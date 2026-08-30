@@ -336,7 +336,6 @@ pub(super) fn load(
         &validator.builds,
         &validator.weapons,
         &validator.maps,
-        &validator.fighter,
     )?;
     Ok(Some(LoadedBalanceLab {
         revision: BalanceLabRevision(persisted.revision),
@@ -388,7 +387,7 @@ pub(super) fn clear(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{builds::BuildCatalog, combat::FighterDefinitions};
+    use crate::builds::BuildCatalog;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static PATH_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -416,14 +415,12 @@ mod tests {
         let weapons = WeaponCatalog::embedded().unwrap();
         let maps = crate::map::MapContentCatalog::embedded().unwrap();
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
-        let fighter = FighterDefinitions::default().entries[0];
         (
             BalanceLabValidator {
                 baseline: baseline.clone(),
                 builds,
                 weapons,
                 maps,
-                fighter,
             },
             baseline,
         )
@@ -491,7 +488,6 @@ mod tests {
             &loaded.builds,
             &loaded.weapons,
             &loaded.maps,
-            &validator.fighter,
         )
         .unwrap();
 

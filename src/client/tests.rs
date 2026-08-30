@@ -592,11 +592,9 @@ fn gamepad_neutral_has_no_target_and_small_lob_input_uses_inner_range() {
 fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {
     let build_catalog = crate::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
     crate::builds::resolve_build_recipe(
         &build_catalog,
         &weapons,
-        &fighter,
         crate::builds::BrawlerBuildRecipe {
             weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(3)),
             ultimate: crate::builds::UltimateDefinitionId(1),
@@ -612,11 +610,9 @@ fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {
 fn resolved_reveal_scan_loadout() -> crate::builds::ResolvedMatchLoadout {
     let build_catalog = crate::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
     crate::builds::resolve_build_recipe(
         &build_catalog,
         &weapons,
-        &fighter,
         crate::builds::BrawlerBuildRecipe {
             weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(3)),
             ultimate: crate::builds::UltimateDefinitionId(4),
@@ -632,11 +628,9 @@ fn resolved_reveal_scan_loadout() -> crate::builds::ResolvedMatchLoadout {
 fn resolved_fire_field_loadout() -> crate::builds::ResolvedMatchLoadout {
     let build_catalog = crate::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
     crate::builds::resolve_build_recipe(
         &build_catalog,
         &weapons,
-        &fighter,
         crate::builds::BrawlerBuildRecipe {
             weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
             ultimate: crate::builds::UltimateDefinitionId(8),

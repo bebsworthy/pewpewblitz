@@ -119,7 +119,7 @@ fn add_scalar(
 
 pub fn resolve_weapon_parts(
     weapons: &WeaponCatalog,
-    fighter: &crate::combat::FighterDefinition,
+    fighter_body: crate::builds::FighterBody,
     base: WeaponPresetId,
     modifiers: CanonicalWeaponModifiers,
 ) -> Result<crate::combat::ResolvedWeapon, WeaponPartModelError> {
@@ -131,7 +131,7 @@ pub fn resolve_weapon_parts(
     crate::combat::definitions::resolve_configuration_with_policy(
         Some(base),
         configuration,
-        fighter,
+        fighter_body,
         weapons.recipe_policy.clone(),
         EngineWeaponLimits::default(),
     )
@@ -141,7 +141,7 @@ pub fn resolve_weapon_parts(
 pub fn resolve_advertised_weapon_parts(
     configuration: &WeaponConfiguration,
     policy: &WeaponRecipePolicy,
-    fighter: &crate::combat::FighterDefinition,
+    fighter_body: crate::builds::FighterBody,
     base: WeaponPresetId,
     modifiers: CanonicalWeaponModifiers,
 ) -> Result<crate::combat::ResolvedWeapon, WeaponPartModelError> {
@@ -150,7 +150,7 @@ pub fn resolve_advertised_weapon_parts(
     crate::combat::definitions::resolve_configuration_with_policy(
         Some(base),
         configuration,
-        fighter,
+        fighter_body,
         policy.clone(),
         EngineWeaponLimits::default(),
     )

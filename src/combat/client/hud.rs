@@ -34,7 +34,6 @@ pub(crate) fn update_combat_hud(
             &WeaponState,
             Option<&AuthoritativeTick>,
             Option<&crate::builds::SelectedBuild>,
-            Option<&crate::builds::ResolvedMatchLoadout>,
             Option<&ActiveEffects>,
             Option<&Defeated>,
             Option<&crate::builds::ResolvedMatchLoadout>,
@@ -43,9 +42,7 @@ pub(crate) fn update_combat_hud(
         ),
         (With<Fighter>, With<lightyear::prelude::Controlled>),
     >,
-    weapons: Res<WeaponDefinitions>,
     catalog: Option<Res<WeaponCatalogResource>>,
-    build_catalog: Option<Res<crate::builds::BuildCatalogResource>>,
     sentries: Query<
         (
             &crate::abilities::SentryIdentity,
@@ -62,7 +59,6 @@ pub(crate) fn update_combat_hud(
         state,
         authoritative_tick,
         _build,
-        resolved,
         active_effects,
         defeated,
         loadout,
@@ -78,24 +74,25 @@ pub(crate) fn update_combat_hud(
         }
         return;
     };
-    let weapon_id = loadout.map_or(PULSE_SIDEARM_DEFINITION, |loadout| {
-        loadout
-            .primary_weapon
-            .source_preset_id
-            .map_or(PULSE_SIDEARM_DEFINITION, |preset| {
-                WeaponDefinitionId(preset.0)
-            })
-    });
-    let capacity = resolved.map_or_else(
-        || {
-            weapons
-                .get(weapon_id)
-                .map_or(0, |weapon| weapon.magazine_capacity)
-        },
-        |loadout| loadout.primary_weapon.recipe.economy.capacity(),
-    );
-    let weapon_name = resolved
-        .and_then(|loadout| loadout.primary_weapon.source_preset_id)
+    let Some(loadout) = loadout else {
+        for (_, mut visibility) in &mut health_text {
+            *visibility = Visibility::Hidden;
+        }
+        for (_, mut visibility) in &mut ability_text {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    let weapon_id = loadout
+        .primary_weapon
+        .source_preset_id
+        .map_or(PULSE_SIDEARM_DEFINITION, |preset| {
+            WeaponDefinitionId(preset.0)
+        });
+    let capacity = loadout.primary_weapon.recipe.economy.capacity();
+    let weapon_name = loadout
+        .primary_weapon
+        .source_preset_id
         .and_then(|id| catalog.as_ref().and_then(|catalog| catalog.0.preset(id)))
         .map_or_else(
             || {
@@ -135,16 +132,13 @@ pub(crate) fn update_combat_hud(
         },
     );
     let phase = defeated.map_or(phase, |_| "DEFEATED".to_string());
-    let maximum_health = loadout.map_or(100, |loadout| loadout.fighter_stats.maximum_health);
-    let _ = build_catalog;
+    let maximum_health = loadout.fighter_stats.maximum_health;
     let ultimate = ability.map_or_else(
         || "ULT --".to_string(),
         |ability| {
-            let is_targeting = loadout.is_some_and(|loadout| {
-                pending.as_ref().is_some_and(|pending| {
-                    pending.targeted_ultimate.is_targeting(loadout.ultimate.id)
-                })
-            });
+            let is_targeting = pending
+                .as_ref()
+                .is_some_and(|pending| pending.targeted_ultimate.is_targeting(loadout.ultimate.id));
             let phase = match ability.phase {
                 crate::builds::AbilityPhase::Ready if is_targeting => {
                     "TARGETING - FIRE TO CONFIRM / CANCEL TO EXIT"

@@ -1,5 +1,4 @@
 use super::*;
-use crate::combat::WeaponDefinitions;
 use crate::combat::client::cues::{
     ClientCombatEvidenceStatus, RecentCombatEvents, remember_combat_event,
 };
@@ -12,17 +11,17 @@ use crate::combat::{
     AuthoritativeTick, CombatEventId, CurrentHealth, Defeated, WeaponPhase, WeaponState,
     fighter_color, projectile_color,
 };
-use crate::combat::{FighterDefinitions, WeaponCatalog, WeaponPresetId};
+use crate::combat::{WeaponCatalog, WeaponPresetId};
 use crate::map::{MapContentCatalog, MapDynamicState, MapInstanceId, MapPresetId as ArenaPresetId};
 use crate::protocol::{Fighter, PlayerId};
 use crate::timing::SimulationTick;
 
 fn preview_for(id: u16) -> Vec<PreviewPrimitive> {
     let catalog = WeaponCatalog::embedded().unwrap();
-    let fighter = FighterDefinitions::default().entries[0];
-    let resolved = catalog
-        .resolve_preset(WeaponPresetId(id), &fighter)
-        .unwrap();
+    let body = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body;
+    let resolved = catalog.resolve_preset(WeaponPresetId(id), body).unwrap();
     let map_catalog = MapContentCatalog::embedded().unwrap();
     let map = map_catalog
         .resolve_preset(ArenaPresetId(1), MapInstanceId(1))
@@ -69,8 +68,10 @@ fn preview_geometry_is_bounded_and_finite_for_all_presets() {
 #[test]
 fn launcher_preview_uses_the_requested_focal_distance() {
     let catalog = WeaponCatalog::embedded().unwrap();
-    let fighter = FighterDefinitions::default().entries[0];
-    let resolved = catalog.resolve_preset(WeaponPresetId(3), &fighter).unwrap();
+    let body = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body;
+    let resolved = catalog.resolve_preset(WeaponPresetId(3), body).unwrap();
     let map_catalog = MapContentCatalog::embedded().unwrap();
     let map = map_catalog
         .resolve_preset(ArenaPresetId(1), MapInstanceId(1))
@@ -136,9 +137,26 @@ fn headless_exit_waits_for_required_combat_evidence() {
 
 #[test]
 fn combat_hud_reports_replicated_reload_and_defeat_without_reveal_text() {
+    let mut loadout = crate::builds::resolve_build_recipe(
+        &crate::builds::BuildCatalog::embedded().unwrap(),
+        &WeaponCatalog::embedded().unwrap(),
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(WeaponPresetId(1)),
+            ultimate: crate::builds::UltimateDefinitionId(1),
+            passives: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+        },
+    )
+    .unwrap();
+    loadout.fighter_stats.maximum_health = 100;
+    loadout.primary_weapon.recipe.economy = WeaponEconomy::Magazine {
+        capacity: 6,
+        refill_ticks: 60,
+    };
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .init_resource::<WeaponDefinitions>()
         .insert_resource(SimulationTick(999))
         .add_systems(Update, update_combat_hud);
     let hud = app
@@ -163,6 +181,7 @@ fn combat_hud_reports_replicated_reload_and_defeat_without_reveal_text() {
         PlayerId(1),
         CurrentHealth(42),
         AuthoritativeTick(10),
+        loadout,
         crate::concealment::ConcealmentPresentationState {
             revealed_until_tick: 130,
             ..default()

@@ -725,7 +725,7 @@ pub(super) fn resolve_melee_attacks(
         )>,
     >,
     spatial_query: avian2d::prelude::SpatialQuery,
-    tuning: Res<MovementTuning>,
+    builds: Res<crate::builds::BuildCatalogResource>,
 ) {
     let disconnected: HashSet<_> = disconnected.iter().collect();
     for attack in attacks.read() {
@@ -771,7 +771,7 @@ pub(super) fn resolve_melee_attacks(
                     reach,
                     angle,
                     position.0,
-                    tuning.radius,
+                    builds.0.fighter_body.radius,
                 )
                 || !area_line_of_sight_clear(attack.origin, position.0, &spatial_query)
             {

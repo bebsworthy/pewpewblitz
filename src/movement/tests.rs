@@ -20,13 +20,20 @@ use lightyear::prelude::input::native::{ActionState, NativeBuffer};
 
 #[test]
 fn standard_fighter_has_clearance_inside_one_map_cell() {
-    assert!((STANDARD_FIGHTER_RADIUS - 14.0).abs() < f32::EPSILON);
+    assert!((crate::builds::MAX_FIGHTER_BODY_RADIUS - 14.0).abs() < f32::EPSILON);
     assert!(
-        (crate::map::MAP_CELL_SIZE_WORLD - STANDARD_FIGHTER_RADIUS * 2.0 - 4.0).abs()
+        (crate::map::MAP_CELL_SIZE_WORLD - crate::builds::MAX_FIGHTER_BODY_RADIUS * 2.0 - 4.0)
+            .abs()
             < f32::EPSILON
     );
-    assert!((MovementTuning::default().radius - STANDARD_FIGHTER_RADIUS).abs() < f32::EPSILON);
-    assert!((MovementTuning::default().speed - 100.0).abs() < f32::EPSILON);
+    assert_eq!(
+        crate::builds::BuildCatalog::embedded()
+            .unwrap()
+            .fighter_body,
+        crate::builds::FighterBody {
+            radius: crate::builds::MAX_FIGHTER_BODY_RADIUS,
+        }
+    );
 }
 
 #[test]
@@ -63,19 +70,19 @@ fn trigger_hysteresis_does_not_chatter_between_thresholds() {
 
 #[test]
 fn known_fixed_input_moves_at_normalized_speed_and_keeps_facing_without_aim() {
-    let tuning = MovementTuning::default();
+    let movement_speed = 100.0;
     let input_tuning = InputTuning::default();
     let (position, facing, velocity) = desired_pose_step(
         Vec2::ZERO,
         0.7,
         FighterInput::from_axes(Vec2::splat(1.0), None, 0),
-        tuning,
+        movement_speed,
         input_tuning,
         Duration::from_secs_f32(1.0 / 60.0),
     );
-    assert!((position.length() - tuning.speed / 60.0).abs() < 1e-4);
+    assert!((position.length() - movement_speed / 60.0).abs() < 1e-4);
     assert!((facing - 0.7).abs() < f32::EPSILON);
-    assert!((velocity.length() - tuning.speed).abs() < 1e-4);
+    assert!((velocity.length() - movement_speed).abs() < 1e-4);
 }
 
 #[test]
@@ -116,7 +123,10 @@ fn camera_and_spawn_bounds_are_stable() {
         Vec2::new(752.0, 272.0)
     );
     assert_eq!(
-        bounds.clamp_circle(Vec2::new(9_000.0, -9_000.0), STANDARD_FIGHTER_RADIUS),
+        bounds.clamp_circle(
+            Vec2::new(9_000.0, -9_000.0),
+            crate::builds::MAX_FIGHTER_BODY_RADIUS
+        ),
         Vec2::new(882.0, -562.0)
     );
 }
@@ -131,19 +141,19 @@ fn pose_validation_uses_fighter_center_bounds() {
         Vec2::new(882.0, 0.0),
         0.0,
         bounds,
-        STANDARD_FIGHTER_RADIUS
+        crate::builds::MAX_FIGHTER_BODY_RADIUS
     ));
     assert!(!pose_is_valid(
         Vec2::new(896.0, 0.0),
         0.0,
         bounds,
-        STANDARD_FIGHTER_RADIUS
+        crate::builds::MAX_FIGHTER_BODY_RADIUS
     ));
     assert!(!pose_is_valid(
         Vec2::new(0.0, -576.0),
         0.0,
         bounds,
-        STANDARD_FIGHTER_RADIUS
+        crate::builds::MAX_FIGHTER_BODY_RADIUS
     ));
 }
 
@@ -274,13 +284,7 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
         movement: Vec2::X,
         ..MovementDecision::default()
     };
-    let velocity = resolved_movement_velocity(
-        0,
-        &decision,
-        Some(320.0),
-        300.0,
-        MovementModifiers::default(),
-    );
+    let velocity = resolved_movement_velocity(0, &decision, 320.0, MovementModifiers::default());
     assert!((velocity.x - 320.0).abs() < 1e-5);
 
     let slow = crate::combat::ActiveEffects {
@@ -295,7 +299,6 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
     let velocity = resolved_movement_velocity(
         5,
         &decision,
-        None,
         300.0,
         MovementModifiers {
             active_effects: Some(&slow),
@@ -308,7 +311,6 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
     let velocity = resolved_movement_velocity(
         20,
         &decision,
-        None,
         300.0,
         MovementModifiers {
             active_effects: Some(&slow),
@@ -324,7 +326,6 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
     let velocity = resolved_movement_velocity(
         5,
         &decision,
-        None,
         300.0,
         MovementModifiers {
             external_motion: Some(&external),
@@ -348,7 +349,6 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
     let velocity = resolved_movement_velocity(
         5,
         &decision,
-        None,
         300.0,
         MovementModifiers {
             active_effects: Some(&slow),
@@ -373,11 +373,9 @@ fn resolved_velocity_uses_authored_adrenal_movement_bonus() {
     };
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
     let mut loadout = crate::builds::resolve_build_recipe(
         &builds,
         &weapons,
-        &fighter,
         crate::builds::BrawlerBuildRecipe {
             weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
             ultimate: crate::builds::UltimateDefinitionId(1),
@@ -400,7 +398,6 @@ fn resolved_velocity_uses_authored_adrenal_movement_bonus() {
     let velocity = resolved_movement_velocity(
         5,
         &decision,
-        Some(300.0),
         300.0,
         MovementModifiers {
             passive_loadout: Some(&loadout),
@@ -422,7 +419,7 @@ fn repaired_pose_clamps_finite_positions_and_resets_non_finite_facing() {
         Vec2::new(600.0, 0.0),
         1.0,
         &bounds,
-        STANDARD_FIGHTER_RADIUS,
+        crate::builds::MAX_FIGHTER_BODY_RADIUS,
         0.5,
     );
     assert_eq!(position, Vec2::new(486.0, 0.0));
@@ -432,7 +429,7 @@ fn repaired_pose_clamps_finite_positions_and_resets_non_finite_facing() {
         Vec2::INFINITY,
         f32::NAN,
         &bounds,
-        STANDARD_FIGHTER_RADIUS,
+        crate::builds::MAX_FIGHTER_BODY_RADIUS,
         0.5,
     );
     assert_eq!(position, Vec2::ZERO);

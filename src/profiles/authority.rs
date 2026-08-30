@@ -264,7 +264,12 @@ impl ProfileAuthority {
             equipped_part_ids,
             ..
         } = &command
-            && !equipment_candidate_is_valid(&session.snapshot, *brawler_id, *equipped_part_ids)
+            && !equipment_candidate_is_valid(
+                &session.snapshot,
+                self.catalog.fighter_body,
+                *brawler_id,
+                *equipped_part_ids,
+            )
         {
             return Ok(ProfileMutationSubmission::Immediate(rejected_outcome(
                 &command,
@@ -313,7 +318,6 @@ impl ProfileAuthority {
         expected_brawler_revision: super::ProfileRevision,
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
     ) -> Result<MatchBuildSnapshotV3, ProfileAuthorityError> {
         let session = self
             .sessions
@@ -332,14 +336,8 @@ impl ProfileAuthority {
                     && session.snapshot.selected_brawler_id == Some(brawler.id)
             })
             .ok_or(ProfileAuthorityError::InvalidRequest)?;
-        MatchBuildSnapshotV3::from_profile_brawler(
-            &session.snapshot,
-            brawler,
-            builds,
-            weapons,
-            fighter,
-        )
-        .map_err(|_| ProfileAuthorityError::IncompatibleBuild)
+        MatchBuildSnapshotV3::from_profile_brawler(&session.snapshot, brawler, builds, weapons)
+            .map_err(|_| ProfileAuthorityError::IncompatibleBuild)
     }
 
     pub fn remove_client(&mut self, client_key: u64) {
@@ -485,6 +483,7 @@ fn storage_decision(error: &ProfileStorageError) -> ProfileDecision {
 
 fn equipment_candidate_is_valid(
     snapshot: &ProfileSnapshot,
+    fighter_body: crate::builds::FighterBody,
     brawler_id: SavedBrawlerId,
     equipped_part_ids: [Option<crate::weapon_parts::WeaponPartInstanceId>;
         crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
@@ -510,10 +509,9 @@ fn equipment_candidate_is_valid(
     let Ok(weapons) = crate::combat::WeaponCatalog::embedded() else {
         return false;
     };
-    let fighters = crate::combat::FighterDefinitions::default();
     crate::weapon_parts::resolve_weapon_parts(
         &weapons,
-        &fighters.entries[0],
+        fighter_body,
         crate::combat::WeaponPresetId(brawler.weapon_base_id.0),
         modifiers,
     )
@@ -586,12 +584,11 @@ fn snapshot_catalog_is_valid(
     let Ok(weapons) = crate::combat::WeaponCatalog::embedded() else {
         return false;
     };
-    let fighters = crate::combat::FighterDefinitions::default();
     snapshot.brawlers.iter().all(|brawler| {
         snapshot.weapon_modifiers(brawler).is_ok_and(|modifiers| {
             crate::weapon_parts::resolve_weapon_parts(
                 &weapons,
-                &fighters.entries[0],
+                catalog.fighter_body,
                 crate::combat::WeaponPresetId(brawler.weapon_base_id.0),
                 modifiers,
             )

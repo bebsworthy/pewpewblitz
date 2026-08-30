@@ -1,5 +1,5 @@
 use crate::combat::{DamageOverTimeKind, ResolvedWeapon, WeaponPresetId};
-use bevy::prelude::Component;
+use bevy::prelude::{Bundle, Component};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -71,7 +71,7 @@ pub struct SelectedBuild {
     pub revision: BuildRevision,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedFighterStats {
     pub maximum_health: u16,
     pub movement_speed: f32,
@@ -86,6 +86,16 @@ pub struct ResolvedFighterStats {
     pub cold_resistance_basis_points: u16,
     pub poison_resistance_basis_points: u16,
     pub fire_resistance_basis_points: u16,
+}
+
+/// Immutable authored collision geometry shared by every current fighter profile.
+///
+/// Brawler currently has one matched one-cell fighter footprint. Keeping that footprint in the
+/// build catalog lets weapon validation and runtime collision consume one data-owned value without
+/// expanding the replicated loadout wire shape.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct FighterBody {
+    pub radius: f32,
 }
 
 /// Canonical bonus/malus input applied while resolving reveal proximity.
@@ -302,6 +312,28 @@ pub struct ResolvedMatchLoadout {
     pub primary_weapon: ResolvedWeapon,
     pub ultimate: ResolvedUltimate,
     pub passives: [ResolvedPassive; 2],
+}
+
+/// Server-local immutable components projected atomically from a resolved loadout generation.
+///
+/// The replicated aggregate remains the client convergence and diagnostic contract. Authoritative
+/// systems consume these focused components so they cannot fall back to unrelated code defaults.
+#[derive(Bundle, Clone, Debug)]
+pub struct MatchLoadoutProjection {
+    pub fighter_stats: ResolvedFighterStats,
+    pub fighter_body: FighterBody,
+    pub primary_weapon: ResolvedWeapon,
+}
+
+impl MatchLoadoutProjection {
+    #[must_use]
+    pub fn new(loadout: &ResolvedMatchLoadout, fighter_body: FighterBody) -> Self {
+        Self {
+            fighter_stats: loadout.fighter_stats,
+            fighter_body,
+            primary_weapon: loadout.primary_weapon.clone(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]

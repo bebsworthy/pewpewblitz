@@ -100,7 +100,7 @@ pub(crate) fn advance_conditions(
             &mut ActiveEffects,
             Option<&crate::abilities::DashRuntime>,
             &mut crate::builds::AbilityState,
-            Has<TestDummy>,
+            Option<&TestDummy>,
         ),
         (With<Fighter>, Without<Defeated>),
     >,
@@ -248,10 +248,10 @@ pub(crate) fn advance_conditions(
                         .remove::<ExternalMotion>()
                         .remove::<KnockbackFeedback>()
                         .remove::<crate::abilities::DashRuntime>();
-                    if test_dummy {
-                        commands
-                            .entity(entity)
-                            .insert(TestDummyResetDeadline(tick.0.saturating_add(90)));
+                    if let Some(test_dummy) = test_dummy {
+                        commands.entity(entity).insert(TestDummyResetDeadline(
+                            tick.0.saturating_add(test_dummy.reset_delay_ticks),
+                        ));
                     }
                     break;
                 }

@@ -20,11 +20,9 @@ fn test_loadout(
 ) -> crate::builds::ResolvedMatchLoadout {
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
     crate::builds::resolve_build_recipe(
         &builds,
         &weapons,
-        &fighter,
         crate::builds::BrawlerBuildRecipe {
             weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
             ultimate,
@@ -225,11 +223,9 @@ fn demolition_activation_spends_charge_and_emits_one_typed_world_effect() {
 
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
     let loadout = crate::builds::resolve_build_recipe(
         &builds,
         &weapons,
-        &fighter,
         crate::builds::BrawlerBuildRecipe {
             weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
             ultimate: crate::builds::UltimateDefinitionId(6),
@@ -485,6 +481,10 @@ fn dash_interpolation_is_bounded_by_committed_segment_and_deadline() {
     let contacts = stable_dash_contacts(
         Vec2::ZERO,
         Vec2::new(360.0, 0.0),
+        crate::builds::BuildCatalog::embedded()
+            .unwrap()
+            .fighter_body
+            .radius,
         &[NetworkEntityId(2)],
         (1_u64..=12).rev().map(|id| {
             (
@@ -492,7 +492,7 @@ fn dash_interpolation_is_bounded_by_committed_segment_and_deadline() {
                 Vec2::new(
                     f32::from(u16::try_from(id).unwrap()) * 20.0,
                     if id == 12 {
-                        crate::movement::STANDARD_FIGHTER_RADIUS * 2.0 + 1.0
+                        crate::builds::MAX_FIGHTER_BODY_RADIUS * 2.0 + 1.0
                     } else {
                         0.0
                     },
@@ -512,6 +512,10 @@ fn dash_interpolation_is_bounded_by_committed_segment_and_deadline() {
         stable_dash_contacts(
             Vec2::ZERO,
             Vec2::new(360.0, 0.0),
+            crate::builds::BuildCatalog::embedded()
+                .unwrap()
+                .fighter_body
+                .radius,
             &already_hit,
             [(NetworkEntityId(9), Vec2::new(180.0, 0.0), true)],
             maximum_targets,
@@ -1665,11 +1669,9 @@ fn passive_observer_rearms_adrenal_and_primes_quick_cycle_from_primary_facts() {
 
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let fighter_definition = crate::combat::FighterDefinitions::default().entries[0];
     let runner = crate::builds::resolve_build_recipe(
         &builds,
         &weapons,
-        &fighter_definition,
         crate::builds::BrawlerBuildRecipe {
             weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
             ultimate: crate::builds::UltimateDefinitionId(1),
@@ -1683,7 +1685,6 @@ fn passive_observer_rearms_adrenal_and_primes_quick_cycle_from_primary_facts() {
     let controller = crate::builds::resolve_build_recipe(
         &builds,
         &weapons,
-        &fighter_definition,
         crate::builds::BrawlerBuildRecipe {
             weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(3)),
             ultimate: crate::builds::UltimateDefinitionId(2),

@@ -38,8 +38,7 @@ pub use hot_zone::{
 pub use lifecycle::AuthoritativeFighterLifecyclePlugin;
 #[cfg(feature = "server")]
 pub(crate) use lifecycle::{
-    FighterLifecycleConfig, FighterReset, complete_fighter_lifecycle, fighter_runtime_values,
-    reset_fighter_runtime,
+    FighterLifecycleConfig, FighterReset, complete_fighter_lifecycle, reset_fighter_runtime,
 };
 pub use model::{
     ActiveCombatant, FighterDisplayName, MatchClock, MatchId, MatchMember, MatchParticipant,

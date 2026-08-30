@@ -818,12 +818,11 @@ pub(in crate::client::flow) fn present_brawler_details(
         .weapon_modifiers(brawler)
         .ok()
         .and_then(|modifiers| {
-            let fighters = crate::combat::FighterDefinitions::default();
             let weapon = catalog.weapon(brawler.weapon_base_id)?;
             crate::weapon_parts::resolve_advertised_weapon_parts(
                 &weapon.configuration,
                 &catalog.weapon_policy,
-                &fighters.entries[0],
+                catalog.fighter_body,
                 crate::combat::WeaponPresetId(brawler.weapon_base_id.0),
                 modifiers,
             )
@@ -1596,12 +1595,11 @@ pub(in crate::client::flow) fn present_weapon_equipment(
             .weapon_modifiers(candidate_brawler)
             .ok()
             .and_then(|modifiers| {
-                let fighters = crate::combat::FighterDefinitions::default();
                 let weapon = catalog.weapon(saved.weapon_base_id)?;
                 crate::weapon_parts::resolve_advertised_weapon_parts(
                     &weapon.configuration,
                     &catalog.weapon_policy,
-                    &fighters.entries[0],
+                    catalog.fighter_body,
                     crate::combat::WeaponPresetId(saved.weapon_base_id.0),
                     modifiers,
                 )

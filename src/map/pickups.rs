@@ -214,21 +214,6 @@ pub(crate) fn spawn_restoration_pickup(
 }
 
 #[cfg(feature = "server")]
-fn maximum_health(
-    fighter_id: crate::combat::FighterDefinitionId,
-    loadout: Option<&crate::builds::ResolvedMatchLoadout>,
-    definitions: &crate::combat::FighterDefinitions,
-) -> Option<u16> {
-    loadout
-        .map(|loadout| loadout.fighter_stats.maximum_health)
-        .or_else(|| {
-            definitions
-                .get(fighter_id)
-                .map(|fighter| fighter.maximum_health)
-        })
-}
-
-#[cfg(feature = "server")]
 #[allow(
     clippy::too_many_lines,
     reason = "one exclusive transaction deterministically orders pickup collection, healing, and expiry"
@@ -253,9 +238,6 @@ pub(super) fn apply_restoration_pickups(world: &mut World) {
     else {
         return;
     };
-    let definitions = world
-        .resource::<crate::combat::FighterDefinitions>()
-        .clone();
     let catalog = world.resource::<MapCatalogResource>().0.clone();
     let mut pickups: Vec<_> = world
         .query_filtered::<(
@@ -306,8 +288,7 @@ pub(super) fn apply_restoration_pickups(world: &mut World) {
                 &TeamId,
                 &Position,
                 &CurrentHealth,
-                &crate::combat::FighterDefinitionId,
-                Option<&crate::builds::ResolvedMatchLoadout>,
+                &crate::builds::ResolvedFighterStats,
                 &crate::matchplay::MatchMember,
                 &super::SpawnAssignment,
                 Option<&super::EffectTileOccupancy>,
@@ -324,13 +305,12 @@ pub(super) fn apply_restoration_pickups(world: &mut World) {
                     team,
                     position,
                     health,
-                    fighter_id,
-                    loadout,
+                    fighter_stats,
                     member,
                     spawn,
                     effect_tile,
                 )| {
-                    let maximum = maximum_health(*fighter_id, loadout, &definitions)?;
+                    let maximum = fighter_stats.maximum_health;
                     (member.0 == match_id
                         && health.0 > 0
                         && health.0 < maximum
@@ -524,7 +504,6 @@ mod tests {
     fn fixture(tick: u64) -> World {
         let mut world = World::new();
         world.insert_resource(crate::timing::SimulationTick(tick));
-        world.insert_resource(crate::combat::FighterDefinitions::default());
         world.insert_resource(crate::combat::NextCombatIds::default());
         world.insert_resource(MapCatalogResource(
             crate::map::MapContentCatalog::embedded().unwrap(),
@@ -551,6 +530,11 @@ mod tests {
     }
 
     fn spawn_fighter(world: &mut World, network_id: u64, health: u16, position: Vec2) -> Entity {
+        let mut fighter_stats = crate::builds::BuildCatalog::embedded()
+            .unwrap()
+            .fighter_profiles
+            .default;
+        fighter_stats.maximum_health = 100;
         world
             .spawn((
                 crate::protocol::Fighter,
@@ -558,6 +542,7 @@ mod tests {
                 TeamId(u8::try_from(network_id % 2).unwrap()),
                 Position::from_xy(position.x, position.y),
                 CurrentHealth(health),
+                fighter_stats,
                 crate::combat::STANDARD_FIGHTER_DEFINITION,
                 crate::matchplay::MatchMember(crate::matchplay::MatchId(7)),
                 crate::matchplay::ActiveCombatant,

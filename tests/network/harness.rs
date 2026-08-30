@@ -365,10 +365,7 @@ impl Harness {
         };
 
         let mut server = App::new();
-        server.insert_resource(TestDummyFixture {
-            position: Vec2::new(0.0, -320.0),
-            facing: 0.0,
-        });
+        server.insert_resource(TestDummyFixture::standard(Vec2::new(0.0, -320.0)));
         server.insert_resource(LegacySandboxActivation);
         let lifecycle = if matches!(mode, HarnessMode::HotZone | HarnessMode::Heist) {
             // Shortened verification deadlines with a 1v1 capacity so deterministic
@@ -702,14 +699,9 @@ impl Harness {
         };
         let builds = brawler::builds::BuildCatalog::embedded().unwrap();
         let weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
-        let definitions = FighterDefinitions::default();
-        let fighter = definitions
-            .get(brawler::combat::STANDARD_FIGHTER_DEFINITION)
-            .unwrap();
         let loadout = brawler::builds::resolve_saved_brawler_recipe(
             &builds,
             &weapons,
-            fighter,
             brawler::profiles::FighterProfileId(fighter_profile),
             brawler::profiles::WeaponBaseId(weapon_base),
             brawler::builds::UltimateDefinitionId(ultimate),
@@ -717,9 +709,12 @@ impl Harness {
         )
         .unwrap();
         let capacity = loadout.primary_weapon.recipe.economy.capacity();
+        let projection =
+            brawler::builds::MatchLoadoutProjection::new(&loadout, builds.fighter_body);
         self.server.world_mut().entity_mut(fighter_entity).insert((
             loadout.identity,
             loadout.clone(),
+            projection,
             brawler::builds::AbilityState::default(),
             brawler::builds::PassiveRuntimeState::default(),
             CurrentHealth(loadout.fighter_stats.maximum_health),

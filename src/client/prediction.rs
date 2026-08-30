@@ -12,12 +12,12 @@
 //! server-authoritative and unmodelled here, so predicted poses can cross still-solid
 //! destructible cells until the next authoritative correction.
 
-use crate::combat::{ActiveEffects, AuthoritativePose, FighterDefinitionId};
+use crate::combat::{ActiveEffects, AuthoritativePose};
 use crate::map::{
     MapCatalogResource, MapDynamicState, MapRoot, ResolvedMapSnapshot,
     resolve_circle_against_blocking_map,
 };
-use crate::movement::{InputTuning, MovementTuning, committed_aim, decoded_move};
+use crate::movement::{InputTuning, committed_aim, decoded_move};
 use crate::movement::{active_slow_multiplier, adrenaline_multiplier};
 use crate::protocol::{Fighter, FighterInput};
 use crate::timing::SimulationTick;
@@ -98,8 +98,7 @@ pub struct OwnerPredictionPlugin;
 
 impl Plugin for OwnerPredictionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MovementTuning>()
-            .init_resource::<InputTuning>()
+        app.init_resource::<InputTuning>()
             .init_resource::<OwnerPredictionSettings>()
             .init_resource::<OwnerPredictionStats>()
             .add_systems(
@@ -198,15 +197,14 @@ fn predict_owner_movement(
     mut stats: ResMut<OwnerPredictionStats>,
     tick: Res<SimulationTick>,
     time: Res<Time<Fixed>>,
-    tuning: Res<MovementTuning>,
+    builds: Res<crate::builds::BuildCatalogResource>,
     input_tuning: Res<InputTuning>,
     maps: Query<(&ResolvedMapSnapshot, &MapDynamicState), With<MapRoot>>,
     catalog: Res<MapCatalogResource>,
     mut owners: Query<
         (
-            &FighterDefinitionId,
             Option<&ActionState<FighterInput>>,
-            Option<&crate::builds::ResolvedMatchLoadout>,
+            &crate::builds::ResolvedMatchLoadout,
             Option<&ActiveEffects>,
             Option<&crate::builds::PassiveRuntimeState>,
             &mut OwnerPredictedPose,
@@ -222,9 +220,7 @@ fn predict_owner_movement(
         return;
     };
     let delta = time.delta().as_secs_f32();
-    for (_definition, action, loadout, effects, passive_state, mut predicted, mut history) in
-        &mut owners
-    {
+    for (action, loadout, effects, passive_state, mut predicted, mut history) in &mut owners {
         let input = action.map_or(FighterInput::default(), |action| action.0);
         let input = if input.is_valid() {
             input
@@ -240,15 +236,15 @@ fn predict_owner_movement(
         {
             predicted.facing = aim.y.atan2(aim.x);
         }
-        let speed = loadout.map_or(tuning.speed, |loadout| loadout.fighter_stats.movement_speed);
+        let speed = loadout.fighter_stats.movement_speed;
         let velocity = movement
             * speed
             * active_slow_multiplier(effects, tick.0)
-            * adrenaline_multiplier(loadout, passive_state, tick.0);
+            * adrenaline_multiplier(Some(loadout), passive_state, tick.0);
         let mut position = predicted.position + velocity * delta;
         position = resolve_circle_against_blocking_map(
             position,
-            tuning.radius,
+            builds.0.fighter_body.radius,
             snapshot,
             map_state,
             &catalog.0,

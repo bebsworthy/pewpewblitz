@@ -5,8 +5,6 @@ use bevy::prelude::{Component, FromWorld, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use super::FighterDefinition;
-
 pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 9;
 pub const FINGERPRINT_FORMAT_VERSION: u16 = 7;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
@@ -297,7 +295,7 @@ impl WeaponCatalog {
     pub fn resolve_preset(
         &self,
         id: WeaponPresetId,
-        fighter: &FighterDefinition,
+        fighter_body: crate::builds::FighterBody,
     ) -> Result<ResolvedWeapon, String> {
         let preset = self
             .preset(id)
@@ -305,7 +303,7 @@ impl WeaponCatalog {
         resolve_configuration_with_policy(
             Some(id),
             preset.configuration.clone(),
-            fighter,
+            fighter_body,
             self.recipe_policy.clone(),
             EngineWeaponLimits::default(),
         )

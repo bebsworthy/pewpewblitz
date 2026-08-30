@@ -24,7 +24,7 @@ pub const MAX_ADVERTISED_ULTIMATES: usize = crate::builds::MAX_ULTIMATE_DEFINITI
 pub const MAX_ADVERTISED_PASSIVES: usize = crate::builds::MAX_PASSIVE_DEFINITIONS;
 pub const MAX_ADVERTISED_BRAWLER_CATALOG_BYTES: usize = 16 * 1024;
 
-const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 3;
+const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 4;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BrawlerCatalogRevision(pub u64);
@@ -81,6 +81,7 @@ pub struct AdvertisedPassive {
 pub struct AdvertisedBrawlerCatalog {
     pub revision: BrawlerCatalogRevision,
     pub limits: AdvertisedBrawlerLimits,
+    pub fighter_body: crate::builds::FighterBody,
     pub weapon_policy: WeaponRecipePolicy,
     #[serde(deserialize_with = "deserialize_fighter_profiles")]
     pub fighter_profiles: Vec<AdvertisedFighterProfile>,
@@ -105,6 +106,7 @@ impl AdvertisedBrawlerCatalog {
                     |_| "weapon-part slot count does not fit wire metadata",
                 )?,
             },
+            fighter_body: builds.fighter_body,
             weapon_policy: weapons.recipe_policy.clone(),
             fighter_profiles: vec![
                 AdvertisedFighterProfile {
@@ -183,6 +185,12 @@ impl AdvertisedBrawlerCatalog {
         {
             return Err("invalid advertised brawler catalog envelope".into());
         }
+        if !self.fighter_body.radius.is_finite()
+            || !(crate::builds::MIN_FIGHTER_BODY_RADIUS..=crate::builds::MAX_FIGHTER_BODY_RADIUS)
+                .contains(&self.fighter_body.radius)
+        {
+            return Err("invalid advertised fighter body".into());
+        }
         validate_ordered_metadata(
             self.fighter_profiles
                 .iter()
@@ -224,7 +232,7 @@ impl AdvertisedBrawlerCatalog {
             definition.configuration.validate(
                 &self.weapon_policy,
                 EngineWeaponLimits::default(),
-                None,
+                Some(self.fighter_body.radius),
             )?;
         }
         validate_ultimate_parameters(&self.ultimates)?;
@@ -358,6 +366,7 @@ impl AdvertisedBrawlerCatalog {
         let bytes = postcard::to_allocvec(&(
             ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION,
             self.limits,
+            self.fighter_body,
             &self.weapon_policy,
             &self.fighter_profiles,
             &self.weapon_bases,

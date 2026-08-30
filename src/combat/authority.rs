@@ -1,6 +1,7 @@
 //! Server-authoritative combat lifecycle, spatial targeting, and cue publication.
 #![allow(clippy::wildcard_imports)]
 
+#[cfg(feature = "server")]
 use super::*;
 
 /// M04's legacy cue/log shape is a compatibility adapter for the original single straight
@@ -29,22 +30,6 @@ pub(super) fn legacy_compatibility_recipe(recipe: &WeaponRecipe) -> bool {
         )
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
-)]
-pub(super) fn validate_definitions(
-    fighters: Res<FighterDefinitions>,
-    weapons: Res<WeaponDefinitions>,
-) {
-    fighters
-        .validate(&weapons)
-        .expect("code-authored fighter definitions must be valid");
-    weapons
-        .validate(&fighters)
-        .expect("code-authored weapon definitions must be valid");
-}
-
 #[cfg(feature = "server")]
 #[allow(
     clippy::needless_pass_by_value,
@@ -53,29 +38,14 @@ pub(super) fn validate_definitions(
 pub(super) fn spawn_test_dummy(
     mut commands: Commands,
     catalog: Res<WeaponCatalogResource>,
+    builds: Res<crate::builds::BuildCatalogResource>,
     map_spawn: Res<TestDummyFixture>,
-    fighters: Res<FighterDefinitions>,
-    weapons: Res<WeaponDefinitions>,
 ) {
-    if fighters.get(STANDARD_FIGHTER_DEFINITION).is_none()
-        || weapons.get(PULSE_SIDEARM_DEFINITION).is_none()
-    {
-        return;
-    }
-    let Some(fighter) = fighters.get(STANDARD_FIGHTER_DEFINITION) else {
-        return;
-    };
     let position = map_spawn.position;
     let spawn_facing = map_spawn.facing;
-    let body_radius = fighter.body_radius;
-    let (fighter_definition, team, health, weapon) =
-        default_fighter_runtime(NEUTRAL_TEAM, &fighters, &weapons);
-    let build_catalog =
-        crate::builds::BuildCatalog::embedded().expect("embedded build catalog is valid");
-    let loadout = crate::builds::resolve_saved_brawler_recipe(
-        &build_catalog,
+    let mut loadout = crate::builds::resolve_saved_brawler_recipe(
+        &builds.0,
         &catalog.0,
-        fighter,
         crate::profiles::FighterProfileId(1),
         crate::profiles::WeaponBaseId(1),
         crate::builds::UltimateDefinitionId(1),
@@ -85,6 +55,11 @@ pub(super) fn spawn_test_dummy(
         ],
     )
     .expect("dummy saved-brawler loadout resolves");
+    loadout.fighter_stats.maximum_health = map_spawn.maximum_health;
+    let body = builds.0.fighter_body;
+    let projection = crate::builds::MatchLoadoutProjection::new(&loadout, body);
+    let (fighter_definition, team, health, weapon) =
+        resolved_fighter_runtime(NEUTRAL_TEAM, &loadout);
     let dummy = commands
         .spawn((
             Fighter,
@@ -109,21 +84,27 @@ pub(super) fn spawn_test_dummy(
     commands.entity(dummy).insert((
         loadout.identity,
         loadout,
+        projection,
         AuthoritativeTick::default(),
-        Collider::circle(body_radius),
+        Collider::circle(body.radius),
         RigidBody::Kinematic,
         CustomPositionIntegration,
         fighter_collision_layers(),
         Replicate::to_clients(NetworkTarget::All),
         InterpolationTarget::to_clients(NetworkTarget::All),
-        TestDummy,
+        TestDummy {
+            reset_delay_ticks: map_spawn.reset_delay_ticks,
+        },
     ));
 }
 
 /// Marks the reserved stationary hostile practice target.
 #[cfg(feature = "server")]
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TestDummy;
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TestDummy {
+    /// Verification-owned reset policy copied from [`TestDummyFixture`] at installation.
+    pub reset_delay_ticks: u64,
+}
 
 /// Explicit opt-in fixture; production Wipeout composition never inserts it.
 #[cfg(feature = "server")]
@@ -131,6 +112,22 @@ pub struct TestDummy;
 pub struct TestDummyFixture {
     pub position: Vec2,
     pub facing: f32,
+    pub maximum_health: u16,
+    pub reset_delay_ticks: u64,
+}
+
+#[cfg(feature = "server")]
+impl TestDummyFixture {
+    /// Standard deterministic policy for the opt-in combat verification target.
+    #[must_use]
+    pub const fn standard(position: Vec2) -> Self {
+        Self {
+            position,
+            facing: 0.0,
+            maximum_health: 100,
+            reset_delay_ticks: 90,
+        }
+    }
 }
 
 #[cfg(feature = "server")]
@@ -147,7 +144,6 @@ pub struct TestDummyResetDeadline(pub u64);
 pub(super) fn reset_due_fighters(
     mut commands: Commands,
     tick: Res<SimulationTick>,
-    fighters: Res<FighterDefinitions>,
     mut telemetry: ResMut<CombatTelemetry>,
     mut ids: ResMut<NextCombatIds>,
     mut outbox: ResMut<CombatOutbox>,
@@ -155,24 +151,21 @@ pub(super) fn reset_due_fighters(
         (
             Entity,
             &NetworkEntityId,
-            &FighterDefinitionId,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedFighterStats,
+            &ResolvedWeapon,
             &TestDummyResetDeadline,
             &SpawnState,
         ),
         With<TestDummy>,
     >,
 ) {
-    for (entity, network_id, fighter_id, loadout, deadline, spawn) in &query {
+    for (entity, network_id, fighter_stats, weapon, deadline, spawn) in &query {
         if !reset_is_due(tick.0, deadline.0) {
             continue;
         }
-        let Some(fighter) = fighters.get(*fighter_id) else {
-            continue;
-        };
         let (capacity, refill_ticks) = (
-            loadout.primary_weapon.recipe.economy.capacity(),
-            loadout.primary_weapon.recipe.economy.refill_ticks(),
+            weapon.recipe.economy.capacity(),
+            weapon.recipe.economy.refill_ticks(),
         );
         if capacity == 0 || refill_ticks == 0 {
             continue;
@@ -184,7 +177,7 @@ pub(super) fn reset_due_fighters(
         commands
             .entity(entity)
             .insert((
-                CurrentHealth(fighter.maximum_health),
+                CurrentHealth(fighter_stats.maximum_health),
                 WeaponState {
                     ammo: capacity,
                     phase: WeaponPhase::Ready,
@@ -221,7 +214,6 @@ pub(super) fn reset_due_fighters(
         };
         telemetry.record_cue(cue.clone());
         outbox.0.push(cue);
-        let _ = fighter;
     }
 }
 

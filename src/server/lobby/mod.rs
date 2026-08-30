@@ -19,7 +19,7 @@ use super::{LobbyControlInbox, LobbyControlOutbox, RoutedPeer, ServerRoleResourc
 use crate::{
     VERSION,
     builds::BuildCatalog,
-    combat::{FighterDefinitions, STANDARD_FIGHTER_DEFINITION, WeaponCatalog},
+    combat::WeaponCatalog,
     config::GameMode,
     content::GameplayContentFingerprint,
     lobby::{duplicate_display_name, normalize_proposed_display_name},
@@ -71,10 +71,6 @@ pub struct LobbyBuildIdentity {
 pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
     let builds = BuildCatalog::embedded()?;
     let weapons = WeaponCatalog::embedded()?;
-    let fighters = FighterDefinitions::default();
-    let fighter = fighters
-        .get(STANDARD_FIGHTER_DEFINITION)
-        .ok_or_else(|| "standard fighter definition is missing".to_string())?;
     let brawler = crate::profiles::SavedBrawler {
         id: crate::profiles::SavedBrawlerId::new(1)
             .map_err(|error| format!("invalid built-in brawler id: {error}"))?,
@@ -90,9 +86,8 @@ pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
         equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
         revision: crate::profiles::ProfileRevision::INITIAL,
     };
-    let snapshot =
-        crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons, fighter)
-            .map_err(|error| format!("built-in brawler resolution failed: {error:?}"))?;
+    let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
+        .map_err(|error| format!("built-in brawler resolution failed: {error:?}"))?;
     let accepted_identity = snapshot.accepted_identity;
     Ok(LobbyBuildIdentity {
         recipe_fingerprint: accepted_identity.recipe_fingerprint.0,
@@ -105,10 +100,6 @@ pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
 fn practice_bot_build_identity() -> Result<LobbyBuildIdentity, String> {
     let builds = BuildCatalog::embedded()?;
     let weapons = WeaponCatalog::embedded()?;
-    let fighters = FighterDefinitions::default();
-    let fighter = fighters
-        .get(STANDARD_FIGHTER_DEFINITION)
-        .ok_or_else(|| "standard fighter definition is missing".to_string())?;
     let brawler = crate::profiles::SavedBrawler {
         id: crate::profiles::SavedBrawlerId::new(u128::MAX)
             .map_err(|error| format!("invalid canonical bot brawler id: {error}"))?,
@@ -124,9 +115,8 @@ fn practice_bot_build_identity() -> Result<LobbyBuildIdentity, String> {
         equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
         revision: crate::profiles::ProfileRevision::INITIAL,
     };
-    let snapshot =
-        crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons, fighter)
-            .map_err(|error| format!("canonical bot brawler resolution failed: {error:?}"))?;
+    let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
+        .map_err(|error| format!("canonical bot brawler resolution failed: {error:?}"))?;
     let accepted_identity = snapshot.accepted_identity;
     Ok(LobbyBuildIdentity {
         recipe_fingerprint: accepted_identity.recipe_fingerprint.0,
@@ -1138,7 +1128,6 @@ impl Plugin for LobbyPlugin {
             .init_resource::<QueueSnapshotPublication>()
             .init_resource::<QueueEvidenceSettings>()
             .init_resource::<ProductFormationState>()
-            .init_resource::<FighterDefinitions>()
             .add_systems(Startup, initialize_lobby_state)
             .configure_sets(
                 Update,
@@ -1732,7 +1721,6 @@ fn apply_queue_transactions(
     mut queue: ResMut<QueueState>,
     builds: Res<crate::builds::BuildCatalogResource>,
     weapons: Res<crate::combat::WeaponCatalogResource>,
-    fighters: Res<FighterDefinitions>,
     authority: Res<crate::profiles::ProfileAuthority>,
     mut frame: ResMut<LobbyQueueFrame>,
     mut exit: MessageWriter<AppExit>,
@@ -1773,20 +1761,15 @@ fn apply_queue_transactions(
                     command,
                 } => {
                     let admitted = match &command {
-                        crate::lobby::QueueCommand::Join(join) => fighters
-                            .get(STANDARD_FIGHTER_DEFINITION)
-                            .and_then(|fighter| {
-                                authority
-                                    .admitted_snapshot(
-                                        session.netcode_client_id.get(),
-                                        join.brawler_id,
-                                        join.brawler_revision,
-                                        &builds.0,
-                                        &weapons.0,
-                                        fighter,
-                                    )
-                                    .ok()
-                            }),
+                        crate::lobby::QueueCommand::Join(join) => authority
+                            .admitted_snapshot(
+                                session.netcode_client_id.get(),
+                                join.brawler_id,
+                                join.brawler_revision,
+                                &builds.0,
+                                &weapons.0,
+                            )
+                            .ok(),
                         crate::lobby::QueueCommand::Cancel(_) => None,
                     };
                     queue.command(
@@ -1797,7 +1780,6 @@ fn apply_queue_transactions(
                         admitted,
                         &builds.0,
                         &weapons.0,
-                        &fighters,
                     )
                 }
             };
@@ -1941,7 +1923,6 @@ fn apply_practice_start_requests(
     catalog: Res<catalog::ResolvedLobbyCatalog>,
     builds: Res<crate::builds::BuildCatalogResource>,
     weapons: Res<crate::combat::WeaponCatalogResource>,
-    fighters: Res<FighterDefinitions>,
     authority: Res<crate::profiles::ProfileAuthority>,
     mut formation: ResMut<ProductFormationState>,
     mut clients: Query<(
@@ -1991,9 +1972,6 @@ fn apply_practice_start_requests(
                 .expect("authenticated lobby client owns session");
             let started = rejection.map_or_else(
                 || {
-                    let fighter = fighters
-                        .get(STANDARD_FIGHTER_DEFINITION)
-                        .ok_or(crate::lobby::PracticeStartRejection::Internal)?;
                     let snapshot = authority
                         .admitted_snapshot(
                             session.netcode_client_id.get(),
@@ -2001,7 +1979,6 @@ fn apply_practice_start_requests(
                             command.brawler_revision,
                             &builds.0,
                             &weapons.0,
-                            fighter,
                         )
                         .map_err(|error| {
                             let rejection = match error {
@@ -2032,20 +2009,17 @@ fn apply_practice_start_requests(
                             );
                             rejection
                         })?;
-                    let resolved =
-                        snapshot
-                            .resolve(&builds.0, &weapons.0, fighter)
-                            .map_err(|error| {
-                                warn!(
-                                    client_id = session.netcode_client_id.get(),
-                                    request_id = command.request_id.get(),
-                                    brawler_id = ?command.brawler_id,
-                                    brawler_revision = command.brawler_revision.get(),
-                                    cause = ?error,
-                                    "admitted practice build failed repeat resolution"
-                                );
-                                crate::lobby::PracticeStartRejection::IncompatibleBuild
-                            })?;
+                    let resolved = snapshot.resolve(&builds.0, &weapons.0).map_err(|error| {
+                        warn!(
+                            client_id = session.netcode_client_id.get(),
+                            request_id = command.request_id.get(),
+                            brawler_id = ?command.brawler_id,
+                            brawler_revision = command.brawler_revision.get(),
+                            cause = ?error,
+                            "admitted practice build failed repeat resolution"
+                        );
+                        crate::lobby::PracticeStartRejection::IncompatibleBuild
+                    })?;
                     let accepted = crate::builds::AcceptedBuildSummary {
                         canonical_recipe: crate::builds::BrawlerBuildRecipe {
                             weapon: crate::builds::WeaponChoice::Preset(
@@ -2657,7 +2631,6 @@ mod tests {
             brawler_id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
             brawler_revision: crate::profiles::ProfileRevision::INITIAL,
         };
-        let fighter = FighterDefinitions::default();
         let brawler = crate::profiles::SavedBrawler {
             id: command.brawler_id,
             creation_ordinal: 1,
@@ -2672,20 +2645,10 @@ mod tests {
             equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
             revision: command.brawler_revision,
         };
-        let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler(
-            &brawler,
-            &builds,
-            &weapons,
-            fighter.get(STANDARD_FIGHTER_DEFINITION).unwrap(),
-        )
-        .unwrap();
-        let resolved = snapshot
-            .resolve(
-                &builds,
-                &weapons,
-                fighter.get(STANDARD_FIGHTER_DEFINITION).unwrap(),
-            )
-            .unwrap();
+        let snapshot =
+            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
+                .unwrap();
+        let resolved = snapshot.resolve(&builds, &weapons).unwrap();
         let accepted = crate::builds::AcceptedBuildSummary {
             canonical_recipe: crate::builds::BrawlerBuildRecipe {
                 weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),

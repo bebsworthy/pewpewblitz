@@ -118,6 +118,7 @@ pub(in super::super) fn reconcile_fighter_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    metrics: Res<FighterPresentationMetrics>,
     fighters: FighterPresentationQuery,
     visuals: Query<(Entity, &CombatVisualOwner), With<V3FighterVisual>>,
     mut ground_markers: GroundMarkerQuery,
@@ -140,6 +141,7 @@ pub(in super::super) fn reconcile_fighter_visuals(
                     team: *team,
                     marker_relation: ground_marker_relation(*team, controlled, controlled_team),
                 },
+                metrics.radius,
             );
         }
     }
@@ -699,6 +701,7 @@ fn spawn_fighter(
     owner: Entity,
     position: Vec2,
     identity: FighterVisualIdentity,
+    fighter_radius: f32,
 ) {
     let root = commands
         .spawn((
@@ -718,7 +721,7 @@ fn spawn_fighter(
             V3FallbackVisual { owner },
             Mesh3d(primitives.fighter.clone()),
             MeshMaterial3d(team_material(identity.team, materials)),
-            Transform::from_xyz(0.0, FIGHTER_FALLBACK_RADIUS, 0.0),
+            Transform::from_xyz(0.0, fighter_radius, 0.0),
             Name::new("V3 fighter fallback"),
         ));
         parent.spawn((

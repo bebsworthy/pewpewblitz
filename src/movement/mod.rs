@@ -23,8 +23,6 @@ pub use input::{
     radial_deadzone, trigger_pressed,
 };
 
-/// Canonical circular fighter footprint used by movement, combat, map clearance, and presentation.
-pub const STANDARD_FIGHTER_RADIUS: f32 = 14.0;
 pub const AUTHORITATIVE_INPUT_STALE_TICKS: u64 = 12;
 
 /// Live input-trace switch and last-seen inputs. Read only by the server-gated coordinator.
@@ -44,12 +42,9 @@ impl FromWorld for AuthoritativeInputTrace {
     }
 }
 
-/// Fixed simulation values for the provisional fighter body.
+/// Engine-level movement solver policy. Authored fighter balance belongs to `BuildCatalog`.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct MovementTuning {
-    pub speed: f32,
-    pub radius: f32,
-    pub spawn_facing: f32,
     pub stale_input_ticks: u64,
     pub move_iterations: usize,
     pub skin_width: f32,
@@ -58,9 +53,6 @@ pub struct MovementTuning {
 impl Default for MovementTuning {
     fn default() -> Self {
         Self {
-            speed: 100.0,
-            radius: STANDARD_FIGHTER_RADIUS,
-            spawn_facing: 0.0,
             stale_input_ticks: AUTHORITATIVE_INPUT_STALE_TICKS,
             move_iterations: 4,
             skin_width: 0.01,

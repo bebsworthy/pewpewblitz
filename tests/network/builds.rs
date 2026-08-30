@@ -4,11 +4,9 @@ use super::*;
 fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_values() {
     let canonical_builds = brawler::builds::BuildCatalog::embedded().unwrap();
     let canonical_weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
-    let fighter = FighterDefinitions::default().entries[0];
     let canonical = brawler::builds::resolve_saved_brawler_recipe(
         &canonical_builds,
         &canonical_weapons,
-        &fighter,
         brawler::profiles::FighterProfileId(1),
         brawler::profiles::WeaponBaseId(1),
         brawler::builds::UltimateDefinitionId(1),
@@ -62,7 +60,6 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
             .world()
             .resource::<brawler::combat::WeaponCatalogResource>()
             .0,
-        &fighter,
         brawler::profiles::FighterProfileId(1),
         brawler::profiles::WeaponBaseId(1),
         brawler::builds::UltimateDefinitionId(1),
@@ -72,11 +69,20 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
         ],
     )
     .unwrap();
+    let projection = brawler::builds::MatchLoadoutProjection::new(
+        &server_loadout,
+        harness
+            .server
+            .world()
+            .resource::<brawler::builds::BuildCatalogResource>()
+            .0
+            .fighter_body,
+    );
     harness
         .server
         .world_mut()
         .entity_mut(server_entity)
-        .insert(server_loadout.clone());
+        .insert((server_loadout.clone(), projection));
     assert_eq!(server_loadout.identity, canonical.identity);
     assert_ne!(
         server_loadout.primary_weapon.recipe_fingerprint,
@@ -909,7 +915,7 @@ fn dash_shape_cast_truncates_before_map_collision_and_blocks_primary_fire() {
         .get::<Position>(owner_entity)
         .unwrap()
         .0;
-    let nearest_legal_center = -(10.0 + brawler::movement::STANDARD_FIGHTER_RADIUS);
+    let nearest_legal_center = -(10.0 + brawler::builds::MAX_FIGHTER_BODY_RADIUS);
     assert!(
         endpoint.x > -200.0 && endpoint.x <= nearest_legal_center + 0.5,
         "endpoint={endpoint:?}"

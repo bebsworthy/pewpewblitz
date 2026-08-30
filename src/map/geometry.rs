@@ -407,7 +407,7 @@ pub(super) fn validate_spawn_clearance(
             if blocked.iter().any(|shape| {
                 circle_overlaps_derived_shape(
                     center,
-                    crate::movement::STANDARD_FIGHTER_RADIUS,
+                    crate::builds::MAX_FIGHTER_BODY_RADIUS,
                     *shape,
                 )
             }) {
@@ -431,11 +431,11 @@ pub(super) fn validate_fighter_navigation(
         let center = dimensions.cell_center(cell);
         dimensions
             .bounds()
-            .contains_with_inset(center, crate::movement::STANDARD_FIGHTER_RADIUS)
+            .contains_with_inset(center, crate::builds::MAX_FIGHTER_BODY_RADIUS)
             && blocked.iter().all(|shape| {
                 !circle_overlaps_derived_shape(
                     center,
-                    crate::movement::STANDARD_FIGHTER_RADIUS,
+                    crate::builds::MAX_FIGHTER_BODY_RADIUS,
                     *shape,
                 )
             })
@@ -619,12 +619,12 @@ pub(super) fn validate_heist_map_access(
         dimensions.contains(cell)
             && dimensions.bounds().contains_with_inset(
                 dimensions.cell_center(cell),
-                crate::movement::STANDARD_FIGHTER_RADIUS,
+                crate::builds::MAX_FIGHTER_BODY_RADIUS,
             )
             && blocked.iter().all(|shape| {
                 !circle_overlaps_derived_shape(
                     dimensions.cell_center(cell),
-                    crate::movement::STANDARD_FIGHTER_RADIUS,
+                    crate::builds::MAX_FIGHTER_BODY_RADIUS,
                     *shape,
                 )
             })

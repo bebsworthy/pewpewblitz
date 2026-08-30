@@ -482,7 +482,7 @@ mod clearance_tests {
         let wall = MapShape::Rectangle {
             half_extents: Vec2::splat(16.0),
         };
-        let clearance = crate::movement::STANDARD_FIGHTER_RADIUS + 1.0;
+        let clearance = crate::builds::MAX_FIGHTER_BODY_RADIUS + 1.0;
 
         assert!(!shape_contains_with_clearance(
             Vec2::new(-16.0, 0.0),

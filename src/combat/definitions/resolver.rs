@@ -6,12 +6,12 @@ use super::*;
 pub fn resolve_configuration(
     source_preset_id: Option<WeaponPresetId>,
     configuration: WeaponConfiguration,
-    fighter: &FighterDefinition,
+    fighter_body: crate::builds::FighterBody,
 ) -> Result<ResolvedWeapon, String> {
     resolve_configuration_with_policy(
         source_preset_id,
         configuration,
-        fighter,
+        fighter_body,
         WeaponRecipePolicy::default(),
         EngineWeaponLimits::default(),
     )
@@ -24,14 +24,14 @@ pub fn resolve_configuration(
 pub fn resolve_configuration_with_policy(
     source_preset_id: Option<WeaponPresetId>,
     configuration: WeaponConfiguration,
-    fighter: &FighterDefinition,
+    fighter_body: crate::builds::FighterBody,
     policy: WeaponRecipePolicy,
     limits: EngineWeaponLimits,
 ) -> Result<ResolvedWeapon, String> {
     if !limits_within_engine_ceiling(limits) {
         return Err("weapon limits exceed code-owned engine ceilings".to_string());
     }
-    configuration.validate(&policy, limits, Some(fighter.body_radius))?;
+    configuration.validate(&policy, limits, Some(fighter_body.radius))?;
     let straight_geometry = match configuration.recipe.delivery {
         DeliveryMethod::Straight {
             radius,
@@ -49,13 +49,13 @@ pub fn resolve_configuration_with_policy(
         | DeliveryMethod::Splash { .. } => None,
     };
     if straight_geometry
-        .is_some_and(|(radius, muzzle_offset)| muzzle_offset < fighter.body_radius + radius)
+        .is_some_and(|(radius, muzzle_offset)| muzzle_offset < fighter_body.radius + radius)
     {
         return Err("straight muzzle starts inside fighter".to_string());
     }
     if let DeliveryMethod::Lobbed { muzzle_offset, .. }
     | DeliveryMethod::Splash { muzzle_offset, .. } = configuration.recipe.delivery
-        && muzzle_offset < fighter.body_radius
+        && muzzle_offset < fighter_body.radius
     {
         return Err("lobbed muzzle starts inside fighter".to_string());
     }

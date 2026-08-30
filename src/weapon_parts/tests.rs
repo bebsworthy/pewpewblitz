@@ -1,5 +1,5 @@
 use super::*;
-use crate::combat::{FighterDefinitions, WeaponCatalog, WeaponPresetId};
+use crate::combat::{WeaponCatalog, WeaponPresetId};
 
 #[test]
 fn embedded_catalog_is_valid_and_has_twelve_sidegrades() {
@@ -69,13 +69,14 @@ fn slot_permutation_has_the_same_modifiers_and_weapon_fingerprint() {
     assert_eq!(first, reversed);
 
     let weapons = WeaponCatalog::embedded().unwrap();
-    let fighters = FighterDefinitions::default();
-    let fighter = &fighters.entries[0];
+    let body = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body;
     assert_eq!(
-        resolve_weapon_parts(&weapons, fighter, WeaponPresetId(1), first)
+        resolve_weapon_parts(&weapons, body, WeaponPresetId(1), first)
             .unwrap()
             .recipe_fingerprint,
-        resolve_weapon_parts(&weapons, fighter, WeaponPresetId(1), reversed)
+        resolve_weapon_parts(&weapons, body, WeaponPresetId(1), reversed)
             .unwrap()
             .recipe_fingerprint
     );
@@ -85,14 +86,15 @@ fn slot_permutation_has_the_same_modifiers_and_weapon_fingerprint() {
 fn every_legacy_part_resolves_on_every_weapon_base() {
     let parts = WeaponPartCatalog::embedded().unwrap();
     let weapons = WeaponCatalog::embedded().unwrap();
-    let fighters = FighterDefinitions::default();
-    let fighter = &fighters.entries[0];
+    let body = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body;
     for definition in parts.definitions.iter().take(8) {
         let modifiers = aggregate_weapon_part_effects(definition.effects.iter().copied()).unwrap();
         for base in 1..=6 {
-            resolve_weapon_parts(&weapons, fighter, WeaponPresetId(base), modifiers).unwrap();
+            resolve_weapon_parts(&weapons, body, WeaponPresetId(base), modifiers).unwrap();
         }
-        let splash = resolve_weapon_parts(&weapons, fighter, WeaponPresetId(7), modifiers);
+        let splash = resolve_weapon_parts(&weapons, body, WeaponPresetId(7), modifiers);
         if definition.id == WeaponPartDefinitionId(7) {
             assert_eq!(
                 splash.unwrap_err(),
@@ -108,8 +110,9 @@ fn every_legacy_part_resolves_on_every_weapon_base() {
 fn every_legal_zero_to_four_part_combination_resolves_on_its_compatible_bases() {
     let parts = WeaponPartCatalog::embedded().unwrap();
     let weapons = WeaponCatalog::embedded().unwrap();
-    let fighters = FighterDefinitions::default();
-    let fighter = &fighters.entries[0];
+    let body = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body;
     for mask in 0_u16..(1_u16 << parts.definitions.len()) {
         if mask.count_ones() > 4 {
             continue;
@@ -124,7 +127,7 @@ fn every_legal_zero_to_four_part_combination_resolves_on_its_compatible_bases() 
             continue;
         };
         for base in 1..=7 {
-            let _ = resolve_weapon_parts(&weapons, fighter, WeaponPresetId(base), modifiers);
+            let _ = resolve_weapon_parts(&weapons, body, WeaponPresetId(base), modifiers);
         }
     }
 }

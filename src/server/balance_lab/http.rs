@@ -360,7 +360,7 @@ mod tests {
     use super::*;
     use crate::{
         builds::BuildCatalog,
-        combat::{FighterDefinitions, WeaponCatalog},
+        combat::WeaponCatalog,
         server::balance_lab::{
             BalanceLabRevision, BalanceLabSnapshotV3, BalanceLabValidator,
             editor::BalanceLabEditorManifest,
@@ -407,7 +407,6 @@ mod tests {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
         let maps = crate::map::MapContentCatalog::embedded().unwrap();
-        let fighter = FighterDefinitions::default().entries[0];
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let state = BalanceLabStateView {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
@@ -427,7 +426,6 @@ mod tests {
                 builds,
                 weapons,
                 maps,
-                fighter,
             },
             baseline,
         )

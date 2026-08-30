@@ -9,15 +9,16 @@ mod roster;
 use crate::combat::WeaponPhase;
 use crate::{
     builds::{
-        BuildCatalog, BuildCatalogResource, ElementalFieldEffect, FighterStatProfiles,
-        PassiveDefinitionId, PassiveKind, PassiveParameters, ResolvedMatchLoadout, SelectedBuild,
-        UltimateChargePolicy, UltimateDefinitionId, UltimateKind, UltimateParameters,
+        BuildCatalog, BuildCatalogResource, ElementalFieldEffect, FighterBody, FighterStatProfiles,
+        PassiveDefinitionId, PassiveKind, PassiveParameters, ResolvedFighterStats,
+        ResolvedMatchLoadout, SelectedBuild, UltimateChargePolicy, UltimateDefinitionId,
+        UltimateKind, UltimateParameters,
     },
     combat::{
-        CurrentHealth, DamageFalloff, DeliveryMethod, FighterDefinitions, FiringPattern,
-        HealthRecoveryState, PayloadEffectDefinition, RecipientPolicy, TargetSelection,
-        WeaponCatalog, WeaponCatalogResource, WeaponConfiguration, WeaponPresetId, WeaponRecipe,
-        WeaponState, WorldEffectDefinition,
+        CurrentHealth, DamageFalloff, DeliveryMethod, FiringPattern, HealthRecoveryState,
+        PayloadEffectDefinition, RecipientPolicy, ResolvedWeapon, TargetSelection, WeaponCatalog,
+        WeaponCatalogResource, WeaponConfiguration, WeaponPresetId, WeaponRecipe, WeaponState,
+        WorldEffectDefinition,
     },
     matchplay::{
         MatchRestartSet, MatchRoot, MatchState, PendingMatchRestart, PendingMatchRestartSlot,
@@ -386,7 +387,6 @@ struct BalanceLabValidator {
     builds: BuildCatalog,
     weapons: WeaponCatalog,
     maps: crate::map::MapContentCatalog,
-    fighter: crate::combat::FighterDefinition,
 }
 
 impl BalanceLabValidator {
@@ -397,7 +397,6 @@ impl BalanceLabValidator {
             &self.builds,
             &self.weapons,
             &self.maps,
-            &self.fighter,
         )
         .map(|_| ())
     }
@@ -448,7 +447,6 @@ fn validate_revised_manifest_loadouts(
     world: &World,
     builds: &BuildCatalog,
     weapons: &WeaponCatalog,
-    fighter: &crate::combat::FighterDefinition,
 ) -> Result<(), String> {
     let manifest = world
         .resource::<ServerRoleResource>()
@@ -456,7 +454,7 @@ fn validate_revised_manifest_loadouts(
         .ok_or_else(|| "Practice manifest disappeared during startup".to_string())?;
     for snapshot in manifest_selections(manifest)?.into_values() {
         snapshot
-            .resolve_revised_balance_lab_catalogs(builds, weapons, fighter)
+            .resolve_revised_balance_lab_catalogs(builds, weapons)
             .map_err(|error| {
                 format!("admitted loadout is incompatible with persisted tuning: {error:?}")
             })?;
@@ -469,12 +467,11 @@ fn load_persisted_tuning(
     path: &Path,
     validator: &BalanceLabValidator,
     baseline: &BalanceLabSnapshotV3,
-    fighter: &crate::combat::FighterDefinition,
 ) -> (BalanceLabSnapshotV3, BalanceLabRevision) {
     match persistence::load(path, validator) {
         Ok(Some(loaded)) => {
             if let Err(error) =
-                validate_revised_manifest_loadouts(world, &loaded.builds, &loaded.weapons, fighter)
+                validate_revised_manifest_loadouts(world, &loaded.builds, &loaded.weapons)
             {
                 warn!(
                     path = %path.display(),
@@ -534,25 +531,15 @@ fn start_balance_lab(world: &mut World) {
     if let Some(rules) = world.get_resource::<crate::matchplay::HeistRules>() {
         baseline.heist.safe_maximum_health = rules.safe_maximum_health;
     }
-    let fighter = *world
-        .resource::<FighterDefinitions>()
-        .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
-        .expect("validated standard fighter definition");
     let editor_manifest = editor::BalanceLabEditorManifest::from_catalogs(&baseline, &weapons);
     let validator = BalanceLabValidator {
         baseline: baseline.clone(),
         builds,
         weapons,
         maps,
-        fighter,
     };
-    let (applied, revision) = load_persisted_tuning(
-        world,
-        &config.persistence_path,
-        &validator,
-        &baseline,
-        &fighter,
-    );
+    let (applied, revision) =
+        load_persisted_tuning(world, &config.persistence_path, &validator, &baseline);
     if let Some(mut rules) = world.get_resource_mut::<crate::matchplay::HeistRules>() {
         install_heist_tuning(&mut rules, &applied);
     }
@@ -656,7 +643,6 @@ fn apply_balance_lab_transaction(
     mut runtime: Option<ResMut<BalanceLabRuntime>>,
     role: Res<ServerRoleResource>,
     tick: Res<SimulationTick>,
-    fighter_definitions: Res<FighterDefinitions>,
     mut builds: ResMut<BuildCatalogResource>,
     mut weapons: ResMut<WeaponCatalogResource>,
     mut maps: ResMut<crate::map::MapCatalogResource>,
@@ -671,6 +657,9 @@ fn apply_balance_lab_transaction(
     mut fighters: Query<(
         &mut SelectedBuild,
         &mut ResolvedMatchLoadout,
+        &mut ResolvedFighterStats,
+        &mut FighterBody,
+        &mut ResolvedWeapon,
         &mut CurrentHealth,
         &mut WeaponState,
         &mut HealthRecoveryState,
@@ -728,16 +717,12 @@ fn apply_balance_lab_transaction(
         reject(runtime, transaction_id, "another match reset is pending");
         return;
     }
-    let fighter = fighter_definitions
-        .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
-        .expect("validated standard fighter definition");
     let (next_builds, next_weapons, next_maps) = match validate_snapshot(
         &candidate,
         &runtime.baseline,
         &builds.0,
         &weapons.0,
         &maps.0,
-        fighter,
     ) {
         Ok(catalogs) => catalogs,
         Err(error) => {
@@ -780,7 +765,7 @@ fn apply_balance_lab_transaction(
             return;
         };
         let Ok(loadout) =
-            snapshot.resolve_revised_balance_lab_catalogs(&next_builds, &next_weapons, fighter)
+            snapshot.resolve_revised_balance_lab_catalogs(&next_builds, &next_weapons)
         else {
             reject(
                 runtime,
@@ -854,6 +839,7 @@ fn apply_balance_lab_transaction(
         reject(runtime, transaction_id, "another match reset is pending");
         return;
     }
+    let next_body = next_builds.fighter_body;
     builds.0 = next_builds;
     weapons.0 = next_weapons;
     maps.0 = next_maps;
@@ -863,13 +849,25 @@ fn apply_balance_lab_transaction(
         install_heist_tuning(rules, &candidate);
     }
     for (entity, loadout) in resolved {
-        let (mut selected, mut current, mut health, mut weapon, mut recovery) = fighters
+        let (
+            mut selected,
+            mut current,
+            mut fighter_stats,
+            mut fighter_body,
+            mut resolved_weapon,
+            mut health,
+            mut weapon,
+            mut recovery,
+        ) = fighters
             .get_mut(entity)
             .expect("prevalidated fighter runtime remains available during atomic apply");
         *selected = loadout.identity;
         *health = CurrentHealth(loadout.fighter_stats.maximum_health);
         *weapon = WeaponState::ready(loadout.primary_weapon.recipe.economy.capacity());
         *recovery = HealthRecoveryState::starting_at(tick.0);
+        *fighter_stats = loadout.fighter_stats;
+        *fighter_body = next_body;
+        *resolved_weapon = loadout.primary_weapon.clone();
         *current = loadout.clone();
     }
     *restart_policy = RestartBuildPolicy::Retain;
@@ -928,7 +926,6 @@ fn validate_snapshot(
     current_builds: &BuildCatalog,
     current_weapons: &WeaponCatalog,
     current_maps: &crate::map::MapContentCatalog,
-    fighter: &crate::combat::FighterDefinition,
 ) -> Result<(BuildCatalog, WeaponCatalog, crate::map::MapContentCatalog), String> {
     if candidate.schema_version != SNAPSHOT_SCHEMA_VERSION
         || candidate.weapons.len() != baseline.weapons.len()
@@ -971,7 +968,7 @@ fn validate_snapshot(
     apply_ultimate_tuning(candidate, baseline, &mut next_builds)?;
     apply_passive_tuning(candidate, baseline, &mut next_builds)?;
     next_builds.validate()?;
-    validate_saved_brawler_combinations(&next_builds, &next_weapons, fighter)?;
+    validate_saved_brawler_combinations(&next_builds, &next_weapons)?;
     let mut next_maps = current_maps.clone();
     if candidate.barrel.damage_profile.id != baseline.barrel.damage_profile.id
         || candidate.barrel.explosion_profile.id != baseline.barrel.explosion_profile.id
@@ -1019,7 +1016,6 @@ fn validate_snapshot(
 fn validate_saved_brawler_combinations(
     builds: &BuildCatalog,
     weapons: &WeaponCatalog,
-    fighter: &crate::combat::FighterDefinition,
 ) -> Result<(), String> {
     let advertised = crate::profiles::AdvertisedBrawlerCatalog::from_content(builds, weapons)?;
     let ultimate_id = advertised
@@ -1055,7 +1051,7 @@ fn validate_saved_brawler_combinations(
                 equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
                 revision: crate::profiles::ProfileRevision::INITIAL,
             };
-            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, builds, weapons, fighter)
+            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, builds, weapons)
                 .map_err(|_| {
                     "revised fighter profile or weapon base did not resolve".to_string()
                 })?;
@@ -1081,7 +1077,7 @@ fn validate_saved_brawler_combinations(
         for weapon_base in &advertised.weapon_bases {
             if crate::weapon_parts::resolve_weapon_parts(
                 &canonical_weapons,
-                fighter,
+                builds.fighter_body,
                 WeaponPresetId(weapon_base.id.0),
                 modifiers,
             )
@@ -1091,7 +1087,7 @@ fn validate_saved_brawler_combinations(
             }
             crate::weapon_parts::resolve_weapon_parts(
                 weapons,
-                fighter,
+                builds.fighter_body,
                 WeaponPresetId(weapon_base.id.0),
                 modifiers,
             )
@@ -1496,7 +1492,6 @@ mod tests {
     fn admitted_brawler(
         builds: &BuildCatalog,
         weapons: &WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
         fighter_profile_id: u16,
         weapon_base_id: u16,
     ) -> (crate::profiles::MatchBuildSnapshotV3, ResolvedMatchLoadout) {
@@ -1513,9 +1508,8 @@ mod tests {
             revision: crate::profiles::ProfileRevision::INITIAL,
         };
         let snapshot =
-            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, builds, weapons, fighter)
-                .unwrap();
-        let resolved = snapshot.resolve(builds, weapons, fighter).unwrap();
+            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, builds, weapons).unwrap();
+        let resolved = snapshot.resolve(builds, weapons).unwrap();
         (snapshot, resolved)
     }
 
@@ -1585,9 +1579,8 @@ mod tests {
     fn roster_projection_exposes_human_and_bot_loadouts_with_catalog_names() {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
-        let fighter = FighterDefinitions::default().entries[0];
-        let (human, _) = admitted_brawler(&builds, &weapons, &fighter, 2, 1);
-        let (bot, _) = admitted_brawler(&builds, &weapons, &fighter, 3, 2);
+        let (human, _) = admitted_brawler(&builds, &weapons, 2, 1);
+        let (bot, _) = admitted_brawler(&builds, &weapons, 3, 2);
         let players =
             roster::from_manifest(&practice_manifest(&human, &bot), &builds, &weapons).unwrap();
         let json = serde_json::to_value(players).unwrap();
@@ -1612,7 +1605,6 @@ mod tests {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
         let maps = crate::map::MapContentCatalog::embedded().unwrap();
-        let fighter = FighterDefinitions::default().entries[0];
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let mut numeric = baseline.clone();
         numeric.weapons[0].recipe.fire_cooldown_ticks += 1;
@@ -1637,42 +1629,20 @@ mod tests {
             panic!("Pulse Sidearm uses straight delivery");
         };
         *range = 438.0;
-        validate_snapshot(&numeric, &baseline, &builds, &weapons, &maps, &fighter).unwrap();
+        validate_snapshot(&numeric, &baseline, &builds, &weapons, &maps).unwrap();
         let mut invalid_heist = baseline.clone();
         invalid_heist.heist.safe_maximum_health = 99;
-        assert!(
-            validate_snapshot(
-                &invalid_heist,
-                &baseline,
-                &builds,
-                &weapons,
-                &maps,
-                &fighter,
-            )
-            .is_err()
-        );
+        assert!(validate_snapshot(&invalid_heist, &baseline, &builds, &weapons, &maps,).is_err());
         let mut expanded_brush = baseline.clone();
         expanded_brush.weapons[2].recipe.world_effects =
             vec![WorldEffectDefinition::DestroyMap { radius: 128.0 }];
-        assert!(
-            validate_snapshot(
-                &expanded_brush,
-                &baseline,
-                &builds,
-                &weapons,
-                &maps,
-                &fighter,
-            )
-            .is_err()
-        );
+        assert!(validate_snapshot(&expanded_brush, &baseline, &builds, &weapons, &maps,).is_err());
         let mut structural = baseline.clone();
         structural.weapons[0].recipe.firing = FiringPattern::Spread {
             delivery_count: 2,
             total_angle_degrees: 10.0,
         };
-        assert!(
-            validate_snapshot(&structural, &baseline, &builds, &weapons, &maps, &fighter).is_err()
-        );
+        assert!(validate_snapshot(&structural, &baseline, &builds, &weapons, &maps).is_err());
         let mut presentation = baseline.clone();
         let UltimateParameters::Sentry {
             presentation_profile_id,
@@ -1682,24 +1652,13 @@ mod tests {
             panic!("second ultimate is Sentry");
         };
         *presentation_profile_id += 1;
-        assert!(
-            validate_snapshot(&presentation, &baseline, &builds, &weapons, &maps, &fighter,)
-                .is_err()
-        );
+        assert!(validate_snapshot(&presentation, &baseline, &builds, &weapons, &maps,).is_err());
         let mut passive_topology = baseline.clone();
         passive_topology.passives[2].parameters = PassiveParameters::QuickCycle {
             refill_duration_basis_points: 6_000,
         };
         assert!(
-            validate_snapshot(
-                &passive_topology,
-                &baseline,
-                &builds,
-                &weapons,
-                &maps,
-                &fighter,
-            )
-            .is_err()
+            validate_snapshot(&passive_topology, &baseline, &builds, &weapons, &maps,).is_err()
         );
         assert_eq!(builds, BuildCatalog::embedded().unwrap());
         assert_eq!(weapons, WeaponCatalog::embedded().unwrap());
@@ -1729,7 +1688,6 @@ mod tests {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
         let maps = crate::map::MapContentCatalog::embedded().unwrap();
-        let fighter = FighterDefinitions::default().entries[0];
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let mut candidate = baseline.clone();
         candidate.effect_tiles = EffectTileTuning {
@@ -1739,7 +1697,7 @@ mod tests {
             interval_ticks: 90,
         };
         let (_, _, revised_maps) =
-            validate_snapshot(&candidate, &baseline, &builds, &weapons, &maps, &fighter).unwrap();
+            validate_snapshot(&candidate, &baseline, &builds, &weapons, &maps).unwrap();
         assert_eq!(
             EffectTileTuning::from_catalog(&revised_maps).unwrap(),
             candidate.effect_tiles
@@ -1795,10 +1753,7 @@ mod tests {
         ] {
             let mut rejected = baseline.clone();
             rejected.effect_tiles = invalid;
-            assert!(
-                validate_snapshot(&rejected, &baseline, &builds, &weapons, &maps, &fighter)
-                    .is_err()
-            );
+            assert!(validate_snapshot(&rejected, &baseline, &builds, &weapons, &maps).is_err());
         }
     }
 
@@ -1850,8 +1805,6 @@ mod tests {
     fn revised_weapon_tuning_recomputes_an_admitted_modified_weapon_identity() {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
-        let fighter_definitions = FighterDefinitions::default();
-        let fighter = fighter_definitions.entries[0];
         let brawler = crate::profiles::SavedBrawler {
             id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
             creation_ordinal: 1,
@@ -1875,10 +1828,10 @@ mod tests {
         ])
         .unwrap();
         let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler_and_modifiers(
-            &brawler, modifiers, &builds, &weapons, &fighter,
+            &brawler, modifiers, &builds, &weapons,
         )
         .unwrap();
-        let canonical = snapshot.resolve(&builds, &weapons, &fighter).unwrap();
+        let canonical = snapshot.resolve(&builds, &weapons).unwrap();
         let mut revised_weapons = weapons.clone();
         let arc = revised_weapons
             .presets
@@ -1900,11 +1853,11 @@ mod tests {
         revised_weapons.validate().unwrap();
 
         assert_eq!(
-            snapshot.resolve(&builds, &revised_weapons, &fighter),
+            snapshot.resolve(&builds, &revised_weapons),
             Err(crate::builds::BuildResolutionError::InvalidCombination)
         );
         let revised = snapshot
-            .resolve_revised_balance_lab_catalogs(&builds, &revised_weapons, &fighter)
+            .resolve_revised_balance_lab_catalogs(&builds, &revised_weapons)
             .unwrap();
         assert_ne!(revised.identity, canonical.identity);
         assert_ne!(
@@ -1925,10 +1878,8 @@ mod tests {
                 crate::map::MapInstanceId(1),
             )
             .unwrap();
-        let fighter_definitions = FighterDefinitions::default();
-        let fighter = fighter_definitions.entries[0];
-        let (human_snapshot, human_loadout) = admitted_brawler(&builds, &weapons, &fighter, 2, 1);
-        let (bot_snapshot, bot_loadout) = admitted_brawler(&builds, &weapons, &fighter, 3, 2);
+        let (human_snapshot, human_loadout) = admitted_brawler(&builds, &weapons, 2, 1);
+        let (bot_snapshot, bot_loadout) = admitted_brawler(&builds, &weapons, 3, 2);
         let manifest = practice_manifest(&human_snapshot, &bot_snapshot);
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let mut applied = baseline.clone();
@@ -1984,6 +1935,10 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_file(&persistence_path);
+        let human_projection =
+            crate::builds::MatchLoadoutProjection::new(&human_loadout, builds.fighter_body);
+        let bot_projection =
+            crate::builds::MatchLoadoutProjection::new(&bot_loadout, builds.fighter_body);
 
         let mut app = App::new();
         app.add_systems(FixedUpdate, apply_balance_lab_transaction)
@@ -1998,7 +1953,6 @@ mod tests {
             })
             .insert_resource(ServerRoleResource::match_worker(manifest))
             .insert_resource(SimulationTick(50))
-            .insert_resource(fighter_definitions)
             .insert_resource(BuildCatalogResource(builds))
             .insert_resource(WeaponCatalogResource(weapons))
             .insert_resource(crate::map::MapCatalogResource(maps))
@@ -2025,6 +1979,7 @@ mod tests {
                 PlayerId(7),
                 human_loadout.identity,
                 human_loadout.clone(),
+                human_projection,
                 CurrentHealth(1),
                 WeaponState {
                     ammo: 0,
@@ -2041,6 +1996,7 @@ mod tests {
                 PlayerId(9),
                 bot_loadout.identity,
                 bot_loadout.clone(),
+                bot_projection,
                 CurrentHealth(1),
                 WeaponState {
                     ammo: 0,

@@ -3,7 +3,7 @@
 use super::{LobbySession, MAX_AUTHENTICATED_LOBBY_SESSIONS, catalog::ResolvedLobbyCatalog};
 use crate::{
     builds::{AcceptedBuildSummary, BuildCatalog, ResolvedMatchLoadout},
-    combat::{FighterDefinitions, STANDARD_FIGHTER_DEFINITION, WeaponCatalog},
+    combat::WeaponCatalog,
     lobby::{
         GameTypeId, QueueCancelCommand, QueueCommand, QueueCommandOutcome, QueueDecision,
         QueueJoinCommand, QueueMembership, QueuePoolRow, QueuePoolSnapshot, QueueRejection,
@@ -482,7 +482,6 @@ impl QueueState {
         admitted_build: Option<crate::profiles::MatchBuildSnapshotV3>,
         builds: &BuildCatalog,
         weapons: &WeaponCatalog,
-        fighters: &FighterDefinitions,
     ) -> QueueCommandResult {
         let session_id = session.lobby_session_id;
         self.memories
@@ -539,9 +538,7 @@ impl QueueState {
         }
 
         let (decision, changed) = match &command {
-            QueueCommand::Join(join) => {
-                self.join(session, join, admitted_build, builds, weapons, fighters)
-            }
+            QueueCommand::Join(join) => self.join(session, join, admitted_build, builds, weapons),
             QueueCommand::Cancel(cancel) => self.cancel(session, *cancel),
         };
         self.store_outcome(
@@ -620,7 +617,6 @@ impl QueueState {
         admitted_build: Option<crate::profiles::MatchBuildSnapshotV3>,
         builds: &BuildCatalog,
         weapons: &WeaponCatalog,
-        fighters: &FighterDefinitions,
     ) -> (QueueDecision, bool) {
         if let Err(rejection) = self.validate_join_target(command) {
             QueueTelemetry::increment(&mut self.telemetry.game_rejections);
@@ -660,13 +656,7 @@ impl QueueState {
                 false,
             );
         };
-        let Some(fighter) = fighters.get(STANDARD_FIGHTER_DEFINITION) else {
-            return (
-                QueueDecision::Rejected(QueueRejection::TemporarilyUnavailable),
-                false,
-            );
-        };
-        let Ok(resolved) = build_snapshot.resolve(builds, weapons, fighter) else {
+        let Ok(resolved) = build_snapshot.resolve(builds, weapons) else {
             QueueTelemetry::increment(&mut self.telemetry.build_rejections);
             return (
                 QueueDecision::Rejected(QueueRejection::InternalBuildResolution),
@@ -1138,11 +1128,10 @@ mod tests {
         })
     }
 
-    fn content() -> (BuildCatalog, WeaponCatalog, FighterDefinitions) {
+    fn content() -> (BuildCatalog, WeaponCatalog) {
         (
             BuildCatalog::embedded().unwrap(),
             WeaponCatalog::embedded().unwrap(),
-            FighterDefinitions::default(),
         )
     }
 
@@ -1154,7 +1143,7 @@ mod tests {
         command: QueueCommand,
         now: u64,
     ) -> QueueCommandResult {
-        let (builds, weapons, fighters) = content();
+        let (builds, weapons) = content();
         let admitted = match &command {
             QueueCommand::Join(join) => {
                 let preset = u16::try_from(join.brawler_id.get()).unwrap_or(0);
@@ -1167,7 +1156,6 @@ mod tests {
                         None,
                         &builds,
                         &weapons,
-                        &fighters,
                     );
                 }
                 let weapon_base_id = crate::profiles::WeaponBaseId(preset);
@@ -1189,13 +1177,8 @@ mod tests {
                     equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
                     revision: join.brawler_revision,
                 };
-                crate::profiles::MatchBuildSnapshotV3::from_brawler(
-                    &brawler,
-                    &builds,
-                    &weapons,
-                    fighters.get(STANDARD_FIGHTER_DEFINITION).unwrap(),
-                )
-                .ok()
+                crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
+                    .ok()
             }
             QueueCommand::Cancel(_) => None,
         };
@@ -1207,7 +1190,6 @@ mod tests {
             admitted,
             &builds,
             &weapons,
-            &fighters,
         )
     }
 

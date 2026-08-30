@@ -471,7 +471,7 @@ pub(super) fn apply_composed_records(
                         owner_contact,
                         defeat_event,
                         legacy_defeat_event,
-                        test_dummy.is_some(),
+                        test_dummy,
                         applied,
                         gameplay_telemetry,
                         transaction,
@@ -743,7 +743,7 @@ fn record_target_defeat(
     owner_contact: bool,
     defeat_event: CombatEventId,
     legacy_defeat_event: Option<CombatEventId>,
-    test_dummy: bool,
+    test_dummy: Option<&TestDummy>,
     applied: &mut AppliedComposedState,
     gameplay_telemetry: &mut AbilityWeaponTelemetry,
     transaction: &mut CombatTransactionState,
@@ -767,10 +767,12 @@ fn record_target_defeat(
         ))
         .remove::<ExternalMotion>()
         .remove::<KnockbackFeedback>();
-    if test_dummy {
+    if let Some(test_dummy) = test_dummy {
         commands
             .entity(record.target)
-            .insert(TestDummyResetDeadline(tick.saturating_add(90)));
+            .insert(TestDummyResetDeadline(
+                tick.saturating_add(test_dummy.reset_delay_ticks),
+            ));
     }
     applied.effects.remove(&record.target);
     applied.motion.remove(&record.target);

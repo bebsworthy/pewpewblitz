@@ -34,7 +34,6 @@ fn draft(name: &str, fighter: u16, weapon: u16) -> BrawlerDraft {
 fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
     let brawler = SavedBrawler {
         id: SavedBrawlerId::new(9).unwrap(),
         creation_ordinal: 1,
@@ -46,9 +45,7 @@ fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
         equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
         revision: ProfileRevision::INITIAL,
     };
-    let resolved = brawler
-        .resolve_loadout(&builds, &weapons, &fighter)
-        .unwrap();
+    let resolved = brawler.resolve_loadout(&builds, &weapons).unwrap();
     assert_eq!(resolved.fighter_stats, builds.fighter_profiles.lightweight);
     assert_eq!(
         resolved.primary_weapon.source_preset_id,
@@ -59,14 +56,10 @@ fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
         resolved.ultimate.kind,
         crate::builds::UltimateKind::RevealScan
     );
-    let snapshot =
-        MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons, &fighter).unwrap();
+    let snapshot = MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons).unwrap();
     let decoded = MatchBuildSnapshotV3::decode(&snapshot.encode().unwrap()).unwrap();
     assert_eq!(decoded, snapshot);
-    assert_eq!(
-        decoded.resolve(&builds, &weapons, &fighter).unwrap(),
-        resolved
-    );
+    assert_eq!(decoded.resolve(&builds, &weapons).unwrap(), resolved);
 }
 
 #[test]
@@ -111,7 +104,6 @@ fn demolition_strike_is_valid_for_saved_brawler_creation_and_editing() {
 fn v3_part_snapshot_stays_inside_the_routing_bound() {
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
     let brawler = SavedBrawler {
         id: SavedBrawlerId::new(91).unwrap(),
         creation_ordinal: 1,
@@ -132,10 +124,9 @@ fn v3_part_snapshot_stays_inside_the_routing_bound() {
             .flat_map(|definition| definition.effects.iter().copied()),
     )
     .unwrap();
-    let snapshot = MatchBuildSnapshotV3::from_brawler_and_modifiers(
-        &brawler, modifiers, &builds, &weapons, &fighter,
-    )
-    .unwrap();
+    let snapshot =
+        MatchBuildSnapshotV3::from_brawler_and_modifiers(&brawler, modifiers, &builds, &weapons)
+            .unwrap();
     assert!(snapshot.encode().is_ok());
 }
 
@@ -674,16 +665,8 @@ fn persisted_incompatible_resistances_load_for_repair_but_fail_admission_explici
     ));
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let fighters = crate::combat::FighterDefinitions::default();
     assert_eq!(
-        authority.admitted_snapshot(
-            9,
-            brawler_id,
-            brawler.revision,
-            &builds,
-            &weapons,
-            &fighters.entries[0],
-        ),
+        authority.admitted_snapshot(9, brawler_id, brawler.revision, &builds, &weapons,),
         Err(ProfileAuthorityError::IncompatibleBuild)
     );
     drop(authority);

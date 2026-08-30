@@ -64,7 +64,6 @@ type OverheadFighterQuery<'w, 's> = Query<
     (
         Entity,
         &'static crate::combat::CurrentHealth,
-        &'static crate::combat::FighterDefinitionId,
         Option<&'static crate::combat::Defeated>,
         Option<&'static AuthoritativeTick>,
         Option<&'static crate::builds::ResolvedMatchLoadout>,
@@ -522,7 +521,6 @@ pub(in super::super) fn project_fighter_overhead_ui(
 )]
 pub(in super::super) fn update_fighter_overhead_state(
     mut commands: Commands,
-    definitions: Res<crate::combat::FighterDefinitions>,
     fighters: OverheadFighterQuery,
     mut overhead_roots: Query<
         (&CombatVisualOwner, &mut FighterOverheadUi, &mut Visibility),
@@ -545,17 +543,13 @@ pub(in super::super) fn update_fighter_overhead_state(
         ),
     >,
 ) {
-    let controlled_team =
-        fighters
-            .iter()
-            .find_map(|(_, _, _, _, _, _, _, team, _, _, is_controlled)| {
-                is_controlled.then_some(*team)
-            });
+    let controlled_team = fighters
+        .iter()
+        .find_map(|(_, _, _, _, _, _, team, _, _, is_controlled)| is_controlled.then_some(*team));
     for (owner, mut overhead, mut visibility) in &mut overhead_roots {
         let Ok((
             _,
             health,
-            definition,
             defeated,
             authoritative_tick,
             loadout,
@@ -569,21 +563,18 @@ pub(in super::super) fn update_fighter_overhead_state(
             *visibility = Visibility::Hidden;
             continue;
         };
-        let maximum = loadout.map_or_else(
-            || {
-                definitions
-                    .get(*definition)
-                    .map_or(1, |value| value.maximum_health)
-            },
-            |value| value.fighter_stats.maximum_health,
-        );
+        let Some(loadout) = loadout else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let maximum = loadout.fighter_stats.maximum_health;
         let observed_tick = authoritative_tick.map(|tick| tick.0);
         let current = health.0;
         let defeated = defeated.is_some();
         let relation = ground_marker_relation(*team, is_controlled, controlled_team);
         let name = display_name.map_or("Player", |name| name.0.as_str());
         let ammo = weapon.map_or(0, |state| state.ammo);
-        let capacity = loadout.map_or(0, |value| value.primary_weapon.recipe.economy.capacity());
+        let capacity = loadout.primary_weapon.recipe.economy.capacity();
         let ammo_progress = ammo_recovery_progress(weapon, observed_tick);
         // State reconciliation may hide roots; projection alone reveals correctly positioned ones.
         if defeated {
@@ -611,12 +602,10 @@ pub(in super::super) fn update_fighter_overhead_state(
             overhead.last_health = Some(current);
         }
 
-        let cold_frame = loadout.and_then(|loadout| {
-            cold_pie_frame(
-                active_effects.map_or(0, |effects| effects.cold.meter),
-                loadout.fighter_stats.cold_capacity,
-            )
-        });
+        let cold_frame = cold_pie_frame(
+            active_effects.map_or(0, |effects| effects.cold.meter),
+            loadout.fighter_stats.cold_capacity,
+        );
         if let Ok((mut pie, mut image, mut pie_visibility)) = cold_pies.get_mut(overhead.cold_pie) {
             *pie_visibility = if cold_frame.is_some() {
                 Visibility::Inherited

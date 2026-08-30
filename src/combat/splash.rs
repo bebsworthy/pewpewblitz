@@ -119,7 +119,7 @@ fn candidates(
 pub(super) fn advance_persistent_splashes(
     mut commands: Commands,
     tick: Res<SimulationTick>,
-    tuning: Res<MovementTuning>,
+    builds: Res<crate::builds::BuildCatalogResource>,
     mut trackers: ResMut<ActiveAttackTrackers>,
     mut pending: MessageWriter<PendingPayload>,
     mut deliveries: MessageWriter<PendingDelivery>,
@@ -183,7 +183,7 @@ pub(super) fn advance_persistent_splashes(
                 *state,
                 runtime.source,
                 &bundle,
-                tuning.radius,
+                builds.0.fighter_body.radius,
                 &disconnected,
                 &fighters,
                 &spatial_query,

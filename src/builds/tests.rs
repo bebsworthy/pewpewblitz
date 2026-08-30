@@ -1,15 +1,10 @@
 use super::*;
-use crate::combat::{DeliveryMethod, FighterDefinitions, PayloadEffectDefinition, WeaponCatalog};
+use crate::combat::{DeliveryMethod, PayloadEffectDefinition, WeaponCatalog};
 
-fn catalogs() -> (
-    BuildCatalog,
-    WeaponCatalog,
-    crate::combat::FighterDefinition,
-) {
+fn catalogs() -> (BuildCatalog, WeaponCatalog) {
     (
         BuildCatalog::embedded().unwrap(),
         WeaponCatalog::embedded().unwrap(),
-        FighterDefinitions::default().entries[0],
     )
 }
 
@@ -23,7 +18,7 @@ fn recipe(weapon: u16, ultimate: u16, passives: [u16; 2]) -> BrawlerBuildRecipe 
 
 #[test]
 fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters() {
-    let (builds, _, _) = catalogs();
+    let (builds, _) = catalogs();
     assert_eq!(builds.balance_revision, BuildRevision(12));
     assert_eq!(builds.weapon_costs.len(), 7);
     assert_eq!(builds.ultimates.len(), 11);
@@ -118,24 +113,23 @@ fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters()
 
 #[test]
 fn duplicate_and_frame_family_passives_are_rejected() {
-    let (builds, weapons, fighter) = catalogs();
+    let (builds, weapons) = catalogs();
     let mut candidate = recipe(1, 1, [1, 1]);
     assert_eq!(
-        resolve_build_recipe(&builds, &weapons, &fighter, candidate),
+        resolve_build_recipe(&builds, &weapons, candidate),
         Err(BuildResolutionError::InvalidCombination)
     );
     candidate.passives = [PassiveDefinitionId(1), PassiveDefinitionId(2)];
     assert_eq!(
-        resolve_build_recipe(&builds, &weapons, &fighter, candidate),
+        resolve_build_recipe(&builds, &weapons, candidate),
         Err(BuildResolutionError::InvalidCombination)
     );
 }
 
 #[test]
 fn recipes_reject_unknown_ids_and_resolve_exact_budget_and_body_stats() {
-    let (builds, weapons, fighter) = catalogs();
-    let controller =
-        resolve_build_recipe(&builds, &weapons, &fighter, recipe(3, 2, [5, 6])).unwrap();
+    let (builds, weapons) = catalogs();
+    let controller = resolve_build_recipe(&builds, &weapons, recipe(3, 2, [5, 6])).unwrap();
     assert_eq!(controller.total_points, BUILD_POINT_BUDGET);
     assert_eq!(controller.fighter_stats.maximum_health, 1_000);
     assert!((controller.fighter_stats.movement_speed - 70.0).abs() < f32::EPSILON);
@@ -144,27 +138,27 @@ fn recipes_reject_unknown_ids_and_resolve_exact_budget_and_body_stats() {
     let mut unknown = recipe(1, 1, [1, 3]);
     unknown.ultimate = UltimateDefinitionId(999);
     assert_eq!(
-        resolve_build_recipe(&builds, &weapons, &fighter, unknown),
+        resolve_build_recipe(&builds, &weapons, unknown),
         Err(BuildResolutionError::UnknownId)
     );
     unknown = recipe(1, 1, [1, 3]);
     unknown.passives[1] = PassiveDefinitionId(999);
     assert_eq!(
-        resolve_build_recipe(&builds, &weapons, &fighter, unknown),
+        resolve_build_recipe(&builds, &weapons, unknown),
         Err(BuildResolutionError::UnknownId)
     );
 
-    let runner = resolve_build_recipe(&builds, &weapons, &fighter, recipe(1, 1, [1, 3])).unwrap();
+    let runner = resolve_build_recipe(&builds, &weapons, recipe(1, 1, [1, 3])).unwrap();
     assert_eq!(runner.fighter_stats.maximum_health, 85);
     assert!((runner.fighter_stats.movement_speed - 110.0).abs() < f32::EPSILON);
-    let bruiser = resolve_build_recipe(&builds, &weapons, &fighter, recipe(2, 1, [2, 6])).unwrap();
+    let bruiser = resolve_build_recipe(&builds, &weapons, recipe(2, 1, [2, 6])).unwrap();
     assert_eq!(bruiser.fighter_stats.maximum_health, 120);
     assert!((bruiser.fighter_stats.movement_speed - 90.0).abs() < f32::EPSILON);
 }
 
 #[test]
 fn saved_fighter_elemental_baselines_are_independent_and_passives_add_to_them() {
-    let (mut builds, weapons, fighter) = catalogs();
+    let (mut builds, weapons) = catalogs();
     builds.fighter_profiles.lightweight.cold_capacity = 750;
     builds
         .fighter_profiles
@@ -173,7 +167,6 @@ fn saved_fighter_elemental_baselines_are_independent_and_passives_add_to_them() 
     let resolved = resolve_saved_brawler_recipe(
         &builds,
         &weapons,
-        &fighter,
         crate::profiles::FighterProfileId(2),
         crate::profiles::WeaponBaseId(1),
         UltimateDefinitionId(1),
@@ -191,7 +184,6 @@ fn saved_fighter_elemental_baselines_are_independent_and_passives_add_to_them() 
     let clamped = resolve_saved_brawler_recipe(
         &builds,
         &weapons,
-        &fighter,
         crate::profiles::FighterProfileId(2),
         crate::profiles::WeaponBaseId(1),
         UltimateDefinitionId(1),
@@ -203,7 +195,7 @@ fn saved_fighter_elemental_baselines_are_independent_and_passives_add_to_them() 
 
 #[test]
 fn all_custom_pulse_axes_resolve_with_exact_values() {
-    let (builds, weapons, fighter) = catalogs();
+    let (builds, weapons) = catalogs();
     let powers = [PulsePower::Light, PulsePower::Balanced, PulsePower::Heavy];
     let reaches = [PulseReach::Compact, PulseReach::Standard, PulseReach::Long];
     let magazines = [
@@ -224,7 +216,7 @@ fn all_custom_pulse_axes_resolve_with_exact_values() {
                     ultimate: UltimateDefinitionId(1),
                     passives: [PassiveDefinitionId(1), PassiveDefinitionId(6)],
                 };
-                match resolve_build_recipe(&builds, &weapons, &fighter, candidate) {
+                match resolve_build_recipe(&builds, &weapons, candidate) {
                     Ok(resolved) => {
                         assert_eq!(resolved.primary_weapon.source_preset_id, None);
                         let DeliveryMethod::Straight { lifetime_ticks, .. } =
@@ -275,14 +267,14 @@ fn all_custom_pulse_axes_resolve_with_exact_values() {
 
 #[test]
 fn passive_slot_order_does_not_change_canonical_fingerprint() {
-    let (builds, weapons, fighter) = catalogs();
+    let (builds, weapons) = catalogs();
     let candidate = recipe(1, 1, [1, 3]);
     let swapped = BrawlerBuildRecipe {
         passives: [candidate.passives[1], candidate.passives[0]],
         ..candidate
     };
-    let first = resolve_build_recipe(&builds, &weapons, &fighter, candidate).unwrap();
-    let second = resolve_build_recipe(&builds, &weapons, &fighter, swapped).unwrap();
+    let first = resolve_build_recipe(&builds, &weapons, candidate).unwrap();
+    let second = resolve_build_recipe(&builds, &weapons, swapped).unwrap();
     assert_eq!(
         first.identity.recipe_fingerprint,
         second.identity.recipe_fingerprint
@@ -292,7 +284,7 @@ fn passive_slot_order_does_not_change_canonical_fingerprint() {
 
 #[test]
 fn catalog_accepts_additive_inventory_and_rejects_identity_and_cost_mutations() {
-    let (builds, _, _) = catalogs();
+    let (builds, _) = catalogs();
     let mut additive = builds.clone();
     let mut ultimate = additive.ultimates.last().unwrap().clone();
     ultimate.id = UltimateDefinitionId(12);
@@ -354,7 +346,7 @@ fn catalog_accepts_additive_inventory_and_rejects_identity_and_cost_mutations() 
 
 #[test]
 fn weapon_costs_must_exactly_cover_an_additive_weapon_catalog() {
-    let (mut builds, mut weapons, _) = catalogs();
+    let (mut builds, mut weapons) = catalogs();
     let mut eighth = weapons.presets.last().unwrap().clone();
     eighth.id = crate::combat::WeaponPresetId(8);
     eighth.key = "eighth-preset".into();
@@ -374,7 +366,7 @@ fn weapon_costs_must_exactly_cover_an_additive_weapon_catalog() {
 
 #[test]
 fn additive_build_catalog_still_enforces_inventory_ceiling() {
-    let (mut builds, _, _) = catalogs();
+    let (mut builds, _) = catalogs();
     let template = builds.ultimates.last().unwrap().clone();
     for id in 12..=u16::try_from(MAX_ULTIMATE_DEFINITIONS).unwrap() {
         let mut definition = template.clone();
@@ -396,7 +388,7 @@ fn additive_build_catalog_still_enforces_inventory_ceiling() {
 
 #[test]
 fn catalog_rejects_non_finite_and_out_of_policy_balance_values() {
-    let (builds, _, _) = catalogs();
+    let (builds, _) = catalogs();
     let mut valid = builds.clone();
     valid.fighter_profiles.default.maximum_health = u16::MAX;
     valid.fighter_profiles.default.movement_speed = 0.5;
@@ -490,7 +482,7 @@ fn reveal_proximity_resolution_supports_bounded_bonus_malus_and_single_rounding(
 
 #[test]
 fn recipe_budget_boundaries_are_exact_and_overflow_fails_closed() {
-    let (builds, weapons, fighter) = catalogs();
+    let (builds, weapons) = catalogs();
     for (candidate, expected) in [
         (recipe(1, 1, [6, 3]), Ok(10)),
         (recipe(1, 2, [6, 3]), Ok(11)),
@@ -498,7 +490,7 @@ fn recipe_budget_boundaries_are_exact_and_overflow_fails_closed() {
         (recipe(2, 2, [3, 4]), Err(BuildResolutionError::OverBudget)),
     ] {
         assert_eq!(
-            resolve_build_recipe(&builds, &weapons, &fighter, candidate)
+            resolve_build_recipe(&builds, &weapons, candidate)
                 .map(|resolved| resolved.total_points),
             expected
         );
@@ -507,7 +499,7 @@ fn recipe_budget_boundaries_are_exact_and_overflow_fails_closed() {
     let mut overflow = builds.clone();
     overflow.passives[2].point_cost = u8::MAX;
     assert!(matches!(
-        resolve_build_recipe(&overflow, &weapons, &fighter, recipe(2, 2, [3, 4])),
+        resolve_build_recipe(&overflow, &weapons, recipe(2, 2, [3, 4])),
         Err(BuildResolutionError::OverBudget)
     ));
 }

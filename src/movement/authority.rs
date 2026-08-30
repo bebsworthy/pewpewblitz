@@ -93,8 +93,7 @@ pub(crate) fn movement_decision(
 pub(crate) fn resolved_movement_velocity(
     tick: u64,
     decision: &MovementDecision,
-    loadout_speed: Option<f32>,
-    base_speed: f32,
+    resolved_speed: f32,
     modifiers: MovementModifiers<'_>,
 ) -> Vec2 {
     let movement_multiplier = modifiers
@@ -104,7 +103,6 @@ pub(crate) fn resolved_movement_velocity(
         .map_or(1.0, |slow| {
             f32::from(slow.movement_multiplier_milli) / 1000.0
         });
-    let resolved_speed = loadout_speed.unwrap_or(base_speed);
     let tile_multiplier = modifiers.effect_tile.map_or(1.0, |occupancy| {
         f32::from(occupancy.behavior.movement_multiplier_milli()) / 1000.0
     });
@@ -320,7 +318,12 @@ pub(super) fn authoritative_movement(
         ),
         With<Fighter>,
     >,
-    loadouts: Query<&crate::builds::ResolvedMatchLoadout>,
+    runtime: Query<(
+        &crate::builds::ResolvedFighterStats,
+        &crate::builds::FighterBody,
+        &crate::builds::ResolvedMatchLoadout,
+        &crate::combat::SpawnState,
+    )>,
     passive_states: Query<&crate::builds::PassiveRuntimeState>,
     ability_states: Query<&crate::builds::AbilityState>,
 ) {
@@ -371,19 +374,20 @@ pub(super) fn authoritative_movement(
         if let Some(aim) = decision.aim {
             rotation = Rotation::radians(aim.y.atan2(aim.x));
         }
-        let loadout = loadouts.get(entity).ok();
+        let Ok((fighter_stats, body, loadout, spawn)) = runtime.get(entity) else {
+            continue;
+        };
         let desired_velocity = if active_effects.is_some_and(|effects| effects.is_frozen(tick.0)) {
             Vec2::ZERO
         } else {
             resolved_movement_velocity(
                 tick.0,
                 &decision,
-                loadout.map(|loadout| loadout.fighter_stats.movement_speed),
-                tuning.speed,
+                fighter_stats.movement_speed,
                 MovementModifiers {
                     active_effects,
                     effect_tile,
-                    passive_loadout: loadout,
+                    passive_loadout: Some(loadout),
                     passive_state: passive_states.get(entity).ok(),
                     external_motion,
                 },
@@ -407,14 +411,9 @@ pub(super) fn authoritative_movement(
         velocity.0 = output.projected_velocity;
 
         let facing = rotation.as_radians();
-        if !pose_is_valid(position.0, facing, *bounds, tuning.radius) {
-            let (repaired_position, repaired_facing) = repaired_pose(
-                position.0,
-                facing,
-                &bounds,
-                tuning.radius,
-                tuning.spawn_facing,
-            );
+        if !pose_is_valid(position.0, facing, *bounds, body.radius) {
+            let (repaired_position, repaired_facing) =
+                repaired_pose(position.0, facing, &bounds, body.radius, spawn.facing);
             position.0 = repaired_position;
             rotation = Rotation::radians(repaired_facing);
             warn!(?entity, "repaired invalid authoritative fighter pose");

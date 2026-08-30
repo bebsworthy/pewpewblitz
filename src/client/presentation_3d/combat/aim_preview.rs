@@ -147,6 +147,7 @@ pub(in super::super) fn reconcile_aim_preview_visuals(
 pub(in super::super) fn update_aim_preview(
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    builds: Res<crate::builds::BuildCatalogResource>,
     mut aim: AimPreviewInputs,
     fighters: AimFighterQuery,
     mut previews: PreviewVisualQuery,
@@ -170,7 +171,7 @@ pub(in super::super) fn update_aim_preview(
                 position: position.0,
                 rotation: 0.0,
                 shape: crate::map::MapShape::Circle {
-                    radius: crate::movement::STANDARD_FIGHTER_RADIUS,
+                    radius: builds.0.fighter_body.radius,
                 },
             });
         }
@@ -185,6 +186,7 @@ pub(in super::super) fn update_aim_preview(
         &aim.safes,
         &fighters,
         controlled_team,
+        builds.0.fighter_body.radius,
         &mut dynamic_blockers,
     );
     dynamic_blockers.sort_by_key(|blocker| (blocker.class, blocker.stable_id));
@@ -243,6 +245,7 @@ fn append_nonfighter_aim_blockers(
     safes: &SafeAimQuery,
     fighters: &AimFighterQuery,
     controlled_team: Option<crate::combat::TeamId>,
+    fighter_radius: f32,
     blockers: &mut Vec<AimTraceDynamicBlocker>,
 ) {
     for (position, identity, health) in sentries.iter() {
@@ -268,7 +271,7 @@ fn append_nonfighter_aim_blockers(
                 position: position.0,
                 rotation: 0.0,
                 shape: crate::map::MapShape::Circle {
-                    radius: body_radius.unwrap_or(crate::movement::STANDARD_FIGHTER_RADIUS),
+                    radius: body_radius.unwrap_or(fighter_radius),
                 },
             });
         }

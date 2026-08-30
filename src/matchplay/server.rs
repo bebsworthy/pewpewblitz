@@ -11,14 +11,13 @@ use super::{
     MatchParticipantSummary, MatchPhase, MatchRestartSet, MatchResult, MatchRoot, MatchSet,
     MatchState, MatchTelemetry, MatchTelemetryContext, ModeSummary, ResolvedMatchCapacity,
     RespawnState, SpawnCandidate, SpawnProtection, WipeoutState, WipeoutSummary,
-    complete_fighter_lifecycle, configure_match_schedule, fighter_runtime_values,
-    reset_fighter_runtime, select_spawn,
+    complete_fighter_lifecycle, configure_match_schedule, reset_fighter_runtime, select_spawn,
 };
 use crate::{
     combat::{
         AcceptedAttackFacts, ActiveAttackTrackers, CombatOutbox, CombatOutcomeFacts, Defeated,
-        FighterDefinitions, MeleeAttack, PendingDelivery, PendingPayload, SpawnState, TeamId,
-        WeaponDefinitions, WeaponTelemetry,
+        MeleeAttack, PendingDelivery, PendingPayload, ResolvedWeapon, SpawnState, TeamId,
+        WeaponTelemetry,
     },
     map::{MapStartupSet, ResolvedMap, SpawnPointCatalog, WIPEOUT_MODE_DEFINITION},
     protocol::{Fighter, FighterInput, NetworkEntityId, PlayerId},
@@ -494,6 +493,10 @@ fn participant_is_connected(
         .is_ok_and(|(_, disconnected)| !disconnected)
 }
 
+const fn generation_projection_is_complete(present: [bool; 5]) -> bool {
+    present[0] && present[1] && present[2] && present[3] && present[4]
+}
+
 #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 fn refresh_match_roster(
     rules: Res<MatchLifecycleRules>,
@@ -510,6 +513,10 @@ fn refresh_match_roster(
             &TeamId,
             &crate::builds::SelectedBuild,
             Option<&crate::builds::ResolvedMatchLoadout>,
+            Option<&crate::builds::ResolvedFighterStats>,
+            Option<&crate::builds::FighterBody>,
+            Option<&ResolvedWeapon>,
+            Option<&SpawnState>,
             Option<&ControlledBy>,
         ),
         With<Fighter>,
@@ -521,14 +528,34 @@ fn refresh_match_roster(
     let mut connected_network_ids = BTreeSet::new();
     let mut summaries = Vec::new();
     let mut ready = true;
-    for (player, network_id, participant, team, build, selected, controlled) in &participants {
+    for (
+        player,
+        network_id,
+        participant,
+        team,
+        build,
+        selected,
+        fighter_stats,
+        fighter_body,
+        weapon,
+        spawn,
+        controlled,
+    ) in &participants
+    {
         if participant.match_id != state.match_id
             || team.0 > 1
             || !participant_is_connected(controlled, &links)
         {
             continue;
         }
-        ready &= participant.ready && selected.is_some();
+        ready &= participant.ready
+            && generation_projection_is_complete([
+                selected.is_some(),
+                fighter_stats.is_some(),
+                fighter_body.is_some(),
+                weapon.is_some(),
+                spawn.is_some(),
+            ]);
         players.insert(player.0);
         connected_network_ids.insert(network_id.0);
         counts[usize::from(team.0)] = counts[usize::from(team.0)].saturating_add(1);
@@ -619,8 +646,6 @@ fn activate_started_match(
     mut commands: Commands,
     tick: Res<SimulationTick>,
     rules: Res<MatchLifecycleRules>,
-    fighter_definitions: Res<FighterDefinitions>,
-    weapon_definitions: Res<WeaponDefinitions>,
     weapon_telemetry: Res<WeaponTelemetry>,
     ability_telemetry: Res<crate::abilities::AbilityTelemetry>,
     resolved_map: Res<ResolvedMap>,
@@ -633,9 +658,8 @@ fn activate_started_match(
     fighters: Query<(
         Entity,
         &MatchParticipant,
-        &crate::combat::FighterDefinitionId,
-        &crate::builds::SelectedBuild,
-        Option<&crate::builds::ResolvedMatchLoadout>,
+        &crate::builds::ResolvedFighterStats,
+        &ResolvedWeapon,
         &SpawnState,
     )>,
 ) {
@@ -654,28 +678,12 @@ fn activate_started_match(
         rules_revision: state.rules_revision,
         participants: roster.participants.clone(),
     });
-    for (entity, participant, fighter_id, build, loadout, spawn) in &fighters {
+    for (entity, participant, fighter_stats, weapon, spawn) in &fighters {
         if participant.match_id != match_id {
             continue;
         }
-        let Some((maximum_health, ammunition)) = loadout.map_or_else(
-            || {
-                fighter_runtime_values(
-                    *fighter_id,
-                    build,
-                    &fighter_definitions,
-                    &weapon_definitions,
-                )
-            },
-            |loadout| {
-                Some((
-                    loadout.fighter_stats.maximum_health,
-                    loadout.primary_weapon.recipe.economy.capacity(),
-                ))
-            },
-        ) else {
-            continue;
-        };
+        let maximum_health = fighter_stats.maximum_health;
+        let ammunition = weapon.recipe.economy.capacity();
         reset_fighter_runtime(
             &mut commands,
             entity,
@@ -845,15 +853,12 @@ fn commit_match_restart(
     mut restart: ResMut<PendingMatchRestart>,
     mut outcomes: ResMut<ModeRuleOutcome>,
     mut build_policy: ResMut<RestartBuildPolicy>,
-    fighter_definitions: Res<FighterDefinitions>,
-    weapon_definitions: Res<WeaponDefinitions>,
     mut roots: Query<(&mut MatchState, &mut MatchClock), With<MatchRoot>>,
     mut participants: Query<(Entity, &mut MatchParticipant), With<Fighter>>,
     fighters: Query<(
         Entity,
-        &crate::combat::FighterDefinitionId,
-        &crate::builds::SelectedBuild,
-        Option<&crate::builds::ResolvedMatchLoadout>,
+        &crate::builds::ResolvedFighterStats,
+        &ResolvedWeapon,
         &SpawnState,
     )>,
 ) {
@@ -875,25 +880,9 @@ fn commit_match_restart(
         commands.entity(entity).insert(MatchMember(slot.next_id));
         complete_fighter_lifecycle(&mut commands, entity);
     }
-    for (entity, fighter_id, build, loadout, spawn) in &fighters {
-        let Some((maximum_health, ammunition)) = loadout.map_or_else(
-            || {
-                fighter_runtime_values(
-                    *fighter_id,
-                    build,
-                    &fighter_definitions,
-                    &weapon_definitions,
-                )
-            },
-            |loadout| {
-                Some((
-                    loadout.fighter_stats.maximum_health,
-                    loadout.primary_weapon.recipe.economy.capacity(),
-                ))
-            },
-        ) else {
-            continue;
-        };
+    for (entity, fighter_stats, weapon, spawn) in &fighters {
+        let maximum_health = fighter_stats.maximum_health;
+        let ammunition = weapon.recipe.economy.capacity();
         reset_fighter_runtime(
             &mut commands,
             entity,
@@ -993,6 +982,7 @@ fn select_due_respawn_spawns(
     roots: Query<&MatchState, With<MatchRoot>>,
     spawn_points: Res<SpawnPointCatalog>,
     tuning: Res<crate::movement::MovementTuning>,
+    builds: Res<crate::builds::BuildCatalogResource>,
     mut ordinals: ResMut<RespawnOrdinals>,
     living: Query<(&TeamId, &Position, Option<&Defeated>), With<Fighter>>,
     mut due: Query<(
@@ -1033,7 +1023,7 @@ fn select_due_respawn_spawns(
             candidates,
             &living,
             *team,
-            tuning.radius * 2.0 + tuning.skin_width,
+            builds.0.fighter_body.radius * 2.0 + tuning.skin_width,
             participant.match_id,
             *player_id,
             *ordinal,
@@ -1267,5 +1257,20 @@ fn capture_match_summary(
             );
         }
         MatchPhase::Waiting | MatchPhase::Countdown { .. } => {}
+    }
+}
+
+#[cfg(test)]
+mod projection_readiness_tests {
+    use super::generation_projection_is_complete;
+
+    #[test]
+    fn every_generation_projection_is_required_before_match_activation() {
+        assert!(generation_projection_is_complete([true; 5]));
+        for missing in 0..5 {
+            let mut present = [true; 5];
+            present[missing] = false;
+            assert!(!generation_projection_is_complete(present));
+        }
     }
 }

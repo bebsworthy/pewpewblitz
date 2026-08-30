@@ -19,6 +19,7 @@ pub fn bounded_dash_endpoint(
 pub fn stable_dash_contacts(
     segment_start: Vec2,
     segment_end: Vec2,
+    contact_radius: f32,
     already_hit: &[crate::protocol::NetworkEntityId],
     candidates: impl IntoIterator<Item = (crate::protocol::NetworkEntityId, Vec2, bool)>,
     maximum_targets: u8,
@@ -30,7 +31,7 @@ pub fn stable_dash_contacts(
             *eligible
                 && !already_hit.contains(id)
                 && distance_to_segment(*position, segment_start, segment_end)
-                    <= crate::movement::STANDARD_FIGHTER_RADIUS * 2.0
+                    <= contact_radius * 2.0
         })
         .map(|(id, _, _)| id)
         .collect();
@@ -172,6 +173,7 @@ pub(crate) fn activate_dash(
             &avian2d::prelude::Position,
             &avian2d::prelude::Rotation,
             &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::FighterBody,
             &crate::protocol::PlayerId,
             &crate::protocol::NetworkEntityId,
             &crate::combat::TeamId,
@@ -195,6 +197,7 @@ pub(crate) fn activate_dash(
         position,
         rotation,
         loadout,
+        body,
         player,
         network_id,
         team,
@@ -281,7 +284,7 @@ pub(crate) fn activate_dash(
         )
         .with_excluded_entities([entity]);
         let collision = spatial_query.cast_shape(
-            &Collider::circle(crate::movement::STANDARD_FIGHTER_RADIUS),
+            &Collider::circle(body.radius),
             position.0,
             rotation.as_radians(),
             direction_dir,
@@ -406,7 +409,7 @@ pub(crate) fn advance_dash(
     mut commands: bevy::prelude::Commands,
     tick: bevy::prelude::Res<crate::timing::SimulationTick>,
     bounds: bevy::prelude::Res<crate::map::PlayableBounds>,
-    tuning: bevy::prelude::Res<crate::movement::MovementTuning>,
+    builds: bevy::prelude::Res<crate::builds::BuildCatalogResource>,
     mut telemetry: bevy::prelude::ResMut<crate::abilities::AbilityTelemetry>,
     mut payloads: bevy::prelude::MessageWriter<crate::combat::PendingPayload>,
     mut queries: bevy::prelude::ParamSet<(
@@ -447,7 +450,7 @@ pub(crate) fn advance_dash(
                     position.0,
                     *network_id,
                     *team,
-                    sentry_tuning.map_or(tuning.radius, |value| value.body_radius),
+                    sentry_tuning.map_or(builds.0.fighter_body.radius, |value| value.body_radius),
                     defeated.is_some(),
                     active.is_some() || sentry.is_some(),
                 )
@@ -492,7 +495,10 @@ pub(crate) fn advance_dash(
             elapsed,
             dash.tuning.duration_ticks,
         );
-        if !bounds.0.contains_with_inset(next_position, tuning.radius) {
+        if !bounds
+            .0
+            .contains_with_inset(next_position, builds.0.fighter_body.radius)
+        {
             telemetry.record(crate::abilities::AbilityTelemetryRecord {
                 tick: tick.0,
                 owner_network_id: dash.source.owner_network_entity_id,
@@ -511,7 +517,7 @@ pub(crate) fn advance_dash(
         let contacts = stable_dash_contacts_with_radii(
             previous,
             position.0,
-            tuning.radius,
+            builds.0.fighter_body.radius,
             &dash.hit_targets,
             dash.tuning.maximum_targets,
             targets.iter().map(

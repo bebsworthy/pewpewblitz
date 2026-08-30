@@ -6,8 +6,8 @@ use super::{
 };
 use crate::{
     combat::{
-        ActiveEffects, CurrentHealth, Defeated, FighterDefinitions, HealthRecoveryState,
-        SpawnState, WeaponDefinitions, WeaponState,
+        ActiveEffects, CurrentHealth, Defeated, HealthRecoveryState, ResolvedWeapon, SpawnState,
+        WeaponState,
     },
     protocol::NetworkEntityId,
     timing::SimulationTick,
@@ -42,32 +42,6 @@ pub(crate) struct FighterReset {
     pub protection_until: Option<u64>,
     pub active: bool,
     pub recovery_started_at_tick: u64,
-}
-
-pub(crate) fn fighter_runtime_values(
-    fighter_id: crate::combat::FighterDefinitionId,
-    build: &crate::builds::SelectedBuild,
-    fighters: &FighterDefinitions,
-    weapons: &WeaponDefinitions,
-) -> Option<(u16, u8)> {
-    let _ = build;
-    let maximum_health = fighters.get(fighter_id)?.maximum_health;
-    let ammunition = weapons
-        .get(crate::combat::PULSE_SIDEARM_DEFINITION)
-        .map_or(0, |weapon| weapon.magazine_capacity);
-    Some((maximum_health, ammunition))
-}
-
-fn resolved_runtime_values(
-    loadout: Option<&crate::builds::ResolvedMatchLoadout>,
-    fallback: Option<(u16, u8)>,
-) -> Option<(u16, u8)> {
-    loadout.map_or(fallback, |loadout| {
-        Some((
-            loadout.fighter_stats.maximum_health,
-            loadout.primary_weapon.recipe.economy.capacity(),
-        ))
-    })
 }
 
 pub(crate) fn reset_fighter_runtime(commands: &mut Commands, entity: Entity, reset: FighterReset) {
@@ -152,17 +126,14 @@ fn respawn_due_fighters(
     mut commands: Commands,
     tick: Res<SimulationTick>,
     config: Res<FighterLifecycleConfig>,
-    fighters: Res<FighterDefinitions>,
-    weapons: Res<WeaponDefinitions>,
     roots: Query<&MatchState, With<MatchRoot>>,
     mut telemetry: ResMut<super::MatchTelemetry>,
     query: Query<(
         Entity,
         &NetworkEntityId,
         &MatchParticipant,
-        &crate::combat::FighterDefinitionId,
-        &crate::builds::SelectedBuild,
-        Option<&crate::builds::ResolvedMatchLoadout>,
+        &crate::builds::ResolvedFighterStats,
+        &ResolvedWeapon,
         &RespawnState,
         &SpawnState,
     )>,
@@ -171,16 +142,12 @@ fn respawn_due_fighters(
     if !matches!(state.phase, MatchPhase::Active { .. }) {
         return;
     }
-    for (entity, network_id, participant, fighter_id, build, loadout, respawn, spawn) in &query {
+    for (entity, network_id, participant, fighter_stats, weapon, respawn, spawn) in &query {
         if participant.match_id != state.match_id || tick.0 < respawn.respawn_at_tick {
             continue;
         }
-        let Some((maximum_health, ammunition)) = resolved_runtime_values(
-            loadout,
-            fighter_runtime_values(*fighter_id, build, &fighters, &weapons),
-        ) else {
-            continue;
-        };
+        let maximum_health = fighter_stats.maximum_health;
+        let ammunition = weapon.recipe.economy.capacity();
         telemetry.record_respawn(network_id.0, tick.0);
         reset_fighter_runtime(
             &mut commands,

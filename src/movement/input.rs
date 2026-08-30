@@ -10,8 +10,6 @@ use lightyear::prelude::input::native::NativeBuffer;
 
 use crate::protocol::{FighterInput, QuantizedAxis2};
 
-use super::MovementTuning;
-
 /// Input shaping thresholds shared by controller, mouse, and focused tests.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct InputTuning {
@@ -230,7 +228,7 @@ pub fn desired_pose_step(
     position: Vec2,
     facing: f32,
     input: FighterInput,
-    tuning: MovementTuning,
+    movement_speed: f32,
     input_tuning: InputTuning,
     delta: Duration,
 ) -> (Vec2, f32, Vec2) {
@@ -239,7 +237,7 @@ pub fn desired_pose_step(
         .aim_update
         .and_then(|axis| committed_aim(axis.to_vec2(), input_tuning));
     let facing = aim.map_or(facing, |aim| aim.y.atan2(aim.x));
-    let velocity = direction * tuning.speed;
+    let velocity = direction * movement_speed;
     let position = position + velocity * delta.as_secs_f32();
     (position, facing, velocity)
 }

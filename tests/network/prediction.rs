@@ -19,7 +19,7 @@ use lightyear::prelude::Controlled;
 /// Receive-delay ticks per profile: 0 (local), 1 (~33 ms RTT), 3 (~100 ms RTT at 60 Hz).
 const PROFILES: [(&str, usize); 3] = [("local", 0), ("typical", 1), ("adverse", 3)];
 /// Fighter radius used by the correction-magnitude gate.
-const FIGHTER_RADIUS: f32 = brawler::movement::STANDARD_FIGHTER_RADIUS;
+const FIGHTER_RADIUS: f32 = brawler::builds::MAX_FIGHTER_BODY_RADIUS;
 /// Movement displacement that counts as visibly moved for the latency probe.
 const VISIBLE_DELTA_UNITS: f32 = 1.0;
 /// Convergence window and bound after a correction.

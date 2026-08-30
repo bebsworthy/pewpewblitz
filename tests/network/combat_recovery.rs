@@ -151,25 +151,39 @@ fn late_join_recovers_active_projectile_and_defeated_durable_state() {
             && harness.client_ids(0).len() == 1
             && harness.loadout_is_ready(0)
     });
-    harness
-        .server
-        .world_mut()
-        .resource_mut::<FighterDefinitions>()
-        .entries[0]
-        .defeat_reset_delay_ticks = 600;
+    {
+        let world = harness.server.world_mut();
+        let mut dummy = world.query_filtered::<&mut TestDummy, With<TestDummy>>();
+        dummy
+            .single_mut(world)
+            .expect("test dummy reset policy")
+            .reset_delay_ticks = 600;
+    }
     {
         let world = harness.server.world_mut();
         let source_position = {
-            let mut source = world.query_filtered::<
-                (&Position, &mut brawler::builds::ResolvedMatchLoadout),
-                (With<Fighter>, Without<TestDummy>),
-            >();
-            let (position, mut loadout) = source.single_mut(world).expect("controlled fighter");
+            let mut source = world.query_filtered::<(
+                &Position,
+                &mut brawler::builds::ResolvedMatchLoadout,
+                &mut brawler::combat::ResolvedWeapon,
+            ), (With<Fighter>, Without<TestDummy>)>();
+            let (position, mut loadout, mut resolved_weapon) =
+                source.single_mut(world).expect("controlled fighter");
             let brawler::combat::DeliveryMethod::Straight {
                 speed,
                 lifetime_ticks,
                 ..
             } = &mut loadout.primary_weapon.recipe.delivery
+            else {
+                panic!("Pulse Sidearm uses straight delivery");
+            };
+            *speed = 1.0;
+            *lifetime_ticks = 600;
+            let brawler::combat::DeliveryMethod::Straight {
+                speed,
+                lifetime_ticks,
+                ..
+            } = &mut resolved_weapon.recipe.delivery
             else {
                 panic!("Pulse Sidearm uses straight delivery");
             };
@@ -181,9 +195,12 @@ fn late_join_recovers_active_projectile_and_defeated_durable_state() {
             let mut dummy = world.query_filtered::<Entity, With<TestDummy>>();
             dummy.single(world).expect("test dummy entity")
         };
-        world
-            .entity_mut(dummy_entity)
-            .insert(Position(source_position + Vec2::X * 250.0));
+        world.entity_mut(dummy_entity).insert((
+            Position(source_position + Vec2::X * 250.0),
+            // This scenario owns a deliberately vulnerable dummy so the recovered projectile
+            // produces a defeated durable state independently of authored balance values.
+            CurrentHealth(1),
+        ));
     }
 
     harness.set_controlled_input(0, FighterInput::default());

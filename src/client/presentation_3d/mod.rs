@@ -43,9 +43,6 @@ pub(crate) const KENNEY_BLASTER_GRIP_ROTATION: f32 = 0.0;
 const STRAIGHT_PROJECTILE_HEIGHT: f32 = 4.0;
 const LOBBED_PROJECTILE_LAUNCH_HEIGHT: f32 = 20.0;
 const STRAIGHT_PROJECTILE_CATCH_UP_MULTIPLIER: f32 = 3.0;
-const FIGHTER_FALLBACK_RADIUS: f32 = crate::movement::STANDARD_FIGHTER_RADIUS;
-const FIGHTER_RING_INNER_RADIUS: f32 = crate::movement::STANDARD_FIGHTER_RADIUS - 3.0;
-const FIGHTER_RING_OUTER_RADIUS: f32 = crate::movement::STANDARD_FIGHTER_RADIUS;
 const HOT_ZONE_RING_WIDTH: f32 = 10.0;
 const GROUND_AREA_HEIGHT: f32 = 1.0;
 // The direction arrow is a flat UI marker rather than body geometry. Keep its tip inside the
@@ -57,8 +54,6 @@ const FIGHTER_FACING_ARC_SEGMENTS: u16 = 4;
 const KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS: f32 = 0.420_55;
 /// Reviewed bind-pose height of the promoted Kenney character mesh.
 const KENNEY_CHARACTER_SOURCE_HEIGHT: f32 = 0.671_325;
-const KENNEY_CHARACTER_PLANAR_WORLD_SCALE: f32 =
-    crate::movement::STANDARD_FIGHTER_RADIUS / KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS;
 const KENNEY_CHARACTER_HEIGHT_WORLD_SCALE: f32 = 64.0;
 const KENNEY_CHARACTER_WORLD_HEIGHT: f32 =
     KENNEY_CHARACTER_SOURCE_HEIGHT * KENNEY_CHARACTER_HEIGHT_WORLD_SCALE;
@@ -82,6 +77,12 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) area_disc: Handle<Mesh>,
     pub(crate) effect_sphere: Handle<Mesh>,
     pub(crate) barrel_body: Handle<Mesh>,
+}
+
+#[derive(Resource, Clone, Copy)]
+struct FighterPresentationMetrics {
+    radius: f32,
+    imported_planar_scale: f32,
 }
 
 #[derive(Resource)]
@@ -1190,29 +1191,33 @@ fn project_damageable_object_health_ui(
 }
 
 #[allow(
+    clippy::needless_pass_by_value,
     clippy::too_many_lines,
     reason = "startup constructs one bounded shared mesh/material palette and the two cameras"
 )]
 fn setup_3d_foundation(
     mut commands: Commands,
+    builds: Res<crate::builds::BuildCatalogResource>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let fighter_radius = builds.0.fighter_body.radius;
+    let fighter_metrics = FighterPresentationMetrics {
+        radius: fighter_radius,
+        imported_planar_scale: fighter_radius / KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS,
+    };
     let primitives = Primitive3dAssets {
         cover_block: meshes.add(Cuboid::new(64.0, 32.0, 64.0)),
         map_entity: meshes.add(Cuboid::new(24.0, 24.0, 24.0)),
-        fighter: meshes.add(Sphere::new(FIGHTER_FALLBACK_RADIUS)),
+        fighter: meshes.add(Sphere::new(fighter_radius)),
         sentry_direction: meshes.add(Cuboid::new(28.0, 7.0, 8.0)),
-        fighter_facing: meshes.add(fighter_facing_mesh()),
+        fighter_facing: meshes.add(fighter_facing_mesh(fighter_radius)),
         projectile: meshes.add(Cylinder::new(1.0, 1.0)),
         lobbed_projectile: meshes.add(Sphere::new(9.0)),
         unit_cuboid: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
         sentry_base: meshes.add(Cylinder::new(22.0, 8.0)),
         sentry_body: meshes.add(Cylinder::new(15.0, 24.0)),
-        ground_ring: meshes.add(Annulus::new(
-            FIGHTER_RING_INNER_RADIUS,
-            FIGHTER_RING_OUTER_RADIUS,
-        )),
+        ground_ring: meshes.add(Annulus::new(fighter_radius - 3.0, fighter_radius)),
         area_ring: meshes.add(Annulus::new(0.93, 1.0)),
         area_disc: meshes.add(Circle::new(1.0)),
         effect_sphere: meshes.add(Sphere::new(1.0)),
@@ -1419,6 +1424,7 @@ fn setup_3d_foundation(
         }),
     };
     commands.insert_resource(primitives);
+    commands.insert_resource(fighter_metrics);
     commands.insert_resource(material_assets);
 
     let offset = Vec3::new(
@@ -1464,14 +1470,14 @@ fn setup_3d_foundation(
     spawn_client_hud(commands);
 }
 
-fn fighter_facing_mesh() -> Mesh {
+fn fighter_facing_mesh(fighter_radius: f32) -> Mesh {
     let mut positions = vec![[FIGHTER_FACING_TIP_RADIUS, 0.0, 0.0]];
     for step in 0..=FIGHTER_FACING_ARC_SEGMENTS {
         let progress = f32::from(step) / f32::from(FIGHTER_FACING_ARC_SEGMENTS);
         let angle = FIGHTER_FACING_HALF_ANGLE * (1.0 - 2.0 * progress);
         positions.push([
-            FIGHTER_RING_OUTER_RADIUS * angle.cos(),
-            FIGHTER_RING_OUTER_RADIUS * angle.sin(),
+            fighter_radius * angle.cos(),
+            fighter_radius * angle.sin(),
             0.0,
         ]);
     }
@@ -2026,12 +2032,14 @@ fn prepare_imported_assets(
 }
 
 #[allow(
+    clippy::needless_pass_by_value,
     clippy::type_complexity,
     reason = "the query declares imported-scene promotion eligibility on fighter visual roots"
 )]
 fn upgrade_fighters_to_imported_models(
     mut commands: Commands,
     imported: Option<Res<Imported3dAssets>>,
+    metrics: Res<FighterPresentationMetrics>,
     fighters: Query<
         (Entity, &CombatVisualOwner),
         (With<V3FighterVisual>, Without<V3CharacterScene>),
@@ -2051,9 +2059,9 @@ fn upgrade_fighters_to_imported_models(
                 Transform {
                     rotation: Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION),
                     scale: Vec3::new(
-                        KENNEY_CHARACTER_PLANAR_WORLD_SCALE,
+                        metrics.imported_planar_scale,
                         KENNEY_CHARACTER_HEIGHT_WORLD_SCALE,
-                        KENNEY_CHARACTER_PLANAR_WORLD_SCALE,
+                        metrics.imported_planar_scale,
                     ),
                     ..default()
                 },
@@ -2524,7 +2532,11 @@ mod tests {
 
     #[test]
     fn fighter_facing_indicator_is_a_small_arrow_with_a_ring_matched_back_arc() {
-        let mesh = fighter_facing_mesh();
+        let fighter_radius = crate::builds::BuildCatalog::embedded()
+            .unwrap()
+            .fighter_body
+            .radius;
+        let mesh = fighter_facing_mesh(fighter_radius);
         let bevy::mesh::VertexAttributeValues::Float32x3(positions) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
         else {
@@ -2541,9 +2553,7 @@ mod tests {
             Some(FIGHTER_FACING_ARC_SEGMENTS as usize * 3)
         );
         for point in &positions[1..] {
-            assert!(
-                (Vec2::new(point[0], point[1]).length() - FIGHTER_RING_OUTER_RADIUS).abs() < 1e-4
-            );
+            assert!((Vec2::new(point[0], point[1]).length() - fighter_radius).abs() < 1e-4);
             assert!(point[0] < FIGHTER_FACING_TIP_RADIUS);
         }
         assert!((positions[1][1] + positions.last().unwrap()[1]).abs() < 1e-4);
@@ -2551,21 +2561,18 @@ mod tests {
 
     #[test]
     fn fighter_visual_footprint_matches_the_authoritative_body() {
-        assert!(
-            (FIGHTER_FALLBACK_RADIUS - crate::movement::STANDARD_FIGHTER_RADIUS).abs()
-                < f32::EPSILON
-        );
-        assert!(
-            (FIGHTER_RING_OUTER_RADIUS - crate::movement::STANDARD_FIGHTER_RADIUS).abs()
-                < f32::EPSILON
-        );
+        let fighter_radius = crate::builds::BuildCatalog::embedded()
+            .unwrap()
+            .fighter_body
+            .radius;
         assert!(
             (FIGHTER_FACING_TIP_RADIUS - crate::map::MAP_CELL_SIZE_WORLD * 0.5).abs()
                 < f32::EPSILON
         );
         assert!(
-            (KENNEY_CHARACTER_PLANAR_WORLD_SCALE * KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS
-                - crate::movement::STANDARD_FIGHTER_RADIUS)
+            ((fighter_radius / KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS)
+                * KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS
+                - fighter_radius)
                 .abs()
                 < 1e-4
         );

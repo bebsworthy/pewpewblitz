@@ -45,15 +45,9 @@ impl Plugin for ServerCombatPlugin {
     fn build(&self, app: &mut App) {
         outcomes::register_accepted_attack_fact_lifecycle(app);
         if env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1") {
-            app.insert_resource(TestDummyFixture {
-                position: Vec2::new(0.0, -320.0),
-                facing: 0.0,
-            });
+            app.insert_resource(TestDummyFixture::standard(Vec2::new(0.0, -320.0)));
         }
-        app.init_resource::<FighterDefinitions>()
-            .init_resource::<WeaponDefinitions>()
-            .init_resource::<MovementTuning>()
-            .init_resource::<NextCombatIds>()
+        app.init_resource::<NextCombatIds>()
             .init_resource::<CombatTelemetry>()
             .init_resource::<WeaponTelemetry>()
             .init_resource::<ActiveAttackTrackers>()
@@ -85,11 +79,8 @@ impl Plugin for ServerCombatPlugin {
             )
             .add_systems(
                 Startup,
-                (
-                    validate_definitions,
-                    spawn_test_dummy.run_if(resource_exists::<TestDummyFixture>),
-                )
-                    .chain()
+                spawn_test_dummy
+                    .run_if(resource_exists::<TestDummyFixture>)
                     .after(crate::map::MapStartupSet::Instantiate),
             )
             .add_systems(
@@ -156,14 +147,5 @@ impl Plugin for ServerCombatPlugin {
                     .after(lightyear::transport::plugin::TransportSystems::Receive),
             )
             .add_systems(Last, emit_combat_summary);
-        let definition = *app
-            .world()
-            .resource::<FighterDefinitions>()
-            .get(STANDARD_FIGHTER_DEFINITION)
-            .expect("standard fighter definition exists");
-        let mut tuning = app.world_mut().resource_mut::<MovementTuning>();
-        tuning.speed = definition.movement_speed;
-        tuning.radius = definition.body_radius;
-        tuning.spawn_facing = definition.spawn_facing;
     }
 }

@@ -8,7 +8,7 @@ use super::build_app_with_config;
 use super::build_match_worker_graph;
 use crate::{
     builds::{BuildCatalog, BuildCatalogResource},
-    combat::{FighterDefinitions, WeaponCatalogResource},
+    combat::WeaponCatalogResource,
     config::{GameMode, MatchRulesProfile, ServerNetworkConfig},
     content::gameplay_content_fingerprint,
     map::{MapCatalogResource, MapContentCatalog, MapInstanceId, MapPresetId, ServerMapSelection},
@@ -208,10 +208,6 @@ fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerMani
     let builds = BuildCatalog::embedded().map_err(MatchWorkerManifestError::Configuration)?;
     let weapons = crate::combat::WeaponCatalog::embedded()
         .map_err(MatchWorkerManifestError::Configuration)?;
-    let fighter_definitions = FighterDefinitions::default();
-    let fighter = fighter_definitions
-        .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
-        .ok_or(MatchWorkerManifestError::BuildSelectionMismatch)?;
     let validate = |snapshot_bytes: &brawler_routing::MatchBuildSnapshot,
                     recipe_fingerprint: u64,
                     revision: u16|
@@ -219,7 +215,7 @@ fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerMani
         let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(snapshot_bytes)
             .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
         let resolved = snapshot
-            .resolve(&builds, &weapons, fighter)
+            .resolve(&builds, &weapons)
             .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
         if snapshot.accepted_identity != resolved.identity
             || resolved.identity.recipe_fingerprint.0 != recipe_fingerprint
@@ -437,10 +433,6 @@ mod tests {
         let config = ServerNetworkConfig::default();
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-        let fighter_definitions = FighterDefinitions::default();
-        let fighter = fighter_definitions
-            .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
-            .unwrap();
         let brawler = crate::profiles::SavedBrawler {
             id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
             creation_ordinal: 1,
@@ -455,10 +447,9 @@ mod tests {
             equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
             revision: crate::profiles::ProfileRevision::INITIAL,
         };
-        let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler(
-            &brawler, &builds, &weapons, fighter,
-        )
-        .unwrap();
+        let snapshot =
+            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
+                .unwrap();
         let map = MapContentCatalog::embedded().unwrap().presets[0].clone();
         let map_preset = map.id.0;
         let map_revision = map.admission_revision;

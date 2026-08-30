@@ -26,7 +26,7 @@ use crate::{
         ActiveCombatant, HeistSafe, HeistState, HotZoneState, MatchPhase, MatchRoot, MatchState,
         WipeoutState,
     },
-    movement::{InputFreshness, MovementTuning, decoded_input_is_valid},
+    movement::{InputFreshness, decoded_input_is_valid},
     protocol::{Fighter, FighterInput, NetworkEntityId},
     timing::SimulationTick,
 };
@@ -94,7 +94,7 @@ fn capture_observations(
     tick: Res<SimulationTick>,
     profile: Res<BotProfileResource>,
     map: Res<ResolvedMap>,
-    movement: Res<MovementTuning>,
+    builds: Res<crate::builds::BuildCatalogResource>,
     dynamic_states: Query<&MapDynamicState>,
     roots: Query<
         (
@@ -146,7 +146,7 @@ fn capture_observations(
     if navigation.map_instance_id != Some(map.snapshot.identity.instance_id) {
         navigation.snapshot = BotNavigationSnapshot::from_map(
             &map,
-            movement.radius + 1.0,
+            builds.0.fighter_body.radius + 1.0,
             profile.0.damage_tile_cost_milli,
         );
         navigation.map_instance_id = Some(map.snapshot.identity.instance_id);

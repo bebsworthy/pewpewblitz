@@ -291,14 +291,12 @@ impl MatchBuildSnapshotV3 {
         brawler: &SavedBrawler,
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
     ) -> Result<Self, crate::builds::BuildResolutionError> {
         Self::from_brawler_and_modifiers(
             brawler,
             crate::weapon_parts::CanonicalWeaponModifiers::default(),
             builds,
             weapons,
-            fighter,
         )
     }
 
@@ -307,10 +305,9 @@ impl MatchBuildSnapshotV3 {
         brawler: &SavedBrawler,
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
     ) -> Result<Self, crate::builds::BuildResolutionError> {
         let modifiers = profile.weapon_modifiers(brawler)?;
-        Self::from_brawler_and_modifiers(brawler, modifiers, builds, weapons, fighter)
+        Self::from_brawler_and_modifiers(brawler, modifiers, builds, weapons)
     }
 
     pub(crate) fn from_brawler_and_modifiers(
@@ -318,10 +315,8 @@ impl MatchBuildSnapshotV3 {
         weapon_modifiers: crate::weapon_parts::CanonicalWeaponModifiers,
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
     ) -> Result<Self, crate::builds::BuildResolutionError> {
-        let resolved =
-            brawler.resolve_loadout_with_modifiers(builds, weapons, fighter, weapon_modifiers)?;
+        let resolved = brawler.resolve_loadout_with_modifiers(builds, weapons, weapon_modifiers)?;
         Ok(Self {
             schema_version: Self::SCHEMA_VERSION,
             brawler_id: brawler.id,
@@ -355,9 +350,8 @@ impl MatchBuildSnapshotV3 {
         self,
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
     ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
-        let resolved = self.resolve_against_catalogs(builds, weapons, fighter)?;
+        let resolved = self.resolve_against_catalogs(builds, weapons)?;
         if resolved.identity != self.accepted_identity {
             return Err(crate::builds::BuildResolutionError::InvalidCombination);
         }
@@ -371,21 +365,18 @@ impl MatchBuildSnapshotV3 {
         self,
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
     ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
-        self.resolve_against_catalogs(builds, weapons, fighter)
+        self.resolve_against_catalogs(builds, weapons)
     }
 
     fn resolve_against_catalogs(
         self,
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
     ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
         let mut resolved = crate::builds::resolve_saved_brawler_recipe(
             builds,
             weapons,
-            fighter,
             self.fighter_profile_id,
             self.weapon_base_id,
             self.ultimate_id,
@@ -393,7 +384,7 @@ impl MatchBuildSnapshotV3 {
         )?;
         let weapon = crate::weapon_parts::resolve_weapon_parts(
             weapons,
-            fighter,
+            builds.fighter_body,
             crate::combat::WeaponPresetId(self.weapon_base_id.0),
             self.weapon_modifiers,
         )
@@ -464,14 +455,12 @@ impl SavedBrawler {
         &self,
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
     ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
         self.validate()
             .map_err(|_| crate::builds::BuildResolutionError::InvalidCombination)?;
         crate::builds::resolve_saved_brawler_recipe(
             builds,
             weapons,
-            fighter,
             self.fighter_profile_id,
             self.weapon_base_id,
             self.ultimate_id,
@@ -483,13 +472,12 @@ impl SavedBrawler {
         &self,
         builds: &crate::builds::BuildCatalog,
         weapons: &crate::combat::WeaponCatalog,
-        fighter: &crate::combat::FighterDefinition,
         modifiers: crate::weapon_parts::CanonicalWeaponModifiers,
     ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
-        let mut loadout = self.resolve_loadout(builds, weapons, fighter)?;
+        let mut loadout = self.resolve_loadout(builds, weapons)?;
         let weapon = crate::weapon_parts::resolve_weapon_parts(
             weapons,
-            fighter,
+            builds.fighter_body,
             crate::combat::WeaponPresetId(self.weapon_base_id.0),
             modifiers,
         )

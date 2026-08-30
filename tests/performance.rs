@@ -6,9 +6,8 @@ use bevy::{prelude::*, time::TimeUpdateStrategy};
 use brawler::{
     combat::{
         ActiveEffects, AttackId, AttackSource, CombatSourceKind, ComposedProjectileRuntime,
-        CurrentHealth, ExternalMotion, FighterDefinitionId, FighterDefinitions,
-        HealthRecoveryState, LobbedFlight, Projectile, SlowEffect, TeamId, WeaponDefinitions,
-        WeaponPhase, WeaponPresetId, WeaponState, WorldPoint, default_fighter_runtime,
+        ExternalMotion, HealthRecoveryState, LobbedFlight, Projectile, SlowEffect, TeamId,
+        WeaponPresetId, WorldPoint, resolved_fighter_runtime,
     },
     config::{NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -57,8 +56,28 @@ fn performance_app() -> App {
 }
 
 fn spawn_headless_fighters(app: &mut App) -> Vec<Entity> {
-    let fighters = app.world().resource::<FighterDefinitions>().clone();
-    let weapons = app.world().resource::<WeaponDefinitions>().clone();
+    let builds = app
+        .world()
+        .resource::<brawler::builds::BuildCatalogResource>()
+        .0
+        .clone();
+    let weapons = app
+        .world()
+        .resource::<brawler::combat::WeaponCatalogResource>()
+        .0
+        .clone();
+    let loadout = brawler::builds::resolve_saved_brawler_recipe(
+        &builds,
+        &weapons,
+        brawler::profiles::FighterProfileId(1),
+        brawler::profiles::WeaponBaseId(1),
+        brawler::builds::UltimateDefinitionId(1),
+        [
+            brawler::builds::PassiveDefinitionId(3),
+            brawler::builds::PassiveDefinitionId(4),
+        ],
+    )
+    .unwrap();
     let mut entities = Vec::with_capacity(100);
     for row in 0_u16..10 {
         for column in 0_u16..10 {
@@ -71,11 +90,12 @@ fn spawn_headless_fighters(app: &mut App) -> Vec<Entity> {
                 // Keep benchmark fighters clear of the central destructible block.
                 position.x += 260.0;
             }
-            let (fighter_id, team, health, weapon) = default_fighter_runtime(
+            let (fighter_id, team, health, weapon) = resolved_fighter_runtime(
                 TeamId(u8::try_from(player_id % 2).expect("benchmark team fits in u8")),
-                &fighters,
-                &weapons,
+                &loadout,
             );
+            let projection =
+                brawler::builds::MatchLoadoutProjection::new(&loadout, builds.fighter_body);
             let entity = app
                 .world_mut()
                 .spawn((
@@ -90,11 +110,18 @@ fn spawn_headless_fighters(app: &mut App) -> Vec<Entity> {
                     Rotation::IDENTITY,
                     LinearVelocity::default(),
                     AngularVelocity::default(),
-                    Collider::circle(brawler::movement::STANDARD_FIGHTER_RADIUS),
+                    Collider::circle(builds.fighter_body.radius),
                     RigidBody::Kinematic,
                 ))
                 .id();
             app.world_mut().entity_mut(entity).insert((
+                loadout.identity,
+                loadout.clone(),
+                projection,
+                brawler::combat::SpawnState {
+                    position,
+                    facing: 0.0,
+                },
                 CustomPositionIntegration,
                 fighter_collision_layers(),
                 InputFreshness::default(),
@@ -120,11 +147,6 @@ fn spawn_m05_fighter(
     } else {
         position
     };
-    let fighter = *app
-        .world()
-        .resource::<FighterDefinitions>()
-        .get(brawler::combat::STANDARD_FIGHTER_DEFINITION)
-        .expect("standard fighter definition");
     let weapon_catalog = app
         .world()
         .resource::<brawler::combat::WeaponCatalogResource>()
@@ -135,7 +157,6 @@ fn spawn_m05_fighter(
     let loadout = brawler::builds::resolve_saved_brawler_recipe(
         &build_catalog,
         &weapon_catalog,
-        &fighter,
         brawler::profiles::FighterProfileId(1),
         brawler::profiles::WeaponBaseId(preset_id),
         brawler::builds::UltimateDefinitionId(1),
@@ -145,23 +166,22 @@ fn spawn_m05_fighter(
         ],
     )
     .expect("benchmark loadout resolves");
+    let (fighter_id, team, health, weapon) = resolved_fighter_runtime(team, &loadout);
+    let projection =
+        brawler::builds::MatchLoadoutProjection::new(&loadout, build_catalog.fighter_body);
     let entity = app
         .world_mut()
         .spawn((
             Fighter,
             PlayerId(player_id),
             NetworkEntityId(player_id),
-            FighterDefinitionId(fighter.id.0),
+            fighter_id,
             loadout.identity,
             loadout.clone(),
             team,
-            CurrentHealth(fighter.maximum_health),
+            health,
             HealthRecoveryState::starting_at(0),
-            WeaponState {
-                ammo: loadout.primary_weapon.recipe.economy.capacity(),
-                phase: WeaponPhase::Ready,
-                ammo_recovery: None,
-            },
+            weapon,
         ))
         .id();
     app.world_mut().entity_mut(entity).insert((
@@ -169,8 +189,13 @@ fn spawn_m05_fighter(
         Rotation::IDENTITY,
         LinearVelocity::default(),
         AngularVelocity::default(),
-        Collider::circle(fighter.body_radius),
+        Collider::circle(build_catalog.fighter_body.radius),
         RigidBody::Kinematic,
+        projection,
+        brawler::combat::SpawnState {
+            position,
+            facing: 0.0,
+        },
         ActionState(FighterInput::from_axes(
             Vec2::ZERO,
             Some(Vec2::X),
@@ -333,15 +358,9 @@ fn m08_four_sentries_target_fire_and_cleanup_within_fixed_tick_budget() {
         .resource::<brawler::combat::WeaponCatalogResource>()
         .0
         .clone();
-    let fighter_definition = *app
-        .world()
-        .resource::<FighterDefinitions>()
-        .get(brawler::combat::STANDARD_FIGHTER_DEFINITION)
-        .unwrap();
     let controller = brawler::builds::resolve_build_recipe(
         &build_catalog,
         &weapon_catalog,
-        &fighter_definition,
         brawler::builds::BrawlerBuildRecipe {
             weapon: brawler::builds::WeaponChoice::Preset(WeaponPresetId(3)),
             ultimate: brawler::builds::UltimateDefinitionId(2),
@@ -433,9 +452,9 @@ fn one_hundred_headless_fighters_and_two_hundred_projectiles_stay_within_fixed_t
         .resolve_preset(
             WeaponPresetId(1),
             app.world()
-                .resource::<FighterDefinitions>()
-                .get(brawler::combat::STANDARD_FIGHTER_DEFINITION)
-                .expect("standard fighter definition"),
+                .resource::<brawler::builds::BuildCatalogResource>()
+                .0
+                .fighter_body,
         )
         .expect("benchmark preset resolves");
     for index in 0_usize..200 {

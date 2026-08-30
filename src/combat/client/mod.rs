@@ -56,13 +56,10 @@ pub enum CombatClientSet {
 #[cfg(feature = "client")]
 impl Plugin for ClientCombatPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FighterDefinitions>()
-            .init_resource::<WeaponDefinitions>()
-            .init_resource::<RecentCombatEvents>()
+        app.init_resource::<RecentCombatEvents>()
             .init_resource::<ClientCombatObservation>()
             .init_resource::<ClientCombatEvidenceStatus>()
             .add_message::<DeduplicatedCombatCue>()
-            .add_systems(Startup, validate_definitions)
             .configure_sets(
                 Update,
                 (

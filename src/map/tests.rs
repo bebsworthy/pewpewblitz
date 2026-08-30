@@ -24,7 +24,7 @@ fn canonical_fighter_fits_a_one_cell_passage_with_safety_margin() {
     for wall in [left_wall, right_wall] {
         assert!(!circle_overlaps_derived_shape(
             passage_center,
-            crate::movement::STANDARD_FIGHTER_RADIUS,
+            crate::builds::MAX_FIGHTER_BODY_RADIUS,
             wall
         ));
         assert!(!circle_overlaps_derived_shape(passage_center, 15.0, wall));
@@ -34,7 +34,7 @@ fn canonical_fighter_fits_a_one_cell_passage_with_safety_margin() {
         );
     }
     assert!(
-        (MAP_CELL_SIZE_WORLD - crate::movement::STANDARD_FIGHTER_RADIUS * 2.0 - 4.0).abs()
+        (MAP_CELL_SIZE_WORLD - crate::builds::MAX_FIGHTER_BODY_RADIUS * 2.0 - 4.0).abs()
             < f32::EPSILON
     );
 }

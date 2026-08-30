@@ -307,7 +307,7 @@ fn queue_spray_candidate(
 pub(super) fn advance_cone_sprays(
     mut commands: Commands,
     tick: Res<SimulationTick>,
-    tuning: Res<MovementTuning>,
+    builds: Res<crate::builds::BuildCatalogResource>,
     mut trackers: ResMut<ActiveAttackTrackers>,
     mut pending: MessageWriter<PendingPayload>,
     mut deliveries: MessageWriter<PendingDelivery>,
@@ -381,7 +381,7 @@ pub(super) fn advance_cone_sprays(
                 runtime.source,
                 &runtime.recipe,
                 reached_distance,
-                tuning.radius,
+                builds.0.fighter_body.radius,
                 &disconnected,
                 &fighters,
                 &objects,

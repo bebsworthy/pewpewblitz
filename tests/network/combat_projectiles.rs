@@ -148,6 +148,11 @@ fn projectile_hits_the_closest_valid_target_and_does_not_pass_through_it() {
             }
         }
     }
+    let dummy_initial_health = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();
+        query.single(world).expect("dummy health").0
+    };
     harness.set_controlled_input(
         0,
         FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
@@ -179,7 +184,7 @@ fn projectile_hits_the_closest_valid_target_and_does_not_pass_through_it() {
         )
     };
     assert!(target_health < 100);
-    assert_eq!(dummy_health, 100);
+    assert_eq!(dummy_health, dummy_initial_health);
     assert!(
         harness
             .server
@@ -211,8 +216,10 @@ fn projectile_stops_at_thin_cover_before_the_target() {
             &mut Position,
             &mut Rotation,
             Option<&mut brawler::builds::ResolvedMatchLoadout>,
+            Option<&mut brawler::combat::ResolvedWeapon>,
         ), With<Fighter>>();
-        for (player, mut position, mut rotation, loadout) in source.iter_mut(world) {
+        for (player, mut position, mut rotation, loadout, resolved_weapon) in source.iter_mut(world)
+        {
             if player.0 == 0 {
                 position.0 = Vec2::new(300.0, -220.0);
             } else {
@@ -227,9 +234,23 @@ fn projectile_stops_at_thin_cover_before_the_target() {
                 // This fixture proves thin-cover sweep ordering rather than canonical balance.
                 *radius = 6.0;
                 *range = 900.0;
+                let mut resolved_weapon =
+                    resolved_weapon.expect("controlled fighter weapon projection");
+                let brawler::combat::DeliveryMethod::Straight { radius, range, .. } =
+                    &mut resolved_weapon.recipe.delivery
+                else {
+                    panic!("Pulse Sidearm uses straight delivery");
+                };
+                *radius = 6.0;
+                *range = 900.0;
             }
         }
     }
+    let dummy_initial_health = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();
+        query.single(world).expect("dummy health").0
+    };
     harness.set_controlled_input(
         0,
         FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
@@ -250,7 +271,7 @@ fn projectile_stops_at_thin_cover_before_the_target() {
         let mut query = world.query_filtered::<&CurrentHealth, With<TestDummy>>();
         query.single(world).expect("dummy health").0
     };
-    assert_eq!(dummy_health, 100);
+    assert_eq!(dummy_health, dummy_initial_health);
     assert_eq!(harness.server_projectile_count(), 0);
 }
 

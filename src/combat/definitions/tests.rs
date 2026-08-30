@@ -207,8 +207,7 @@ fn semantically_equal_catalog_text_has_stable_fingerprint() {
 
 #[test]
 fn non_preset_configuration_uses_the_same_resolver_and_recipe_fingerprint() {
-    let mut fighter = super::super::FighterDefinitions::default().entries[0];
-    fighter.body_radius = 20.0;
+    let fighter = crate::builds::FighterBody { radius: 20.0 };
     let configuration = WeaponConfiguration {
         presentation_profile_id: WeaponPresentationProfileId(1),
         recipe: WeaponRecipe {
@@ -236,10 +235,10 @@ fn non_preset_configuration_uses_the_same_resolver_and_recipe_fingerprint() {
             world_effects: Vec::new(),
         },
     };
-    let first = resolve_configuration(None, configuration.clone(), &fighter).unwrap();
+    let first = resolve_configuration(None, configuration.clone(), fighter).unwrap();
     let mut other_profile = configuration;
     other_profile.presentation_profile_id = WeaponPresentationProfileId(4);
-    let second = resolve_configuration(None, other_profile, &fighter).unwrap();
+    let second = resolve_configuration(None, other_profile, fighter).unwrap();
     assert_eq!(first.source_preset_id, None);
     assert_eq!(first.recipe_fingerprint, second.recipe_fingerprint);
     assert_ne!(
@@ -352,7 +351,9 @@ fn splash_configuration() -> WeaponConfiguration {
 
 #[test]
 fn splash_validation_bounds_geometry_cadence_and_effect_identity() {
-    let fighter = super::super::FighterDefinitions::default().entries[0];
+    let body = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body;
     let policy = WeaponRecipePolicy::default();
     let limits = EngineWeaponLimits::default();
 
@@ -364,7 +365,7 @@ fn splash_validation_bounds_geometry_cadence_and_effect_identity() {
         half_extents: [96.0, 48.0],
     };
     rectangle
-        .validate(&policy, limits, Some(fighter.body_radius))
+        .validate(&policy, limits, Some(body.radius))
         .unwrap();
 
     let mut duplicate = splash_configuration();
@@ -375,7 +376,7 @@ fn splash_validation_bounds_geometry_cadence_and_effect_identity() {
     };
     assert!(
         duplicate
-            .validate(&policy, limits, Some(fighter.body_radius))
+            .validate(&policy, limits, Some(body.radius))
             .unwrap_err()
             .contains("distinct")
     );
@@ -388,7 +389,7 @@ fn splash_validation_bounds_geometry_cadence_and_effect_identity() {
     };
     assert!(
         knockback
-            .validate(&policy, limits, Some(fighter.body_radius))
+            .validate(&policy, limits, Some(body.radius))
             .unwrap_err()
             .contains("does not support knockback")
     );
@@ -404,7 +405,7 @@ fn splash_validation_bounds_geometry_cadence_and_effect_identity() {
     *pulse_interval_ticks = 1;
     assert!(
         too_many_pulses
-            .validate(&policy, limits, Some(fighter.body_radius))
+            .validate(&policy, limits, Some(body.radius))
             .unwrap_err()
             .contains("invalid splash delivery")
     );
@@ -412,7 +413,9 @@ fn splash_validation_bounds_geometry_cadence_and_effect_identity() {
 
 #[test]
 fn cone_spray_validation_rejects_unbounded_geometry_and_cadence() {
-    let fighter = super::super::FighterDefinitions::default().entries[0];
+    let body = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body;
     let policy = WeaponRecipePolicy::default();
     let limits = EngineWeaponLimits::default();
 
@@ -447,16 +450,15 @@ fn cone_spray_validation_rejects_unbounded_geometry_and_cadence() {
     ] {
         let mut bad = spray_configuration();
         bad.recipe.delivery = delivery;
-        assert!(
-            bad.validate(&policy, limits, Some(fighter.body_radius))
-                .is_err()
-        );
+        assert!(bad.validate(&policy, limits, Some(body.radius)).is_err());
     }
 }
 
 #[test]
 fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
-    let fighter = super::super::FighterDefinitions::default().entries[0];
+    let body = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body;
     let policy = WeaponRecipePolicy::default();
     let limits = EngineWeaponLimits::default();
 
@@ -467,7 +469,7 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
         .world_effects
         .push(WorldEffectDefinition::DestroyMap { radius: 16.0 });
     assert!(
-        two.validate(&policy, limits, Some(fighter.body_radius))
+        two.validate(&policy, limits, Some(body.radius))
             .unwrap_err()
             .contains("too many world effects")
     );
@@ -476,7 +478,7 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
         let mut bad = arc_configuration();
         bad.recipe.world_effects = vec![WorldEffectDefinition::DestroyMap { radius }];
         assert!(
-            bad.validate(&policy, limits, Some(fighter.body_radius))
+            bad.validate(&policy, limits, Some(body.radius))
                 .unwrap_err()
                 .contains("map destruction radius"),
             "radius {radius} must reject"
@@ -503,7 +505,7 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
     }];
     assert!(
         straight
-            .validate(&policy, limits, Some(fighter.body_radius))
+            .validate(&policy, limits, Some(body.radius))
             .unwrap_err()
             .contains("single-fire lobbed")
     );
@@ -529,7 +531,7 @@ fn world_effect_validation_rejects_invalid_count_radius_and_delivery() {
     // The untouched Arc configuration resolves without a terrain effect.
     assert!(
         arc_configuration()
-            .validate(&policy, limits, Some(fighter.body_radius))
+            .validate(&policy, limits, Some(body.radius))
             .is_ok()
     );
 }

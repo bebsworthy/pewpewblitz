@@ -4,62 +4,24 @@ use super::*;
 
 #[test]
 fn authored_catalogs_validate_and_have_expected_values() {
-    let fighters = FighterDefinitions::default();
-    let weapons = WeaponDefinitions::default();
-    assert!(fighters.validate(&weapons).is_ok());
-    assert!(weapons.validate(&fighters).is_ok());
-    assert_eq!(
-        fighters
-            .get(STANDARD_FIGHTER_DEFINITION)
-            .unwrap()
-            .maximum_health,
-        100
-    );
-    assert!(
-        (fighters
-            .get(STANDARD_FIGHTER_DEFINITION)
-            .unwrap()
-            .movement_speed
-            - 100.0)
-            .abs()
-            < f32::EPSILON
-    );
-    assert_eq!(
-        weapons
-            .get(PULSE_SIDEARM_DEFINITION)
-            .unwrap()
-            .magazine_capacity,
-        6
-    );
+    let builds = crate::builds::BuildCatalog::embedded().unwrap();
+    let weapons = WeaponCatalog::embedded().unwrap();
+    assert!(builds.validate().is_ok());
+    assert!(weapons.validate().is_ok());
+    assert!((builds.fighter_body.radius - 14.0).abs() < f32::EPSILON);
+    let pulse = weapons
+        .resolve_preset(WeaponPresetId(1), builds.fighter_body)
+        .unwrap();
+    assert_eq!(pulse.recipe.economy.capacity(), 4);
 }
 
 #[test]
-fn catalog_validation_rejects_duplicate_and_unsafe_values() {
-    let mut fighters = FighterDefinitions::default();
-    fighters.entries.push(fighters.entries[0]);
-    assert!(fighters.validate(&WeaponDefinitions::default()).is_err());
-    fighters.entries.pop();
-    fighters.entries[0].movement_speed = f32::NAN;
-    assert!(fighters.validate(&WeaponDefinitions::default()).is_err());
-    assert!(
-        FighterDefinitions {
-            entries: Vec::new()
-        }
-        .validate(&WeaponDefinitions::default())
-        .is_err()
-    );
-    let mut weapons = WeaponDefinitions::default();
-    weapons.entries[0].muzzle_offset = 1.0;
-    assert!(weapons.validate(&FighterDefinitions::default()).is_err());
-    weapons.entries[0].maximum_range = 0.0;
-    assert!(weapons.validate(&FighterDefinitions::default()).is_err());
-    assert!(
-        WeaponDefinitions {
-            entries: Vec::new()
-        }
-        .validate(&FighterDefinitions::default())
-        .is_err()
-    );
+fn catalog_validation_rejects_unsafe_fighter_body_values() {
+    let mut builds = crate::builds::BuildCatalog::embedded().unwrap();
+    builds.fighter_body.radius = f32::NAN;
+    assert!(builds.validate().is_err());
+    builds.fighter_body.radius = 0.0;
+    assert!(builds.validate().is_err());
 }
 
 #[test]
@@ -94,13 +56,12 @@ fn combat_cue_evidence_encoding_round_trips_full_payload() {
 #[cfg(feature = "server")]
 #[test]
 fn fire_economy_boundaries_are_integer_and_deterministic() {
-    let fighters = FighterDefinitions::default();
-    let fighter = fighters
-        .get(STANDARD_FIGHTER_DEFINITION)
-        .expect("standard fighter definition");
+    let body = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body;
     let recipe = WeaponCatalog::embedded()
         .expect("embedded catalog")
-        .resolve_preset(WeaponPresetId(1), fighter)
+        .resolve_preset(WeaponPresetId(1), body)
         .expect("pulse preset")
         .recipe;
     let mut state = WeaponState {
@@ -131,12 +92,25 @@ fn fire_economy_boundaries_are_integer_and_deterministic() {
 #[cfg(feature = "server")]
 #[test]
 fn fighter_runtime_reads_health_and_ammo_from_selected_definitions() {
-    let mut fighters = FighterDefinitions::default();
-    fighters.entries[0].maximum_health = 77;
-    let mut weapons = WeaponDefinitions::default();
-    weapons.entries[0].magazine_capacity = 3;
-
-    let (_, _, health, weapon) = default_fighter_runtime(TeamId(4), &fighters, &weapons);
+    let mut loadout = crate::builds::resolve_build_recipe(
+        &crate::builds::BuildCatalog::embedded().unwrap(),
+        &WeaponCatalog::embedded().unwrap(),
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(WeaponPresetId(1)),
+            ultimate: crate::builds::UltimateDefinitionId(1),
+            passives: [
+                crate::builds::PassiveDefinitionId(3),
+                crate::builds::PassiveDefinitionId(4),
+            ],
+        },
+    )
+    .unwrap();
+    loadout.fighter_stats.maximum_health = 77;
+    loadout.primary_weapon.recipe.economy = WeaponEconomy::Magazine {
+        capacity: 3,
+        refill_ticks: 60,
+    };
+    let (_, _, health, weapon) = resolved_fighter_runtime(TeamId(4), &loadout);
 
     assert_eq!(health, CurrentHealth(77));
     assert_eq!(weapon.ammo, 3);

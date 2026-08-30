@@ -7,8 +7,8 @@ use super::ServerRoleResource;
 use crate::{
     builds::{AbilityState, BuildCatalogResource, PassiveRuntimeState},
     combat::{
-        ActiveEffects, AuthoritativeTick, CurrentHealth, FighterDefinitions, HealthRecoveryState,
-        SpawnState, WeaponCatalogResource, WeaponState, default_fighter_runtime,
+        ActiveEffects, AuthoritativeTick, CurrentHealth, HealthRecoveryState, SpawnState,
+        WeaponCatalogResource, WeaponState, resolved_fighter_runtime,
     },
     map::{MapStartupSet, ResolvedMap, SpawnAssignment, SpawnPointCatalog},
     matchplay::{
@@ -47,34 +47,26 @@ fn install_manifest_bots(
     spawn_points: Res<SpawnPointCatalog>,
     resolved_map: Res<ResolvedMap>,
     movement_tuning: Res<MovementTuning>,
-    definitions: (
-        Res<FighterDefinitions>,
-        Res<crate::combat::WeaponDefinitions>,
-        Res<BuildCatalogResource>,
-        Res<WeaponCatalogResource>,
-    ),
+    definitions: (Res<BuildCatalogResource>, Res<WeaponCatalogResource>),
 ) {
-    let (fighters, weapons, builds, weapon_catalog) = definitions;
+    let (builds, weapon_catalog) = definitions;
     let Some(manifest) = role.manifest() else {
         return;
     };
     let Ok(match_state) = roots.single() else {
         return;
     };
-    let fighter = fighters
-        .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
-        .expect("validated standard fighter definition");
     let mut occupied = Vec::with_capacity(manifest.bots.len());
     for bot in &manifest.bots {
         let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(&bot.build_snapshot)
             .expect("validated bot build snapshot");
         #[cfg(feature = "balance-lab")]
         let loadout = snapshot
-            .resolve_revised_balance_lab_catalogs(&builds.0, &weapon_catalog.0, fighter)
+            .resolve_revised_balance_lab_catalogs(&builds.0, &weapon_catalog.0)
             .expect("validated Balance Lab bot build resolution");
         #[cfg(not(feature = "balance-lab"))]
         let loadout = snapshot
-            .resolve(&builds.0, &weapon_catalog.0, fighter)
+            .resolve(&builds.0, &weapon_catalog.0)
             .expect("validated bot build resolution");
         let player_id = PlayerId(bot.player_id.get());
         let network_entity_id = NetworkEntityId(bot.player_id.get());
@@ -94,14 +86,16 @@ fn install_manifest_bots(
             candidates,
             &occupied,
             team,
-            movement_tuning.radius * 2.0 + movement_tuning.skin_width,
+            builds.0.fighter_body.radius * 2.0 + movement_tuning.skin_width,
             match_state.match_id,
             player_id,
             0,
         )
         .expect("validated practice roster has a finite spawn");
         occupied.push((team, spawn_point.position));
-        let (fighter_definition, _, _, _) = default_fighter_runtime(team, &fighters, &weapons);
+        let projection =
+            crate::builds::MatchLoadoutProjection::new(&loadout, builds.0.fighter_body);
+        let (fighter_definition, _, _, _) = resolved_fighter_runtime(team, &loadout);
         commands
             .spawn((
                 Fighter,
@@ -125,6 +119,7 @@ fn install_manifest_bots(
                     facing: spawn_point.facing,
                 },
             ))
+            .insert(projection)
             .insert((
                 HealthRecoveryState::default(),
                 Position::from_xy(spawn_point.position.x, spawn_point.position.y),
@@ -144,7 +139,7 @@ fn install_manifest_bots(
                 },
             ))
             .insert((
-                Collider::circle(movement_tuning.radius),
+                Collider::circle(builds.0.fighter_body.radius),
                 RigidBody::Kinematic,
                 CustomPositionIntegration,
                 CollisionLayers::new(

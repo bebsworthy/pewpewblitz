@@ -441,7 +441,7 @@ mod server {
                 &TeamId,
                 &NetworkEntityId,
                 &Position,
-                Option<&crate::builds::ResolvedMatchLoadout>,
+                &crate::builds::ResolvedFighterStats,
                 Option<&ControlledBy>,
                 Has<Defeated>,
                 Has<ActiveCombatant>,
@@ -463,7 +463,7 @@ mod server {
                     team,
                     network_id,
                     position,
-                    loadout,
+                    fighter_stats,
                     controlled,
                     defeated,
                     active,
@@ -478,8 +478,7 @@ mod server {
                     team: *team,
                     network_id: *network_id,
                     position: position.0,
-                    reveal_radius: loadout
-                        .map_or(160.0, |value| value.fighter_stats.reveal_proximity_radius),
+                    reveal_radius: fighter_stats.reveal_proximity_radius,
                     connection: controlled.map(|value| value.owner),
                     alive: !defeated && active,
                     concealment: if objective_carrier {

@@ -234,6 +234,13 @@ fn initial_admission_uses_the_shared_spawn_selector() {
     harness.step_until(|harness| (0..4).all(|index| harness.client_is_active(index)));
     let state = server_match(&mut harness);
     let tuning = *harness.server.world().resource::<MovementTuning>();
+    let fighter_radius = harness
+        .server
+        .world()
+        .resource::<brawler::builds::BuildCatalogResource>()
+        .0
+        .fighter_body
+        .radius;
     let spawn_points = harness
         .server
         .world()
@@ -270,7 +277,7 @@ fn initial_admission_uses_the_shared_spawn_selector() {
             candidates,
             &living,
             team,
-            tuning.radius * 2.0 + tuning.skin_width,
+            fighter_radius * 2.0 + tuning.skin_width,
             state.match_id,
             player,
             0,

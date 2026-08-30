@@ -1,12 +1,12 @@
 use super::{
-    BrawlerBuildRecipe, BuildRecipeFingerprint, BuildRevision, ElementalFieldEffect,
+    BrawlerBuildRecipe, BuildRecipeFingerprint, BuildRevision, ElementalFieldEffect, FighterBody,
     PassiveDefinitionId, PassiveKind, PassiveParameters, PulseMagazine, PulsePower, PulseReach,
     ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate,
     RevealProximityModifier, SelectedBuild, UltimateChargePolicy, UltimateDefinitionId,
     UltimateKind, UltimateParameters, WeaponChoice,
 };
 use crate::combat::{
-    DamageOverTimeKind, DeliveryMethod, FighterDefinition, PayloadEffectDefinition, WeaponCatalog,
+    DamageOverTimeKind, DeliveryMethod, PayloadEffectDefinition, WeaponCatalog,
     WeaponConfiguration, WeaponEconomy, WeaponPresetId, resolve_configuration,
 };
 use crate::content::{GameplayContentFingerprint, fnv1a64};
@@ -14,14 +14,17 @@ use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 14;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 14;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 15;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 15;
 pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub(crate) const MAX_ULTIMATE_DEFINITIONS: usize = 32;
 pub(crate) const MAX_PASSIVE_DEFINITIONS: usize = 32;
 pub const BUILD_POINT_BUDGET: u8 = 12;
 pub const MAX_FIGHTER_MOVEMENT_SPEED: f32 = 1_200.0;
+pub const MIN_FIGHTER_BODY_RADIUS: f32 = 1.0;
+/// Largest body supported by the one-cell map navigation and spawn-clearance contract.
+pub const MAX_FIGHTER_BODY_RADIUS: f32 = 14.0;
 pub const MAX_COLD_CAPACITY: u16 = 10_000;
 pub const MIN_REVEAL_PROXIMITY_RADIUS: f32 = 32.0;
 pub const MAX_REVEAL_PROXIMITY_RADIUS: f32 = 1_024.0;
@@ -33,6 +36,7 @@ pub const MAX_REVEAL_PROXIMITY_PERCENT_BASIS_POINTS: i16 = 20_000;
 pub struct BuildCatalog {
     pub schema_version: u16,
     pub balance_revision: BuildRevision,
+    pub fighter_body: FighterBody,
     pub fighter_profiles: FighterStatProfiles,
     pub custom_pulse: CustomPulseTuning,
     pub ultimate_charge: UltimateChargePolicy,
@@ -185,10 +189,19 @@ impl BuildCatalog {
         if cost_ids != preset_ids {
             return Err("weapon point costs must exactly cover the weapon catalog".into());
         }
+        for preset in &weapons.presets {
+            weapons.resolve_preset(preset.id, self.fighter_body)?;
+        }
         Ok(())
     }
 
     fn validate_tuning(&self) -> Result<(), String> {
+        if !self.fighter_body.radius.is_finite()
+            || !(MIN_FIGHTER_BODY_RADIUS..=MAX_FIGHTER_BODY_RADIUS)
+                .contains(&self.fighter_body.radius)
+        {
+            return Err("invalid authored fighter body radius".into());
+        }
         if self.ultimate_charge.maximum == 0
             || self.ultimate_charge.maximum > 10_000
             || self.ultimate_charge.dealt_damage_multiplier == 0
@@ -599,10 +612,9 @@ fn validate_metadata<T>(
 pub fn resolve_build_recipe(
     catalog: &BuildCatalog,
     weapons: &WeaponCatalog,
-    fighter: &FighterDefinition,
     recipe: BrawlerBuildRecipe,
 ) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
-    resolve_build_recipe_inner(catalog, weapons, fighter, recipe, None)
+    resolve_build_recipe_inner(catalog, weapons, recipe, None)
 }
 
 /// Resolve V7's authored saved-brawler recipe without the retired point-budget or frame-passive
@@ -610,7 +622,6 @@ pub fn resolve_build_recipe(
 pub fn resolve_saved_brawler_recipe(
     catalog: &BuildCatalog,
     weapons: &WeaponCatalog,
-    fighter: &FighterDefinition,
     fighter_profile_id: crate::profiles::FighterProfileId,
     weapon_base_id: crate::profiles::WeaponBaseId,
     ultimate: UltimateDefinitionId,
@@ -639,7 +650,6 @@ pub fn resolve_saved_brawler_recipe(
     resolve_build_recipe_inner(
         catalog,
         weapons,
-        fighter,
         BrawlerBuildRecipe {
             weapon: WeaponChoice::Preset(WeaponPresetId(weapon_base_id.0)),
             ultimate,
@@ -653,7 +663,6 @@ pub fn resolve_saved_brawler_recipe(
 fn resolve_build_recipe_inner(
     catalog: &BuildCatalog,
     weapons: &WeaponCatalog,
-    fighter: &FighterDefinition,
     recipe: BrawlerBuildRecipe,
     explicit_fighter_profile: Option<(u16, ResolvedFighterStats)>,
 ) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
@@ -715,7 +724,7 @@ fn resolve_build_recipe_inner(
         charge_policy: catalog.ultimate_charge,
     };
     let (primary_weapon, _weapon_points) =
-        resolve_weapon_choice(catalog, weapons, fighter, recipe.weapon)?;
+        resolve_weapon_choice(catalog, weapons, catalog.fighter_body, recipe.weapon)?;
     let total_points = build_point_total(catalog, recipe)?;
     if explicit_fighter_profile.is_none() && total_points > BUILD_POINT_BUDGET {
         return Err(BuildResolutionError::OverBudget);
@@ -869,14 +878,14 @@ pub fn build_point_total(
 fn resolve_weapon_choice(
     catalog: &BuildCatalog,
     weapons: &WeaponCatalog,
-    fighter: &FighterDefinition,
+    fighter_body: FighterBody,
     choice: WeaponChoice,
 ) -> Result<(crate::combat::ResolvedWeapon, u8), BuildResolutionError> {
     match choice {
         WeaponChoice::Preset(id) => {
             let cost = weapon_point_cost(catalog, id)?;
             weapons
-                .resolve_preset(id, fighter)
+                .resolve_preset(id, fighter_body)
                 .map(|weapon| (weapon, cost))
                 .map_err(|_| BuildResolutionError::ResolutionFailed)
         }
@@ -934,7 +943,7 @@ fn resolve_weapon_choice(
                 .and_then(|points| points.checked_add(reach_cost))
                 .and_then(|points| points.checked_add(magazine_cost))
                 .ok_or(BuildResolutionError::ResolutionFailed)?;
-            resolve_configuration(None, configuration, fighter)
+            resolve_configuration(None, configuration, fighter_body)
                 .map(|weapon| (weapon, points))
                 .map_err(|_| BuildResolutionError::ResolutionFailed)
         }

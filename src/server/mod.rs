@@ -7,9 +7,9 @@ use crate::{
     builds::{AbilityState, PassiveRuntimeState},
     combat::{
         ActiveEffects, AuthoritativeTick, CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot,
-        CombatTelemetry, CurrentHealth, HealthRecoveryState, ServerCombatPlugin, SpawnState,
-        TeamId, WeaponCatalogResource, WeaponPresetId, WeaponState, WeaponTelemetry,
-        WeaponTelemetryKey, decode_combat_cue, default_fighter_runtime, encode_state_snapshot,
+        CombatTelemetry, HealthRecoveryState, ServerCombatPlugin, SpawnState, TeamId,
+        WeaponCatalogResource, WeaponPresetId, WeaponTelemetry, WeaponTelemetryKey,
+        decode_combat_cue, encode_state_snapshot, resolved_fighter_runtime,
     },
     config::{MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -569,8 +569,6 @@ fn initialize_sessions(
 
 #[derive(SystemParam)]
 struct ServerHelloContent<'w> {
-    fighters: Res<'w, crate::combat::FighterDefinitions>,
-    weapons: Res<'w, crate::combat::WeaponDefinitions>,
     builds: Res<'w, crate::builds::BuildCatalogResource>,
     weapon_catalog: Res<'w, WeaponCatalogResource>,
 }
@@ -579,15 +577,14 @@ fn resolve_admitted_match_snapshot(
     snapshot: crate::profiles::MatchBuildSnapshotV3,
     builds: &crate::builds::BuildCatalog,
     weapons: &crate::combat::WeaponCatalog,
-    fighter: &crate::combat::FighterDefinition,
 ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
     #[cfg(feature = "balance-lab")]
     {
-        snapshot.resolve_revised_balance_lab_catalogs(builds, weapons, fighter)
+        snapshot.resolve_revised_balance_lab_catalogs(builds, weapons)
     }
     #[cfg(not(feature = "balance-lab"))]
     {
-        snapshot.resolve(builds, weapons, fighter)
+        snapshot.resolve(builds, weapons)
     }
 }
 
@@ -737,12 +734,6 @@ fn process_client_hellos(
                         let worker_loadout = worker_participant
                             .as_ref()
                             .map(|participant| {
-                                let fighter = content
-                                    .fighters
-                                    .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
-                                    .ok_or_else(|| {
-                                        "standard fighter definition disappeared".to_string()
-                                    })?;
                                 let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(
                                     &participant.build_snapshot,
                                 )?;
@@ -750,7 +741,6 @@ fn process_client_hellos(
                                     snapshot,
                                     &content.builds.0,
                                     &content.weapon_catalog.0,
-                                    fighter,
                                 )
                                 .map_err(|error| format!("{error:?}"))
                             })
@@ -784,15 +774,10 @@ fn process_client_hellos(
                                             .expect(
                                                 "capacity was checked before identifier allocation",
                                             );
-                                            let fighter = content
-                                                .fighters
-                                                .get(crate::combat::STANDARD_FIGHTER_DEFINITION)
-                                                .expect("validated standard fighter definition");
                                             let loadout =
                                                 crate::builds::resolve_saved_brawler_recipe(
                                                     &content.builds.0,
                                                     &content.weapon_catalog.0,
-                                                    fighter,
                                                     crate::profiles::FighterProfileId(1),
                                                     crate::profiles::WeaponBaseId(
                                                         u16::try_from(
@@ -839,7 +824,8 @@ fn process_client_hellos(
                                         candidates,
                                         &living_fighters,
                                         assigned_team,
-                                        movement_tuning.radius * 2.0 + movement_tuning.skin_width,
+                                        content.builds.0.fighter_body.radius * 2.0
+                                            + movement_tuning.skin_width,
                                         match_state.match_id,
                                         player_id,
                                         0,
@@ -849,16 +835,12 @@ fn process_client_hellos(
                                     );
                                     let spawn_position = spawn_point.position;
                                     let spawn_facing = spawn_point.facing;
-                                    let (fighter_definition, team, _, _) = default_fighter_runtime(
-                                        assigned_team,
-                                        &content.fighters,
-                                        &content.weapons,
+                                    let projection = crate::builds::MatchLoadoutProjection::new(
+                                        &loadout,
+                                        content.builds.0.fighter_body,
                                     );
-                                    let health =
-                                        CurrentHealth(loadout.fighter_stats.maximum_health);
-                                    let weapon = WeaponState::ready(
-                                        loadout.primary_weapon.recipe.economy.capacity(),
-                                    );
+                                    let (fighter_definition, team, health, weapon) =
+                                        resolved_fighter_runtime(assigned_team, &loadout);
                                     let fighter_entity = commands
                                         .spawn((
                                             Fighter,
@@ -898,7 +880,7 @@ fn process_client_hellos(
                                                 .instance_id,
                                             spawn_point_id: spawn_point.id,
                                         },
-                                        Collider::circle(movement_tuning.radius),
+                                        Collider::circle(content.builds.0.fighter_body.radius),
                                         RigidBody::Kinematic,
                                         CustomPositionIntegration,
                                         CollisionLayers::new(
@@ -918,6 +900,7 @@ fn process_client_hellos(
                                     commands.entity(fighter_entity).insert((
                                         loadout.identity,
                                         loadout,
+                                        projection,
                                         AbilityState::default(),
                                         PassiveRuntimeState::default(),
                                         weapon,

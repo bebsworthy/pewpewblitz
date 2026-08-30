@@ -77,7 +77,6 @@ fn snapshot(revision: u64, queued: u16) -> crate::lobby::QueuePoolSnapshot {
 fn joined_membership(game_type_id: &str, ticket_id: u128) -> crate::lobby::QueueMembership {
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let fighter = crate::combat::FighterDefinitions::default().entries[0];
     let brawler = crate::profiles::SavedBrawler {
         id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
         creation_ordinal: 1,
@@ -92,9 +91,7 @@ fn joined_membership(game_type_id: &str, ticket_id: u128) -> crate::lobby::Queue
         equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
         revision: crate::profiles::ProfileRevision::INITIAL,
     };
-    let resolved = brawler
-        .resolve_loadout(&builds, &weapons, &fighter)
-        .unwrap();
+    let resolved = brawler.resolve_loadout(&builds, &weapons).unwrap();
     crate::lobby::QueueMembership {
         ticket_id: crate::lobby::QueueTicketId::new(ticket_id).unwrap(),
         catalog_revision: crate::lobby::CatalogRevision([1; 32]),

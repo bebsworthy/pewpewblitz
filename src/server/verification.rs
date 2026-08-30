@@ -619,7 +619,7 @@ pub(super) fn verify_process_combat(
     weapon_telemetry: Res<WeaponTelemetry>,
     evidence: Res<CombatEvidenceSnapshots>,
     catalog: Res<WeaponCatalogResource>,
-    fighters: Res<crate::combat::FighterDefinitions>,
+    builds: Res<crate::builds::BuildCatalogResource>,
     sessions: Query<&ServerSession, With<LinkOf>>,
     selected_fighters: Query<
         (
@@ -663,12 +663,9 @@ pub(super) fn verify_process_combat(
         );
         return;
     };
-    let Some(fighter_definition) = fighters.get(crate::combat::STANDARD_FIGHTER_DEFINITION) else {
-        return;
-    };
     let Ok(expected_resolved) = catalog
         .0
-        .resolve_preset(expected_preset_id, fighter_definition)
+        .resolve_preset(expected_preset_id, builds.0.fighter_body)
     else {
         error!(
             preset_id = expected_preset_id.0,

@@ -38,8 +38,7 @@ fn native_input_moves_the_server_owned_fighter_and_replicates_position() {
     assert_eq!(final_positions.len(), 1);
     assert!(final_positions[0].1.0.x > initial[0].1.0.x + 1.0);
     assert!(
-        final_positions[0].1.0.x
-            <= 800.0 - brawler::movement::STANDARD_FIGHTER_RADIUS + f32::EPSILON
+        final_positions[0].1.0.x <= 800.0 - brawler::builds::MAX_FIGHTER_BODY_RADIUS + f32::EPSILON
     );
 }
 
@@ -544,7 +543,7 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
         harness.step();
     }
     let wall_pose = harness.server_poses()[0];
-    let positive_arena_x = 896.0 - brawler::movement::STANDARD_FIGHTER_RADIUS;
+    let positive_arena_x = 896.0 - brawler::builds::MAX_FIGHTER_BODY_RADIUS;
     let contact_skin_tolerance = 2.5;
     assert!(
         (positive_arena_x - contact_skin_tolerance..=positive_arena_x).contains(&wall_pose.1.0.x),
@@ -571,7 +570,7 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
     assert!(
         (positive_arena_x - contact_skin_tolerance..=positive_arena_x).contains(&corner_pose.x)
     );
-    let positive_arena_y = 576.0 - brawler::movement::STANDARD_FIGHTER_RADIUS;
+    let positive_arena_y = 576.0 - brawler::builds::MAX_FIGHTER_BODY_RADIUS;
     assert!(
         (positive_arena_y - contact_skin_tolerance..=positive_arena_y).contains(&corner_pose.y),
         "corner_pose={corner_pose:?}"
@@ -620,7 +619,7 @@ fn authoritative_fighters_stop_at_walls_slide_tangentially_and_overlap() {
     let overlap_poses = overlap.server_poses();
     assert!(
         (overlap_poses[0].1.0 - overlap_poses[1].1.0).length()
-            < brawler::movement::STANDARD_FIGHTER_RADIUS * 2.0,
+            < brawler::builds::MAX_FIGHTER_BODY_RADIUS * 2.0,
         "overlap_poses={overlap_poses:?}"
     );
 }
@@ -690,7 +689,7 @@ fn authoritative_move_and_slide_depenetrates_a_spawned_inside_cover_fighter() {
     }
     let pose = harness.server_poses()[0].1.0;
     assert!(
-        pose.x.abs() >= 160.0 + brawler::movement::STANDARD_FIGHTER_RADIUS
-            || (pose.y + 256.0).abs() >= 32.0 + brawler::movement::STANDARD_FIGHTER_RADIUS
+        pose.x.abs() >= 160.0 + brawler::builds::MAX_FIGHTER_BODY_RADIUS
+            || (pose.y + 256.0).abs() >= 32.0 + brawler::builds::MAX_FIGHTER_BODY_RADIUS
     );
 }
