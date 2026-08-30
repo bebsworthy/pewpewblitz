@@ -73,3 +73,26 @@ The transaction boundary is batch-wide, not merely per effect. Planning must sim
 - Focused composed-effect tests pass (13). Routed reciprocal lethal attribution, launcher slow replication, persistent splash, and impaired full-cue convergence pass.
 - `just check`, `just lint`, formatting, strict role isolation, and diff hygiene pass.
 - Remaining: replace the still-immediate coordinator with a batch-wide sequential plan, make batch commit the only target/tracker mutation pass, and replay all immediate/deferred projections from that committed plan.
+
+## Closeout — batch-wide authoritative transaction complete, 2026-08-30
+
+Implementation commit `9aeaae1` completes the required `plan -> commit -> project` boundary.
+
+- `plan_composed_records` snapshots target/capability state and simulates every sorted record without mutating ECS, attack trackers, telemetry, cues, facts, or evidence.
+- `commit_composed_plan` is the sole target/tracker mutation pass. It applies health, terminal state, runtime effects, motion, test-dummy reset state, hostile-contact tracker state, cancellation, and deterministic delivery completion in first-target encounter order while preserving deferred `Commands` behavior.
+- `project_composed_plan` replays protected contact, hostile contact, passive modification, damage, defeat, healing, and runtime telemetry/facts/cues in the legacy order. Deferred runtime cues remain after immediate record projection and are suppressed for targets defeated later in the batch.
+- Exact parity includes sequential same-target state, damage-before-other-effect order, event reservation/cardinality, retained disconnected deliveries, legacy compatibility cues/events, protected contact, owner/allied/hostile policies, sentry restrictions, Close Quarters, Tenacity/resistances, health/defeat precedence, healing-block behavior, and tracker completion.
+- The legacy no-capability healing ceiling remains per-record rather than becoming an initial-batch maximum. Defeat resets the accumulated commit shadow while record-local telemetry still observes the pre-deferred-Commands effects/motion state, preserving terminal-plus-heal and same-record projection behavior.
+
+Verification is green:
+
+- `cargo test --no-default-features --features server combat::effects`: 13 passed.
+- `cargo check --no-default-features --features server`, strict server all-target Clippy, formatting, and `git diff --check` passed on the final code.
+- `just ci` passed: role checks and strict lint; 492 client tests, 441 server tests, 463 Balance Lab tests, 95 serial network scenarios, and 12 performance gates; routed product 1v1/2v2/3v3; and all nine Wipeout/Hot Zone/Heist Practice 1v1/2v2/3v3 topologies reached Active.
+- No native playtest was required because this slice changes organization only and preserves gameplay, protocol, balance, schedule, physics, and presentation behavior.
+
+### Learn-from-errors review
+
+The first transactional plan incorrectly treated accumulated commit state as identical to the state visible inside every legacy record. That would have changed two edge behaviors: the fallback maximum-health ceiling after an earlier record, and effects/motion included in telemetry when lethal damage and later healing are processed before deferred commands apply. The cause was reasoning from desired final ECS state instead of tracing the exact legacy data flow across immutable world snapshots, record-local state, accumulated shadows, and deferred mutation visibility.
+
+Prevention: future Bevy transaction refactors must characterize four layers explicitly—world snapshot, per-record locals, accumulated transaction shadow, and terminal commit state—and compare not only final components and cue order but also telemetry snapshots, event consumption, and `Commands` visibility. An independent semantic-diff review should remain part of closeout for authoritative batch refactors.

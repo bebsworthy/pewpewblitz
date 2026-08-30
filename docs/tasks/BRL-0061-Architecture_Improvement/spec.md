@@ -328,3 +328,30 @@ The remaining BRL-0061 remediation is the structural combat transaction work: de
 BRL-0068 completed the delivery-emission portion of the authoritative combat transaction remediation. `authoritative_composed_fire` remains one admission/economy/reservation/publication transaction, while a private exhaustive delivery coordinator delegates straight/sticky, blocked contact, lobbed/splash, melee, and cone-spray commits to focused helpers. Lobbed and Splash share one launch primitive, and routed characterization now covers all six delivery families, including a new melee/no-projectile proof. Full checks, strict lint, 492 client / 439 server / 461 Balance Lab tests, 95 network scenarios, and 12 performance gates pass.
 
 The remaining required BRL-0061 work is effect application `plan -> commit -> project` decomposition with atomic mutation and outcome/cue/telemetry ordering preserved. Projectile sweep decomposition is a useful follow-up only if inspection shows a safe independently reviewable ownership boundary; later registry and broad module-splitting recommendations remain non-blocking follow-up candidates.
+
+## Final remediation reconciliation and closeout — 2026-08-30
+
+All required findings are now implemented or explicitly dispositioned:
+
+- Stage 1 / BRL-0062 removed conflicting code-authored fighter/weapon defaults and established validated catalog-owned runtime projections with fail-closed generation boundaries.
+- Stage 2 / BRL-0063 moved residual gameplay and presentation tuning into validated authored policies, removed duplicate/dead policy paths, and completed native default/reduced-effects evidence. The user confirmed the manifest-backed sound path is audible.
+- Stage 3 / BRL-0064 corrected dependency direction: protocol and transport/session plugins no longer choose gameplay/content/presentation; explicit role composition roots own installation while preserving schedule and feature isolation.
+- Stage 4 / BRL-0065 through BRL-0069 replaced deep loadout reads with focused fighter, weapon, ultimate, and passive capabilities; centralized common ultimate admission; decomposed all attack delivery families; and completed batch-wide composed-effect `plan -> commit -> project` authority. Final transaction implementation is commit `9aeaae1`.
+- Stage 5's demonstrated extension seams were already completed and verified by BRL-0058: plugin-owned ability composition, a validated mode descriptor registry, a stable terminal-reaction registry, generic lifecycle cleanup facts, neutral authoritative phases, and additive/coverage tests. Speculative dynamic registries for typed wire effects or renderer internals are rejected for this remediation: they have no demonstrated second implementation and would weaken the explicit typed protocol/presentation boundaries without improving a current extension path.
+- Stage 6's concrete high-risk ownership findings were already completed and verified by BRL-0057: flow, projectile sweep, worker control, and Sentry coordinators were decomposed into focused planning/commit responsibilities. Broad splitting of the cohesive lobby, 3D presentation, Balance Lab, and screen modules solely by file size is rejected under the repository's ownership/no-overengineering rules. Inspection did not establish a remaining independent owner, execution role, lifecycle, or second use that warrants another migration; schedule/composition roots remain intentionally visible. A future feature that establishes such a boundary should receive its own scoped ticket rather than speculative churn here.
+
+The resulting durable contracts live in the owning catalog/schema, gameplay/network architecture documentation, role composition roots, focused capability components, neutral phase/registry APIs, and transaction module documentation. Public module paths and wire contracts were preserved except for the explicitly versioned authored/catalog changes owned by their child tickets. Server authority, client/server dependency isolation, bounded state, stable network identity, and deferred schedule boundaries remain intact.
+
+### Final verification and feedback disposition
+
+- Final `just ci` passed on the closing implementation state: role checks and strict lint; 492 client tests, 441 server tests, 463 Balance Lab tests, 95 serial network scenarios, and 12 performance gates.
+- Routed product 1v1/2v2/3v3 and all nine Wipeout/Hot Zone/Heist Practice 1v1/2v2/3v3 topologies reached Active.
+- Focused final composed-effects coverage passed 13/13, including pure boundary, recipient, resistance/Tenacity, stacking, event-reservation, and runtime-effect behavior.
+- The native presentation/audio changes were exercised during BRL-0063; visual reports passed and the user's audible-cue confirmation is recorded. Later stages were organization-only and required no additional native playtest.
+- No audit finding remains silently pending: required correctness, dependency, capability, extension, and transaction work is implemented; unsupported speculative registries and line-count-only file splits are rejected with the rationale above.
+
+### Parent learn-from-errors review
+
+The initial audit stated an overly broad Open/Closed aspiration for protocol-visible mechanics. Remediation refined it to a practical contract: typed schema changes remain local, while behavior is installed through owned plugins/registrations without unrelated coordinator rewrites. This preserves explicit compatibility and authority rather than hiding wire evolution behind dynamic dispatch.
+
+The most subtle implementation risk appeared in the final effect transaction: final ECS equivalence was insufficient because telemetry and cues also depend on per-record snapshots and deferred `Commands` visibility. Independent semantic review found and corrected the fallback healing-ceiling and terminal record-local effects/motion edges before closeout. Future architecture remediation should define observable parity across final state, intermediate event order, telemetry snapshots, reservations, and deferred boundaries before extracting a transaction.
