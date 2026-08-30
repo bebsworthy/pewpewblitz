@@ -573,8 +573,11 @@ fn point_blank_shots_damage_the_first_chest_or_barrel_without_passing_through() 
             &mut Position,
             &mut Rotation,
             &mut brawler::builds::ResolvedMatchLoadout,
+            &mut brawler::combat::ResolvedWeapon,
         ), With<Fighter>>();
-        for (player, mut position, mut rotation, mut loadout) in fighters.iter_mut(world) {
+        for (player, mut position, mut rotation, mut loadout, mut weapon) in
+            fighters.iter_mut(world)
+        {
             if *player == source_player {
                 position.0 = chest_position - Vec2::new(32.0, 0.0);
                 *rotation = Rotation::IDENTITY;
@@ -585,6 +588,7 @@ fn point_blank_shots_damage_the_first_chest_or_barrel_without_passing_through() 
                 };
                 // Keep both objects alive so this test can observe first-hit ordering twice.
                 *amount = 20;
+                weapon.recipe = loadout.primary_weapon.recipe.clone();
             } else {
                 position.0 = Vec2::new(-700.0, -400.0);
             }

@@ -107,13 +107,20 @@ pub(super) struct CombatTargetState<'w, 's> {
         'w,
         's,
         (
-            Query<'w, 's, &'static crate::builds::ResolvedMatchLoadout>,
+            Query<
+                'w,
+                's,
+                (
+                    &'static crate::builds::ResolvedFighterStats,
+                    &'static crate::builds::ResolvedPassives,
+                ),
+            >,
             Query<
                 'w,
                 's,
                 (
                     &'static NetworkEntityId,
-                    &'static crate::builds::ResolvedMatchLoadout,
+                    &'static crate::builds::ResolvedPassives,
                 ),
                 With<Fighter>,
             >,

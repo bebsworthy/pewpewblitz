@@ -495,8 +495,8 @@ fn participant_is_connected(
         .is_ok_and(|(_, disconnected)| !disconnected)
 }
 
-const fn generation_projection_is_complete(present: [bool; 6]) -> bool {
-    present[0] && present[1] && present[2] && present[3] && present[4] && present[5]
+const fn generation_projection_is_complete(present: [bool; 7]) -> bool {
+    present[0] && present[1] && present[2] && present[3] && present[4] && present[5] && present[6]
 }
 
 #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
@@ -519,6 +519,7 @@ fn refresh_match_roster(
             Option<&crate::builds::FighterBody>,
             Option<&ResolvedWeapon>,
             Option<&crate::builds::ResolvedUltimate>,
+            Option<&crate::builds::ResolvedPassives>,
             Option<&SpawnState>,
             Option<&ControlledBy>,
         ),
@@ -542,6 +543,7 @@ fn refresh_match_roster(
         fighter_body,
         weapon,
         ultimate,
+        passives,
         spawn,
         controlled,
     ) in &participants
@@ -559,6 +561,7 @@ fn refresh_match_roster(
                 fighter_body.is_some(),
                 weapon.is_some(),
                 ultimate.is_some(),
+                passives.is_some(),
                 spawn.is_some(),
             ]);
         players.insert(player.0);
@@ -1271,9 +1274,9 @@ mod projection_readiness_tests {
 
     #[test]
     fn every_generation_projection_is_required_before_match_activation() {
-        assert!(generation_projection_is_complete([true; 6]));
-        for missing in 0..6 {
-            let mut present = [true; 6];
+        assert!(generation_projection_is_complete([true; 7]));
+        for missing in 0..7 {
+            let mut present = [true; 7];
             present[missing] = false;
             assert!(!generation_projection_is_complete(present));
         }

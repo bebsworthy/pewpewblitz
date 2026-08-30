@@ -842,8 +842,9 @@ pub(super) fn authoritative_composed_fire(
     query: Query<
         (
             (Entity, &Position, &Rotation),
-            &crate::builds::SelectedBuild,
-            &crate::builds::ResolvedMatchLoadout,
+            &ResolvedWeapon,
+            &crate::builds::ResolvedUltimate,
+            &crate::builds::ResolvedPassives,
             &TeamId,
             &PlayerId,
             &NetworkEntityId,
@@ -860,8 +861,9 @@ pub(super) fn authoritative_composed_fire(
     let disconnected: HashSet<_> = disconnected.iter().collect();
     for (
         (entity, position, rotation),
-        _build_identity,
-        loadout,
+        resolved,
+        ultimate,
+        passives,
         team,
         player_id,
         network_id,
@@ -878,7 +880,6 @@ pub(super) fn authoritative_composed_fire(
         {
             continue;
         }
-        let resolved = &loadout.primary_weapon;
         let recipe = &resolved.recipe;
         advance_composed_weapon_state(&mut state, recipe, tick.0);
         ensure_ammo_recovery(
@@ -886,7 +887,7 @@ pub(super) fn authoritative_composed_fire(
             tick.0,
             &mut state,
             recipe,
-            loadout,
+            passives,
             &mut passive_states,
             &mut gameplay_telemetry.ability,
         );
@@ -897,8 +898,7 @@ pub(super) fn authoritative_composed_fire(
         }
         let input = action.map_or(FighterInput::default(), |value| value.0);
         let targeted_ultimate_requested = input.gameplay_buttons & FighterInput::ULTIMATE != 0
-            && loadout.ultimate.kind.activation_style()
-                == crate::builds::UltimateActivationStyle::Targeted;
+            && ultimate.kind.activation_style() == crate::builds::UltimateActivationStyle::Targeted;
         let held = !input_should_neutralize(
             tick.0,
             freshness.last_fresh_tick,
@@ -1030,7 +1030,7 @@ pub(super) fn authoritative_composed_fire(
             tick.0,
             &mut state,
             recipe,
-            loadout,
+            passives,
             &mut passive_states,
             &mut gameplay_telemetry.ability,
         );
@@ -1150,7 +1150,7 @@ fn ensure_ammo_recovery(
     tick: u64,
     state: &mut WeaponState,
     recipe: &WeaponRecipe,
-    loadout: &crate::builds::ResolvedMatchLoadout,
+    passives: &crate::builds::ResolvedPassives,
     passive_states: &mut Query<&mut crate::builds::PassiveRuntimeState>,
     telemetry: &mut crate::abilities::AbilityTelemetry,
 ) {
@@ -1163,11 +1163,7 @@ fn ensure_ammo_recovery(
         owner_network_id,
         tick,
         recipe.economy.refill_ticks(),
-        loadout
-            .passives
-            .iter()
-            .find(|passive| passive.kind == crate::builds::PassiveKind::QuickCycle)
-            .copied(),
+        passives.find(crate::builds::PassiveKind::QuickCycle),
         passive_states,
         telemetry,
     );

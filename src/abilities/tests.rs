@@ -1700,7 +1700,9 @@ fn passive_observer_rearms_adrenal_and_primes_quick_cycle_from_primary_facts() {
             Fighter,
             NetworkEntityId(1),
             TeamId(0),
-            runner,
+            crate::builds::ResolvedPassives {
+                passives: runner.passives,
+            },
             crate::builds::PassiveRuntimeState::default(),
         ))
         .id();
@@ -1710,7 +1712,9 @@ fn passive_observer_rearms_adrenal_and_primes_quick_cycle_from_primary_facts() {
             Fighter,
             NetworkEntityId(2),
             TeamId(1),
-            controller,
+            crate::builds::ResolvedPassives {
+                passives: controller.passives,
+            },
             crate::builds::PassiveRuntimeState::default(),
         ))
         .id();
@@ -1784,11 +1788,11 @@ fn passive_observer_rearms_adrenal_and_primes_quick_cycle_from_primary_facts() {
     );
 
     {
-        let mut runner_loadout = app
+        let mut runner_passives = app
             .world_mut()
-            .get_mut::<crate::builds::ResolvedMatchLoadout>(runner_entity)
+            .get_mut::<crate::builds::ResolvedPassives>(runner_entity)
             .unwrap();
-        let adrenal = runner_loadout
+        let adrenal = runner_passives
             .passives
             .iter_mut()
             .find(|passive| passive.kind == crate::builds::PassiveKind::AdrenalResponse)

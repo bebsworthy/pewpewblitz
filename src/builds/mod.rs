@@ -20,9 +20,9 @@ pub use model::{
     BuildRevision, DeployableId, ElementalFieldEffect, FighterBody, MatchLoadoutProjection,
     PassiveDefinitionId, PassiveKind, PassiveParameters, PassiveRuntimeState, PulseMagazine,
     PulsePower, PulseReach, ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive,
-    ResolvedUltimate, RevealProximityModifier, SelectedBuild, UltimateActivationStyle,
-    UltimateChargePolicy, UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
-    world_units_from_milliunits,
+    ResolvedPassives, ResolvedUltimate, RevealProximityModifier, SelectedBuild,
+    UltimateActivationStyle, UltimateChargePolicy, UltimateDefinitionId, UltimateKind,
+    UltimateParameters, WeaponChoice, world_units_from_milliunits,
 };
 
 #[cfg(test)]

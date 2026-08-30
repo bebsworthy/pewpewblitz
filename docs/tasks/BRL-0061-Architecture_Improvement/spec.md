@@ -315,3 +315,10 @@ BRL-0066 owns the next Stage 4 slice: atomically project `ResolvedUltimate`, mig
 ## Stage 4 progress — BRL-0066 complete
 
 Ultimate authority now consumes an atomically installed `ResolvedUltimate` capability. Eight activation coordinators share one pure rising-edge/common admission policy with preserved rejection precedence and raw latch semantics; checked generation rollover is centralized. Match readiness and Balance Lab reconciliation include the new projection. Full server, focused Balance Lab, networked Dash/Sentry, role, lint, and isolation verification passed. Remaining Stage 4 work is passive capability projection and combat delivery/effect transaction decomposition.
+
+
+## Stage 4 passive capability projection completed — 2026-08-30
+
+BRL-0067 completed the passive portion of focused authoritative loadout projection. `ResolvedPassives` is installed atomically with each resolved generation; passive telemetry, Adrenal Response movement, Quick Cycle recovery, Close Quarters, Tenacity, and resistance-aware effect application consume focused components rather than `ResolvedMatchLoadout`. Match readiness and Balance Lab reconciliation enforce the seven-component generation boundary. Full role-specific checks, lint, 492 client / 439 server / 461 Balance Lab tests, 94 network scenarios, and 12 performance gates pass.
+
+The remaining BRL-0061 remediation is the structural combat transaction work: decompose the large delivery and effect coordinators into focused deterministic family planning/commit helpers while preserving their explicit fixed-tick ordering and atomic publication. Later registry/module-splitting recommendations remain lower-priority follow-up candidates and should be ticketed separately if retained after that transaction work.

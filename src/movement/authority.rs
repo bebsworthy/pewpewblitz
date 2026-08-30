@@ -43,7 +43,7 @@ pub(crate) struct MovementDecision {
 pub(crate) struct MovementModifiers<'a> {
     pub active_effects: Option<&'a crate::combat::ActiveEffects>,
     pub effect_tile: Option<&'a crate::map::EffectTileOccupancy>,
-    pub passive_loadout: Option<&'a crate::builds::ResolvedMatchLoadout>,
+    pub passive_capabilities: Option<&'a crate::builds::ResolvedPassives>,
     pub passive_state: Option<&'a crate::builds::PassiveRuntimeState>,
     pub external_motion: Option<&'a crate::combat::ExternalMotion>,
 }
@@ -107,7 +107,9 @@ pub(crate) fn resolved_movement_velocity(
         f32::from(occupancy.behavior.movement_multiplier_milli()) / 1000.0
     });
     let adrenaline_multiplier = super::input::adrenaline_multiplier(
-        modifiers.passive_loadout,
+        modifiers
+            .passive_capabilities
+            .and_then(|passives| passives.find(crate::builds::PassiveKind::AdrenalResponse)),
         modifiers.passive_state,
         tick,
     );
@@ -321,7 +323,7 @@ pub(super) fn authoritative_movement(
     runtime: Query<(
         &crate::builds::ResolvedFighterStats,
         &crate::builds::FighterBody,
-        &crate::builds::ResolvedMatchLoadout,
+        &crate::builds::ResolvedPassives,
         &crate::combat::SpawnState,
     )>,
     passive_states: Query<&crate::builds::PassiveRuntimeState>,
@@ -374,7 +376,7 @@ pub(super) fn authoritative_movement(
         if let Some(aim) = decision.aim {
             rotation = Rotation::radians(aim.y.atan2(aim.x));
         }
-        let Ok((fighter_stats, body, loadout, spawn)) = runtime.get(entity) else {
+        let Ok((fighter_stats, body, passives, spawn)) = runtime.get(entity) else {
             continue;
         };
         let desired_velocity = if active_effects.is_some_and(|effects| effects.is_frozen(tick.0)) {
@@ -387,7 +389,7 @@ pub(super) fn authoritative_movement(
                 MovementModifiers {
                     active_effects,
                     effect_tile,
-                    passive_loadout: Some(loadout),
+                    passive_capabilities: Some(passives),
                     passive_state: passive_states.get(entity).ok(),
                     external_motion,
                 },

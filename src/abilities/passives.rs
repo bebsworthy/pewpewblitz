@@ -73,26 +73,20 @@ pub(crate) fn observe_passive_triggers(
     mut fighters: bevy::prelude::Query<
         (
             &crate::protocol::NetworkEntityId,
-            &crate::builds::ResolvedMatchLoadout,
+            &crate::builds::ResolvedPassives,
             &mut crate::builds::PassiveRuntimeState,
             Option<&crate::matchplay::ActiveCombatant>,
         ),
         bevy::prelude::With<crate::protocol::Fighter>,
     >,
 ) {
-    for (network_id, loadout, mut runtime, active) in &mut fighters {
-        let adrenal = loadout
-            .passives
-            .iter()
-            .find(|passive| passive.kind == crate::builds::PassiveKind::AdrenalResponse)
-            .copied();
-        let quick_cycle = loadout
-            .passives
-            .iter()
-            .find(|passive| passive.kind == crate::builds::PassiveKind::QuickCycle)
+    for (network_id, passives, mut runtime, active) in &mut fighters {
+        let adrenal = passives.find(crate::builds::PassiveKind::AdrenalResponse);
+        let quick_cycle = passives
+            .find(crate::builds::PassiveKind::QuickCycle)
             .map(|passive| passive.id);
         if active.is_some() {
-            for passive in &loadout.passives {
+            for passive in &passives.passives {
                 let is_active = match passive.kind {
                     crate::builds::PassiveKind::AdrenalResponse => runtime
                         .adrenaline_until_tick

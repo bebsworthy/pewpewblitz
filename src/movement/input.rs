@@ -57,7 +57,7 @@ pub fn active_slow_multiplier(effects: Option<&crate::combat::ActiveEffects>, ti
 /// Adrenaline multiplier from the passive runtime state, shared by both movement paths.
 #[must_use]
 pub fn adrenaline_multiplier(
-    loadout: Option<&crate::builds::ResolvedMatchLoadout>,
+    passive: Option<crate::builds::ResolvedPassive>,
     state: Option<&crate::builds::PassiveRuntimeState>,
     tick: u64,
 ) -> f32 {
@@ -67,18 +67,16 @@ pub fn adrenaline_multiplier(
     if !active {
         return 1.0;
     }
-    loadout
-        .and_then(|loadout| {
-            loadout.passives.iter().find_map(|passive| {
-                let crate::builds::PassiveParameters::AdrenalResponse {
-                    movement_bonus_basis_points,
-                    ..
-                } = passive.parameters
-                else {
-                    return None;
-                };
-                Some(movement_bonus_basis_points)
-            })
+    passive
+        .and_then(|passive| {
+            let crate::builds::PassiveParameters::AdrenalResponse {
+                movement_bonus_basis_points,
+                ..
+            } = passive.parameters
+            else {
+                return None;
+            };
+            Some(movement_bonus_basis_points)
         })
         .map_or(1.0, |bonus| 1.0 + f32::from(bonus) / 10_000.0)
 }

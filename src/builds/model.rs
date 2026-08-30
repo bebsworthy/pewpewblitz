@@ -303,6 +303,21 @@ pub struct ResolvedPassive {
     pub parameters: PassiveParameters,
 }
 
+/// The immutable passive capabilities installed for one resolved loadout generation.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedPassives {
+    pub passives: [ResolvedPassive; 2],
+}
+
+impl ResolvedPassives {
+    #[must_use]
+    pub fn find(self, kind: PassiveKind) -> Option<ResolvedPassive> {
+        self.passives
+            .into_iter()
+            .find(|passive| passive.kind == kind)
+    }
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ResolvedMatchLoadout {
     pub identity: SelectedBuild,
@@ -323,6 +338,7 @@ pub struct MatchLoadoutProjection {
     pub fighter_body: FighterBody,
     pub primary_weapon: ResolvedWeapon,
     pub ultimate: ResolvedUltimate,
+    pub passives: ResolvedPassives,
 }
 
 impl MatchLoadoutProjection {
@@ -333,6 +349,9 @@ impl MatchLoadoutProjection {
             fighter_body,
             primary_weapon: loadout.primary_weapon.clone(),
             ultimate: loadout.ultimate,
+            passives: ResolvedPassives {
+                passives: loadout.passives,
+            },
         }
     }
 }

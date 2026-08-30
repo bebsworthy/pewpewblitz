@@ -387,9 +387,12 @@ fn m08_four_sentries_target_fire_and_cleanup_within_fixed_tick_budget() {
     {
         let player_id = 40_000 + u64::try_from(index).unwrap();
         let entity = spawn_m05_fighter(&mut app, player_id, 3, position, team, false);
+        let controller_projection =
+            brawler::builds::MatchLoadoutProjection::new(&controller, build_catalog.fighter_body);
         app.world_mut().entity_mut(entity).insert((
             controller.identity,
             controller.clone(),
+            controller_projection,
             brawler::builds::AbilityState {
                 charge: 1_000,
                 phase: brawler::builds::AbilityPhase::Ready,

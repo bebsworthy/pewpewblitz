@@ -661,6 +661,7 @@ fn apply_balance_lab_transaction(
         &mut FighterBody,
         &mut ResolvedWeapon,
         &mut crate::builds::ResolvedUltimate,
+        &mut crate::builds::ResolvedPassives,
         &mut CurrentHealth,
         &mut WeaponState,
         &mut HealthRecoveryState,
@@ -857,6 +858,7 @@ fn apply_balance_lab_transaction(
             mut fighter_body,
             mut resolved_weapon,
             mut resolved_ultimate,
+            mut resolved_passives,
             mut health,
             mut weapon,
             mut recovery,
@@ -871,6 +873,7 @@ fn apply_balance_lab_transaction(
         *fighter_body = next_body;
         *resolved_weapon = loadout.primary_weapon.clone();
         *resolved_ultimate = loadout.ultimate;
+        resolved_passives.passives = loadout.passives;
         *current = loadout.clone();
     }
     *restart_policy = RestartBuildPolicy::Retain;
@@ -2001,8 +2004,18 @@ mod tests {
 
         let human_after = app.world().get::<ResolvedMatchLoadout>(human).unwrap();
         let bot_after = app.world().get::<ResolvedMatchLoadout>(bot).unwrap();
+        let human_passives = app
+            .world()
+            .get::<crate::builds::ResolvedPassives>(human)
+            .unwrap();
+        let bot_passives = app
+            .world()
+            .get::<crate::builds::ResolvedPassives>(bot)
+            .unwrap();
         assert_eq!(human_after.identity, human_loadout.identity);
         assert_eq!(bot_after.identity, bot_loadout.identity);
+        assert_eq!(human_passives.passives, human_after.passives);
+        assert_eq!(bot_passives.passives, bot_after.passives);
         assert_eq!(human_after.fighter_stats.cold_capacity, 750);
         assert_eq!(
             human_after.fighter_stats.cold_resistance_basis_points,

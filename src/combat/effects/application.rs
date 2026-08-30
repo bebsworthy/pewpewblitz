@@ -61,12 +61,9 @@ pub(super) fn collect_composed_batch<'a>(
         .passive_access
         .p1()
         .iter()
-        .filter_map(|(network_id, loadout)| {
-            loadout
-                .passives
-                .iter()
-                .find(|passive| passive.kind == crate::builds::PassiveKind::CloseQuarters)
-                .copied()
+        .filter_map(|(network_id, passives)| {
+            passives
+                .find(crate::builds::PassiveKind::CloseQuarters)
                 .map(|passive| (network_id.0, passive))
         })
         .collect();
@@ -315,23 +312,20 @@ pub(super) fn apply_composed_records(
             poison_resistance,
             fire_resistance,
         ) = {
-            let loadouts = combat.passive_access.p0();
-            loadouts
-                .get(record.target)
-                .map_or((health.0, None, 1_000, 0, 0, 0), |loadout| {
+            let capabilities = combat.passive_access.p0();
+            capabilities.get(record.target).map_or(
+                (health.0, None, 1_000, 0, 0, 0),
+                |(stats, passives)| {
                     (
-                        loadout.fighter_stats.maximum_health,
-                        loadout
-                            .passives
-                            .iter()
-                            .find(|passive| passive.kind == crate::builds::PassiveKind::Tenacity)
-                            .copied(),
-                        loadout.fighter_stats.cold_capacity,
-                        loadout.fighter_stats.cold_resistance_basis_points,
-                        loadout.fighter_stats.poison_resistance_basis_points,
-                        loadout.fighter_stats.fire_resistance_basis_points,
+                        stats.maximum_health,
+                        passives.find(crate::builds::PassiveKind::Tenacity),
+                        stats.cold_capacity,
+                        stats.cold_resistance_basis_points,
+                        stats.poison_resistance_basis_points,
+                        stats.fire_resistance_basis_points,
                     )
-                })
+                },
+            )
         };
         let owner_contact = *target_network_id == record.source.owner_network_entity_id;
         if !owner_contact

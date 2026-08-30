@@ -240,7 +240,15 @@ fn predict_owner_movement(
         let velocity = movement
             * speed
             * active_slow_multiplier(effects, tick.0)
-            * adrenaline_multiplier(Some(loadout), passive_state, tick.0);
+            * adrenaline_multiplier(
+                loadout
+                    .passives
+                    .iter()
+                    .find(|passive| passive.kind == crate::builds::PassiveKind::AdrenalResponse)
+                    .copied(),
+                passive_state,
+                tick.0,
+            );
         let mut position = predicted.position + velocity * delta;
         position = resolve_circle_against_blocking_map(
             position,

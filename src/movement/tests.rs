@@ -391,6 +391,9 @@ fn resolved_velocity_uses_authored_adrenal_movement_bonus() {
         rearm_ticks: 240,
         movement_bonus_basis_points: 2_500,
     };
+    let passives = crate::builds::ResolvedPassives {
+        passives: loadout.passives,
+    };
     let passive_state = crate::builds::PassiveRuntimeState {
         adrenaline_until_tick: Some(10),
         ..Default::default()
@@ -400,7 +403,7 @@ fn resolved_velocity_uses_authored_adrenal_movement_bonus() {
         &decision,
         300.0,
         MovementModifiers {
-            passive_loadout: Some(&loadout),
+            passive_capabilities: Some(&passives),
             passive_state: Some(&passive_state),
             ..default()
         },

@@ -17,12 +17,13 @@ fn recipe(weapon: u16, ultimate: u16, passives: [u16; 2]) -> BrawlerBuildRecipe 
 }
 
 #[test]
-fn runtime_projection_installs_the_exact_resolved_ultimate() {
+fn runtime_projection_installs_the_exact_resolved_ability_capabilities() {
     let (builds, weapons) = catalogs();
     let loadout = resolve_build_recipe(&builds, &weapons, recipe(1, 6, [1, 3])).unwrap();
     let projection = MatchLoadoutProjection::new(&loadout, builds.fighter_body);
 
     assert_eq!(projection.ultimate, loadout.ultimate);
+    assert_eq!(projection.passives.passives, loadout.passives);
 }
 
 #[test]
