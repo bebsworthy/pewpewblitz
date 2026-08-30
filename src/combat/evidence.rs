@@ -110,7 +110,8 @@ impl CombatProjectileSnapshot {
         let position = straight_flight
             .map(|flight| {
                 let elapsed_ticks = authoritative_tick.saturating_sub(flight.launched_at_tick);
-                let distance = (elapsed_ticks as f32 * flight.speed / 60.0)
+                let distance = (elapsed_ticks as f32 * flight.speed
+                    / crate::timing::SIMULATION_TICK_HZ as f32)
                     .min(flight.maximum_range)
                     .max(0.0);
                 WorldPoint::from(

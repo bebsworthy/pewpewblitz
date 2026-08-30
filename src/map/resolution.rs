@@ -6,16 +6,16 @@ use super::geometry::{
     validate_fighter_navigation, validate_heist_map_access, validate_spawn_clearance,
 };
 use super::{
-    HEIST_MODE_DEFINITION, HEIST_SAFE_VISUAL_PROFILE, HOT_ZONE_MODE_DEFINITION,
-    MAP_CELL_SIZE_WORLD, MAP_RECIPE_SCHEMA_VERSION, MapAssetId, MapAssetPlacement, MapAssetSlot,
-    MapCell, MapColliderShape, MapConcealmentBehavior, MapContentCatalog, MapDestructionBehavior,
-    MapDimensions, MapDurabilityBehavior, MapEffectTileBehavior, MapInstanceId, MapModeAnchorKind,
-    MapModeAnchorPlacement, MapPlacementId, MapPlacementParameterKind, MapPlacementParameters,
-    MapPresetId, MapRecipe, MapRecipeFingerprint, MapShape, MapVisualProfileId, ModeAnchorId,
-    ModeDefinitionId, PlayerCollision, ProjectileCollision, ResolvedEffectTile,
-    ResolvedMapIdentity, ResolvedMapSnapshot, SpawnPointId, TeamSpawnPoint,
-    WIPEOUT_MODE_DEFINITION,
+    HEIST_SAFE_VISUAL_PROFILE, MAP_CELL_SIZE_WORLD, MAP_RECIPE_SCHEMA_VERSION, MapAssetId,
+    MapAssetPlacement, MapAssetSlot, MapCell, MapColliderShape, MapConcealmentBehavior,
+    MapContentCatalog, MapDestructionBehavior, MapDimensions, MapDurabilityBehavior,
+    MapEffectTileBehavior, MapInstanceId, MapModeAnchorKind, MapModeAnchorPlacement,
+    MapPlacementId, MapPlacementParameterKind, MapPlacementParameters, MapPresetId, MapRecipe,
+    MapRecipeFingerprint, MapShape, MapVisualProfileId, ModeAnchorId, PlayerCollision,
+    ProjectileCollision, ResolvedEffectTile, ResolvedMapIdentity, ResolvedMapSnapshot,
+    SpawnPointId, TeamSpawnPoint,
 };
+use crate::modes::ModeTopologyPolicy;
 use bevy::prelude::{Resource, Vec2};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -62,6 +62,9 @@ pub(super) fn resolve_grid_recipe(
     catalog: &MapContentCatalog,
 ) -> Result<ResolvedMap, String> {
     let default_surface_tag = validate_recipe_identity(recipe, instance_id, catalog)?;
+    let topology = crate::modes::descriptor_for_definition(recipe.mode_definition_id)
+        .expect("validated map mode descriptor remains registered")
+        .topology();
     let mut placements = expand_recipe_placements(recipe)?;
     validate_recipe_capacity(recipe.dimensions, &placements, catalog)?;
     let mut placement_ids = validate_placement_contracts(recipe, &placements, catalog)?;
@@ -71,12 +74,12 @@ pub(super) fn resolve_grid_recipe(
     let mut mode_anchors = recipe.mode_anchors.clone();
     mode_anchors.sort_by_key(|anchor| (anchor.placement_id, anchor.anchor_id));
     let (objective_zone, heist_safes) = validate_and_resolve_mode_anchors(
-        recipe.mode_definition_id,
+        topology,
         recipe.dimensions,
         &mode_anchors,
         &mut placement_ids,
     )?;
-    validate_mode_topology(recipe, &placements, &mode_anchors, catalog)?;
+    validate_mode_topology(recipe, topology, &placements, &mode_anchors, catalog)?;
 
     let snapshot = build_resolved_snapshot(
         recipe,
@@ -300,6 +303,7 @@ fn canonicalize_placements(placements: &mut [MapAssetPlacement], catalog: &MapCo
 
 fn validate_mode_topology(
     recipe: &MapRecipe,
+    topology: ModeTopologyPolicy,
     placements: &[MapAssetPlacement],
     mode_anchors: &[MapModeAnchorPlacement],
     catalog: &MapContentCatalog,
@@ -321,7 +325,7 @@ fn validate_mode_topology(
     validate_spawn_clearance(placements, recipe.dimensions, catalog)?;
     validate_effect_tile_spawn_safety(placements, catalog)?;
     validate_fighter_navigation(placements, recipe.dimensions, catalog)?;
-    if recipe.mode_definition_id == HEIST_MODE_DEFINITION {
+    if topology == ModeTopologyPolicy::MirroredHeistSafes {
         validate_heist_map_access(placements, mode_anchors, recipe.dimensions, catalog)?;
     }
     Ok(())
@@ -509,23 +513,26 @@ fn validate_effect_tile_spawn_safety(
 }
 
 pub(super) fn validate_and_resolve_mode_anchors(
-    mode: ModeDefinitionId,
+    topology: ModeTopologyPolicy,
     dimensions: MapDimensions,
     anchors: &[MapModeAnchorPlacement],
     placement_ids: &mut BTreeSet<MapPlacementId>,
 ) -> Result<(Option<ResolvedMapObjective>, Vec<ResolvedHeistSafeAnchor>), String> {
-    if mode == WIPEOUT_MODE_DEFINITION {
-        return anchors
-            .is_empty()
-            .then_some((None, Vec::new()))
-            .ok_or_else(|| "Wipeout maps cannot contain mode anchors".to_string());
+    match topology {
+        ModeTopologyPolicy::NoAnchors => {
+            return anchors
+                .is_empty()
+                .then_some((None, Vec::new()))
+                .ok_or_else(|| "anchorless modes cannot contain mode anchors".to_string());
+        }
+        ModeTopologyPolicy::MirroredHeistSafes => {
+            return resolve_heist_safe_anchors(dimensions, anchors, placement_ids)
+                .map(|resolved| (None, resolved));
+        }
+        ModeTopologyPolicy::HotZoneCircle => {}
     }
-    if mode == HEIST_MODE_DEFINITION {
-        return resolve_heist_safe_anchors(dimensions, anchors, placement_ids)
-            .map(|resolved| (None, resolved));
-    }
-    if mode != HOT_ZONE_MODE_DEFINITION || anchors.len() != 1 {
-        return Err("Hot Zone maps require exactly one objective anchor".to_string());
+    if anchors.len() != 1 {
+        return Err("zone modes require exactly one objective anchor".to_string());
     }
     let anchor = anchors[0];
     if anchor.placement_id.0 == 0

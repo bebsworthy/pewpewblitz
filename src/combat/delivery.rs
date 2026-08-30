@@ -197,7 +197,7 @@ fn plan_straight_trajectory(
     body: Option<&ProjectileBody>,
 ) -> Option<StraightTrajectoryPlan> {
     let body = body.copied().filter(|body| body.shape.is_valid())?;
-    let step = (runtime.velocity.length() / 60.0)
+    let step = (runtime.velocity.length() / crate::timing::SIMULATION_TICK_HZ as f32)
         .min((runtime.maximum_range - runtime.travelled).max(0.0));
     let direction = Dir2::new(runtime.velocity.normalize_or_zero()).ok()?;
     Some(StraightTrajectoryPlan {
@@ -435,15 +435,7 @@ pub(super) fn sweep_composed_projectiles(
         objects: object_lookup,
         blocking_geometry: environment.walls.iter().collect(),
     };
-    let mut active_sticky_by_owner: HashMap<u64, usize> = HashMap::new();
-    let mut active_sticky_total = 0_usize;
-    let mut newly_attached_primaries: HashMap<u64, Entity> = HashMap::new();
-    for (_, runtime) in &sticky_blobs {
-        *active_sticky_by_owner
-            .entry(runtime.source.owner_network_entity_id.0)
-            .or_default() += 1;
-        active_sticky_total = active_sticky_total.saturating_add(1);
-    }
+    let mut sticky_sweep = sticky::StickySweepState::from_active(&sticky_blobs);
     let mut ordered: Vec<_> = projectiles.iter_mut().collect();
     ordered.sort_by_key(|(_, _, runtime, _, lob)| {
         (
@@ -586,33 +578,8 @@ pub(super) fn sweep_composed_projectiles(
             continue;
         }
         if tick.0 >= runtime.expires_at_tick || runtime.travelled >= runtime.maximum_range {
-            if let Some((_, max_active, _)) = sticky::sticky_delivery_parameters(&runtime.recipe) {
-                let owner_active = active_sticky_by_owner
-                    .get(&runtime.source.owner_network_entity_id.0)
-                    .copied()
-                    .unwrap_or_default();
-                if owner_active < usize::from(max_active)
-                    && active_sticky_total < sticky::MAX_ACTIVE_STICKY_BLOBS
-                    && sticky::arm_projectile(
-                        &mut commands,
-                        entity,
-                        (*runtime).clone(),
-                        position.0,
-                        None,
-                        if matches!(runtime.source.kind, CombatSourceKind::PrimaryWeapon) {
-                            StickyBlobKind::Primary
-                        } else {
-                            StickyBlobKind::UltimateSecondary
-                        },
-                        tick.0,
-                    )
-                {
-                    *active_sticky_by_owner
-                        .entry(runtime.source.owner_network_entity_id.0)
-                        .or_default() += 1;
-                    active_sticky_total = active_sticky_total.saturating_add(1);
-                    continue;
-                }
+            if sticky_sweep.try_arm_expired(&mut commands, entity, &runtime, position.0, tick.0) {
+                continue;
             }
             ProjectileTerminationContext {
                 commands: &mut commands,
@@ -670,69 +637,19 @@ pub(super) fn sweep_composed_projectiles(
         };
         runtime.travelled += hit.distance.clamp(0.0, trajectory.step);
         let target = index.fighters.get(&hit.entity).copied();
-        if let Some((_, max_active, explosion_radius)) =
-            sticky::sticky_delivery_parameters(&runtime.recipe)
-        {
-            let owner_active = active_sticky_by_owner
-                .get(&runtime.source.owner_network_entity_id.0)
-                .copied()
-                .unwrap_or_default();
-            if owner_active < usize::from(max_active)
-                && active_sticky_total < sticky::MAX_ACTIVE_STICKY_BLOBS
-            {
-                let attached_to = target
-                    .and_then(|(_, _, network_id, defeated, _)| (!defeated).then_some(network_id));
-                let kind = if matches!(runtime.source.kind, CombatSourceKind::PrimaryWeapon) {
-                    StickyBlobKind::Primary
-                } else {
-                    StickyBlobKind::UltimateSecondary
-                };
-                if kind == StickyBlobKind::Primary
-                    && let Some(target_network_id) = attached_to
-                {
-                    for (mut existing, _) in &mut sticky_blobs {
-                        if sticky::primary_impact_triggers_existing(
-                            kind,
-                            *existing,
-                            target_network_id,
-                        ) {
-                            existing.detonates_at_tick = tick.0;
-                        }
-                    }
-                    if let Some(previous) =
-                        newly_attached_primaries.get(&target_network_id.0).copied()
-                    {
-                        commands.entity(previous).insert(StickyBlobState {
-                            kind: StickyBlobKind::Primary,
-                            attached_to: Some(target_network_id),
-                            armed_at_tick: tick.0,
-                            detonates_at_tick: tick.0,
-                            explosion_radius,
-                        });
-                    }
-                }
-                let armed_position = target.map_or(hit.point2, |(position, ..)| position);
-                if sticky::arm_projectile(
-                    &mut commands,
-                    entity,
-                    (*runtime).clone(),
-                    armed_position,
-                    attached_to,
-                    kind,
-                    tick.0,
-                ) {
-                    if kind == StickyBlobKind::Primary
-                        && let Some(target_network_id) = attached_to
-                    {
-                        newly_attached_primaries.insert(target_network_id.0, entity);
-                    }
-                    *active_sticky_by_owner
-                        .entry(runtime.source.owner_network_entity_id.0)
-                        .or_default() += 1;
-                    active_sticky_total = active_sticky_total.saturating_add(1);
-                    continue;
-                }
-            }
+        let attached_to =
+            target.and_then(|(_, _, network_id, defeated, _)| (!defeated).then_some(network_id));
+        let armed_position = target.map_or(hit.point2, |(position, ..)| position);
+        if sticky_sweep.try_arm_impact(
+            &mut commands,
+            entity,
+            &runtime,
+            armed_position,
+            attached_to,
+            tick.0,
+            &mut sticky_blobs,
+        ) {
+            continue;
         }
         if let Some(target) = target {
             queue_direct_fighter_payloads(
@@ -967,6 +884,108 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "server")]
+    fn sticky_sweep_app(tick: u64) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(avian2d::prelude::PhysicsPlugins::default())
+            .insert_resource(SimulationTick(tick))
+            .init_resource::<NextCombatIds>()
+            .init_resource::<ActiveAttackTrackers>()
+            .init_resource::<WeaponTelemetry>()
+            .init_resource::<crate::map::PendingWorldTargetDamages>()
+            .init_resource::<crate::matchplay::PendingModeObjectiveDamages>()
+            .add_message::<PendingPayload>()
+            .add_message::<PendingDelivery>()
+            .add_systems(
+                FixedPostUpdate,
+                (
+                    sweep_composed_projectiles
+                        .after(avian2d::prelude::PhysicsSystems::StepSimulation),
+                    ApplyDeferred.after(sweep_composed_projectiles),
+                ),
+            );
+        app.finish();
+        app.cleanup();
+        app.update();
+        app
+    }
+
+    #[cfg(feature = "server")]
+    fn sticky_recipe() -> WeaponRecipe {
+        WeaponCatalog::embedded()
+            .unwrap()
+            .preset(WeaponPresetId(5))
+            .unwrap()
+            .configuration
+            .recipe
+            .clone()
+    }
+
+    #[cfg(feature = "server")]
+    fn sticky_attack_source(attack_id: u64, owner: NetworkEntityId) -> AttackSource {
+        AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
+            attack_id: AttackId(attack_id),
+            player_id: PlayerId(owner.0),
+            owner_network_entity_id: owner,
+            team_id: TeamId(0),
+            recipe_fingerprint: WeaponRecipeFingerprint(11),
+            presentation_profile_id: WeaponPresentationProfileId(5),
+            legacy_compatibility: false,
+            source_preset_id: Some(WeaponPresetId(5)),
+            origin: WorldPoint::from(Vec2::ZERO),
+            facing: 0.0,
+        }
+    }
+
+    #[cfg(feature = "server")]
+    fn spawn_sticky_owner(app: &mut App, owner: NetworkEntityId) -> Entity {
+        app.world_mut()
+            .spawn((Fighter, Position(Vec2::ZERO), TeamId(0), owner))
+            .id()
+    }
+
+    #[cfg(feature = "server")]
+    fn spawn_sticky_projectile(
+        app: &mut App,
+        owner_entity: Entity,
+        source: AttackSource,
+        position: Vec2,
+        expires_at_tick: u64,
+    ) -> Entity {
+        let recipe = sticky_recipe();
+        app.world_mut()
+            .spawn((
+                Projectile,
+                Position(position),
+                ProjectileBody::circle(2.0),
+                Collider::circle(2.0),
+                CollisionLayers::new(
+                    PROJECTILE_LAYER,
+                    FIGHTER_LAYER | STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER,
+                ),
+                ComposedProjectileRuntime {
+                    owner_entity,
+                    source_entity: owner_entity,
+                    source,
+                    delivery_index: 0,
+                    velocity: Vec2::new(600.0, 0.0),
+                    travelled: 0.0,
+                    expires_at_tick,
+                    maximum_range: 1_000.0,
+                    landing: None,
+                    recipe,
+                },
+            ))
+            .id()
+    }
+
+    #[cfg(feature = "server")]
+    fn run_sticky_sweep(app: &mut App) {
+        app.world_mut().run_schedule(FixedPostUpdate);
+    }
+
+    #[cfg(feature = "server")]
     fn test_attack_source() -> AttackSource {
         AttackSource {
             kind: CombatSourceKind::PrimaryWeapon,
@@ -1033,6 +1052,158 @@ mod tests {
         assert_eq!(objectives.0[0].delivery_index, 2);
         assert_eq!(objectives.0[0].bundle_index, 3);
         assert_eq!(objectives.0[0].effect_index, 4);
+    }
+
+    #[test]
+    #[cfg(feature = "server")]
+    fn production_sweep_arms_an_expired_sticky_at_its_last_position() {
+        let mut app = sticky_sweep_app(20);
+        let owner_id = NetworkEntityId(70);
+        let owner = spawn_sticky_owner(&mut app, owner_id);
+        let projectile = spawn_sticky_projectile(
+            &mut app,
+            owner,
+            sticky_attack_source(51, owner_id),
+            Vec2::new(17.0, 9.0),
+            20,
+        );
+
+        run_sticky_sweep(&mut app);
+
+        assert!(app.world().get::<Projectile>(projectile).is_none());
+        assert_eq!(
+            app.world().get::<Position>(projectile).unwrap().0,
+            Vec2::new(17.0, 9.0)
+        );
+        let state = app.world().get::<StickyBlobState>(projectile).unwrap();
+        assert_eq!(state.kind, StickyBlobKind::Primary);
+        assert_eq!(state.attached_to, None);
+        assert_eq!(state.armed_at_tick, 20);
+        assert_eq!(state.detonates_at_tick, 89);
+    }
+
+    #[test]
+    #[cfg(feature = "server")]
+    fn production_sweep_enforces_per_owner_and_global_sticky_caps() {
+        let mut app = sticky_sweep_app(20);
+        let owner_id = NetworkEntityId(70);
+        let owner = spawn_sticky_owner(&mut app, owner_id);
+        let recipe = sticky_recipe();
+        for attack_id in 1..=6 {
+            app.world_mut().spawn((
+                StickyBlobState {
+                    kind: StickyBlobKind::Primary,
+                    attached_to: None,
+                    armed_at_tick: 1,
+                    detonates_at_tick: 100,
+                    explosion_radius: 85.44,
+                },
+                StickyBlobRuntime {
+                    source: sticky_attack_source(attack_id, owner_id),
+                    delivery_index: 0,
+                    recipe: recipe.clone(),
+                },
+            ));
+        }
+        let owner_capped = spawn_sticky_projectile(
+            &mut app,
+            owner,
+            sticky_attack_source(80, owner_id),
+            Vec2::ZERO,
+            20,
+        );
+
+        run_sticky_sweep(&mut app);
+
+        assert!(app.world().get_entity(owner_capped).is_err());
+
+        let mut app = sticky_sweep_app(20);
+        let owner_id = NetworkEntityId(70);
+        let owner = spawn_sticky_owner(&mut app, owner_id);
+        for index in 0..sticky::MAX_ACTIVE_STICKY_BLOBS {
+            let existing_owner = NetworkEntityId(1_000 + index as u64);
+            app.world_mut().spawn((
+                StickyBlobState {
+                    kind: StickyBlobKind::Primary,
+                    attached_to: None,
+                    armed_at_tick: 1,
+                    detonates_at_tick: 100,
+                    explosion_radius: 85.44,
+                },
+                StickyBlobRuntime {
+                    source: sticky_attack_source(1_000 + index as u64, existing_owner),
+                    delivery_index: 0,
+                    recipe: recipe.clone(),
+                },
+            ));
+        }
+        let globally_capped = spawn_sticky_projectile(
+            &mut app,
+            owner,
+            sticky_attack_source(90, owner_id),
+            Vec2::ZERO,
+            20,
+        );
+
+        run_sticky_sweep(&mut app);
+
+        assert!(app.world().get_entity(globally_capped).is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "server")]
+    fn production_sweep_attaches_and_chains_primary_stickies_on_one_carrier() {
+        let mut app = sticky_sweep_app(20);
+        let owner_id = NetworkEntityId(70);
+        let owner = spawn_sticky_owner(&mut app, owner_id);
+        let target_id = NetworkEntityId(71);
+        app.world_mut().spawn((
+            Fighter,
+            Position(Vec2::new(8.0, 0.0)),
+            TeamId(1),
+            target_id,
+            RigidBody::Static,
+            Collider::circle(2.0),
+            CollisionLayers::new(FIGHTER_LAYER, PROJECTILE_LAYER),
+        ));
+        let existing = app
+            .world_mut()
+            .spawn((
+                Position(Vec2::new(8.0, 0.0)),
+                StickyBlobState {
+                    kind: StickyBlobKind::Primary,
+                    attached_to: Some(target_id),
+                    armed_at_tick: 1,
+                    detonates_at_tick: 100,
+                    explosion_radius: 85.44,
+                },
+                StickyBlobRuntime {
+                    source: sticky_attack_source(50, owner_id),
+                    delivery_index: 0,
+                    recipe: sticky_recipe(),
+                },
+            ))
+            .id();
+        let incoming = spawn_sticky_projectile(
+            &mut app,
+            owner,
+            sticky_attack_source(51, owner_id),
+            Vec2::ZERO,
+            100,
+        );
+
+        run_sticky_sweep(&mut app);
+
+        assert_eq!(
+            app.world()
+                .get::<StickyBlobState>(existing)
+                .unwrap()
+                .detonates_at_tick,
+            20
+        );
+        let incoming_state = app.world().get::<StickyBlobState>(incoming).unwrap();
+        assert_eq!(incoming_state.attached_to, Some(target_id));
+        assert_eq!(incoming_state.detonates_at_tick, 89);
     }
 
     #[test]

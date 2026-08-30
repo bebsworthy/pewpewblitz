@@ -18,8 +18,9 @@ use brawler::{
         CombatTelemetry, ComposedProjectileRuntime, ConeSpray, ConeSprayState, CurrentHealth,
         DUMMY_NETWORK_ENTITY, Defeated, FighterDefinitions, HealthRecoveryState, MeleeAttack,
         PendingDelivery, PendingPayload, PersistentSplash, PersistentSplashState, Projectile,
-        ProjectileDeadline, ReplicatedAttackSource, SpawnState, TeamId, WeaponPhase,
-        WeaponPresetId, WeaponRecipeFingerprint, WeaponState, WeaponTelemetry, WorldPoint,
+        ProjectileDeadline, ReplicatedAttackSource, SpawnState, StickyBlobState, TeamId,
+        WeaponPhase, WeaponPresetId, WeaponRecipeFingerprint, WeaponState, WeaponTelemetry,
+        WorldPoint,
     },
     config::{ClientNetworkConfig, NetworkTransport, ServerNetworkConfig},
     gameplay::GameplayPlugin,
@@ -84,6 +85,8 @@ mod combat_recovery;
 mod combat_splash;
 #[path = "network/combat_spray.rs"]
 mod combat_spray;
+#[path = "network/combat_sticky.rs"]
+mod combat_sticky;
 #[path = "network/concealment.rs"]
 mod concealment;
 #[path = "network/lifecycle.rs"]

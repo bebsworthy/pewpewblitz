@@ -9,6 +9,9 @@ const MAX_BOT_CATALOG_BYTES: usize = 4 * 1024;
 const MAX_REACTION_TICKS: u64 = 15;
 const MAX_SEARCH_EXPANSIONS: u32 =
     crate::map::MAX_MAP_DIMENSION_CELLS as u32 * crate::map::MAX_MAP_DIMENSION_CELLS as u32;
+const MAX_BOT_WORLD_DISTANCE: f32 =
+    crate::map::MAX_MAP_DIMENSION_CELLS as f32 * crate::map::MAP_CELL_SIZE_WORLD;
+const MAX_PERIMETER_INSET_CELLS: f32 = crate::map::MAX_MAP_DIMENSION_CELLS as f32 / 2.0;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -70,6 +73,25 @@ impl BotProfile {
         ]
         .into_iter()
         .all(|value| value.is_finite() && value > 0.0);
+        if !finite_positive {
+            return Err("Practice bot distances must be finite and positive".into());
+        }
+        let bounded_world_distances = [
+            self.retreat_step_min_world,
+            self.retreat_step_max_world,
+            self.defend_anchor_max_distance,
+            self.pressure_strafe_distance,
+            self.ally_separation_distance,
+        ]
+        .into_iter()
+        .all(|value| value <= MAX_BOT_WORLD_DISTANCE && value.powi(2).is_finite());
+        if !bounded_world_distances
+            || self.waypoint_reach_distance >= crate::map::MAP_CELL_SIZE_WORLD
+            || self.route_goal_change_distance > crate::map::MAP_CELL_SIZE_WORLD
+            || self.perimeter_recovery_release_cells > MAX_PERIMETER_INSET_CELLS
+        {
+            return Err("Practice bot distances exceed map-derived engine bounds".into());
+        }
         let finite_fractions = [
             self.maximum_aim_error_radians,
             self.preferred_range_fraction,
@@ -113,7 +135,6 @@ impl BotProfile {
             || !(0.0..=1.0).contains(&self.pressure_retreat_fraction)
             || self.pressure_dash_range_fraction < 1.0
             || !(0.0..=1.0).contains(&self.ally_separation_weight)
-            || !finite_positive
             || self.retreat_step_min_world > self.retreat_step_max_world
             || self.perimeter_recovery_trigger_cells >= self.perimeter_recovery_release_cells
             || self.total_search_expansions_per_tick == 0

@@ -5,6 +5,7 @@ use crate::combat::client::DeduplicatedCombatCue;
 use std::collections::{HashMap, VecDeque};
 
 const MAX_EFFECTS: usize = 96;
+const SPHERE_CENTER_HEIGHT_FRACTION: f32 = 0.45;
 
 #[derive(Component)]
 pub(in super::super) struct CombatEffect3d {
@@ -51,11 +52,9 @@ impl PendingCombatEffect {
 }
 
 #[derive(Clone, Copy)]
-enum EffectPlacement {
-    RaisedByScale(f32),
+enum EffectAnchor {
+    Center,
     RaisedFixed(f32),
-    GroundRing,
-    LegacyHeist,
 }
 
 #[derive(Clone, Copy)]
@@ -64,7 +63,7 @@ struct CatalogEffectRequest {
     reduced: bool,
     position: Vec2,
     base_scale: f32,
-    placement: EffectPlacement,
+    anchor: EffectAnchor,
     deadline: Option<(u64, u64, Option<u64>)>,
     label: &'static str,
 }
@@ -75,7 +74,8 @@ fn catalog_effect(
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
 ) -> PendingCombatEffect {
-    let profile = catalog.resolve(request.family, request.reduced);
+    let profile =
+        catalog.resolve_for_request(request.family, request.reduced, request.deadline.is_some());
     let scale = request.base_scale * profile.scale_multiplier;
     let (lifetime, expires_at_tick) = match (profile.lifetime, request.deadline) {
         (VfxLifetime::AuthoritativeDeadline, Some((activated, expires, observed))) => (
@@ -83,32 +83,17 @@ fn catalog_effect(
             Some(expires),
         ),
         (VfxLifetime::Millis(millis), _) => (Duration::from_millis(u64::from(millis)), None),
-        (VfxLifetime::AuthoritativeDeadline, None) => (Duration::ZERO, None),
-    };
-    let transform = match request.placement {
-        EffectPlacement::RaisedByScale(multiplier) => Transform::from_translation(
-            ground_position(request.position) + Vec3::Y * (scale * multiplier),
-        )
-        .with_scale(Vec3::splat(scale)),
-        EffectPlacement::RaisedFixed(height) => {
-            Transform::from_translation(ground_position(request.position) + Vec3::Y * height)
-                .with_scale(Vec3::splat(scale))
+        (VfxLifetime::AuthoritativeDeadline, None) => {
+            unreachable!("validated VFX resolution falls back when no deadline is available")
         }
-        EffectPlacement::GroundRing => Transform {
-            translation: ground_position(request.position) + Vec3::Y * GROUND_EFFECT_HEIGHT,
-            rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
-            scale: Vec3::splat(scale),
-        },
-        EffectPlacement::LegacyHeist => Transform {
-            translation: ground_position(request.position) + Vec3::Y * GROUND_EFFECT_HEIGHT,
-            scale: if profile.renderer == VfxRendererFamily::GroundRing {
-                Vec3::new(scale, 1.0, scale)
-            } else {
-                Vec3::splat(scale)
-            },
-            ..default()
-        },
     };
+    let transform = effect_transform(
+        profile.renderer,
+        request.position,
+        request.base_scale,
+        scale,
+        request.anchor,
+    );
     PendingCombatEffect {
         lifetime,
         expires_at_tick,
@@ -121,6 +106,30 @@ fn catalog_effect(
         label: request.label,
         profile_id: profile.id.clone(),
         concurrency_cap: profile.concurrency_cap,
+    }
+}
+
+fn effect_transform(
+    renderer: VfxRendererFamily,
+    position: Vec2,
+    base_scale: f32,
+    rendered_scale: f32,
+    anchor: EffectAnchor,
+) -> Transform {
+    match renderer {
+        VfxRendererFamily::GroundRing => Transform {
+            translation: ground_position(position) + Vec3::Y * GROUND_EFFECT_HEIGHT,
+            rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
+            scale: Vec3::splat(rendered_scale),
+        },
+        VfxRendererFamily::Sphere => {
+            let height = match anchor {
+                EffectAnchor::Center => base_scale * SPHERE_CENTER_HEIGHT_FRACTION,
+                EffectAnchor::RaisedFixed(height) => height,
+            };
+            Transform::from_translation(ground_position(position) + Vec3::Y * height)
+                .with_scale(Vec3::splat(rendered_scale))
+        }
     }
 }
 
@@ -191,11 +200,7 @@ pub(in super::super) fn consume_combat_cues(
                 reduced,
                 position,
                 base_scale: scale,
-                placement: if scan_pulse {
-                    EffectPlacement::GroundRing
-                } else {
-                    EffectPlacement::RaisedByScale(0.45)
-                },
+                anchor: EffectAnchor::Center,
                 deadline,
                 label: if scan_pulse {
                     "V9 active Reveal Scan area"
@@ -256,10 +261,10 @@ pub(in super::super) fn consume_world_object_cues(
                 reduced,
                 position,
                 base_scale: radius,
-                placement: if exploded {
-                    EffectPlacement::GroundRing
+                anchor: if exploded {
+                    EffectAnchor::Center
                 } else {
-                    EffectPlacement::RaisedFixed(8.0)
+                    EffectAnchor::RaisedFixed(8.0)
                 },
                 deadline: None,
                 label: if exploded {
@@ -335,10 +340,10 @@ pub(in super::super) fn consume_pickup_cues(
                 reduced,
                 position,
                 base_scale: radius,
-                placement: if ring {
-                    EffectPlacement::GroundRing
+                anchor: if ring {
+                    EffectAnchor::Center
                 } else {
-                    EffectPlacement::RaisedFixed(15.0)
+                    EffectAnchor::RaisedFixed(15.0)
                 },
                 deadline: None,
                 label,
@@ -397,7 +402,7 @@ pub(in super::super) fn consume_heist_objective_cues(
                 reduced,
                 position: cue.position.as_vec2(),
                 base_scale: radius,
-                placement: EffectPlacement::LegacyHeist,
+                anchor: EffectAnchor::Center,
                 deadline: None,
                 label: match cue.kind {
                     crate::matchplay::HeistObjectiveCueKind::Damaged => "Heist safe hit cue",
@@ -700,6 +705,49 @@ mod tests {
         let world = app.world_mut();
         let mut effects = world.query::<&CombatEffect3d>();
         assert_eq!(effects.single(world).unwrap().timer.duration(), reduced);
+    }
+
+    #[test]
+    fn reduced_sphere_scale_preserves_the_semantic_center_height() {
+        let normal = effect_transform(
+            VfxRendererFamily::Sphere,
+            Vec2::new(10.0, 20.0),
+            8.0,
+            8.0,
+            EffectAnchor::Center,
+        );
+        let reduced = effect_transform(
+            VfxRendererFamily::Sphere,
+            Vec2::new(10.0, 20.0),
+            8.0,
+            5.2,
+            EffectAnchor::Center,
+        );
+
+        assert_eq!(reduced.translation, normal.translation);
+        assert_eq!(normal.scale, Vec3::splat(8.0));
+        assert_eq!(reduced.scale, Vec3::splat(5.2));
+    }
+
+    #[test]
+    fn renderer_family_owns_ground_ring_orientation_and_placement() {
+        let ring = effect_transform(
+            VfxRendererFamily::GroundRing,
+            Vec2::new(10.0, 20.0),
+            8.0,
+            5.2,
+            EffectAnchor::RaisedFixed(99.0),
+        );
+
+        assert_eq!(
+            ring.translation,
+            ground_position(Vec2::new(10.0, 20.0)) + Vec3::Y * GROUND_EFFECT_HEIGHT
+        );
+        assert_eq!(
+            ring.rotation,
+            Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)
+        );
+        assert_eq!(ring.scale, Vec3::splat(5.2));
     }
 
     #[test]

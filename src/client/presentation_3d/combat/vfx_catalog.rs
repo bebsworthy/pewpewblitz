@@ -99,6 +99,12 @@ impl VfxCatalog {
         if !profiles.contains_key(&source.default_profile) {
             return Err("VFX default profile reference is missing".to_string());
         }
+        if matches!(
+            profiles[&source.default_profile].lifetime,
+            VfxLifetime::AuthoritativeDeadline
+        ) {
+            return Err("VFX default profile must use a fixed lifetime".to_string());
+        }
         for profile in profiles.values() {
             for reference in [
                 Some(&profile.fallback_profile),
@@ -114,6 +120,17 @@ impl VfxCatalog {
                     ));
                 }
             }
+            if matches!(profile.lifetime, VfxLifetime::AuthoritativeDeadline)
+                && matches!(
+                    profiles[&profile.fallback_profile].lifetime,
+                    VfxLifetime::AuthoritativeDeadline
+                )
+            {
+                return Err(format!(
+                    "VFX authoritative profile {} must fall back to a fixed lifetime",
+                    profile.id
+                ));
+            }
         }
         let mut mappings = BTreeMap::new();
         for mapping in source.mappings {
@@ -127,6 +144,25 @@ impl VfxCatalog {
                 return Err(format!(
                     "duplicate VFX family mapping: {:?}",
                     mapping.family
+                ));
+            }
+        }
+        for (&family, profile_id) in &mappings {
+            if family_supports_authoritative_deadline(family) {
+                continue;
+            }
+            let profile = &profiles[profile_id];
+            let reduced = profile
+                .reduced_profile
+                .as_ref()
+                .map(|profile_id| &profiles[profile_id]);
+            if matches!(profile.lifetime, VfxLifetime::AuthoritativeDeadline)
+                || reduced.is_some_and(|profile| {
+                    matches!(profile.lifetime, VfxLifetime::AuthoritativeDeadline)
+                })
+            {
+                return Err(format!(
+                    "VFX family {family:?} cannot use an authoritative-deadline profile"
                 ));
             }
         }
@@ -150,6 +186,21 @@ impl VfxCatalog {
         }
     }
 
+    pub(super) fn resolve_for_request(
+        &self,
+        family: VfxCueFamily,
+        reduced: bool,
+        authoritative_deadline_available: bool,
+    ) -> &VfxProfile {
+        let profile = self.resolve(family, reduced);
+        if authoritative_deadline_available
+            || !matches!(profile.lifetime, VfxLifetime::AuthoritativeDeadline)
+        {
+            return profile;
+        }
+        self.resolve_profile(&profile.fallback_profile)
+    }
+
     fn resolve_profile(&self, requested: &str) -> &VfxProfile {
         let mut next = requested;
         let mut visited = BTreeSet::new();
@@ -166,6 +217,10 @@ impl VfxCatalog {
             next = &profile.fallback_profile;
         }
     }
+}
+
+const fn family_supports_authoritative_deadline(family: VfxCueFamily) -> bool {
+    matches!(family, VfxCueFamily::RevealScan)
 }
 
 fn validate_profile(profile: &VfxProfile) -> Result<(), String> {
@@ -256,5 +311,23 @@ mod tests {
             1,
         );
         assert!(VfxCatalog::from_ron(&source).is_err());
+    }
+
+    #[test]
+    fn deadline_profiles_are_restricted_to_deadline_bearing_cues() {
+        let source = VFX_CATALOG.replacen(
+            "(family: CombatMuzzle, profile: \"muzzle\")",
+            "(family: CombatMuzzle, profile: \"reveal_scan\")",
+            1,
+        );
+        assert!(VfxCatalog::from_ron(&source).is_err());
+
+        let mut catalog = VfxCatalog::embedded().unwrap();
+        catalog
+            .mappings
+            .insert(VfxCueFamily::CombatMuzzle, "reveal_scan".to_string());
+        let resolved = catalog.resolve_for_request(VfxCueFamily::CombatMuzzle, false, false);
+        assert_eq!(resolved.id, "impact");
+        assert!(matches!(resolved.lifetime, VfxLifetime::Millis(_)));
     }
 }

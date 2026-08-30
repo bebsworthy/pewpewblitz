@@ -646,7 +646,7 @@ impl WeaponConfiguration {
                     || lifetime_ticks > policy.max_projectile_lifetime_ticks
                     || !finite_range(muzzle_offset, 0.0, limits.max_world_field)
                     || muzzle_offset == 0.0
-                    || speed / 60.0 > range
+                    || speed / crate::timing::SIMULATION_TICK_HZ as f32 > range
                 {
                     return Err("invalid straight delivery".to_string());
                 }
@@ -677,7 +677,7 @@ impl WeaponConfiguration {
                     || fuse_ticks > limits.max_deadline_ticks
                     || max_active_per_owner == 0
                     || max_active_per_owner > 16
-                    || speed / 60.0 > range
+                    || speed / crate::timing::SIMULATION_TICK_HZ as f32 > range
                 {
                     return Err("invalid sticky straight delivery".to_string());
                 }
@@ -767,7 +767,10 @@ impl WeaponConfiguration {
                 {
                     return Err("invalid cone spray delivery".to_string());
                 }
-                let fill_ticks = ((reach * 60.0) / propagation_speed).ceil().max(1.0) as u64;
+                let fill_ticks = ((reach * crate::timing::SIMULATION_TICK_HZ as f32)
+                    / propagation_speed)
+                    .ceil()
+                    .max(1.0) as u64;
                 let lifetime_ticks = fill_ticks.saturating_add(linger_ticks);
                 let pulse_count = lifetime_ticks / pulse_interval_ticks;
                 if lifetime_ticks > limits.max_deadline_ticks

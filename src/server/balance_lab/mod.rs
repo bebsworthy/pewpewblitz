@@ -51,6 +51,7 @@ impl Plugin for BalanceLabPlugin {
             Startup,
             start_balance_lab
                 .after(crate::protocol::initialize_content_fingerprint)
+                .before(crate::map::MapStartupSet::Instantiate)
                 .before(crate::matchplay::initialize_match_root),
         )
         .add_systems(
@@ -659,6 +660,7 @@ fn apply_balance_lab_transaction(
     mut builds: ResMut<BuildCatalogResource>,
     mut weapons: ResMut<WeaponCatalogResource>,
     mut maps: ResMut<crate::map::MapCatalogResource>,
+    mut resolved_map: ResMut<crate::map::ResolvedMap>,
     mut condition_rules: ResMut<crate::combat::CombatConditionRulesResource>,
     mut heist_rules: Option<ResMut<crate::matchplay::HeistRules>>,
     mut restart: ResMut<PendingMatchRestart>,
@@ -797,6 +799,27 @@ fn apply_balance_lab_transaction(
         );
         return;
     }
+    let Some(source_preset_id) = resolved_map.snapshot.identity.source_preset_id else {
+        reject(
+            runtime,
+            transaction_id,
+            "authoritative Practice map has no source preset",
+        );
+        return;
+    };
+    let next_resolved_map = match next_maps
+        .resolve_preset(source_preset_id, resolved_map.snapshot.identity.instance_id)
+    {
+        Ok(map) => map,
+        Err(error) => {
+            reject(
+                runtime,
+                transaction_id,
+                &format!("revised Practice map did not resolve: {error}"),
+            );
+            return;
+        }
+    };
     let Some(next_revision) = runtime.revision.0.checked_add(1) else {
         reject(
             runtime,
@@ -834,6 +857,7 @@ fn apply_balance_lab_transaction(
     builds.0 = next_builds;
     weapons.0 = next_weapons;
     maps.0 = next_maps;
+    *resolved_map = next_resolved_map;
     condition_rules.0 = candidate.condition_rules;
     if let Some(rules) = heist_rules.as_deref_mut() {
         install_heist_tuning(rules, &candidate);
@@ -1895,6 +1919,12 @@ mod tests {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
         let maps = crate::map::MapContentCatalog::embedded().unwrap();
+        let resolved_map = maps
+            .resolve_preset(
+                crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+                crate::map::MapInstanceId(1),
+            )
+            .unwrap();
         let fighter_definitions = FighterDefinitions::default();
         let fighter = fighter_definitions.entries[0];
         let (human_snapshot, human_loadout) = admitted_brawler(&builds, &weapons, &fighter, 2, 1);
@@ -1972,6 +2002,7 @@ mod tests {
             .insert_resource(BuildCatalogResource(builds))
             .insert_resource(WeaponCatalogResource(weapons))
             .insert_resource(crate::map::MapCatalogResource(maps))
+            .insert_resource(resolved_map)
             .insert_resource(crate::combat::CombatConditionRulesResource(
                 baseline.condition_rules,
             ))
@@ -2075,6 +2106,36 @@ mod tests {
             .unwrap(),
             expected_effect_tiles
         );
+        for tile in &app
+            .world()
+            .resource::<crate::map::ResolvedMap>()
+            .effect_tiles
+        {
+            match tile.behavior {
+                crate::map::MapEffectTileBehavior::Speed {
+                    movement_multiplier_milli,
+                } => assert_eq!(
+                    movement_multiplier_milli,
+                    expected_effect_tiles.speed_multiplier_milli
+                ),
+                crate::map::MapEffectTileBehavior::Slow {
+                    movement_multiplier_milli,
+                } => assert_eq!(
+                    movement_multiplier_milli,
+                    expected_effect_tiles.slow_multiplier_milli
+                ),
+                crate::map::MapEffectTileBehavior::Damage {
+                    damage,
+                    interval_ticks,
+                } => {
+                    assert_eq!(damage, expected_effect_tiles.damage_per_pulse);
+                    assert_eq!(interval_ticks, expected_effect_tiles.interval_ticks);
+                }
+                crate::map::MapEffectTileBehavior::None => {
+                    panic!("resolved effect tile cannot be inert")
+                }
+            }
+        }
         assert!(
             app.world()
                 .resource::<PendingMatchRestart>()

@@ -350,7 +350,7 @@ fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
         },
     }];
     let (objective, heist_safes) = validate_and_resolve_mode_anchors(
-        HOT_ZONE_MODE_DEFINITION,
+        crate::modes::ModeTopologyPolicy::HotZoneCircle,
         MapDimensions {
             width: 25,
             height: 37,
@@ -368,6 +368,23 @@ fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
             shape: MapShape::Circle { radius: 112.0 },
         }
     );
+}
+
+#[test]
+fn anchorless_topology_is_reusable_without_a_built_in_mode_branch() {
+    let (objective, heist_safes) = validate_and_resolve_mode_anchors(
+        crate::modes::ModeTopologyPolicy::NoAnchors,
+        MapDimensions {
+            width: 25,
+            height: 37,
+        },
+        &[],
+        &mut BTreeSet::new(),
+    )
+    .unwrap();
+
+    assert!(objective.is_none());
+    assert!(heist_safes.is_empty());
 }
 
 #[test]

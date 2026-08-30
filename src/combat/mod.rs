@@ -393,7 +393,8 @@ impl WeaponDefinitions {
                     definition.id
                 ));
             }
-            let maximum_step = definition.projectile_speed / 60.0;
+            let maximum_step =
+                definition.projectile_speed / crate::timing::SIMULATION_TICK_HZ as f32;
             if !maximum_step.is_finite()
                 || maximum_step <= 0.0
                 || maximum_step > definition.maximum_range

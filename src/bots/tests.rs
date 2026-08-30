@@ -49,6 +49,24 @@ fn embedded_profile_is_valid_bounded_and_fingerprinted() {
     invalid = catalog;
     invalid.practice.maximum_search_expansions = u32::MAX;
     assert!(invalid.validate().is_err());
+    invalid = catalog;
+    invalid.practice.waypoint_reach_distance = f32::MAX;
+    assert_eq!(
+        invalid.validate(),
+        Err("Practice bot distances exceed map-derived engine bounds".into())
+    );
+    invalid = catalog;
+    invalid.practice.waypoint_reach_distance = crate::map::MAP_CELL_SIZE_WORLD;
+    assert_eq!(
+        invalid.validate(),
+        Err("Practice bot distances exceed map-derived engine bounds".into())
+    );
+    invalid = catalog;
+    invalid.practice.ally_separation_distance = f32::MAX;
+    assert_eq!(
+        invalid.validate(),
+        Err("Practice bot distances exceed map-derived engine bounds".into())
+    );
 }
 
 #[test]

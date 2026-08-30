@@ -6,6 +6,137 @@ use super::*;
 
 pub(crate) const MAX_ACTIVE_STICKY_BLOBS: usize = 96;
 
+pub(crate) struct StickySweepState {
+    active_by_owner: HashMap<u64, usize>,
+    active_total: usize,
+    newly_attached_primaries: HashMap<u64, Entity>,
+}
+
+impl StickySweepState {
+    pub(crate) fn from_active(blobs: &Query<(&mut StickyBlobState, &StickyBlobRuntime)>) -> Self {
+        let mut active_by_owner = HashMap::new();
+        let mut active_total = 0_usize;
+        for (_, runtime) in blobs {
+            *active_by_owner
+                .entry(runtime.source.owner_network_entity_id.0)
+                .or_default() += 1;
+            active_total = active_total.saturating_add(1);
+        }
+        Self {
+            active_by_owner,
+            active_total,
+            newly_attached_primaries: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn try_arm_expired(
+        &mut self,
+        commands: &mut Commands,
+        entity: Entity,
+        runtime: &ComposedProjectileRuntime,
+        position: Vec2,
+        tick: u64,
+    ) -> bool {
+        if !self.has_capacity(runtime) {
+            return false;
+        }
+        let kind = sticky_kind(runtime.source.kind);
+        if !arm_projectile(
+            commands,
+            entity,
+            runtime.clone(),
+            position,
+            None,
+            kind,
+            tick,
+        ) {
+            return false;
+        }
+        self.record_arm(runtime.source.owner_network_entity_id);
+        true
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn try_arm_impact(
+        &mut self,
+        commands: &mut Commands,
+        entity: Entity,
+        runtime: &ComposedProjectileRuntime,
+        armed_position: Vec2,
+        attached_to: Option<NetworkEntityId>,
+        tick: u64,
+        blobs: &mut Query<(&mut StickyBlobState, &StickyBlobRuntime)>,
+    ) -> bool {
+        if !self.has_capacity(runtime) {
+            return false;
+        }
+        let kind = sticky_kind(runtime.source.kind);
+        if kind == StickyBlobKind::Primary
+            && let Some(target) = attached_to
+        {
+            for (mut existing, _) in blobs.iter_mut() {
+                if primary_impact_triggers_existing(kind, *existing, target) {
+                    existing.detonates_at_tick = tick;
+                }
+            }
+            if let Some(previous) = self.newly_attached_primaries.get(&target.0).copied() {
+                let (_, _, explosion_radius) = sticky_delivery_parameters(&runtime.recipe)
+                    .expect("capacity check requires a validated sticky recipe");
+                commands.entity(previous).insert(StickyBlobState {
+                    kind: StickyBlobKind::Primary,
+                    attached_to: Some(target),
+                    armed_at_tick: tick,
+                    detonates_at_tick: tick,
+                    explosion_radius,
+                });
+            }
+        }
+        if !arm_projectile(
+            commands,
+            entity,
+            runtime.clone(),
+            armed_position,
+            attached_to,
+            kind,
+            tick,
+        ) {
+            return false;
+        }
+        if kind == StickyBlobKind::Primary
+            && let Some(target) = attached_to
+        {
+            self.newly_attached_primaries.insert(target.0, entity);
+        }
+        self.record_arm(runtime.source.owner_network_entity_id);
+        true
+    }
+
+    fn has_capacity(&self, runtime: &ComposedProjectileRuntime) -> bool {
+        let Some((_, max_active, _)) = sticky_delivery_parameters(&runtime.recipe) else {
+            return false;
+        };
+        self.active_by_owner
+            .get(&runtime.source.owner_network_entity_id.0)
+            .copied()
+            .unwrap_or_default()
+            < usize::from(max_active)
+            && self.active_total < MAX_ACTIVE_STICKY_BLOBS
+    }
+
+    fn record_arm(&mut self, owner: NetworkEntityId) {
+        *self.active_by_owner.entry(owner.0).or_default() += 1;
+        self.active_total = self.active_total.saturating_add(1);
+    }
+}
+
+const fn sticky_kind(source: CombatSourceKind) -> StickyBlobKind {
+    if matches!(source, CombatSourceKind::PrimaryWeapon) {
+        StickyBlobKind::Primary
+    } else {
+        StickyBlobKind::UltimateSecondary
+    }
+}
+
 #[must_use]
 pub(crate) fn sticky_delivery_parameters(recipe: &WeaponRecipe) -> Option<(u64, u8, f32)> {
     let DeliveryMethod::StickyStraight {

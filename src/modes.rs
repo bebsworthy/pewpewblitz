@@ -20,6 +20,13 @@ pub(crate) enum CompatibleMapPolicy {
     ExactModeDefinition,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ModeTopologyPolicy {
+    NoAnchors,
+    HotZoneCircle,
+    MirroredHeistSafes,
+}
+
 #[cfg(feature = "server")]
 impl CompatibleMapPolicy {
     pub(crate) fn accepts(self, descriptor: &ModeDescriptor, map_mode: ModeDefinitionId) -> bool {
@@ -58,6 +65,7 @@ pub(crate) struct ModeDescriptor {
     #[cfg(any(feature = "server", test))]
     pub(crate) key: &'static str,
     pub(crate) definition_id: ModeDefinitionId,
+    pub(crate) topology: ModeTopologyPolicy,
     #[cfg(feature = "server")]
     pub(crate) rules_revision: u16,
     #[cfg(feature = "server")]
@@ -77,6 +85,10 @@ pub(crate) struct ModeDescriptor {
 }
 
 impl ModeDescriptor {
+    pub(crate) const fn topology(self) -> ModeTopologyPolicy {
+        self.topology
+    }
+
     #[cfg(feature = "server")]
     pub(crate) fn accepts_map(self, map_mode: ModeDefinitionId) -> bool {
         self.compatible_maps.accepts(&self, map_mode)
@@ -100,6 +112,7 @@ pub(crate) static MODE_DESCRIPTORS: [ModeDescriptor; 3] = [
         #[cfg(any(feature = "server", test))]
         key: "wipeout",
         definition_id: WIPEOUT_MODE_DEFINITION,
+        topology: ModeTopologyPolicy::NoAnchors,
         #[cfg(feature = "server")]
         rules_revision: crate::matchplay::WIPEOUT_RULES_REVISION,
         #[cfg(feature = "server")]
@@ -125,6 +138,7 @@ pub(crate) static MODE_DESCRIPTORS: [ModeDescriptor; 3] = [
         #[cfg(any(feature = "server", test))]
         key: "hot-zone",
         definition_id: HOT_ZONE_MODE_DEFINITION,
+        topology: ModeTopologyPolicy::HotZoneCircle,
         #[cfg(feature = "server")]
         rules_revision: crate::matchplay::HOT_ZONE_RULES_REVISION,
         #[cfg(feature = "server")]
@@ -150,6 +164,7 @@ pub(crate) static MODE_DESCRIPTORS: [ModeDescriptor; 3] = [
         #[cfg(any(feature = "server", test))]
         key: "heist",
         definition_id: HEIST_MODE_DEFINITION,
+        topology: ModeTopologyPolicy::MirroredHeistSafes,
         #[cfg(feature = "server")]
         rules_revision: crate::matchplay::HEIST_RULES_REVISION,
         #[cfg(feature = "server")]
@@ -430,5 +445,14 @@ mod tests {
             validate_registry(&MODE_DESCRIPTORS[..2]),
             Err(RegistryError::MissingMode(GameMode::Heist))
         ));
+    }
+
+    #[test]
+    fn a_synthetic_descriptor_can_reuse_an_existing_topology_policy() {
+        let mut synthetic = MODE_DESCRIPTORS[0];
+        synthetic.definition_id = ModeDefinitionId(99);
+        synthetic.key = "synthetic-anchorless";
+
+        assert_eq!(synthetic.topology(), ModeTopologyPolicy::NoAnchors);
     }
 }

@@ -343,15 +343,11 @@ impl WorkerBootstrap {
             && std::env::var("BRAWLER_LOBBY_TRANSITION_DRIVER").as_deref() == Ok("1");
         let mut config = config_from_manifest(&manifest)?;
         if automatic_transition_driver {
-            config.game_mode = match std::env::var("BRAWLER_LOBBY_TRANSITION_MODE").as_deref() {
-                Ok("wipeout") => GameMode::Wipeout,
-                Ok("hot-zone") => GameMode::HotZone,
-                _ => {
-                    return Err(WorkerBootstrapError::Invalid(
-                        "invalid automatic transition game mode",
-                    ));
-                }
-            };
+            config.game_mode = automatic_transition_game_mode(
+                &std::env::var("BRAWLER_LOBBY_TRANSITION_MODE").map_err(|_| {
+                    WorkerBootstrapError::Invalid("invalid automatic transition game mode")
+                })?,
+            )?;
         }
         let heartbeat = manifest.heartbeat();
         let digest = manifest.digest();
@@ -423,6 +419,14 @@ impl WorkerBootstrap {
         debug!(?endpoint, role = ?args.role, "routed worker endpoint bootstrapped");
         Ok(app)
     }
+}
+
+fn automatic_transition_game_mode(key: &str) -> Result<GameMode, WorkerBootstrapError> {
+    crate::modes::descriptor_for_key(key)
+        .map(|descriptor| descriptor.mode)
+        .ok_or(WorkerBootstrapError::Invalid(
+            "invalid automatic transition game mode",
+        ))
 }
 
 /// Install one addressless Netcode server endpoint backed by the worker's private packet stream.
@@ -778,13 +782,13 @@ fn drain_match_control_outbox(
                 1 => outbox.cancel = None,
                 _ => outbox.activated = None,
             },
-            Err(IpcIoError::WouldBlock) => drain.blocked = true,
+            Err(error) if control_outbox_backpressure(&error) => drain.blocked = true,
             Err(_) => drain.failed = true,
         }
     }
 }
 
-fn lobby_backpressure(error: &IpcIoError) -> bool {
+fn control_outbox_backpressure(error: &IpcIoError) -> bool {
     matches!(
         error,
         IpcIoError::WouldBlock | IpcIoError::Malformed(CodecError::Oversize)
@@ -805,14 +809,14 @@ fn drain_lobby_control_outbox(
             Ok(()) => {
                 outbox.activation_cancels.pop_front();
             }
-            Err(IpcIoError::WouldBlock) => drain.blocked = true,
+            Err(error) if control_outbox_backpressure(&error) => drain.blocked = true,
             Err(_) => drain.failed = true,
         }
     }
     while let Some(fact) = outbox.netcode_authenticated_front().copied() {
         match enqueue_control_body(worker, state, ControlBody::LobbyNetcodeAuthenticated(fact)) {
             Ok(()) => outbox.pop_netcode_authenticated(),
-            Err(error) if lobby_backpressure(&error) => {
+            Err(error) if control_outbox_backpressure(&error) => {
                 drain.blocked = true;
                 break;
             }
@@ -828,7 +832,7 @@ fn drain_lobby_control_outbox(
         };
         match enqueue_control_body(worker, state, ControlBody::LobbyAuthenticated(fact)) {
             Ok(()) => outbox.pop_authenticated(),
-            Err(error) if lobby_backpressure(&error) => {
+            Err(error) if control_outbox_backpressure(&error) => {
                 drain.blocked = true;
                 break;
             }
@@ -842,7 +846,7 @@ fn drain_lobby_control_outbox(
         while let Some(body) = outbox.front().cloned() {
             match enqueue_control_body(worker, state, ControlBody::AllocateRequest(body)) {
                 Ok(()) => outbox.pop_front(),
-                Err(error) if lobby_backpressure(&error) => break,
+                Err(error) if control_outbox_backpressure(&error) => break,
                 Err(_) => {
                     drain.failed = true;
                     break;
@@ -969,16 +973,20 @@ fn worker_control_receive(
             return;
         }
     }
-    if emit_control_heartbeat(&mut worker, &mut state).is_err() {
-        error!(worker = ?state.worker_id, "brawler routed worker heartbeat enqueue failed");
-        worker_control_failure(
-            &mut worker,
-            &mut state,
-            &mut app_exit,
-            &mut commands,
-            worker_entity,
-            FAILURE_DETAIL_MALFORMED,
-        );
+    match emit_control_heartbeat(&mut worker, &mut state) {
+        Ok(()) => {}
+        Err(error) if control_outbox_backpressure(&error) => {}
+        Err(_) => {
+            error!(worker = ?state.worker_id, "brawler routed worker heartbeat enqueue failed");
+            worker_control_failure(
+                &mut worker,
+                &mut state,
+                &mut app_exit,
+                &mut commands,
+                worker_entity,
+                FAILURE_DETAIL_MALFORMED,
+            );
+        }
     }
 }
 
@@ -1513,6 +1521,35 @@ mod tests {
         }
     }
 
+    fn fill_worker_control_queue(app: &mut App) {
+        let world = app.world_mut();
+        let mut query = world.query::<&mut RoutedWorker>();
+        let mut worker = query.single_mut(world).unwrap();
+        for sequence in 100..100 + brawler_routing::WORKER_CONTROL_QUEUE_FRAMES as u64 {
+            worker
+                .channels_mut()
+                .enqueue_control(
+                    &control_frame(
+                        sequence,
+                        ControlBody::Heartbeat(brawler_routing::HeartbeatBody {
+                            generation: brawler_routing::Generation::new(1).unwrap(),
+                            uptime_ms: 0,
+                            active_peers: 0,
+                            packet_frames: 0,
+                            packet_bytes: 0,
+                            control_frames: 0,
+                            control_bytes: 0,
+                            fixed_tick_lag_us: 0,
+                            health_flags: 0,
+                        }),
+                    )
+                    .encode()
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+    }
+
     #[test]
     fn lobby_outbox_is_bounded_and_ordered() {
         let mut outbox = LobbyControlOutbox::default();
@@ -1611,6 +1648,15 @@ mod tests {
     fn worker_argv_parser_rejects_secret_like_unknown_flags() {
         let result = parse_worker_arguments(["--capability", "secret"].map(str::to_string));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn automatic_transition_mode_uses_the_complete_registered_mode_set() {
+        assert_eq!(
+            automatic_transition_game_mode("heist").unwrap(),
+            GameMode::Heist
+        );
+        assert!(automatic_transition_game_mode("unknown").is_err());
     }
 
     #[test]
@@ -1828,34 +1874,7 @@ mod tests {
                 .resource_mut::<LobbyControlOutbox>()
                 .push(allocation_body(7))
         );
-        {
-            let world = harness.app.world_mut();
-            let mut query = world.query::<&mut RoutedWorker>();
-            let mut worker = query.single_mut(world).unwrap();
-            for sequence in 100..100 + brawler_routing::WORKER_CONTROL_QUEUE_FRAMES as u64 {
-                worker
-                    .channels_mut()
-                    .enqueue_control(
-                        &control_frame(
-                            sequence,
-                            ControlBody::Heartbeat(brawler_routing::HeartbeatBody {
-                                generation: brawler_routing::Generation::new(1).unwrap(),
-                                uptime_ms: 0,
-                                active_peers: 0,
-                                packet_frames: 0,
-                                packet_bytes: 0,
-                                control_frames: 0,
-                                control_bytes: 0,
-                                fixed_tick_lag_us: 0,
-                                health_flags: 0,
-                            }),
-                        )
-                        .encode()
-                        .unwrap(),
-                    )
-                    .unwrap();
-            }
-        }
+        fill_worker_control_queue(&mut harness.app);
 
         harness.app.world_mut().run_schedule(Update);
         assert_eq!(
@@ -1912,6 +1931,41 @@ mod tests {
         let frames = harness.receive();
         assert!(
             matches!(frames.as_slice(), [ControlFrame { sequence, body: ControlBody::AllocateRequest(body), .. }] if sequence.get() == 2 && body.request_id.get() == 7)
+        );
+    }
+
+    #[test]
+    fn due_heartbeat_retries_after_control_queue_backpressure() {
+        let mut harness = WorkerControlHarness::new(WorkerEntrypointRole::Lobby);
+        let due = Instant::now();
+        harness
+            .app
+            .world_mut()
+            .resource_mut::<WorkerControlState>()
+            .next_heartbeat = due;
+        fill_worker_control_queue(&mut harness.app);
+
+        harness.app.world_mut().run_schedule(Update);
+        let state = harness.app.world().resource::<WorkerControlState>();
+        assert!(!state.exit_sent);
+        assert_eq!(state.next_sequence, 2);
+        assert_eq!(state.next_heartbeat, due);
+
+        harness.app.world_mut().run_schedule(Last);
+        assert_eq!(
+            harness.receive().len(),
+            brawler_routing::WORKER_CONTROL_QUEUE_FRAMES
+        );
+
+        harness.app.world_mut().run_schedule(Update);
+        let state = harness.app.world().resource::<WorkerControlState>();
+        assert!(!state.exit_sent);
+        assert_eq!(state.next_sequence, 3);
+        assert!(state.next_heartbeat > due);
+        harness.app.world_mut().run_schedule(Last);
+        let frames = harness.receive();
+        assert!(
+            matches!(frames.as_slice(), [ControlFrame { sequence, body: ControlBody::Heartbeat(_), .. }] if sequence.get() == 2)
         );
     }
 

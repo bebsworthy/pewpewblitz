@@ -17,6 +17,31 @@ use catalog::{AudioAssetKey, AudioCueFamily, AudioProfileCatalog};
 struct ClientAudioOneShot;
 
 #[derive(Resource, Default)]
+struct AudioFrameReservations {
+    active_or_reserved: usize,
+}
+
+impl AudioFrameReservations {
+    fn reset(&mut self, active: usize) {
+        self.active_or_reserved = active;
+    }
+
+    fn reserve(&mut self, concurrency_cap: usize) -> bool {
+        if self.active_or_reserved >= concurrency_cap {
+            return false;
+        }
+        self.active_or_reserved += 1;
+        true
+    }
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum ClientAudioSet {
+    ResetReservations,
+    Produce,
+}
+
+#[derive(Resource, Default)]
 struct ClientAudioState {
     recent: VecDeque<(AudioCueFamily, u64)>,
     was_playable: bool,
@@ -45,6 +70,18 @@ impl Plugin for ClientAudioPlugin {
             AudioProfileCatalog::embedded().expect("embedded audio profile catalog is valid"),
         )
         .init_resource::<ClientAudioState>()
+        .init_resource::<AudioFrameReservations>()
+        .configure_sets(
+            Update,
+            (
+                ClientAudioSet::ResetReservations,
+                ClientAudioSet::Produce.after(ClientAudioSet::ResetReservations),
+            ),
+        )
+        .add_systems(
+            Update,
+            reset_audio_reservations.in_set(ClientAudioSet::ResetReservations),
+        )
         .add_systems(
             Update,
             (
@@ -56,9 +93,17 @@ impl Plugin for ClientAudioPlugin {
                 play_match_audio,
                 play_hot_zone_audio,
             )
-                .after(crate::map::MapPresentationSet::Readiness),
+                .after(crate::map::MapPresentationSet::Readiness)
+                .in_set(ClientAudioSet::Produce),
         );
     }
+}
+
+fn reset_audio_reservations(
+    active: Query<(), With<ClientAudioOneShot>>,
+    mut reservations: ResMut<AudioFrameReservations>,
+) {
+    reservations.reset(active.iter().count());
 }
 
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
@@ -70,14 +115,13 @@ fn play_heist_objective_audio(
     mut cues: MessageReader<crate::matchplay::ReceivedHeistObjectiveCue>,
     readiness: Res<hud::ClientHeistReadiness>,
     mut state: ResMut<ClientAudioState>,
-    active: Query<(), With<ClientAudioOneShot>>,
+    mut reservations: ResMut<AudioFrameReservations>,
 ) {
     let Some(handles) = handles else {
         cues.clear();
         return;
     };
     let ready = matches!(*readiness, hud::ClientHeistReadiness::Ready);
-    let mut active_count = active.iter().count();
     for crate::matchplay::ReceivedHeistObjectiveCue(cue) in cues.read() {
         if !ready {
             continue;
@@ -110,7 +154,7 @@ fn play_heist_objective_audio(
                 &handles,
                 &asset_server,
                 family,
-                &mut active_count,
+                &mut reservations,
             ),
             PlaybackAttempt::Played
         ) {
@@ -151,7 +195,7 @@ fn play_ability_audio(
         &crate::concealment::ConcealmentFieldState,
         Added<crate::concealment::ConcealmentFieldState>,
     >,
-    active: Query<(), With<ClientAudioOneShot>>,
+    mut reservations: ResMut<AudioFrameReservations>,
 ) {
     let Some(handles) = handles else { return };
     let mut sounds = Vec::new();
@@ -182,7 +226,6 @@ fn play_ability_audio(
     for _ in &concealment_fields {
         sounds.push(AudioCueFamily::ConcealmentFieldSpawn);
     }
-    let mut active_count = active.iter().count();
     for family in sounds {
         let _ = try_play_audio(
             &mut commands,
@@ -190,7 +233,7 @@ fn play_ability_audio(
             &handles,
             &asset_server,
             family,
-            &mut active_count,
+            &mut reservations,
         );
     }
 }
@@ -213,7 +256,7 @@ fn play_match_audio(
         ),
     >,
     mut state: ResMut<ClientAudioState>,
-    active: Query<(), With<ClientAudioOneShot>>,
+    mut reservations: ResMut<AudioFrameReservations>,
 ) {
     let Some((current, wipeout)) = matches.iter().next() else {
         return;
@@ -246,7 +289,6 @@ fn play_match_audio(
     } else {
         None
     };
-    let mut active_count = active.iter().count();
     if family.is_some_and(|family| {
         matches!(
             try_play_audio(
@@ -255,7 +297,7 @@ fn play_match_audio(
                 &handles,
                 &asset_server,
                 family,
-                &mut active_count,
+                &mut reservations,
             ),
             PlaybackAttempt::Capped
         )
@@ -285,7 +327,7 @@ fn play_hot_zone_audio(
         ),
     >,
     mut state: ResMut<ClientAudioState>,
-    active: Query<(), With<ClientAudioOneShot>>,
+    mut reservations: ResMut<AudioFrameReservations>,
 ) {
     let Some((hot_zone, match_state)) = zones.iter().next() else {
         return;
@@ -334,7 +376,6 @@ fn play_hot_zone_audio(
             AudioCueFamily::Impact
         })
     };
-    let mut active_count = active.iter().count();
     if family.is_some_and(|family| {
         matches!(
             try_play_audio(
@@ -343,7 +384,7 @@ fn play_hot_zone_audio(
                 &handles,
                 &asset_server,
                 family,
-                &mut active_count,
+                &mut reservations,
             ),
             PlaybackAttempt::Capped
         )
@@ -363,13 +404,12 @@ fn play_combat_audio(
     asset_server: Res<AssetServer>,
     mut cues: MessageReader<DeduplicatedCombatCue>,
     mut state: ResMut<ClientAudioState>,
-    active: Query<(), With<ClientAudioOneShot>>,
+    mut reservations: ResMut<AudioFrameReservations>,
 ) {
     let Some(handles) = handles else {
         cues.clear();
         return;
     };
-    let mut active_count = active.iter().count();
     for DeduplicatedCombatCue(cue) in cues.read() {
         let Some((family, key)) = combat_sound(cue) else {
             continue;
@@ -385,7 +425,7 @@ fn play_combat_audio(
                 &handles,
                 &asset_server,
                 family,
-                &mut active_count,
+                &mut reservations,
             ),
             PlaybackAttempt::Capped
         ) {
@@ -415,7 +455,7 @@ fn play_reload_audio(
     catalog: Res<AudioProfileCatalog>,
     asset_server: Res<AssetServer>,
     weapons: Query<(Entity, &WeaponState), (With<Fighter>, With<Controlled>)>,
-    active: Query<(), With<ClientAudioOneShot>>,
+    mut reservations: ResMut<AudioFrameReservations>,
     mut observed_ammo: Local<HashMap<Entity, u8>>,
 ) {
     let Some(handles) = handles else {
@@ -431,7 +471,6 @@ fn play_reload_audio(
         }
     }
     observed_ammo.retain(|entity, _| weapons.get(*entity).is_ok());
-    let mut active_count = active.iter().count();
     for _ in 0..reloads {
         let _ = try_play_audio(
             &mut commands,
@@ -439,7 +478,7 @@ fn play_reload_audio(
             &handles,
             &asset_server,
             AudioCueFamily::Reload,
-            &mut active_count,
+            &mut reservations,
         );
     }
 }
@@ -458,7 +497,7 @@ fn play_session_audio(
     map: Res<crate::map::ClientMapReadiness>,
     joins: Query<&ClientJoinStatus>,
     mut state: ResMut<ClientAudioState>,
-    active: Query<(), With<ClientAudioOneShot>>,
+    mut reservations: ResMut<AudioFrameReservations>,
 ) {
     let is_error = matches!(*map, crate::map::ClientMapReadiness::Invalid(_))
         || joins.iter().any(|status| {
@@ -479,7 +518,6 @@ fn play_session_audio(
     } else {
         None
     };
-    let mut active_count = active.iter().count();
     if let Some(family) = family {
         let _ = try_play_audio(
             &mut commands,
@@ -487,7 +525,7 @@ fn play_session_audio(
             &handles,
             &asset_server,
             family,
-            &mut active_count,
+            &mut reservations,
         );
     }
     state.was_playable = playable.0;
@@ -546,14 +584,14 @@ fn try_play_audio(
     handles: &ClientAssetHandles,
     asset_server: &AssetServer,
     family: AudioCueFamily,
-    active_count: &mut usize,
+    reservations: &mut AudioFrameReservations,
 ) -> PlaybackAttempt {
     let Some(plan) = catalog.playback_plan(family, |asset| {
         asset_server.is_loaded(audio_handle(handles, asset))
     }) else {
         return PlaybackAttempt::Unavailable;
     };
-    if *active_count >= plan.concurrency_cap {
+    if !reservations.reserve(plan.concurrency_cap) {
         return PlaybackAttempt::Capped;
     }
     commands.spawn((
@@ -565,7 +603,6 @@ fn try_play_audio(
             ..PlaybackSettings::DESPAWN
         },
     ));
-    *active_count += 1;
     PlaybackAttempt::Played
 }
 
@@ -619,6 +656,16 @@ mod tests {
         assert!(cap(AudioCueFamily::Fire) < cap(AudioCueFamily::Impact));
         assert!(cap(AudioCueFamily::Impact) < cap(AudioCueFamily::Defeat));
         assert_eq!(cap(AudioCueFamily::Error), 24);
+    }
+
+    #[test]
+    fn same_frame_producers_share_one_immediate_audio_reservation_cap() {
+        let mut reservations = AudioFrameReservations::default();
+        reservations.reset(23);
+
+        assert!(reservations.reserve(24));
+        assert!(!reservations.reserve(24));
+        assert_eq!(reservations.active_or_reserved, 24);
     }
 
     #[test]
