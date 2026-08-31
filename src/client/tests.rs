@@ -3,6 +3,39 @@
 use super::*;
 
 #[test]
+fn scheduled_evidence_capture_uses_stable_due_stems_and_stops_at_count() {
+    let mut plan = ScheduledScreenshots {
+        dir: std::path::PathBuf::from("target/captures"),
+        first_update: 2,
+        interval: 3,
+        remaining: 2,
+        update_index: 0,
+        captured: 0,
+    };
+
+    assert_eq!(plan.take_due(), None);
+    assert_eq!(plan.take_due(), None);
+    assert_eq!(
+        plan.take_due(),
+        Some((
+            std::path::PathBuf::from("target/captures"),
+            "brawler-000002".to_string(),
+        ))
+    );
+    assert_eq!(plan.take_due(), None);
+    assert_eq!(plan.take_due(), None);
+    assert_eq!(
+        plan.take_due(),
+        Some((
+            std::path::PathBuf::from("target/captures"),
+            "brawler-000005".to_string(),
+        ))
+    );
+    assert_eq!(plan.take_due(), None);
+    assert_eq!((plan.remaining, plan.captured), (0, 2));
+}
+
+#[test]
 fn client_network_plugin_does_not_select_gameplay_or_presentation() {
     let mut config = ClientNetworkConfig::new(1);
     config.transport = NetworkTransport::Udp;

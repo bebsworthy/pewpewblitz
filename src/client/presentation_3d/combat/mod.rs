@@ -10,8 +10,9 @@ mod fighter_ui;
 
 pub(super) use aim_preview::{reconcile_aim_preview_visuals, update_aim_preview};
 pub(super) use cone_spray::{reconcile_cone_spray_visuals, update_cone_spray_visuals};
-pub(super) use effects::{
-    CombatEffect3d, PendingCombatEffect, animate_attack_acceptance, cleanup_combat_effects,
+pub(super) use effects::animate_attack_acceptance;
+pub(in crate::client) use effects::{
+    CombatEffect3d, PendingCombatEffect, cleanup_combat_effects, collect_vfx_evidence_snapshot,
     materialize_combat_effects, resolve_vfx_requests,
 };
 pub(super) use entities::{

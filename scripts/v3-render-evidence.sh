@@ -4,6 +4,7 @@ set -euo pipefail
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 report_path=${1:-target/v3-render-evidence.txt}
 peer_report_path=${report_path}.peer
+capture_dir=${report_path}.captures
 bind_addr=${BRAWLER_RENDER_BIND:-127.0.0.1:5024}
 game_mode=${BRAWLER_RENDER_MODE:-wipeout}
 players_per_team=${BRAWLER_RENDER_PLAYERS_PER_TEAM:-}
@@ -105,8 +106,8 @@ for duration in "$warmup_seconds" "$measure_seconds"; do
 done
 
 cd "$project_dir"
-if [[ -e "$report_path" || -e "$peer_report_path" || -e "$client_one_log" || -e "$client_two_log" ]]; then
-    printf '%s\n' 'brawler render evidence: refusing to overwrite an existing report or client log' >&2
+if [[ -e "$report_path" || -e "$peer_report_path" || -e "$client_one_log" || -e "$client_two_log" || -e "$capture_dir" ]]; then
+    printf '%s\n' 'brawler render evidence: refusing to overwrite an existing report, client log, or capture directory' >&2
     exit 2
 fi
 
@@ -172,6 +173,8 @@ if [[ "$practice_smoke" == 1 ]]; then
     target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
         --auto-connect --product-practice-smoke --product-game-type "$game_type" --move-axis 1,0 \
         --window-size "$window_size" \
+        --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
+        --screenshot-count 3 \
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
         --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         ${measured_combat_flags:+$measured_combat_flags} \
@@ -180,6 +183,8 @@ else
     target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
         --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis 1,0 \
         --window-size "$window_size" \
+        --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
+        --screenshot-count 3 \
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
         --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         ${measured_combat_flags:+$measured_combat_flags} \
@@ -237,10 +242,12 @@ for completed_report in "${completed_reports[@]}"; do
     fi
 done
 if [[ "$practice_smoke" == 1 ]]; then
-    printf 'brawler render evidence: Practice %s passed; report=%s\n' "$game_type" "$report_path"
+    printf 'brawler render evidence: Practice %s passed; report=%s; captures=%s\n' \
+        "$game_type" "$report_path" "$capture_dir"
 elif [[ "$validate_peer" == 1 ]]; then
-    printf 'brawler render evidence: passed; reports=%s,%s\n' "$report_path" "$peer_report_path"
+    printf 'brawler render evidence: passed; reports=%s,%s; captures=%s\n' \
+        "$report_path" "$peer_report_path" "$capture_dir"
 else
-    printf 'brawler render evidence: passed; report=%s; pacing-peer=%s\n' \
-        "$report_path" "$peer_report_path"
+    printf 'brawler render evidence: passed; report=%s; pacing-peer=%s; captures=%s\n' \
+        "$report_path" "$peer_report_path" "$capture_dir"
 fi

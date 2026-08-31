@@ -3,12 +3,13 @@ use crate::client::vfx::{
     VfxLifetime, VfxMaterialKey, VfxProfile, VfxRegistry, VfxRendererFamily, VfxRequest,
 };
 use crate::combat::client::DeduplicatedCombatCue;
+use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 
 const MAX_EFFECTS: usize = 96;
 
 #[derive(Component)]
-pub(in super::super) struct CombatEffect3d {
+pub(in crate::client) struct CombatEffect3d {
     timer: Timer,
     expires_at_tick: Option<u64>,
     order: u64,
@@ -16,10 +17,10 @@ pub(in super::super) struct CombatEffect3d {
 }
 
 #[derive(Default)]
-pub(in super::super) struct CombatEffectSequence(u64);
+pub(in crate::client) struct CombatEffectSequence(u64);
 
 #[derive(Message)]
-pub(in super::super) struct PendingCombatEffect {
+pub(in crate::client) struct PendingCombatEffect {
     lifetime: Duration,
     expires_at_tick: Option<u64>,
     mesh: Handle<Mesh>,
@@ -156,7 +157,7 @@ pub(in super::super) fn animate_attack_acceptance(
     clippy::needless_pass_by_value,
     reason = "the renderer adapter resolves one bounded request batch against retained render assets"
 )]
-pub(in super::super) fn resolve_vfx_requests(
+pub(in crate::client) fn resolve_vfx_requests(
     mut requests: MessageReader<VfxRequest>,
     mut pending_effects: MessageWriter<PendingCombatEffect>,
     primitives: Res<Primitive3dAssets>,
@@ -180,7 +181,7 @@ fn ordered_vfx_requests(requests: impl IntoIterator<Item = VfxRequest>) -> Vec<V
     ordered
 }
 
-pub(in super::super) fn materialize_combat_effects(
+pub(in crate::client) fn materialize_combat_effects(
     mut commands: Commands,
     mut pending_effects: MessageReader<PendingCombatEffect>,
     effects: Query<(Entity, &CombatEffect3d)>,
@@ -251,7 +252,7 @@ fn reveal_ring_remaining_duration(
     clippy::needless_pass_by_value,
     reason = "Time is a Bevy system resource parameter"
 )]
-pub(in super::super) fn cleanup_combat_effects(
+pub(in crate::client) fn cleanup_combat_effects(
     mut commands: Commands,
     time: Res<Time<Real>>,
     authoritative_ticks: Query<&AuthoritativeTick>,
@@ -268,6 +269,129 @@ pub(in super::super) fn cleanup_combat_effects(
             commands.entity(entity).try_despawn();
         }
     }
+}
+
+/// Collects bounded presentation-owned VFX state for a screenshot evidence pair.
+///
+/// The snapshot intentionally reports renderer ownership rather than gameplay outcomes. Durable
+/// gameplay facts (projectiles, fields, fighters, and authoritative ticks) are captured by the
+/// ordinary evidence path alongside this renderer view.
+pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Value {
+    let mut transient_query = world.query::<(Entity, &CombatEffect3d, Option<&Name>)>();
+    let mut transient_effects = transient_query
+        .iter(world)
+        .map(|(entity, effect, name)| {
+            json!({
+                "entity": entity.to_bits(),
+                "profile_id": effect.profile_id,
+                "order": effect.order,
+                "label": name.map(Name::as_str),
+                "elapsed_seconds": effect.timer.elapsed_secs(),
+                "duration_seconds": effect.timer.duration().as_secs_f32(),
+                "authoritative_expires_at_tick": effect.expires_at_tick,
+            })
+        })
+        .collect::<Vec<_>>();
+    transient_effects.sort_by_key(|effect| effect["order"].as_u64().unwrap_or(u64::MAX));
+
+    let reduced_effects = world
+        .get_resource::<ClientShellSettings>()
+        .is_some_and(|settings| settings.reduced_combat_effects);
+    let primitive_world = world
+        .get_resource::<ImportedWorldFallbackPolicy>()
+        .is_some_and(|policy| matches!(policy, ImportedWorldFallbackPolicy::ForcePrimitive));
+    let mesh_assets = world.get_resource::<Assets<Mesh>>().map_or(0, Assets::len);
+    let material_assets = world
+        .get_resource::<Assets<StandardMaterial>>()
+        .map_or(0, Assets::len);
+    let image_assets = world.get_resource::<Assets<Image>>().map_or(0, Assets::len);
+    let elemental_fields =
+        serialized_component_snapshots::<crate::combat::ElementalFieldState>(world);
+    let concealment_fields =
+        serialized_component_snapshots::<crate::concealment::ConcealmentFieldState>(world);
+    let persistent_splashes =
+        serialized_component_snapshots::<crate::combat::PersistentSplashState>(world);
+    let cone_sprays = serialized_component_snapshots::<crate::combat::ConeSprayState>(world);
+    let sticky_blobs = sticky_blob_snapshots(world);
+
+    json!({
+        "catalog_fingerprint": vfx::embedded_vfx_catalog_fingerprint(),
+        "reduced_effects": reduced_effects,
+        "primitive_world": primitive_world,
+        "active": {
+            "visual_roots": component_count::<CombatVisualOwner>(world),
+            "transient_roots": transient_effects.len(),
+            "projectile_roots": component_count::<V3ProjectileVisual>(world),
+            "sentry_roots": component_count::<super::entities::SentryVisual3d>(world),
+            "concealment_field_roots": component_count::<super::entities::ConcealmentFieldVisual3d>(world),
+            "elemental_field_roots": component_count::<super::entities::ElementalFieldVisual3d>(world),
+            "persistent_splash_roots": component_count::<super::entities::PersistentSplashVisual3d>(world),
+            "sticky_blob_roots": component_count::<super::entities::StickyBlobVisual3d>(world),
+            "cone_spray_roots": component_count::<super::cone_spray::ConeSprayVisual3d>(world),
+            "status_roots": component_count::<super::fighter_feedback::StatusVisual3d>(world),
+            "dash_trail_roots": component_count::<super::fighter_feedback::DashTrailVisual3d>(world),
+        },
+        "assets": {
+            "meshes": mesh_assets,
+            "standard_materials": material_assets,
+            "images": image_assets,
+        },
+        "transient_effects": transient_effects,
+        "persistent_facts": {
+            "elemental_fields": elemental_fields,
+            "concealment_fields": concealment_fields,
+            "persistent_splashes": persistent_splashes,
+            "cone_sprays": cone_sprays,
+            "sticky_blobs": sticky_blobs,
+        },
+    })
+}
+
+fn component_count<T: Component>(world: &mut World) -> usize {
+    world
+        .query_filtered::<Entity, With<T>>()
+        .iter(world)
+        .count()
+}
+
+fn serialized_component_snapshots<T>(world: &mut World) -> Vec<Value>
+where
+    T: Component + serde::Serialize,
+{
+    let mut query = world.query::<(Entity, &T)>();
+    let mut snapshots = query
+        .iter(world)
+        .map(|(entity, state)| {
+            json!({
+                "entity": entity.to_bits(),
+                "state": state,
+            })
+        })
+        .collect::<Vec<_>>();
+    snapshots.sort_by_key(|snapshot| snapshot["entity"].as_u64().unwrap_or(u64::MAX));
+    snapshots
+}
+
+fn sticky_blob_snapshots(world: &mut World) -> Vec<Value> {
+    let mut query = world.query::<(
+        Entity,
+        &crate::combat::StickyBlobState,
+        Option<&Position>,
+        Option<&crate::combat::ReplicatedAttackSource>,
+    )>();
+    let mut snapshots = query
+        .iter(world)
+        .map(|(entity, state, position, source)| {
+            json!({
+                "entity": entity.to_bits(),
+                "position": position.map(|position| [position.x, position.y]),
+                "state": state,
+                "source": source,
+            })
+        })
+        .collect::<Vec<_>>();
+    snapshots.sort_by_key(|snapshot| snapshot["entity"].as_u64().unwrap_or(u64::MAX));
+    snapshots
 }
 
 #[cfg(test)]
@@ -324,6 +448,55 @@ mod tests {
             profile_id: label.to_string(),
             concurrency_cap: MAX_EFFECTS,
         }
+    }
+
+    #[test]
+    fn evidence_snapshot_names_catalog_variant_and_active_lifecycle_owners() {
+        let mut world = World::new();
+        world.insert_resource(ClientShellSettings {
+            reduced_combat_effects: true,
+            ..Default::default()
+        });
+        world.insert_resource(ImportedWorldFallbackPolicy::ForcePrimitive);
+        world.spawn((
+            CombatEffect3d {
+                timer: Timer::new(Duration::from_millis(180), TimerMode::Once),
+                expires_at_tick: None,
+                order: 7,
+                profile_id: "impact".to_string(),
+            },
+            Name::new("Impact evidence fixture"),
+        ));
+        let owner = world.spawn_empty().id();
+        world.spawn((
+            CombatVisualOwner(owner),
+            super::super::entities::ElementalFieldVisual3d,
+        ));
+        world.spawn(crate::combat::ElementalFieldState {
+            id: crate::combat::ElementalFieldId(11),
+            kind: crate::combat::ElementalFieldKind::Fire,
+            owner_network_entity_id: NetworkEntityId(12),
+            team_id: crate::combat::TeamId(1),
+            center: crate::combat::WorldPoint { x: 2.0, y: 3.0 },
+            radius_milliunits: 64_000,
+            activated_at_tick: 20,
+            next_pulse_tick: 30,
+            expires_at_tick: 80,
+        });
+
+        let snapshot = collect_vfx_evidence_snapshot(&mut world);
+
+        assert_eq!(snapshot["reduced_effects"], true);
+        assert_eq!(snapshot["primitive_world"], true);
+        assert_eq!(snapshot["active"]["transient_roots"], 1);
+        assert_eq!(snapshot["active"]["elemental_field_roots"], 1);
+        assert_eq!(snapshot["transient_effects"][0]["profile_id"], "impact");
+        assert_eq!(snapshot["transient_effects"][0]["order"], 7);
+        assert_eq!(
+            snapshot["persistent_facts"]["elemental_fields"][0]["state"]["kind"],
+            "Fire"
+        );
+        assert_ne!(snapshot["catalog_fingerprint"], 0);
     }
 
     fn effect_allocation_app() -> App {

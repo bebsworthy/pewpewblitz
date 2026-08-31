@@ -192,6 +192,157 @@ assignment.
 - reduced-effects mode decreases redundant effect size, lifetime, and count but never hides required
   objectives, previews, projectiles, statuses, or relationship identity.
 
+### Composable combat VFX contract
+
+Combat VFX is client-only presentation over gameplay facts. Gameplay and protocol types own stable
+source identity, exact planar geometry, authoritative activation/deadline ticks, relationship, and
+semantic effects. The client resolves those facts into a bounded visual signature and a validated
+layered recipe. A renderer adapter materializes the recipe without deciding collision, hits,
+damage, status application, area membership, targeting, expiry, or cleanup truth.
+
+The production flow is:
+
+```text
+replicated state / ordered cue
+            |
+            v
+feature-owned semantic adapter
+            |
+            v
+bounded visual signature ---- relationship + presentation variant
+            |
+            v
+validated recipe resolver ---- fallback + reduced/primitive policy
+            |
+            v
+lifecycle-owned materializer -- transient / attached / persistent
+            |
+            v
+shared meshes, materials, optional particles, diagnostics, cleanup
+```
+
+The current pre-recipe presentation paths are intentionally preserved while the migration is
+sequenced:
+
+| Path | Input and owner | Current materialization | Lifetime and recovery |
+| --- | --- | --- | --- |
+| Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One `VfxProfile`: sphere or ground ring, one material, scale, anchor, lifetime | Fixed real-time timer or authoritative Reveal Scan deadline; oldest-first total and per-profile eviction; reduced profile |
+| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Projectile visual root and shared primitive body | Root follows the replicated owner and disappears with it; lob height derives from replicated launch/landing ticks |
+| Elemental/concealment field | Replicated field state | Low disc/ring root selected by semantic field/team | Recreated after late join from public state; owner removal is cleanup truth |
+| Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
+| Sticky payload | Replicated position, fuse ticks, radius, role, and attack source | Moving body, exact warning ring, authoritative fuse-progress fill | Recreated at the observed tick and removed with the owner |
+| Cone spray | Replicated origin, facing, propagation and deadline | Fixed bounded clipped-segment root | Reconstructed from authoritative tick; owner removal clears all segments |
+| Fighter status/dash | Replicated status, ability, concealment, and observed tick | Fighter-owned status markers and bounded trail | Reconciled from current state and removed on status/owner lifecycle |
+
+Aim previews remain intent UI rather than weapon VFX recipes. Imported fighter/weapon scenes and
+map visuals retain their existing owners. The recipe system may reuse presentation assets, but it
+does not become a second gameplay-world renderer.
+
+#### Semantic signature
+
+The first production signature is a typed value, not an unrestricted tag set. It contains:
+
+- carrier: point transient, straight projectile, lobbed projectile, melee, cone, persistent area,
+  attached status, sticky payload, deployable, or world/object feedback;
+- phase: activation, travel, impact, active, pulse, expiry, or interruption;
+- accent: neutral, Cold, Fire, Poison, Restoration, Reveal, Demolition, or another implemented
+  semantic family;
+- observer relationship: self, ally, enemy, or neutral;
+- one optional typed contextual override owned by the source feature, such as an ultimate-specific
+  activation treatment;
+- typed geometry: point, direction/normal, projectile body, circle, oriented rectangle, or cone;
+- stable presentation identity: combat event, attack plus delivery index, replicated field/entity
+  identity, or an explicit VfxLab seed;
+- authoritative activation, observed, and expiry ticks where the lifecycle is persistent;
+- normal, reduced, or primitive presentation variant.
+
+Carrier, phase, accent, and relationship remain independent. Team relationship may add a rim,
+marker, or secondary channel but may not overwrite elemental identity. Contextual overrides are a
+closed owned enum and may replace only the documented recipe selection step; they do not create a
+general priority/tag engine.
+
+The client does not initially need a protocol change for exact weapon identity. Delivery entities
+already replicate `ReplicatedAttackSource`, whose `AttackSource` includes the immutable
+`WeaponRecipeFingerprint`, source kind, team, owner, attack ID, and ultimate/deployable identity.
+Fighters also replicate `ResolvedMatchLoadout`. The resolver will maintain a FIFO-bounded cache of
+at most 512 attack signatures, learning exact fingerprints from replicated delivery state and
+snapshotting the current loadout at `AttackAccepted`. A signature remains valid after a projectile
+or source visual disappears. Persistent Splash carries its effect semantics directly; elemental
+fields carry their kind; armed sticky entities retain their replicated attack source. Missing
+identity fails to the neutral recipe. A wire migration is warranted only if focused lifecycle tests
+later demonstrate an accepted cue path that cannot be observed or cached before its source is gone.
+
+#### Recipe and layer schema
+
+The first catalog evolution uses three bounded tables: semantic request mappings, recipes, and
+reusable layers. IDs are client-only validated lowercase ASCII names and never enter gameplay
+content fingerprints or protocol state.
+
+A recipe owns an ordered list of layer IDs, a total concurrency cap, one fixed-lifetime fallback
+recipe, and an optional reduced recipe. Recipes do not recursively include other recipes. Fallback
+and reduced references must exist and be acyclic. Resolution expands to at most eight layers.
+
+A layer owns:
+
+- one implemented source: mesh, bounded trail, or optional particle adapter;
+- a typed primitive/material key rather than an asset path;
+- an anchor and geometry policy derived from supplied authoritative facts;
+- a bounded timeline;
+- shadow flags and optional orientation policy;
+- a readability class: `CriticalGeometry`, `Identity`, or `Decorative`.
+
+The demonstrated mesh vocabulary is sphere/flash body, disc/fill, annulus/boundary, unit cuboid or
+segment, exact projectile body, and lobbed body/shadow. A new primitive is added only with a real
+carrier/layer use. The first mesh migration authors delay, fixed or authoritative duration, easing,
+and transform/scale keyframes. It retains static material alpha. Per-instance animated alpha is not
+authored until a bounded material-uniform or explicitly reclaimed material-pool implementation is
+proven; cloning `StandardMaterial` every frame or leaving per-effect assets behind is forbidden.
+
+Initial validated engine bounds are:
+
+- 64 semantic request mappings;
+- 128 recipes;
+- 256 reusable layers;
+- eight expanded layers per recipe;
+- 96 active transient recipe roots, preserving the current total cap;
+- a maximum fixed transient duration of 10 seconds;
+- per-recipe concurrency from 1 through 96;
+- 512 cached attack signatures;
+- no per-frame mesh or material asset creation;
+- persistent-root counts remain bounded by their authoritative gameplay caps rather than receiving
+  a second VFX-owned capacity rule.
+
+Phase-one recipes use shared retained mesh and material handles. The later particle gate must set a
+separate measured emitter/particle cap before a particle field can be authored.
+
+#### Determinism, variants, and cleanup
+
+Request merge order remains explicit producer rank then stable event ID. Mesh timelines sample
+explicit elapsed time; persistent timelines sample authoritative ticks. Randomized presentation
+uses counter-based hash sampling from a versioned tuple containing the stable presentation
+identity, recipe ID, layer ID, occurrence index, and property salt. It does not consume a mutable
+global random stream, so adding one decorative choice cannot perturb other layers. The same tuple
+selects the same bounded values. GPU particle motion may be statistically rather than pixel
+identical across hardware, but its seed and parameter bounds remain captured.
+
+Every recipe variant obeys these rules:
+
+- `CriticalGeometry` is present in normal, reduced, and primitive variants and uses an available
+  primitive fallback;
+- `Identity` retains at least one non-color motion, silhouette, or timing channel in reduced and
+  primitive variants;
+- `Decorative` may be shortened, thinned, or omitted;
+- bloom, imported assets, particles, and custom shaders are never required for counterplay;
+- exact radius, rectangle, cone, projectile footprint, impact point, and authoritative deadline are
+  derived from gameplay facts rather than authored approximations.
+
+Transient recipe roots retain oldest-first total/per-recipe eviction and timer/deadline cleanup.
+Attached and persistent roots retain `CombatVisualOwner` and their source entity as cleanup truth.
+Owner removal, interruption, reset, match transition, and failed layer materialization must still
+remove the complete root. Native render evidence records the VFX catalog fingerprint, selected
+presentation variants, active lifecycle-root counts, transient profile/order/timing, and retained
+asset counts alongside the authoritative state and rendered PNG.
+
 ## Environments, themes, and geometry
 
 Visual footprints must agree with authoritative planar shapes:

@@ -15,6 +15,14 @@ const MAX_VFX_FIXED_WORLD: f32 =
     crate::map::MAX_MAP_DIMENSION_CELLS as f32 * crate::map::MAP_CELL_SIZE_WORLD;
 const MAX_VFX_RADIUS_MULTIPLIER: f32 = 16.0;
 
+/// Stable evidence identity for the exact embedded client-only presentation catalog.
+///
+/// This deliberately does not contribute to the gameplay-content or protocol fingerprint. It
+/// lets native captures and `VfxLab` previews name the presentation input that produced a frame.
+pub(crate) fn embedded_vfx_catalog_fingerprint() -> u64 {
+    crate::content::fnv1a64(VFX_CATALOG.as_bytes())
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) enum VfxRendererFamily {
     Sphere,

@@ -10,9 +10,13 @@ pub(crate) use producers::{
     WorldObjectVfxProducerPlugin,
 };
 
-pub(crate) use catalog::{VfxLifetime, VfxMaterialKey, VfxProfile, VfxRendererFamily};
+pub(crate) use catalog::{
+    VfxLifetime, VfxMaterialKey, VfxProfile, VfxRendererFamily, embedded_vfx_catalog_fingerprint,
+};
+#[cfg(test)]
+pub(crate) use registry::VfxRegistryPlugin;
 pub(crate) use registry::{
-    VfxAppExt, VfxRegistry, VfxRegistryPlugin, VfxRequestCapabilities, VfxRequestRegistration,
+    ProductionVfxPlugin, VfxAppExt, VfxRegistry, VfxRequestCapabilities, VfxRequestRegistration,
 };
 pub(crate) use request::{
     COMBAT_DAMAGE_VFX, COMBAT_IMPACT_VFX, COMBAT_MUZZLE_VFX, COMBAT_RESET_VFX,

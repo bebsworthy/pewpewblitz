@@ -85,6 +85,18 @@ See the [Balance Lab operator and maintenance guide](./docs/15-balance-lab.md) f
 limitations, and the required checklist when fighter, weapon, ultimate, passive, map-effect, mode,
 or world-object tuning changes.
 
+To inspect the current production VFX catalog without a server or match, open the read-only
+development viewer:
+
+```sh
+just vfx-lab
+```
+
+Use Left/Right to select one of the 15 production semantic mappings, Space to replay it, R to
+toggle the production reduced-effects profile, P to inspect the primitive variant, and Escape to
+quit. `just vfx-lab '--effect world-object.explosion --reduced'` starts at an exact request key.
+The current viewer is intentionally read-only; BRL-0096 owns the later authoring workbench.
+
 ## Canonical commands
 
 Run `just` to list the supported everyday surface.
@@ -94,6 +106,7 @@ Run `just` to list the supported everyday surface.
 | `just server` | Start the routed supervisor and production lobby on localhost |
 | `just balance-lab` | Start Balance Lab, one interactive client, and its default-browser page |
 | `just client` | Open one interactive product client against the local server |
+| `just vfx-lab [args]` | Open the offline read-only production VFX viewer |
 | `just run <N>` | Build once, start the routed server, and open exactly 1–16 interactive clients |
 | `just fmt` | Format all Rust sources |
 | `just check` | Check every independently buildable role |
@@ -171,7 +184,9 @@ and bindings shape local intent before quantization and never become server auth
 
 Evidence captures are saved as matching PNG/JSON pairs under the platform Pictures directory at
 `PewPew Blitz/Captures` (or the application data directory when Pictures is unavailable).
-`BRAWLER_CAPTURE_DIR` overrides that destination for troubleshooting and automation.
+`BRAWLER_CAPTURE_DIR` overrides that destination for troubleshooting and automation. The
+`--screenshot-dir` scheduled visual-verification path writes the same paired capture format into
+its explicit directory.
 
 Recovery is authored per fighter profile and weapon. The Default fighter recovers `100` health per
 second; Lightweight and Reinforced recover `10`, all after `3.0` seconds without a server-accepted

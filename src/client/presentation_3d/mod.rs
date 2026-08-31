@@ -31,6 +31,11 @@ pub(super) use camera::cursor_ground_point;
 use camera::{
     CAMERA_DISTANCE, CAMERA_ELEVATION_RADIANS, CAMERA_VERTICAL_FOV_RADIANS, follow_3d_camera,
 };
+pub(super) use combat::collect_vfx_evidence_snapshot;
+pub(in crate::client) use combat::{
+    CombatEffect3d, PendingCombatEffect, cleanup_combat_effects, materialize_combat_effects,
+    resolve_vfx_requests,
+};
 use coordinates::{ground_point, ground_position, ground_rotation};
 use map::{GeneratedMapMesh, Presented3dMap};
 use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_health_ui};
@@ -181,7 +186,7 @@ pub(crate) struct Imported3dAssets {
 }
 
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum ImportedWorldFallbackPolicy {
+pub(in crate::client) enum ImportedWorldFallbackPolicy {
     #[default]
     Auto,
     ForcePrimitive,
@@ -265,14 +270,9 @@ impl Plugin for WorldPresentationPlugin {
             app.add_plugins(diagnostics::RenderMeasurementPlugin(config));
         }
         configure_world_presentation_schedule(app);
-        app.add_plugins(vfx::VfxRegistryPlugin).add_plugins((
-            vfx::CombatVfxProducerPlugin,
-            vfx::WorldObjectVfxProducerPlugin,
-            vfx::PickupVfxProducerPlugin,
-            vfx::HeistVfxProducerPlugin,
-        ));
+        app.add_plugins(vfx::ProductionVfxPlugin);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
-            .add_message::<combat::PendingCombatEffect>()
+            .add_message::<PendingCombatEffect>()
             .init_resource::<combat::ConcealedMaterialVariants>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
             .init_resource::<DamageableObjectHealthUiIndex>()
@@ -326,8 +326,8 @@ impl Plugin for WorldPresentationPlugin {
                 Update,
                 (
                     combat::animate_attack_acceptance,
-                    combat::resolve_vfx_requests.after(vfx::VfxRequestSet),
-                    combat::materialize_combat_effects,
+                    resolve_vfx_requests.after(vfx::VfxRequestSet),
+                    materialize_combat_effects,
                 )
                     .chain()
                     .in_set(WorldPresentationSet::ConsumeCues),
@@ -351,7 +351,7 @@ impl Plugin for WorldPresentationPlugin {
             )
             .add_systems(
                 Update,
-                combat::cleanup_combat_effects.in_set(WorldPresentationSet::Cleanup),
+                cleanup_combat_effects.in_set(WorldPresentationSet::Cleanup),
             )
             .add_systems(
                 PostUpdate,
@@ -991,7 +991,7 @@ fn update_damageable_map_visuals(
     clippy::too_many_lines,
     reason = "startup constructs one bounded shared mesh/material palette and the two cameras"
 )]
-fn setup_3d_foundation(
+pub(in crate::client) fn setup_3d_foundation(
     mut commands: Commands,
     builds: Res<crate::builds::BuildCatalogResource>,
     mut meshes: ResMut<Assets<Mesh>>,

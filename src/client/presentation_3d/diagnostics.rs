@@ -144,7 +144,7 @@ struct RenderEvidenceQueries<'w, 's> {
     all: Query<'w, 's, Entity>,
     mesh_entities: Query<'w, 's, (), With<Mesh3d>>,
     visual_roots: Query<'w, 's, (), With<CombatVisualOwner>>,
-    effects: Query<'w, 's, (), With<combat::CombatEffect3d>>,
+    effects: Query<'w, 's, (), With<CombatEffect3d>>,
     map_members: Query<'w, 's, (), With<crate::map::MapPresentationMember>>,
     dynamic_map_visuals: Query<'w, 's, (), With<DynamicMapVisual>>,
     fighters: Query<'w, 's, (), With<Fighter>>,

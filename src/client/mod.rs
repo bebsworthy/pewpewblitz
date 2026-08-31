@@ -73,6 +73,7 @@ mod settings;
 mod shell;
 mod targeting;
 pub(crate) mod vfx;
+mod vfx_lab;
 pub(crate) use assets::ClientAssetHandles;
 pub use flow::{
     CancelMatchStartConfirmation, ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError,
@@ -102,6 +103,7 @@ pub use settings::{
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
 pub use shell::ClientShellPlugin;
+pub use vfx_lab::{VfxLabConfig, build_vfx_lab_app};
 
 /// Installs client-side gameplay state reconstructed from authoritative replication and messages.
 /// Connection lifecycle and transport remain owned by [`ClientNetworkPlugin`].
@@ -668,7 +670,7 @@ fn gameplay_window_resolution(window_size: Option<(u16, u16)>) -> WindowResoluti
     WindowResolution::new(width, height)
 }
 
-/// In-process frame capture state for windowed visual verification.
+/// In-process paired frame/state capture state for windowed visual verification.
 #[derive(Resource, Debug)]
 struct ScheduledScreenshots {
     dir: std::path::PathBuf,
@@ -679,23 +681,33 @@ struct ScheduledScreenshots {
     captured: u32,
 }
 
-fn capture_scheduled_screenshot(mut commands: Commands, mut plan: ResMut<ScheduledScreenshots>) {
-    if plan.remaining == 0 {
-        return;
+impl ScheduledScreenshots {
+    fn take_due(&mut self) -> Option<(std::path::PathBuf, String)> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let current = self.update_index;
+        self.update_index = current.saturating_add(1);
+        let due = self.first_update + self.interval * self.captured;
+        if current < due {
+            return None;
+        }
+        self.remaining -= 1;
+        self.captured += 1;
+        Some((self.dir.clone(), format!("brawler-{current:06}")))
     }
-    let current = plan.update_index;
-    plan.update_index = current.saturating_add(1);
-    let due = plan.first_update + plan.interval * plan.captured;
-    if current < due {
-        return;
-    }
-    let path = plan.dir.join(format!("brawler-{current:06}.png"));
-    info!(path = %path.display(), "capturing scheduled screenshot");
-    commands
-        .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
-        .observe(bevy::render::view::screenshot::save_to_disk(path));
-    plan.remaining -= 1;
-    plan.captured += 1;
+}
+
+fn capture_scheduled_screenshot(world: &mut World) {
+    let capture = {
+        let mut plan = world.resource_mut::<ScheduledScreenshots>();
+        let Some(capture) = plan.take_due() else {
+            return;
+        };
+        capture
+    };
+    info!(directory = %capture.0.display(), stem = %capture.1, "capturing scheduled frame + client state");
+    evidence_capture::request_scheduled_evidence_capture(world, &capture.0, &capture.1);
 }
 
 const RENDER_30_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 30);

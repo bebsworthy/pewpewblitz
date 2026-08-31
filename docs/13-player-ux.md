@@ -153,11 +153,14 @@ directory at `PewPew Blitz/Captures`; if Pictures is unavailable, the applicatio
 directory is used. `BRAWLER_CAPTURE_DIR` provides an explicit troubleshooting and automation
 override.
 
-The JSON records the build/protocol/content identity, wall-clock capture time, latest observed
-authoritative tick, window and camera, local connection/input context, resolved and presented map,
-match/mode state, and bounded client-visible fighters, projectiles, sentries, world objects,
-objectives, and pickups. It records only state already present in the client world and excludes
-profile credentials, persistence data, hidden server state, and server-only recovery accumulators.
+Capture schema 2 records the build/protocol/content identity, wall-clock capture time, latest
+observed authoritative tick, window and camera, local connection/input context, resolved and
+presented map, match/mode state, and bounded client-visible fighters, projectiles, sentries, world
+objects, objectives, and pickups. It also records the client-only VFX catalog fingerprint,
+normal/reduced and primitive presentation choices, active transient profile/order/timing, current
+VFX lifecycle-root counts, and retained mesh/material/image counts. It records only state already
+present in the client world and excludes profile credentials, persistence data, hidden server
+state, and server-only recovery accumulators.
 Opaque 128-bit match identities are written as decimal strings so capture works for the complete
 routed identity space without JSON integer-range failures or downstream precision loss.
 If either member of the pair cannot be saved, the capture is reported as failed rather than

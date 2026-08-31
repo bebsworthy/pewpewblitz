@@ -30,7 +30,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const CAPTURE_SCHEMA_VERSION: u16 = 1;
+const CAPTURE_SCHEMA_VERSION: u16 = 2;
 const TOAST_FRAMES: u16 = 240;
 
 pub(super) struct ClientEvidenceCapturePlugin;
@@ -131,15 +131,32 @@ fn request_evidence_capture(world: &mut World, mut sequence: Local<u32>) {
         return;
     }
 
-    let unix_millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        });
+    let unix_millis = current_unix_millis();
     let suffix = *sequence;
     *sequence = sequence.saturating_add(1);
     let directory = world.resource::<EvidenceCaptureDirectory>().0.clone();
     let stem = format!("brawler-{unix_millis}-{suffix:03}");
+    request_evidence_capture_pair(world, &directory, &stem, unix_millis);
+}
+
+pub(super) fn request_scheduled_evidence_capture(world: &mut World, directory: &Path, stem: &str) {
+    request_evidence_capture_pair(world, directory, stem, current_unix_millis());
+}
+
+fn current_unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
+fn request_evidence_capture_pair(
+    world: &mut World,
+    directory: &Path,
+    stem: &str,
+    unix_millis: u64,
+) {
     let png_path = directory.join(format!("{stem}.png"));
     let json_path = directory.join(format!("{stem}.json"));
     let snapshot = collect_client_snapshot(world, unix_millis);
@@ -236,6 +253,7 @@ fn collect_client_snapshot(world: &mut World, unix_millis: u64) -> Value {
         "match": collect_match_snapshot(world),
         "fighters": collect_fighter_snapshots(world),
         "projectiles": collect_projectile_snapshots(world),
+        "vfx": super::presentation_3d::collect_vfx_evidence_snapshot(world),
         "sentries": collect_sentry_snapshots(world),
         "damageable_objects": collect_damageable_object_snapshots(world),
         "objectives": collect_objective_snapshots(world),

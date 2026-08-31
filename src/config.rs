@@ -318,7 +318,7 @@ pub struct ClientNetworkConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowedCombatDemo;
 
-/// In-process screenshot capture plan for windowed visual verification. Frames are read
+/// In-process paired frame/state capture plan for windowed visual verification. Frames are read
 /// from the render surface, so no operating-system screen-recording permission is needed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScreenshotSchedule {

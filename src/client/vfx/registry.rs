@@ -3,7 +3,10 @@
 use bevy::prelude::{App, Plugin, Resource};
 use std::collections::BTreeSet;
 
-use super::{VfxLifetime, VfxProfile, VfxRequest, VfxRequestKey, catalog::VfxCatalog};
+use super::{
+    CombatVfxProducerPlugin, HeistVfxProducerPlugin, PickupVfxProducerPlugin, VfxLifetime,
+    VfxProfile, VfxRequest, VfxRequestKey, WorldObjectVfxProducerPlugin, catalog::VfxCatalog,
+};
 
 pub(crate) const MAX_VFX_REQUEST_REGISTRATIONS: usize = 32;
 
@@ -190,8 +193,7 @@ impl VfxRegistry {
         builder.seal(catalog)
     }
 
-    #[cfg(test)]
-    fn registrations(&self) -> &[VfxRequestRegistration] {
+    pub(crate) fn registrations(&self) -> &[VfxRequestRegistration] {
         &self.registrations
     }
 }
@@ -238,6 +240,23 @@ impl Plugin for VfxRegistryPlugin {
             .seal(catalog)
             .expect("installed VFX producers and authored mappings must agree");
         app.insert_resource(registry);
+    }
+}
+
+/// Installs the production VFX catalog plus every feature-owned semantic request adapter.
+///
+/// Gameplay and `VfxLab` share this exact sealed registry so the isolated viewer cannot drift to
+/// a second catalog or request-registration contract.
+pub(crate) struct ProductionVfxPlugin;
+
+impl Plugin for ProductionVfxPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(VfxRegistryPlugin).add_plugins((
+            CombatVfxProducerPlugin,
+            WorldObjectVfxProducerPlugin,
+            PickupVfxProducerPlugin,
+            HeistVfxProducerPlugin,
+        ));
     }
 }
 
