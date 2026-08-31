@@ -82,8 +82,10 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) sentry_body: Handle<Mesh>,
     pub(crate) ground_ring: Handle<Mesh>,
     pub(crate) area_ring: Handle<Mesh>,
+    pub(crate) area_thin_ring: Handle<Mesh>,
     pub(crate) area_disc: Handle<Mesh>,
     pub(crate) effect_sphere: Handle<Mesh>,
+    pub(crate) fire_tongue: Handle<Mesh>,
     pub(crate) barrel_body: Handle<Mesh>,
 }
 
@@ -115,6 +117,9 @@ pub(crate) struct Material3dAssets {
     pub(crate) elemental_cold_bright: Handle<StandardMaterial>,
     pub(crate) elemental_fire: Handle<StandardMaterial>,
     pub(crate) elemental_fire_bright: Handle<StandardMaterial>,
+    pub(crate) elemental_fire_fill: Handle<StandardMaterial>,
+    pub(crate) elemental_fire_hot: Handle<StandardMaterial>,
+    pub(in crate::client) elemental_fire_area: Handle<combat::FireAreaMaterial>,
     pub(crate) elemental_poison: Handle<StandardMaterial>,
     pub(crate) elemental_restoration: Handle<StandardMaterial>,
     pub(crate) sticky_blob: Handle<StandardMaterial>,
@@ -279,7 +284,7 @@ impl Plugin for WorldPresentationPlugin {
             app.add_plugins(diagnostics::RenderMeasurementPlugin(config));
         }
         configure_world_presentation_schedule(app);
-        app.add_plugins(vfx::ProductionVfxPlugin);
+        app.add_plugins((vfx::ProductionVfxPlugin, combat::FireAreaMaterialPlugin));
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .add_message::<PendingCombatEffect>()
             .init_resource::<combat::ConcealedMaterialVariants>()
@@ -353,6 +358,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::update_sticky_blob_fuse_progress,
                     combat::update_cone_spray_visuals,
                     combat::animate_elemental_motion_accents,
+                    combat::animate_fire_area_material,
                     combat::update_aim_preview,
                     animate_combat_effect_layers,
                     update_character_animation,
@@ -1007,6 +1013,7 @@ pub(in crate::client) fn setup_3d_foundation(
     builds: Res<crate::builds::BuildCatalogResource>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut fire_area_materials: ResMut<Assets<combat::FireAreaMaterial>>,
 ) {
     let fighter_radius = builds.0.fighter_body.radius;
     let fighter_metrics = FighterPresentationMetrics {
@@ -1026,8 +1033,10 @@ pub(in crate::client) fn setup_3d_foundation(
         sentry_body: meshes.add(Cylinder::new(15.0, 24.0)),
         ground_ring: meshes.add(Annulus::new(fighter_radius - 3.0, fighter_radius)),
         area_ring: meshes.add(Annulus::new(0.93, 1.0)),
+        area_thin_ring: meshes.add(Annulus::new(0.978, 1.0)),
         area_disc: meshes.add(Circle::new(1.0)),
         effect_sphere: meshes.add(Sphere::new(1.0)),
+        fire_tongue: meshes.add(fire_tongue_mesh()),
         barrel_body: meshes.add(Cylinder::new(16.0, 28.0)),
     };
     let matte = |color: Color| StandardMaterial {
@@ -1144,6 +1153,20 @@ pub(in crate::client) fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
+        elemental_fire_fill: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.72, 0.055, 0.008, 0.13),
+            emissive: LinearRgba::new(0.32, 0.018, 0.002, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        elemental_fire_hot: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.82, 0.18),
+            emissive: LinearRgba::new(4.2, 1.65, 0.05, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        elemental_fire_area: fire_area_materials.add(combat::FireAreaMaterial::default()),
         elemental_poison: materials.add(StandardMaterial {
             base_color: Color::srgba(0.32, 0.92, 0.12, 0.34),
             emissive: LinearRgba::new(0.2, 1.5, 0.04, 1.0),
@@ -1315,6 +1338,33 @@ fn fighter_facing_mesh(fighter_radius: f32) -> Mesh {
         indices.extend([0, segment + 1, segment + 2]);
     }
 
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U16(indices));
+    mesh
+}
+
+fn fire_tongue_mesh() -> Mesh {
+    let positions = vec![
+        [-0.50, 0.0, 0.0],
+        [0.50, 0.0, 0.0],
+        [0.34, 0.28, 0.0],
+        [0.16, 0.52, 0.0],
+        [0.02, 1.0, 0.0],
+        [-0.14, 0.58, 0.0],
+        [-0.34, 0.30, 0.0],
+    ];
+    let normals = vec![[0.0, 0.0, 1.0]; positions.len()];
+    let uvs = positions
+        .iter()
+        .map(|position| [position[0] + 0.5, position[1]])
+        .collect::<Vec<_>>();
+    let indices = vec![0, 1, 2, 0, 2, 6, 6, 2, 3, 6, 3, 5, 5, 3, 4];
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),

@@ -231,7 +231,7 @@ it does not replace these ownership and cleanup paths:
 | --- | --- | --- | --- |
 | Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with one to eight authored mesh-layer children, each selecting a retained primitive/material, scale, anchor, and timeline | Root lifetime is the maximum layer delay plus duration or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
 | Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Cold adds slow crystal fins and Fire adds fast trailing lobes; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height derives from replicated launch/landing ticks |
-| Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion and Fire uses fast rising flame motion | Recreated after late join from public state; owner removal is cleanup truth |
+| Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained procedural material for a coherent turbulent circumference, layered heat bands, and transparent center; reduced/primitive Fire uses bounded tapered mesh tongues | Recreated after late join from public state; owner removal is cleanup truth |
 | Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary; circular Cold/Fire areas reuse the elemental area style | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
 | Sticky payload | Replicated position, fuse ticks, radius, role, and attack source | Moving body, exact warning ring, authoritative fuse-progress fill | Recreated at the observed tick and removed with the owner |
 | Cone spray | Replicated origin, facing, propagation and deadline | Fixed bounded clipped-segment root | Reconstructed from authoritative tick; owner removal clears all segments |
@@ -343,6 +343,13 @@ Every recipe variant obeys these rules:
 - bloom, imported assets, particles, and custom shaders are never required for counterplay;
 - exact radius, rectangle, cone, projectile footprint, impact point, and authoritative deadline are
   derived from gameplay facts rather than authored approximations.
+
+The normal Fire-area material is the demonstrated optional-shader case. Its periodic noise field is
+sampled from authoritative ticks, so pause, step, and replay do not depend on wall-clock time. It
+draws only the decorative turbulent circumference and halo. A separate retained annulus always
+draws the exact authoritative radius, and reduced/primitive variants replace the shader with shared
+fill, ring, and tapered-tongue meshes. The material handle is shared; animation updates one retained
+uniform and does not allocate per area or per frame.
 
 Transient recipe roots retain oldest-first total/per-recipe eviction and timer/deadline cleanup.
 Attached and persistent roots retain `CombatVisualOwner` and their source entity as cleanup truth.

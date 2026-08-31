@@ -73,3 +73,47 @@ Implemented:
 Verification: focused VfxLab tests passed (3), strict client Clippy passed, and native paired evidence at `target/brl-0101-feedback-guide` confirmed the guide is legible beside a normal Cold field with one fighter reference inside and one outside its exact radius.
 
 Feedback remains awaiting user confirmation after the corrected viewer is tried.
+
+# Playtest feedback — production quality gap, 2026-08-31
+
+The supplied native screenshot and 1.11-second reference recording reject the current Fire area presentation. The current flat red fill, uniform annulus, and sparse round lobes prove the data/lifecycle path but read as debug primitives rather than a polished combat effect.
+
+The reference establishes these required quality channels:
+
+- a coherent living circumference rather than isolated orbiting dots;
+- an irregular flame silhouette with many tapered inward tongues;
+- at least two visible emissive color/depth bands, with a hot yellow-orange edge and darker orange/red body;
+- continuously staggered motion around the circumference rather than synchronized pulsing;
+- a calm, transparent center that preserves fighters and terrain;
+- an exact readable gameplay boundary beneath the decorative flame silhouette;
+- normal presentation quality that does not depend on the reduced/primitive fallback looking identical.
+
+Correction scope:
+
+1. Replace Fire area spheres with a retained tapered flame-tongue mesh distributed densely and deterministically around the circumference.
+2. Add staggered per-tongue radial flicker, scale, and small angular variation from stable identity and authoritative ticks.
+3. Reduce center opacity and layer a hot exact outer boundary with a softer inner fire band. Preserve independent relationship marking.
+4. Keep reduced mode bounded with fewer tongues while retaining the exact ring and recognizable flame silhouette; primitive mode remains a readable fallback.
+5. Re-capture normal and reduced native motion evidence and obtain user confirmation against the supplied quality reference. A later custom shader or particle adapter remains optional only if the retained-mesh pass cannot meet the accepted bar; BRL-0102 still owns dependency adoption.
+
+BRL-0101 remains doing and the previous visual-quality acceptance evidence is superseded.
+
+# Fire-area quality correction implementation — 2026-08-31
+
+The dense retained-mesh experiment removed the isolated spheres but still read as synchronized geometric teeth. It is retained only as the reduced/primitive fallback and is not accepted as the normal-quality presentation.
+
+Normal Fire areas now use one client-only retained custom material over the shared area disc. A seamless domain-warped periodic noise field produces a coherent circumference, irregular inward tongues, porous flow detail, ember/orange/hot depth bands, and a subordinate outer halo. The material samples the maximum authoritative tick rather than wall-clock time, so the same tick yields the same presentation and VfxLab pause/step is exact. One shared material handle is updated without per-area or per-frame asset allocation.
+
+Counterplay does not depend on the shader: an independent narrow retained annulus marks the exact authoritative radius, while reduced/primitive variants use shared fill, ring, and tapered-tongue meshes. No bloom or particle dependency was introduced. Missing optional shader presentation therefore cannot alter gameplay geometry, authority, expiry, cleanup, or server composition.
+
+The native captures at `target/brl-0101-fire-noise-pass` (tick 42) and `target/brl-0101-fire-noise-motion` (tick 58) show a materially changing turbulent silhouette while preserving the open center. `target/brl-0101-fire-reduced-fallback` shows the bounded reduced + primitive fallback. Final verification and user confirmation remain required.
+
+# Fire-area correction verification — 2026-08-31
+
+- `cargo test --locked --no-default-features --features client --lib` — 583 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings` — passed.
+- `just _check-server` and `just _server-features` — passed; the server graph remains free of rendering and shader capability.
+- Final native normal Fire + ultimate field capture: `target/brl-0101-fire-quality-final`. Its JSON records one authoritative field root, one animated Fire-area materialization, one retained custom material, zero fallback motion accents, radius 72, and playback tick 50.
+- Cross-tick captures at ticks 42 and 58 visibly change the turbulent silhouette while preserving the center and exact boundary. Reduced + primitive evidence retains 18 bounded mesh tongues.
+
+Feedback disposition: the original flat-disc presentation is replaced. Visual acceptance of the corrected normal-quality Fire field remains awaiting the user, so BRL-0101 stays `doing`.

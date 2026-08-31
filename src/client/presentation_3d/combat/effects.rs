@@ -477,6 +477,9 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
     let material_assets = world
         .get_resource::<Assets<StandardMaterial>>()
         .map_or(0, Assets::len);
+    let fire_area_material_assets = world
+        .get_resource::<Assets<super::elemental_style::FireAreaMaterial>>()
+        .map_or(0, Assets::len);
     let image_assets = world.get_resource::<Assets<Image>>().map_or(0, Assets::len);
     let signature_cache = world
         .get_resource::<VfxSignatureCache>()
@@ -525,10 +528,12 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             "status_roots": component_count::<super::fighter_feedback::StatusVisual3d>(world),
             "dash_trail_roots": component_count::<super::fighter_feedback::DashTrailVisual3d>(world),
             "elemental_motion_accents": component_count::<super::elemental_style::ElementalMotionAccent3d>(world),
+            "animated_fire_areas": component_count::<super::elemental_style::AnimatedFireArea3d>(world),
         },
         "assets": {
             "meshes": mesh_assets,
             "standard_materials": material_assets,
+            "fire_area_materials": fire_area_material_assets,
             "images": image_assets,
         },
         "signature_cache": signature_cache,
@@ -691,6 +696,7 @@ mod tests {
             super::super::entities::ElementalFieldVisual3d,
             CombatVisualSignature::neutral_point(11, Vec2::new(2.0, 3.0)),
         ));
+        world.spawn(super::super::elemental_style::AnimatedFireArea3d);
         world.spawn(crate::combat::ElementalFieldState {
             id: crate::combat::ElementalFieldId(11),
             kind: crate::combat::ElementalFieldKind::Fire,
@@ -709,6 +715,7 @@ mod tests {
         assert_eq!(snapshot["primitive_world"], true);
         assert_eq!(snapshot["active"]["transient_roots"], 1);
         assert_eq!(snapshot["active"]["elemental_field_roots"], 1);
+        assert_eq!(snapshot["active"]["animated_fire_areas"], 1);
         assert_eq!(snapshot["transient_effects"][0]["recipe_id"], "impact");
         assert_eq!(snapshot["transient_effects"][0]["order"], 7);
         assert_eq!(
@@ -857,6 +864,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<super::super::elemental_style::FireAreaMaterial>>()
             .init_resource::<crate::builds::BuildCatalogResource>()
             .insert_resource(registry)
             .add_message::<VfxRequest>()
