@@ -459,10 +459,10 @@ resolved maximum. It is collected automatically by authoritative overlap and fol
 - collection emits public bounded presentation/telemetry facts but grants no inventory item,
   currency, account state, ultimate charge, or persistent entitlement.
 
-The implementing milestone selects the heal amount, collision radius, lifetime, presentation, and
-audio through Balance Lab and playtest. If current combat health ownership cannot accept healing
-without a second writer, the milestone must add one explicit ordered health-mutation stage rather
-than mutating fighter health from an `Update` presentation or overlap system.
+Balance Lab tunes the pickup's numeric healing, collection radius, and lifetime policy.
+Presentation and audio are authored separately and validated through playtest. Collection owns the
+explicit ordered `FixedPostUpdate` health mutation; presentation and overlap detection never form
+a second fighter-health writer.
 
 ## Heist mode
 
@@ -583,8 +583,8 @@ Heist is a complete routed product mode:
   stable Heist mode identity;
 - the lobby admits only a Heist game type whose selected map resolves exactly two valid safe
   anchors and compatible team capacity;
-- the match worker composes `HeistModePlugin` only for that mode and rejects mode/map/rules
-  mismatches before gameplay;
+- the selected Heist registration validates and projects its rules, then installs `HeistModePlugin`
+  during application construction; mode/map/rules mismatches are rejected before gameplay;
 - client flow, HUD, audio, results, replay/requeue, reconnect, and shutdown dispatch explicitly on
   Heist rather than treating every non-Wipeout mode as Hot Zone;
 - Wipeout and Hot Zone retain their current behavior and mixed-worker operation.
@@ -612,11 +612,15 @@ damage numbers or mutate health.
 
 The Balance Lab exposes only values owned by completed V10 behavior:
 
-- barrel maximum health, explosion radius/damage, target policy, and terminal profile;
-- chest maximum health, restoration amount, pickup radius/lifetime, and terminal profile;
+- barrel maximum health, explosion radius/damage, maximum targets, and maximum chain reactions;
+- chest maximum health, restoration amount, and pickup radius/lifetime;
 - Heist safe maximum health; match duration, countdown, respawn delay, and topology remain owned by
   the advertised game-type configuration rather than this Balance Lab snapshot;
 - later tuning values only after their behavior is implemented.
+
+Terminal reaction identities and topology are immutable catalog capabilities, not Balance Lab
+choices. The lab may tune the numeric policy consumed by an existing reaction but cannot replace
+the registered handler or turn one terminal family into another.
 
 Authoritative telemetry distinguishes fighter, deployable, environment-object, and mode-objective
 damage. It records object damage, terminal causes, explosion chains, environmental lineage,
@@ -671,7 +675,7 @@ Balance evidence must answer:
 
 ### Capacity and lifecycle evidence
 
-Before each implementing milestone closes, select and enforce bounded ceilings for damageable
+Before each implementing Ticket closes, select and enforce bounded ceilings for damageable
 placements, safe entities, secondary targets, barrel chains, pickups, facts, cues, replication
 bytes, recovery bytes, and per-tick work. Measure fixed-tick p50/p95/p99/max, server entity high
 water, client entity/visual high water, memory, bandwidth, recovery size, and repeated-match growth
@@ -703,27 +707,29 @@ Production ownership is:
 src/map/
   catalog.rs            durability, explosion, pickup definitions, and map-authoring validation
   objects.rs            shared target identities, health/life shapes, facts, cues, and telemetry
-  runtime.rs            environment-object install, terminal transaction, reset, and recovery
+  runtime/              environment-object install, terminal transaction, reset, and recovery
+    terminal_reactions.rs bounded stable-ID handler registration and catalog-coverage seal
   pickups.rs            restoration spawn, overlap, collection, expiry, reset, and telemetry
 
 src/combat/
   attack.rs             origin-to-muzzle first-contact handling
   delivery.rs           projectile/melee damageable-target geometry and contact
   effects/              target-aware damage and bounded secondary transaction
+  environment.rs        atomic fighter/deployable environmental damage commit
   outcomes.rs           existing fighter/deployable facts; environmental fighter damage only
 
 src/matchplay/
   heist.rs              rules, safe ownership, outcome, restart, telemetry
 
 src/client/presentation_3d/
-  map-object, restoration-pickup, and Heist-idol presentation bound to replicated state
+  map/object presentation plus focused object_health.rs projection from replicated state
 
 src/client/
   HUD, audio, results, and product-flow dispatch
 ```
 
 `map/mod.rs`, `combat/mod.rs`, and `matchplay/mod.rs` remain composition/public surfaces. Focused
-pickup ownership prevents collection/expiry from expanding `map/runtime.rs`; the muzzle-contact
+pickup ownership prevents collection/expiry from expanding `map/runtime/`; the muzzle-contact
 view and queues use one local `SystemParam` without creating a new plugin or crate.
 
 ## Deferred after V10
@@ -739,17 +745,17 @@ view and queues use one local `SystemParam` without creating a new plugin or cra
 - Concealed objects/pickups/objectives, spectator-specific objective permissions, replay, or kill
   cam.
 - More Heist maps or object content beyond the accepted Feature Yard slice unless a later content
-  milestone deliberately owns and playtests them.
+  Ticket deliberately owns and playtests them.
 
 ## Implementation and closeout sources
 
 Local, version-pinned sources inspected while preparing and implementing this contract:
 
-- `src/map/catalog.rs`, `objects.rs`, `runtime.rs`, `pickups.rs`, `server.rs`, and `client.rs` for
+- `src/map/catalog.rs`, `objects.rs`, `runtime/`, `pickups.rs`, `server.rs`, and `client.rs` for
   sparse placements, typed mode anchors, colliders, object health/terminals, restoration pickup,
   generation/revision recovery, and client convergence;
-- `src/combat/attack.rs`, `delivery.rs`, `effects/mod.rs`, `effects/application.rs`, `model.rs`,
-  `cues.rs`, and `outcomes.rs` for fighter/deployable targeting, composed payload staging,
+- `src/combat/attack.rs`, `delivery.rs`, `effects/mod.rs`, `effects/application.rs`, `environment.rs`,
+  `model.rs`, `cues.rs`, and `outcomes.rs` for fighter/deployable targeting, composed payload staging,
   `CurrentHealth`, stable
   combat identity, existing environmental source shape, cue subject filtering, and fighter-centric
   outcome consumers;
@@ -762,7 +768,7 @@ Local, version-pinned sources inspected while preparing and implementing this co
   threshold precedence, summaries, and result publication;
 - `src/protocol.rs`, `src/server/admission.rs`, `src/server/lobby/catalog.rs`, and routed game-mode
   mappings for global registration, compatibility, admission, worker, and product dispatch;
-- `src/client/hud.rs`, `audio.rs`, `session.rs`, and `presentation_3d/` for objective generation
+- `src/client/hud.rs`, `audio/`, `session/`, and `presentation_3d/` for objective generation
   matching, HUD/results, cues, and world presentation;
 - `references/bevy/examples/app/plugin.rs` for focused Bevy plugin composition;
 - `references/lightyear/examples/network_visibility/src/server.rs` and the checked-in Lightyear
@@ -773,6 +779,6 @@ Local, version-pinned sources inspected while preparing and implementing this co
   [V1 roadmap](./implementation/v1/roadmap.md#v1-backlog).
 
 The checked-in Lightyear 0.29 material matches Brawler's Bevy 0.19 dependency. The checked-in Bevy
-source is 0.20-dev and was used only for plugin-structure guidance. Each implementing milestone
-rechecked the exact installed Bevy, Lightyear, and Avian seams it changed; the V10 milestone records
+source is 0.20-dev and was used only for plugin-structure guidance. Each implementing V10 milestone
+rechecked the exact installed Bevy, Lightyear, and Avian seams it changed; the milestone records
 retain those research and verification details.

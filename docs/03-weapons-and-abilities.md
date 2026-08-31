@@ -9,8 +9,8 @@ lifecycle rules. It records both the supported foundation and bounded extension 
 [Fighter and build specification](./02-fighter-model.md) owns loadout resolution, fighter runtime,
 target-held status state, arsenal, and equipment. [Engine specification](./01-engine-decision.md)
 owns Bevy application composition and fixed schedules. [Network architecture](./08-network-architecture.md)
-owns authority and replication boundaries. Versioned implementation documents retain delivery
-history, exact milestone scope, and verification evidence.
+owns authority and replication boundaries. Ticket owns active implementation scope and evidence;
+versioned implementation documents retain historical delivery records.
 
 ## Combat authoring layers
 
@@ -217,6 +217,11 @@ serialized resolved data. Authored policy may narrow those limits but cannot wid
 fingerprints derive from canonical operational data, not local ECS identity or display names.
 Per-ammunition refill/recharge duration has no gameplay tuning ceiling; it must only be positive
 and representable by the authoritative tick deadline.
+
+Numeric weapon, passive, and ultimate bounds have one crate-private typed owner beside the authored
+model and authoritative validator. Balance Lab's private editor adapters consume those same owners
+and exhaustively project the editable leaves; the editor describes legal authoritative values but
+does not become an independent validation authority.
 
 Presentation-profile IDs are approved as part of server-known content or server resolution. A
 client may request a legal cosmetic choice when that product capability exists, but it cannot attach
@@ -472,7 +477,11 @@ The supported ultimate set contains:
 - **Demolition Strike:** an instant server-authoritative targeted terrain brush with 520 world-unit
   maximum range and a 64 world-unit destruction radius. It spends full ultimate charge on any
   accepted activation, including a valid area where no destructible placement changes. It does not
-  damage fighters or world objects.
+  damage fighters or world objects;
+- **Cryogenic Field, Fire Field, Poison Field, and Restoration Field:** targeted persistent regions
+  that pulse the corresponding typed combat effect; and
+- **Big Blob:** a targeted parent lob that emits six independently authored Sticky Blomb
+  secondaries at landing.
 
 The supported passive set contains:
 
@@ -481,7 +490,10 @@ The supported passive set contains:
 - Adrenal Response;
 - Close Quarters;
 - Quick Cycle;
-- Tenacity.
+- Tenacity;
+- Cryogenic Insulation;
+- Filtered Circulation; and
+- Heat Shielding.
 
 Passives should alter a meaningful decision, range, risk, or timing window rather than merely raise
 every number. Their authored definitions grant bounded modifiers or typed capabilities; runtime

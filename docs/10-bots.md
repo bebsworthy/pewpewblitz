@@ -69,10 +69,9 @@ Alternatives remain:
    still evolving, and deterministic diagnosis matters more than opaque peak performance. A learned
    candidate may later compete behind the same observation/decision boundary.
 
-## Architecture readiness
+## Implemented integration
 
-No preparatory architecture refactor is required before the bot milestone. The current production
-shape already provides the required integration points:
+The completed server-hosted controller uses the existing production integration points:
 
 - the practice allocation and manifest own stable bot identity, team, saved-brawler snapshot, and
   roster capacity;
@@ -86,32 +85,24 @@ shape already provides the required integration points:
 - existing movement, combat, ability, mode, terrain, replication, and presentation systems already
   consume or present the resulting authoritative outcomes.
 
-The bot milestone owns these integration seams as part of the feature:
+The bot feature owns these integration seams:
 
-1. Replace `InertPracticeBotPlugin` with a focused practice-bot composition that installs private
-   controller state only on manifest bot fighters.
-2. Add the private pure observation, team-plan, policy, navigation, capability, profile, and entropy
-   modules described below. Do not make them public or compile them into the client before another
-   execution host exists.
-3. Expose the existing complete decoded-input validity rule through one narrow `pub(crate)` helper
-   so the controller reuses finite, radial-range, and button checks instead of duplicating them.
-4. Commit validated `ActionState<FighterInput>` and controller-produced `InputFreshness` together in
-   the current fixed input phase.
-5. Track a private monotonic controller life generation derived from authoritative transitions among
-   `Defeated`, `RespawnState`, and `ActiveCombatant`; do not add a shared or replicated lifecycle
-   component solely for bots.
-6. Replace the current four-preset rotation with one explicit, validated, saved-brawler-native
-   canonical recipe. The first capability executor targets a Pulse weapon and Dash ultimate; it
-   chooses behavior from the resolved snapshot, never from a legacy preset ID.
-7. Provide the visibility adapter a bot observer path over the same pure observer-specific reveal
-   rule used for clients. Do not create fake connections or infer visibility from the existing
-   connection-keyed cache.
+1. Focused Practice composition installs private controller state only on manifest bot fighters.
+2. Private observation, team-plan, policy, navigation, behavior-registry, profile, diagnostics, and
+   entropy modules keep pure decisions separate from ECS collection and input installation.
+3. The controller reuses the ordinary decoded-input validity rule and commits validated
+   `ActionState<FighterInput>` with `InputFreshness` in the fixed input phase.
+4. A private monotonic controller-life generation follows authoritative defeat, respawn, and active
+   transitions without adding bot-only replicated lifecycle state.
+5. The manifest uses an explicit authored saved-brawler-native recipe, and executors choose behavior
+   from resolved capabilities rather than legacy preset IDs.
+6. Bot observation uses the same pure observer-specific reveal rule as client visibility without
+   fake connections or access to the connection-keyed cache.
 
 This work does not require changes to routing or supervisor protocols, match-manifest wire shapes,
 global compatibility, lobby admission/check-in, protocol registration, authoritative gameplay
-ownership, or the dedicated-server feature boundary. If implementation evidence later contradicts
-that assessment, the milestone must return to specification review before changing one of those
-contracts.
+ownership, or the dedicated-server feature boundary. A later hosting or protocol change requires a
+focused Ticket specification before changing one of those contracts.
 
 ## First playable slice
 
@@ -227,9 +218,9 @@ Practice bot work uses the authoritative fixed `SimulationTick` and several expl
    duplicate planner work twice for the same tick.
 
 All cadences and work ceilings are tick-based, synchronous, bounded, and deterministic. No policy
-result may depend on wall-clock completion, task scheduling, or thread race. Keep ordering visible
-at the server composition point and cover it with schedule-trace tests. The implementing milestone
-must verify exact owning systems and deferred boundaries before choosing final system labels.
+result may depend on wall-clock completion, task scheduling, or thread race. Ordering remains
+visible at the server composition point and is covered by schedule-trace tests; a future change must
+verify the exact owning systems and deferred boundaries in its Ticket.
 
 A later external-client adapter requires its own clock contract. It must name a specific Lightyear
 interpolation/replication timeline, attach source tick and age to non-atomic replicated facts, and
@@ -422,36 +413,36 @@ panic or stall the match worker.
 External client launch flags, bot network admission, bot check-in, supervisor sidecars, and bot
 process shutdown are not part of this lifecycle.
 
-## Suggested ownership
+## Implemented ownership
 
-Keep pure behavior separate from the server adapter without creating a generic AI framework:
+Pure behavior remains separate from the ECS adapter without creating a generic AI framework:
 
 ```text
 bots/
-  mod.rs          private composition and narrow model exports
+  mod.rs          private composition and shared BotContentPlugin export
+  behaviors.rs    built-in behavior registrations and focused contributions
+  controller.rs   ECS observation, lifecycle, schedule, and input installation
+  diagnostics.rs  bounded decision and work evidence
   model.rs        canonical observations, plans, state, intent, and decision facts
   policy.rs       pure utility scoring and per-bot transition
   team.rs         pure bounded role/goal assignment
   navigation.rs   revisioned topology, deterministic search, route following
-  capability.rs   resolved Pulse/Dash intent-to-input rules
   profile.rs      validated first-profile values and version
+  registry.rs     bounded stable-ID behavior handlers and authored-coverage seal
   entropy.rs      pinned deterministic independent samples
 
-server/practice/
-  mod.rs          manifest bot materialization and practice composition
-  controller.rs   ECS allowlist, lifecycle, schedule, and input installation
+server/practice.rs manifest bot materialization and Practice composition
 ```
 
-The exact file split remains subject to implementation evidence; cohesive navigation internals may
-use focused submodules if graph construction, search, and route following have distinct ownership.
 The required boundary is that pure policy/navigation code cannot query or mutate a Bevy `World`,
-while the server adapter cannot become a second gameplay implementation. Until a second execution
-host exists, compile the bot module only where the practice server uses it rather than broadening
-client or public APIs speculatively.
+while the server adapter cannot become a second gameplay implementation. The authored `BotCatalog`
+and its fingerprint projection are shared and headless-safe so every compatibility role computes the
+same gameplay identity. Executable observation, behavior handlers, navigation, controller state,
+and the sealed handler registry remain private and server-only.
 
-## First-slice verification
+## Verification contract
 
-A first playable bot milestone must include:
+The playable bot slice is protected by:
 
 - pure team-plan, tactic, capability, and committed-state tests over canonical synthetic facts;
 - deterministic ordering/tie tests with ECS insertion, collection, teammate, and navigation-node

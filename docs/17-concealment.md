@@ -91,10 +91,10 @@ queries profile storage, inventory, part instances, rarity, or display metadata.
 
 Modifier composition adopts the established deterministic modifier order: combine all validated
 flat changes, then the combined percentage change, clamp to the code-owned minimum and maximum, and
-round once at the resolved boundary. Exact base values, modifier inventory, and bounds are selected
-through the Balance Lab and playtest. The implementing milestone must add the attribute to content
-fingerprints, immutable match snapshots, preview text, validation, persistence/backup fixtures,
-and Balance Lab surfaces that already own fighter attributes.
+round once at the resolved boundary. Exact base values, modifier inventory, and bounds are authored
+and playtested through the normal content and Balance Lab surfaces. The resolved attribute is part
+of content fingerprints, immutable match snapshots, preview text, validation, persistence fixtures,
+and fighter tuning.
 
 Proximity uses authoritative planar center-to-center distance and the observer's resolved radius.
 The first implementation does not add line-of-sight occlusion: walls do not block proximity
@@ -114,10 +114,11 @@ accepted attack or applied damage, and the reveal-scan ultimate.
 | Allied area | Living friendly fighter overlaps the public active field; includes caster | Reveal all enemies for `M` ticks | Reveal all enemies for `N` ticks | Observer-specific reveal | Exit, field expiry/removal, defeat, reset, or teardown |
 
 V9 M01 initially authors `M = 90` ticks (1.5 seconds) and `N = 120` ticks (2 seconds) at 60 Hz.
-These are Balance Lab/playtest values and may change through ordinary balance revision without
+These are authored/playtest values and may change through ordinary balance revision without
 changing the reveal-lock semantics. They are validated build-embedded gameplay data in
 `content/catalogs/concealment.ron`; concealment authority consumes the shared rules resource rather
-than code-owned balance literals. A deadline is active while `current_tick < deadline`.
+than code-owned balance literals. Balance Lab does not currently expose attack/damage reveal-lock
+durations. A deadline is active while `current_tick < deadline`.
 
 `M`, `N`, source durations, radii, ranges, charge rules, and cooldowns are bounded authored balance
 values. `M` and `N` may differ. If multiple temporary locks exist, the effective deadline is the
@@ -214,25 +215,25 @@ does not create a generic region scripting system.
 
 ## ECS ownership and fixed-tick order
 
-The implementation should begin with focused concealment ownership rather than embedding network
-calls throughout combat, maps, and abilities:
+Production keeps focused concealment ownership rather than embedding network calls throughout
+combat, maps, and abilities:
 
 ```text
 src/concealment/
-  mod.rs          composition, system sets, narrow shared types
+  mod.rs          content/server plugin composition, system sets, narrow exports
   model.rs        source, membership, lock, reveal, and observer decision facts
-  authority.rs    fixed-tick source/membership/decision lifecycle
-  network.rs      connection mapping, visibility application, cue filtering
+  rules.rs        validated authored reveal rules and fingerprint contribution
+  field.rs        public allied-field state, geometry, and ownership
+  network.rs      observer visibility cache and Lightyear visibility application
   telemetry.rs    bounded transitions and aggregates
   tests.rs        pure and small-App behavior
-
-src/concealment/client/
-  presentation.rs  public boundaries and permitted reveal/conceal cues
 ```
 
-Exact extraction follows implementation evidence, but authoritative state remains server-gated and
-client presentation remains optional. `mod.rs` is a composition surface, not the implementation
-owner for every algorithm.
+Authoritative systems and network visibility remain server-gated; shared models and rules are
+headless-safe, and client presentation remains optional. `mod.rs` is a composition surface even
+though its private role-owned module coordinates the fixed-post transaction. Connection/view
+construction stays at that composition boundary, while each cue publisher owns filtering through
+the shared observer visibility cache.
 
 The fixed-tick semantic order is:
 
@@ -247,8 +248,8 @@ The fixed-tick semantic order is:
    `ReplicationSystems::Send` path;
 8. presentation receives only public facts and facts permitted for that observer.
 
-The implementing milestone must make the actual `SystemSet`, `.before`/`.after`, `.chain()`, and
-`ApplyDeferred` relationships visible at composition. A visibility change queued through
+The actual `SystemSet`, `.before`/`.after`, `.chain()`, and `ApplyDeferred` relationships remain
+visible at composition. A visibility change queued through
 `Commands` needs an explicit deferred-command boundary before replication send; relying on the end
 of an unrelated schedule is not sufficient evidence.
 
@@ -288,7 +289,7 @@ Server-hosted bots and autonomous sentries must consume the same permitted obser
 human opponents. They may not query absolute hidden fighter positions through convenient server
 ECS access. A bot observation adapter may include a subject only when that bot would see it;
 temporary target memory requires a separate explicit rule and cannot contain current hidden motion.
-The proposed [V11 bot specification](./implementation/v11/milestone-01.md) supplies that rule by
+The completed [V11 bot specification](./implementation/v11/milestone-01.md) supplies that rule by
 retaining only a bounded last-permitted delayed pose with its source tick and expiry; hidden state
 never refreshes it.
 

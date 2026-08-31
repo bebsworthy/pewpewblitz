@@ -235,10 +235,11 @@ The target owns `StatusRuntime`. Weapons, abilities, persistent regions, and all
 contributions with the same stable status identity, as specified in
 [Weapons and abilities](./03-weapons-and-abilities.md#effects-and-status-contributions).
 
-A first systemic-status slice should implement one complete interaction, such as cold accumulating
-into a temporary freeze. It must prove multi-source contribution, decay, threshold behavior,
-cleanup, resistance or immunity, and readable feedback before a generalized status framework is
-justified.
+The first systemic-status slice is implemented as target-owned Cold buildup into temporary Freeze,
+with authored decay, threshold, thaw, post-thaw immunity, cleanup, and readable feedback. Weapons,
+abilities, and persistent regions contribute through the same bounded condition path; Balance Lab
+edits the shared numeric rules. This proven capability does not imply an open-ended status
+framework or make source effects owners of target runtime state.
 
 ## Fighter lifecycle
 
@@ -353,9 +354,10 @@ capabilities, not rarity, acquisition history, presentation type, or a particula
 
 V7 seeds a fixed authored starter inventory and caps an account at 128 part instances. It preserves
 each generated roll across balance updates unless an explicit versioned migration changes it; no
-update silently rerolls owned equipment. Initial Frost parts map to the supported slow effect, while
-accumulating Frost remains a later status capability. Balance should favor readable sidegrades and
-capped tradeoffs.
+update silently rerolls owned equipment. Initial Frost parts still map to the supported Slow effect;
+the implemented systemic Cold/Freeze condition is a distinct typed combat capability and is not
+inferred from a part's presentation name. Balance should favor readable sidegrades and capped
+tradeoffs.
 
 Pre-match equipment is the expected extension. Equipping loot during an active match would require
 pickup, inventory mutation, loadout transition, replication, presentation, and balance rules and is

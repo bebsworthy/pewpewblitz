@@ -111,8 +111,8 @@ payloads into `LinkReceiver` and drains opaque outbound payloads from `LinkSende
 binds one socket and creates child links keyed by remote address. Its Crossbeam transport
 demonstrates the same integration for in-process channels but cannot cross processes.
 
-V2 will implement a Brawler-owned routed transport at that boundary. It will not fork Lightyear or
-wrap gameplay replication in a second snapshot format.
+The routed production path implements a Brawler-owned transport at that boundary. It does not fork
+Lightyear or wrap gameplay replication in a second snapshot format.
 
 Conceptual external envelope:
 
@@ -126,9 +126,9 @@ Conceptual internal packet frame:
 frame_version | direction | route_id | peer_id | payload_length | opaque_lightyear_datagram
 ```
 
-The specification must define fixed endianness, maximum sizes, unknown-version behavior, route
-lifecycle, peer identity, and malformed-frame handling. The envelope reduces effective Lightyear
-MTU; the transport must advertise or enforce a measured safe payload size.
+The codec defines fixed endianness, maximum sizes, unknown-version behavior, route lifecycle, peer
+identity, and malformed-frame handling. The envelope reduces effective Lightyear MTU, so the
+transport advertises and enforces its measured safe payload size.
 
 Routing solely by external source address may be a comparison/test mode, not the target contract:
 NAT rebinding and client socket recreation can change that address. An explicit capability envelope
@@ -149,12 +149,16 @@ application-message evolution: the enduring one-current-schema policy, global co
 handshake, and no-per-message-version rule are defined in
 [Network architecture](./08-network-architecture.md#application-protocol-compatibility-and-evolution).
 
-M01 will compare:
+M01 compared these backend choices:
 
 - Unix-domain socket on macOS/Linux, preferring packet/message semantics where reliable;
 - Windows named pipe when Windows implementation enters scope, using the same logical frame codec
   whether the selected pipe API exposes byte- or message-oriented behavior;
-- framed loopback TCP as a portable fallback if it materially reduces risk.
+- framed loopback TCP as a portable fallback if it materially reduced risk.
+
+The current macOS production backend uses private framed Unix-domain byte streams with explicit
+length-prefix handling; deterministic in-memory channels exercise the same logical codecs in tests.
+Windows named-pipe work remains deferred until Windows enters supported implementation scope.
 
 Unix FIFOs and standard input/output are byte streams and do not preserve packet boundaries. They
 are acceptable for bounded control only with explicit framing and independent logs. Gameplay
@@ -224,8 +228,7 @@ overall loading duration, but the lobby remains the sole deadline authority.
 
 ## Reusable foundation, not a throwaway spike
 
-V2 M01 is a spike because it retires architectural risk early. Its planned artifacts are production
-foundations once the M01 specification is validated:
+V2 M01 retired architectural risk early, and its artifacts are the current production foundations:
 
 - versioned envelope/frame types with parser and validation tests;
 - supervisor route table and bounded queues;
@@ -310,8 +313,8 @@ Version-pinned local evidence:
 Current primary cross-checks: [Lightyear 0.29](https://docs.rs/lightyear/0.29.0/lightyear/) and
 [Rust process IO](https://doc.rust-lang.org/std/process/struct.Stdio.html).
 
-Before M01 can leave `Researching`, it sets thresholds from the M11 direct-UDP baseline and records
-the costed worker-port-range reference design. Implementation then measures packet overhead/loss,
-IPC latency/queues, worker startup and memory, fixed-tick behavior, handoff time, crash cleanup, and
-two-worker isolation. A failed hard threshold after bounded optimization returns the bounded
-worker-port-range contingency to specification review; it does not silently replace this decision.
+M01 set thresholds from the M11 direct-UDP baseline, recorded the costed worker-port-range reference
+design, and measured packet overhead/loss, IPC latency/queues, worker startup and memory, fixed-tick
+behavior, handoff time, crash cleanup, and two-worker isolation. The accepted closeout retains the
+single-port routed design; a future measured hard-threshold failure must return any contingency to a
+focused Ticket specification rather than silently replacing this decision.

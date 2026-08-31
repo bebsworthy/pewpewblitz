@@ -9,8 +9,9 @@ version checklist or implementation-status report.
 The Dashboard-centered connected loop, direct server connection, server-local queues, routed match
 handoff, practice allocation, local settings, and current recovery behavior are established
 foundations. Capabilities explicitly described as **envisioned** are directions that still require a
-version milestone and validation before they become product commitments. Version roadmaps and
-milestones own delivery status, implementation evidence, playtest findings, and historical designs.
+focused Ticket specification and validation before they become product commitments. Ticket owns
+current delivery status and evidence; version roadmaps and milestones preserve historical designs,
+playtest findings, and closeout records.
 
 Related ownership is intentionally separate:
 
@@ -446,8 +447,8 @@ Player-flow changes should preserve representative evidence at the layer where f
   recovery behavior.
 
 The matrix should remain representative rather than multiplying every device, resolution, scale,
-timing, and failure into a Cartesian suite. Version milestones select the concrete risk cases and
-record their evidence.
+timing, and failure into a Cartesian suite. The owning Ticket selects the concrete risk cases and
+records their evidence.
 
 ## Envisioned extensions
 
@@ -461,6 +462,6 @@ The following directions may extend this shell without changing its present auth
 - rank, leaderboards, social features, and moderation surfaces;
 - broader platform-specific input, localization, and release-readiness support.
 
-Each extension requires a focused candidate or milestone. It should attach to Dashboard or another
+Each extension requires a focused Ticket. It should attach to Dashboard or another
 demonstrated owner rather than creating a new top-level hub or generic navigation framework in
 advance.

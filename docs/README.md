@@ -7,20 +7,21 @@ practice, multiplayer, creator, arsenal, progression, and social directions exte
 without creating alternate gameplay authority.
 
 Start with [Product direction](./00-product-direction.md) for the product promise and design
-principles. Use the specifications below for durable product and technical contracts, the
-[candidate index](./backlog.md) for unresolved future work, and versioned implementation records for
-delivery status and evidence.
+principles. Use the specifications below for durable product and technical contracts. Current
+scope, status, acceptance criteria, decisions, and evidence live in the repository's Ticket project;
+run `ticket list` and `ticket task <ID>` rather than inferring active work from these documents.
 
 ## How the documentation is organized
 
 - **Product direction and specifications** are aspirational and forward-looking. They describe the
   intended product, settled boundaries, supported foundations, and envisioned extensions. They are
   not implementation-status reports.
-- **The candidate index** is the canonical cross-version view of unresolved work. A candidate is
-  not a commitment until it is promoted into a version roadmap.
-- **Version roadmaps and milestones** are implementation records. They own scope, status, research,
-  accepted technical specifications, verification, playtest feedback, and closeout evidence for a
-  particular delivery period.
+- **Ticket** is the source of truth for active and deferred work. `docs/tasks/` contains generated,
+  readable Ticket mirrors and must not be edited directly.
+- **The candidate index** preserves the pre-Ticket cross-version candidate catalog and links to
+  durable design context. It is no longer an active queue or scope authority.
+- **Version roadmaps and milestones** are historical implementation records. They preserve scope,
+  research, verification, playtest feedback, and closeout evidence for their delivery period.
 - **Source and root project documentation** own current commands, configuration, and operational
   behavior. Historical milestones may refer to older paths or implementations without redefining
   the current architecture.
@@ -73,12 +74,12 @@ delivery status and evidence.
 - [Research sources](./06-research-sources.md) — external references used to establish the original
   product and technical baseline.
 
-## Future candidates
+## Future candidates and active work
 
-[Canonical cross-version candidate index](./backlog.md) is the single comparison and promotion
-surface for unresolved product, service, architecture, release, and maintenance candidates. Detailed
-specifications and historical rationale remain in their owning documents; the index links to them
-rather than copying them.
+Use Ticket to search, select, and track current work. The [candidate index](./backlog.md) remains a
+historical crosswalk for pre-Ticket product, service, architecture, release, and maintenance ideas;
+its rows do not establish priority or implementation scope. Detailed specifications and historical
+rationale remain in their owning documents.
 
 ## Implementation history
 
@@ -100,7 +101,7 @@ and closeout learning.
 | V10 | Damageable world objects, oil barrels, mirrored Heist, the consolidated Feature Yard family, treasure chests, restoration pickups, and cross-feature closeout | [V10 roadmap](./implementation/v10/roadmap.md) |
 | V11 | Playable deterministic server-hosted Practice bots with fair perception, map-aware navigation, objective play, Pulse/Dash behavior, and input-only authority | [V11 roadmap](./implementation/v11/roadmap.md) |
 | V12 | Completed 3v3 maps and dynamic framing, Balance Lab correctness/presentation, server-authoritative sustain and ammunition recovery, instant evidence capture, projectile geometry/readability, and feedback-driven balance | [V12 roadmap](./implementation/v12/roadmap.md) |
-| V13 | Specification review: original Blender-authored environment kit and reproducible Bevy-ready asset pipeline | [V13 roadmap](./implementation/v13/roadmap.md) |
+| V13 | Draft specification context only: original Blender-authored environment kit and reproducible Bevy-ready asset pipeline; not active scope | [V13 roadmap](./implementation/v13/roadmap.md) |
 
 Historical milestones are evidence for the choices and implementation of their version. They do not
 override later durable specifications or accepted changes recorded by subsequent versions.

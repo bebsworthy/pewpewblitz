@@ -4,8 +4,8 @@ PewPew Blitz is a server-authoritative top-down arena shooter built around playe
 builds, readable combat, meaningful tradeoffs, and short objective matches. The current product
 supports Wipeout, Hot Zone, and Heist; bounded weapon/build recipes; abilities and passives;
 destructible and health-bearing map assets; treasure-chest restoration pickups; the consolidated
-Feature Yard test-map family; a fixed-camera 3D presentation; server-local multiplayer; and server-
-hosted Practice matches with active deterministic Pulse/Dash bots.
+Feature Yard test-map family; a dynamically framed 3D presentation; server-local multiplayer; and
+server-hosted Practice matches with active deterministic Pulse/Dash bots.
 
 The windowed client presents the Player Dashboard and renders the world, HUD, audio, and local input.
 The routed supervisor and lobby own admission and server-local queues; isolated match workers own
@@ -16,9 +16,10 @@ The product is named PewPew Blitz; repository, crate, executable, log-target, an
 identifiers retain the established `brawler` name.
 
 Start with the [documentation index](docs/README.md) for durable product and technical
-specifications, the [product direction](docs/00-product-direction.md) for the vision, and the
-[candidate index](docs/backlog.md) for unresolved future work. Version roadmaps under
-`docs/implementation/` preserve delivery history and evidence.
+specifications and the [product direction](docs/00-product-direction.md) for the vision. Active
+scope, status, acceptance criteria, and evidence live in Ticket; `docs/tasks/` is its generated
+readable mirror. The [candidate index](docs/backlog.md) and version roadmaps under
+`docs/implementation/` preserve pre-Ticket planning context and delivery history, not current scope.
 
 ## Requirements and toolchain
 
@@ -81,7 +82,8 @@ without changing canonical authored content. The page also shows the authoritati
 teams, admitted fighter/weapon/ability choices, and effective weapon-part modifiers for the current
 Practice worker.
 See the [Balance Lab operator and maintenance guide](./docs/15-balance-lab.md) for validation rules,
-limitations, and the required checklist when fighter or weapon properties change.
+limitations, and the required checklist when fighter, weapon, ultimate, passive, map-effect, mode,
+or world-object tuning changes.
 
 ## Canonical commands
 
@@ -95,8 +97,8 @@ Run `just` to list the supported everyday surface.
 | `just run <N>` | Build once, start the routed server, and open exactly 1–16 interactive clients |
 | `just fmt` | Format all Rust sources |
 | `just check` | Check every independently buildable role |
-| `just lint` | Run formatting, Clippy, server isolation, and renderer-boundary checks |
-| `just test` | Run deterministic routing, client, server, network, and performance suites |
+| `just lint` | Run formatting, Clippy, role isolation, renderer/map-boundary checks, and Balance Lab web checks |
+| `just test` | Run deterministic routing, client, server, Balance Lab, network, and performance suites |
 | `just e2e [2, 4, or 6]` | Run the real-process 1v1, 2v2, or 3v3 product path; default is 2 |
 | `just practice-e2e [game type]` | Run one exact real-process Practice match with one human and server-filled bots; default is `wipeout-1v1` |
 | `just v3-render-evidence [path]` | Record the bounded native release render report; the historical recipe name is retained |
@@ -171,12 +173,39 @@ Evidence captures are saved as matching PNG/JSON pairs under the platform Pictur
 `PewPew Blitz/Captures` (or the application data directory when Pictures is unavailable).
 `BRAWLER_CAPTURE_DIR` overrides that destination for troubleshooting and automation.
 
-Canonical fighters recover `10` health per second after `3.0` seconds without a server-accepted
-player attack. Current weapons recover one round or charge every `1.3` seconds; firing consumes
-stock without resetting an interval already in progress. Both mechanics remain server-authoritative.
+Recovery is authored per fighter profile and weapon. The Default fighter recovers `100` health per
+second; Lightweight and Reinforced recover `10`, all after `3.0` seconds without a server-accepted
+player attack. Per-ammunition recovery is `1.0` seconds for Pulse Sidearm, `1.2` for Scatter Cannon,
+`1.6` for Arc Launcher, `1.0` for Impact Blade, and `1.5` for Sticky Blomb, Spray, and Splash. Firing
+consumes stock without resetting an interval already in progress. Both mechanics remain
+server-authoritative.
 See the [fighter specification](docs/02-fighter-model.md) and
 [weapons and abilities specification](docs/03-weapons-and-abilities.md) for the exact lifecycle and
 replication rules.
+
+## Architecture and extension model
+
+Bevy's `World` is the runtime gameplay model. Authored definitions are validated and resolved into
+immutable match data, projected into focused ECS components/resources, processed through explicit
+fixed-tick systems, and exposed as typed facts/messages or replicated state. The authoritative
+`FixedPostUpdate` transaction is ordered as Delivery → Effects → Environment → Objectives →
+Visibility → Publication → Finalization; domain plugins retain their focused internal sets inside
+those neutral phases.
+
+New instances built from existing mechanics—weapon recipes, maps, profiles, and object variants—are
+normally data-only. A genuinely new semantic family adds a bounded typed definition/capability and a
+focused plugin, system, or registration rather than branches in unrelated coordinators. Current
+examples include server-only bot-behavior and world-object terminal-reaction registries, a
+process-local mode registry, and effect-tile capability projection. Registration builders validate
+stable IDs, capacity, duplicates, and required coverage, sort deterministically, and seal before
+runtime. These are local extension seams, not a dynamic mod ABI; stable routed and wire enums remain
+deliberately closed and are covered by the one global compatibility handshake.
+
+Cross-domain authority uses explicit collect/validate/plan/commit/publish boundaries. Match
+admission plans before shared fighter assembly, projectile sweep plans before mutation, Balance Lab
+prepares and persists before committing a clean epoch, and combat alone commits fighter/deployable
+environment damage. Client feature producers emit stable-key VFX and audio requests; generic
+client-only adapters resolve authored profiles and perform Bevy rendering/playback.
 
 ## Server configuration and authored content
 
@@ -203,6 +232,12 @@ Build-embedded, headless-safe gameplay definitions live under
 sorted [`content/maps/index.ron`](content/maps/index.ron). Startup rejects disagreement between the
 index and embedded map sources.
 
+Every installed shared gameplay catalog contributes canonical material through its owning content
+plugin to one deterministically sorted gameplay-content fingerprint. Startup and worker admission
+fail closed on duplicate, missing, invalid, or unavailable required contributions. Client-only
+asset, VFX, and audio catalogs are excluded from that fingerprint and from the dedicated-server
+feature graph.
+
 Map recipes reference stable `MapAssetId`s rather than client asset paths. The server derives
 surfaces, collision, destruction, damageable-object durability, spawns, and typed mode anchors from
 shared gameplay profiles and lowers them into a resolved authoritative snapshot. Runtime barrels,
@@ -222,7 +257,7 @@ contract. Important ownership rules are:
 - `--auto-connect`, headless clients, and demo automation require an explicit `--client-id`;
 - `--server` prefills the interactive connection target and selects the automation endpoint;
 - `--window-size WIDTHxHEIGHT` reproduces supported visual-check layouts;
-- `--weapon-preset 1..4`, movement/aim/fire flags, demos, screenshots, and render reports are
+- `--weapon-preset 1..6`, movement/aim/fire flags, demos, screenshots, and render reports are
   development or automation inputs rather than alternate product flows;
 - `BRAWLER_FORCE_PRIMITIVE_WORLD=1` verifies deterministic meshes inside the sole 3D renderer; it is
   not a renderer or content-mode selector;
@@ -289,8 +324,8 @@ match flow, or production hosting topology.
 - Dedicated-server builds exclude rendering, windowing, audio, device input, and client assets.
 - Stable protocol and content IDs cross process boundaries; process-local ECS `Entity` identity does
   not.
-- The current implementation scope, when a version is active, is the next validated milestone file.
-  Deferred work remains in the [canonical candidate index](docs/backlog.md) or the owning version
-  backlog.
+- Active implementation scope and evidence live in the owning Ticket specification. Independently
+  valuable deferred work gets a linked backlog ticket; historical roadmaps and the candidate index
+  do not establish current status.
 - Checked-in upstream references under `references/` are read-only implementation material unless a
   snapshot update is explicitly requested.

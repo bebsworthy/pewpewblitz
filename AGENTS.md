@@ -2,7 +2,10 @@
 
 ## Quick orientation
 
-Brawler is an original, cross-platform top-down arena shooter built around player-authored fighter builds. Combat readability, meaningful build tradeoffs, short matches, reusable content primitives, and server-authoritative networking are the core product constraints.
+PewPew Blitz (repository and crate identifier `brawler`) is an original, cross-platform top-down
+arena shooter built around player-authored fighter builds. Combat readability, meaningful build
+tradeoffs, short matches, reusable content primitives, and server-authoritative networking are the
+core product constraints.
 
 For current work, start with `ticket list` and `ticket task <ID>`. Ticket descriptions and specs
 own active scope, status, acceptance criteria, and evidence. `docs/tasks/` contains readable Ticket
@@ -10,44 +13,23 @@ mirrors but is never the agent write path.
 
 Start with:
 
-1. `docs/00-product-direction.md` for product intent and non-goals.
-2. `docs/implementation/v12/roadmap.md`, `milestone-03.md`, `docs/03-weapons-and-abilities.md`, and
-   `docs/15-balance-lab.md` for the completed 3v3 maps and framing, Balance Lab correction,
-   server-authoritative sustain/ammunition recovery, evidence capture, projectile readability, and
-   feedback-driven balance closeout.
-3. `docs/implementation/v11/roadmap.md`, `milestone-01.md`, and `docs/10-bots.md` for the completed
-   playable server-hosted Practice bots, fair delayed perception, bounded navigation, objective
-   behavior, feedback corrections, and V11 closeout.
-4. `docs/implementation/v10/roadmap.md`, `milestone-03.md`, and
-   `docs/18-damageable-world-objects-and-heist.md` for the completed oil barrels, mirrored Heist,
-   consolidated Feature Yard family, treasure chests, restoration pickups, and V10 closeout.
-5. `docs/implementation/v9/roadmap.md`, `milestone-03.md`, and `docs/17-concealment.md` for the
-   completed authoritative terrain, Self Cloak, Concealment Field, reveal-proximity, Reveal Scan,
-   server-advertised brawler catalog, and saved-brawler UI closeout.
-6. `docs/implementation/v8/roadmap.md`, `milestone-04.md`, and
-   `docs/16-grid-map-asset-system.md` for the completed sparse map-asset system, domain-organized
-   content, and legacy-removal evidence.
-7. `docs/implementation/v7/roadmap.md` for the completed persistent server-owned profiles, saved
-   brawlers, weapon bases, and four-slot weapon-part equipment.
-8. `docs/implementation/v6/roadmap.md` and `docs/15-balance-lab.md` for the completed
-   development-only authoritative Balance Lab and its enduring operator contract.
-9. `docs/implementation/v5/roadmap.md` and `milestone-03.md` for the completed auto-connect,
-   responsive Player Dashboard, connected-loop convergence, recovery/lifecycle hardening, and V5
-   closeout evidence.
-10. `docs/implementation/v4/roadmap.md` and `milestone-03.md` for the historical independently
-   embedded map documents, semantic object placement, two reusable themes, routed admission,
-   presentation hardening, and V4 closeout evidence.
-11. `docs/implementation/v3/roadmap.md` for the completed 3D-presentation migration and enduring
-   V3 decisions.
-12. `docs/11-art-and-presentation-direction.md` for the current renderer, readability, asset,
-   provenance, degradation, and future-art contracts.
-13. `docs/08-network-architecture.md` for enduring gameplay authority and replication boundaries.
-14. `docs/13-player-ux.md` for the canonical player experience and
-   `docs/14-multiplayer-server-architecture.md` for the routed-process decisions it relies on.
-15. `docs/implementation/v2/roadmap.md` and `milestone-09.md` for the completed routed product
-   baseline and closeout evidence.
-16. `docs/implementation/v1/roadmap.md` and `milestone-11.md` for the completed gameplay MVP,
-   verification evidence, deferred release polish, and the direct-UDP comparison baseline.
+1. `docs/README.md` and `docs/00-product-direction.md` for the durable document map, product intent,
+   and non-goals.
+2. `docs/01-engine-decision.md` and `docs/08-network-architecture.md` for the current Bevy/ECS,
+   authority, schedule, plugin, compatibility, registry, and content-fingerprint contracts.
+3. `docs/02-fighter-model.md` and `docs/03-weapons-and-abilities.md` for authored definitions,
+   immutable resolved loadouts, runtime capabilities, combat transactions, and extension rules.
+4. `docs/04-maps-and-game-modes.md`, `docs/16-grid-map-asset-system.md`, and
+   `docs/18-damageable-world-objects-and-heist.md` for maps, effect-tile capability projection,
+   local mode/object-reaction registration, and environment authority.
+5. `docs/10-bots.md` and `docs/17-concealment.md` for server-hosted Practice policy, semantic
+   observations, fair delayed perception, and observer-specific replication.
+6. `docs/11-art-and-presentation-direction.md` for renderer, audio/VFX request boundaries,
+   readability, assets, provenance, and degradation.
+7. `docs/13-player-ux.md`, `docs/14-multiplayer-server-architecture.md`, and
+   `docs/15-balance-lab.md` for player flow, routed processes, and the current tuning contract.
+8. `docs/implementation/v1/` through `docs/implementation/v12/` only when historical delivery,
+   feedback, or evidence is relevant. Later draft version documents are context, not active scope.
 
 V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
 playtest. It is not a release-ready claim: controller feel, audio, HUD/readability, balance, pacing,
@@ -126,99 +108,51 @@ ownership, execution role, plugin composition, and schedule phase:
 
 ```text
 src/
-  lib.rs                   shared crate module and role feature gates
-  bin/{client,server}.rs   thin executable entry points
-  gameplay.rs              shared fixed-tick schedule/set composition
-  protocol.rs              wire registration and network protocol boundary
-  config.rs                validated client/server/process configuration
-  content.rs               build-embedded catalog loading and content fingerprints
-  timing.rs                shared simulation time definitions
-  abilities/
-    mod.rs                 ability composition root, schedule sets, public re-exports
-    charge.rs              ultimate charge ownership and outcome observation
-    dash.rs                authoritative dash activation/movement/interruption
-    sentry.rs              deployable activation, targeting, firing, and cleanup
-    passives.rs            passive trigger/application rules
-    telemetry.rs           bounded ability records and aggregates
-    tests.rs               focused ability composition and behavior tests
-  builds/
-    mod.rs                 build composition root and public API
-    model.rs               authored selections and resolved immutable loadouts
-    definitions.rs         catalogs, validation, resolution, fingerprints
-    server.rs              waiting-phase authoritative build transaction
-    telemetry.rs           bounded selection/build records and aggregates
-    tests.rs               focused build rule and composition tests
-    combat/
-    mod.rs                 combat composition root, public re-exports, shared sets/plugins
-    model.rs               stable identities and shared/runtime combat state shapes
-    cues.rs                gameplay-to-presentation combat facts
-    definitions/           authored catalog, validation, resolution, fingerprints, tests
-    authority.rs           authoritative fighter lifecycle and authority helpers
-    attack.rs              economy, attack acceptance, firing expansion, attack telemetry
-    delivery.rs            straight, lobbed, and melee delivery geometry/execution
-    effects/               staged payload planning/application/runtime transaction and tests
-    outcomes.rs            bounded authoritative outcome-fact ownership
-    telemetry.rs           bounded records, trackers, aggregates, summaries
-    evidence.rs            bounded process/checkpoint evidence and convergence schemas
-    server.rs              server combat plugin and schedule registration
-    client/                previews, cues, transient observations, HUD, and tests
-    tests.rs               shared combat model/composition tests
-  map/
-    mod.rs                 map composition root, stable IDs/profiles, public re-exports
-    model.rs               stable map identity, bounds, spawn, and shared placement types
-    catalog.rs             map-asset catalogs, recipes, validation, resolution, and tests
-    objects.rs             damageable-target identities, health-state shapes, facts, and cues
-    pickups.rs             restoration-pickup authority, collection, expiry, reset, and telemetry
-    runtime/               server map schedule composition, object authority, installation/colliders,
-                           dynamic destruction/recovery, and focused tests
-    server.rs              selected-map startup and exact-generation lifecycle
-    client.rs              replicated map convergence, recovery, and presentation readiness
-  matchplay/
-    mod.rs                 common match schedule/restart composition and mode plugins
-    model.rs               stable match state, results, participants, and summaries
-    lifecycle.rs           fighter defeat/respawn/reset lifecycle helpers
-    server.rs              common authoritative roster, phase, restart, and outcomes
-    spawns.rs              mode-neutral team assignment and deterministic spawn selection
-    wipeout.rs             Wipeout scoring and mode-owned reset
-    hot_zone.rs            Hot Zone occupancy/progress and mode-owned reset
-    heist.rs               mirrored objective health, threshold/timeout outcomes, and mode reset
-    telemetry.rs           bounded match/mode records and aggregates
-    tests.rs               focused common/mode lifecycle tests
-  movement/
-    mod.rs                 movement plugins and authoritative schedule composition
-    arena.rs               arena definitions, geometry, colliders, and spawn helpers
-    authority.rs           server-owned movement decisions, collision, and mutation
-    input.rs               pure input shaping plus server validation/freshness rules
-    tests.rs               focused movement tests
+  lib.rs; gameplay.rs; protocol.rs; config.rs; content.rs; timing.rs
+                           crate gates, fixed schedules, wire boundary, validated config,
+                           contributor-sealed gameplay content, and timing policy
+  bin/{client,server,profile_admin}.rs
+                           thin executable entry points
+  abilities/               activation/charge plus focused Dash, Sentry, cloak/reveal,
+                           demolition, elemental-field, Big Blob, passive, telemetry ownership
+  bots/                    private Practice policy, behavior registry, observations, navigation,
+                           team/objective projections, diagnostics, and tests
+  builds/                  authored catalog, shared passive/ultimate bounds, loadout resolution
+  combat/                  definitions/model/cues/outcomes/telemetry/evidence; attack/emission;
+                           delivery/projectiles; staged effect planning/application/runtime;
+                           combat-owned environment damage; client/server adapters
+  concealment/             authored rules, fields, observer-specific relevance, telemetry
+  map/                     catalog/model/resolution/effect-tile capabilities/client/server
+    runtime/               installation, dynamics, effect-tile authority, object authority,
+                           and sealed terminal-reaction registry
+  modes/                   bounded local registry plus Wipeout/Hot Zone/Heist registrations
+  matchplay/               common lifecycle/spawns/server plus focused mode rule plugins
+  movement/                input shaping, authority, arena geometry, and planar collision
+  profiles/                saved-brawler model/catalog/server authority/SQLite storage
+  weapon_parts/            authored definitions, canonical modifiers, deterministic resolver
   client/
-    mod.rs                 client application composition and shared client state
-    assets.rs              retained visual/audio handles and readiness
-    audio.rs               bounded cue-to-audio presentation
-    hud.rs                 session, combat, build, match, and mode HUD
-    input.rs               keyboard, mouse, gamepad, and native-input sampling
-    presentation.rs        screen-space HUD and pause-overlay UI
-    presentation_3d/       sole gameplay-world renderer: camera, coordinates, GLB/animation,
-                           map/combat meshes, projected fighter UI, and render diagnostics
-    session/               connection/admission, routed transitions, match commands, automation,
-                           observation, shutdown, and explicit session schedule composition
-    settings/              local calibration/rebinding state and pause-overlay UI
-    tests.rs               client composition and behavior tests
-  diagnostics/
-    mod.rs                 closeout schemas, aggregation, registration, and public API
-    failure.rs             bounded process failure classification
-    overlay.rs             client authority/network diagnostics presentation
-    process.rs             process-owned report/checkpoint lifecycle
-    tests.rs               schema, lifecycle, and validation tests
+    flow/                  ordered action/observation/commit composition; profile, equipment,
+                           and match-flow reducers plus screen-owned presentation
+    queue/                 matchmaking, Practice, loading, and automation
+    session/               routed connection/admission/transitions/commands/observation
+    audio/                 authored mappings, producer registry, semantic requests, playback
+    vfx/                   authored profiles, producer registry, semantic requests
+    presentation_3d/       sole world renderer, combat/environment, object-health projection
+    settings/              persisted calibration/bindings/UI
+    *.rs                   assets, input, HUD, shell, profile, targeting, and evidence adapters
   server/
-    mod.rs                 dedicated-server and connection/session composition
-    verification.rs        process-only movement/combat evidence validation
-    tests.rs               server composition and lifecycle tests
-tests/
-  network.rs               integration-test composition entry point
-  network/
-    harness.rs             reusable separate-App/Crossbeam/UDP test harness
-    *.rs                   scenarios grouped by lifecycle, movement, map, selection, builds, combat, recovery, and modes
-  performance.rs           fixed-tick and subsystem performance/capacity gates
+    admission.rs           manifest validation and pure match-join planning
+    fighter_spawn.rs       shared controller-neutral authoritative fighter assembly
+    lobby/                 catalog/queue plus profile transaction adapter
+    balance_lab/           HTTP/persistence/roster, typed editor adapters, staged transaction
+    practice.rs; routed_worker.rs; worker.rs; verification.rs; mod.rs
+  diagnostics/             process closeout/identity/sampling plus failure and client overlay
+packages/brawler-routing/  route envelope, IPC, supervisor/worker protocol
+content/{catalogs,maps}/   headless-safe authored gameplay data
+assets/catalogs/           client-only audio/VFX/map presentation data
+tools/balance-lab-web/     TypeScript operator application
+tests/network/             separate-App authority/replication scenarios and reusable harness
+tests/performance.rs       fixed-tick and subsystem performance/capacity gates
 ```
 
 `content/catalogs/` owns build-embedded, headless-safe gameplay definitions. `content/maps/` owns
@@ -256,6 +190,27 @@ primitive override validates 3D degradation and is not a renderer selector.
 - Keep authored definitions, selected/resolved builds, mutable ECS runtime state, protocol
   registration, telemetry/evidence, and presentation as separate concerns. A shared wire shape does
   not authorize shared execution of server-only rules.
+- Treat data-only extension and semantic-family extension differently. New instances composed from
+  existing typed mechanics belong in authored catalogs. A new behavior family adds a bounded typed
+  schema or runtime capability plus its focused plugin/handler/system; do not add built-in-ID
+  branches to unrelated coordinators.
+- Registration builders exist only during plugin composition. They use stable IDs, enforce capacity,
+  duplicate and required-coverage rules, sort deterministically, then seal immutable resources.
+  Process-local registries do not open stable wire enums or create runtime-loaded executable mods.
+- Every new shared headless gameplay catalog registers canonical fingerprint material through its
+  content plugin. Client audio/VFX and other presentation catalogs remain outside the gameplay
+  fingerprint and the server feature graph.
+- Model authoritative cross-domain work as collect/validate/plan/commit/publish when atomicity or
+  ordering matters. Map owns object selection and topology; combat alone commits fighter/deployable
+  health, lifecycle, outcomes, and cues for environmental damage.
+- Presentation feature producers emit stable-key `VfxRequest` or `AudioRequest` messages. Generic
+  client adapters own authored-profile lookup and Bevy materialization; producers do not select
+  renderer/material families, asset handles, playback policy, or reduced-effects behavior.
+- AI consumes semantic mode, objective, world-object, and effect-tile projections rather than
+  recognizing concrete asset IDs or inspecting mode-specific resources. Mode installation goes
+  through `src/modes/` registrations while the routed `GameMode` protocol remains closed.
+- Effect tiles currently resolve to focused runtime capabilities; there is no generic executable
+  handler registry. Add one only after a second real mechanic demonstrates a reusable handler shape.
 - Keep network registrations in `protocol.rs`; keep stable shared protocol/gameplay types in the
   appropriate shared model/cue/definition module. Never expose process-local `Entity` identity on
   the wire. Preserve public module paths and wire contracts during organization-only changes unless
@@ -292,7 +247,7 @@ primitive override validates 3D degradation and is not a renderer selector.
 - Start with local, direct code. Extract a helper, module, plugin, crate, or public API only after
   duplication, distinct ownership, platform separation, testing needs, or another concrete cost
   demonstrates the boundary. A second real use is evidence; an imagined future use is not.
-- Prefer Bevy-native components, resources, systems, states, events/messages, assets, and UI before
+- Prefer Bevy-native components, resources, systems, states, messages, assets, and UI before
   adding a custom framework or dependency. Add another abstraction only when the native approach
   creates a specific observed problem.
 - Optimize for obvious ownership and readable execution flow, not the number of layers. A small
@@ -325,7 +280,14 @@ primitive override validates 3D degradation and is not a renderer selector.
 - Server authority is not optional, including in-process and offline development modes.
 - Clients send intent, not positions, hits, damage, scores, status triggers, or map edits.
 - Separate authored definitions, selected builds, and runtime state.
-- Keep gameplay events independent from rendering, audio, camera, and HUD presentation.
+- Keep gameplay facts/messages independent from rendering, audio, camera, and HUD presentation.
+- Put player-facing balance in authored catalogs or validated operator configuration. Keep
+  representation, protocol, capacity, overflow, and deterministic-geometry ceilings code-owned.
+  Shared passive/weapon/ultimate bounds live beside their typed model and are consumed by both the
+  authoritative validator and private Balance Lab adapters.
+- Use `src/timing.rs` conversions rather than literal 60-Hz math. Resolve formation deadlines from
+  `config/server/game-types.ron` and direct-diagnostic loadouts from
+  `content/catalogs/builds.ron`; do not infer either from catalog order or literals.
 - Use focused pure-function tests where a rule is naturally independent of ECS. Test component, resource, lifecycle, and state behavior with small `App`/`World` schedule tests; add headless integration tests for authority and replication.
 - Advance Bevy fixed time or explicitly run the relevant schedule in time-dependent tests rather than waiting on wall-clock sleeps.
 - Visual verification complements automated tests; it does not replace them.

@@ -5,14 +5,14 @@
 This document defines the forward-looking direction for environmental gameplay: surfaces,
 concealment, hazards, traversal, interactive geometry, and temporary areas that change player
 decisions inside a match. It is a candidate catalog and a set of promotion constraints, not a
-commitment to implement every family or a schedule for a future version.
+commitment to implement every family or a delivery schedule.
 
 The [map and mode specification](./04-maps-and-game-modes.md) owns the map recipe, resolved map,
 runtime map, terrain, mode-anchor, and mode-runtime boundaries. The
 [network architecture](./08-network-architecture.md) owns replication, interest management, and
 concealment transport. The [art, presentation, and asset specification](./11-art-and-presentation-direction.md)
-owns how environment facts are rendered. The [backlog](./backlog.md) is the canonical candidate
-index, and a promoted version milestone becomes the implementation scope contract.
+owns how environment facts are rendered. The [backlog](./backlog.md) is the historical candidate
+crosswalk for pre-Ticket ideas; a focused BRL ticket becomes the implementation scope contract.
 
 Brawler uses original names, values, art, layouts, and combinations. Genre examples help describe
 the vocabulary; they are not content to copy.
@@ -32,14 +32,17 @@ provides:
   proximity, attack/damage, and Reveal Scan outcomes enforced before replication;
 - V10 health-bearing oil barrels and treasure chests, exact-once explosion/drop terminals, public
   restoration pickups, and mirrored Heist objectives through explicit target and mode ownership;
+- one-cell authored Speed, Slow, and periodic neutral Damage effect tiles projected into focused
+  movement, damage, healing-block, bot-traversal, spawn-clearance, and presentation capabilities;
 - client-owned visual profiles, themes, imported scenes, primitives, generated meshes,
   and deterministic fallbacks.
 
 The current map-asset catalog implements ground, blocking water, concealing tall grass, walls,
 round obstacles, destructible cover, rubble replacement, health-bearing oil barrels and treasure
-chests, inert decorations, and spawn markers. Restoration pickups are server-owned runtime entities
-created by the chest terminal transaction rather than authored placements. These concrete
-capabilities do not imply hazards, movement modifiers, or arbitrary scripted interactions.
+chests, one-cell Speed/Slow/Damage effect tiles, inert decorations, and spawn markers. Restoration
+pickups are server-owned runtime entities created by the chest terminal transaction rather than
+authored placements. These concrete capabilities do not imply arbitrary scripted interactions or
+the richer surface, traversal, and hazard families below.
 
 A visible tile is not independently authoritative. Gameplay comes from the shared profile attached
 to a placed `MapAssetId`; client surfaces, props, vegetation, particles, materials, and shaders
@@ -47,7 +50,7 @@ present those facts without deciding them.
 
 ## Environment extension principles
 
-1. **Promote one player-visible capability at a time.** A future version selects one coherent
+1. **Promote one player-visible capability at a time.** A focused ticket selects one coherent
    surface, concealment, hazard, traversal, interactive, or temporary-area outcome. It does not
    implement an environment framework or the complete catalog first.
 2. **Keep authored definitions, placements, and runtime state distinct.** A map may place a stable
@@ -75,10 +78,10 @@ present those facts without deciding them.
 
 | Family | Candidate examples | Player-visible decision | Principal risk |
 |---|---|---|---|
-| Movement surface | Speedway, slow ground, mud, snow, web | Route through a positional movement advantage or penalty | Movement composition, overlap, prediction |
+| Movement surface | Implemented one-cell Speed/Slow proof; richer mud, snow, web, or overlapping surfaces | Route through a positional movement advantage or penalty | Movement composition, overlap, prediction |
 | Directional surface | Conveyor, wind current | Enter a space that adds or forces directional movement | Collision/displacement ordering |
 | Slippery surface | Ice, oil | Trade control for retained momentum or speed | Input feel, deterministic movement, prediction |
-| Damage hazard | Fire, acid, electricity, danger boundary | Respect telegraphed area denial or accept damage/status risk | Damage attribution, tick rate, stacking, readability |
+| Damage hazard | Implemented one-cell neutral Damage proof; richer fire, acid, electricity, or danger boundaries | Respect telegraphed area denial or accept damage/status risk | Damage attribution, tick rate, stacking, readability |
 | Beneficial field | Healing, shielding, haste, energy | Contest or remain inside supportive space | Team/owner filters, stacking, combat pacing |
 | Tactical field | Reveal, silence, anti-heal, projectile modifier | Change information or combat rules within bounded space | Cross-system coupling and exceptions |
 | Concealment | Tall grass, smoke, darkness, invisibility field | Use uncertain information for ambush, escape, or area control | Observer-specific gameplay and replication |
@@ -124,11 +127,11 @@ behavior; they do not need to share creation, persistence, or network lifecycle.
 Stable definitions should contain only the parameters the selected mechanic requires. Do not begin
 with a universal `SurfaceRegionDefinition`, movement-rule language, environment effect graph, or
 arbitrary property bag. The existing map placement/profile boundary can be extended with focused
-definitions and lowering when a milestone proves the need.
+definitions and lowering when a ticket proves the need.
 
 ## Questions for every promoted capability
 
-Before implementation, the milestone specification must decide:
+Before implementation, the ticket specification must decide:
 
 - Which subjects are affected: fighters, projectiles, deployables, terrain, objectives, or a
   deliberately smaller set?
@@ -209,7 +212,8 @@ V9 verification proves:
 - reveal returns current state without replaying the hidden path;
 - proximity, action, damage, objective, and expiry rules transition on exact authoritative ticks;
 - private descendants, messages, effects, UI, and cues do not leak hidden state;
-- sentries follow the same observer permission rule; autonomous practice bots remain deferred;
+- sentries and server-hosted Practice bots follow the same observer permission rule and delayed
+  perception contract;
 - late join, reconnect, defeat, respawn, restart, and map replacement do not retain stale visibility;
 - presentation clearly communicates boundaries, reveal, disappearance, reappearance, and the
   reason a subject became observable.
@@ -251,8 +255,8 @@ resembles grass, fire, ice, a door, or a teleporter.
 
 ## Candidate selection guidance
 
-The canonical backlog promotes one environment outcome, not a predetermined bundle. Selection
-should compare player value, interaction with existing builds/modes/maps, authority complexity,
+An owning Ticket selects one environment outcome, not a predetermined bundle. Selection should
+compare player value, interaction with existing builds/modes/maps, authority complexity,
 presentation cost, and verification risk.
 
 - A single speed or slow surface is a relatively focused proof of authored overlaps and movement

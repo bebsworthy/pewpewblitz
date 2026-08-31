@@ -8,7 +8,7 @@ use std::{env, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--mode <wipeout|hot-zone>] [--match-rules <production|verification>]"
+        "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--mode <wipeout|hot-zone|heist>] [--match-rules <production|verification>]"
     );
     eprintln!(
         "       brawler-server lobby-worker --role lobby --logical-server-id <U128> --supervisor-generation <U64> --worker-id <U128> --process-id <U128> --worker-generation <U64> --packet-socket <PATH> --control-socket <PATH>"

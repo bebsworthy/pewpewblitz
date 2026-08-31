@@ -10,8 +10,8 @@ design contract, not a delivery checklist or implementation-status report.
 [Fighter and build specification](./02-fighter-model.md),
 [weapons and abilities](./03-weapons-and-abilities.md), and
 [maps and modes](./04-maps-and-game-modes.md) own the rules and data used by these loops.
-[Player UX](./13-player-ux.md) owns exact navigation and admission behavior. Version roadmaps own
-completed scope, evidence, and future delivery plans.
+[Player UX](./13-player-ux.md) owns exact navigation and admission behavior. Ticket owns active
+scope and evidence; version roadmaps preserve completed historical delivery records.
 
 ## Loop hierarchy
 
@@ -225,9 +225,10 @@ Build feedback should emphasize decisions rather than only aggregate power. Usef
 - Did each passive produce an observable advantage with an opportunity cost?
 - Did the selected mode or map expose a weakness that another build choice could address?
 
-Practice is the fastest experimentation path, but it must eventually provide opponents that exercise
-movement, range, pressure, objectives, and counterplay. Inert participants validate lifecycle only;
-they do not complete the build-learning promise.
+Practice is the fastest experimentation path. Server-hosted deterministic bots already exercise
+movement, weapon range, pressure, Wipeout/Hot Zone/Heist objectives, and selected typed capabilities
+through ordinary input intent. Broader build coverage, difficulty profiles, and richer tactics remain
+separate product slices rather than alternate gameplay authority.
 
 ## Saved-brawler arsenal loop
 

@@ -21,8 +21,8 @@ More focused documents own their detailed domains:
   and the player map-builder boundary.
 
 Those documents may refine their owned behavior without weakening the engine boundaries defined
-here. Version milestone specifications record changes and evidence; they do not silently establish
-a second engine composition.
+here. Ticket specifications own active changes and evidence; historical version milestones do not
+silently establish a second engine composition.
 
 ## Supported baseline
 
@@ -218,7 +218,7 @@ state. Lightyear capabilities such as prediction, rollback, and lag compensation
 merely because the dependency provides them. Owner prediction remains an isolated experimental
 feature, and any production prediction or lag-compensation path requires measured player benefit,
 terrain and collision correctness, explicit lifecycle ownership, protocol verification, and
-acceptance through a future milestone.
+acceptance through a focused Ticket.
 
 The routed transport carries opaque Lightyear datagrams between the public supervisor endpoint and
 the selected lobby or match authority. It does not wrap replication in another snapshot protocol
@@ -262,6 +262,17 @@ Built-in and future user-authored maps use the same typed recipe, validation, re
 runtime-instantiation path. User-editable layout data remains separate from developer-authored
 authoritative mode plugins. Likewise, built-in brawler and weapon presets use the same bounded
 recipe and resolution path as player-authored variations.
+
+Data-only extension applies to new instances composed from implemented typed primitives. A genuinely
+new semantic family adds its bounded definition or runtime capability plus a focused plugin, system,
+or registered handler; it must not add built-in-ID branches to unrelated coordinators. Registration
+builders exist only during application composition, validate stable IDs, bounds, duplicates, and
+required coverage, then seal immutable deterministically ordered resources. These local registries
+do not create runtime-loaded executable mods or open the intentionally versioned wire protocol.
+
+Every shared headless-safe gameplay catalog contributes canonical material to the one gameplay
+content fingerprint through its owning content plugin. Client-only visual, VFX, and audio catalogs
+remain outside that fingerprint and outside the server feature graph.
 
 Prefer Bevy-native components, resources, systems, messages, assets, states, and UI before adding a
 custom framework. Add a scripting language, editor framework, general command bus, or other engine

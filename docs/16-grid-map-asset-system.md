@@ -20,8 +20,9 @@ Historical milestone documents are evidence, not production content organization
   per built-in map.
 - [`assets/catalogs/`](../assets/catalogs/) maps stable visual IDs to client-only scenes,
   transforms, and materials; shared gameplay content never contains client asset paths.
-- [`src/map/catalog.rs`](../src/map/catalog.rs) parses, validates, fingerprints, and resolves map
-  content. [`src/map/runtime.rs`](../src/map/runtime.rs) owns authoritative whole-asset destruction,
+- [`src/map/catalog.rs`](../src/map/catalog.rs) parses and validates map content, while
+  [`src/map/resolution.rs`](../src/map/resolution.rs) resolves it. [`src/map/runtime/`](../src/map/runtime/)
+  owns authoritative installation, whole-asset destruction,
   damageable-object terminals, recovery, and colliders; [`src/map/objects.rs`](../src/map/objects.rs)
   owns shared target state/facts and [`src/map/pickups.rs`](../src/map/pickups.rs) owns restoration-
   pickup lifecycle. [`src/map/client.rs`](../src/map/client.rs) owns client convergence and readiness.
@@ -468,30 +469,21 @@ Conceptual source form:
 
 ```ron
 (
-    recipe_id: MapRecipeId(4),
-    revision: 1,
-    recipe_version: 1,
-    name: "Acid Lakes",
-    mode_definition_id: WIPEOUT,
-    presentation_theme_id: DESERT_DAY,
+    recipe_id: MapRecipeId(4), revision: 1, recipe_version: 5,
+    mode_definition_id: ModeDefinitionId(2),
+    presentation_theme_id: MapPresentationThemeId(2),
     dimensions: (width: 60, height: 60),
-    default_surface_asset_id: SAND_FLOOR,
+    default_surface_asset_id: MapAssetId(5),
 
     placements: [
-        (placement_id: 1, cell: (4, 7), asset: WALL_CORNER, rotation: 0),
-        (placement_id: 2, cell: (5, 7), asset: WALL, rotation: 0),
-        (placement_id: 3, cell: (12, 9), asset: WATER, rotation: 0),
-        (placement_id: 4, cell: (18, 14), asset: BUSH, rotation: 0),
-        (placement_id: 5, cell: (22, 8), asset: CHEST, rotation: 0),
+        (placement_id: MapPlacementId(1), cell: (x: 4, y: 7), asset_id: MapAssetId(7), quarter_turns: 0, parameters: None),
         (
-            placement_id: 6,
-            cell: (3, 20),
-            asset: PLAYER_SPAWN,
-            rotation: 0,
-            parameters: PlayerSpawn(team: 0, ordinal: 1, facing: East),
+            placement_id: MapPlacementId(2), cell: (x: 3, y: 20),
+            asset_id: MapAssetId(20), quarter_turns: 0,
+            parameters: PlayerSpawn(team_slot: 0, ordinal: 1, facing_quarter_turns: 0),
         ),
     ],
-
+    filled_rects: [],
     mode_anchors: [],
 )
 ```
@@ -530,6 +522,8 @@ covers:
 - collision, projectile, concealment, destruction, and interaction profile consistency;
 - spawn count, team topology, capacity, clearance, and terrain-aware reachability;
 - required mode anchors, objective access, and mode compatibility;
+- mode topology projected by the selected mode registration rather than map-side branches over
+  concrete Wipeout, Hot Zone, or Heist implementations;
 - deterministic canonical order and fingerprints;
 - client visual coverage through a build/test-time cross-catalog audit, without loading client files
   in the server runtime.
@@ -583,30 +577,30 @@ mutation, recovery cache, visual entity, generated mesh, and transient effect.
 
 ## ECS and schedule ownership
 
-The final source organization should reflect the new responsibility rather than preserve old file
-names:
+Production source ownership is:
 
 ```text
 src/map/
   mod.rs                 composition, sets, public API
-  model.rs               shared grid, IDs, recipe and resolved shapes
-  catalog/               shared map-asset/gameplay definitions and validation
-  recipe/                parsing, canonicalization, resolution and layout validation
-  server/                authoritative installation, indexes, reset and teardown
-  runtime/               dynamic asset state, destruction/interactions and recovery
-  client/                snapshot acceptance and client convergence
+  model.rs               stable IDs plus shared resolved/runtime map facts
+  catalog.rs             authored catalogs, placement/recipe shapes, parsing, validation, fingerprints
+  resolution.rs          canonical resolution and mode-topology validation
+  effect_tiles.rs        authored behavior to focused runtime-capability projection
+  objects.rs             shared world-target state, facts, and cues
+  pickups.rs             restoration-pickup lifecycle
+  server.rs              selected-map startup and generation lifecycle
+  client.rs              snapshot acceptance and client convergence
+  runtime/
+    installation.rs      authoritative installation and colliders
+    dynamics.rs          destruction, recovery, reset, and publication
+    object_authority.rs  damageable-object runtime and registered reactions
+    terminal_reactions.rs bounded stable-ID reaction registry
+    effect_tiles.rs      authoritative occupancy and periodic pulses
   tests.rs
 
-src/client/presentation_3d/map/
-  catalog.rs             client visual/theme profiles and asset readiness
-  materialize.rs         grid surfaces, features, decorations and markers
-  generated.rs           adjacency/chunk/generated mesh ownership
-  tests.rs
+src/client/presentation_3d/map.rs
+                         client map materialization and generated presentation
 ```
-
-Exact filenames may change when implementation evidence demonstrates a clearer cohesive boundary.
-The final design must not preserve `terrain/`, `regions`, or `objects` merely as forwarding layers
-for deleted concepts.
 
 Authoritative fixed-tick ordering remains explicit:
 
@@ -621,8 +615,8 @@ input/combat intent
   -> physics step observes committed state
 ```
 
-Concealment observation and interactive behaviors receive their own explicit ordering in the
-milestone that implements them; presentation never becomes an authority dependency.
+New concealment or interactive behaviors receive their own explicit ordering in the Ticket that
+implements them; presentation never becomes an authority dependency.
 
 ## Existing content conversion
 

@@ -2,14 +2,18 @@
 
 ## Architectural decision
 
-Brawler is first and foremost a networked competitive game. The target architecture is a **dedicated-server-authoritative simulation**. The local gameplay prototype is only a development harness; it must not become a separate client-authoritative implementation that later needs to be rewritten for online play.
+Brawler is first and foremost a networked competitive game. Its implemented architecture is a
+**dedicated-server-authoritative simulation**. Local and automated gameplay are development harnesses
+over that same authority path, not separate client-authoritative implementations.
 
-The planned implementation is Bevy 0.19 with Lightyear 0.29. Bevy core is intentionally modular and does not provide first-party networking; Lightyear supplies the networked game layer. Bevy supports headless applications by omitting rendering/window features, while Lightyear provides separate client/server plugins, input buffering, replication, prediction, rollback, interpolation, and transport layers. See the version-pinned [Bevy headless example](https://docs.rs/crate/bevy/0.19.0/source/examples/app/headless.rs), [Lightyear 0.29 documentation](https://docs.rs/lightyear/0.29.0/lightyear/), and [Lightyear repository](https://github.com/cBournhonesque/lightyear).
+The supported implementation uses Bevy 0.19 with Lightyear 0.29. Bevy core is intentionally modular and does not provide first-party networking; Lightyear supplies the networked game layer. Bevy supports headless applications by omitting rendering/window features, while Lightyear provides separate client/server plugins, input buffering, replication, prediction, rollback, interpolation, and transport layers. See the version-pinned [Bevy headless example](https://docs.rs/crate/bevy/0.19.0/source/examples/app/headless.rs), [Lightyear 0.29 documentation](https://docs.rs/lightyear/0.29.0/lightyear/), and [Lightyear repository](https://github.com/cBournhonesque/lightyear).
 
-This dependency choice is a deliberate risk, not an invisible assumption. v1 Milestones 01–03 validate the actual version combination through application composition, two-client connection/replication, and server-authoritative movement before the project commits to substantial combat content; there is no separate throwaway engine spike.
+This dependency choice remains deliberate rather than invisible. V1 Milestones 01–03 recorded the
+original version-combination, connection/replication, and authoritative-movement evidence; current
+dependency changes must revalidate those boundaries rather than relying on a throwaway engine spike.
 
 V2 concurrency extends this authority model through isolated match-worker processes rather than
-placing multiple mutable matches in one Bevy world. The proposed supervisor, single-public-port,
+placing multiple mutable matches in one Bevy world. The production supervisor, single-public-port,
 and UDP/IPC routing decision is recorded in
 [Multi-process server and single-port UDP/IPC transport](./14-multiplayer-server-architecture.md).
 This document remains the gameplay authority and replication contract inside each match worker.
@@ -177,7 +181,7 @@ migration requirement explicitly justifies more.
 
 ## Input and replication
 
-The client sends intent, not results. The exact Lightyear input type is selected during the relevant milestone; conceptually it contains:
+The client sends intent, not results. The registered Lightyear input type follows this contract:
 
 ```text
 InputFrame

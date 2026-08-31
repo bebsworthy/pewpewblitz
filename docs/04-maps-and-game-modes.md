@@ -9,7 +9,8 @@ authoring boundary for a future player-facing map builder.
 [Product direction](./00-product-direction.md) owns why player-authored arenas matter.
 [Network architecture](./08-network-architecture.md) owns replication and visibility.
 [Art, presentation, and asset specification](./11-art-and-presentation-direction.md) owns client rendering.
-Version roadmaps and milestones own delivery history, evidence, and temporary implementation stages.
+Ticket owns active implementation scope and evidence. Version roadmaps and milestones preserve
+historical delivery records and temporary implementation stages.
 
 The central rule is:
 
@@ -111,11 +112,11 @@ pulsing only after a complete first interval and blocks passive recovery, healin
 Restoration Field, and restoration-pickup collection until the fighter exits; blocked pickups are
 not consumed unless their ordinary expiry is due. Speed and Slow occupancy do not block healing.
 
-The resolved map retains each tile's complete authored behavior. Damage amount and interval are
-read from that resolved behavior at runtime. The current Speed/Slow movement path instead reads the
-canonical `1.250`/`0.700` constants; although Balance Lab validates and persists alternative
-multipliers, they are not yet consumed by authoritative movement. BRL-0036 remains open for that
-wiring correction.
+The resolved map retains each tile's complete authored behavior. One headless-safe projection lowers
+it into orthogonal runtime capabilities for movement scaling, periodic neutral damage, healing
+blocking, bot traversal cost, spawn clearance, and presentation. Authoritative consumers read only
+the capability they own. Speed/Slow movement therefore consumes the resolved authored multiplier,
+and Balance Lab changes take effect without a parallel movement constant.
 
 Resolution produces an immutable `ResolvedMap` and contributes to a
 `ResolvedMatchComposition`. Mutable runtime state never flows back into the authored recipe. A map
@@ -260,11 +261,12 @@ exactly two teams or use one advertised topology as an engine-wide ceiling.
 
 ## Supported modes
 
-The checked-in `config/server/game-types.ron` schema 4 catalog owns match balancing at two levels.
-`common_lifecycle` declares spawn-protection and completed-match input-lock durations once for every
-advertised game type. `mode_policies` declares Wipeout's recent-hostile defeat-credit window and
-Heist's critical-health percentage once per mode. Per-game-type entries continue to own topology,
-map selection, objective target, match duration, countdown, and respawn duration. The lobby
+The checked-in `config/server/game-types.ron` schema 5 catalog owns operator policy at four levels.
+`formation_timing` declares loading and route-grant deadlines, `common_lifecycle` declares
+spawn-protection and completed-match input-lock durations once for every advertised game type,
+`mode_policies` declares Wipeout's recent-hostile defeat-credit window and Heist's critical-health
+percentage once per mode, and per-game-type entries own topology, map selection, objective target,
+match duration, countdown, and respawn duration. The lobby
 validates this complete policy, incorporates it into the catalog revision, and copies the resolved
 values through allocation and the match manifest; a production worker does not reconstruct them
 from mode defaults. The shortened process-verification profile remains an explicit test/operator
@@ -337,6 +339,8 @@ Mode rules use focused Bevy-native composition rather than an object-oriented un
 trait:
 
 - one focused rule plugin for each supported mode;
+- one bounded process-local registry populated by mode-owned registration plugins and sealed in
+  deterministic stable-ID order;
 - stable definitions and validated rule resources;
 - common match-phase components and systems only where behavior is truly shared;
 - mode-owned resources/components for scores, objectives, timers, and participant facts;
@@ -344,8 +348,16 @@ trait:
   and completion;
 - replicated state and cues observed by client HUD and world presentation systems.
 
-Introduce a shared registry, trait, or generic mode layer only after concrete modes demonstrate a
-problem that plugin composition, typed definitions, and ECS queries do not solve.
+The registry opens local installation and projection without turning mode behavior into data or a
+generic trait hierarchy. Stable routed `GameMode` values and protocol identities remain deliberately
+closed; advertising a new network mode requires an explicit route/protocol compatibility migration.
+
+World-object terminal reactions follow the same bounded local-registration pattern: an authored
+terminal identity must have exactly one registered handler before the map runtime starts. The
+registry validates duplicates, capacity, and coverage of every authored terminal identity, sorts
+by stable ID, and seals;
+adding a new terminal family adds its definition and focused handler plugin rather than another
+branch in the object coordinator.
 
 ## Map design principles
 

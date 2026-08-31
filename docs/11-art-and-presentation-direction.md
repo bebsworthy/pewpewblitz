@@ -15,7 +15,8 @@ machine-readable sources may evolve without turning this specification into a du
 
 ## Visual direction
 
-Brawler is a stylized, toy-like, fixed-camera arena shooter designed to remain clean and readable at
+Brawler is a stylized, toy-like, orthographic arena shooter with dynamic map/viewport framing,
+designed to remain clean and readable at
 match scale. Its visual identity favors:
 
 - recognizable silhouettes and restrained surface detail;

@@ -1,96 +1,93 @@
-# Canonical cross-version candidate index
+# Historical cross-version candidate index
 
-Last reconciled: **2026-08-26**, after V11 completed and accepted playable deterministic Practice
-bots, objective-priority and perimeter-recovery feedback corrections, affected verification, and
-closeout.
+Last reconciled: **2026-08-31**, after V12 closeout, adoption of Ticket as the current work tracker,
+and the BRL-0061/BRL-0070 architecture-remediation rounds.
 
-This file is the canonical index of unresolved product and technical candidates for future PewPew
-Blitz versions. It provides one place to compare candidates without copying the detailed research,
-specifications, evidence, or historical rationale retained by completed version roadmaps and design
-documents.
+This file preserves the candidate catalog that predates Ticket. It provides one place to understand
+older candidate IDs without copying the detailed research, specifications, evidence, or historical
+rationale retained by completed version roadmaps and design documents. It is not the current backlog:
+search the `BRL` Ticket project for live status and create or update one focused ticket when work is
+selected.
 
 A candidate is not an implementation commitment or a permanent priority. It becomes active only
-when promoted into the next version roadmap and processed through research and user specification
-review. Completed roadmap rows remain historical sources of truth and are not rewritten from this
-index.
+when a BRL ticket owns its outcome, specification, acceptance criteria, decisions, and evidence.
+Completed roadmap rows remain historical sources of truth and are not rewritten from this index.
 
 ## How to use this index
 
 - Select future work by current player value, product direction, dependency evidence, and delivery
   cost—not by the age or identifier of a candidate.
-- Promote the smallest player-visible vertical slice. A parent candidate may produce one focused
-  milestone without committing every capability named by its source documents.
-- Create the next version roadmap and first milestone only when that version is intentionally
-  chosen. Record research, exact scope, architecture, tests, playtest, feedback, and closeout there.
-- Update this index when a candidate is promoted, split, superseded, resolved, rejected, or gains a
-  concrete promotion trigger.
+- Open the smallest player-visible vertical slice as one focused BRL ticket without committing
+  every capability named by its source documents.
+- Record research, exact scope, architecture, tests, playtest, feedback, and closeout in the ticket
+  specification. Create a linked backlog ticket for independently valuable deferred work.
+- Update this historical crosswalk when an old candidate is ticketed, split, superseded, resolved,
+  rejected, or gains a concrete trigger.
 - Keep catalog-scale idea inventories in their owning design documents. Add a separate candidate
-  here only when it represents a plausible version outcome or a concrete maintenance obligation.
+  here only when it represents a plausible ticket outcome or a concrete maintenance obligation.
 
 ## Candidate states
 
 | State | Meaning |
 |---|---|
-| Candidate | Eligible for future-version research; no order or delivery commitment is assigned |
+| Candidate | Eligible for future ticket research; no order or delivery commitment is assigned |
 | Partially delivered | A useful baseline exists, but a separately valuable remainder is unresolved |
 | Trigger-bound | Revisit only when the stated product, platform, deployment, or evidence condition occurs |
-| Promoted | Owned by an active version roadmap; that roadmap is the implementation scope contract |
+| Ticketed | Owned by a BRL ticket; that ticket is the implementation scope contract |
 | Resolved | Delivered, superseded, or explicitly closed; retained only in the archive below |
 
 ## Player-visible product candidates
 
-| ID | Candidate outcome | State and promotion trigger | Detailed sources and dependencies |
+| ID | Candidate outcome | State and Ticket trigger | Detailed sources and dependencies |
 |---|---|---|---|
 | CAND-BOTS | Playable, readable server-hosted opponents in the existing Start Practice flow | Resolved by completed V11 M01; broader bot builds, difficulty, avoidance, tactics, hosting, and learned-policy work retain their explicit V11 backlog gates | [V11 roadmap](./implementation/v11/roadmap.md); [V11 M01 closeout](./implementation/v11/milestone-01.md); [bot decision and first-slice contract](./10-bots.md) |
-| CAND-RELEASE-POLISH | Release-quality controller feel, audio, HUD/combat/terrain/objective readability, balance, match length, and mode pacing | Candidate; promote before claiming release readiness or when focused playtests identify the next highest-value feel problem | [`POST-V1-RELEASE-POLISH`](./implementation/v1/roadmap.md#v1-backlog); [V2 manual-matrix rows](./implementation/v2/roadmap.md#v2-backlog); [V10 closeout](./implementation/v10/roadmap.md) |
-| CAND-ARSENAL | Persistent player-owned brawlers, immutable fighter-profile/weapon-base creation choices, four interchangeable owned weapon-part slots, production editing, and the minimum account/storage boundary required by that loop | Resolved by completed V7; acquisition, currencies, loot, purchases, trade, crafting, global accounts, and cloud profiles were outside that outcome and require a separately promoted player loop | [V7 roadmap](./implementation/v7/roadmap.md); [fighter model](./02-fighter-model.md); [weapons and abilities](./03-weapons-and-abilities.md) |
-| CAND-WEB-ARSENAL | A browser profile/dashboard that creates, edits, deletes, selects, and presents the same server-owned brawlers through an HTTP API | Trigger-bound; promote when browser or remote arsenal management becomes a selected player workflow. It must call the same profile commands, revisions, validation, and queue-time edit rejection as the native Dashboard and must not access SQLite directly or imply browser gameplay | [V7 roadmap](./implementation/v7/roadmap.md); [player UX](./13-player-ux.md); [multiplayer server architecture](./14-multiplayer-server-architecture.md) |
-| CAND-WEB-GAME-CLIENT | A supported Bevy WASM gameplay client connecting through a browser-compatible Lightyear transport while preserving the routed, server-authoritative match path | Trigger-bound; promote only when browser gameplay is a supported platform target. Requires a WebTransport or evaluated WebSocket ingress rather than raw UDP, WASM-specific client feature composition and persistence, certificate/deployment policy, browser input/audio/render checks, and cross-browser performance evidence | [network architecture](./08-network-architecture.md); [multiplayer server architecture](./14-multiplayer-server-architecture.md); [current native-only transport features](../Cargo.toml); [local Lightyear WASM/WebTransport example](../references/lightyear/examples/simple_setup/README.md) |
-| CAND-COMBAT-CAPABILITIES | One new readable combat/build family, such as support/control payloads, a new ultimate, systemic status interaction, an advanced projectile, or a terrain-destruction carrier | Candidate parent; promote exactly one coherent capability family after choosing its player-visible build tradeoff | [fighter model](./02-fighter-model.md); [weapons and abilities](./03-weapons-and-abilities.md); [future-version combat candidates](./implementation/v1/roadmap.md#future-version-candidate-backlog); [`GAP-DESIGN-TERRAIN-RESERVATION`](./implementation/v1/roadmap.md#v1-backlog) |
+| CAND-RELEASE-POLISH | Release-quality controller feel, audio, HUD/combat/terrain/objective readability, balance, match length, and mode pacing | Candidate; open a focused ticket before claiming release readiness or when playtests identify the next highest-value feel problem | [`POST-V1-RELEASE-POLISH`](./implementation/v1/roadmap.md#v1-backlog); [V2 manual-matrix rows](./implementation/v2/roadmap.md#v2-backlog); [V10 closeout](./implementation/v10/roadmap.md) |
+| CAND-ARSENAL | Persistent player-owned brawlers, immutable fighter-profile/weapon-base creation choices, four interchangeable owned weapon-part slots, production editing, and the minimum account/storage boundary required by that loop | Resolved by completed V7; acquisition, currencies, loot, purchases, trade, crafting, global accounts, and cloud profiles were outside that outcome and require a separate selected player-loop ticket | [V7 roadmap](./implementation/v7/roadmap.md); [fighter model](./02-fighter-model.md); [weapons and abilities](./03-weapons-and-abilities.md) |
+| CAND-WEB-ARSENAL | A browser profile/dashboard that creates, edits, deletes, selects, and presents the same server-owned brawlers through an HTTP API | Trigger-bound; ticket when browser or remote arsenal management becomes a selected player workflow. It must call the same profile commands, revisions, validation, and queue-time edit rejection as the native Dashboard and must not access SQLite directly or imply browser gameplay | [V7 roadmap](./implementation/v7/roadmap.md); [player UX](./13-player-ux.md); [multiplayer server architecture](./14-multiplayer-server-architecture.md) |
+| CAND-WEB-GAME-CLIENT | A supported Bevy WASM gameplay client connecting through a browser-compatible Lightyear transport while preserving the routed, server-authoritative match path | Trigger-bound; ticket only when browser gameplay is a supported platform target. Requires a WebTransport or evaluated WebSocket ingress rather than raw UDP, WASM-specific client feature composition and persistence, certificate/deployment policy, browser input/audio/render checks, and cross-browser performance evidence | [network architecture](./08-network-architecture.md); [multiplayer server architecture](./14-multiplayer-server-architecture.md); [current native-only transport features](../Cargo.toml); [local Lightyear WASM/WebTransport example](../references/lightyear/examples/simple_setup/README.md) |
+| CAND-COMBAT-CAPABILITIES | One new readable combat/build family, such as support/control payloads, a new ultimate, systemic status interaction, an advanced projectile, or a terrain-destruction carrier | Candidate parent; ticket exactly one coherent capability family after choosing its player-visible build tradeoff | [fighter model](./02-fighter-model.md); [weapons and abilities](./03-weapons-and-abilities.md); [future-version combat candidates](./implementation/v1/roadmap.md#future-version-candidate-backlog); [`GAP-DESIGN-TERRAIN-RESERVATION`](./implementation/v1/roadmap.md#v1-backlog) |
 | CAND-GAME-MODE | One complete additional authoritative mode with compatible map requirements and a player-visible loop | Partially delivered: V10 completed the focused `HeistModePlugin`. Gem Grab, Solo Showdown, and another complete mode remain candidates rather than framework requirements | [V10 roadmap](./implementation/v10/roadmap.md); [damageable objects and Heist specification](./18-damageable-world-objects-and-heist.md); [future-version mode candidates](./implementation/v1/roadmap.md#future-version-candidate-backlog); [maps and modes](./04-maps-and-game-modes.md) |
-| CAND-ENVIRONMENT-GAMEPLAY | One readable environment slice—surface, concealment, hazard, traversal device, interactive geometry, or ability-created region—using server-owned outcomes | Partially delivered: V9 completed concealment/reveal and V10 completed oil barrels plus one treasure-chest/restoration-pickup behavior. Unrelated hazards, traversal devices, interactions, movement surfaces, and temporary regions remain candidates | [V10 roadmap](./implementation/v10/roadmap.md); [damageable objects and Heist specification](./18-damageable-world-objects-and-heist.md); [V9 roadmap](./implementation/v9/roadmap.md); [concealment and reveal specification](./17-concealment.md); [environment gameplay direction](./09-environment-gameplay.md) |
-| CAND-MAP-CONTENT | Additional built-in maps or themes using the implemented sparse-grid map-asset contract | V10 consolidated product-visible feature proofs into the Feature Yard integration family. Promote a later map slice only to deliberately author and playtest fun/balanced player content or a genuinely new theme, not another isolated mechanic fixture | [V10 Feature Yard closeout](./implementation/v10/milestone-02b.md); [grid map-asset specification](./16-grid-map-asset-system.md); [maps and modes](./04-maps-and-game-modes.md) |
-| CAND-MAP-BUILDER | A player-facing workflow for editing, validating, saving, reopening, and launching bounded map recipes without authoring executable mode rules | Candidate; promote after choosing a deliberately bounded authoring vertical slice. Publishing, discovery, moderation, arbitrary assets, and platform services remain separate decisions | [`FUT-MAP-BUILDER`](./implementation/v1/roadmap.md#v1-backlog); [creator direction](./00-product-direction.md#creator-direction); [V4 storage/object evidence](./implementation/v4/roadmap.md) |
+| CAND-ENVIRONMENT-GAMEPLAY | One readable environment slice—surface, concealment, hazard, traversal device, interactive geometry, or ability-created region—using server-owned outcomes | Partially delivered: concealment/reveal, oil barrels, chest/restoration behavior, and one-cell Speed/Slow/Damage effect tiles are complete. Richer hazards/surfaces, traversal, interactions, and temporary regions remain candidates | [damageable objects and Heist specification](./18-damageable-world-objects-and-heist.md); [concealment and reveal specification](./17-concealment.md); [environment gameplay direction](./09-environment-gameplay.md) |
+| CAND-MAP-CONTENT | Additional built-in maps or themes using the implemented sparse-grid map-asset contract | V10 consolidated product-visible feature proofs into the Feature Yard integration family. Open a later map ticket only to deliberately author and playtest fun/balanced player content or a genuinely new theme, not another isolated mechanic fixture | [V10 Feature Yard closeout](./implementation/v10/milestone-02b.md); [grid map-asset specification](./16-grid-map-asset-system.md); [maps and modes](./04-maps-and-game-modes.md) |
+| CAND-MAP-BUILDER | A player-facing workflow for editing, validating, saving, reopening, and launching bounded map recipes without authoring executable mode rules | Candidate; open a ticket after choosing a deliberately bounded authoring vertical slice. Publishing, discovery, moderation, arbitrary assets, and platform services remain separate decisions | [`FUT-MAP-BUILDER`](./implementation/v1/roadmap.md#v1-backlog); [creator direction](./00-product-direction.md#creator-direction); [V4 storage/object evidence](./implementation/v4/roadmap.md) |
 | CAND-MAP-PROVISIONING | Server-selected map-bundle delivery and caching so clients need not embed the complete map library | Trigger-bound; research before server-hosted custom maps or when built-in library size becomes a measured distribution problem | [V4 M02 map-document architecture](./implementation/v4/milestone-02.md); [network map authority](./08-network-architecture.md#map-recipe-and-mode-authority). Coordinate bundle identity, assets, trust, cache/recovery, and global compatibility as one content-delivery boundary |
-| CAND-ORIGINAL-ART | A coherent original PewPew Blitz production-art replacement or extension for the dashboard, fighters, environments, weapons, animation, and effects | Trigger-bound; promote only with an art-production budget and a coherent replacement target | [`V3-ORIGINAL-ASSETS`](./implementation/v3/roadmap.md#v3-backlog); [`V5-ORIGINAL-DASHBOARD-ART`](./implementation/v5/roadmap.md#initial-v5-backlog); [art, presentation, and asset specification](./11-art-and-presentation-direction.md) |
+| CAND-ORIGINAL-ART | A coherent original PewPew Blitz production-art replacement or extension for the dashboard, fighters, environments, weapons, animation, and effects | Trigger-bound; open a ticket only with an art-production budget and a coherent replacement target | [`V3-ORIGINAL-ASSETS`](./implementation/v3/roadmap.md#v3-backlog); [`V5-ORIGINAL-DASHBOARD-ART`](./implementation/v5/roadmap.md#initial-v5-backlog); [art, presentation, and asset specification](./11-art-and-presentation-direction.md) |
 | CAND-RELEASE-READINESS | Remaining desktop release work: broader minimum-spec coverage, colorblind palette, explicit resolution/frame-limit/cursor policy, non-Xbox glyph/rumble support, localization decision, packaging/notarization, and battery/thermal behavior | Trigger-bound; split into the smallest required slices when a supported-platform or external-distribution gate is chosen | [V1 explicit release exclusions](./implementation/v1/roadmap.md#explicitly-outside-v1); [player UX settings/accessibility contract](./13-player-ux.md); [V3 performance baseline](./implementation/v3/roadmap.md); [V5 closeout limitations](./implementation/v5/roadmap.md#v5-closeout) |
 
 ## Network, service, and session candidates
 
-| ID | Candidate outcome | State and promotion trigger | Detailed sources and dependencies |
+| ID | Candidate outcome | State and Ticket trigger | Detailed sources and dependencies |
 |---|---|---|---|
-| CAND-INTERNET-REACHABILITY | Supported play beyond LAN through an explicit port-forwarding, NAT-traversal, relay, or hosted-connectivity policy | Trigger-bound; promote when internet play becomes a supported product target | [V2 hosting deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [network architecture](./08-network-architecture.md); [multiplayer server architecture](./14-multiplayer-server-architecture.md) |
-| CAND-SERVER-DISCOVERY | A bounded server registry with authenticated/current advertisements, expiry, refresh, and client browsing while preserving direct hostname/IP entry and local favorites | Trigger-bound; promote with public multi-server discovery and coordinate with internet reachability because discovery does not make a server reachable | [player UX server-selection direction](./13-player-ux.md); [V2 hosting deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2) |
+| CAND-INTERNET-REACHABILITY | Supported play beyond LAN through an explicit port-forwarding, NAT-traversal, relay, or hosted-connectivity policy | Trigger-bound; open a ticket when internet play becomes a supported product target | [V2 hosting deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [network architecture](./08-network-architecture.md); [multiplayer server architecture](./14-multiplayer-server-architecture.md) |
+| CAND-SERVER-DISCOVERY | A bounded server registry with authenticated/current advertisements, expiry, refresh, and client browsing while preserving direct hostname/IP entry and local favorites | Trigger-bound; open a ticket with public multi-server discovery and coordinate it with internet reachability because discovery does not make a server reachable | [player UX server-selection direction](./13-player-ux.md); [V2 hosting deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2) |
 | CAND-PREDICTION-LAG-COMP | Measured owner prediction and/or lag compensation that improves supported latency without violating terrain, collision, authority, or readability | Trigger-bound; revisit with a terrain-aware prediction candidate or latency evidence that current authoritative/interpolated play is inadequate | [`M03-PRED`](./implementation/v1/roadmap.md#v1-backlog); [network architecture](./08-network-architecture.md); [local prediction experiment](../src/client/prediction.rs) |
-| CAND-SESSION-CONTINUITY | One explicit continuity feature such as interrupted-match resumption, join-in-progress, or a spectator/observer client | Trigger-bound; promote one feature when continuity, tournament observation, or larger playtest operations demonstrate the need | [`V2-ROUTE-RESUMPTION`](./implementation/v2/roadmap.md#v2-backlog); [V2 explicit deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [player UX](./13-player-ux.md) |
+| CAND-SESSION-CONTINUITY | One explicit continuity feature such as interrupted-match resumption, join-in-progress, or a spectator/observer client | Trigger-bound; select and ticket one feature when continuity, tournament observation, or larger playtest operations demonstrate the need | [`V2-ROUTE-RESUMPTION`](./implementation/v2/roadmap.md#v2-backlog); [V2 explicit deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [player UX](./13-player-ux.md) |
 | CAND-HOSTING-HARDENING | Internet-facing capacity, credentials, security, fleet scheduling, autoscaling, moderation, and administration appropriate to a concrete deployment | Trigger-bound; do not build a generic backend before a public hosting target exists | [`V2-HOSTING-HARDENING`](./implementation/v2/roadmap.md#v2-backlog); [V2 explicit deferrals](./implementation/v2/roadmap.md#explicitly-deferred-beyond-v2); [multiplayer server architecture](./14-multiplayer-server-architecture.md) |
 
 Global accounts, cloud profiles, social systems, parties, ranked play, currencies, monetization,
 live operations, and mobile controls remain outside the current candidate index unless a future
-product decision promotes a concrete player outcome. V7 owns only the minimum server-side identity,
+product decision selects a concrete player outcome for a ticket. V7 owns only the minimum server-side identity,
 storage, and entitlement boundary required by its persistent-arsenal slice.
 
 ## Trigger-bound technical maintenance
 
-These rows do not compete with player-visible candidates for permanent priority. Promote them when
-their trigger occurs or include them in a version whose changed surface makes the maintenance
-necessary.
+These rows do not compete with player-visible candidates for permanent priority. Open or include
+them in a focused ticket when their trigger occurs or another ticket changes the relevant surface.
 
-| ID | Obligation | Promotion trigger and source |
+| ID | Obligation | Ticket trigger and source |
 |---|---|---|
 | MAINT-ROUTED-HARDENING | Re-measure and optimize routed IPC/egress, MTU, CPU, and capacity behavior | A real deployment target or measured bottleneck; [`V2-ROUTED-HARDENING`](./implementation/v2/roadmap.md#v2-backlog) |
 | MAINT-WINDOWS-IPC | Implement the production Windows named-pipe backend | Windows becomes an active supported target; [`V2-WINDOWS-IPC`](./implementation/v2/roadmap.md#v2-backlog) |
 | MAINT-TRANSPORT-CONTINGENCY | Reconsider bounded worker-port Lightyear UDP instead of routed transport | Only a qualifying routed hard-gate failure and explicit user approval; [`V2-TRANSPORT-CONTINGENCY`](./implementation/v2/roadmap.md#v2-backlog) |
 | MAINT-LEGACY-DIRECT-UDP | Retire the V1 direct-UDP scripts and documentation | Their explicit comparison/debug value is gone; [`V2-V1-DIRECT-UDP-RETIREMENT`](./implementation/v2/roadmap.md#v2-backlog) |
 | MAINT-COMBAT-PROFILES | Repair, replace with routed evidence, or retire the documented legacy `network-combat-profiles` gate | Before relying on it for evidence or when retiring the legacy direct-UDP path; the historical failure predates terrain work and requires fresh reproduction |
-| MAINT-NETWORK-TEST-LINT | Decide and enforce a Clippy policy for the `network-test` test/performance configuration | When test-code warning cleanliness becomes a CI/release gate; current CI runs tests but not a `-D warnings` Clippy gate for this feature |
 | MAINT-LIFECYCLE-SOAK | Re-run simultaneous heterogeneous-mode and repeated completion/requeue bounded-growth campaigns | Host scale, lifecycle changes, or leak evidence; [`V2-M06-LIFECYCLE-SOAK`](./implementation/v2/roadmap.md#v2-backlog) |
 
 ## Dependency and scoping rules
 
 - **Bots:** begin with the server-hosted practice vertical slice. External bot clients, automatic
   multiplayer substitution, and supervisor-managed bot processes are later decisions.
-- **Arsenal and equipment:** saved brawler identity and owned item instances are distinct. Promote
+- **Arsenal and equipment:** saved brawler identity and owned item instances are distinct. Ticket
   only the acquisition, entitlement, persistence, and UI behavior required by the selected slice.
 - **Browser surfaces:** a web arsenal is an HTTP adapter over profile authority and does not require
   a browser game client. A WASM game client is a separate platform/transport effort and cannot use
@@ -105,13 +102,14 @@ necessary.
 - **Prediction and lag compensation:** neither is automatically required by internet play. Adopt
   only after impairment evidence identifies a player-visible problem and the candidate preserves
   server authority and terrain correctness.
-- **Release readiness:** do not turn the complete platform matrix into one milestone. Promote the
+- **Release readiness:** do not turn the complete platform matrix into one ticket. Select the
   smallest platform, accessibility, packaging, or performance gate needed for the intended handoff.
 
 ## Resolved and superseded archive
 
 | Historical item | Resolution and evidence |
 |---|---|
+| Network-test Clippy policy (`MAINT-NETWORK-TEST-LINT`) | Resolved: `just lint` runs the network-test feature through Clippy with warnings denied as part of the canonical CI gate |
 | Settings screen and local persistence (`GAP-UI-SETTINGS`) | Resolved by V2; V5 retains persisted input, UI scale, reduced motion/effects, master volume, focus mute, fullscreen, and vsync through the dashboard shell. See [V2 roadmap](./implementation/v2/roadmap.md) and [V5 closeout](./implementation/v5/roadmap.md#v5-closeout) |
 | Authoritative practice mode (`GAP-MODE-TRAINING`) | Resolved by V2 with routed server-hosted practice and manifest fillers; completed V11 added playable server-hosted controller behavior without reopening practice architecture |
 | In-match Pause naming (`GAP-UI-PAUSE-RENAME`) | Resolved by V2: the non-pausing menu context is explicit; the physical pause/menu action remains an input label |
@@ -165,5 +163,7 @@ The following are not active candidates without new evidence or an explicit prod
   [V5 backlog](./implementation/v5/roadmap.md#initial-v5-backlog);
 - procedural map generation, automatic balance generation, arbitrary user-authored executable mode
   rules, structural collapse, fluids, and material simulation;
+- the external image-to-map importer experiment, which is abandoned and unsupported; built-in maps
+  remain deliberate authored recipes reviewed through the ordinary map-content workflow;
 - generic social, monetization, live-operations, anti-cheat, backend, AI, rendering, UI, or content
   frameworks before one selected product slice demonstrates the boundary.

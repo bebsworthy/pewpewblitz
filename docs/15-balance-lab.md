@@ -3,8 +3,8 @@
 ## Purpose
 
 Balance Lab is a development-only, server-authoritative tuning console for local Practice matches.
-It edits a complete global-rule, fighter-profile, weapon-base, supported-ultimate, map-effect, and
-world-object tuning snapshot, validates it against concrete engine and wire safety invariants,
+It edits a complete global-rule, fighter-profile, weapon-base, supported-ultimate, supported-passive,
+map-effect, and world-object tuning snapshot, validates it against concrete engine and wire safety invariants,
 persists accepted tuning locally, and applies it by starting a clean authoritative match epoch. It
 does not modify canonical authored content.
 
@@ -25,8 +25,8 @@ restoration-pickup evolution.
 3. Review **Players & loadouts** for the authoritative human and bot roster admitted to this
    Practice worker. Each card identifies the team, fighter profile, weapon base, ultimate, two
    passives, and effective weapon modifiers. Collapse the panel when more tuning space is useful.
-4. Choose a gameplay section and one global rule family, fighter, weapon, ultimate, map effect,
-   world object, or mode. Edit the focused draft using the displayed gameplay units and
+4. Choose a gameplay section and one global rule family, fighter, weapon, ultimate, passive, map
+   effect, world object, or mode. Edit the focused draft using the displayed gameplay units and
    authoritative bounds.
 5. Review the changed marker plus applied/default comparison. Values that differ from the
    canonical server defaults are highlighted in red independently of whether they are newly edited
@@ -53,7 +53,9 @@ editable numeric path, gameplay unit, storage conversion, authoritative bound, s
 control. The browser does not infer editability or limits from serialized field names. Its
 **Global** tab currently contains a **Cold & Freeze** section for buildup decay delay/rate, Freeze
 duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, seven
-canonical weapon-base recipes, and the bounded parameters of all eleven tunable ultimates.
+canonical weapon-base recipes, all 12 numeric parameters across the seven parameterized passives,
+and the bounded parameters of all eleven tunable ultimates. Lightweight Frame and Reinforced Frame
+remain supported snapshot identities but have no numeric editor controls.
 Weapon coverage includes every Sticky Blomb delivery/fuse value and every Splash numeric delivery
 value; ultimate coverage includes every Big Blob parent/secondary value. The **World objects** tab
 exposes an **Effect tiles** subject with
@@ -214,8 +216,13 @@ Review this checklist:
   when the expanded representation requires it.
 - **Verification:** add focused snapshot/validation tests, fixed-tick apply/reset coverage, and
   network coverage proportional to the changed property.
-- **Documentation:** update this guide plus the owning fighter/weapon specification and active
-  implementation milestone.
+- **Documentation:** update this guide plus the owning gameplay specification and active Ticket.
+
+Apply and Restore use one staged authoritative transaction: normalize and prepare an immutable,
+fully validated candidate; persist or clear the local override; commit the prevalidated resources
+and fighter runtime state; then stage the clean restart and publish the transaction result. No authoritative ECS mutation
+occurs before preparation and persistence succeed, so a rejected or failed operation cannot leave a
+partially applied match.
 
 Primary implementation ownership currently lives in `src/server/balance_lab/`, with authored global
 condition tuning in `content/catalogs/combat_conditions.ron`, authored build tuning and shared

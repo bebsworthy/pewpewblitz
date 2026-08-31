@@ -27,7 +27,8 @@ upgrades. PewPew Blitz reverses that relationship:
 - the player composes the weapon's behavior and bounded specifications, which determine the primary
   combat pattern;
 - the ultimate and passives create specialization;
-- players trade strengths and weaknesses within a bounded budget.
+- players trade strengths and weaknesses through bounded legality, slots, and explicit opportunity
+  costs.
 
 The player's long-lived collection is an arsenal of authored brawlers, each with its own validated
 weapon configuration and loadout. This creates a buildcraft game without requiring a large roster
@@ -56,7 +57,9 @@ explicitly support them.
 
 ## Balance principle
 
-Customization must not mean that every stat can be maximized independently. Each build should spend from a power budget, use slot restrictions, or accept explicit opportunity costs.
+Customization must not mean that every stat can be maximized independently. Each build should use
+bounded legality, slot restrictions, explicit tradeoffs, or—where a design deliberately adopts
+one—a power budget.
 
 Examples:
 
@@ -66,8 +69,9 @@ Examples:
 - a mobility item can occupy the same slot as a defensive item.
 
 Built-in weapon and brawler presets and player-authored builds must use the same compositional recipe
-and validation path. Bounded customization uses an explicit budget whose exact allocation belongs
-to the specification that introduces or revises it. Acquisition mechanics such as currency, loot,
+and validation path. The current saved-brawler weapon model uses four generic part slots and
+validated sidegrade rules rather than a player-facing point budget. Acquisition mechanics such as
+currency, loot,
 unlocks, and progression decide which options a player owns, not whether a weapon is legal in
 combat, and are later product problems. Automatic balancing and procedural item generation are
 also later problems.
