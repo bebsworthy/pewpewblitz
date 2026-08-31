@@ -54,6 +54,23 @@ fn additive_part_catalog_rejects_duplicate_keys_and_inventory_overrun() {
 }
 
 #[test]
+fn cold_part_uses_the_combat_payload_amount_boundary() {
+    let maximum = crate::combat::definitions::MAX_COLD_PAYLOAD_AMOUNT;
+    assert!(
+        WeaponPartEffect::Cold { amount: maximum }
+            .validate()
+            .is_ok()
+    );
+    assert!(
+        WeaponPartEffect::Cold {
+            amount: maximum + 1,
+        }
+        .validate()
+        .is_err()
+    );
+}
+
+#[test]
 fn slot_permutation_has_the_same_modifiers_and_weapon_fingerprint() {
     let parts = WeaponPartCatalog::embedded().unwrap();
     let first: Vec<_> = parts

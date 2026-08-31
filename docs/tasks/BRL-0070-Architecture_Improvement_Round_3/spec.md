@@ -333,3 +333,15 @@ A fresh ownership audit confirms the remaining connection/server-selection reduc
 Completed and independently reviewed. Passive numeric bounds now have one crate-private authoritative owner shared by validation and Balance Lab projection; passive-only editor projection is private and exhaustive; 12 numeric leaves have bidirectional coverage and an independent literal serialized parity oracle. All focused and canonical `check`, `lint`, and `test` gates pass. No player-visible, schema, protocol, role, or public-API changes occurred.
 
 The initially reported resistance-minimum mismatch was an audit error caught by parity evidence; BRL-0092 was canceled without implementation. The remaining ultimate/weapon-family follow-up is being decided from a separate evidence audit under the repository's demonstrated-use rule.
+
+## Follow-up decision — weapon metadata
+
+The BRL-0091 follow-up audit found two live weapon descriptor/validator mismatches and pervasive wildcard omission risk, so deferral would leave a known operator defect. BRL-0093 owns the correction and private exhaustive weapon projection. It proceeds before the ultimate exact-output phase because its manifest output is already wrong: Lobbed/Splash flight time advertises 1 tick instead of the authored 6-tick minimum, and Splash Heal advertises 65,535 instead of the authoritative 1,000 maximum.
+
+## Phase BRL-0093 — weapon Balance Lab metadata
+
+Completed and independently reviewed. Weapon projection is now private and exhaustive; embedded 87-leaf plus synthetic absent-topology coverage prevents silent omission. The editor manifest alone advances to schema 10 to correct two live UI/authority mismatches: Lobbed/Splash flight minimum is the authored 6 ticks (0.10 s), and Heal maximum is the effective 1,000-health policy/engine ceiling. Authoritative gameplay/content, snapshot 19, persistence 13, weapon catalog 11, fingerprint 9, protocol, and public APIs remain unchanged.
+
+Focused suites, web build/tests, role checks, `just check`, `just lint`, `just test`, all 97 network cases, and all 12 performance gates pass. Live routed Balance Lab evidence confirmed unchanged canonical Arc/Splash values, corrected input attributes, exact 0.09/0.10 and 1,000/1,001 inline rejection, and disabled Apply for invalid drafts. Independent review findings were corrected and follow-up review is clean.
+
+The ultimate-family exact-output follow-up remains the last demonstrated Stage 6.3 implementation phase before final BRL-0070 CI/native closeout.

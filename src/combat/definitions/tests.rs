@@ -320,6 +320,29 @@ fn lob_flight_floor_is_bounded_and_covered_by_every_lobbed_delivery() {
     assert_ne!(baseline.fingerprint(), tuned.fingerprint());
 }
 
+#[test]
+fn cold_payload_amount_uses_the_shared_weapon_boundary() {
+    let catalog = WeaponCatalog::embedded().unwrap();
+    let mut configuration = catalog.presets[0].configuration.clone();
+    configuration.recipe.payload_bundles[0].effects[0] = PayloadEffectDefinition::Cold {
+        amount: MAX_COLD_PAYLOAD_AMOUNT,
+        recipients: RecipientPolicy::Hostiles,
+    };
+    configuration
+        .validate(&catalog.recipe_policy, EngineWeaponLimits::default(), None)
+        .unwrap();
+
+    configuration.recipe.payload_bundles[0].effects[0] = PayloadEffectDefinition::Cold {
+        amount: MAX_COLD_PAYLOAD_AMOUNT + 1,
+        recipients: RecipientPolicy::Hostiles,
+    };
+    assert!(
+        configuration
+            .validate(&catalog.recipe_policy, EngineWeaponLimits::default(), None)
+            .is_err()
+    );
+}
+
 // --- Delivery-level world effects (Milestone 10) ---
 
 #[test]

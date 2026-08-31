@@ -42,6 +42,22 @@ const range = {
   unit: "world units",
 };
 
+const weaponFlight = {
+  ...health,
+  path: ["weapons", 2, "recipe", "delivery", "Lobbed", "max_flight_ticks"],
+  storageScale: 60,
+  minimum: 0.1,
+  maximum: 10,
+  step: 1 / 60,
+  unit: "s",
+};
+
+const weaponHeal = {
+  ...health,
+  path: ["weapons", 6, "recipe", "payload_bundles", 0, "effects", 1, "Heal", "amount"],
+  maximum: 1_000,
+};
+
 test("paths traverse arrays and objects without mutating the snapshot", () => {
   assert.equal(readAtPath(snapshot, range.path), 384_000);
   const changed = replaceAtPath(snapshot, range.path, 512_000);
@@ -76,6 +92,15 @@ test("authoritative bounds drive inline validation", () => {
   assert.match(validateDisplayNumber(0, health), /at least 1 health/);
   assert.equal(validateDisplayNumber(65_535, health), null);
   assert.match(validateDisplayNumber(65_536, health), /at most 65535 health/);
+});
+
+test("corrected weapon policy bounds drive inline validation", () => {
+  assert.match(validateDisplayNumber(0.09, weaponFlight), /at least 0.1 s/);
+  assert.equal(validateDisplayNumber(0.1, weaponFlight), null);
+  assert.equal(toStoredNumber(0.1, weaponFlight), 6);
+
+  assert.equal(validateDisplayNumber(1_000, weaponHeal), null);
+  assert.match(validateDisplayNumber(1_001, weaponHeal), /at most 1000 health/);
 });
 
 test("changed field count ignores non-editable metadata", () => {

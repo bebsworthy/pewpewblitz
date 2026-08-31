@@ -153,7 +153,10 @@ impl WeaponPartEffect {
             } => {
                 (1..=6_000).contains(&penalty_basis_points) && (1..=3_600).contains(&duration_ticks)
             }
-            Self::Cold { amount } | Self::Heal { amount } => (1..=1_000).contains(&amount),
+            Self::Cold { amount } => {
+                (1..=crate::combat::definitions::MAX_COLD_PAYLOAD_AMOUNT).contains(&amount)
+            }
+            Self::Heal { amount } => (1..=1_000).contains(&amount),
             Self::DamageOverTime {
                 damage_per_tick,
                 tick_interval,

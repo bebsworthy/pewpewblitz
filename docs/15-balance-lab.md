@@ -47,8 +47,8 @@ recomputes runtime recipe identities for equipped weapon modifiers whose base re
 persisted tuning makes any admitted loadout genuinely invalid, that tuning is ignored for the new
 worker rather than crashing or stranding the client during Match Loading.
 
-The current snapshot schema is version 17, the persistence envelope is version 12, and the
-non-persisted editor-manifest schema is version 8. The server manifest explicitly identifies every
+The current snapshot schema is version 19, the persistence envelope is version 13, and the
+non-persisted editor-manifest schema is version 10. The server manifest explicitly identifies every
 editable numeric path, gameplay unit, storage conversion, authoritative bound, step, and preferred
 control. The browser does not infer editability or limits from serialized field names. Its
 **Global** tab currently contains a **Cold & Freeze** section for buildup decay delay/rate, Freeze
@@ -86,6 +86,16 @@ remains available beyond the editor's ordinary playtest range. Type timing value
 decimal seconds. Balance Lab saves the nearest 1/60-second server tick and displays tick-backed
 seconds to two decimal places: `0.17 s`, for example, resolves to 10 ticks. Operators do not need to
 calculate or enter an exact six-decimal tick multiple.
+
+Weapon controls' independent scalar bounds are projected from the same validated recipe policy and
+code-owned engine ceilings used by authoritative recipe validation. Arc Launcher and Splash flight
+time therefore start at the authored six-tick minimum (`0.10 s`), and Splash healing accepts at
+most `1,000` health per pulse, matching the effective weapon-effect ceiling. The editor uses the
+narrower applicable policy or engine maximum for ordinary weapon scalar controls. Cross-field
+invariants, such as ordered falloff distances or timing relationships, remain server-validated when
+the operator applies the complete snapshot. `DestroyMap` radius is the deliberate exception:
+Balance Lab exposes the code-owned 128-world-unit engine ceiling because snapshot validation widens
+only this development map-destruction policy from the canonical authored 64-world-unit maximum.
 
 Effect-tile movement is displayed as an ordinary multiplier: Speed accepts `1.001×` through
 `2.000×`, and Slow accepts `0.100×` through `0.999×`. Damage accepts `1` through `100` health per
@@ -209,8 +219,10 @@ Review this checklist:
 Primary implementation ownership currently lives in `src/server/balance_lab/`, with authored global
 condition tuning in `content/catalogs/combat_conditions.ron`, authored build
 tuning in `src/builds/definitions.rs`, weapon definitions and map-destruction bounds in
-`src/combat/definitions/`, effect-tile and object/chest definitions in `src/map/`, Heist safe rules in
-`src/matchplay/heist.rs`, and the operator application in `tools/balance-lab-web/`.
+`src/combat/definitions/`, the private weapon-manifest adapter in
+`src/server/balance_lab/editor/weapons.rs`, effect-tile and object/chest definitions in `src/map/`,
+Heist safe rules in `src/matchplay/heist.rs`, and the operator application in
+`tools/balance-lab-web/`.
 
 Elemental field timing, range, radius, and effect strength are part of the editable ultimate
 snapshot. The snapshot/persistence schema is migrated when these fields, fighter elemental

@@ -4,17 +4,15 @@ use crate::{
         MAX_COLD_CAPACITY, MAX_FIGHTER_MOVEMENT_SPEED, MAX_REVEAL_PROXIMITY_RADIUS,
         MIN_REVEAL_PROXIMITY_RADIUS, UltimateParameters,
     },
-    combat::{
-        DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadEffectDefinition,
-        RecipientPolicy, TargetSelection, WeaponCatalog, WeaponEconomy, WorldEffectDefinition,
-    },
+    combat::WeaponCatalog,
     timing::{SIMULATION_TICK_HZ_F64, simulation_seconds_f64},
 };
 use serde::Serialize;
 
 mod passives;
+mod weapons;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 9;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 10;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -232,7 +230,7 @@ impl BalanceLabEditorManifest {
         add_global_fields(&mut fields);
         add_fighter_fields(&mut fields);
         for (index, weapon) in snapshot.weapons.iter().enumerate() {
-            add_weapon_fields(&mut fields, index, weapon, weapons);
+            weapons::add_fields(&mut fields, index, weapon, weapons);
         }
         add_ultimate_fields(&mut fields, snapshot);
         passives::add_fields(&mut fields, snapshot);
@@ -498,546 +496,6 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
                 field_label,
                 NumberSpec::resistance_basis_points(),
             );
-        }
-    }
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "explicit descriptors keep the complete weapon editor contract auditable"
-)]
-fn add_weapon_fields(
-    fields: &mut Vec<EditorFieldDescriptor>,
-    index: usize,
-    weapon: &super::WeaponPresetTuning,
-    catalog: &WeaponCatalog,
-) {
-    let policy = &catalog.recipe_policy;
-    let limits = EngineWeaponLimits::default();
-    let root = |tail: Vec<EditorPathSegment>| {
-        let mut path = path!["weapons", index, "recipe"];
-        path.extend(tail);
-        path
-    };
-    let mut add = |tail: Vec<EditorPathSegment>, group: &str, label: &str, spec: NumberSpec| {
-        add_field(
-            fields,
-            root(tail),
-            EditorSection::Weapons,
-            &weapon.key,
-            &weapon.display_name,
-            group,
-            label,
-            spec,
-        );
-    };
-
-    match weapon.recipe.economy {
-        WeaponEconomy::Magazine { .. } => {
-            add(
-                path!["economy", "Magazine", "capacity"],
-                "Economy",
-                "Magazine capacity",
-                NumberSpec::integer(1, u32::from(policy.max_capacity), "shots"),
-            );
-            add(
-                path!["economy", "Magazine", "refill_ticks"],
-                "Economy",
-                "Ammo recovery per round",
-                NumberSpec::ticks(1, u64::from(u32::MAX)),
-            );
-        }
-        WeaponEconomy::Charges { .. } => {
-            add(
-                path!["economy", "Charges", "capacity"],
-                "Economy",
-                "Charge capacity",
-                NumberSpec::integer(1, u32::from(policy.max_capacity), "charges"),
-            );
-            add(
-                path!["economy", "Charges", "recharge_ticks"],
-                "Economy",
-                "Ammo recovery per charge",
-                NumberSpec::ticks(1, u64::from(u32::MAX)),
-            );
-        }
-    }
-    add(
-        path!["fire_cooldown_ticks"],
-        "Firing",
-        "Fire cooldown",
-        NumberSpec::ticks(1, policy.max_fire_cooldown_ticks),
-    );
-    if let FiringPattern::Spread { .. } = weapon.recipe.firing {
-        add(
-            path!["firing", "Spread", "delivery_count"],
-            "Firing",
-            "Projectile count",
-            NumberSpec::integer(
-                2,
-                u32::from(policy.max_deliveries_per_attack),
-                "projectiles",
-            ),
-        );
-        add(
-            path!["firing", "Spread", "total_angle_degrees"],
-            "Firing",
-            "Total spread angle",
-            NumberSpec::positive_decimal(f64::from(policy.max_angle_degrees), "degrees").ranged(),
-        );
-    }
-    match weapon.recipe.delivery {
-        DeliveryMethod::Straight { .. } => {
-            add(
-                path!["delivery", "Straight", "speed"],
-                "Delivery",
-                "Projectile speed",
-                NumberSpec::positive_decimal(f64::from(policy.max_speed), "world units/s"),
-            );
-            add(
-                path!["delivery", "Straight", "radius"],
-                "Delivery",
-                "Projectile radius",
-                NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
-            );
-            add(
-                path!["delivery", "Straight", "range"],
-                "Delivery",
-                "Maximum range",
-                NumberSpec::positive_decimal(f64::from(policy.max_distance), "world units"),
-            );
-            add(
-                path!["delivery", "Straight", "lifetime_ticks"],
-                "Delivery",
-                "Projectile lifetime",
-                NumberSpec::ticks(1, policy.max_projectile_lifetime_ticks),
-            );
-            add(
-                path!["delivery", "Straight", "muzzle_offset"],
-                "Delivery",
-                "Muzzle offset",
-                NumberSpec::positive_decimal(f64::from(limits.max_world_field), "world units"),
-            );
-        }
-        DeliveryMethod::StickyStraight { .. } => {
-            add(
-                path!["delivery", "StickyStraight", "speed"],
-                "Delivery",
-                "Projectile speed",
-                NumberSpec::positive_decimal(f64::from(policy.max_speed), "world units/s"),
-            );
-            add(
-                path!["delivery", "StickyStraight", "radius"],
-                "Delivery",
-                "Projectile radius",
-                NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
-            );
-            add(
-                path!["delivery", "StickyStraight", "range"],
-                "Delivery",
-                "Maximum range",
-                NumberSpec::positive_decimal(f64::from(policy.max_distance), "world units"),
-            );
-            add(
-                path!["delivery", "StickyStraight", "lifetime_ticks"],
-                "Delivery",
-                "Projectile lifetime",
-                NumberSpec::ticks(1, policy.max_projectile_lifetime_ticks),
-            );
-            add(
-                path!["delivery", "StickyStraight", "muzzle_offset"],
-                "Delivery",
-                "Muzzle offset",
-                NumberSpec::positive_decimal(f64::from(limits.max_world_field), "world units"),
-            );
-            add(
-                path!["delivery", "StickyStraight", "fuse_ticks"],
-                "Sticky",
-                "Explosion delay",
-                NumberSpec::ticks(1, limits.max_deadline_ticks),
-            );
-            add(
-                path!["delivery", "StickyStraight", "max_active_per_owner"],
-                "Sticky",
-                "Maximum active blobs",
-                NumberSpec::integer(1, 16, "blobs"),
-            );
-        }
-        DeliveryMethod::Lobbed { .. } => {
-            add(
-                path!["delivery", "Lobbed", "distance"],
-                "Delivery",
-                "Maximum distance",
-                NumberSpec::positive_decimal(f64::from(policy.max_distance), "world units"),
-            );
-            add(
-                path!["delivery", "Lobbed", "max_flight_ticks"],
-                "Delivery",
-                "Maximum flight time",
-                NumberSpec::ticks(1, policy.max_projectile_lifetime_ticks),
-            );
-            add(
-                path!["delivery", "Lobbed", "visual_arc_height"],
-                "Delivery",
-                "Visual arc height",
-                NumberSpec::decimal(0.0, f64::from(policy.max_distance), 0.1, "world units"),
-            );
-            add(
-                path!["delivery", "Lobbed", "landing_clearance_radius"],
-                "Delivery",
-                "Landing clearance",
-                NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
-            );
-            add(
-                path!["delivery", "Lobbed", "muzzle_offset"],
-                "Delivery",
-                "Muzzle offset",
-                NumberSpec::positive_decimal(f64::from(limits.max_world_field), "world units"),
-            );
-        }
-        DeliveryMethod::MeleeArc { .. } => {
-            add(
-                path!["delivery", "MeleeArc", "reach"],
-                "Delivery",
-                "Reach",
-                NumberSpec::positive_decimal(f64::from(policy.max_distance), "world units"),
-            );
-            add(
-                path!["delivery", "MeleeArc", "angle_degrees"],
-                "Delivery",
-                "Arc angle",
-                NumberSpec::positive_decimal(f64::from(policy.max_angle_degrees), "degrees")
-                    .ranged(),
-            );
-        }
-        DeliveryMethod::ConeSpray { .. } => {
-            add(
-                path!["delivery", "ConeSpray", "propagation_speed"],
-                "Spray",
-                "Gas propagation speed",
-                NumberSpec::positive_decimal(f64::from(policy.max_speed), "world units/s"),
-            );
-            add(
-                path!["delivery", "ConeSpray", "reach"],
-                "Spray",
-                "Maximum reach",
-                NumberSpec::positive_decimal(f64::from(policy.max_distance), "world units"),
-            );
-            add(
-                path!["delivery", "ConeSpray", "angle_degrees"],
-                "Spray",
-                "Cone angle",
-                NumberSpec::positive_decimal(f64::from(policy.max_angle_degrees), "degrees")
-                    .ranged(),
-            );
-            add(
-                path!["delivery", "ConeSpray", "linger_ticks"],
-                "Spray",
-                "Full-cone linger",
-                NumberSpec::ticks(1, limits.max_deadline_ticks),
-            );
-            add(
-                path!["delivery", "ConeSpray", "pulse_interval_ticks"],
-                "Spray",
-                "Damage pulse interval",
-                NumberSpec::ticks(1, limits.max_deadline_ticks),
-            );
-            add(
-                path!["delivery", "ConeSpray", "max_targets"],
-                "Spray",
-                "Maximum targets per pulse",
-                NumberSpec::integer(1, u32::from(policy.max_targets_per_delivery), "targets"),
-            );
-        }
-        DeliveryMethod::Splash { shape, .. } => {
-            add(
-                path!["delivery", "Splash", "distance"],
-                "Splash",
-                "Maximum placement distance",
-                NumberSpec::positive_decimal(f64::from(policy.max_distance), "world units"),
-            );
-            add(
-                path!["delivery", "Splash", "max_flight_ticks"],
-                "Splash",
-                "Maximum flight time",
-                NumberSpec::ticks(1, policy.max_projectile_lifetime_ticks),
-            );
-            add(
-                path!["delivery", "Splash", "visual_arc_height"],
-                "Splash",
-                "Visual arc height",
-                NumberSpec::decimal(0.0, f64::from(policy.max_distance), 0.1, "world units"),
-            );
-            add(
-                path!["delivery", "Splash", "landing_clearance_radius"],
-                "Splash",
-                "Landing clearance",
-                NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
-            );
-            add(
-                path!["delivery", "Splash", "muzzle_offset"],
-                "Splash",
-                "Muzzle offset",
-                NumberSpec::positive_decimal(f64::from(limits.max_world_field), "world units"),
-            );
-            match shape {
-                crate::combat::PersistentAreaShape::Circle { .. } => add(
-                    path!["delivery", "Splash", "shape", "Circle", "radius"],
-                    "Splash area",
-                    "Circle radius",
-                    NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
-                ),
-                crate::combat::PersistentAreaShape::Rectangle { .. } => {
-                    add(
-                        path![
-                            "delivery",
-                            "Splash",
-                            "shape",
-                            "Rectangle",
-                            "half_extents",
-                            0
-                        ],
-                        "Splash area",
-                        "Rectangle half-width",
-                        NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
-                    );
-                    add(
-                        path![
-                            "delivery",
-                            "Splash",
-                            "shape",
-                            "Rectangle",
-                            "half_extents",
-                            1
-                        ],
-                        "Splash area",
-                        "Rectangle half-depth",
-                        NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
-                    );
-                }
-            }
-            add(
-                path!["delivery", "Splash", "duration_ticks"],
-                "Splash area",
-                "Area duration",
-                NumberSpec::ticks(1, policy.max_effect_duration_ticks),
-            );
-            add(
-                path!["delivery", "Splash", "pulse_interval_ticks"],
-                "Splash area",
-                "Pulse interval",
-                NumberSpec::ticks(1, policy.max_effect_duration_ticks),
-            );
-            add(
-                path!["delivery", "Splash", "max_targets"],
-                "Splash area",
-                "Maximum targets per pulse",
-                NumberSpec::integer(1, u32::from(policy.max_targets_per_delivery), "targets"),
-            );
-            add(
-                path!["delivery", "Splash", "max_active_per_owner"],
-                "Splash area",
-                "Maximum active areas",
-                NumberSpec::integer(1, 8, "areas"),
-            );
-        }
-    }
-
-    for (bundle_index, bundle) in weapon.recipe.payload_bundles.iter().enumerate() {
-        let group = format!("Payload {}", bundle_index + 1);
-        if let TargetSelection::Area { .. } = bundle.target {
-            add(
-                path!["payload_bundles", bundle_index, "target", "Area", "radius"],
-                &group,
-                "Area radius",
-                NumberSpec::positive_decimal(f64::from(policy.max_radius), "world units"),
-            );
-            add(
-                path![
-                    "payload_bundles",
-                    bundle_index,
-                    "target",
-                    "Area",
-                    "max_targets"
-                ],
-                &group,
-                "Maximum targets",
-                NumberSpec::integer(1, u32::from(policy.max_targets_per_delivery), "targets"),
-            );
-        }
-        for (effect_index, effect) in bundle.effects.iter().enumerate() {
-            let effect_root = |kind: &str, tail: Vec<EditorPathSegment>| {
-                let mut path = path![
-                    "payload_bundles",
-                    bundle_index,
-                    "effects",
-                    effect_index,
-                    kind
-                ];
-                path.extend(tail);
-                path
-            };
-            match effect {
-                PayloadEffectDefinition::Damage {
-                    falloff,
-                    recipients,
-                    ..
-                } => {
-                    add(
-                        effect_root("Damage", path!["amount"]),
-                        &group,
-                        "Damage",
-                        NumberSpec::integer(1, u32::from(policy.max_damage), "health"),
-                    );
-                    if let DamageFalloff::Linear { .. } = falloff {
-                        add(
-                            effect_root("Damage", path!["falloff", "Linear", "start_distance"]),
-                            &group,
-                            "Falloff start",
-                            NumberSpec::decimal(
-                                0.0,
-                                f64::from(policy.max_distance),
-                                0.1,
-                                "world units",
-                            ),
-                        );
-                        add(
-                            effect_root("Damage", path!["falloff", "Linear", "end_distance"]),
-                            &group,
-                            "Falloff end",
-                            NumberSpec::decimal(
-                                0.0,
-                                f64::from(policy.max_distance),
-                                0.1,
-                                "world units",
-                            )
-                            .help("Must be greater than falloff start."),
-                        );
-                        add(
-                            effect_root("Damage", path!["falloff", "Linear", "minimum_scale"]),
-                            &group,
-                            "Minimum damage scale",
-                            NumberSpec {
-                                minimum_exclusive: true,
-                                ..NumberSpec::decimal(0.0, 1.0, 0.01, "×").ranged()
-                            },
-                        );
-                    }
-                    if let RecipientPolicy::HostilesAndOwner { .. } = recipients {
-                        add(
-                            effect_root(
-                                "Damage",
-                                path!["recipients", "HostilesAndOwner", "owner_scale"],
-                            ),
-                            &group,
-                            "Owner damage scale",
-                            NumberSpec::decimal(0.0, 1.0, 0.01, "×").ranged(),
-                        );
-                    }
-                }
-                PayloadEffectDefinition::Knockback { recipients, .. } => {
-                    add(
-                        effect_root("Knockback", path!["speed"]),
-                        &group,
-                        "Knockback speed",
-                        NumberSpec::decimal(
-                            0.0,
-                            f64::from(policy.max_knockback_speed),
-                            0.1,
-                            "world units/s",
-                        ),
-                    );
-                    add(
-                        effect_root("Knockback", path!["duration_ticks"]),
-                        &group,
-                        "Knockback duration",
-                        NumberSpec::ticks(1, policy.max_effect_duration_ticks),
-                    );
-                    if let RecipientPolicy::HostilesAndOwner { .. } = recipients {
-                        add(
-                            effect_root(
-                                "Knockback",
-                                path!["recipients", "HostilesAndOwner", "owner_scale"],
-                            ),
-                            &group,
-                            "Owner effect scale",
-                            NumberSpec::decimal(0.0, 1.0, 0.01, "×").ranged(),
-                        );
-                    }
-                }
-                PayloadEffectDefinition::Slow { recipients, .. } => {
-                    add(
-                        effect_root("Slow", path!["movement_multiplier"]),
-                        &group,
-                        "Movement multiplier",
-                        NumberSpec {
-                            minimum_exclusive: true,
-                            ..NumberSpec::decimal(0.0, 1.0, 0.01, "×").ranged()
-                        },
-                    );
-                    add(
-                        effect_root("Slow", path!["duration_ticks"]),
-                        &group,
-                        "Slow duration",
-                        NumberSpec::ticks(1, policy.max_effect_duration_ticks),
-                    );
-                    if let RecipientPolicy::HostilesAndOwner { .. } = recipients {
-                        add(
-                            effect_root(
-                                "Slow",
-                                path!["recipients", "HostilesAndOwner", "owner_scale"],
-                            ),
-                            &group,
-                            "Owner effect scale",
-                            NumberSpec::decimal(0.0, 1.0, 0.01, "×").ranged(),
-                        );
-                    }
-                }
-                PayloadEffectDefinition::Cold { .. } => add(
-                    effect_root("Cold", path!["amount"]),
-                    &group,
-                    "Cold per hit",
-                    NumberSpec::integer(1, u32::from(u16::MAX), "cold")
-                        .help("Applied after resistance against the target's Cold capacity."),
-                ),
-                PayloadEffectDefinition::DamageOverTime { .. } => {
-                    add(
-                        effect_root("DamageOverTime", path!["damage_per_tick"]),
-                        &group,
-                        "Damage per tick",
-                        NumberSpec::integer(1, u32::from(policy.max_damage), "health"),
-                    );
-                    add(
-                        effect_root("DamageOverTime", path!["tick_interval"]),
-                        &group,
-                        "Tick interval",
-                        NumberSpec::ticks(1, policy.max_effect_duration_ticks),
-                    );
-                    add(
-                        effect_root("DamageOverTime", path!["duration_ticks"]),
-                        &group,
-                        "Duration",
-                        NumberSpec::ticks(1, policy.max_effect_duration_ticks),
-                    );
-                }
-                PayloadEffectDefinition::Heal { .. } => add(
-                    effect_root("Heal", path!["amount"]),
-                    &group,
-                    "Healing",
-                    NumberSpec::integer(1, u32::from(u16::MAX), "health"),
-                ),
-            }
-        }
-    }
-    for (effect_index, effect) in weapon.recipe.world_effects.iter().enumerate() {
-        match effect {
-            WorldEffectDefinition::DestroyMap { .. } => add(
-                path!["world_effects", effect_index, "DestroyMap", "radius"],
-                "World effect",
-                "Destruction radius",
-                NumberSpec::positive_decimal(128.0, "world units")
-                    .help("128 world units is the current bounded terrain-event safety ceiling."),
-            ),
         }
     }
 }
@@ -1670,6 +1128,24 @@ mod tests {
             .join("/")
     }
 
+    fn assert_f64_eq(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < f64::EPSILON,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn manifest_field_by_path<'a>(
+        manifest: &'a BalanceLabEditorManifest,
+        path: &str,
+    ) -> &'a EditorFieldDescriptor {
+        manifest
+            .fields
+            .iter()
+            .find(|field| path_key(&field.path) == path)
+            .unwrap_or_else(|| panic!("missing editor descriptor {path}"))
+    }
+
     fn collect_numeric_leaf_paths(
         value: &serde_json::Value,
         prefix: &mut Vec<String>,
@@ -1696,6 +1172,62 @@ mod tests {
             serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::String(_) => {
             }
         }
+    }
+
+    fn assert_weapon_numeric_coverage(
+        weapon: &super::super::WeaponPresetTuning,
+        catalog: &WeaponCatalog,
+    ) -> usize {
+        let mut numeric_leaves = std::collections::BTreeSet::new();
+        collect_numeric_leaf_paths(
+            &serde_json::to_value(&weapon.recipe).unwrap(),
+            &mut Vec::new(),
+            &mut numeric_leaves,
+        );
+        let mut fields = Vec::new();
+        weapons::add_fields(&mut fields, 0, weapon, catalog);
+        let descriptor_paths: Vec<_> = fields
+            .iter()
+            .map(|field| match field.path.as_slice() {
+                [
+                    EditorPathSegment::Key(root),
+                    EditorPathSegment::Index(0),
+                    EditorPathSegment::Key(recipe),
+                    tail @ ..,
+                ] if root == "weapons" && recipe == "recipe" => path_key(tail),
+                _ => panic!(
+                    "{} emitted a descriptor outside weapons/0/recipe: {}",
+                    weapon.key,
+                    path_key(&field.path)
+                ),
+            })
+            .collect();
+        assert_eq!(
+            fields.len(),
+            descriptor_paths.len(),
+            "{} did not account for every emitted weapon descriptor",
+            weapon.key
+        );
+        let unique_descriptor_paths: std::collections::BTreeSet<_> =
+            descriptor_paths.iter().cloned().collect();
+        assert_eq!(
+            descriptor_paths.len(),
+            unique_descriptor_paths.len(),
+            "{} has duplicate weapon descriptors",
+            weapon.key
+        );
+        assert_eq!(
+            fields.len(),
+            numeric_leaves.len(),
+            "{} weapon descriptor and numeric-leaf totals differ",
+            weapon.key
+        );
+        assert_eq!(
+            unique_descriptor_paths, numeric_leaves,
+            "{} weapon metadata does not cover its numeric schema exactly",
+            weapon.key
+        );
+        numeric_leaves.len()
     }
 
     #[test]
@@ -2074,6 +1606,409 @@ mod tests {
             total_numeric_leaves += numeric_leaves.len();
         }
         assert_eq!(total_numeric_leaves, 12);
+    }
+
+    #[test]
+    fn every_embedded_weapon_numeric_leaf_has_exactly_one_descriptor() {
+        let (snapshot, weapons) = fixture();
+        let total_numeric_leaves = snapshot
+            .weapons
+            .iter()
+            .map(|weapon| assert_weapon_numeric_coverage(weapon, &weapons))
+            .sum::<usize>();
+        assert_eq!(total_numeric_leaves, 87);
+    }
+
+    #[test]
+    fn absent_weapon_topologies_have_exact_numeric_descriptor_coverage() {
+        use crate::combat::{
+            DamageOverTimeKind, DeliveryMethod, PayloadEffectDefinition, PersistentAreaShape,
+            RecipientPolicy, WeaponConfiguration, WorldEffectDefinition,
+        };
+
+        let (snapshot, weapons) = fixture();
+        let limits = crate::combat::EngineWeaponLimits::default();
+
+        let mut rectangle_effects = snapshot.weapons[6].clone();
+        let DeliveryMethod::Splash { shape, .. } = &mut rectangle_effects.recipe.delivery else {
+            panic!("Splash fixture changed topology");
+        };
+        *shape = PersistentAreaShape::Rectangle {
+            half_extents: [96.0, 72.0],
+        };
+        rectangle_effects.recipe.payload_bundles[0].effects = vec![
+            PayloadEffectDefinition::Cold {
+                amount: 250,
+                recipients: RecipientPolicy::HostilesAndOwner { owner_scale: 0.5 },
+            },
+            PayloadEffectDefinition::DamageOverTime {
+                kind: DamageOverTimeKind::Fire,
+                damage_per_tick: 12,
+                tick_interval: 30,
+                duration_ticks: 90,
+                recipients: RecipientPolicy::Hostiles,
+            },
+        ];
+        WeaponConfiguration {
+            recipe: rectangle_effects.recipe.clone(),
+        }
+        .validate(&weapons.recipe_policy, limits, None)
+        .unwrap();
+        assert_weapon_numeric_coverage(&rectangle_effects, &weapons);
+        let mut rectangle_fields = Vec::new();
+        weapons::add_fields(&mut rectangle_fields, 0, &rectangle_effects, &weapons);
+        let cold = rectangle_fields
+            .iter()
+            .find(|field| {
+                path_key(&field.path) == "weapons/0/recipe/payload_bundles/0/effects/0/Cold/amount"
+            })
+            .unwrap();
+        assert_f64_eq(
+            cold.maximum,
+            f64::from(crate::combat::definitions::MAX_COLD_PAYLOAD_AMOUNT),
+        );
+        let owner_scale = rectangle_fields
+            .iter()
+            .find(|field| {
+                path_key(&field.path)
+                    == "weapons/0/recipe/payload_bundles/0/effects/0/Cold/recipients/HostilesAndOwner/owner_scale"
+            })
+            .unwrap();
+        assert_f64_eq(owner_scale.minimum, 0.0);
+        assert_f64_eq(owner_scale.maximum, 1.0);
+
+        let mut destruction = snapshot.weapons[2].clone();
+        destruction.recipe.world_effects = vec![WorldEffectDefinition::DestroyMap { radius: 64.0 }];
+        WeaponConfiguration {
+            recipe: destruction.recipe.clone(),
+        }
+        .validate(&weapons.recipe_policy, limits, None)
+        .unwrap();
+        assert_weapon_numeric_coverage(&destruction, &weapons);
+        let mut destruction_fields = Vec::new();
+        weapons::add_fields(&mut destruction_fields, 0, &destruction, &weapons);
+        let radius = destruction_fields
+            .iter()
+            .find(|field| {
+                path_key(&field.path) == "weapons/0/recipe/world_effects/0/DestroyMap/radius"
+            })
+            .unwrap();
+        assert_f64_eq(
+            radius.maximum,
+            f64::from(crate::combat::EngineWeaponLimits::default().max_map_destruction_radius),
+        );
+    }
+
+    #[test]
+    fn lobbed_flight_descriptor_preserves_the_exact_serialized_contract() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+
+        assert_eq!(
+            serde_json::to_value(manifest_field_by_path(
+                &manifest,
+                "weapons/2/recipe/delivery/Lobbed/max_flight_ticks"
+            ))
+            .unwrap(),
+            serde_json::json!({
+                "path": ["weapons", 2, "recipe", "delivery", "Lobbed", "max_flight_ticks"],
+                "section": "weapons",
+                "subjectKey": "arc-launcher",
+                "subjectLabel": "Arc Launcher",
+                "group": "Delivery",
+                "label": "Maximum flight time",
+                "storageKind": "integer",
+                "unit": "s",
+                "storageScale": 60.0,
+                "minimum": 0.1,
+                "maximum": 10.0,
+                "minimumExclusive": false,
+                "step": 0.016_666_666_666_666_666,
+                "control": "number",
+                "help": "Enter seconds; saved to the nearest authoritative server tick."
+            })
+        );
+    }
+
+    #[test]
+    fn splash_flight_descriptor_preserves_the_exact_serialized_contract() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+
+        assert_eq!(
+            serde_json::to_value(manifest_field_by_path(
+                &manifest,
+                "weapons/6/recipe/delivery/Splash/max_flight_ticks"
+            ))
+            .unwrap(),
+            serde_json::json!({
+                "path": ["weapons", 6, "recipe", "delivery", "Splash", "max_flight_ticks"],
+                "section": "weapons",
+                "subjectKey": "splash",
+                "subjectLabel": "Splash",
+                "group": "Splash",
+                "label": "Maximum flight time",
+                "storageKind": "integer",
+                "unit": "s",
+                "storageScale": 60.0,
+                "minimum": 0.1,
+                "maximum": 10.0,
+                "minimumExclusive": false,
+                "step": 0.016_666_666_666_666_666,
+                "control": "number",
+                "help": "Enter seconds; saved to the nearest authoritative server tick."
+            })
+        );
+    }
+
+    #[test]
+    fn splash_heal_descriptor_preserves_the_exact_serialized_contract() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+
+        assert_eq!(
+            serde_json::to_value(manifest_field_by_path(
+                &manifest,
+                "weapons/6/recipe/payload_bundles/0/effects/1/Heal/amount"
+            ))
+            .unwrap(),
+            serde_json::json!({
+                "path": [
+                    "weapons", 6, "recipe", "payload_bundles", 0, "effects", 1, "Heal",
+                    "amount"
+                ],
+                "section": "weapons",
+                "subjectKey": "splash",
+                "subjectLabel": "Splash",
+                "group": "Payload 1",
+                "label": "Healing",
+                "storageKind": "integer",
+                "unit": "health",
+                "storageScale": 1.0,
+                "minimum": 1.0,
+                "maximum": 1_000.0,
+                "minimumExclusive": false,
+                "step": 1.0,
+                "control": "number"
+            })
+        );
+    }
+
+    #[test]
+    fn weapon_manifest_uses_authoritative_active_per_owner_bounds() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+
+        assert_f64_eq(
+            manifest_field_by_path(
+                &manifest,
+                "weapons/4/recipe/delivery/StickyStraight/max_active_per_owner",
+            )
+            .maximum,
+            f64::from(crate::combat::definitions::MAX_STICKY_ACTIVE_PER_OWNER),
+        );
+        assert_f64_eq(
+            manifest_field_by_path(
+                &manifest,
+                "weapons/6/recipe/delivery/Splash/max_active_per_owner",
+            )
+            .maximum,
+            f64::from(crate::combat::definitions::MAX_SPLASH_ACTIVE_PER_OWNER),
+        );
+    }
+
+    #[test]
+    fn weapon_editor_and_validator_share_lob_and_heal_boundaries() {
+        use crate::combat::{DeliveryMethod, PayloadEffectDefinition, WeaponConfiguration};
+
+        let (snapshot, weapons) = fixture();
+        let limits = crate::combat::EngineWeaponLimits::default();
+
+        let mut lobbed = snapshot.weapons[2].recipe.clone();
+        if let DeliveryMethod::Lobbed {
+            max_flight_ticks, ..
+        } = &mut lobbed.delivery
+        {
+            *max_flight_ticks = 5;
+        } else {
+            panic!("Arc Launcher fixture changed topology");
+        }
+        assert!(
+            WeaponConfiguration {
+                recipe: lobbed.clone()
+            }
+            .validate(&weapons.recipe_policy, limits, None)
+            .is_err()
+        );
+        if let DeliveryMethod::Lobbed {
+            max_flight_ticks, ..
+        } = &mut lobbed.delivery
+        {
+            *max_flight_ticks = 6;
+        }
+        WeaponConfiguration { recipe: lobbed }
+            .validate(&weapons.recipe_policy, limits, None)
+            .unwrap();
+
+        let mut splash = snapshot.weapons[6].recipe.clone();
+        if let DeliveryMethod::Splash {
+            max_flight_ticks, ..
+        } = &mut splash.delivery
+        {
+            *max_flight_ticks = 5;
+        } else {
+            panic!("Splash fixture changed topology");
+        }
+        assert!(
+            WeaponConfiguration {
+                recipe: splash.clone()
+            }
+            .validate(&weapons.recipe_policy, limits, None)
+            .is_err()
+        );
+        if let DeliveryMethod::Splash {
+            max_flight_ticks, ..
+        } = &mut splash.delivery
+        {
+            *max_flight_ticks = 6;
+        }
+        WeaponConfiguration {
+            recipe: splash.clone(),
+        }
+        .validate(&weapons.recipe_policy, limits, None)
+        .unwrap();
+
+        if let PayloadEffectDefinition::Heal { amount, .. } =
+            &mut splash.payload_bundles[0].effects[1]
+        {
+            *amount = 1_000;
+        } else {
+            panic!("Splash fixture lost its healing payload");
+        }
+        WeaponConfiguration {
+            recipe: splash.clone(),
+        }
+        .validate(&weapons.recipe_policy, limits, None)
+        .unwrap();
+        if let PayloadEffectDefinition::Heal { amount, .. } =
+            &mut splash.payload_bundles[0].effects[1]
+        {
+            *amount = 1_001;
+        }
+        assert!(
+            WeaponConfiguration { recipe: splash }
+                .validate(&weapons.recipe_policy, limits, None)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn lowered_weapon_damage_policy_drives_heal_editor_and_validator_maximum() {
+        use crate::combat::{PayloadEffectDefinition, WeaponConfiguration};
+
+        let (snapshot, weapons) = fixture();
+        let limits = crate::combat::EngineWeaponLimits::default();
+        let mut lowered = weapons;
+        lowered.recipe_policy.max_damage = 600;
+        let lowered_manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &lowered);
+        let healing = lowered_manifest
+            .fields
+            .iter()
+            .find(|field| {
+                path_key(&field.path) == "weapons/6/recipe/payload_bundles/0/effects/1/Heal/amount"
+            })
+            .unwrap();
+        assert_f64_eq(healing.maximum, 600.0);
+
+        let mut lowered_recipe = snapshot.weapons[6].recipe.clone();
+        if let PayloadEffectDefinition::Heal { amount, .. } =
+            &mut lowered_recipe.payload_bundles[0].effects[1]
+        {
+            *amount = 600;
+        } else {
+            panic!("Splash fixture lost its healing payload");
+        }
+        WeaponConfiguration {
+            recipe: lowered_recipe.clone(),
+        }
+        .validate(&lowered.recipe_policy, limits, None)
+        .unwrap();
+        if let PayloadEffectDefinition::Heal { amount, .. } =
+            &mut lowered_recipe.payload_bundles[0].effects[1]
+        {
+            *amount = 601;
+        }
+        assert!(
+            WeaponConfiguration {
+                recipe: lowered_recipe,
+            }
+            .validate(&lowered.recipe_policy, limits, None)
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn active_per_owner_editor_caps_match_weapon_validation() {
+        use crate::combat::{DeliveryMethod, WeaponConfiguration};
+
+        let (snapshot, weapons) = fixture();
+        let limits = crate::combat::EngineWeaponLimits::default();
+
+        let mut sticky = snapshot.weapons[4].recipe.clone();
+        if let DeliveryMethod::StickyStraight {
+            max_active_per_owner,
+            ..
+        } = &mut sticky.delivery
+        {
+            *max_active_per_owner = crate::combat::definitions::MAX_STICKY_ACTIVE_PER_OWNER;
+        } else {
+            panic!("Sticky Blomb fixture changed topology");
+        }
+        WeaponConfiguration {
+            recipe: sticky.clone(),
+        }
+        .validate(&weapons.recipe_policy, limits, None)
+        .unwrap();
+        if let DeliveryMethod::StickyStraight {
+            max_active_per_owner,
+            ..
+        } = &mut sticky.delivery
+        {
+            *max_active_per_owner = crate::combat::definitions::MAX_STICKY_ACTIVE_PER_OWNER + 1;
+        }
+        assert!(
+            WeaponConfiguration { recipe: sticky }
+                .validate(&weapons.recipe_policy, limits, None)
+                .is_err()
+        );
+
+        let mut splash = snapshot.weapons[6].recipe.clone();
+        if let DeliveryMethod::Splash {
+            max_active_per_owner,
+            ..
+        } = &mut splash.delivery
+        {
+            *max_active_per_owner = crate::combat::definitions::MAX_SPLASH_ACTIVE_PER_OWNER;
+        } else {
+            panic!("Splash fixture changed topology");
+        }
+        WeaponConfiguration {
+            recipe: splash.clone(),
+        }
+        .validate(&weapons.recipe_policy, limits, None)
+        .unwrap();
+        if let DeliveryMethod::Splash {
+            max_active_per_owner,
+            ..
+        } = &mut splash.delivery
+        {
+            *max_active_per_owner = crate::combat::definitions::MAX_SPLASH_ACTIVE_PER_OWNER + 1;
+        }
+        assert!(
+            WeaponConfiguration { recipe: splash }
+                .validate(&weapons.recipe_policy, limits, None)
+                .is_err()
+        );
     }
 
     #[test]

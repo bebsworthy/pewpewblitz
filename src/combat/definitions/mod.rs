@@ -9,6 +9,9 @@ pub const WEAPON_CATALOG_SCHEMA_VERSION: u16 = 11;
 pub const FINGERPRINT_FORMAT_VERSION: u16 = 9;
 pub const MAX_RESOLVED_WEAPON_BYTES: usize = 2048;
 pub(crate) const MAX_WEAPON_PRESETS: usize = 16;
+pub(crate) const MAX_COLD_PAYLOAD_AMOUNT: u16 = 1_000;
+pub(crate) const MAX_SPLASH_ACTIVE_PER_OWNER: u8 = 8;
+pub(crate) const MAX_STICKY_ACTIVE_PER_OWNER: u8 = 16;
 const MAX_WEAPON_CATALOG_BYTES: usize = 64 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -667,7 +670,7 @@ impl WeaponConfiguration {
                     || fuse_ticks == 0
                     || fuse_ticks > limits.max_deadline_ticks
                     || max_active_per_owner == 0
-                    || max_active_per_owner > 16
+                    || max_active_per_owner > MAX_STICKY_ACTIVE_PER_OWNER
                     || speed / crate::timing::SIMULATION_TICK_HZ as f32 > range
                 {
                     return Err("invalid sticky straight delivery".to_string());
@@ -820,7 +823,7 @@ impl WeaponConfiguration {
                     || max_targets > limits.max_targets_per_delivery
                     || max_targets > policy.max_targets_per_delivery
                     || max_active_per_owner == 0
-                    || max_active_per_owner > 8
+                    || max_active_per_owner > MAX_SPLASH_ACTIVE_PER_OWNER
                 {
                     return Err("invalid splash delivery".to_string());
                 }
@@ -1033,7 +1036,7 @@ fn validate_effect(
         }
         PayloadEffectDefinition::Cold { amount, recipients } => {
             if amount == 0
-                || amount > 1_000
+                || amount > MAX_COLD_PAYLOAD_AMOUNT
                 || !valid_recipients(recipients, limits)
                 || !policy
                     .permitted_recipient_policies
