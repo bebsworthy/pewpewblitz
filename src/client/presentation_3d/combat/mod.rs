@@ -8,6 +8,8 @@ mod entities;
 mod fighter_feedback;
 mod fighter_ui;
 
+use bevy::prelude::{App, IntoScheduleConfigs, Plugin, PostUpdate, SystemSet, Update};
+
 pub(super) use aim_preview::{reconcile_aim_preview_visuals, update_aim_preview};
 pub(super) use cone_spray::{reconcile_cone_spray_visuals, update_cone_spray_visuals};
 pub(super) use effects::animate_attack_acceptance;
@@ -30,6 +32,38 @@ pub(super) use fighter_ui::{
     prepare_cold_pie_assets, project_fighter_overhead_ui, reconcile_fighter_overheads,
     update_fighter_overhead_state,
 };
+
+/// Schedule seam used only by the offline `VfxLab` to run production lifecycle materializers.
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(in crate::client) struct VfxLabLifecycleSet;
+
+/// Installs the production materializers needed by isolated lifecycle fixtures.
+///
+/// The Lab supplies replicated-shape fixture facts but never duplicates their visual construction.
+pub(in crate::client) struct VfxLabLifecyclePresentationPlugin;
+
+impl Plugin for VfxLabLifecyclePresentationPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<crate::combat::client::AimTraceBlockerIndex>()
+            .add_systems(
+                Update,
+                (
+                    reconcile_fighter_visuals,
+                    reconcile_projectile_visuals,
+                    reconcile_elemental_field_visuals,
+                    reconcile_cone_spray_visuals,
+                    reconcile_status_visuals,
+                    update_cone_spray_visuals,
+                )
+                    .chain()
+                    .in_set(VfxLabLifecycleSet),
+            )
+            .add_systems(
+                PostUpdate,
+                (write_fighter_visual_poses, write_projectile_visual_poses),
+            );
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::super::*;

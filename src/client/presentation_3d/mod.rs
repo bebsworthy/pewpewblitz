@@ -33,8 +33,8 @@ use camera::{
 };
 pub(super) use combat::collect_vfx_evidence_snapshot;
 pub(in crate::client) use combat::{
-    CombatEffect3d, PendingCombatEffect, cleanup_combat_effects, materialize_combat_effects,
-    resolve_vfx_requests,
+    CombatEffect3d, PendingCombatEffect, VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet,
+    cleanup_combat_effects, materialize_combat_effects, resolve_vfx_requests,
 };
 use coordinates::{ground_point, ground_position, ground_rotation};
 use map::{GeneratedMapMesh, Presented3dMap};

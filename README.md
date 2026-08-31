@@ -92,10 +92,19 @@ development viewer:
 just vfx-lab
 ```
 
-Use Left/Right to select one of the 15 production semantic mappings, Space to replay it, R to
-toggle the production reduced-effects profile, P to inspect the primitive variant, and Escape to
-quit. `just vfx-lab '--effect world-object.explosion --reduced'` starts at an exact request key.
-The current viewer is intentionally read-only; BRL-0096 owns the later authoring workbench.
+The default fixture previews the 15 production semantic mappings; use Left/Right to select one.
+Tab cycles production-lifecycle fixtures for straight and lobbed projectiles, elemental fields,
+cone propagation, and attached fighter status. Space restarts with the same presentation identity,
+N advances to a new identity, Enter pauses, and `.` advances one simulation tick. R toggles the
+production reduced-effects variant, P toggles the primitive variant, F12 writes paired PNG/JSON
+evidence under `target/vfx-lab`, and Escape quits.
+
+`just vfx-lab '--effect world-object.explosion --reduced'` starts at an exact transient request.
+Use `--fixture transient|straight|lobbed|field|cone|status` to start at a lifecycle fixture. Native
+automation may add `--identity N --radius WORLD_UNITS` and
+`--capture-dir PATH --capture-after UPDATES --exit-after-capture`; `--paused` captures a stable
+initial state. The current viewer is intentionally read-only; BRL-0096 owns the later authoring
+workbench.
 
 ## Canonical commands
 

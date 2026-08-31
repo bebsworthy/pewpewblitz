@@ -33,7 +33,7 @@ use std::{
 const CAPTURE_SCHEMA_VERSION: u16 = 2;
 const TOAST_FRAMES: u16 = 240;
 
-pub(super) struct ClientEvidenceCapturePlugin;
+pub(in crate::client) struct ClientEvidenceCapturePlugin;
 
 impl Plugin for ClientEvidenceCapturePlugin {
     fn build(&self, app: &mut App) {
@@ -143,7 +143,7 @@ pub(super) fn request_scheduled_evidence_capture(world: &mut World, directory: &
     request_evidence_capture_pair(world, directory, stem, current_unix_millis());
 }
 
-fn current_unix_millis() -> u64 {
+pub(in crate::client) fn current_unix_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| {
@@ -157,9 +157,18 @@ fn request_evidence_capture_pair(
     stem: &str,
     unix_millis: u64,
 ) {
+    let snapshot = collect_client_snapshot(world, unix_millis);
+    request_custom_evidence_capture(world, directory, stem, &snapshot);
+}
+
+pub(in crate::client) fn request_custom_evidence_capture(
+    world: &mut World,
+    directory: &Path,
+    stem: &str,
+    snapshot: &Value,
+) {
     let png_path = directory.join(format!("{stem}.png"));
     let json_path = directory.join(format!("{stem}.json"));
-    let snapshot = collect_client_snapshot(world, unix_millis);
     let snapshot_json = match serde_json::to_vec_pretty(&snapshot) {
         Ok(json) => json,
         Err(error) => {

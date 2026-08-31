@@ -343,6 +343,28 @@ remove the complete root. Native render evidence records the VFX catalog fingerp
 presentation variants, active lifecycle-root counts, transient profile/order/timing, and retained
 asset counts alongside the authoritative state and rendered PNG.
 
+#### Read-only VfxLab
+
+The development-only `brawler-vfx-lab` binary is the isolated inspection surface for this contract.
+It composes the production client catalog, resolver, retained assets, materializers, lifecycle
+roots, degradation settings, cleanup, and evidence capture without starting a server or entering a
+match. It is excluded from the server feature graph and production player flow.
+
+The transient fixture enumerates registered semantic requests. Additional bounded fixtures create
+representative replicated projectile, field, cone, and fighter-status facts, then let the production
+lifecycle materializers create and own their visual roots. Fixtures do not contain a second visual
+implementation. Restart preserves the explicit presentation identity; choosing a new identity is a
+separate action. Pause and single-step use the canonical simulation tick, so persistent deadlines
+and attached motion can be inspected predictably.
+
+Every Lab capture uses the production asynchronous screenshot path and writes a paired PNG and JSON
+snapshot. The JSON identifies the build and VFX catalog, fixture, semantic request and resolved
+profile where applicable, presentation identity, playback tick, normal/reduced/primitive variant,
+authoritative geometry/deadline inputs, active lifecycle-root counts, and retained asset counts.
+The Lab is read-only: future authoring and validation workflow belongs to the separate VFX Workbench
+and must publish through validated catalog transactions rather than mutating production resources
+inside this viewer.
+
 ## Environments, themes, and geometry
 
 Visual footprints must agree with authoritative planar shapes:

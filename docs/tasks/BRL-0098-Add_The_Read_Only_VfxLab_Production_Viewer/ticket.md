@@ -1,13 +1,13 @@
 ---
 id: BRL-0098
 title: Add the read-only VfxLab production viewer
-status: doing
+status: done
 theme:
 release:
 created: 2026-08-31T08:21:40Z
-modified: 2026-08-31T11:44:37Z
-closed:
-revision: c3efe568f4833465
+modified: 2026-08-31T12:35:12Z
+closed: 2026-08-31T12:35:12Z
+revision: 5685726c92173c27
 blocks: [BRL-0099]
 related: [BRL-0094, BRL-0096]
 ---

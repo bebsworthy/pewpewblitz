@@ -16,6 +16,21 @@ pub(in crate::client) struct CombatEffect3d {
     profile_id: String,
 }
 
+impl CombatEffect3d {
+    pub(in crate::client) fn advance_and_is_finished(
+        &mut self,
+        delta: Duration,
+        current_tick: Option<u64>,
+    ) -> bool {
+        self.timer.tick(delta);
+        let authoritative_expiry = self
+            .expires_at_tick
+            .zip(current_tick)
+            .is_some_and(|(expires_at_tick, now)| now >= expires_at_tick);
+        authoritative_expiry || self.timer.is_finished()
+    }
+}
+
 #[derive(Default)]
 pub(in crate::client) struct CombatEffectSequence(u64);
 
@@ -260,12 +275,7 @@ pub(in crate::client) fn cleanup_combat_effects(
 ) {
     let current_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     for (entity, mut effect) in &mut effects {
-        effect.timer.tick(time.delta());
-        let authoritative_expiry = effect
-            .expires_at_tick
-            .zip(current_tick)
-            .is_some_and(|(expires_at_tick, now)| now >= expires_at_tick);
-        if authoritative_expiry || effect.timer.is_finished() {
+        if effect.advance_and_is_finished(time.delta(), current_tick) {
             commands.entity(entity).try_despawn();
         }
     }
