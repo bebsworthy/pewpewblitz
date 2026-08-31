@@ -332,6 +332,18 @@ fn lobby_membership_with_brawler() -> ClientLobbyMembership {
     membership
 }
 
+fn lobby_membership_with_two_brawlers() -> ClientLobbyMembership {
+    let mut membership = lobby_membership_with_brawler();
+    let mut second = membership.profile.brawlers[0].clone();
+    second.id = crate::profiles::SavedBrawlerId::new(3).unwrap();
+    second.creation_ordinal = 2;
+    second.name = "Second Brawler".into();
+    second.revision = crate::profiles::ProfileRevision::INITIAL;
+    membership.profile.brawlers.push(second);
+    membership.profile.next_brawler_ordinal = 3;
+    membership
+}
+
 #[test]
 fn explicit_action_preempts_session_and_ordinary_while_profile_decision_still_applies() {
     let mut app = flow_action_test_app();
@@ -407,6 +419,14 @@ fn configured_lobby_flow_app(membership: ClientLobbyMembership) -> App {
     app
 }
 
+fn configured_customization_app(membership: &ClientLobbyMembership) -> App {
+    let mut app = configured_lobby_flow_app(membership.clone());
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(membership.profile.clone());
+    app
+}
+
 #[test]
 fn queue_and_practice_require_a_selected_brawler() {
     let empty_membership = lobby_membership();
@@ -471,8 +491,167 @@ fn pending_queue_rejects_practice_start() {
     );
 }
 
+fn assert_customization_entry_actions_are_blocked(
+    app: &mut App,
+    brawler_id: crate::profiles::SavedBrawlerId,
+    profile_pending: bool,
+) {
+    for action in [
+        FlowUiAction::CreateBrawler,
+        FlowUiAction::SelectBrawler(brawler_id),
+        FlowUiAction::OpenBrawlerEditor(brawler_id),
+        FlowUiAction::OpenWeaponEquipment(brawler_id),
+        FlowUiAction::DeleteBrawler(brawler_id),
+    ] {
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Settings;
+        inject_action(app, action);
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::Settings
+        );
+        assert_eq!(
+            app.world()
+                .resource::<super::super::ClientProfileModel>()
+                .pending(),
+            profile_pending
+        );
+    }
+}
+
 #[test]
-fn profile_decisions_route_created_and_rejected_edits_to_their_owned_overlays() {
+fn customization_entry_actions_preserve_queue_practice_and_profile_locks() {
+    let membership = lobby_membership_with_brawler();
+    let brawler = membership.profile.brawlers[0].clone();
+
+    let mut queue_locked = configured_customization_app(&membership);
+    inject_action(&mut queue_locked, FlowUiAction::JoinQueue);
+    assert!(
+        queue_locked
+            .world()
+            .resource::<super::super::ClientQueueModel>()
+            .pending()
+            .is_some()
+    );
+    assert_customization_entry_actions_are_blocked(&mut queue_locked, brawler.id, false);
+
+    let mut practice_locked = configured_customization_app(&membership);
+    inject_action(&mut practice_locked, FlowUiAction::StartPractice);
+    assert!(
+        practice_locked
+            .world()
+            .resource::<super::super::ClientPracticeModel>()
+            .pending()
+    );
+    assert_customization_entry_actions_are_blocked(&mut practice_locked, brawler.id, false);
+
+    let mut profile_locked = configured_customization_app(&membership);
+    assert!(
+        profile_locked
+            .world_mut()
+            .resource_mut::<super::super::ClientProfileModel>()
+            .edit(
+                brawler.id,
+                crate::profiles::BrawlerEdit {
+                    name: brawler.name,
+                    ultimate_id: brawler.ultimate_id,
+                    passive_ids: brawler.passive_ids,
+                },
+            )
+    );
+    assert_customization_entry_actions_are_blocked(&mut profile_locked, brawler.id, true);
+}
+
+#[test]
+fn equipment_actions_preserve_slot_conflict_draft_and_overlay_contracts() {
+    let mut membership = lobby_membership_with_two_brawlers();
+    let target = membership.profile.brawlers[0].id;
+    let occupied_part = crate::weapon_parts::WeaponPartInstanceId::new(41).unwrap();
+    membership.profile.brawlers[1].equipped_part_ids[2] = Some(occupied_part);
+    let mut app = configured_customization_app(&membership);
+
+    inject_action(&mut app, FlowUiAction::OpenWeaponEquipment(target));
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::WeaponEquipment
+    );
+    {
+        let mut draft = app.world_mut().resource_mut::<WeaponEquipmentDraft>();
+        draft.selected_slot = 1;
+        draft.inline_error = Some("keep this error".into());
+    }
+    inject_action(
+        &mut app,
+        FlowUiAction::SelectEquipmentSlot(crate::weapon_parts::WEAPON_PART_SLOT_COUNT),
+    );
+    let draft = app.world().resource::<WeaponEquipmentDraft>();
+    assert_eq!(draft.selected_slot, 1);
+    assert_eq!(draft.inline_error.as_deref(), Some("keep this error"));
+
+    inject_action(&mut app, FlowUiAction::EquipWeaponPart(occupied_part));
+    let draft = app.world().resource::<WeaponEquipmentDraft>();
+    assert_eq!(
+        draft.inline_error.as_deref(),
+        Some("That physical part is equipped on another brawler.")
+    );
+    assert_eq!(draft.equipped_part_ids, [None; 4]);
+    assert!(
+        !app.world()
+            .resource::<super::super::ClientProfileModel>()
+            .pending()
+    );
+
+    let free_part = crate::weapon_parts::WeaponPartInstanceId::new(42).unwrap();
+    inject_action(&mut app, FlowUiAction::EquipWeaponPart(free_part));
+    assert_eq!(
+        app.world()
+            .resource::<WeaponEquipmentDraft>()
+            .equipped_part_ids[1],
+        Some(free_part)
+    );
+    assert!(
+        app.world()
+            .resource::<WeaponEquipmentDraft>()
+            .inline_error
+            .is_none()
+    );
+    inject_action(&mut app, FlowUiAction::UnequipWeaponPart);
+    assert_eq!(
+        app.world()
+            .resource::<WeaponEquipmentDraft>()
+            .equipped_part_ids[1],
+        None
+    );
+    inject_action(&mut app, FlowUiAction::EquipWeaponPart(free_part));
+    inject_action(&mut app, FlowUiAction::ConfirmWeaponEquipment);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerDetails(target)
+    );
+    assert!(
+        app.world()
+            .resource::<super::super::ClientProfileModel>()
+            .pending()
+    );
+
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(membership.profile.clone());
+    inject_action(&mut app, FlowUiAction::OpenWeaponEquipment(target));
+    inject_action(&mut app, FlowUiAction::CancelWeaponEquipment);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerDetails(target)
+    );
+    *app.world_mut().resource_mut::<WeaponEquipmentDraft>() = WeaponEquipmentDraft::default();
+    inject_action(&mut app, FlowUiAction::CancelWeaponEquipment);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerList
+    );
+}
+
+#[test]
+fn profile_decisions_preserve_exact_notices_overlays_focus_and_draft_errors() {
     let mut app = flow_action_test_app();
     let membership = lobby_membership_with_brawler();
     let created = membership.profile.brawlers[0].clone();
@@ -493,6 +672,41 @@ fn profile_decisions_route_created_and_rejected_edits_to_their_owned_overlays() 
     assert_eq!(
         app.world().resource::<DashboardNotice>().0.as_deref(),
         Some("Created Test Brawler.")
+    );
+    assert_eq!(app.world().resource::<FlowNavigation>().selected, 0);
+
+    app.world_mut().resource_mut::<PendingEditedBrawler>().0 = Some(created.id);
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_decision_for_test(crate::profiles::ProfileDecision::Accepted);
+    app.update();
+
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerDetails(created.id)
+    );
+    assert_eq!(
+        app.world().resource::<DashboardNotice>().0.as_deref(),
+        Some("Profile saved.")
+    );
+    assert_eq!(app.world().resource::<FlowNavigation>().selected, 1);
+
+    app.world_mut().resource_mut::<PendingCreatedBrawler>().0 = Some(created.creation_ordinal);
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_decision_for_test(crate::profiles::ProfileDecision::InvalidRequest);
+    app.update();
+
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerCreation
+    );
+    assert_eq!(
+        app.world()
+            .resource::<BrawlerCreationDraft>()
+            .inline_error
+            .as_deref(),
+        Some("That brawler change is not valid.")
     );
 
     app.world_mut().resource_mut::<PendingEditedBrawler>().0 = Some(created.id);

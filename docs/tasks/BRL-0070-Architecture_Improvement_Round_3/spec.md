@@ -293,3 +293,11 @@ Rollback coverage now proves filesystem failure and precondition rejection canno
 Independent review is clean. Focused tests, combined Balance Lab/network smoke, canonical checks/lint, all 97 network cases, and all 12 performance gates pass. No native evidence was required because schemas, tuning, schedule timing, UI, and player-visible behavior are unchanged.
 
 The next Stage 6 slice is the lower-risk client customization reducer extraction: move brawler/profile and weapon-equipment action ownership into private helper modules while retaining the single resolve_flow_action precedence coordinator and existing FlowCommit/schedule pipeline.
+
+## BRL-0086 phase completion
+
+BRL-0086 completed the client customization reducer extraction. `resolve_flow_action` remains the sole schedule-facing coordinator with exact profile-decision, explicit, session, and ordinary precedence and the existing `FlowCommit`/ApplyDeferred pipeline. Private profile and equipment modules now own their cohesive action families, pending-decision reconciliation, drafts, exact notices/errors, locks, and overlay/focus outcomes without changing protocol, UI, schedule, or player-visible behavior.
+
+Independent review is clean after exact accepted/rejected create/edit characterization was completed. Focused flow tests, strict client Clippy, canonical check/lint/test, all 97 routed network cases, and all 12 performance gates pass. No native rerun was required for this organization-only phase.
+
+The next Stage 6 slice is the server lobby profile-transaction adapter currently embedded in `src/server/lobby/mod.rs`: extract Hello-to-profile-load admission and authenticated profile-command/result bridging into one private module while preserving load-before-command polling, queue lock semantics, and the exact trailing ApplyDeferred visibility boundary.
