@@ -2,7 +2,7 @@ use super::BalanceLabSnapshotV3;
 use crate::{
     builds::{
         MAX_COLD_CAPACITY, MAX_FIGHTER_MOVEMENT_SPEED, MAX_REVEAL_PROXIMITY_RADIUS,
-        MIN_REVEAL_PROXIMITY_RADIUS, UltimateParameters,
+        MIN_REVEAL_PROXIMITY_RADIUS,
     },
     combat::WeaponCatalog,
     timing::{SIMULATION_TICK_HZ_F64, simulation_seconds_f64},
@@ -10,6 +10,7 @@ use crate::{
 use serde::Serialize;
 
 mod passives;
+mod ultimates;
 mod weapons;
 
 pub(super) const EDITOR_SCHEMA_VERSION: u16 = 10;
@@ -232,7 +233,7 @@ impl BalanceLabEditorManifest {
         for (index, weapon) in snapshot.weapons.iter().enumerate() {
             weapons::add_fields(&mut fields, index, weapon, weapons);
         }
-        add_ultimate_fields(&mut fields, snapshot);
+        ultimates::add_fields(&mut fields, snapshot);
         passives::add_fields(&mut fields, snapshot);
         add_effect_tile_fields(&mut fields);
         add_world_fields(&mut fields);
@@ -500,514 +501,6 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "explicit descriptors keep the small ultimate editor contract auditable"
-)]
-fn add_ultimate_fields(fields: &mut Vec<EditorFieldDescriptor>, snapshot: &BalanceLabSnapshotV3) {
-    for (index, ultimate) in snapshot.ultimates.iter().enumerate() {
-        match ultimate.parameters {
-            UltimateParameters::Dash { .. } => {
-                for (tail, group, label, spec) in [
-                    (
-                        "maximum_distance_milliunits",
-                        "Movement",
-                        "Maximum distance",
-                        NumberSpec::milliunits(1, 4_096_000),
-                    ),
-                    (
-                        "duration_ticks",
-                        "Movement",
-                        "Duration",
-                        NumberSpec::ticks(1, 600),
-                    ),
-                    (
-                        "damage",
-                        "Impact",
-                        "Damage",
-                        NumberSpec::integer(1, 1_000, "health"),
-                    ),
-                    (
-                        "knockback_speed_milliunits",
-                        "Impact",
-                        "Knockback speed",
-                        NumberSpec::milliunits(1, 4_096_000),
-                    ),
-                    (
-                        "knockback_duration_ticks",
-                        "Impact",
-                        "Knockback duration",
-                        NumberSpec::ticks(1, 600),
-                    ),
-                    (
-                        "maximum_targets",
-                        "Capacity",
-                        "Maximum targets",
-                        NumberSpec::integer(1, 32, "targets"),
-                    ),
-                ] {
-                    add_field(
-                        fields,
-                        path!["ultimates", index, "parameters", "Dash", tail],
-                        EditorSection::Ultimates,
-                        &ultimate.key,
-                        &ultimate.display_name,
-                        group,
-                        label,
-                        spec,
-                    );
-                }
-            }
-            UltimateParameters::Sentry { .. } => {
-                for offset in 0..6 {
-                    add_field(
-                        fields,
-                        path![
-                            "ultimates",
-                            index,
-                            "parameters",
-                            "Sentry",
-                            "placement_offsets_milliunits",
-                            offset
-                        ],
-                        EditorSection::Ultimates,
-                        &ultimate.key,
-                        &ultimate.display_name,
-                        "Placement",
-                        &format!("Placement offset {}", offset + 1),
-                        NumberSpec::milliunits(1, 1_024_000),
-                    );
-                }
-                for (tail, group, label, spec) in [
-                    (
-                        "body_radius_milliunits",
-                        "Deployable",
-                        "Body radius",
-                        NumberSpec::milliunits(1, 512_000),
-                    ),
-                    (
-                        "acquisition_range_milliunits",
-                        "Targeting",
-                        "Acquisition range",
-                        NumberSpec::milliunits(1, 4_096_000),
-                    ),
-                    (
-                        "acquisition_interval_ticks",
-                        "Targeting",
-                        "Acquisition interval",
-                        NumberSpec::ticks(1, 600),
-                    ),
-                    (
-                        "fire_interval_ticks",
-                        "Firing",
-                        "Fire interval",
-                        NumberSpec::ticks(1, 3_600),
-                    ),
-                    (
-                        "lifetime_ticks",
-                        "Deployable",
-                        "Lifetime",
-                        NumberSpec::ticks(1, 36_000),
-                    ),
-                    (
-                        "maximum_health",
-                        "Deployable",
-                        "Maximum health",
-                        NumberSpec::integer(1, 10_000, "health"),
-                    ),
-                    (
-                        "projectile_speed_milliunits",
-                        "Projectile",
-                        "Speed",
-                        NumberSpec::milliunits(1, 4_096_000),
-                    ),
-                    (
-                        "projectile_radius_milliunits",
-                        "Projectile",
-                        "Radius",
-                        NumberSpec::milliunits(1, 512_000),
-                    ),
-                    (
-                        "projectile_range_milliunits",
-                        "Projectile",
-                        "Range",
-                        NumberSpec::milliunits(1, 4_096_000),
-                    ),
-                    (
-                        "projectile_lifetime_ticks",
-                        "Projectile",
-                        "Flight lifetime",
-                        NumberSpec::ticks(1, 600),
-                    ),
-                    (
-                        "projectile_damage",
-                        "Projectile",
-                        "Damage",
-                        NumberSpec::integer(1, 1_000, "health"),
-                    ),
-                ] {
-                    add_field(
-                        fields,
-                        path!["ultimates", index, "parameters", "Sentry", tail],
-                        EditorSection::Ultimates,
-                        &ultimate.key,
-                        &ultimate.display_name,
-                        group,
-                        label,
-                        spec,
-                    );
-                }
-            }
-            UltimateParameters::SelfCloak { .. } => add_field(
-                fields,
-                path![
-                    "ultimates",
-                    index,
-                    "parameters",
-                    "SelfCloak",
-                    "duration_ticks"
-                ],
-                EditorSection::Ultimates,
-                &ultimate.key,
-                &ultimate.display_name,
-                "Timing",
-                "Cloak duration",
-                NumberSpec::ticks(1, 3_600),
-            ),
-            UltimateParameters::RevealScan { .. } => {
-                add_field(
-                    fields,
-                    path![
-                        "ultimates",
-                        index,
-                        "parameters",
-                        "RevealScan",
-                        "maximum_range_milliunits"
-                    ],
-                    EditorSection::Ultimates,
-                    &ultimate.key,
-                    &ultimate.display_name,
-                    "Targeting",
-                    "Maximum range",
-                    NumberSpec::milliunits(1, 4_096_000),
-                );
-                add_field(
-                    fields,
-                    path![
-                        "ultimates",
-                        index,
-                        "parameters",
-                        "RevealScan",
-                        "radius_milliunits"
-                    ],
-                    EditorSection::Ultimates,
-                    &ultimate.key,
-                    &ultimate.display_name,
-                    "Area",
-                    "Reveal radius",
-                    NumberSpec::milliunits(1, 2_048_000),
-                );
-                add_field(
-                    fields,
-                    path![
-                        "ultimates",
-                        index,
-                        "parameters",
-                        "RevealScan",
-                        "reveal_ticks"
-                    ],
-                    EditorSection::Ultimates,
-                    &ultimate.key,
-                    &ultimate.display_name,
-                    "Timing",
-                    "Reveal duration",
-                    NumberSpec::ticks(1, 3_600),
-                );
-            }
-            UltimateParameters::ConcealmentField { .. } => {
-                add_field(
-                    fields,
-                    path![
-                        "ultimates",
-                        index,
-                        "parameters",
-                        "ConcealmentField",
-                        "maximum_range_milliunits"
-                    ],
-                    EditorSection::Ultimates,
-                    &ultimate.key,
-                    &ultimate.display_name,
-                    "Targeting",
-                    "Maximum range",
-                    NumberSpec::milliunits(1, 4_096_000),
-                );
-                add_field(
-                    fields,
-                    path![
-                        "ultimates",
-                        index,
-                        "parameters",
-                        "ConcealmentField",
-                        "radius_milliunits"
-                    ],
-                    EditorSection::Ultimates,
-                    &ultimate.key,
-                    &ultimate.display_name,
-                    "Area",
-                    "Field radius",
-                    NumberSpec::milliunits(1, 2_048_000),
-                );
-                add_field(
-                    fields,
-                    path![
-                        "ultimates",
-                        index,
-                        "parameters",
-                        "ConcealmentField",
-                        "duration_ticks"
-                    ],
-                    EditorSection::Ultimates,
-                    &ultimate.key,
-                    &ultimate.display_name,
-                    "Timing",
-                    "Field duration",
-                    NumberSpec::ticks(1, 3_600),
-                );
-            }
-            UltimateParameters::DemolitionStrike { .. } => {
-                add_field(
-                    fields,
-                    path![
-                        "ultimates",
-                        index,
-                        "parameters",
-                        "DemolitionStrike",
-                        "maximum_range_milliunits"
-                    ],
-                    EditorSection::Ultimates,
-                    &ultimate.key,
-                    &ultimate.display_name,
-                    "Targeting",
-                    "Maximum range",
-                    NumberSpec::milliunits(1, 4_096_000),
-                );
-                add_field(
-                    fields,
-                    path![
-                        "ultimates",
-                        index,
-                        "parameters",
-                        "DemolitionStrike",
-                        "radius_milliunits"
-                    ],
-                    EditorSection::Ultimates,
-                    &ultimate.key,
-                    &ultimate.display_name,
-                    "Area",
-                    "Destruction radius",
-                    NumberSpec::milliunits(8_000, 64_000),
-                );
-            }
-            UltimateParameters::ElementalField { .. } => {
-                for (tail, group, label, spec) in [
-                    (
-                        "maximum_range_milliunits",
-                        "Targeting",
-                        "Maximum range",
-                        NumberSpec::milliunits(1, 4_096_000),
-                    ),
-                    (
-                        "radius_milliunits",
-                        "Area",
-                        "Field radius",
-                        NumberSpec::milliunits(1, 2_048_000),
-                    ),
-                    (
-                        "duration_ticks",
-                        "Timing",
-                        "Field duration",
-                        NumberSpec::ticks(1, 3_600),
-                    ),
-                    (
-                        "pulse_interval_ticks",
-                        "Timing",
-                        "Pulse interval",
-                        NumberSpec::ticks(1, 3_600),
-                    ),
-                ] {
-                    add_field(
-                        fields,
-                        path!["ultimates", index, "parameters", "ElementalField", tail],
-                        EditorSection::Ultimates,
-                        &ultimate.key,
-                        &ultimate.display_name,
-                        group,
-                        label,
-                        spec,
-                    );
-                }
-                let (effect_kind, effect_label) = match ultimate.kind {
-                    crate::builds::UltimateKind::CryogenicField => ("Cold", "Cold per pulse"),
-                    crate::builds::UltimateKind::FireField
-                    | crate::builds::UltimateKind::PoisonField => {
-                        ("DamageOverTime", "Damage per tick")
-                    }
-                    crate::builds::UltimateKind::RestorationField => ("Heal", "Healing"),
-                    _ => continue,
-                };
-                let effect_tail = if effect_kind == "DamageOverTime" {
-                    "damage_per_tick"
-                } else {
-                    "amount"
-                };
-                add_field(
-                    fields,
-                    path![
-                        "ultimates",
-                        index,
-                        "parameters",
-                        "ElementalField",
-                        "effect",
-                        effect_kind,
-                        effect_tail
-                    ],
-                    EditorSection::Ultimates,
-                    &ultimate.key,
-                    &ultimate.display_name,
-                    "Effect",
-                    effect_label,
-                    NumberSpec::integer(
-                        1,
-                        u32::from(u16::MAX),
-                        if effect_kind == "Cold" {
-                            "cold/pulse"
-                        } else {
-                            "points"
-                        },
-                    )
-                    .help(if effect_kind == "Cold" {
-                        "Applied after resistance against each target's Cold capacity."
-                    } else {
-                        "Applied on each authoritative field pulse."
-                    }),
-                );
-                if effect_kind == "DamageOverTime" {
-                    for (tail, label) in [
-                        ("tick_interval", "Damage interval"),
-                        ("duration_ticks", "Damage duration"),
-                    ] {
-                        add_field(
-                            fields,
-                            path![
-                                "ultimates",
-                                index,
-                                "parameters",
-                                "ElementalField",
-                                "effect",
-                                effect_kind,
-                                tail
-                            ],
-                            EditorSection::Ultimates,
-                            &ultimate.key,
-                            &ultimate.display_name,
-                            "Effect",
-                            label,
-                            NumberSpec::ticks(1, 3_600),
-                        );
-                    }
-                }
-            }
-            UltimateParameters::BigBlob { .. } => {
-                for (tail, group, label, spec) in [
-                    (
-                        "maximum_range_milliunits",
-                        "Targeting",
-                        "Maximum throw range",
-                        NumberSpec::milliunits(1, 4_096_000),
-                    ),
-                    (
-                        "flight_ticks",
-                        "Targeting",
-                        "Lob flight time",
-                        NumberSpec::ticks(1, 600),
-                    ),
-                    (
-                        "visual_arc_height_milliunits",
-                        "Targeting",
-                        "Visual arc height",
-                        NumberSpec::milliunits(1, 2_048_000),
-                    ),
-                    (
-                        "landing_clearance_milliunits",
-                        "Targeting",
-                        "Landing clearance",
-                        NumberSpec::milliunits(1, 512_000),
-                    ),
-                    (
-                        "child_speed_milliunits",
-                        "Secondary blobs",
-                        "Travel speed",
-                        NumberSpec::milliunits(1, 4_096_000),
-                    ),
-                    (
-                        "child_radius_milliunits",
-                        "Secondary blobs",
-                        "Projectile radius",
-                        NumberSpec::milliunits(1, 512_000),
-                    ),
-                    (
-                        "child_range_milliunits",
-                        "Secondary blobs",
-                        "Travel range",
-                        NumberSpec::milliunits(1, 4_096_000),
-                    ),
-                    (
-                        "child_lifetime_ticks",
-                        "Secondary blobs",
-                        "Flight lifetime",
-                        NumberSpec::ticks(1, 600),
-                    ),
-                    (
-                        "child_fuse_ticks",
-                        "Explosion",
-                        "Fuse delay",
-                        NumberSpec::ticks(1, 3_600),
-                    ),
-                    (
-                        "child_explosion_radius_milliunits",
-                        "Explosion",
-                        "Explosion radius",
-                        NumberSpec::milliunits(1, 512_000),
-                    ),
-                    (
-                        "child_damage",
-                        "Explosion",
-                        "Damage",
-                        NumberSpec::integer(1, 1_000, "health"),
-                    ),
-                    (
-                        "max_active_per_owner",
-                        "Capacity",
-                        "Maximum active blobs",
-                        NumberSpec::integer(1, 16, "blobs"),
-                    ),
-                ] {
-                    add_field(
-                        fields,
-                        path!["ultimates", index, "parameters", "BigBlob", tail],
-                        EditorSection::Ultimates,
-                        &ultimate.key,
-                        &ultimate.display_name,
-                        group,
-                        label,
-                        spec,
-                    );
-                }
-            }
-        }
-    }
-}
-
 fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
     add_field(
         fields,
@@ -1230,6 +723,50 @@ mod tests {
         numeric_leaves.len()
     }
 
+    fn ultimate_descriptor_json(
+        manifest: &BalanceLabEditorManifest,
+        path: &str,
+    ) -> serde_json::Value {
+        serde_json::to_value(manifest_field_by_path(manifest, path)).unwrap()
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::needless_pass_by_value,
+        reason = "the test helper keeps every serialized descriptor field explicit"
+    )]
+    fn literal_integer_descriptor(
+        path: serde_json::Value,
+        subject_key: &str,
+        subject_label: &str,
+        group: &str,
+        label: &str,
+        unit: &str,
+        storage_scale: f64,
+        minimum: f64,
+        maximum: f64,
+        step: f64,
+        help: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "path": path,
+            "section": "ultimates",
+            "subjectKey": subject_key,
+            "subjectLabel": subject_label,
+            "group": group,
+            "label": label,
+            "storageKind": "integer",
+            "unit": unit,
+            "storageScale": storage_scale,
+            "minimum": minimum,
+            "maximum": maximum,
+            "minimumExclusive": false,
+            "step": step,
+            "control": "number",
+            "help": help,
+        })
+    }
+
     #[test]
     fn manifest_exposes_only_the_supported_numeric_leaves() {
         let (snapshot, weapons) = fixture();
@@ -1265,6 +802,233 @@ mod tests {
                 "missing authored tuning path {expected}"
             );
         }
+    }
+
+    #[test]
+    fn every_authored_ultimate_numeric_leaf_has_one_exact_indexed_descriptor() {
+        let (snapshot, _) = fixture();
+        assert_eq!(snapshot.ultimates.len(), 11);
+
+        let mut fields = Vec::new();
+        ultimates::add_fields(&mut fields, &snapshot);
+        assert_eq!(fields.len(), 68);
+        let mut descriptor_paths = vec![Vec::new(); snapshot.ultimates.len()];
+        for field in &fields {
+            match field.path.as_slice() {
+                [
+                    EditorPathSegment::Key(root),
+                    EditorPathSegment::Index(index),
+                    EditorPathSegment::Key(parameters),
+                    tail @ ..,
+                ] if root == "ultimates"
+                    && parameters == "parameters"
+                    && *index < snapshot.ultimates.len() =>
+                {
+                    descriptor_paths[*index].push(path_key(tail));
+                }
+                _ => panic!(
+                    "ultimate adapter emitted an unexpected descriptor path: {}",
+                    path_key(&field.path)
+                ),
+            }
+        }
+
+        let expected_counts = [6, 17, 1, 3, 3, 2, 5, 7, 7, 5, 12];
+        let mut total_numeric_leaves = 0;
+        for (index, ultimate) in snapshot.ultimates.iter().enumerate() {
+            let mut numeric_leaves = std::collections::BTreeSet::new();
+            collect_numeric_leaf_paths(
+                &serde_json::to_value(ultimate.parameters).unwrap(),
+                &mut Vec::new(),
+                &mut numeric_leaves,
+            );
+            let unique_descriptor_paths: std::collections::BTreeSet<_> =
+                descriptor_paths[index].iter().cloned().collect();
+            assert_eq!(numeric_leaves.len(), expected_counts[index]);
+            assert_eq!(descriptor_paths[index].len(), expected_counts[index]);
+            assert_eq!(unique_descriptor_paths.len(), expected_counts[index]);
+            assert_eq!(
+                unique_descriptor_paths, numeric_leaves,
+                "{} ultimate metadata does not cover its numeric schema exactly",
+                ultimate.key
+            );
+            total_numeric_leaves += numeric_leaves.len();
+        }
+        assert_eq!(total_numeric_leaves, 68);
+    }
+
+    #[test]
+    fn ordered_ultimate_descriptor_contract_has_the_independent_literal_digest() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let descriptors: Vec<_> = manifest
+            .fields
+            .iter()
+            .filter(|field| {
+                matches!(
+                    field.path.first(),
+                    Some(EditorPathSegment::Key(root)) if root == "ultimates"
+                )
+            })
+            .collect();
+        assert_eq!(descriptors.len(), 68);
+        let bytes = serde_json::to_vec(&descriptors).unwrap();
+        let digest = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        assert_eq!(digest, 0x7c9a_7aaa_e5ba_9969);
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "literal nested contracts diagnose each high-risk ultimate descriptor shape"
+    )]
+    fn nested_sentry_and_elemental_effect_descriptors_are_fully_literal() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let tick = 0.016_666_666_666_666_666;
+        let tick_help = "Enter seconds; saved to the nearest authoritative server tick.";
+
+        assert_eq!(
+            ultimate_descriptor_json(
+                &manifest,
+                "ultimates/1/parameters/Sentry/placement_offsets_milliunits/0",
+            ),
+            literal_integer_descriptor(
+                serde_json::json!([
+                    "ultimates",
+                    1,
+                    "parameters",
+                    "Sentry",
+                    "placement_offsets_milliunits",
+                    0
+                ]),
+                "sentry",
+                "Sentry",
+                "Placement",
+                "Placement offset 1",
+                "world units",
+                1_000.0,
+                0.001,
+                1_024.0,
+                0.001,
+                "Displayed in world units and stored to the nearest thousandth.",
+            )
+        );
+        assert_eq!(
+            ultimate_descriptor_json(
+                &manifest,
+                "ultimates/6/parameters/ElementalField/effect/Cold/amount",
+            ),
+            literal_integer_descriptor(
+                serde_json::json!([
+                    "ultimates",
+                    6,
+                    "parameters",
+                    "ElementalField",
+                    "effect",
+                    "Cold",
+                    "amount"
+                ]),
+                "cryogenic-field",
+                "Cryogenic Field",
+                "Effect",
+                "Cold per pulse",
+                "cold/pulse",
+                1.0,
+                1.0,
+                65_535.0,
+                1.0,
+                "Applied after resistance against each target's Cold capacity.",
+            )
+        );
+        assert_eq!(
+            ultimate_descriptor_json(
+                &manifest,
+                "ultimates/7/parameters/ElementalField/effect/DamageOverTime/damage_per_tick",
+            ),
+            literal_integer_descriptor(
+                serde_json::json!([
+                    "ultimates",
+                    7,
+                    "parameters",
+                    "ElementalField",
+                    "effect",
+                    "DamageOverTime",
+                    "damage_per_tick"
+                ]),
+                "fire-field",
+                "Fire Field",
+                "Effect",
+                "Damage per tick",
+                "points",
+                1.0,
+                1.0,
+                65_535.0,
+                1.0,
+                "Applied on each authoritative field pulse.",
+            )
+        );
+        for (tail, label) in [
+            ("tick_interval", "Damage interval"),
+            ("duration_ticks", "Damage duration"),
+        ] {
+            assert_eq!(
+                ultimate_descriptor_json(
+                    &manifest,
+                    &format!("ultimates/7/parameters/ElementalField/effect/DamageOverTime/{tail}"),
+                ),
+                literal_integer_descriptor(
+                    serde_json::json!([
+                        "ultimates",
+                        7,
+                        "parameters",
+                        "ElementalField",
+                        "effect",
+                        "DamageOverTime",
+                        tail
+                    ]),
+                    "fire-field",
+                    "Fire Field",
+                    "Effect",
+                    label,
+                    "s",
+                    60.0,
+                    tick,
+                    60.0,
+                    tick,
+                    tick_help,
+                )
+            );
+        }
+        assert_eq!(
+            ultimate_descriptor_json(
+                &manifest,
+                "ultimates/9/parameters/ElementalField/effect/Heal/amount",
+            ),
+            literal_integer_descriptor(
+                serde_json::json!([
+                    "ultimates",
+                    9,
+                    "parameters",
+                    "ElementalField",
+                    "effect",
+                    "Heal",
+                    "amount"
+                ]),
+                "restoration-field",
+                "Restoration Field",
+                "Effect",
+                "Healing",
+                "points",
+                1.0,
+                1.0,
+                65_535.0,
+                1.0,
+                "Applied on each authoritative field pulse.",
+            )
+        );
     }
 
     #[test]

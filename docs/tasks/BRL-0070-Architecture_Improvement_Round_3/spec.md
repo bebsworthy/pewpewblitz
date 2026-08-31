@@ -345,3 +345,7 @@ Completed and independently reviewed. Weapon projection is now private and exhau
 Focused suites, web build/tests, role checks, `just check`, `just lint`, `just test`, all 97 network cases, and all 12 performance gates pass. Live routed Balance Lab evidence confirmed unchanged canonical Arc/Splash values, corrected input attributes, exact 0.09/0.10 and 1,000/1,001 inline rejection, and disabled Apply for invalid drafts. Independent review findings were corrected and follow-up review is clean.
 
 The ultimate-family exact-output follow-up remains the last demonstrated Stage 6.3 implementation phase before final BRL-0070 CI/native closeout.
+
+## Follow-up decision — ultimate metadata
+
+The post-passive audit found the same demonstrated maintenance failure in ultimate metadata: bounds are duplicated between build validation and the Balance Lab adapter, all eight parameter projections use wildcard matches, and current one-way coverage cannot detect a newly added numeric field. BRL-0095 owns an exact-output typed-bounds/exhaustive-projection phase with 11-definition/68-leaf bidirectional coverage. No schema or behavior change is authorized.

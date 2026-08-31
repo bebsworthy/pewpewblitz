@@ -120,6 +120,598 @@ fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters()
     );
 }
 
+fn catalog_with_ultimate_parameters(
+    catalog: &BuildCatalog,
+    kind: UltimateKind,
+    parameters: UltimateParameters,
+) -> BuildCatalog {
+    let mut candidate = catalog.clone();
+    candidate
+        .ultimates
+        .iter_mut()
+        .find(|definition| definition.kind == kind)
+        .expect("embedded ultimate kind exists")
+        .parameters = parameters;
+    candidate
+}
+
+fn assert_ultimate_parameters_valid(
+    catalog: &BuildCatalog,
+    kind: UltimateKind,
+    parameters: UltimateParameters,
+) {
+    assert!(
+        catalog_with_ultimate_parameters(catalog, kind, parameters)
+            .validate()
+            .is_ok(),
+        "{kind:?} should accept {parameters:?}"
+    );
+}
+
+fn assert_ultimate_parameters_invalid(
+    catalog: &BuildCatalog,
+    kind: UltimateKind,
+    parameters: UltimateParameters,
+) {
+    assert!(
+        catalog_with_ultimate_parameters(catalog, kind, parameters)
+            .validate()
+            .is_err(),
+        "{kind:?} should reject {parameters:?}"
+    );
+}
+
+fn sentry_with_relational_violation(
+    parameters: UltimateParameters,
+    violation: u8,
+) -> UltimateParameters {
+    let UltimateParameters::Sentry {
+        mut placement_offsets_milliunits,
+        body_radius_milliunits,
+        acquisition_range_milliunits,
+        acquisition_interval_ticks,
+        fire_interval_ticks,
+        lifetime_ticks,
+        maximum_health,
+        projectile_speed_milliunits,
+        projectile_radius_milliunits,
+        projectile_range_milliunits,
+        projectile_lifetime_ticks,
+        projectile_damage,
+    } = parameters
+    else {
+        panic!("expected Sentry parameters")
+    };
+    if violation == 0 {
+        placement_offsets_milliunits[1] = placement_offsets_milliunits[0];
+    }
+    UltimateParameters::Sentry {
+        placement_offsets_milliunits,
+        body_radius_milliunits,
+        acquisition_range_milliunits,
+        acquisition_interval_ticks,
+        fire_interval_ticks,
+        lifetime_ticks,
+        maximum_health,
+        projectile_speed_milliunits,
+        projectile_radius_milliunits: if violation == 1 {
+            body_radius_milliunits + 1
+        } else {
+            projectile_radius_milliunits
+        },
+        projectile_range_milliunits: if violation == 2 {
+            acquisition_range_milliunits + 1
+        } else {
+            projectile_range_milliunits
+        },
+        projectile_lifetime_ticks,
+        projectile_damage,
+    }
+}
+
+#[test]
+fn ultimate_parameter_bound_literals_are_exact() {
+    let bounds = ULTIMATE_PARAMETER_BOUNDS;
+    assert_eq!(
+        (
+            bounds.world_distance_milliunits.minimum,
+            bounds.world_distance_milliunits.maximum
+        ),
+        (1, 4_096_000)
+    );
+    assert_eq!(
+        (
+            bounds.field_radius_milliunits.minimum,
+            bounds.field_radius_milliunits.maximum
+        ),
+        (1, 2_048_000)
+    );
+    assert_eq!(
+        (
+            bounds.compact_radius_milliunits.minimum,
+            bounds.compact_radius_milliunits.maximum
+        ),
+        (1, 512_000)
+    );
+    assert_eq!(
+        (
+            bounds.sentry_placement_offset_milliunits.minimum,
+            bounds.sentry_placement_offset_milliunits.maximum
+        ),
+        (1, 1_024_000)
+    );
+    assert_eq!(
+        (
+            bounds.demolition_radius_milliunits.minimum,
+            bounds.demolition_radius_milliunits.maximum
+        ),
+        (8_000, 64_000)
+    );
+    assert_eq!(
+        (bounds.short_ticks.minimum, bounds.short_ticks.maximum),
+        (1, 600)
+    );
+    assert_eq!(
+        (bounds.duration_ticks.minimum, bounds.duration_ticks.maximum),
+        (1, 3_600)
+    );
+    assert_eq!(
+        (
+            bounds.long_lifetime_ticks.minimum,
+            bounds.long_lifetime_ticks.maximum
+        ),
+        (1, 36_000)
+    );
+    assert_eq!((bounds.damage.minimum, bounds.damage.maximum), (1, 1_000));
+    assert_eq!((bounds.health.minimum, bounds.health.maximum), (1, 10_000));
+    assert_eq!(
+        (bounds.effect_amount.minimum, bounds.effect_amount.maximum),
+        (1, u16::MAX)
+    );
+    assert_eq!(
+        (bounds.target_count.minimum, bounds.target_count.maximum),
+        (1, 32)
+    );
+    assert_eq!(
+        (bounds.active_count.minimum, bounds.active_count.maximum),
+        (1, 16)
+    );
+}
+
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the endpoint matrix keeps every ultimate field and effect family visibly covered"
+)]
+fn every_ultimate_field_accepts_its_exact_lower_and_upper_endpoints() {
+    let (catalog, _) = catalogs();
+    let cases = [
+        (
+            UltimateKind::Dash,
+            UltimateParameters::Dash {
+                maximum_distance_milliunits: 1,
+                duration_ticks: 1,
+                damage: 1,
+                knockback_speed_milliunits: 1,
+                knockback_duration_ticks: 1,
+                maximum_targets: 1,
+            },
+            UltimateParameters::Dash {
+                maximum_distance_milliunits: 4_096_000,
+                duration_ticks: 600,
+                damage: 1_000,
+                knockback_speed_milliunits: 4_096_000,
+                knockback_duration_ticks: 600,
+                maximum_targets: 32,
+            },
+        ),
+        (
+            UltimateKind::Sentry,
+            UltimateParameters::Sentry {
+                placement_offsets_milliunits: [6, 5, 4, 3, 2, 1],
+                body_radius_milliunits: 1,
+                acquisition_range_milliunits: 1,
+                acquisition_interval_ticks: 1,
+                fire_interval_ticks: 1,
+                lifetime_ticks: 1,
+                maximum_health: 1,
+                projectile_speed_milliunits: 1,
+                projectile_radius_milliunits: 1,
+                projectile_range_milliunits: 1,
+                projectile_lifetime_ticks: 1,
+                projectile_damage: 1,
+            },
+            UltimateParameters::Sentry {
+                placement_offsets_milliunits: [
+                    1_024_000, 1_023_999, 1_023_998, 1_023_997, 1_023_996, 1_023_995,
+                ],
+                body_radius_milliunits: 512_000,
+                acquisition_range_milliunits: 4_096_000,
+                acquisition_interval_ticks: 600,
+                fire_interval_ticks: 3_600,
+                lifetime_ticks: 36_000,
+                maximum_health: 10_000,
+                projectile_speed_milliunits: 4_096_000,
+                projectile_radius_milliunits: 512_000,
+                projectile_range_milliunits: 4_096_000,
+                projectile_lifetime_ticks: 600,
+                projectile_damage: 1_000,
+            },
+        ),
+        (
+            UltimateKind::SelfCloak,
+            UltimateParameters::SelfCloak { duration_ticks: 1 },
+            UltimateParameters::SelfCloak {
+                duration_ticks: 3_600,
+            },
+        ),
+        (
+            UltimateKind::RevealScan,
+            UltimateParameters::RevealScan {
+                maximum_range_milliunits: 1,
+                radius_milliunits: 1,
+                reveal_ticks: 1,
+            },
+            UltimateParameters::RevealScan {
+                maximum_range_milliunits: 4_096_000,
+                radius_milliunits: 2_048_000,
+                reveal_ticks: 3_600,
+            },
+        ),
+        (
+            UltimateKind::ConcealmentField,
+            UltimateParameters::ConcealmentField {
+                maximum_range_milliunits: 1,
+                radius_milliunits: 1,
+                duration_ticks: 1,
+            },
+            UltimateParameters::ConcealmentField {
+                maximum_range_milliunits: 4_096_000,
+                radius_milliunits: 2_048_000,
+                duration_ticks: 3_600,
+            },
+        ),
+        (
+            UltimateKind::DemolitionStrike,
+            UltimateParameters::DemolitionStrike {
+                maximum_range_milliunits: 1,
+                radius_milliunits: 8_000,
+            },
+            UltimateParameters::DemolitionStrike {
+                maximum_range_milliunits: 4_096_000,
+                radius_milliunits: 64_000,
+            },
+        ),
+        (
+            UltimateKind::CryogenicField,
+            UltimateParameters::ElementalField {
+                maximum_range_milliunits: 1,
+                radius_milliunits: 1,
+                duration_ticks: 1,
+                pulse_interval_ticks: 1,
+                effect: ElementalFieldEffect::Cold { amount: 1 },
+            },
+            UltimateParameters::ElementalField {
+                maximum_range_milliunits: 4_096_000,
+                radius_milliunits: 2_048_000,
+                duration_ticks: 3_600,
+                pulse_interval_ticks: 3_600,
+                effect: ElementalFieldEffect::Cold { amount: u16::MAX },
+            },
+        ),
+        (
+            UltimateKind::FireField,
+            UltimateParameters::ElementalField {
+                maximum_range_milliunits: 1,
+                radius_milliunits: 1,
+                duration_ticks: 1,
+                pulse_interval_ticks: 1,
+                effect: ElementalFieldEffect::DamageOverTime {
+                    kind: crate::combat::DamageOverTimeKind::Fire,
+                    damage_per_tick: 1,
+                    tick_interval: 1,
+                    duration_ticks: 1,
+                },
+            },
+            UltimateParameters::ElementalField {
+                maximum_range_milliunits: 4_096_000,
+                radius_milliunits: 2_048_000,
+                duration_ticks: 3_600,
+                pulse_interval_ticks: 3_600,
+                effect: ElementalFieldEffect::DamageOverTime {
+                    kind: crate::combat::DamageOverTimeKind::Fire,
+                    damage_per_tick: u16::MAX,
+                    tick_interval: 3_600,
+                    duration_ticks: 3_600,
+                },
+            },
+        ),
+        (
+            UltimateKind::PoisonField,
+            UltimateParameters::ElementalField {
+                maximum_range_milliunits: 1,
+                radius_milliunits: 1,
+                duration_ticks: 1,
+                pulse_interval_ticks: 1,
+                effect: ElementalFieldEffect::DamageOverTime {
+                    kind: crate::combat::DamageOverTimeKind::Poison,
+                    damage_per_tick: 1,
+                    tick_interval: 1,
+                    duration_ticks: 1,
+                },
+            },
+            UltimateParameters::ElementalField {
+                maximum_range_milliunits: 4_096_000,
+                radius_milliunits: 2_048_000,
+                duration_ticks: 3_600,
+                pulse_interval_ticks: 3_600,
+                effect: ElementalFieldEffect::DamageOverTime {
+                    kind: crate::combat::DamageOverTimeKind::Poison,
+                    damage_per_tick: u16::MAX,
+                    tick_interval: 3_600,
+                    duration_ticks: 3_600,
+                },
+            },
+        ),
+        (
+            UltimateKind::RestorationField,
+            UltimateParameters::ElementalField {
+                maximum_range_milliunits: 1,
+                radius_milliunits: 1,
+                duration_ticks: 1,
+                pulse_interval_ticks: 1,
+                effect: ElementalFieldEffect::Heal { amount: 1 },
+            },
+            UltimateParameters::ElementalField {
+                maximum_range_milliunits: 4_096_000,
+                radius_milliunits: 2_048_000,
+                duration_ticks: 3_600,
+                pulse_interval_ticks: 3_600,
+                effect: ElementalFieldEffect::Heal { amount: u16::MAX },
+            },
+        ),
+        (
+            UltimateKind::BigBlob,
+            UltimateParameters::BigBlob {
+                maximum_range_milliunits: 1,
+                flight_ticks: 1,
+                visual_arc_height_milliunits: 1,
+                landing_clearance_milliunits: 1,
+                child_speed_milliunits: 1,
+                child_radius_milliunits: 1,
+                child_range_milliunits: 1,
+                child_lifetime_ticks: 1,
+                child_fuse_ticks: 1,
+                child_explosion_radius_milliunits: 1,
+                child_damage: 1,
+                max_active_per_owner: 1,
+            },
+            UltimateParameters::BigBlob {
+                maximum_range_milliunits: 4_096_000,
+                flight_ticks: 600,
+                visual_arc_height_milliunits: 2_048_000,
+                landing_clearance_milliunits: 512_000,
+                child_speed_milliunits: 4_096_000,
+                child_radius_milliunits: 512_000,
+                child_range_milliunits: 4_096_000,
+                child_lifetime_ticks: 600,
+                child_fuse_ticks: 3_600,
+                child_explosion_radius_milliunits: 512_000,
+                child_damage: 1_000,
+                max_active_per_owner: 16,
+            },
+        ),
+    ];
+    for (kind, minimum, maximum) in cases {
+        assert_ultimate_parameters_valid(&catalog, kind, minimum);
+        assert_ultimate_parameters_valid(&catalog, kind, maximum);
+    }
+}
+
+#[cfg(feature = "balance-lab")]
+fn collect_numeric_json_pointers(
+    value: &serde_json::Value,
+    prefix: &str,
+    pointers: &mut Vec<String>,
+) {
+    match value {
+        serde_json::Value::Number(_) => pointers.push(prefix.to_string()),
+        serde_json::Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                collect_numeric_json_pointers(value, &format!("{prefix}/{index}"), pointers);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for (key, value) in values {
+                collect_numeric_json_pointers(value, &format!("{prefix}/{key}"), pointers);
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::String(_) => {}
+    }
+}
+
+#[cfg(feature = "balance-lab")]
+fn invalid_ultimate_upper(pointer: &str) -> Option<u64> {
+    match pointer {
+        "/Dash/maximum_distance_milliunits"
+        | "/Dash/knockback_speed_milliunits"
+        | "/Sentry/acquisition_range_milliunits"
+        | "/Sentry/projectile_speed_milliunits"
+        | "/Sentry/projectile_range_milliunits"
+        | "/RevealScan/maximum_range_milliunits"
+        | "/ConcealmentField/maximum_range_milliunits"
+        | "/DemolitionStrike/maximum_range_milliunits"
+        | "/ElementalField/maximum_range_milliunits"
+        | "/BigBlob/maximum_range_milliunits"
+        | "/BigBlob/child_speed_milliunits"
+        | "/BigBlob/child_range_milliunits" => Some(4_096_001),
+        "/RevealScan/radius_milliunits"
+        | "/ConcealmentField/radius_milliunits"
+        | "/ElementalField/radius_milliunits"
+        | "/BigBlob/visual_arc_height_milliunits" => Some(2_048_001),
+        "/Sentry/body_radius_milliunits"
+        | "/Sentry/projectile_radius_milliunits"
+        | "/BigBlob/landing_clearance_milliunits"
+        | "/BigBlob/child_radius_milliunits"
+        | "/BigBlob/child_explosion_radius_milliunits" => Some(512_001),
+        pointer if pointer.starts_with("/Sentry/placement_offsets_milliunits/") => Some(1_024_001),
+        "/DemolitionStrike/radius_milliunits" => Some(68_000),
+        "/Dash/duration_ticks"
+        | "/Dash/knockback_duration_ticks"
+        | "/Sentry/acquisition_interval_ticks"
+        | "/Sentry/projectile_lifetime_ticks"
+        | "/BigBlob/flight_ticks"
+        | "/BigBlob/child_lifetime_ticks" => Some(601),
+        "/Sentry/fire_interval_ticks"
+        | "/SelfCloak/duration_ticks"
+        | "/RevealScan/reveal_ticks"
+        | "/ConcealmentField/duration_ticks"
+        | "/ElementalField/duration_ticks"
+        | "/ElementalField/pulse_interval_ticks"
+        | "/ElementalField/effect/DamageOverTime/tick_interval"
+        | "/ElementalField/effect/DamageOverTime/duration_ticks"
+        | "/BigBlob/child_fuse_ticks" => Some(3_601),
+        "/Sentry/lifetime_ticks" => Some(36_001),
+        "/Dash/damage" | "/Sentry/projectile_damage" | "/BigBlob/child_damage" => Some(1_001),
+        "/Sentry/maximum_health" => Some(10_001),
+        "/Dash/maximum_targets" => Some(33),
+        "/BigBlob/max_active_per_owner" => Some(17),
+        "/ElementalField/effect/Cold/amount"
+        | "/ElementalField/effect/DamageOverTime/damage_per_tick"
+        | "/ElementalField/effect/Heal/amount" => None,
+        _ => panic!("missing literal upper-bound case for {pointer}"),
+    }
+}
+
+#[cfg(feature = "balance-lab")]
+#[test]
+fn every_ultimate_numeric_field_rejects_isolated_out_of_range_mutations() {
+    let (catalog, _) = catalogs();
+    let mut total_numeric_fields = 0;
+    for definition in &catalog.ultimates {
+        let baseline = serde_json::to_value(definition.parameters).unwrap();
+        let mut pointers = Vec::new();
+        collect_numeric_json_pointers(&baseline, "", &mut pointers);
+        for pointer in pointers {
+            total_numeric_fields += 1;
+            let mut below = baseline.clone();
+            *below.pointer_mut(&pointer).unwrap() = serde_json::json!(0);
+            let below = serde_json::from_value(below).unwrap();
+            assert_ultimate_parameters_invalid(&catalog, definition.kind, below);
+
+            let mut upper = baseline.clone();
+            if let Some(invalid) = invalid_ultimate_upper(&pointer) {
+                *upper.pointer_mut(&pointer).unwrap() = serde_json::json!(invalid);
+                let upper = serde_json::from_value(upper).unwrap();
+                assert_ultimate_parameters_invalid(&catalog, definition.kind, upper);
+            } else {
+                *upper.pointer_mut(&pointer).unwrap() = serde_json::json!(u16::MAX);
+                let upper = serde_json::from_value(upper).unwrap();
+                assert_ultimate_parameters_valid(&catalog, definition.kind, upper);
+            }
+        }
+    }
+    assert_eq!(total_numeric_fields, 68);
+}
+
+#[test]
+fn sentry_and_demolition_relational_invariants_remain_validator_owned() {
+    let (catalog, _) = catalogs();
+    let sentry = catalog
+        .ultimates
+        .iter()
+        .find(|definition| definition.kind == UltimateKind::Sentry)
+        .unwrap()
+        .parameters;
+    for parameters in [
+        sentry_with_relational_violation(sentry, 0),
+        sentry_with_relational_violation(sentry, 1),
+        sentry_with_relational_violation(sentry, 2),
+    ] {
+        assert_ultimate_parameters_invalid(&catalog, UltimateKind::Sentry, parameters);
+    }
+    assert_ultimate_parameters_invalid(
+        &catalog,
+        UltimateKind::DemolitionStrike,
+        UltimateParameters::DemolitionStrike {
+            maximum_range_milliunits: 520_000,
+            radius_milliunits: 10_000,
+        },
+    );
+}
+
+#[test]
+fn ultimate_kind_and_elemental_effect_compatibility_remain_exhaustive() {
+    let (catalog, _) = catalogs();
+    for definition in &catalog.ultimates {
+        let wrong_kind = if definition.kind == UltimateKind::Dash {
+            UltimateKind::Sentry
+        } else {
+            UltimateKind::Dash
+        };
+        let mut invalid = catalog.clone();
+        invalid
+            .ultimates
+            .iter_mut()
+            .find(|candidate| candidate.id == definition.id)
+            .unwrap()
+            .kind = wrong_kind;
+        assert!(invalid.validate().is_err());
+    }
+    for (kind, effect) in [
+        (
+            UltimateKind::CryogenicField,
+            ElementalFieldEffect::Heal { amount: 1 },
+        ),
+        (
+            UltimateKind::FireField,
+            ElementalFieldEffect::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Poison,
+                damage_per_tick: 1,
+                tick_interval: 1,
+                duration_ticks: 1,
+            },
+        ),
+        (
+            UltimateKind::RestorationField,
+            ElementalFieldEffect::Cold { amount: 1 },
+        ),
+    ] {
+        assert_ultimate_parameters_invalid(
+            &catalog,
+            kind,
+            UltimateParameters::ElementalField {
+                maximum_range_milliunits: 1,
+                radius_milliunits: 1,
+                duration_ticks: 1,
+                pulse_interval_ticks: 1,
+                effect,
+            },
+        );
+    }
+}
+
+#[test]
+fn elemental_timing_fields_have_no_unowned_cross_field_invariants() {
+    let (catalog, _) = catalogs();
+    assert_ultimate_parameters_valid(
+        &catalog,
+        UltimateKind::FireField,
+        UltimateParameters::ElementalField {
+            maximum_range_milliunits: 1,
+            radius_milliunits: 1,
+            duration_ticks: 1,
+            pulse_interval_ticks: 3_600,
+            effect: ElementalFieldEffect::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Fire,
+                damage_per_tick: u16::MAX,
+                tick_interval: 3_600,
+                duration_ticks: 1,
+            },
+        },
+    );
+}
+
 #[test]
 fn embedded_catalog_exposes_direct_diagnostic_policy() {
     let (builds, _) = catalogs();

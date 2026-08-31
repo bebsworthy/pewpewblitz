@@ -7,8 +7,8 @@ use super::{
     PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS, PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS,
     PassiveDefinitionId, PassiveKind, PassiveParameters, PulseMagazine, PulsePower, PulseReach,
     ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate,
-    RevealProximityModifier, SelectedBuild, UltimateChargePolicy, UltimateDefinitionId,
-    UltimateKind, UltimateParameters, WeaponChoice,
+    RevealProximityModifier, SelectedBuild, ULTIMATE_PARAMETER_BOUNDS, UltimateChargePolicy,
+    UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
 };
 use crate::combat::{
     DamageOverTimeKind, DeliveryMethod, EngineWeaponLimits, PayloadEffectDefinition, WeaponCatalog,
@@ -359,120 +359,197 @@ impl BuildCatalog {
 
 #[allow(
     clippy::too_many_lines,
-    reason = "one exhaustive kind/parameter validation matrix keeps authored ultimate bounds reviewable together"
+    reason = "one exhaustive kind/parameter matrix keeps all ultimate bounds and invariants reviewable"
 )]
 fn validate_ultimate_definitions(definitions: &[UltimateDefinition]) -> Result<(), String> {
-    if definitions.iter().any(|definition| {
-        !matches!(
-            (definition.kind, definition.parameters),
-            (
-                UltimateKind::Dash,
-                UltimateParameters::Dash {
-                    maximum_distance_milliunits: 1..=4_096_000,
-                    duration_ticks: 1..=600,
-                    damage: 1..=1_000,
-                    knockback_speed_milliunits: 1..=4_096_000,
-                    knockback_duration_ticks: 1..=600,
-                    maximum_targets: 1..=32,
+    let bounds = ULTIMATE_PARAMETER_BOUNDS;
+    let valid =
+        definitions.iter().all(
+            |definition| match (definition.kind, definition.parameters) {
+                (
+                    UltimateKind::Dash,
+                    UltimateParameters::Dash {
+                        maximum_distance_milliunits,
+                        duration_ticks,
+                        damage,
+                        knockback_speed_milliunits,
+                        knockback_duration_ticks,
+                        maximum_targets,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_distance_milliunits)
+                        && bounds.short_ticks.contains(&duration_ticks)
+                        && bounds.damage.contains(&damage)
+                        && bounds
+                            .world_distance_milliunits
+                            .contains(&knockback_speed_milliunits)
+                        && bounds.short_ticks.contains(&knockback_duration_ticks)
+                        && bounds.target_count.contains(&maximum_targets)
                 }
-            )
-                | (
+                (
                     UltimateKind::Sentry,
                     UltimateParameters::Sentry {
-                        placement_offsets_milliunits: _,
-                        body_radius_milliunits: 1..=512_000,
-                        acquisition_range_milliunits: 1..=4_096_000,
-                        acquisition_interval_ticks: 1..=600,
-                        fire_interval_ticks: 1..=3_600,
-                        lifetime_ticks: 1..=36_000,
-                        maximum_health: 1..=10_000,
-                        projectile_speed_milliunits: 1..=4_096_000,
-                        projectile_radius_milliunits: 1..=512_000,
-                        projectile_range_milliunits: 1..=4_096_000,
-                        projectile_lifetime_ticks: 1..=600,
-                        projectile_damage: 1..=1_000,
-                    }
-                )
-                | (
-                    UltimateKind::SelfCloak,
-                    UltimateParameters::SelfCloak {
-                        duration_ticks: 1..=3_600
-                    }
-                )
-                | (
+                        placement_offsets_milliunits,
+                        body_radius_milliunits,
+                        acquisition_range_milliunits,
+                        acquisition_interval_ticks,
+                        fire_interval_ticks,
+                        lifetime_ticks,
+                        maximum_health,
+                        projectile_speed_milliunits,
+                        projectile_radius_milliunits,
+                        projectile_range_milliunits,
+                        projectile_lifetime_ticks,
+                        projectile_damage,
+                    },
+                ) => {
+                    placement_offsets_milliunits
+                        .iter()
+                        .all(|offset| bounds.sentry_placement_offset_milliunits.contains(offset))
+                        && placement_offsets_milliunits
+                            .windows(2)
+                            .all(|pair| pair[0] > pair[1])
+                        && bounds
+                            .compact_radius_milliunits
+                            .contains(&body_radius_milliunits)
+                        && bounds
+                            .world_distance_milliunits
+                            .contains(&acquisition_range_milliunits)
+                        && bounds.short_ticks.contains(&acquisition_interval_ticks)
+                        && bounds.duration_ticks.contains(&fire_interval_ticks)
+                        && bounds.long_lifetime_ticks.contains(&lifetime_ticks)
+                        && bounds.health.contains(&maximum_health)
+                        && bounds
+                            .world_distance_milliunits
+                            .contains(&projectile_speed_milliunits)
+                        && bounds
+                            .compact_radius_milliunits
+                            .contains(&projectile_radius_milliunits)
+                        && bounds
+                            .world_distance_milliunits
+                            .contains(&projectile_range_milliunits)
+                        && bounds.short_ticks.contains(&projectile_lifetime_ticks)
+                        && bounds.damage.contains(&projectile_damage)
+                        && projectile_radius_milliunits <= body_radius_milliunits
+                        && projectile_range_milliunits <= acquisition_range_milliunits
+                }
+                (UltimateKind::SelfCloak, UltimateParameters::SelfCloak { duration_ticks }) => {
+                    bounds.duration_ticks.contains(&duration_ticks)
+                }
+                (
                     UltimateKind::RevealScan,
                     UltimateParameters::RevealScan {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        radius_milliunits: 1..=2_048_000,
-                        reveal_ticks: 1..=3_600,
-                    }
-                )
-                | (
+                        maximum_range_milliunits,
+                        radius_milliunits,
+                        reveal_ticks,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds.field_radius_milliunits.contains(&radius_milliunits)
+                        && bounds.duration_ticks.contains(&reveal_ticks)
+                }
+                (
                     UltimateKind::ConcealmentField,
                     UltimateParameters::ConcealmentField {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        radius_milliunits: 1..=2_048_000,
-                        duration_ticks: 1..=3_600,
-                    }
-                )
-                | (
+                        maximum_range_milliunits,
+                        radius_milliunits,
+                        duration_ticks,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds.field_radius_milliunits.contains(&radius_milliunits)
+                        && bounds.duration_ticks.contains(&duration_ticks)
+                }
+                (
                     UltimateKind::DemolitionStrike,
                     UltimateParameters::DemolitionStrike {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        radius_milliunits: 8_000..=64_000,
-                    }
-                )
-                | (
+                        maximum_range_milliunits,
+                        radius_milliunits,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds
+                            .demolition_radius_milliunits
+                            .contains(&radius_milliunits)
+                        && radius_milliunits.is_multiple_of(4_000)
+                }
+                (
+                    kind @ (UltimateKind::CryogenicField
+                    | UltimateKind::FireField
+                    | UltimateKind::PoisonField
+                    | UltimateKind::RestorationField),
+                    UltimateParameters::ElementalField {
+                        maximum_range_milliunits,
+                        radius_milliunits,
+                        duration_ticks,
+                        pulse_interval_ticks,
+                        effect,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds.field_radius_milliunits.contains(&radius_milliunits)
+                        && bounds.duration_ticks.contains(&duration_ticks)
+                        && bounds.duration_ticks.contains(&pulse_interval_ticks)
+                        && valid_elemental_ultimate_effect(kind, effect)
+                }
+                (
                     UltimateKind::BigBlob,
                     UltimateParameters::BigBlob {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        flight_ticks: 1..=600,
-                        visual_arc_height_milliunits: 1..=2_048_000,
-                        landing_clearance_milliunits: 1..=512_000,
-                        child_speed_milliunits: 1..=4_096_000,
-                        child_radius_milliunits: 1..=512_000,
-                        child_range_milliunits: 1..=4_096_000,
-                        child_lifetime_ticks: 1..=600,
-                        child_fuse_ticks: 1..=3_600,
-                        child_explosion_radius_milliunits: 1..=512_000,
-                        child_damage: 1..=1_000,
-                        max_active_per_owner: 1..=16,
-                    }
-                )
-                | (
-                    UltimateKind::CryogenicField
-                        | UltimateKind::FireField
-                        | UltimateKind::PoisonField
-                        | UltimateKind::RestorationField,
-                    UltimateParameters::ElementalField {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        radius_milliunits: 1..=2_048_000,
-                        duration_ticks: 1..=3_600,
-                        pulse_interval_ticks: 1..=3_600,
-                        ..
-                    }
-                )
-        ) || matches!(
-            definition.parameters,
-            UltimateParameters::Sentry {
-                placement_offsets_milliunits,
-                body_radius_milliunits,
-                projectile_radius_milliunits,
-                projectile_range_milliunits,
-                acquisition_range_milliunits,
-                ..
-            } if placement_offsets_milliunits.iter().any(|offset| *offset == 0 || *offset > 1_024_000)
-                || placement_offsets_milliunits.windows(2).any(|pair| pair[0] <= pair[1])
-                || projectile_radius_milliunits > body_radius_milliunits
-                || projectile_range_milliunits > acquisition_range_milliunits
-        ) || matches!(
-            definition.parameters,
-            UltimateParameters::DemolitionStrike {
-                radius_milliunits,
-                ..
-            } if !radius_milliunits.is_multiple_of(4_000)
-        ) || !valid_elemental_ultimate_effect(definition.kind, definition.parameters)
-    }) {
+                        maximum_range_milliunits,
+                        flight_ticks,
+                        visual_arc_height_milliunits,
+                        landing_clearance_milliunits,
+                        child_speed_milliunits,
+                        child_radius_milliunits,
+                        child_range_milliunits,
+                        child_lifetime_ticks,
+                        child_fuse_ticks,
+                        child_explosion_radius_milliunits,
+                        child_damage,
+                        max_active_per_owner,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds.short_ticks.contains(&flight_ticks)
+                        && bounds
+                            .field_radius_milliunits
+                            .contains(&visual_arc_height_milliunits)
+                        && bounds
+                            .compact_radius_milliunits
+                            .contains(&landing_clearance_milliunits)
+                        && bounds
+                            .world_distance_milliunits
+                            .contains(&child_speed_milliunits)
+                        && bounds
+                            .compact_radius_milliunits
+                            .contains(&child_radius_milliunits)
+                        && bounds
+                            .world_distance_milliunits
+                            .contains(&child_range_milliunits)
+                        && bounds.short_ticks.contains(&child_lifetime_ticks)
+                        && bounds.duration_ticks.contains(&child_fuse_ticks)
+                        && bounds
+                            .compact_radius_milliunits
+                            .contains(&child_explosion_radius_milliunits)
+                        && bounds.damage.contains(&child_damage)
+                        && bounds.active_count.contains(&max_active_per_owner)
+                }
+                _ => false,
+            },
+        );
+    if !valid {
         return Err("ultimate kind and parameters do not match engine bounds".into());
     }
     Ok(())
@@ -560,56 +637,36 @@ fn validate_passive_definitions(definitions: &[PassiveDefinition]) -> Result<(),
         .ok_or_else(|| "passive kind and parameters do not match engine bounds".into())
 }
 
-fn valid_elemental_ultimate_effect(kind: UltimateKind, parameters: UltimateParameters) -> bool {
-    match (kind, parameters) {
+fn valid_elemental_ultimate_effect(kind: UltimateKind, effect: ElementalFieldEffect) -> bool {
+    let bounds = ULTIMATE_PARAMETER_BOUNDS;
+    match (kind, effect) {
+        (UltimateKind::CryogenicField, ElementalFieldEffect::Cold { amount })
+        | (UltimateKind::RestorationField, ElementalFieldEffect::Heal { amount }) => {
+            bounds.effect_amount.contains(&amount)
+        }
         (
-            UltimateKind::CryogenicField,
-            UltimateParameters::ElementalField {
-                effect: ElementalFieldEffect::Cold { amount: 1.. },
-                ..
-            },
-        )
-        | (
             UltimateKind::FireField,
-            UltimateParameters::ElementalField {
-                effect:
-                    ElementalFieldEffect::DamageOverTime {
-                        kind: DamageOverTimeKind::Fire,
-                        damage_per_tick: 1..,
-                        tick_interval: 1..=3_600,
-                        duration_ticks: 1..=3_600,
-                    },
-                ..
+            ElementalFieldEffect::DamageOverTime {
+                kind: DamageOverTimeKind::Fire,
+                damage_per_tick,
+                tick_interval,
+                duration_ticks,
             },
         )
         | (
             UltimateKind::PoisonField,
-            UltimateParameters::ElementalField {
-                effect:
-                    ElementalFieldEffect::DamageOverTime {
-                        kind: DamageOverTimeKind::Poison,
-                        damage_per_tick: 1..,
-                        tick_interval: 1..=3_600,
-                        duration_ticks: 1..=3_600,
-                    },
-                ..
+            ElementalFieldEffect::DamageOverTime {
+                kind: DamageOverTimeKind::Poison,
+                damage_per_tick,
+                tick_interval,
+                duration_ticks,
             },
-        )
-        | (
-            UltimateKind::RestorationField,
-            UltimateParameters::ElementalField {
-                effect: ElementalFieldEffect::Heal { amount: 1.. },
-                ..
-            },
-        ) => true,
-        (
-            UltimateKind::CryogenicField
-            | UltimateKind::FireField
-            | UltimateKind::PoisonField
-            | UltimateKind::RestorationField,
-            _,
-        ) => false,
-        _ => true,
+        ) => {
+            bounds.effect_amount.contains(&damage_per_tick)
+                && bounds.duration_ticks.contains(&tick_interval)
+                && bounds.duration_ticks.contains(&duration_ticks)
+        }
+        _ => false,
     }
 }
 

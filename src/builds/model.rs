@@ -153,6 +153,61 @@ impl UltimateKind {
     }
 }
 
+/// Inclusive code-owned limits for one numeric ultimate-parameter family.
+///
+/// These remain crate-private because they coordinate authoritative catalog validation with
+/// development tooling; they are not a runtime capability or public content API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct UltimateNumericBounds<T> {
+    pub(crate) minimum: T,
+    pub(crate) maximum: T,
+}
+
+impl<T> UltimateNumericBounds<T> {
+    const fn new(minimum: T, maximum: T) -> Self {
+        Self { minimum, maximum }
+    }
+}
+
+impl<T: PartialOrd> UltimateNumericBounds<T> {
+    pub(crate) fn contains(self, value: &T) -> bool {
+        value >= &self.minimum && value <= &self.maximum
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct UltimateParameterBounds {
+    pub(crate) world_distance_milliunits: UltimateNumericBounds<u32>,
+    pub(crate) field_radius_milliunits: UltimateNumericBounds<u32>,
+    pub(crate) compact_radius_milliunits: UltimateNumericBounds<u32>,
+    pub(crate) sentry_placement_offset_milliunits: UltimateNumericBounds<u32>,
+    pub(crate) demolition_radius_milliunits: UltimateNumericBounds<u32>,
+    pub(crate) short_ticks: UltimateNumericBounds<u64>,
+    pub(crate) duration_ticks: UltimateNumericBounds<u64>,
+    pub(crate) long_lifetime_ticks: UltimateNumericBounds<u64>,
+    pub(crate) damage: UltimateNumericBounds<u16>,
+    pub(crate) health: UltimateNumericBounds<u16>,
+    pub(crate) effect_amount: UltimateNumericBounds<u16>,
+    pub(crate) target_count: UltimateNumericBounds<u8>,
+    pub(crate) active_count: UltimateNumericBounds<u8>,
+}
+
+pub(crate) const ULTIMATE_PARAMETER_BOUNDS: UltimateParameterBounds = UltimateParameterBounds {
+    world_distance_milliunits: UltimateNumericBounds::new(1, 4_096_000),
+    field_radius_milliunits: UltimateNumericBounds::new(1, 2_048_000),
+    compact_radius_milliunits: UltimateNumericBounds::new(1, 512_000),
+    sentry_placement_offset_milliunits: UltimateNumericBounds::new(1, 1_024_000),
+    demolition_radius_milliunits: UltimateNumericBounds::new(8_000, 64_000),
+    short_ticks: UltimateNumericBounds::new(1, 600),
+    duration_ticks: UltimateNumericBounds::new(1, 3_600),
+    long_lifetime_ticks: UltimateNumericBounds::new(1, 36_000),
+    damage: UltimateNumericBounds::new(1, 1_000),
+    health: UltimateNumericBounds::new(1, 10_000),
+    effect_amount: UltimateNumericBounds::new(1, u16::MAX),
+    target_count: UltimateNumericBounds::new(1, 32),
+    active_count: UltimateNumericBounds::new(1, 16),
+};
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UltimateParameters {
     Dash {

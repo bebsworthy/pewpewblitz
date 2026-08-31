@@ -6,8 +6,8 @@ use super::{
 };
 use crate::{
     builds::{
-        BuildCatalog, PassiveDefinitionId, PassiveKind, ResolvedFighterStats, UltimateDefinitionId,
-        UltimateKind, UltimateParameters,
+        BuildCatalog, PassiveDefinitionId, PassiveKind, ResolvedFighterStats,
+        ULTIMATE_PARAMETER_BOUNDS, UltimateDefinitionId, UltimateKind, UltimateParameters,
     },
     combat::{EngineWeaponLimits, WeaponCatalog, WeaponConfiguration, WeaponRecipePolicy},
     content::fnv1a64,
@@ -378,79 +378,131 @@ impl AdvertisedBrawlerCatalog {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the profile catalog deliberately keeps its partial ultimate compatibility matrix explicit"
+)]
 fn validate_ultimate_parameters(definitions: &[AdvertisedUltimate]) -> Result<(), String> {
-    if definitions.iter().any(|definition| {
-        !matches!(
-            (definition.kind, definition.parameters),
-            (UltimateKind::Dash, UltimateParameters::Dash { .. })
-                | (UltimateKind::Sentry, UltimateParameters::Sentry { .. })
-                | (
-                    UltimateKind::SelfCloak,
-                    UltimateParameters::SelfCloak {
-                        duration_ticks: 1..=3_600
-                    }
-                )
-                | (
+    let bounds = ULTIMATE_PARAMETER_BOUNDS;
+    let valid =
+        definitions.iter().all(
+            |definition| match (definition.kind, definition.parameters) {
+                (UltimateKind::Dash, UltimateParameters::Dash { .. })
+                | (UltimateKind::Sentry, UltimateParameters::Sentry { .. }) => true,
+                (UltimateKind::SelfCloak, UltimateParameters::SelfCloak { duration_ticks }) => {
+                    bounds.duration_ticks.contains(&duration_ticks)
+                }
+                (
                     UltimateKind::RevealScan,
                     UltimateParameters::RevealScan {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        radius_milliunits: 1..=2_048_000,
-                        reveal_ticks: 1..=3_600,
-                    }
-                )
-                | (
+                        maximum_range_milliunits,
+                        radius_milliunits,
+                        reveal_ticks,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds.field_radius_milliunits.contains(&radius_milliunits)
+                        && bounds.duration_ticks.contains(&reveal_ticks)
+                }
+                (
                     UltimateKind::ConcealmentField,
                     UltimateParameters::ConcealmentField {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        radius_milliunits: 1..=2_048_000,
-                        duration_ticks: 1..=3_600,
-                    }
-                )
-                | (
+                        maximum_range_milliunits,
+                        radius_milliunits,
+                        duration_ticks,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds.field_radius_milliunits.contains(&radius_milliunits)
+                        && bounds.duration_ticks.contains(&duration_ticks)
+                }
+                (
                     UltimateKind::DemolitionStrike,
                     UltimateParameters::DemolitionStrike {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        radius_milliunits: 8_000..=64_000,
-                    }
-                )
-                | (
+                        maximum_range_milliunits,
+                        radius_milliunits,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds
+                            .demolition_radius_milliunits
+                            .contains(&radius_milliunits)
+                        && radius_milliunits.is_multiple_of(4_000)
+                }
+                (
                     UltimateKind::BigBlob,
                     UltimateParameters::BigBlob {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        flight_ticks: 1..=600,
-                        visual_arc_height_milliunits: 1..=2_048_000,
-                        landing_clearance_milliunits: 1..=512_000,
-                        child_speed_milliunits: 1..=4_096_000,
-                        child_radius_milliunits: 1..=512_000,
-                        child_range_milliunits: 1..=4_096_000,
-                        child_lifetime_ticks: 1..=600,
-                        child_fuse_ticks: 1..=3_600,
-                        child_explosion_radius_milliunits: 1..=512_000,
-                        child_damage: 1..=1_000,
-                        max_active_per_owner: 1..=16,
-                    }
-                )
-                | (
+                        maximum_range_milliunits,
+                        flight_ticks,
+                        visual_arc_height_milliunits,
+                        landing_clearance_milliunits,
+                        child_speed_milliunits,
+                        child_radius_milliunits,
+                        child_range_milliunits,
+                        child_lifetime_ticks,
+                        child_fuse_ticks,
+                        child_explosion_radius_milliunits,
+                        child_damage,
+                        max_active_per_owner,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds.short_ticks.contains(&flight_ticks)
+                        && bounds
+                            .field_radius_milliunits
+                            .contains(&visual_arc_height_milliunits)
+                        && bounds
+                            .compact_radius_milliunits
+                            .contains(&landing_clearance_milliunits)
+                        && bounds
+                            .world_distance_milliunits
+                            .contains(&child_speed_milliunits)
+                        && bounds
+                            .compact_radius_milliunits
+                            .contains(&child_radius_milliunits)
+                        && bounds
+                            .world_distance_milliunits
+                            .contains(&child_range_milliunits)
+                        && bounds.short_ticks.contains(&child_lifetime_ticks)
+                        && bounds.duration_ticks.contains(&child_fuse_ticks)
+                        && bounds
+                            .compact_radius_milliunits
+                            .contains(&child_explosion_radius_milliunits)
+                        && bounds.damage.contains(&child_damage)
+                        && bounds.active_count.contains(&max_active_per_owner)
+                }
+                (
                     UltimateKind::CryogenicField
-                        | UltimateKind::FireField
-                        | UltimateKind::PoisonField
-                        | UltimateKind::RestorationField,
+                    | UltimateKind::FireField
+                    | UltimateKind::PoisonField
+                    | UltimateKind::RestorationField,
                     UltimateParameters::ElementalField {
-                        maximum_range_milliunits: 1..=4_096_000,
-                        radius_milliunits: 1..=2_048_000,
-                        duration_ticks: 1..=3_600,
-                        pulse_interval_ticks: 1..=3_600,
-                        ..
-                    }
-                )
-        ) || matches!(
-            definition.parameters,
-            UltimateParameters::DemolitionStrike {
-                radius_milliunits,
-                ..
-            } if !radius_milliunits.is_multiple_of(4_000)
-        )
-    }) {
+                        maximum_range_milliunits,
+                        radius_milliunits,
+                        duration_ticks,
+                        pulse_interval_ticks,
+                        effect: _,
+                    },
+                ) => {
+                    bounds
+                        .world_distance_milliunits
+                        .contains(&maximum_range_milliunits)
+                        && bounds.field_radius_milliunits.contains(&radius_milliunits)
+                        && bounds.duration_ticks.contains(&duration_ticks)
+                        && bounds.duration_ticks.contains(&pulse_interval_ticks)
+                }
+                _ => false,
+            },
+        );
+    if !valid {
         return Err("invalid advertised ultimate parameters".into());
     }
     Ok(())
@@ -587,6 +639,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builds::ElementalFieldEffect;
 
     fn embedded() -> AdvertisedBrawlerCatalog {
         AdvertisedBrawlerCatalog::from_content(
@@ -594,6 +647,122 @@ mod tests {
             &WeaponCatalog::embedded().unwrap(),
         )
         .unwrap()
+    }
+
+    fn advertised(kind: UltimateKind) -> AdvertisedUltimate {
+        embedded()
+            .ultimates
+            .into_iter()
+            .find(|definition| definition.kind == kind)
+            .expect("embedded advertised ultimate exists")
+    }
+
+    #[test]
+    fn partial_ultimate_validator_deliberately_ignores_dash_sentry_and_nested_effect_bounds() {
+        let mut dash = advertised(UltimateKind::Dash);
+        dash.parameters = UltimateParameters::Dash {
+            maximum_distance_milliunits: 0,
+            duration_ticks: 0,
+            damage: 0,
+            knockback_speed_milliunits: 0,
+            knockback_duration_ticks: 0,
+            maximum_targets: 0,
+        };
+        assert!(validate_ultimate_parameters(&[dash]).is_ok());
+
+        let mut sentry = advertised(UltimateKind::Sentry);
+        sentry.parameters = UltimateParameters::Sentry {
+            placement_offsets_milliunits: [0; 6],
+            body_radius_milliunits: 0,
+            acquisition_range_milliunits: 0,
+            acquisition_interval_ticks: 0,
+            fire_interval_ticks: 0,
+            lifetime_ticks: 0,
+            maximum_health: 0,
+            projectile_speed_milliunits: 0,
+            projectile_radius_milliunits: 0,
+            projectile_range_milliunits: 0,
+            projectile_lifetime_ticks: 0,
+            projectile_damage: 0,
+        };
+        assert!(validate_ultimate_parameters(&[sentry]).is_ok());
+
+        let mut field = advertised(UltimateKind::FireField);
+        let UltimateParameters::ElementalField { effect, .. } = &mut field.parameters else {
+            panic!("Fire Field remains an elemental field")
+        };
+        *effect = ElementalFieldEffect::Cold { amount: 0 };
+        assert!(validate_ultimate_parameters(&[field]).is_ok());
+    }
+
+    #[test]
+    fn partial_ultimate_validator_rejects_owned_common_bounds_and_kind_mismatch() {
+        let mut invalid = Vec::new();
+
+        let mut mismatch = advertised(UltimateKind::Dash);
+        mismatch.kind = UltimateKind::Sentry;
+        invalid.push(mismatch);
+
+        let mut self_cloak = advertised(UltimateKind::SelfCloak);
+        self_cloak.parameters = UltimateParameters::SelfCloak { duration_ticks: 0 };
+        invalid.push(self_cloak);
+
+        let mut reveal = advertised(UltimateKind::RevealScan);
+        let UltimateParameters::RevealScan {
+            maximum_range_milliunits,
+            ..
+        } = &mut reveal.parameters
+        else {
+            panic!("Reveal Scan remains compatible")
+        };
+        *maximum_range_milliunits = 0;
+        invalid.push(reveal);
+
+        let mut concealment = advertised(UltimateKind::ConcealmentField);
+        let UltimateParameters::ConcealmentField {
+            radius_milliunits, ..
+        } = &mut concealment.parameters
+        else {
+            panic!("Concealment Field remains compatible")
+        };
+        *radius_milliunits = 0;
+        invalid.push(concealment);
+
+        let mut demolition = advertised(UltimateKind::DemolitionStrike);
+        let UltimateParameters::DemolitionStrike {
+            radius_milliunits, ..
+        } = &mut demolition.parameters
+        else {
+            panic!("Demolition Strike remains compatible")
+        };
+        *radius_milliunits = 10_000;
+        invalid.push(demolition);
+
+        let mut elemental = advertised(UltimateKind::CryogenicField);
+        let UltimateParameters::ElementalField {
+            pulse_interval_ticks,
+            ..
+        } = &mut elemental.parameters
+        else {
+            panic!("Cryogenic Field remains compatible")
+        };
+        *pulse_interval_ticks = 0;
+        invalid.push(elemental);
+
+        let mut big_blob = advertised(UltimateKind::BigBlob);
+        let UltimateParameters::BigBlob {
+            max_active_per_owner,
+            ..
+        } = &mut big_blob.parameters
+        else {
+            panic!("Big Blob remains compatible")
+        };
+        *max_active_per_owner = 0;
+        invalid.push(big_blob);
+
+        for definition in invalid {
+            assert!(validate_ultimate_parameters(&[definition]).is_err());
+        }
     }
 
     #[test]
