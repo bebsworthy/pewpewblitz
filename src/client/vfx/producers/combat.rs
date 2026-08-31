@@ -24,7 +24,7 @@ const REGISTRATIONS: [VfxRequestRegistration; 7] = [
     VfxRequestRegistration::new(
         COMBAT_IMPACT_VFX,
         COMBAT_VFX_PRODUCER_RANK,
-        VfxRequestCapabilities::NONE,
+        VfxRequestCapabilities::RADIUS,
     ),
     VfxRequestRegistration::new(
         COMBAT_DAMAGE_VFX,
@@ -80,7 +80,7 @@ fn produce_combat_vfx_requests(
     let observed_at_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     for DeduplicatedCombatCue(cue) in cues.read() {
         let Some((key, position, radius, deadline, label)) =
-            combat_vfx_request(cue, observed_at_tick)
+            combat_vfx_request(cue, observed_at_tick, &cache)
         else {
             continue;
         };
@@ -169,8 +169,16 @@ fn combat_vfx_signature(
             attack_id,
             delivery_index,
             ..
-        }
-        | C::MeleeContact {
+        } => cache.signature_for_attack(
+            *attack_id,
+            *delivery_index,
+            VfxCarrier::LobbedProjectile,
+            VfxPhase::Impact,
+            radius.map_or(point, |radius| VfxGeometry::circle(position, radius)),
+            instant(*tick),
+            VfxPresentationVariant::Normal,
+        ),
+        C::MeleeContact {
             tick,
             attack_id,
             delivery_index,
@@ -360,6 +368,7 @@ fn relationship_for_team(
 fn combat_vfx_request(
     cue: &CombatCue,
     observed_at_tick: Option<u64>,
+    cache: &VfxSignatureCache,
 ) -> Option<(
     crate::client::vfx::VfxRequestKey,
     Vec2,
@@ -376,8 +385,18 @@ fn combat_vfx_request(
             None,
             "V3 bounded combat cue effect",
         )),
+        C::LobLanded {
+            attack_id,
+            position,
+            ..
+        } => Some((
+            COMBAT_IMPACT_VFX,
+            position.as_vec2(),
+            cache.impact_radius_for_attack(*attack_id),
+            None,
+            "V3 bounded lobbed landing effect",
+        )),
         C::DeliveryImpact { position, .. }
-        | C::LobLanded { position, .. }
         | C::MeleeContact { position, .. }
         | C::DeployableRemoved { position, .. } => Some((
             COMBAT_IMPACT_VFX,
@@ -471,7 +490,7 @@ mod tests {
                 .iter()
                 .filter(|entry| entry.capabilities.authoritative_radius)
                 .count(),
-            3
+            4
         );
         assert_eq!(
             REGISTRATIONS
@@ -484,6 +503,7 @@ mod tests {
 
     #[test]
     fn combat_mapping_preserves_muzzle_scan_and_legacy_omission() {
+        let cache = VfxSignatureCache::default();
         let attack = CombatCue::AttackAccepted {
             event_id: CombatEventId(9),
             tick: 10,
@@ -492,7 +512,8 @@ mod tests {
             position: WorldPoint { x: 2.0, y: 3.0 },
             weapon_definition_id: WeaponDefinitionId(13),
         };
-        let (key, position, radius, deadline, _) = combat_vfx_request(&attack, None).unwrap();
+        let (key, position, radius, deadline, _) =
+            combat_vfx_request(&attack, None, &cache).unwrap();
         assert_eq!(key, COMBAT_MUZZLE_VFX);
         assert_eq!(position, Vec2::new(2.0, 3.0));
         assert_eq!(radius, None);
@@ -506,7 +527,7 @@ mod tests {
             radius_milliunits: 6_000,
             expires_at_tick: 30,
         };
-        let (key, _, radius, deadline, _) = combat_vfx_request(&scan, Some(22)).unwrap();
+        let (key, _, radius, deadline, _) = combat_vfx_request(&scan, Some(22), &cache).unwrap();
         assert_eq!(key, REVEAL_SCAN_VFX);
         assert_eq!(radius, Some(6.0));
         assert_eq!(deadline, Some(VfxDeadline::new(20, 30, Some(22))));
@@ -519,6 +540,6 @@ mod tests {
             weapon_definition_id: WeaponDefinitionId(13),
             position: WorldPoint { x: 2.0, y: 3.0 },
         };
-        assert!(combat_vfx_request(&legacy, None).is_none());
+        assert!(combat_vfx_request(&legacy, None, &cache).is_none());
     }
 }

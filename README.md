@@ -100,11 +100,14 @@ Enter pauses both retained and GPU-particle timelines, and `.` advances one simu
 toggles the production reduced-effects variant, P toggles the primitive variant, F12 writes paired
 PNG/JSON evidence under
 `target/vfx-lab`, I switches between the plain-language guide and technical diagnostics, and Escape
-quits. Technical diagnostics and JSON evidence include particle profile, seed, burst/capacity,
+quits. Technical diagnostics and JSON evidence include particle profile, seed, spawn mode/capacity,
 active-emitter high-water, and suppression counts. Two gray fighter-sized reference spheres provide
 scale and are not part of the effect.
 
 `just vfx-lab '--effect world-object.explosion --reduced'` starts at an exact transient request.
+Use `just vfx-lab '--effect combat.impact --lobbed-impact --radius 150'` to preview the production
+lobbed-landing explosion with its exact payload radius. The `--lobbed-impact` switch changes only
+the Lab's semantic carrier fixture; it does not introduce another renderer path.
 Use `--fixture transient|straight|lobbed|field|cone|status` to start at a lifecycle fixture. Native
 automation may add `--identity N --radius WORLD_UNITS` and
 `--sample-ticks N --accent neutral|cold|fire --ultimate --capture-dir PATH --capture-after UPDATES

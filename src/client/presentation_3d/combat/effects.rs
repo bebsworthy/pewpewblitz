@@ -1,7 +1,7 @@
 use super::super::*;
 use super::{
-    MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, VfxParticleAssets,
-    VfxParticleDiagnostics, VfxParticleEmitter3d,
+    MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, RetainedProjectileSmoke3d,
+    VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
 use crate::client::vfx::{
     CombatVisualSignature, ResolvedVfxRecipe, VfxDeadline, VfxLifetime, VfxMaterialKey,
@@ -174,6 +174,8 @@ fn resolved_effect(
                 mesh: match layer.renderer {
                     VfxRendererFamily::Sphere => primitives.effect_sphere.clone(),
                     VfxRendererFamily::GroundRing => primitives.area_ring.clone(),
+                    VfxRendererFamily::GroundThinRing => primitives.area_thin_ring.clone(),
+                    VfxRendererFamily::GroundDisc => primitives.area_disc.clone(),
                 },
                 material: vfx_material(layer.material, materials),
                 transform: effect_layer_transform(
@@ -264,7 +266,9 @@ fn effect_layer_transform(
         .resolve_height(authoritative_radius)
         .expect("validated VFX layer supplies required authoritative radius");
     match layer.renderer {
-        VfxRendererFamily::GroundRing => Transform {
+        VfxRendererFamily::GroundRing
+        | VfxRendererFamily::GroundThinRing
+        | VfxRendererFamily::GroundDisc => Transform {
             translation: ground_position(position) + Vec3::Y * height,
             rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
             scale: Vec3::splat(scale),
@@ -391,9 +395,11 @@ pub(in crate::client) fn materialize_combat_effects(
     mut commands: Commands,
     mut pending_effects: MessageReader<PendingCombatEffect>,
     effects: Query<(Entity, &CombatEffect3d)>,
+    retained_particle_emitters: Query<(), With<RetainedProjectileSmoke3d>>,
     mut sequence: Local<CombatEffectSequence>,
     mut particle_diagnostics: Option<ResMut<VfxParticleDiagnostics>>,
 ) {
+    let retained_particle_emitters = retained_particle_emitters.count();
     let mut active = effects
         .iter()
         .map(|(entity, effect)| {
@@ -447,7 +453,8 @@ pub(in crate::client) fn materialize_combat_effects(
             }
         }
         sequence.0 = sequence.0.saturating_add(1);
-        let particle_budget = MAX_ACTIVE_PARTICLE_EMITTERS.saturating_sub(active_particle_emitters);
+        let particle_budget = MAX_ACTIVE_PARTICLE_EMITTERS
+            .saturating_sub(active_particle_emitters.saturating_add(retained_particle_emitters));
         let (entity, particle_emitters) =
             descriptor.spawn(&mut commands, sequence.0, particle_budget);
         if let Some(diagnostics) = particle_diagnostics.as_deref_mut() {
@@ -470,8 +477,8 @@ pub(in crate::client) fn materialize_combat_effects(
         ));
     }
     if let Some(diagnostics) = particle_diagnostics.as_deref_mut() {
-        diagnostics.active = active_particle_emitters;
-        diagnostics.high_water = diagnostics.high_water.max(active_particle_emitters);
+        diagnostics.active = active_particle_emitters.saturating_add(retained_particle_emitters);
+        diagnostics.high_water = diagnostics.high_water.max(diagnostics.active);
     }
 }
 
@@ -543,7 +550,7 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
                 "id": emitter.layer_id,
                 "profile": emitter.profile,
                 "capacity": emitter.capacity,
-                "burst_count": emitter.burst_count,
+                "spawn": emitter.spawn,
                 "seed": emitter.seed,
             }));
     }
@@ -634,6 +641,7 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             "visual_roots": component_count::<CombatVisualOwner>(world),
             "transient_roots": transient_effects.len(),
             "projectile_roots": component_count::<V3ProjectileVisual>(world),
+            "lobbed_projectile_aids": component_count::<super::entities::LobbedProjectileAid3d>(world),
             "sentry_roots": component_count::<super::entities::SentryVisual3d>(world),
             "concealment_field_roots": component_count::<super::entities::ConcealmentFieldVisual3d>(world),
             "elemental_field_roots": component_count::<super::entities::ElementalFieldVisual3d>(world),
@@ -646,6 +654,7 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             "animated_fire_areas": component_count::<super::elemental_style::AnimatedFireArea3d>(world),
             "fire_area_underlays": component_count::<super::elemental_style::FireAreaUnderlay3d>(world),
             "particle_emitters": component_count::<VfxParticleEmitter3d>(world),
+            "retained_projectile_smoke_emitters": component_count::<RetainedProjectileSmoke3d>(world),
             "particle_emitter_capacity": MAX_ACTIVE_PARTICLE_EMITTERS,
             "particle_emitter_high_water": particle_diagnostics.high_water,
             "particle_emitters_suppressed": particle_diagnostics.suppressed,

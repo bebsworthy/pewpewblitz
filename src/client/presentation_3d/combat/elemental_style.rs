@@ -160,10 +160,10 @@ pub(super) fn spawn_elemental_projectile_style(
             }
         }
         vfx::VfxAccent::Fire => {
-            let count: u8 = if reduced { 1 } else { 3 };
+            let count: u8 = if reduced { 1 } else { 4 };
             for slot in 0..count {
-                let distance = visual_radius * (1.0 + f32::from(slot) * 0.75);
-                let scale = visual_radius * (0.62 - f32::from(slot) * 0.13);
+                let distance = visual_radius * (1.1 + f32::from(slot) * 0.9);
+                let scale = visual_radius * (0.64 - f32::from(slot) * 0.1);
                 let transform = Transform::from_translation(Vec3::new(-distance, 0.4, 0.0))
                     .with_scale(Vec3::splat(scale.max(0.5)));
                 parent.spawn((

@@ -8,8 +8,8 @@ use crate::{
     builds::{DeployableId, ResolvedMatchLoadout, UltimateDefinitionId},
     combat::{
         AttackId, AttackSource, CombatCue, CombatSourceKind, DamageOverTimeKind, DeliveryMethod,
-        ElementalFieldKind, PayloadEffectDefinition, ReplicatedAttackSource, WeaponRecipe,
-        WeaponRecipeFingerprint, client::DeduplicatedCombatCue,
+        ElementalFieldKind, PayloadEffectDefinition, ReplicatedAttackSource, TargetSelection,
+        WeaponRecipe, WeaponRecipeFingerprint, client::DeduplicatedCombatCue,
     },
     protocol::NetworkEntityId,
 };
@@ -347,7 +347,7 @@ impl VfxObserver {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct CachedAttackStyle {
     owner: NetworkEntityId,
     team: crate::combat::TeamId,
@@ -355,6 +355,7 @@ struct CachedAttackStyle {
     carrier: VfxCarrier,
     accents: [Option<VfxAccent>; 2],
     context: Option<VfxContextOverride>,
+    impact_radius: Option<f32>,
 }
 
 impl CachedAttackStyle {
@@ -366,13 +367,21 @@ impl CachedAttackStyle {
             carrier,
             accents: [Some(VfxAccent::Neutral), None],
             context: context_for_source(source.kind),
+            impact_radius: None,
         }
     }
 
     fn from_recipe(source: AttackSource, recipe: &WeaponRecipe, carrier: VfxCarrier) -> Self {
+        let impact_radius = recipe.payload_bundles.iter().fold(None, |largest, bundle| {
+            let TargetSelection::Area { radius, .. } = bundle.target else {
+                return largest;
+            };
+            Some(largest.map_or(radius, |largest: f32| largest.max(radius)))
+        });
         Self {
             carrier,
             accents: accents_for_recipe(recipe),
+            impact_radius,
             ..Self::neutral(source, carrier)
         }
     }
@@ -486,6 +495,7 @@ impl VfxSignatureCache {
                 carrier: fallback_carrier,
                 accents: [Some(VfxAccent::Neutral), None],
                 context: None,
+                impact_radius: None,
             });
         style.signature(
             attack_id,
@@ -531,6 +541,12 @@ impl VfxSignatureCache {
 
     pub(crate) const fn observer(&self) -> VfxObserver {
         self.observer
+    }
+
+    pub(crate) fn impact_radius_for_attack(&self, attack_id: AttackId) -> Option<f32> {
+        self.entries
+            .get(&attack_id)
+            .and_then(|style| style.impact_radius)
     }
 
     pub(crate) fn diagnostics(&self) -> VfxSignatureCacheDiagnostics {
@@ -908,6 +924,7 @@ mod tests {
                     carrier: VfxCarrier::StraightProjectile,
                     accents: [Some(VfxAccent::Fire), None],
                     context: None,
+                    impact_radius: None,
                 },
             );
         }
@@ -930,6 +947,48 @@ mod tests {
     }
 
     #[test]
+    fn cached_attack_style_retains_the_largest_authored_area_radius() {
+        let mut loadout = resolved_test_loadout();
+        loadout.primary_weapon.recipe.payload_bundles.push(
+            crate::combat::PayloadBundleDefinition {
+                target: TargetSelection::Area {
+                    radius: 150.0,
+                    map_occlusion: true,
+                    max_targets: 16,
+                },
+                effects: vec![PayloadEffectDefinition::Damage {
+                    amount: 10,
+                    falloff: crate::combat::DamageFalloff::None,
+                    recipients: crate::combat::RecipientPolicy::Hostiles,
+                }],
+            },
+        );
+        loadout.primary_weapon.recipe.payload_bundles.push(
+            crate::combat::PayloadBundleDefinition {
+                target: TargetSelection::Area {
+                    radius: 92.0,
+                    map_occlusion: false,
+                    max_targets: 4,
+                },
+                effects: vec![PayloadEffectDefinition::Damage {
+                    amount: 5,
+                    falloff: crate::combat::DamageFalloff::None,
+                    recipients: crate::combat::RecipientPolicy::Hostiles,
+                }],
+            },
+        );
+        let style = CachedAttackStyle::from_recipe(
+            attack_source(72, 81, CombatSourceKind::PrimaryWeapon),
+            &loadout.primary_weapon.recipe,
+            VfxCarrier::LobbedProjectile,
+        );
+        let mut cache = VfxSignatureCache::default();
+        cache.remember(AttackId(72), style);
+        assert_eq!(cache.impact_radius_for_attack(AttackId(72)), Some(150.0));
+        assert_eq!(cache.impact_radius_for_attack(AttackId(999)), None);
+    }
+
+    #[test]
     fn immediate_impact_resolves_the_accepted_attack_signature_without_a_delivery_entity() {
         let mut cache = VfxSignatureCache {
             observer: VfxObserver {
@@ -947,6 +1006,7 @@ mod tests {
                 carrier: VfxCarrier::StraightProjectile,
                 accents: [Some(VfxAccent::Fire), None],
                 context: None,
+                impact_radius: None,
             },
         );
 
@@ -994,6 +1054,7 @@ mod tests {
                 carrier: VfxCarrier::StraightProjectile,
                 accents: [Some(VfxAccent::Cold), None],
                 context: None,
+                impact_radius: None,
             },
         );
         cache.reset_for_observed_tick(Some(1));

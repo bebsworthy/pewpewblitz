@@ -149,12 +149,20 @@ impl VfxRegistry {
         {
             return None;
         }
-        let recipe = self.catalog.resolve(
+        let mut recipe = self.catalog.resolve(
             request.key.as_str(),
             &request.signature,
             reduced,
             request.deadline.is_some(),
         )?;
+        if recipe
+            .layers
+            .iter()
+            .any(VfxMeshLayer::requires_authoritative_radius)
+            && request.authoritative_radius.is_none()
+        {
+            recipe = self.catalog.resolved_fallback(&recipe)?;
+        }
         if recipe
             .layers
             .iter()
@@ -415,6 +423,26 @@ mod tests {
         let mut wrong_rank = valid;
         wrong_rank.order.producer_rank += 1;
         assert!(registry.resolve(&wrong_rank, false).is_none());
+
+        let mut lobbed_signature =
+            super::super::CombatVisualSignature::neutral_point(8, bevy::prelude::Vec2::ZERO);
+        lobbed_signature.carrier = super::super::VfxCarrier::LobbedProjectile;
+        lobbed_signature.phase = super::super::VfxPhase::Impact;
+        let lobbed_without_radius = VfxRequest::try_new(
+            super::super::COMBAT_IMPACT_VFX,
+            super::super::VfxRequestOrder::new(COMBAT_VFX_PRODUCER_RANK, 8),
+            bevy::prelude::Vec2::ZERO,
+            None,
+            None,
+            "late lobbed impact without retained radius",
+        )
+        .unwrap()
+        .with_signature(lobbed_signature)
+        .unwrap();
+        assert_eq!(
+            registry.resolve(&lobbed_without_radius, false).unwrap().id,
+            "impact"
+        );
     }
 
     #[test]
@@ -491,7 +519,7 @@ mod tests {
             (
                 COMBAT_IMPACT_VFX,
                 COMBAT_VFX_PRODUCER_RANK,
-                VfxRequestCapabilities::NONE,
+                VfxRequestCapabilities::RADIUS,
             ),
             (
                 COMBAT_DAMAGE_VFX,

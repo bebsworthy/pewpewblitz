@@ -141,7 +141,9 @@ impl VfxMeshLayer {
                     VfxAnchorPolicy::FixedWorldHeight(_)
                         | VfxAnchorPolicy::AuthoritativeRadiusHeight(_)
                 ) | (
-                    VfxRendererFamily::GroundRing,
+                    VfxRendererFamily::GroundRing
+                        | VfxRendererFamily::GroundThinRing
+                        | VfxRendererFamily::GroundDisc,
                     VfxAnchorPolicy::GroundOffset(_)
                 )
             ))
@@ -167,6 +169,15 @@ impl VfxMeshLayer {
 pub(crate) enum VfxParticleProfile {
     ColdFragments,
     FireEmbers,
+    ExplosionSparks,
+    ExplosionSmoke,
+    ProjectileSmoke,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) enum VfxParticleSpawn {
+    Burst(u16),
+    RatePerSecond(u16),
 }
 
 /// Bounded authored input for a decorative GPU-particle layer.
@@ -179,7 +190,7 @@ pub(crate) struct VfxParticleLayer {
     pub(crate) id: String,
     pub(crate) profile: VfxParticleProfile,
     pub(crate) capacity: u16,
-    pub(crate) burst_count: u16,
+    pub(crate) spawn: VfxParticleSpawn,
     pub(crate) lifetime_millis: u16,
     pub(crate) spawn_radius: f32,
     pub(crate) speed_min: f32,
@@ -196,8 +207,8 @@ impl VfxParticleLayer {
         if !valid_vfx_catalog_id(&self.id)
             || self.capacity == 0
             || self.capacity > MAX_VFX_PARTICLES_PER_LAYER
-            || self.burst_count == 0
-            || self.burst_count > self.capacity
+            || self.spawn.amount() == 0
+            || self.spawn.amount() > self.capacity
             || self.lifetime_millis == 0
             || u32::from(self.lifetime_millis) > MAX_VFX_LIFETIME_MILLIS
             || !finite_world_value(self.spawn_radius)
@@ -219,6 +230,14 @@ impl VfxParticleLayer {
 
     pub(crate) const fn lifetime(&self) -> Duration {
         Duration::from_millis(self.lifetime_millis as u64)
+    }
+}
+
+impl VfxParticleSpawn {
+    pub(crate) const fn amount(self) -> u16 {
+        match self {
+            Self::Burst(amount) | Self::RatePerSecond(amount) => amount,
+        }
     }
 }
 
@@ -356,7 +375,7 @@ mod tests {
             id: "cold_fragments".to_string(),
             profile: VfxParticleProfile::ColdFragments,
             capacity: 64,
-            burst_count: 24,
+            spawn: VfxParticleSpawn::Burst(24),
             lifetime_millis: 600,
             spawn_radius: 4.0,
             speed_min: 12.0,
@@ -366,9 +385,10 @@ mod tests {
             anchor_height: 5.0,
         };
         assert!(layer.validate().is_ok());
-        layer.burst_count = 65;
+        layer.spawn = VfxParticleSpawn::Burst(65);
         assert!(layer.validate().is_err());
-        layer.burst_count = 24;
+        layer.spawn = VfxParticleSpawn::RatePerSecond(24);
+        assert!(layer.validate().is_ok());
         layer.capacity = MAX_VFX_PARTICLES_PER_LAYER + 1;
         assert!(layer.validate().is_err());
         layer.capacity = 64;

@@ -229,8 +229,8 @@ it does not replace these ownership and cleanup paths:
 
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
-| Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with one to eight authored mesh-layer children plus zero to two optional decorative GPU-particle children; every particle layer has an authored bounded profile and a shaped retained mesh | Root lifetime is the maximum mesh or particle lifetime, or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
-| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Cold adds slow crystal fins and Fire adds fast trailing lobes; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height derives from replicated launch/landing ticks |
+| Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with up to eight combined children: ordered mesh layers plus zero to two optional decorative GPU-particle layers; every particle layer has an authored bounded profile and a shaped retained mesh | Root lifetime is the maximum mesh or particle lifetime, or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
+| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Cold adds slow crystal fins and Fire adds fast trailing lobes; lobbed flight also has a projected shadow, fixed landing marker, and short tangent trail; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
 | Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained ember ground underlay plus a procedural material for a coherent turbulent circumference and layered heat bands; reduced/primitive Fire uses bounded tapered mesh tongues | Recreated after late join from public state; owner removal is cleanup truth |
 | Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary; circular Cold/Fire areas reuse the elemental area style | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
 | Sticky payload | Replicated position, fuse ticks, radius, role, and attack source | Moving body, exact warning ring, authoritative fuse-progress fill | Recreated at the observed tick and removed with the owner |
@@ -277,9 +277,9 @@ later demonstrate an accepted cue path that cannot be observed or cached before 
 
 #### Recipe and layer schema
 
-Catalog schema 6 uses five bounded tables: semantic request mappings, typed style mappings, recipes,
+Catalog schema 8 uses five bounded tables: semantic request mappings, typed style mappings, recipes,
 reusable mesh layers, and decorative particle layers. A style mapping may select on an implemented
-accent, lifecycle phase, and ultimate context over the existing typed signature. Every styled
+accent, carrier, lifecycle phase, and ultimate context over the existing typed signature. Every styled
 request retains one key-only fallback, duplicate selectors fail validation, and the most-specific
 matching selector wins deterministically. IDs are client-only validated lowercase ASCII names and
 never enter gameplay content fingerprints or protocol state.
@@ -298,8 +298,8 @@ A layer owns:
 - shadow flags and optional orientation policy;
 - a readability class: `CriticalGeometry`, `Identity`, or `Decorative`.
 
-The demonstrated mesh vocabulary is sphere/flash body, disc/fill, annulus/boundary, unit cuboid or
-segment, exact projectile body, and lobbed body/shadow. A new primitive is added only with a real
+The demonstrated mesh vocabulary is sphere/flash body, ground disc/fill, regular or thin
+annulus/boundary, unit cuboid or segment, exact projectile body, and lobbed body/shadow. A new primitive is added only with a real
 carrier/layer use. The first mesh migration authors delay, fixed or authoritative duration, linear
 or smooth-step easing, and transform/scale keyframes. It retains static material alpha. Per-instance
 animated alpha is not
@@ -324,8 +324,18 @@ Normal Cold and Fire impact recipes demonstrate the optional particle adapter wi
 and ember bursts. The adapter is a client-feature-only Hanabi 0.19 integration; it never enters the
 server feature graph. Particle layers have no readability-class field and are therefore always
 `Decorative`. Reduced and primitive variants omit them, while retained mesh layers remain a complete
-fallback. The materializer waits for a stable compiled GPU pipeline before releasing a one-shot
-burst, parents emitters to the recipe root, and removes them with that root.
+fallback. The materializer waits for a stable compiled GPU pipeline before releasing one-shot
+bursts. Fire lobbed projectiles additionally demonstrate the bounded rate-emitter mode: particles
+spawn at the moving projectile in global simulation space, remain behind to expand and fade, stop
+emitting when the projectile disappears, and retain the emitter only for the authored particle
+lifetime. Both modes share the global emitter cap and deterministic CPU seed contract.
+
+Lobbed landings retain the largest authored area-target radius with the cached attack style. The
+landing cue projects that radius into a circle signature and selects a carrier-specific explosion
+recipe. Its thin ring remains the exact radius while ground flash, flash/core bodies, expanding
+shockwave, typed sparks, and typed smoke provide staged identity. Missing cached identity falls
+back to the ordinary point-impact recipe rather than inventing a radius. World-object explosions
+reuse this layer vocabulary.
 
 Particle limits are separate and explicit:
 
@@ -373,7 +383,7 @@ Attached and persistent roots retain `CombatVisualOwner` and their source entity
 Owner removal, interruption, reset, match transition, and failed layer materialization must still
 remove the complete root. Native render evidence records the VFX catalog fingerprint, selected
 presentation variants, active lifecycle-root counts, transient recipe and authored mesh/particle
-layer order, particle profile, capacity, burst count and seed, emitter high-water/suppression
+layer order, particle profile, capacity, bounded burst/rate spawn mode and seed, emitter high-water/suppression
 diagnostics, and retained asset counts alongside the authoritative state and rendered PNG.
 
 #### Read-only VfxLab

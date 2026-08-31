@@ -4,9 +4,15 @@ use super::common::{
     ground_marker_relation, unique_roots,
 };
 use super::elemental_style::{spawn_elemental_area_style, spawn_elemental_projectile_style};
+use super::{
+    MAX_ACTIVE_PARTICLE_EMITTERS, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
+};
 
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const STRAIGHT_PROJECTILE_VISUAL_THICKNESS: f32 = 6.0;
+const LOBBED_PROJECTILE_SHADOW_RADIUS: f32 = 11.0;
+const LOBBED_PROJECTILE_LANDING_MARKER_RADIUS: f32 = 15.0;
+const LOBBED_PROJECTILE_TRAIL_PROGRESS: f32 = 0.14;
 
 #[derive(Component)]
 pub(in super::super) struct SentryVisual3d;
@@ -27,6 +33,24 @@ pub(in super::super) struct StickyBlobVisual3d;
 pub(in super::super) struct StickyFuseProgressVisual3d {
     owner: Entity,
     explosion_radius: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LobbedProjectileAidKind {
+    GroundShadow,
+    LandingMarker,
+    ArcTrail,
+}
+
+#[derive(Component)]
+pub(in super::super) struct LobbedProjectileAid3d {
+    owner: Entity,
+    kind: LobbedProjectileAidKind,
+}
+
+#[derive(Component)]
+pub(in super::super) struct LobbedProjectileBody3d {
+    owner: Entity,
 }
 
 #[allow(
@@ -155,13 +179,17 @@ pub(in super::super) fn reconcile_fighter_visuals(
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
     clippy::type_complexity,
-    reason = "projectile roots consume the complete replicated delivery shape at materialization"
+    reason = "projectile materialization consumes replicated delivery shape plus the bounded optional particle adapter"
 )]
 pub(in super::super) fn reconcile_projectile_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    particle_assets: Option<Res<VfxParticleAssets>>,
+    particle_emitters: Query<(), With<VfxParticleEmitter3d>>,
+    mut particle_diagnostics: Option<ResMut<VfxParticleDiagnostics>>,
     vfx: CombatVfxContext,
     projectiles: Query<
         (
@@ -180,6 +208,8 @@ pub(in super::super) fn reconcile_projectile_visuals(
     visuals: Query<(Entity, &CombatVisualOwner), With<V3ProjectileVisual>>,
 ) {
     let roots = unique_roots(&mut commands, &visuals);
+    let mut particle_budget =
+        MAX_ACTIVE_PARTICLE_EMITTERS.saturating_sub(particle_emitters.count());
     for (owner, position, source, straight, body, lobbed, deadline, attack_source, delivery) in
         &projectiles
     {
@@ -233,18 +263,28 @@ pub(in super::super) fn reconcile_projectile_visuals(
                     )
                 },
             );
-            spawn_projectile(
+            let wants_smoke = lobbed.is_some()
+                && signature.accents.contains(&Some(vfx::VfxAccent::Fire))
+                && signature.variant == vfx::VfxPresentationVariant::Normal;
+            let spawned_smoke = spawn_projectile(
                 &mut commands,
                 &primitives,
                 &materials,
+                particle_assets.as_deref(),
+                particle_budget > 0,
                 owner,
                 position.0,
                 source.team_id,
                 straight,
                 body,
-                lobbed.is_some(),
+                lobbed,
                 signature,
             );
+            if spawned_smoke {
+                particle_budget = particle_budget.saturating_sub(1);
+            } else if wants_smoke && let Some(diagnostics) = particle_diagnostics.as_deref_mut() {
+                diagnostics.suppressed = diagnostics.suppressed.saturating_add(1);
+            }
         }
     }
     for (root, owner) in &visuals {
@@ -1018,14 +1058,16 @@ fn spawn_projectile(
     commands: &mut Commands,
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
+    particle_assets: Option<&VfxParticleAssets>,
+    allow_particle_smoke: bool,
     owner: Entity,
     position: Vec2,
     team: crate::combat::TeamId,
     straight: Option<&crate::combat::StraightFlight>,
     body: Option<&crate::combat::ProjectileBody>,
-    lobbed: bool,
+    lobbed: Option<&crate::combat::LobbedFlight>,
     signature: vfx::CombatVisualSignature,
-) {
+) -> bool {
     let root = commands
         .spawn((
             CombatVisualOwner(owner),
@@ -1039,39 +1081,141 @@ fn spawn_projectile(
         ))
         .id();
     commands.entity(root).with_children(|parent| {
-        let transform = if lobbed {
+        let transform = if lobbed.is_some() {
             Transform::default()
         } else {
             Transform::from_scale(straight_projectile_visual_scale(
                 *body.expect("straight projectile visual requires replicated body"),
             ))
         };
-        let mesh = if lobbed {
+        let mesh = if lobbed.is_some() {
             primitives.lobbed_projectile.clone()
         } else {
             primitives.projectile.clone()
         };
         let relationship_material = team_material(team, materials);
         let visual_radius = body.map_or(9.0, |body| body.shape.bounding_radius());
-        if !spawn_elemental_projectile_style(
-            parent,
-            primitives,
-            materials,
-            signature,
-            mesh.clone(),
-            transform,
-            relationship_material.clone(),
-            visual_radius,
-        ) {
-            parent.spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(relationship_material),
-                NotShadowCaster,
+        if lobbed.is_some() {
+            parent
+                .spawn((
+                    LobbedProjectileBody3d { owner },
+                    Transform::default(),
+                    Visibility::default(),
+                    Name::new("Lobbed projectile tangent-aligned body"),
+                ))
+                .with_children(|body_parent| {
+                    spawn_projectile_geometry(
+                        body_parent,
+                        primitives,
+                        materials,
+                        signature,
+                        mesh,
+                        transform,
+                        relationship_material,
+                        visual_radius,
+                    );
+                });
+        } else {
+            spawn_projectile_geometry(
+                parent,
+                primitives,
+                materials,
+                signature,
+                mesh,
                 transform,
-                Name::new("V3 projectile geometry"),
-            ));
+                relationship_material,
+                visual_radius,
+            );
+        }
+        if lobbed.is_some() {
+            spawn_lobbed_projectile_aids(parent, primitives, materials, owner);
         }
     });
+    allow_particle_smoke
+        && signature.accents.contains(&Some(vfx::VfxAccent::Fire))
+        && signature.variant == vfx::VfxPresentationVariant::Normal
+        && particle_assets.is_some_and(|assets| {
+            assets.spawn_projectile_smoke(
+                commands,
+                primitives,
+                owner,
+                root,
+                signature.stable_seed(),
+            )
+        })
+}
+
+fn spawn_lobbed_projectile_aids(
+    parent: &mut ChildSpawnerCommands,
+    primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
+    owner: Entity,
+) {
+    for (kind, mesh, material, name) in [
+        (
+            LobbedProjectileAidKind::GroundShadow,
+            primitives.area_disc.clone(),
+            materials.lobbed_shadow.clone(),
+            "Lobbed projectile ground-projected shadow",
+        ),
+        (
+            LobbedProjectileAidKind::LandingMarker,
+            primitives.area_ring.clone(),
+            materials.effect_impact.clone(),
+            "Lobbed projectile landing-point marker",
+        ),
+        (
+            LobbedProjectileAidKind::ArcTrail,
+            primitives.unit_cuboid.clone(),
+            materials.effect_muzzle.clone(),
+            "Lobbed projectile tangent trail",
+        ),
+    ] {
+        parent.spawn((
+            LobbedProjectileAid3d { owner, kind },
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            NotShadowCaster,
+            NotShadowReceiver,
+            Transform::default(),
+            Visibility::Hidden,
+            Name::new(name),
+        ));
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the focused helper receives one complete retained projectile visual profile"
+)]
+fn spawn_projectile_geometry(
+    parent: &mut ChildSpawnerCommands,
+    primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
+    signature: vfx::CombatVisualSignature,
+    mesh: Handle<Mesh>,
+    transform: Transform,
+    relationship_material: Handle<StandardMaterial>,
+    visual_radius: f32,
+) {
+    if !spawn_elemental_projectile_style(
+        parent,
+        primitives,
+        materials,
+        signature,
+        mesh.clone(),
+        transform,
+        relationship_material.clone(),
+        visual_radius,
+    ) {
+        parent.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(relationship_material),
+            NotShadowCaster,
+            transform,
+            Name::new("V3 projectile geometry"),
+        ));
+    }
 }
 
 fn straight_projectile_visual_scale(body: crate::combat::ProjectileBody) -> Vec3 {
@@ -1175,6 +1319,121 @@ pub(in super::super) fn write_projectile_visual_poses(
     }
 }
 
+#[allow(clippy::cast_precision_loss, clippy::needless_pass_by_value)]
+pub(in super::super) fn write_lobbed_projectile_body_poses(
+    ticks: Query<&AuthoritativeTick>,
+    owners: Query<&crate::combat::LobbedFlight, With<crate::combat::Projectile>>,
+    mut bodies: Query<(&LobbedProjectileBody3d, &mut Transform)>,
+) {
+    let current_tick = ticks.iter().map(|tick| tick.0).max().unwrap_or_default();
+    for (body, mut transform) in &mut bodies {
+        let Ok(flight) = owners.get(body.owner) else {
+            continue;
+        };
+        let progress = lobbed_flight_progress(*flight, current_tick);
+        transform.rotation = lobbed_arc_tangent_rotation(*flight, progress);
+    }
+}
+
+#[allow(clippy::cast_precision_loss, clippy::needless_pass_by_value)]
+pub(in super::super) fn write_lobbed_projectile_aid_poses(
+    ticks: Query<&AuthoritativeTick>,
+    owners: Query<(&Position, &crate::combat::LobbedFlight), With<crate::combat::Projectile>>,
+    mut aids: Query<(&LobbedProjectileAid3d, &mut Transform, &mut Visibility)>,
+) {
+    let current_tick = ticks.iter().map(|tick| tick.0).max().unwrap_or_default();
+    for (aid, mut transform, mut visibility) in &mut aids {
+        let Ok((position, flight)) = owners.get(aid.owner) else {
+            continue;
+        };
+        let progress = lobbed_flight_progress(*flight, current_tick);
+        let height = lobbed_flight_height(*flight, progress);
+        match aid.kind {
+            LobbedProjectileAidKind::GroundShadow => {
+                let maximum_height =
+                    (LOBBED_PROJECTILE_LAUNCH_HEIGHT + flight.visual_arc_height).max(1.0);
+                let height_ratio = (height / maximum_height).clamp(0.0, 1.0);
+                let radius = LOBBED_PROJECTILE_SHADOW_RADIUS * (1.0 - height_ratio * 0.38);
+                *transform = Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT - height, 0.0)
+                    .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::splat(radius));
+                *visibility = Visibility::Inherited;
+            }
+            LobbedProjectileAidKind::LandingMarker => {
+                let landing_offset = ground_position(flight.landing.as_vec2() - position.0)
+                    + Vec3::Y * (GROUND_EFFECT_HEIGHT + 0.3 - height);
+                *transform = Transform::from_translation(landing_offset)
+                    .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::splat(LOBBED_PROJECTILE_LANDING_MARKER_RADIUS));
+                *visibility = Visibility::Inherited;
+            }
+            LobbedProjectileAidKind::ArcTrail => {
+                if let Some(trail) = lobbed_arc_trail_transform(*flight, position.0, progress) {
+                    *transform = trail;
+                    *visibility = Visibility::Inherited;
+                } else {
+                    *visibility = Visibility::Hidden;
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn lobbed_flight_progress(flight: crate::combat::LobbedFlight, current_tick: u64) -> f32 {
+    let duration = flight
+        .lands_at_tick
+        .saturating_sub(flight.launched_at_tick)
+        .max(1);
+    let elapsed = current_tick
+        .saturating_sub(flight.launched_at_tick)
+        .min(duration);
+    elapsed as f32 / duration as f32
+}
+
+fn lobbed_flight_height(flight: crate::combat::LobbedFlight, progress: f32) -> f32 {
+    LOBBED_PROJECTILE_LAUNCH_HEIGHT
+        + crate::combat::delivery::lob_height(progress, flight.visual_arc_height)
+}
+
+fn lobbed_arc_tangent(flight: crate::combat::LobbedFlight, progress: f32) -> Vec3 {
+    let planar = ground_position(flight.landing.as_vec2() - flight.launch.as_vec2());
+    let vertical = 4.0 * flight.visual_arc_height * (1.0 - 2.0 * progress.clamp(0.0, 1.0));
+    (planar + Vec3::Y * vertical).normalize_or(Vec3::X)
+}
+
+fn lobbed_arc_tangent_rotation(flight: crate::combat::LobbedFlight, progress: f32) -> Quat {
+    Quat::from_rotation_arc(Vec3::X, lobbed_arc_tangent(flight, progress))
+}
+
+fn lobbed_arc_trail_transform(
+    flight: crate::combat::LobbedFlight,
+    current_position: Vec2,
+    progress: f32,
+) -> Option<Transform> {
+    let previous_progress = (progress - LOBBED_PROJECTILE_TRAIL_PROGRESS).max(0.0);
+    if previous_progress >= progress {
+        return None;
+    }
+    let previous_position = flight
+        .launch
+        .as_vec2()
+        .lerp(flight.landing.as_vec2(), previous_progress);
+    let current_height = lobbed_flight_height(flight, progress);
+    let previous_height = lobbed_flight_height(flight, previous_progress);
+    let to_previous = ground_position(previous_position - current_position)
+        + Vec3::Y * (previous_height - current_height);
+    let length = to_previous.length();
+    if !length.is_finite() || length <= f32::EPSILON {
+        return None;
+    }
+    Some(Transform {
+        translation: to_previous * 0.5,
+        rotation: lobbed_arc_tangent_rotation(flight, progress),
+        scale: Vec3::new(length, 2.4, 2.4),
+    })
+}
+
 pub(in super::super) fn write_sentry_visual_poses(
     sentry_owners: Query<(&Position, &Rotation), With<crate::abilities::Sentry>>,
     mut sentry_visuals: SentryVisualPoseQuery,
@@ -1200,6 +1459,34 @@ mod tests {
         assert!((scatter.x - 4.0).abs() < f32::EPSILON);
         assert!((scatter.z - 4.0).abs() < f32::EPSILON);
         assert!((pulse.y - STRAIGHT_PROJECTILE_VISUAL_THICKNESS).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn lobbed_aids_follow_bounded_authoritative_progress_and_arc_tangent() {
+        let flight = crate::combat::LobbedFlight {
+            launch: crate::combat::WorldPoint::from(Vec2::new(-100.0, 0.0)),
+            landing: crate::combat::WorldPoint::from(Vec2::new(100.0, 0.0)),
+            launched_at_tick: 20,
+            lands_at_tick: 100,
+            visual_arc_height: 120.0,
+        };
+        assert!(lobbed_flight_progress(flight, 0).abs() < f32::EPSILON);
+        assert!((lobbed_flight_progress(flight, 60) - 0.5).abs() < f32::EPSILON);
+        assert!((lobbed_flight_progress(flight, 200) - 1.0).abs() < f32::EPSILON);
+        assert!(lobbed_arc_trail_transform(flight, Vec2::ZERO, 0.0).is_none());
+        let ascending = lobbed_arc_tangent(flight, 0.25);
+        let apex = lobbed_arc_tangent(flight, 0.5);
+        let descending = lobbed_arc_tangent(flight, 0.75);
+        assert!(ascending.y > 0.0);
+        assert!(apex.y.abs() < f32::EPSILON);
+        assert!(descending.y < 0.0);
+
+        let trail = lobbed_arc_trail_transform(flight, Vec2::ZERO, 0.25).unwrap();
+        assert!(trail.scale.x.is_finite() && trail.scale.x > 0.0);
+        assert!(trail.translation.x < 0.0);
+        assert!(trail.translation.y.abs() > f32::EPSILON);
+        let trail_forward = trail.rotation * Vec3::X;
+        assert!(trail_forward.dot(ascending) > 0.999);
     }
 
     #[test]

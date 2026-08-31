@@ -134,6 +134,7 @@ pub(crate) struct Material3dAssets {
     pub(crate) effect_muzzle: Handle<StandardMaterial>,
     pub(crate) effect_impact: Handle<StandardMaterial>,
     pub(crate) effect_damage: Handle<StandardMaterial>,
+    pub(crate) lobbed_shadow: Handle<StandardMaterial>,
     pub(crate) dash: Handle<StandardMaterial>,
     pub(crate) barrel: Handle<StandardMaterial>,
     pub(crate) barrel_damaged: Handle<StandardMaterial>,
@@ -379,7 +380,12 @@ impl Plugin for WorldPresentationPlugin {
                 PostUpdate,
                 (
                     (combat::write_fighter_visual_poses, follow_3d_camera).chain(),
-                    combat::write_projectile_visual_poses,
+                    (
+                        combat::write_projectile_visual_poses,
+                        combat::write_lobbed_projectile_body_poses,
+                        combat::write_lobbed_projectile_aid_poses,
+                    )
+                        .chain(),
                     combat::write_sentry_visual_poses,
                     combat::write_sticky_blob_visual_poses,
                     combat::write_status_visual_poses,
@@ -1251,6 +1257,12 @@ pub(in crate::client) fn setup_3d_foundation(
         effect_damage: materials.add(StandardMaterial {
             base_color: Color::srgb(0.95, 0.08, 0.12),
             emissive: LinearRgba::new(1.2, 0.02, 0.02, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        lobbed_shadow: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.015, 0.02, 0.03, 0.38),
+            alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),

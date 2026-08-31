@@ -10,10 +10,10 @@ use super::recipes::{
     VfxParticleLayer, VfxReadabilityClass, VfxRecipe,
 };
 use super::request::valid_vfx_request_key;
-use super::{CombatVisualSignature, VfxAccent, VfxContextOverride, VfxPhase};
+use super::{CombatVisualSignature, VfxAccent, VfxCarrier, VfxContextOverride, VfxPhase};
 
 pub(super) const VFX_CATALOG: &str = include_str!("../../../assets/catalogs/vfx.ron");
-const VFX_SCHEMA_VERSION: u16 = 6;
+const VFX_SCHEMA_VERSION: u16 = 8;
 const MAX_VFX_MAPPINGS: usize = 64;
 const MAX_VFX_FIXED_WORLD: f32 =
     crate::map::MAX_MAP_DIMENSION_CELLS as f32 * crate::map::MAP_CELL_SIZE_WORLD;
@@ -31,6 +31,8 @@ pub(crate) fn embedded_vfx_catalog_fingerprint() -> u64 {
 pub(crate) enum VfxRendererFamily {
     Sphere,
     GroundRing,
+    GroundThinRing,
+    GroundDisc,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -147,6 +149,8 @@ struct VfxRequestMapping {
 struct VfxStyleMapping {
     key: String,
     accent: VfxAccent,
+    #[serde(default)]
+    carrier: Option<VfxCarrier>,
     phase: Option<VfxPhase>,
     ultimate: bool,
     recipe: String,
@@ -156,12 +160,15 @@ impl VfxStyleMapping {
     fn matches(&self, key: &str, signature: &CombatVisualSignature) -> bool {
         self.key == key
             && signature.accents.contains(&Some(self.accent))
+            && self
+                .carrier
+                .is_none_or(|carrier| carrier == signature.carrier)
             && self.phase.is_none_or(|phase| phase == signature.phase)
             && (!self.ultimate || signature.context.is_some_and(is_ultimate_context))
     }
 
     const fn specificity(&self) -> u8 {
-        1 + self.phase.is_some() as u8 + self.ultimate as u8
+        1 + self.carrier.is_some() as u8 + self.phase.is_some() as u8 + self.ultimate as u8
     }
 }
 
@@ -338,6 +345,7 @@ impl VfxCatalog {
             if !style_selectors.insert((
                 mapping.key.clone(),
                 mapping.accent,
+                mapping.carrier,
                 mapping.phase,
                 mapping.ultimate,
             )) {
@@ -456,6 +464,15 @@ impl VfxCatalog {
         self.mappings
             .get(key)
             .and_then(|recipe_id| self.recipes.get(recipe_id))
+    }
+
+    pub(super) fn resolved_fallback(
+        &self,
+        recipe: &ResolvedVfxRecipe,
+    ) -> Option<ResolvedVfxRecipe> {
+        self.recipes
+            .get(&recipe.fallback_recipe)
+            .and_then(|fallback| self.resolved(fallback))
     }
 
     fn resolved(&self, recipe: &VfxRecipe) -> Option<ResolvedVfxRecipe> {
@@ -666,6 +683,56 @@ mod tests {
                 .id,
             "impact"
         );
+
+        let mut lobbed = neutral;
+        lobbed.carrier = VfxCarrier::LobbedProjectile;
+        lobbed.phase = VfxPhase::Impact;
+        lobbed.geometry = super::super::VfxGeometry::circle(bevy::prelude::Vec2::ZERO, 150.0);
+        assert_eq!(
+            catalog
+                .resolve("combat.impact", &lobbed, false, false)
+                .unwrap()
+                .id,
+            "lob_explosion"
+        );
+        let lobbed_normal = catalog
+            .resolve("combat.impact", &lobbed, false, false)
+            .unwrap();
+        assert_eq!(lobbed_normal.layers.len(), 5);
+        assert_eq!(lobbed_normal.particle_layers.len(), 2);
+        assert_eq!(
+            lobbed_normal.layers[0].renderer,
+            VfxRendererFamily::GroundThinRing
+        );
+        assert_eq!(
+            lobbed_normal.layers[0].readability,
+            VfxReadabilityClass::CriticalGeometry
+        );
+        assert_eq!(
+            catalog
+                .resolve("combat.impact", &lobbed, true, false)
+                .unwrap()
+                .id,
+            "lob_explosion_reduced"
+        );
+        assert!(
+            catalog
+                .resolve("combat.impact", &lobbed, true, false)
+                .unwrap()
+                .particle_layers
+                .is_empty()
+        );
+        lobbed.accents = [Some(VfxAccent::Fire), None];
+        lobbed.context = Some(VfxContextOverride::Ultimate(
+            crate::builds::UltimateDefinitionId(4),
+        ));
+        assert_eq!(
+            catalog
+                .resolve("combat.impact", &lobbed, false, false)
+                .unwrap()
+                .id,
+            "fire_lob_explosion_ultimate"
+        );
     }
 
     #[test]
@@ -687,7 +754,7 @@ mod tests {
 
             assert_eq!(normal.particle_layers.len(), 1);
             assert_eq!(normal.particle_layers[0].profile, expected_profile);
-            assert!(normal.particle_layers[0].burst_count <= normal.particle_layers[0].capacity);
+            assert!(normal.particle_layers[0].spawn.amount() <= normal.particle_layers[0].capacity);
             assert!(reduced.particle_layers.is_empty());
         }
     }
@@ -695,7 +762,7 @@ mod tests {
     #[test]
     fn strict_schema_keys_references_values_and_capacity_are_validated() {
         for (needle, replacement) in [
-            ("schema_version: 6", "schema_version: 5"),
+            ("schema_version: 8", "schema_version: 7"),
             ("key: \"combat.muzzle\"", "key: \"Combat/Muzzle\""),
             ("recipe: \"muzzle\"", "recipe: \"missing\""),
             ("scale: FixedWorld(8.0)", "scale: FixedWorld(0.0)"),
@@ -812,7 +879,7 @@ mod tests {
         dropped_critical
             .mesh_layers
             .iter_mut()
-            .find(|layer| layer.id == "world_explosion_reduced")
+            .find(|layer| layer.id == "explosion_exact_boundary_reduced")
             .unwrap()
             .readability = VfxReadabilityClass::Identity;
         assert!(

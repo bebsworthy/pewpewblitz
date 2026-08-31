@@ -93,6 +93,7 @@ pub struct VfxLabConfig {
     pub radius: Option<u16>,
     pub sample_ticks: Option<u16>,
     pub accent: VfxLabAccent,
+    pub lobbed_impact: bool,
     pub ultimate: bool,
     pub reduced: bool,
     pub primitive: bool,
@@ -221,6 +222,7 @@ impl VfxLabScenario {
         event_id: u64,
         radius: u16,
         accent: VfxLabAccent,
+        lobbed_impact: bool,
         ultimate: bool,
     ) -> VfxRequest {
         let authoritative_radius = self
@@ -245,6 +247,13 @@ impl VfxLabScenario {
             signature.accents = [Some(accent.signature_accent()), None];
             if self.key == crate::client::vfx::COMBAT_IMPACT_VFX {
                 signature.phase = crate::client::vfx::VfxPhase::Impact;
+                if lobbed_impact {
+                    signature.carrier = crate::client::vfx::VfxCarrier::LobbedProjectile;
+                    signature.geometry = crate::client::vfx::VfxGeometry::circle(
+                        request.position,
+                        f32::from(radius),
+                    );
+                }
             }
             signature.context = if self.key == crate::client::vfx::ELEMENTAL_FIELD_VFX {
                 Some(crate::client::vfx::VfxContextOverride::ElementalField(
@@ -279,6 +288,7 @@ struct VfxLabState {
     presentation_identity: u64,
     radius: u16,
     accent: VfxLabAccent,
+    lobbed_impact: bool,
     ultimate: bool,
     reduced: bool,
     primitive: bool,
@@ -309,6 +319,7 @@ impl VfxLabState {
                 self.presentation_identity,
                 self.radius,
                 self.accent,
+                self.lobbed_impact,
                 self.ultimate,
             )
         })
@@ -340,6 +351,9 @@ struct VfxLabFixtureOwner;
 #[derive(Component)]
 struct VfxLabClock;
 
+#[derive(Component)]
+struct VfxLabReference(u8);
+
 struct VfxLabPlugin {
     config: VfxLabConfig,
 }
@@ -367,6 +381,7 @@ impl Plugin for VfxLabPlugin {
             Update,
             (
                 handle_lab_input,
+                update_lab_reference_positions,
                 sync_lab_particle_time,
                 resolve_vfx_requests,
                 materialize_combat_effects,
@@ -416,6 +431,7 @@ impl Plugin for VfxLabPlugin {
             presentation_identity: self.config.presentation_identity.unwrap_or(1),
             radius: self.config.radius.unwrap_or(DEFAULT_RADIUS),
             accent: self.config.accent,
+            lobbed_impact: self.config.lobbed_impact,
             ultimate: self.config.ultimate,
             reduced: self.config.reduced,
             primitive: self.config.primitive,
@@ -523,8 +539,14 @@ fn setup_lab_scene(
         Transform::from_xyz(0.0, -0.5, 0.0),
         Name::new("VfxLab neutral floor"),
     ));
-    for (index, x) in [0.0, 96.0].into_iter().enumerate() {
+    let reference_positions = if state.fixture == VfxLabFixture::LobbedProjectile {
+        [-80.0, 80.0]
+    } else {
+        [0.0, 96.0]
+    };
+    for (index, x) in reference_positions.into_iter().enumerate() {
         commands.spawn((
+            VfxLabReference(u8::try_from(index).expect("two reference indices fit u8")),
             Mesh3d(primitives.fighter.clone()),
             MeshMaterial3d(presentation_materials.neutral.clone()),
             Transform::from_xyz(x, 14.0, 0.0),
@@ -549,6 +571,24 @@ fn setup_lab_scene(
     ));
     commands.spawn((VfxLabClock, AuthoritativeTick(state.playback_tick)));
     spawn_lab_scenario(&mut commands, &state, &mut requests);
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the read-only state is a Bevy resource system parameter"
+)]
+fn update_lab_reference_positions(
+    state: Res<VfxLabState>,
+    mut references: Query<(&VfxLabReference, &mut Transform)>,
+) {
+    let positions = if state.fixture == VfxLabFixture::LobbedProjectile {
+        [-80.0, 80.0]
+    } else {
+        [0.0, 96.0]
+    };
+    for (reference, mut transform) in &mut references {
+        transform.translation.x = positions[usize::from(reference.0)];
+    }
 }
 
 fn spawn_lab_scenario(
@@ -1039,6 +1079,7 @@ fn request_lab_capture(world: &mut World) {
                 state.fixture,
                 state.presentation_identity,
                 state.accent,
+                state.lobbed_impact,
                 state.ultimate,
                 state.reduced,
                 state.primitive,
@@ -1054,6 +1095,7 @@ fn request_lab_capture(world: &mut World) {
         fixture,
         identity,
         accent,
+        lobbed_impact,
         ultimate,
         reduced,
         primitive,
@@ -1065,7 +1107,7 @@ fn request_lab_capture(world: &mut World) {
     };
     let radius = world.resource::<VfxLabState>().radius;
     let request = matches!(fixture, VfxLabFixture::Transient)
-        .then(|| scenario.request(identity, radius, accent, ultimate));
+        .then(|| scenario.request(identity, radius, accent, lobbed_impact, ultimate));
     let recipe = request.as_ref().map(|request| {
         world
             .resource::<VfxRegistry>()
@@ -1106,6 +1148,7 @@ fn request_lab_capture(world: &mut World) {
             "producer_rank": request.as_ref().map(|_| scenario.producer_rank),
             "presentation_identity": identity,
             "accent": accent.label(),
+            "lobbed_impact": lobbed_impact,
             "ultimate": ultimate,
             "radius": radius,
             "playback_tick": tick,
@@ -1191,11 +1234,11 @@ fn update_lab_inspector(
                 .enumerate()
                 .map(|(index, layer)| {
                     format!(
-                        "P{}. {} {:?} Decorative {} particles / {} ms",
+                        "P{}. {} {:?} Decorative {:?} / {} ms",
                         index + 1,
                         layer.id,
                         layer.profile,
-                        layer.burst_count,
+                        layer.spawn,
                         layer.lifetime_millis,
                     )
                 }),
@@ -1315,13 +1358,17 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
     };
     let meaning = match state.fixture {
         VfxLabFixture::Transient => {
-            "The effect is centered on the gray target. Flash bodies communicate the event; expanding rings communicate its ground position. Use . to move one tick or restart with another --sample-ticks value."
+            if state.lobbed_impact {
+                "This is a lobbed landing. The thin outer ring is the exact payload radius; the ground flash, central burst, expanding shockwave, sparks, and smoke are staged presentation. Use . to move one tick or restart with another --sample-ticks value."
+            } else {
+                "The effect is centered on the gray target. Flash bodies communicate the event; expanding rings communicate its ground position. Use . to move one tick or restart with another --sample-ticks value."
+            }
         }
         VfxLabFixture::StraightProjectile => {
             "The colored body is the projectile's exact collision footprint. Cold adds rigid crystal fins; Fire adds soft trailing lobes."
         }
         VfxLabFixture::LobbedProjectile => {
-            "The moving body follows the production launch/landing arc. Its ground shadow communicates where it will land."
+            "The moving body follows the production launch/landing arc. The dark disc tracks its ground projection, the orange ring marks the fixed landing point, the hot tail follows the current tangent, and emitted smoke remains behind to expand and fade."
         }
         VfxLabFixture::ElementalField => {
             "The subtly tinted center is the affected ground area. The thin bright ring is the exact gameplay boundary. Perimeter crystals or the living flame band identify the element without hiding fighters."
@@ -1444,6 +1491,7 @@ mod tests {
             presentation_identity: 7,
             radius: DEFAULT_RADIUS,
             accent: VfxLabAccent::Neutral,
+            lobbed_impact: false,
             ultimate: false,
             reduced: false,
             primitive: false,
@@ -1474,6 +1522,25 @@ mod tests {
         assert_eq!(state.transient_request().unwrap().order.event_id, 7);
         state.use_next_identity();
         assert_eq!(state.transient_request().unwrap().order.event_id, 8);
+    }
+
+    #[test]
+    fn lobbed_impact_preview_uses_the_production_carrier_and_radius() {
+        let scenario = VfxLabScenario {
+            key: crate::client::vfx::COMBAT_IMPACT_VFX,
+            producer_rank: crate::client::vfx::COMBAT_VFX_PRODUCER_RANK,
+            capabilities: VfxRequestCapabilities::RADIUS,
+        };
+        let request = scenario.request(9, 150, VfxLabAccent::Fire, true, false);
+        assert_eq!(
+            request.signature.carrier,
+            crate::client::vfx::VfxCarrier::LobbedProjectile
+        );
+        assert_eq!(request.authoritative_radius, Some(150.0));
+        assert_eq!(
+            request.signature.geometry,
+            crate::client::vfx::VfxGeometry::circle(Vec2::ZERO, 150.0)
+        );
     }
 
     #[test]

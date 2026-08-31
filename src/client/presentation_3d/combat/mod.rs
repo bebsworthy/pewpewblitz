@@ -27,7 +27,8 @@ pub(super) use entities::{
     reconcile_concealment_field_visuals, reconcile_elemental_field_visuals,
     reconcile_fighter_visuals, reconcile_persistent_splash_visuals, reconcile_projectile_visuals,
     reconcile_sentry_visuals, reconcile_sticky_blob_visuals, update_sticky_blob_fuse_progress,
-    write_fighter_visual_poses, write_projectile_visual_poses, write_sentry_visual_poses,
+    write_fighter_visual_poses, write_lobbed_projectile_aid_poses,
+    write_lobbed_projectile_body_poses, write_projectile_visual_poses, write_sentry_visual_poses,
     write_sticky_blob_visual_poses,
 };
 pub(super) use fighter_feedback::{
@@ -39,8 +40,8 @@ pub(super) use fighter_ui::{
     update_fighter_overhead_state,
 };
 pub(in crate::client) use particles::{
-    MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, VfxParticleAdapterPlugin,
-    VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
+    MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, RetainedProjectileSmoke3d,
+    VfxParticleAdapterPlugin, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
 
 /// Schedule seam used only by the offline `VfxLab` to run production lifecycle materializers.
@@ -73,7 +74,15 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (write_fighter_visual_poses, write_projectile_visual_poses),
+                (
+                    write_fighter_visual_poses,
+                    (
+                        write_projectile_visual_poses,
+                        write_lobbed_projectile_body_poses,
+                        write_lobbed_projectile_aid_poses,
+                    )
+                        .chain(),
+                ),
             );
     }
 }

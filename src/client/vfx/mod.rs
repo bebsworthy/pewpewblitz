@@ -16,8 +16,8 @@ pub(crate) use catalog::{
     VfxLifetime, VfxMaterialKey, VfxRendererFamily, embedded_vfx_catalog_fingerprint,
 };
 pub(crate) use recipes::{
-    ResolvedVfxRecipe, VfxMeshLayer, VfxParticleLayer, VfxParticleProfile, VfxReadabilityClass,
-    VfxTimeline, vfx_counter_sample,
+    ResolvedVfxRecipe, VfxMeshLayer, VfxParticleLayer, VfxParticleProfile, VfxParticleSpawn,
+    VfxReadabilityClass, VfxTimeline, vfx_counter_sample,
 };
 #[cfg(test)]
 pub(crate) use registry::VfxRegistryPlugin;

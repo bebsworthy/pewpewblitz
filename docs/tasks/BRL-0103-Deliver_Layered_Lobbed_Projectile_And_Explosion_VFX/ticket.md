@@ -1,13 +1,13 @@
 ---
 id: BRL-0103
 title: Deliver layered lobbed projectile and explosion VFX
-status: todo
+status: done
 theme:
 release:
 created: 2026-08-31T08:21:41Z
-modified: 2026-08-31T11:01:53Z
-closed:
-revision: aa7cb31b757a690f
+modified: 2026-08-31T22:48:40Z
+closed: 2026-08-31T22:48:26Z
+revision: 9426d84ad7ca8838
 blocks: [BRL-0104]
 related: [BRL-0094]
 ---
