@@ -1,6 +1,6 @@
 use super::super::*;
-use super::vfx_catalog::{
-    VfxCatalog, VfxCueFamily, VfxLifetime, VfxMaterialKey, VfxProfile, VfxRendererFamily,
+use crate::client::vfx::{
+    VfxLifetime, VfxMaterialKey, VfxProfile, VfxRegistry, VfxRendererFamily, VfxRequest,
 };
 use crate::combat::client::DeduplicatedCombatCue;
 use std::collections::{HashMap, VecDeque};
@@ -51,32 +51,24 @@ impl PendingCombatEffect {
     }
 }
 
-#[derive(Clone, Copy)]
-struct CatalogEffectRequest {
-    family: VfxCueFamily,
-    reduced: bool,
-    position: Vec2,
-    authoritative_radius: Option<f32>,
-    deadline: Option<(u64, u64, Option<u64>)>,
-    label: &'static str,
-}
-
-fn catalog_effect(
-    request: CatalogEffectRequest,
-    catalog: &VfxCatalog,
+fn resolved_effect(
+    request: &VfxRequest,
+    profile: &VfxProfile,
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
 ) -> PendingCombatEffect {
-    let profile =
-        catalog.resolve_for_request(request.family, request.reduced, request.deadline.is_some());
     let (lifetime, expires_at_tick) = match (profile.lifetime, request.deadline) {
-        (VfxLifetime::AuthoritativeDeadline, Some((activated, expires, observed))) => (
-            reveal_ring_remaining_duration(activated, expires, observed),
-            Some(expires),
+        (VfxLifetime::AuthoritativeDeadline, Some(deadline)) => (
+            reveal_ring_remaining_duration(
+                deadline.activated_at_tick,
+                deadline.expires_at_tick,
+                deadline.observed_at_tick,
+            ),
+            Some(deadline.expires_at_tick),
         ),
         (VfxLifetime::Millis(millis), _) => (Duration::from_millis(u64::from(millis)), None),
         (VfxLifetime::AuthoritativeDeadline, None) => {
-            unreachable!("validated VFX resolution falls back when no deadline is available")
+            unreachable!("the VFX registry rejects deadline profiles without a deadline")
         }
     };
     let transform = effect_transform(profile, request.position, request.authoritative_radius);
@@ -131,24 +123,12 @@ fn vfx_material(key: VfxMaterialKey, materials: &Material3dAssets) -> Handle<Sta
         VfxMaterialKey::PickupGlow => materials.pickup_glow.clone(),
     }
 }
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::too_many_arguments,
-    reason = "cue consumption resolves actor intents and one bounded effect transaction"
-)]
-pub(in super::super) fn consume_combat_cues(
+/// Keeps fighter animation feedback separate from semantic VFX production.
+pub(in super::super) fn animate_attack_acceptance(
     mut cues: MessageReader<DeduplicatedCombatCue>,
-    mut pending_effects: MessageWriter<PendingCombatEffect>,
-    primitives: Res<Primitive3dAssets>,
-    materials: Res<Material3dAssets>,
-    catalog: Res<VfxCatalog>,
-    settings: Option<Res<ClientShellSettings>>,
     owners: Query<(Entity, &NetworkEntityId), With<Fighter>>,
     mut visuals: Query<(Entity, &CombatVisualOwner, &mut V3FighterVisual)>,
-    authoritative_ticks: Query<&AuthoritativeTick>,
 ) {
-    let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
-    let current_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     let visuals_by_owner = visuals
         .iter()
         .map(|(visual, owner, _)| (owner.0, visual))
@@ -168,227 +148,36 @@ pub(in super::super) fn consume_combat_cues(
         {
             visual.shoot_seconds = 0.18;
         }
-        let Some((family, position, authoritative_radius)) = cue_effect(cue) else {
-            continue;
-        };
-        let scan_pulse = matches!(cue, crate::combat::CombatCue::RevealScanActivated { .. });
-        let deadline = if let crate::combat::CombatCue::RevealScanActivated {
-            tick,
-            expires_at_tick,
-            ..
-        } = cue
-        {
-            Some((*tick, *expires_at_tick, current_tick))
-        } else {
-            None
-        };
-        pending_effects.write(catalog_effect(
-            CatalogEffectRequest {
-                family,
-                reduced,
-                position,
-                authoritative_radius,
-                deadline,
-                label: if scan_pulse {
-                    "V9 active Reveal Scan area"
-                } else {
-                    "V3 bounded combat cue effect"
-                },
-            },
-            &catalog,
-            &primitives,
-            &materials,
-        ));
     }
 }
 
 #[allow(
     clippy::too_many_arguments,
     clippy::needless_pass_by_value,
-    reason = "the focused Bevy presentation system reads bounded cue, map, palette, settings, and effect state"
+    reason = "the renderer adapter resolves one bounded request batch against retained render assets"
 )]
-pub(in super::super) fn consume_world_object_cues(
-    received: Option<ResMut<crate::map::ReceivedWorldObjectCues>>,
+pub(in super::super) fn resolve_vfx_requests(
+    mut requests: MessageReader<VfxRequest>,
     mut pending_effects: MessageWriter<PendingCombatEffect>,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
-    catalog: Res<VfxCatalog>,
+    registry: Res<VfxRegistry>,
     settings: Option<Res<ClientShellSettings>>,
-    map_states: Query<&crate::map::MapDynamicState, With<crate::map::MapRoot>>,
 ) {
-    let Some(mut received) = received else {
-        return;
-    };
-    let Ok(map_state) = map_states.single() else {
-        received.0.clear();
-        return;
-    };
     let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
-    for cue in received.0.drain(..) {
-        if cue.target().generation() != map_state.generation_id() {
+    let ordered = ordered_vfx_requests(requests.read().copied());
+    for request in &ordered {
+        let Some(profile) = registry.resolve(request, reduced) else {
             continue;
-        }
-        let (position, authoritative_radius, exploded) = match cue {
-            crate::map::WorldObjectCue::Damaged { position, .. } => {
-                (position.as_vec2(), None, false)
-            }
-            crate::map::WorldObjectCue::Exploded {
-                position,
-                radius_world_units,
-                ..
-            } => (
-                position.as_vec2(),
-                Some(f32::from(radius_world_units)),
-                true,
-            ),
         };
-        pending_effects.write(catalog_effect(
-            CatalogEffectRequest {
-                family: if exploded {
-                    VfxCueFamily::WorldObjectExploded
-                } else {
-                    VfxCueFamily::WorldObjectDamaged
-                },
-                reduced,
-                position,
-                authoritative_radius,
-                deadline: None,
-                label: if exploded {
-                    "V10 authoritative oil-barrel blast"
-                } else {
-                    "V10 oil-barrel damage response"
-                },
-            },
-            &catalog,
-            &primitives,
-            &materials,
-        ));
+        pending_effects.write(resolved_effect(request, profile, &primitives, &materials));
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    clippy::needless_pass_by_value,
-    reason = "the pickup cue presenter owns bounded green open, heal, and expiry feedback"
-)]
-pub(in super::super) fn consume_pickup_cues(
-    received: Option<ResMut<crate::map::ReceivedPickupCues>>,
-    mut pending_effects: MessageWriter<PendingCombatEffect>,
-    primitives: Res<Primitive3dAssets>,
-    materials: Res<Material3dAssets>,
-    catalog: Res<VfxCatalog>,
-    settings: Option<Res<ClientShellSettings>>,
-    map_states: Query<&crate::map::MapDynamicState, With<crate::map::MapRoot>>,
-) {
-    let Some(mut received) = received else { return };
-    let Ok(map_state) = map_states.single() else {
-        received.0.clear();
-        return;
-    };
-    let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
-    for cue in received.0.drain(..) {
-        let (identity, position, family, label) = match cue {
-            crate::map::PickupCue::Spawned {
-                identity, position, ..
-            } => (
-                identity,
-                position.as_vec2(),
-                VfxCueFamily::PickupSpawned,
-                "V10 chest restoration drop",
-            ),
-            crate::map::PickupCue::Collected {
-                identity, position, ..
-            } => (
-                identity,
-                position.as_vec2(),
-                VfxCueFamily::PickupCollected,
-                "V10 restoration collected",
-            ),
-            crate::map::PickupCue::Expired {
-                identity, position, ..
-            } => (
-                identity,
-                position.as_vec2(),
-                VfxCueFamily::PickupExpired,
-                "V10 restoration expired",
-            ),
-        };
-        if identity.generation != map_state.generation_id() {
-            continue;
-        }
-        pending_effects.write(catalog_effect(
-            CatalogEffectRequest {
-                family,
-                reduced,
-                position,
-                authoritative_radius: None,
-                deadline: None,
-                label,
-            },
-            &catalog,
-            &primitives,
-            &materials,
-        ));
-    }
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    clippy::needless_pass_by_value,
-    reason = "the focused presentation system validates and materializes bounded objective cues"
-)]
-pub(in super::super) fn consume_heist_objective_cues(
-    mut received: MessageReader<crate::matchplay::ReceivedHeistObjectiveCue>,
-    mut pending_effects: MessageWriter<PendingCombatEffect>,
-    readiness: Res<hud::ClientHeistReadiness>,
-    matches: Query<&MatchState, With<MatchRoot>>,
-    safes: Query<&crate::map::DamageableTargetIdentity, With<crate::matchplay::HeistSafe>>,
-    primitives: Res<Primitive3dAssets>,
-    materials: Res<Material3dAssets>,
-    catalog: Res<VfxCatalog>,
-    settings: Option<Res<ClientShellSettings>>,
-) {
-    let ready = matches!(*readiness, hud::ClientHeistReadiness::Ready);
-    let match_id = matches.single().ok().map(|state| state.match_id);
-    let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
-    for crate::matchplay::ReceivedHeistObjectiveCue(cue) in received.read() {
-        if !ready
-            || !matches!(
-                cue.target,
-                crate::map::DamageableTargetIdentity::HeistSafe {
-                    match_id: cue_match,
-                    ..
-                } if Some(cue_match) == match_id
-            )
-            || !safes.iter().any(|identity| *identity == cue.target)
-        {
-            continue;
-        }
-        let family = match cue.kind {
-            crate::matchplay::HeistObjectiveCueKind::Damaged => VfxCueFamily::HeistDamaged,
-            crate::matchplay::HeistObjectiveCueKind::Critical => VfxCueFamily::HeistCritical,
-            crate::matchplay::HeistObjectiveCueKind::Destroyed => VfxCueFamily::HeistDestroyed,
-        };
-        pending_effects.write(catalog_effect(
-            CatalogEffectRequest {
-                family,
-                reduced,
-                position: cue.position.as_vec2(),
-                authoritative_radius: None,
-                deadline: None,
-                label: match cue.kind {
-                    crate::matchplay::HeistObjectiveCueKind::Damaged => "Heist safe hit cue",
-                    crate::matchplay::HeistObjectiveCueKind::Critical => "Heist safe critical cue",
-                    crate::matchplay::HeistObjectiveCueKind::Destroyed => {
-                        "Heist safe destroyed cue"
-                    }
-                },
-            },
-            &catalog,
-            &primitives,
-            &materials,
-        ));
-    }
+fn ordered_vfx_requests(requests: impl IntoIterator<Item = VfxRequest>) -> Vec<VfxRequest> {
+    let mut ordered = requests.into_iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|request| (request.order, request.key));
+    ordered
 }
 
 pub(in super::super) fn materialize_combat_effects(
@@ -458,69 +247,6 @@ fn reveal_ring_remaining_duration(
         .saturating_add(crate::timing::SIMULATION_TICK.saturating_mul(subsecond_ticks))
 }
 
-fn cue_effect(cue: &crate::combat::CombatCue) -> Option<(VfxCueFamily, Vec2, Option<f32>)> {
-    use crate::combat::CombatCue as C;
-    match cue {
-        C::AttackAccepted { position, .. } | C::SentryFired { position, .. } => {
-            Some((VfxCueFamily::CombatMuzzle, position.as_vec2(), None))
-        }
-        C::DeliveryImpact { position, .. }
-        | C::LobLanded { position, .. }
-        | C::MeleeContact { position, .. }
-        | C::DeployableRemoved { position, .. } => {
-            Some((VfxCueFamily::CombatImpact, position.as_vec2(), None))
-        }
-        C::DamageApplied { position, .. }
-        | C::EffectApplied { position, .. }
-        | C::FighterDefeated { position, .. } => {
-            Some((VfxCueFamily::CombatDamage, position.as_vec2(), None))
-        }
-        C::FighterReset { position, .. } => {
-            Some((VfxCueFamily::CombatReset, position.as_vec2(), None))
-        }
-        C::RevealScanActivated {
-            center,
-            radius_milliunits,
-            ..
-        }
-        | C::ElementalFieldActivated {
-            center,
-            radius_milliunits,
-            ..
-        } => Some((
-            if matches!(cue, C::RevealScanActivated { .. }) {
-                VfxCueFamily::RevealScan
-            } else {
-                VfxCueFamily::ElementalField
-            },
-            center.as_vec2(),
-            Some(crate::builds::world_units_from_milliunits(
-                *radius_milliunits,
-            )?),
-        )),
-        C::DemolitionStrikeActivated {
-            center,
-            radius_milliunits,
-            ..
-        } => Some((
-            VfxCueFamily::DemolitionStrike,
-            center.as_vec2(),
-            Some(crate::builds::world_units_from_milliunits(
-                *radius_milliunits,
-            )?),
-        )),
-        C::Muzzle { .. }
-        | C::ConeSprayPulse { .. }
-        | C::Impact { .. }
-        | C::Damage { .. }
-        | C::Defeat { .. }
-        | C::Reset { .. }
-        | C::SelfCloakActivated { .. }
-        | C::SelfCloakEnded { .. }
-        | C::ForcedRevealApplied { .. } => None,
-    }
-}
-
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Time is a Bevy system resource parameter"
@@ -547,6 +273,46 @@ pub(in super::super) fn cleanup_combat_effects(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::vfx::{
+        COMBAT_IMPACT_VFX, COMBAT_MUZZLE_VFX, COMBAT_RESET_VFX, COMBAT_VFX_PRODUCER_RANK,
+        CombatVfxProducerPlugin, ELEMENTAL_FIELD_VFX, HEIST_DAMAGED_VFX, HEIST_VFX_PRODUCER_RANK,
+        HeistVfxProducerPlugin, PICKUP_COLLECTED_VFX, PICKUP_VFX_PRODUCER_RANK,
+        PickupVfxProducerPlugin, REVEAL_SCAN_VFX, VfxDeadline, VfxRegistryPlugin,
+        VfxRequestCapabilities, VfxRequestKey, VfxRequestOrder, VfxRequestRegistration,
+        WORLD_OBJECT_DAMAGED_VFX, WORLD_OBJECT_VFX_PRODUCER_RANK, WorldObjectVfxProducerPlugin,
+    };
+
+    fn registry() -> VfxRegistry {
+        let mut app = App::new();
+        app.add_plugins(VfxRegistryPlugin).add_plugins((
+            CombatVfxProducerPlugin,
+            WorldObjectVfxProducerPlugin,
+            PickupVfxProducerPlugin,
+            HeistVfxProducerPlugin,
+        ));
+        crate::test_app::finalize(&mut app);
+        app.world().resource::<VfxRegistry>().clone()
+    }
+
+    fn profile(
+        registry: &VfxRegistry,
+        key: VfxRequestKey,
+        reduced: bool,
+        radius: Option<f32>,
+        deadline: Option<VfxDeadline>,
+    ) -> VfxProfile {
+        let request = VfxRequest::try_new(
+            key,
+            VfxRequestOrder::new(registry.producer_rank(key).unwrap(), 1),
+            Vec2::ZERO,
+            radius,
+            deadline,
+            "renderer profile test",
+        )
+        .unwrap();
+        registry.resolve(&request, reduced).unwrap().clone()
+    }
+
     fn pending_effect(label: &'static str, lifetime: Duration) -> PendingCombatEffect {
         PendingCombatEffect {
             lifetime,
@@ -632,6 +398,112 @@ mod tests {
     }
 
     #[test]
+    fn request_ordering_preserves_producer_rank_then_event_fifo() {
+        let request = |key, rank, event_id, label| {
+            VfxRequest::try_new(
+                key,
+                VfxRequestOrder::new(rank, event_id),
+                Vec2::ZERO,
+                None,
+                None,
+                label,
+            )
+            .unwrap()
+        };
+        let ordered = ordered_vfx_requests([
+            request(HEIST_DAMAGED_VFX, HEIST_VFX_PRODUCER_RANK, 2, "heist"),
+            request(
+                COMBAT_IMPACT_VFX,
+                COMBAT_VFX_PRODUCER_RANK,
+                9,
+                "combat impact",
+            ),
+            request(
+                WORLD_OBJECT_DAMAGED_VFX,
+                WORLD_OBJECT_VFX_PRODUCER_RANK,
+                5,
+                "world object",
+            ),
+            request(
+                COMBAT_MUZZLE_VFX,
+                COMBAT_VFX_PRODUCER_RANK,
+                3,
+                "combat muzzle",
+            ),
+            request(PICKUP_COLLECTED_VFX, PICKUP_VFX_PRODUCER_RANK, 1, "pickup"),
+        ]);
+
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|request| (request.key, request.order.event_id))
+                .collect::<Vec<_>>(),
+            [
+                (COMBAT_MUZZLE_VFX, 3),
+                (COMBAT_IMPACT_VFX, 9),
+                (WORLD_OBJECT_DAMAGED_VFX, 5),
+                (PICKUP_COLLECTED_VFX, 1),
+                (HEIST_DAMAGED_VFX, 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn synthetic_request_mapping_materializes_through_existing_renderer_primitive() {
+        const SYNTHETIC: VfxRequestKey = VfxRequestKey::new("synthetic.spark");
+        const SYNTHETIC_RANK: u16 = 900;
+        let registry = registry()
+            .with_test_mapping(
+                VfxRequestRegistration::new(
+                    SYNTHETIC,
+                    SYNTHETIC_RANK,
+                    VfxRequestCapabilities::NONE,
+                ),
+                "impact",
+            )
+            .unwrap();
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<crate::builds::BuildCatalogResource>()
+            .insert_resource(registry)
+            .add_message::<VfxRequest>()
+            .add_message::<PendingCombatEffect>()
+            .add_systems(Startup, setup_3d_foundation)
+            .add_systems(
+                Update,
+                (resolve_vfx_requests, materialize_combat_effects).chain(),
+            );
+        app.world_mut().write_message(
+            VfxRequest::try_new(
+                SYNTHETIC,
+                VfxRequestOrder::new(SYNTHETIC_RANK, 1),
+                Vec2::new(10.0, 20.0),
+                None,
+                None,
+                "synthetic renderer extension",
+            )
+            .unwrap(),
+        );
+
+        app.update();
+
+        let sphere = app
+            .world()
+            .resource::<Primitive3dAssets>()
+            .effect_sphere
+            .clone();
+        let world = app.world_mut();
+        let mut effects = world.query::<(&CombatEffect3d, &Name, &Mesh3d, &Transform)>();
+        let (effect, name, mesh, transform) = effects.single(world).unwrap();
+        assert_eq!(effect.profile_id, "impact");
+        assert_eq!(name.as_str(), "synthetic renderer extension");
+        assert_eq!(mesh.0, sphere);
+        assert_eq!(transform.translation, Vec3::new(10.0, 6.3, -20.0));
+        assert_eq!(transform.scale, Vec3::splat(14.0));
+    }
+
+    #[test]
     fn effect_allocation_enforces_the_catalog_profile_cap() {
         let mut app = effect_allocation_app();
         for label in ["first", "second", "third"] {
@@ -661,9 +533,9 @@ mod tests {
 
     #[test]
     fn reduced_effect_duration_survives_central_allocation() {
-        let catalog = VfxCatalog::embedded().unwrap();
-        let normal = catalog.resolve(VfxCueFamily::CombatReset, false);
-        let reduced = catalog.resolve(VfxCueFamily::CombatReset, true);
+        let registry = registry();
+        let normal = profile(&registry, COMBAT_RESET_VFX, false, None, None);
+        let reduced = profile(&registry, COMBAT_RESET_VFX, true, None, None);
         let VfxLifetime::Millis(normal) = normal.lifetime else {
             panic!("reset VFX uses a fixed lifetime")
         };
@@ -685,14 +557,14 @@ mod tests {
 
     #[test]
     fn reduced_sphere_scale_preserves_the_semantic_center_height() {
-        let catalog = VfxCatalog::embedded().unwrap();
+        let registry = registry();
         let normal = effect_transform(
-            catalog.resolve(VfxCueFamily::CombatMuzzle, false),
+            &profile(&registry, COMBAT_MUZZLE_VFX, false, None, None),
             Vec2::new(10.0, 20.0),
             None,
         );
         let reduced = effect_transform(
-            catalog.resolve(VfxCueFamily::CombatMuzzle, true),
+            &profile(&registry, COMBAT_MUZZLE_VFX, true, None, None),
             Vec2::new(10.0, 20.0),
             None,
         );
@@ -704,9 +576,15 @@ mod tests {
 
     #[test]
     fn renderer_family_owns_ground_ring_orientation_and_placement() {
-        let catalog = VfxCatalog::embedded().unwrap();
-        let profile = catalog.resolve(VfxCueFamily::RevealScan, false);
-        let ring = effect_transform(profile, Vec2::new(10.0, 20.0), Some(5.2));
+        let registry = registry();
+        let profile = profile(
+            &registry,
+            REVEAL_SCAN_VFX,
+            false,
+            Some(5.2),
+            Some(VfxDeadline::new(1, 2, Some(1))),
+        );
+        let ring = effect_transform(&profile, Vec2::new(10.0, 20.0), Some(5.2));
 
         assert_eq!(
             ring.translation,
@@ -721,9 +599,9 @@ mod tests {
 
     #[test]
     fn authored_fixed_and_authoritative_radius_geometry_reaches_runtime_transform() {
-        let catalog = VfxCatalog::embedded().unwrap();
+        let registry = registry();
         let fixed = effect_transform(
-            catalog.resolve(VfxCueFamily::WorldObjectDamaged, true),
+            &profile(&registry, WORLD_OBJECT_DAMAGED_VFX, true, None, None),
             Vec2::ZERO,
             None,
         );
@@ -732,7 +610,7 @@ mod tests {
 
         let radius = 20.0;
         let area = effect_transform(
-            catalog.resolve(VfxCueFamily::ElementalField, true),
+            &profile(&registry, ELEMENTAL_FIELD_VFX, true, Some(radius), None),
             Vec2::ZERO,
             Some(radius),
         );

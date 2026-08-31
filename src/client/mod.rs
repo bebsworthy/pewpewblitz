@@ -72,6 +72,7 @@ mod session;
 mod settings;
 mod shell;
 mod targeting;
+pub(crate) mod vfx;
 pub(crate) use assets::ClientAssetHandles;
 pub use flow::{
     CancelMatchStartConfirmation, ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError,

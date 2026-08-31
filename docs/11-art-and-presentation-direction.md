@@ -262,14 +262,25 @@ The asset boundary has four distinct sources:
 | `assets/catalogs/` | Client-owned paths, transforms, material values, theme profiles, and degradation mappings |
 | `content/` | Stable server/client-neutral gameplay, map-asset, gameplay-profile, and theme identities |
 
-Transient VFX and one-shot audio use strict client-only schema-2 catalogs. Every registered cue
-family appears exactly once; a missing family, duplicate mapping, unknown asset/profile reference,
-or unsafe numeric value rejects the embedded catalog instead of silently selecting a default.
-`assets/catalogs/vfx.ron` owns the supported renderer/material key, complete fixed-world or
-authoritative-radius scale policy, anchor height/offset, lifetime, concurrency cap, fallback, and
-reduced-effects profile. Authoritative radii still arrive from replicated gameplay facts: the
-catalog may scale or anchor their presentation but never replaces their gameplay geometry.
+Transient VFX uses a strict client-only schema-3 catalog and a sealed request registry. Feature
+plugins translate their owned gameplay facts into validated semantic request keys such as
+`combat.muzzle`, `world-object.explosion`, or `heist.critical`; these producers do not select
+meshes, materials, renderer families, reduced-effects policy, or resolved lifetimes. During plugin
+finalization the registry requires exact agreement between bounded producer registrations and
+authored request mappings, including authoritative-radius and deadline capabilities. Unknown,
+duplicate, missing, extra, or incompatible requests fail closed. Stable producer ranks plus event
+identities preserve deterministic cross-feature effect ordering without a central cue-family enum.
 
+`assets/catalogs/vfx.ron` maps semantic request keys to profiles and owns the supported
+renderer/material key, complete fixed-world or authoritative-radius scale policy, anchor
+height/offset, lifetime, concurrency cap, fallback, and reduced-effects profile. Adding semantic
+VFX with existing renderer primitives requires a feature producer registration and authored
+mapping, not renderer dispatch changes. Adding a genuinely new concrete primitive or material
+remains an intentional typed renderer extension. Authoritative radii still arrive from replicated
+gameplay facts: the catalog may scale or anchor their presentation but never replaces their
+gameplay geometry.
+
+One-shot audio retains its strict client-only schema-2 catalog.
 `assets/catalogs/audio_profiles.ron` maps semantic cue families to stable IDs from
 `assets/manifest.ron`, which remains the one owner of shipped audio paths and provenance. Audio
 profiles own speed, volume, concurrency, and unavailable-asset fallback. One-shot playback that

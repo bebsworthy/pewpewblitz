@@ -265,6 +265,10 @@ fn configure_world_presentation_schedule(app: &mut App) {
             .chain()
             .after(CombatClientSet::Sync),
     );
+    app.configure_sets(
+        Update,
+        vfx::VfxRequestSet.in_set(WorldPresentationSet::ConsumeCues),
+    );
 }
 
 impl Plugin for WorldPresentationPlugin {
@@ -288,10 +292,13 @@ impl Plugin for WorldPresentationPlugin {
             app.add_plugins(diagnostics::RenderMeasurementPlugin(config));
         }
         configure_world_presentation_schedule(app);
+        app.add_plugins(vfx::VfxRegistryPlugin).add_plugins((
+            vfx::CombatVfxProducerPlugin,
+            vfx::WorldObjectVfxProducerPlugin,
+            vfx::PickupVfxProducerPlugin,
+            vfx::HeistVfxProducerPlugin,
+        ));
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
-            .insert_resource(
-                combat::VfxCatalog::embedded().expect("embedded client VFX catalog must be valid"),
-            )
             .add_message::<combat::PendingCombatEffect>()
             .init_resource::<combat::ConcealedMaterialVariants>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
@@ -345,10 +352,8 @@ impl Plugin for WorldPresentationPlugin {
             .add_systems(
                 Update,
                 (
-                    combat::consume_combat_cues,
-                    combat::consume_world_object_cues,
-                    combat::consume_pickup_cues,
-                    combat::consume_heist_objective_cues,
+                    combat::animate_attack_acceptance,
+                    combat::resolve_vfx_requests.after(vfx::VfxRequestSet),
                     combat::materialize_combat_effects,
                 )
                     .chain()

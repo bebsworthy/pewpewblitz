@@ -7,14 +7,12 @@ mod effects;
 mod entities;
 mod fighter_feedback;
 mod fighter_ui;
-mod vfx_catalog;
 
 pub(super) use aim_preview::{reconcile_aim_preview_visuals, update_aim_preview};
 pub(super) use cone_spray::{reconcile_cone_spray_visuals, update_cone_spray_visuals};
 pub(super) use effects::{
-    CombatEffect3d, PendingCombatEffect, cleanup_combat_effects, consume_combat_cues,
-    consume_heist_objective_cues, consume_pickup_cues, consume_world_object_cues,
-    materialize_combat_effects,
+    CombatEffect3d, PendingCombatEffect, animate_attack_acceptance, cleanup_combat_effects,
+    materialize_combat_effects, resolve_vfx_requests,
 };
 pub(super) use entities::{
     reconcile_concealment_field_visuals, reconcile_elemental_field_visuals,
@@ -31,8 +29,6 @@ pub(super) use fighter_ui::{
     prepare_cold_pie_assets, project_fighter_overhead_ui, reconcile_fighter_overheads,
     update_fighter_overhead_state,
 };
-pub(super) use vfx_catalog::VfxCatalog;
-
 #[cfg(test)]
 mod tests {
     use super::super::*;

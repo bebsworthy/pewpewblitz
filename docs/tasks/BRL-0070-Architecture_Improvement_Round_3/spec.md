@@ -264,3 +264,9 @@ Completed the contributory gameplay-content compatibility phase. Seven shared co
 ## BRL-0081 phase completion
 
 Completed the process-local mode registration and installation lifecycle. Wipeout, Hot Zone, and Heist now own registration metadata, operator-rule resolution, and authoritative installation; a bounded Bevy registry seals deterministically during plugin finalization, while pure pre-App consumers use the same mode-owned constants. Synthetic local registration proves extension without inventing routed identity, and the stable protocol/routing surface remains intentionally closed. Exact catalog digest, rejection precedence, map topology, role isolation, all focused suites, `just check`, `just lint`, all 97 network cases, and all 12 performance gates passed. Child BRL-0081 is ready to close; coordinator/module decomposition is the next delivery-sequence phase.
+
+## Phase completion: BRL-0082 VFX request boundary
+
+BRL-0082 completed the next architecture-improvement phase. Client gameplay/domain systems now emit registered stable-key VFX requests, while the generic renderer exclusively owns authored profile resolution and concrete Bevy materialization. The closed `VfxCueFamily` inventory was removed, exact presentation values and authority/protocol boundaries were preserved, final automated/native evidence passed, and independent review corrections were incorporated.
+
+The next planned child is the separate audio request/playback boundary. Audio will reuse the proven bounded registration and feature-owned producer pattern but remain a sibling implementation because its occurrence deduplication, asset readiness, playback reservations, speed/volume policy, and one-shot lifecycle are not VFX renderer concerns.
