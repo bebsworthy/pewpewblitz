@@ -22,7 +22,9 @@ mod team;
 
 #[cfg(feature = "server")]
 pub(crate) use model::PracticeBotController;
-pub(crate) use profile::{BotCatalog, BotCatalogResource, BotContentPlugin};
+#[cfg(test)]
+pub(crate) use profile::BotCatalogResource;
+pub(crate) use profile::BotContentPlugin;
 
 #[cfg(feature = "server")]
 pub(crate) fn install_controller_systems(app: &mut bevy::prelude::App) {

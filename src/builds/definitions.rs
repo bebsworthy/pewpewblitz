@@ -1084,8 +1084,27 @@ impl FromWorld for BuildCatalogResource {
 
 pub struct BuildContentPlugin;
 
+const FINGERPRINT_DOMAIN_SCHEMA_VERSION: u16 = 1;
+
 impl Plugin for BuildContentPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<BuildCatalogResource>();
+        crate::content::register_gameplay_fingerprint_contributor(
+            app,
+            crate::content::BUILDS_FINGERPRINT_DOMAIN,
+            FINGERPRINT_DOMAIN_SCHEMA_VERSION,
+            build_fingerprint_material,
+        );
     }
+}
+
+fn build_fingerprint_material(world: &bevy::prelude::World) -> Result<Vec<u8>, String> {
+    let builds = world
+        .get_resource::<BuildCatalogResource>()
+        .ok_or_else(|| "build catalog resource is not installed".to_owned())?;
+    let weapons = world
+        .get_resource::<crate::combat::WeaponCatalogResource>()
+        .ok_or_else(|| "weapon catalog resource is not installed".to_owned())?;
+    builds.0.validate_weapon_references(&weapons.0)?;
+    builds.0.canonical_fingerprint_material()
 }

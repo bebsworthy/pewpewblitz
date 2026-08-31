@@ -295,8 +295,24 @@ impl FromWorld for BotCatalogResource {
 
 pub(crate) struct BotContentPlugin;
 
+const FINGERPRINT_DOMAIN_SCHEMA_VERSION: u16 = 1;
+
 impl Plugin for BotContentPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<BotCatalogResource>();
+        crate::content::register_gameplay_fingerprint_contributor(
+            app,
+            crate::content::BOTS_FINGERPRINT_DOMAIN,
+            FINGERPRINT_DOMAIN_SCHEMA_VERSION,
+            bot_fingerprint_material,
+        );
     }
+}
+
+fn bot_fingerprint_material(world: &World) -> Result<Vec<u8>, String> {
+    world
+        .get_resource::<BotCatalogResource>()
+        .ok_or_else(|| "Practice bot catalog resource is not installed".to_owned())?
+        .0
+        .canonical_fingerprint_material()
 }

@@ -133,6 +133,25 @@ or undecodable input is closed and classified as an incompatible handshake. All 
 collections and strings remain independently bounded at decode time even after compatibility has
 succeeded.
 
+The gameplay-content fingerprint is assembled from a bounded registry populated by shared,
+headless-safe content plugins. Each gameplay domain owns a stable textual domain ID, a domain
+schema version, and a read-only projection from its live Bevy resource to canonical bytes. The
+global envelope sorts contributions by domain ID and hashes the ID, schema version, and material,
+so plugin installation order cannot change compatibility and a new shared catalog can contribute
+without editing a central catalog tuple. Duplicate IDs, missing required built-in domains,
+capacity overflow, invalid cross-catalog references, and unavailable resources fail closed. The
+routed supervisor, lobby worker, match worker, direct server, client, and Startup finalizer all
+evaluate the same registrations; pre-Startup resource overrides therefore cannot diverge from the
+identity advertised by production roles.
+
+Only authored gameplay definitions required by both sides may contribute. Client-only visual and
+audio catalogs, server-only operator configuration, mutable ECS runtime state, and Balance Lab
+runtime tuning remain outside this envelope. Domain contributors do not create independent
+compatibility negotiation: the application still exposes one current gameplay-content fingerprint
+and one global mismatch rejection boundary. Content envelope format 27 introduced this stable-ID,
+sorted contribution framing without changing the handshake or `GameplayContentFingerprint` wire
+shape.
+
 Brawler does not maintain parallel application-message decoders, fallback hellos, or compatibility
 shims for unreleased schemas. A future need for rolling deployments, public-server/client skew, or a
 released migration window must return to architecture review and define the supported-version

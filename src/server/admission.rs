@@ -6,12 +6,13 @@
 #[cfg(test)]
 use super::build_app_with_config;
 use super::build_match_worker_graph;
+#[cfg(test)]
+use crate::builds::BuildCatalogResource;
 use crate::{
-    builds::{BuildCatalog, BuildCatalogResource},
-    combat::WeaponCatalogResource,
+    builds::BuildCatalog,
     config::{GameMode, MatchRulesProfile, ServerNetworkConfig},
-    content::gameplay_content_fingerprint,
-    map::{MapCatalogResource, MapContentCatalog, MapInstanceId, MapPresetId, ServerMapSelection},
+    content::gameplay_content_fingerprint_from_world,
+    map::{MapContentCatalog, MapInstanceId, MapPresetId, ServerMapSelection},
     protocol::{MatchHello, MatchJoinOutcome, MatchJoinRejection, protocol_fingerprint},
 };
 #[cfg(test)]
@@ -106,12 +107,8 @@ pub fn routing_identity() -> Result<RoutingIdentity, MatchWorkerManifestError> {
             crate::protocol::ProtocolPlugin,
         ));
     let protocol_registry_fingerprint = protocol_fingerprint(app.world_mut());
-    let content_fingerprint = gameplay_content_fingerprint(
-        &app.world().resource::<WeaponCatalogResource>().0,
-        &app.world().resource::<MapCatalogResource>().0,
-        &app.world().resource::<BuildCatalogResource>().0,
-    )
-    .map_err(MatchWorkerManifestError::Configuration)?;
+    let content_fingerprint = gameplay_content_fingerprint_from_world(app.world())
+        .map_err(MatchWorkerManifestError::Configuration)?;
     Ok(RoutingIdentity {
         network_protocol: crate::protocol::NETWORK_PROTOCOL_ID,
         protocol_registry_fingerprint,
@@ -579,12 +576,8 @@ fn validate_runtime_identity(
     if protocol_registry_fingerprint != protocol {
         return Err(MatchWorkerManifestError::ProtocolRegistryMismatch);
     }
-    let content = gameplay_content_fingerprint(
-        &app.world().resource::<WeaponCatalogResource>().0,
-        &app.world().resource::<MapCatalogResource>().0,
-        &app.world().resource::<BuildCatalogResource>().0,
-    )
-    .map_err(MatchWorkerManifestError::Configuration)?;
+    let content = gameplay_content_fingerprint_from_world(app.world())
+        .map_err(MatchWorkerManifestError::Configuration)?;
     if content_fingerprint != content.0 {
         return Err(MatchWorkerManifestError::ContentMismatch);
     }
@@ -1173,12 +1166,7 @@ mod tests {
         };
         let mut direct = build_app_with_config(config.clone());
         let protocol = protocol_fingerprint(direct.world_mut());
-        let content = gameplay_content_fingerprint(
-            &direct.world().resource::<WeaponCatalogResource>().0,
-            &direct.world().resource::<MapCatalogResource>().0,
-            &direct.world().resource::<BuildCatalogResource>().0,
-        )
-        .unwrap();
+        let content = gameplay_content_fingerprint_from_world(direct.world()).unwrap();
         let mut value = manifest();
         // MatchId is a routed u128 identity; the worker must install it without narrowing to u64.
         value.match_id = MatchId::new(u128::from(u64::MAX) + 1).unwrap();
@@ -1248,12 +1236,7 @@ mod tests {
         };
         let mut direct = build_app_with_config(config.clone());
         let protocol = protocol_fingerprint(direct.world_mut());
-        let content = gameplay_content_fingerprint(
-            &direct.world().resource::<WeaponCatalogResource>().0,
-            &direct.world().resource::<MapCatalogResource>().0,
-            &direct.world().resource::<BuildCatalogResource>().0,
-        )
-        .unwrap();
+        let content = gameplay_content_fingerprint_from_world(direct.world()).unwrap();
         let mut value = manifest();
         let template = value.participants[0];
         value.mode = expected_routing_mode(game_mode);
@@ -1453,12 +1436,7 @@ mod tests {
             ..default()
         });
         let protocol = protocol_fingerprint(direct.world_mut());
-        let content = gameplay_content_fingerprint(
-            &direct.world().resource::<WeaponCatalogResource>().0,
-            &direct.world().resource::<MapCatalogResource>().0,
-            &direct.world().resource::<BuildCatalogResource>().0,
-        )
-        .unwrap();
+        let content = gameplay_content_fingerprint_from_world(direct.world()).unwrap();
         assert_eq!(
             identity.network_protocol,
             crate::protocol::NETWORK_PROTOCOL_ID
@@ -1496,12 +1474,7 @@ mod tests {
         };
         let mut identity_app = build_app_with_config(config.clone());
         let protocol = protocol_fingerprint(identity_app.world_mut());
-        let content = gameplay_content_fingerprint(
-            &identity_app.world().resource::<WeaponCatalogResource>().0,
-            &identity_app.world().resource::<MapCatalogResource>().0,
-            &identity_app.world().resource::<BuildCatalogResource>().0,
-        )
-        .unwrap();
+        let content = gameplay_content_fingerprint_from_world(identity_app.world()).unwrap();
         let mut lobby = LobbyManifest {
             common: ManifestCommon {
                 manifest_version: 2,

@@ -130,6 +130,47 @@ pub use telemetry::{
     telemetry_cue_keys,
 };
 
+/// Installs the shared, headless-safe combat catalogs and their compatibility contributions.
+pub(crate) struct CombatContentPlugin;
+
+const WEAPON_FINGERPRINT_DOMAIN_SCHEMA_VERSION: u16 = 1;
+const CONDITION_FINGERPRINT_DOMAIN_SCHEMA_VERSION: u16 = 1;
+
+impl Plugin for CombatContentPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<WeaponCatalogResource>()
+            .init_resource::<CombatConditionRulesResource>();
+        crate::content::register_gameplay_fingerprint_contributor(
+            app,
+            crate::content::COMBAT_WEAPONS_FINGERPRINT_DOMAIN,
+            WEAPON_FINGERPRINT_DOMAIN_SCHEMA_VERSION,
+            weapon_fingerprint_material,
+        );
+        crate::content::register_gameplay_fingerprint_contributor(
+            app,
+            crate::content::COMBAT_CONDITIONS_FINGERPRINT_DOMAIN,
+            CONDITION_FINGERPRINT_DOMAIN_SCHEMA_VERSION,
+            condition_fingerprint_material,
+        );
+    }
+}
+
+fn weapon_fingerprint_material(world: &World) -> Result<Vec<u8>, String> {
+    world
+        .get_resource::<WeaponCatalogResource>()
+        .ok_or_else(|| "weapon catalog resource is not installed".to_owned())?
+        .0
+        .canonical_fingerprint_material()
+}
+
+fn condition_fingerprint_material(world: &World) -> Result<Vec<u8>, String> {
+    world
+        .get_resource::<CombatConditionRulesResource>()
+        .ok_or_else(|| "combat-condition rules resource is not installed".to_owned())?
+        .0
+        .canonical_fingerprint_material()
+}
+
 #[cfg(feature = "network-test")]
 pub(crate) mod testing {
     pub use super::authority::{TestDummy, TestDummyFixture, TestDummyResetDeadline};

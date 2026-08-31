@@ -514,10 +514,26 @@ impl bevy::prelude::FromWorld for MapCatalogResource {
 /// Installs the one build-embedded, headless-safe map catalog.
 pub struct MapContentPlugin;
 
+const FINGERPRINT_DOMAIN_SCHEMA_VERSION: u16 = 1;
+
 impl Plugin for MapContentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MapCatalogResource>();
+        crate::content::register_gameplay_fingerprint_contributor(
+            app,
+            crate::content::MAP_FINGERPRINT_DOMAIN,
+            FINGERPRINT_DOMAIN_SCHEMA_VERSION,
+            map_fingerprint_material,
+        );
     }
+}
+
+fn map_fingerprint_material(world: &bevy::prelude::World) -> Result<Vec<u8>, String> {
+    world
+        .get_resource::<MapCatalogResource>()
+        .ok_or_else(|| "map catalog resource is not installed".to_owned())?
+        .0
+        .canonical_fingerprint_material()
 }
 
 #[derive(Deserialize)]

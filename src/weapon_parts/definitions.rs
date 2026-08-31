@@ -148,8 +148,24 @@ impl FromWorld for WeaponPartCatalogResource {
 
 pub struct WeaponPartContentPlugin;
 
+const FINGERPRINT_DOMAIN_SCHEMA_VERSION: u16 = 1;
+
 impl Plugin for WeaponPartContentPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<WeaponPartCatalogResource>();
+        crate::content::register_gameplay_fingerprint_contributor(
+            app,
+            crate::content::WEAPON_PARTS_FINGERPRINT_DOMAIN,
+            FINGERPRINT_DOMAIN_SCHEMA_VERSION,
+            weapon_part_fingerprint_material,
+        );
     }
+}
+
+fn weapon_part_fingerprint_material(world: &bevy::prelude::World) -> Result<Vec<u8>, String> {
+    world
+        .get_resource::<WeaponPartCatalogResource>()
+        .ok_or_else(|| "weapon-part catalog resource is not installed".to_owned())?
+        .0
+        .canonical_fingerprint_material()
 }

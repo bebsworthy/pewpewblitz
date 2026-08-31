@@ -60,10 +60,26 @@ impl FromWorld for ConcealmentRulesResource {
 
 pub struct ConcealmentContentPlugin;
 
+const FINGERPRINT_DOMAIN_SCHEMA_VERSION: u16 = 1;
+
 impl Plugin for ConcealmentContentPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<ConcealmentRulesResource>();
+        crate::content::register_gameplay_fingerprint_contributor(
+            app,
+            crate::content::CONCEALMENT_FINGERPRINT_DOMAIN,
+            FINGERPRINT_DOMAIN_SCHEMA_VERSION,
+            concealment_fingerprint_material,
+        );
     }
+}
+
+fn concealment_fingerprint_material(world: &bevy::prelude::World) -> Result<Vec<u8>, String> {
+    world
+        .get_resource::<ConcealmentRulesResource>()
+        .ok_or_else(|| "concealment rules resource is not installed".to_owned())?
+        .0
+        .canonical_fingerprint_material()
 }
 
 #[cfg(test)]
