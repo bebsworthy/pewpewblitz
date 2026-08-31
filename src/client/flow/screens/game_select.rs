@@ -41,6 +41,7 @@ pub(in crate::client::flow) fn spawn_game_type_select(
     mut navigation: ResMut<FlowNavigation>,
     draft: Res<GameTypeSelectionDraft>,
     queue: Res<ClientQueueModel>,
+    modes: Res<crate::modes::ModeRegistry>,
 ) {
     let Some(membership) = memberships.iter().next() else {
         return;
@@ -71,10 +72,10 @@ pub(in crate::client::flow) fn spawn_game_type_select(
                 ));
             }
             for (index, game_type) in membership.game_types.iter().enumerate() {
-                let mode_name =
-                    crate::modes::descriptor_for_definition(game_type.mode_definition_id)
-                        .and_then(|descriptor| descriptor.presentation)
-                        .map_or("Unknown mode", |projection| projection.selection_label);
+                let mode_name = modes
+                    .descriptor_for_definition(game_type.mode_definition_id)
+                    .and_then(|registration| registration.presentation)
+                    .map_or("Unknown mode", |projection| projection.selection_label);
                 let map_names = game_type
                     .map_preset_ids
                     .iter()

@@ -29,6 +29,8 @@ fn headless_client_builder_explicitly_installs_content_gameplay_and_session_plug
 
     assert!(app.is_plugin_added::<GameplayContentPlugin>());
     assert!(app.is_plugin_added::<ProtocolPlugin>());
+    assert!(app.is_plugin_added::<crate::modes::ModeRegistryPlugin>());
+    assert!(app.is_plugin_added::<crate::modes::BuiltInModeRegistrationsPlugin>());
     assert!(app.is_plugin_added::<ClientReplicatedGameplayPlugin>());
     assert!(app.is_plugin_added::<ClientCombatPlugin>());
     assert!(app.is_plugin_added::<crate::map::ClientMapPlugin>());

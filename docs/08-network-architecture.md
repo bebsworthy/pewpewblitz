@@ -97,6 +97,17 @@ networking, and optional presentation as siblings. A protocol or session/transpo
 select gameplay or presentation transitively. The minimum lobby worker opts into shared content,
 protocol, lobby authority, and routed transport without installing match gameplay.
 
+Game-mode composition is process-local and plugin-owned. `ModeRegistryPlugin` opens a bounded
+builder, each mode registration plugin contributes its stable definition, topology, role-specific
+projection, operator-rule callbacks, and authoritative installer, and application finalization
+seals those contributions into an immutable, deterministically ordered registry. The selected
+server mode is installed during application construction so its Bevy plugin receives the complete
+plugin lifecycle; finalization never adds gameplay plugins. Pure pre-`App` validation uses an
+immutable built-in catalog assembled from the same mode-owned registration constants. This permits
+new local-only modes to register without central dispatch edits while keeping routed `GameMode`
+values, protocol enums, and stable IDs intentionally closed: adding a new network-advertised mode
+still requires an explicit protocol/route compatibility migration.
+
 Authored content/rule definitions may be serializable Rust data or Bevy assets/configuration loaded
 into the worlds that need them. Player-authored brawler builds and weapon recipes are separate from
 those definitions, and immutable resolved match loadouts are separate from mutable runtime state.

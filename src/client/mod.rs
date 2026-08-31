@@ -604,6 +604,8 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         tick_duration: crate::timing::SIMULATION_TICK,
     })
     .add_plugins((
+        crate::modes::ModeRegistryPlugin,
+        crate::modes::BuiltInModeRegistrationsPlugin,
         GameplayPlugin,
         GameplayContentPlugin,
         ProtocolPlugin,

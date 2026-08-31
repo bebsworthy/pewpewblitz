@@ -1,13 +1,14 @@
 //! Server-only operator catalog parsing and authoritative gameplay resolution.
 
+#[cfg(test)]
+use crate::lobby::AdvertisedRulesSummary;
 use crate::{
     lobby::{
-        AdvertisedGameType, AdvertisedRulesSummary, CatalogRevision, GameTypeId, MAX_GAME_TYPES,
-        MAX_MAPS_PER_GAME_TYPE, canonical_catalog_bytes, validate_catalog,
-        validate_presentation_name,
+        AdvertisedGameType, CatalogRevision, GameTypeId, MAX_GAME_TYPES, MAX_MAPS_PER_GAME_TYPE,
+        canonical_catalog_bytes, validate_catalog, validate_presentation_name,
     },
     map::{MapDimensionLimits, MapInstanceId, MapPresetId},
-    matchplay::{HeistRules, HotZoneRules, MatchLifecycleRules, WipeoutRules},
+    matchplay::MatchLifecycleRules,
 };
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
@@ -217,20 +218,17 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     }
     .validate()
     .map_err(str::to_string)?;
-    WipeoutRules {
-        target_score: 1,
-        recent_hostile_damage_credit_ticks: mode_policies
+    let operator_policy = crate::modes::ModeOperatorPolicyInput {
+        wipeout_recent_hostile_damage_credit_ticks: mode_policies
             .wipeout
             .recent_hostile_damage_credit_ticks,
+        heist_critical_health_percent: mode_policies.heist.critical_health_percent,
+    };
+    for registration in crate::modes::builtin_mode_catalog().registrations() {
+        registration
+            .validate_operator_policy(operator_policy)
+            .map_err(str::to_string)?;
     }
-    .validate()
-    .map_err(str::to_string)?;
-    HeistRules {
-        safe_maximum_health: 1,
-        critical_health_percent: mode_policies.heist.critical_health_percent,
-    }
-    .validate()
-    .map_err(str::to_string)?;
     let mut advertised = Vec::with_capacity(operator.game_types.len());
     let mut game_rules = BTreeMap::new();
     for entry in operator.game_types {
@@ -273,87 +271,43 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             ));
         }
 
-        let mode = crate::modes::descriptor_for_key(&entry.mode).ok_or_else(|| {
-            format!(
-                "game type {} has an unknown mode or mismatched objective",
-                id.as_str()
-            )
-        })?;
-        let (objective_target, rules_summary) = match mode.mode {
-            crate::config::GameMode::Wipeout
-                if entry.capture_seconds == 0 && entry.safe_health == 0 =>
-            {
-                let target_score = entry.kills_to_win;
-                WipeoutRules {
-                    target_score,
-                    recent_hostile_damage_credit_ticks: mode_policies
-                        .wipeout
-                        .recent_hostile_damage_credit_ticks,
-                }
-                .validate()
-                .map_err(|error| {
-                    format!("game type {} has invalid objective: {error}", id.as_str())
-                })?;
-                (
-                    target_score,
-                    AdvertisedRulesSummary::Wipeout {
-                        target_score,
-                        active_limit_ticks: match_duration_ticks,
-                    },
-                )
-            }
-            crate::config::GameMode::HotZone
-                if entry.kills_to_win == 0 && entry.safe_health == 0 =>
-            {
-                let capture_seconds = entry.capture_seconds;
-                let target_progress_ticks = u16::try_from(seconds_to_ticks(capture_seconds)?)
-                    .map_err(|_| {
-                        format!("game type {} capture duration is too long", id.as_str())
-                    })?;
-                HotZoneRules {
-                    target_progress_ticks,
-                }
-                .validate_with(&entry_lifecycle)
-                .map_err(|error| {
-                    format!("game type {} has invalid objective: {error}", id.as_str())
-                })?;
-                (
-                    target_progress_ticks,
-                    AdvertisedRulesSummary::HotZone {
-                        target_progress_ticks,
-                        active_limit_ticks: match_duration_ticks,
-                    },
-                )
-            }
-            crate::config::GameMode::Heist
-                if entry.kills_to_win == 0
-                    && entry.capture_seconds == 0
-                    && entry.safe_health > 0 =>
-            {
-                let safe_maximum_health = entry.safe_health;
-                HeistRules {
-                    safe_maximum_health,
-                    critical_health_percent: mode_policies.heist.critical_health_percent,
-                }
-                .validate()
-                .map_err(|error| {
-                    format!("game type {} has invalid objective: {error}", id.as_str())
-                })?;
-                (
-                    safe_maximum_health,
-                    AdvertisedRulesSummary::Heist {
-                        safe_maximum_health,
-                        active_limit_ticks: match_duration_ticks,
-                    },
-                )
-            }
-            _ => {
-                return Err(format!(
+        let mode = crate::modes::builtin_mode_catalog()
+            .descriptor_for_key(&entry.mode)
+            .ok_or_else(|| {
+                format!(
                     "game type {} has an unknown mode or mismatched objective",
                     id.as_str()
-                ));
-            }
-        };
+                )
+            })?;
+        let resolved_mode = mode
+            .resolve_operator_rules(crate::modes::ModeRuleResolveInput {
+                kills_to_win: entry.kills_to_win,
+                capture_seconds: entry.capture_seconds,
+                safe_health: entry.safe_health,
+                match_duration_ticks,
+                lifecycle: entry_lifecycle,
+                wipeout_recent_hostile_damage_credit_ticks: mode_policies
+                    .wipeout
+                    .recent_hostile_damage_credit_ticks,
+                heist_critical_health_percent: mode_policies.heist.critical_health_percent,
+            })
+            .map_err(|error| match error {
+                crate::modes::ModeRuleResolutionError::MismatchedObjective => format!(
+                    "game type {} has an unknown mode or mismatched objective",
+                    id.as_str()
+                ),
+                crate::modes::ModeRuleResolutionError::InvalidTiming => {
+                    format!("game type {} has invalid timing", id.as_str())
+                }
+                crate::modes::ModeRuleResolutionError::CaptureDurationTooLong => {
+                    format!("game type {} capture duration is too long", id.as_str())
+                }
+                crate::modes::ModeRuleResolutionError::InvalidObjective(error) => {
+                    format!("game type {} has invalid objective: {error}", id.as_str())
+                }
+            })?;
+        let objective_target = resolved_mode.objective_target;
+        let rules_summary = resolved_mode.rules_summary;
         let mode_definition_id = mode.definition_id;
 
         let mut map_ids = Vec::with_capacity(entry.maps.len());
@@ -647,6 +601,50 @@ mod tests {
         ] {
             assert!(resolve_operator_catalog(invalid.as_bytes()).is_err());
         }
+    }
+
+    #[test]
+    fn mode_owned_policy_validation_preserves_fail_fast_precedence() {
+        let invalid_policy_and_mode = VALID
+            .replace(
+                "recent_hostile_damage_credit_ticks: 300",
+                "recent_hostile_damage_credit_ticks: 0",
+            )
+            .replace("mode: \"wipeout\"", "mode: \"unknown\"");
+        assert_eq!(
+            resolve_operator_catalog(invalid_policy_and_mode.as_bytes()).unwrap_err(),
+            "Wipeout score target and hostile-credit window must be nonzero"
+        );
+
+        let invalid_heist_policy_and_entry = VALID
+            .replace(
+                "critical_health_percent: 25",
+                "critical_health_percent: 100",
+            )
+            .replace("kills_to_win: 10", "kills_to_win: 0");
+        assert_eq!(
+            resolve_operator_catalog(invalid_heist_policy_and_entry.as_bytes()).unwrap_err(),
+            "Heist critical-health percentage must be within 1..=99"
+        );
+    }
+
+    #[test]
+    fn mode_owned_rule_errors_keep_operator_facing_context() {
+        let unknown_mode = VALID.replacen("mode: \"wipeout\"", "mode: \"unknown\"", 1);
+        assert_eq!(
+            resolve_operator_catalog(unknown_mode.as_bytes()).unwrap_err(),
+            "game type wipeout-2v2 has an unknown mode or mismatched objective"
+        );
+
+        let mismatched_objective = VALID.replacen(
+            "capture_seconds: 30",
+            "capture_seconds: 30, kills_to_win: 1",
+            1,
+        );
+        assert_eq!(
+            resolve_operator_catalog(mismatched_objective.as_bytes()).unwrap_err(),
+            "game type hot-zone-2v2 has an unknown mode or mismatched objective"
+        );
     }
 
     #[test]

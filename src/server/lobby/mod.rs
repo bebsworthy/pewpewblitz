@@ -47,7 +47,9 @@ use std::{
 fn routing_mode_for_definition(
     mode: crate::map::ModeDefinitionId,
 ) -> Option<brawler_routing::GameMode> {
-    crate::modes::descriptor_for_definition(mode).map(|descriptor| descriptor.routing_mode)
+    crate::modes::builtin_mode_catalog()
+        .descriptor_for_definition(mode)
+        .map(|registration| registration.server().routing_mode)
 }
 
 /// M01's hard upper bound for authenticated lobby sessions.
@@ -559,13 +561,16 @@ impl LobbyState {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mode = crate::modes::descriptor_for_mode(self.mode).ok_or(CodecError::InvalidValue)?;
+        let mode = crate::modes::builtin_mode_catalog()
+            .descriptor_for_mode(self.mode)
+            .ok_or(CodecError::InvalidValue)?;
+        let server_mode = mode.server();
         let rules =
             resolve_operator_catalog(include_bytes!("../../../config/server/game-types.ron"))
                 .ok()
                 .and_then(|catalog| catalog.first_rules_for_mode(mode.definition_id))
                 .ok_or(CodecError::InvalidValue)?;
-        let map_preset = mode.default_map_preset;
+        let map_preset = server_mode.default_map_preset;
         let map_revision = crate::map::MapContentCatalog::embedded()
             .ok()
             .and_then(|catalog| {
@@ -577,7 +582,7 @@ impl LobbyState {
         let body = AllocateRequestBody {
             request_id,
             lobby_session_id: sessions[0].lobby_session_id,
-            mode: mode.routing_mode,
+            mode: server_mode.routing_mode,
             map_preset: map_preset.0,
             map_revision,
             rules_profile: 1,

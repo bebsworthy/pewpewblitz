@@ -1309,7 +1309,8 @@ fn build_authoritative_app(
         let catalog =
             lobby::resolve_operator_catalog(include_bytes!("../../config/server/game-types.ron"))
                 .expect("embedded production game-type catalog is valid");
-        let mode = crate::modes::descriptor_for_mode(config.game_mode)
+        let mode = crate::modes::builtin_mode_catalog()
+            .descriptor_for_mode(config.game_mode)
             .expect("every configured game mode has a registered descriptor");
         let rules = catalog
             .first_rules_for_mode(mode.definition_id)
@@ -1361,6 +1362,8 @@ fn build_authoritative_app(
         tick_duration: crate::timing::SIMULATION_TICK,
     })
     .add_plugins((
+        crate::modes::ModeRegistryPlugin,
+        crate::modes::BuiltInModeRegistrationsPlugin,
         GameplayPlugin,
         GameplayContentPlugin,
         ProtocolPlugin,
@@ -1378,39 +1381,21 @@ fn build_authoritative_app(
     {
         crate::diagnostics::install_panic_failure_hook(path);
     }
-    install_server_game_mode(&mut app);
+    let (mode, mode_input) = {
+        let config = app.world().resource::<ServerNetworkConfig>();
+        (
+            config.game_mode,
+            crate::modes::ModeInstallInput {
+                profile: config.match_rules_profile,
+                objective_target: config.match_objective_target,
+                wipeout_recent_hostile_damage_credit_ticks: config
+                    .wipeout_recent_hostile_damage_credit_ticks,
+                heist_critical_health_percent: config.heist_critical_health_percent,
+            },
+        )
+    };
+    crate::modes::install_configured_server_mode(&mut app, mode, mode_input);
     app
-}
-
-/// Install the configured mode's rules and mode plugin. The production composition reads the
-/// validated configuration exactly once during app construction; no runtime hot-swap occurs.
-fn install_server_game_mode(app: &mut App) {
-    let mode = app.world().resource::<ServerNetworkConfig>().game_mode;
-    let profile = app
-        .world()
-        .resource::<ServerNetworkConfig>()
-        .match_rules_profile;
-    let objective_target = app
-        .world()
-        .resource::<ServerNetworkConfig>()
-        .match_objective_target;
-    let wipeout_recent_hostile_damage_credit_ticks = app
-        .world()
-        .resource::<ServerNetworkConfig>()
-        .wipeout_recent_hostile_damage_credit_ticks;
-    let heist_critical_health_percent = app
-        .world()
-        .resource::<ServerNetworkConfig>()
-        .heist_critical_health_percent;
-    crate::modes::descriptor_for_mode(mode)
-        .expect("every configured game mode has a registered descriptor")
-        .install_server(
-            app,
-            profile,
-            objective_target,
-            wipeout_recent_hostile_damage_credit_ticks,
-            heist_critical_health_percent,
-        );
 }
 
 /// The required scenario checkpoints for one asserted weapon preset. Public for the

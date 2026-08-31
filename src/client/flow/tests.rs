@@ -57,7 +57,12 @@ fn flow_test_app() -> App {
             "brawler-m03-flow-test-{}-connections.ron",
             std::process::id()
         ))))
+        .add_plugins((
+            crate::modes::ModeRegistryPlugin,
+            crate::modes::BuiltInModeRegistrationsPlugin,
+        ))
         .add_plugins(ClientFlowPlugin);
+    crate::test_app::finalize(&mut app);
     app.update();
     app
 }

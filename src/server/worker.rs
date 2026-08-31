@@ -422,8 +422,9 @@ impl WorkerBootstrap {
 }
 
 fn automatic_transition_game_mode(key: &str) -> Result<GameMode, WorkerBootstrapError> {
-    crate::modes::descriptor_for_key(key)
-        .map(|descriptor| descriptor.mode)
+    crate::modes::builtin_mode_catalog()
+        .descriptor_for_key(key)
+        .and_then(|descriptor| descriptor.configured_mode)
         .ok_or(WorkerBootstrapError::Invalid(
             "invalid automatic transition game mode",
         ))
@@ -1201,19 +1202,21 @@ fn config_from_manifest(
         WorkerManifest::Lobby(manifest) => {
             let catalog = super::lobby::resolve_operator_catalog(&manifest.raw_catalog)
                 .map_err(|_| WorkerBootstrapError::Invalid("invalid lobby game-type catalog"))?;
-            config.game_mode = crate::modes::descriptor_for_definition(
-                catalog
-                    .game_types
-                    .first()
-                    .map(|game_type| game_type.mode_definition_id)
-                    .ok_or(WorkerBootstrapError::Invalid("unsupported lobby game mode"))?,
-            )
-            .map(|descriptor| descriptor.mode)
-            .ok_or(WorkerBootstrapError::Invalid("unsupported lobby game mode"))?;
+            config.game_mode = crate::modes::builtin_mode_catalog()
+                .descriptor_for_definition(
+                    catalog
+                        .game_types
+                        .first()
+                        .map(|game_type| game_type.mode_definition_id)
+                        .ok_or(WorkerBootstrapError::Invalid("unsupported lobby game mode"))?,
+                )
+                .and_then(|descriptor| descriptor.configured_mode)
+                .ok_or(WorkerBootstrapError::Invalid("unsupported lobby game mode"))?;
         }
         WorkerManifest::Match(manifest) => {
-            config.game_mode = crate::modes::descriptor_for_routing_mode(manifest.mode)
-                .map(|descriptor| descriptor.mode)
+            config.game_mode = crate::modes::builtin_mode_catalog()
+                .descriptor_for_routing_mode(manifest.mode)
+                .and_then(|descriptor| descriptor.configured_mode)
                 .ok_or(WorkerBootstrapError::Invalid("unsupported match game mode"))?;
             config.match_rules_profile = match manifest.rules_profile {
                 1 => MatchRulesProfile::Production,

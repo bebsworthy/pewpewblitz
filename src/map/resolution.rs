@@ -62,7 +62,8 @@ pub(super) fn resolve_grid_recipe(
     catalog: &MapContentCatalog,
 ) -> Result<ResolvedMap, String> {
     let default_surface_tag = validate_recipe_identity(recipe, instance_id, catalog)?;
-    let topology = crate::modes::descriptor_for_definition(recipe.mode_definition_id)
+    let topology = crate::modes::builtin_mode_catalog()
+        .descriptor_for_definition(recipe.mode_definition_id)
         .expect("validated map mode descriptor remains registered")
         .topology();
     let mut placements = expand_recipe_placements(recipe)?;
@@ -114,7 +115,9 @@ fn validate_recipe_identity(
         || recipe.recipe_id.0 == 0
         || recipe.revision == 0
         || recipe.recipe_version != MAP_RECIPE_SCHEMA_VERSION
-        || crate::modes::descriptor_for_definition(recipe.mode_definition_id).is_none()
+        || crate::modes::builtin_mode_catalog()
+            .descriptor_for_definition(recipe.mode_definition_id)
+            .is_none()
     {
         return Err("invalid grid map recipe identity or mode".to_string());
     }

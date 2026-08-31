@@ -28,6 +28,8 @@ fn authoritative_server_builder_explicitly_installs_role_plugins() {
 
     assert!(app.is_plugin_added::<GameplayContentPlugin>());
     assert!(app.is_plugin_added::<ProtocolPlugin>());
+    assert!(app.is_plugin_added::<crate::modes::ModeRegistryPlugin>());
+    assert!(app.is_plugin_added::<crate::modes::BuiltInModeRegistrationsPlugin>());
     assert!(app.is_plugin_added::<ServerAuthoritativeGameplayPlugin>());
     assert!(app.is_plugin_added::<AuthoritativeMapPlugin>());
     assert!(app.is_plugin_added::<AuthoritativeMovementPlugin>());

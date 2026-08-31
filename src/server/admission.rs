@@ -416,8 +416,10 @@ pub(super) fn plan_match_join(
 }
 
 fn expected_routing_mode(mode: GameMode) -> brawler_routing::GameMode {
-    crate::modes::descriptor_for_mode(mode)
+    crate::modes::builtin_mode_catalog()
+        .descriptor_for_mode(mode)
         .expect("every configured game mode has a registered descriptor")
+        .server()
         .routing_mode
 }
 
@@ -435,7 +437,8 @@ fn validate_manifest_map_against_catalog(
     catalog: &MapContentCatalog,
 ) -> Result<(), MatchWorkerManifestError> {
     let preset_id = MapPresetId(manifest.map_preset);
-    let mode = crate::modes::descriptor_for_mode(config.game_mode)
+    let mode = crate::modes::builtin_mode_catalog()
+        .descriptor_for_mode(config.game_mode)
         .expect("every configured game mode has a registered descriptor");
     let preset = catalog
         .preset(preset_id)
@@ -651,6 +654,8 @@ pub fn build_lobby_worker_app(
         tick_duration: crate::timing::SIMULATION_TICK,
     })
     .add_plugins((
+        crate::modes::ModeRegistryPlugin,
+        crate::modes::BuiltInModeRegistrationsPlugin,
         crate::content::GameplayContentPlugin,
         crate::protocol::ProtocolPlugin,
         super::lobby::LobbyPlugin,
@@ -1513,6 +1518,8 @@ mod tests {
         assert!(!worker.is_plugin_added::<TerminalCtrlCHandlerPlugin>());
         assert!(worker.is_plugin_added::<crate::content::GameplayContentPlugin>());
         assert!(worker.is_plugin_added::<crate::protocol::ProtocolPlugin>());
+        assert!(worker.is_plugin_added::<crate::modes::ModeRegistryPlugin>());
+        assert!(worker.is_plugin_added::<crate::modes::BuiltInModeRegistrationsPlugin>());
         assert!(worker.is_plugin_added::<crate::server::RoutedWorkerPlugin>());
         assert!(!worker.is_plugin_added::<crate::gameplay::GameplayPlugin>());
         assert!(!worker.is_plugin_added::<crate::server::ServerAuthoritativeGameplayPlugin>());
