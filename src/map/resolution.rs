@@ -178,7 +178,7 @@ fn validate_recipe_capacity(
                 profile.concealment == MapConcealmentBehavior::HideOccupants
             }));
         effect_tile_count += usize::from(
-            profile.is_some_and(|profile| profile.effect_tile != MapEffectTileBehavior::None),
+            profile.is_some_and(|profile| profile.effect_tile.capabilities().is_effect_tile()),
         );
     }
     if effect_tile_count > super::MAX_EFFECT_TILE_PLACEMENTS {
@@ -496,15 +496,12 @@ fn validate_effect_tile_spawn_safety(
             .asset(placement.asset_id)
             .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
             .map_or(MapEffectTileBehavior::None, |profile| profile.effect_tile);
-        if behavior == MapEffectTileBehavior::None {
+        let capabilities = behavior.capabilities();
+        if !capabilities.is_effect_tile() {
             continue;
         }
         for spawn in &spawn_cells {
-            let dx = placement.cell.x.abs_diff(spawn.x);
-            let dy = placement.cell.y.abs_diff(spawn.y);
-            if placement.cell == *spawn
-                || (matches!(behavior, MapEffectTileBehavior::Damage { .. }) && dx <= 1 && dy <= 1)
-            {
+            if capabilities.violates_spawn_clearance(placement.cell, *spawn) {
                 return Err("effect tile violates spawn safety clearance".to_string());
             }
         }

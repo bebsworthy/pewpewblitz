@@ -52,6 +52,20 @@ fn client_fighter_health(
         .map(|(_, health, defeated)| (health.0, defeated.is_some()))
 }
 
+fn client_fighter_tile(
+    harness: &mut Harness,
+    index: usize,
+    network_id: NetworkEntityId,
+) -> Option<brawler::map::EffectTileOccupancy> {
+    let world = harness.clients[index].world_mut();
+    let mut query = world
+        .query_filtered::<(&NetworkEntityId, &brawler::map::EffectTileOccupancy), With<Fighter>>();
+    query
+        .iter(world)
+        .find(|(candidate, _)| **candidate == network_id)
+        .map(|(_, occupancy)| *occupancy)
+}
+
 fn client_pickup_count(harness: &mut Harness, index: usize) -> usize {
     let world = harness.clients[index].world_mut();
     world
@@ -516,6 +530,93 @@ fn barrel_explosion_damage_is_combat_owned_and_replicates_to_both_clients() {
             .resource::<CombatTelemetry>()
             .applied_damage,
         35
+    );
+}
+
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario proves authoritative tile occupancy, cadence, damage, and replication together"
+)]
+fn damage_tile_capabilities_drive_authority_and_replicate_to_both_clients() {
+    let mut harness = Harness::new_feature_yard_match(2);
+    harness.step_until(|harness| {
+        (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
+    });
+    let waiting = server_match_state(&mut harness);
+    for index in 0..2 {
+        harness.send_match_command(
+            index,
+            MatchCommandRequest {
+                request_id: 1,
+                match_id: waiting.match_id,
+                command: MatchCommand::SetReady(true),
+            },
+        );
+    }
+    harness.step_until(|harness| {
+        matches!(server_match_state(harness).phase, MatchPhase::Active { .. })
+    });
+
+    let target_player = harness.controlled_player_id(1);
+    let tile_position = {
+        let map = harness.server.world().resource::<ResolvedMap>();
+        let tile = map
+            .effect_tiles
+            .iter()
+            .find(|tile| tile.behavior.kind() == Some(brawler::map::EffectTileKind::Damage))
+            .expect("Feature Yard damage tile");
+        map.snapshot.dimensions.cell_center(tile.cell)
+    };
+    let (target_entity, target_network_id, target_health) = {
+        let world = harness.server.world_mut();
+        let mut fighters = world
+            .query_filtered::<(Entity, &PlayerId, &NetworkEntityId, &CurrentHealth), With<Fighter>>(
+            );
+        fighters
+            .iter(world)
+            .find(|(_, player, _, _)| **player == target_player)
+            .map(|(entity, _, network_id, health)| (entity, *network_id, health.0))
+            .expect("target fighter")
+    };
+    harness
+        .server
+        .world_mut()
+        .entity_mut(target_entity)
+        .insert(Position::from_xy(tile_position.x, tile_position.y))
+        .remove::<brawler::matchplay::SpawnProtection>();
+
+    harness.step_until(|harness| {
+        (0..2).all(|index| client_fighter_tile(harness, index, target_network_id).is_some())
+    });
+    let server_occupancy = *harness
+        .server
+        .world()
+        .get::<brawler::map::EffectTileOccupancy>(target_entity)
+        .expect("authoritative damage-tile occupancy");
+    assert_eq!(
+        server_occupancy.next_pulse_at_tick,
+        Some(server_occupancy.entered_at_tick + 30)
+    );
+
+    let expected_health = target_health.saturating_sub(10);
+    harness.step_until(|harness| {
+        (0..2).all(|index| {
+            client_fighter_health(harness, index, target_network_id)
+                == Some((expected_health, false))
+        })
+    });
+    assert_eq!(
+        harness.server.world().get::<CurrentHealth>(target_entity),
+        Some(&CurrentHealth(expected_health))
+    );
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .resource::<CombatTelemetry>()
+            .applied_damage,
+        10
     );
 }
 

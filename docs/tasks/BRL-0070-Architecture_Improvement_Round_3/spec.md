@@ -252,3 +252,7 @@ BRL-0077 completed the admission/fighter-assembly phase: match hello validation 
 ## BRL-0078 phase completion
 
 Completed the environment-combat authority phase. Barrel explosion combatant damage now flows through one combat-owned atomic transaction shared with damage tiles; map code owns only deterministic selection, LOS, world-object chaining/reactions, and map telemetry. The previously inert authored chain limit is effective. Focused, role, lint, canonical, full network, and performance verification passed. Child BRL-0078 is complete; the next planned slice is focused effect-tile capability projection.
+
+## BRL-0079 phase completion
+
+Completed the focused effect-tile capability projection phase. Authored Speed, Slow, Damage, and None remain the closed catalog/editor vocabulary, while production map, movement, bot, recovery predicate, and presentation paths consume orthogonal resolved capabilities. A composite-capability test and two-client authoritative damage-tile scenario prove the extension seam without schema or protocol changes. All focused, role, lint, canonical, network, and performance gates passed after a package-scoped Cargo artifact cleanup resolved host disk exhaustion. Child BRL-0079 is complete; plugin-populated tile registration or the larger ModeRegistry lifecycle remains the next Stage 5 decision.

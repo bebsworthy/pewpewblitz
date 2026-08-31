@@ -51,6 +51,8 @@ pub use client::{
     ClientMapPlugin, ClientMapReadiness, ClientWorldObjectReadiness, MapPresentationMember,
     MapPresentationPlugin, MapPresentationSet, PresentedMap, perimeter_visual_shapes,
 };
+#[cfg(feature = "client")]
+pub(crate) use effect_tiles::EffectTilePresentation;
 pub use effect_tiles::{
     EffectTileKind, EffectTileOccupancy, MAX_EFFECT_TILE_PLACEMENTS, MapEffectTileBehavior,
     ResolvedEffectTile,

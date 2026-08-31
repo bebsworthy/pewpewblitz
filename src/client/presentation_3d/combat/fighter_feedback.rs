@@ -32,6 +32,16 @@ enum StatusKind {
     TileDamage,
 }
 
+fn effect_tile_status(tile: &crate::map::EffectTileOccupancy) -> Option<StatusKind> {
+    tile.capabilities()
+        .presentation
+        .map(|presentation| match presentation {
+            crate::map::EffectTilePresentation::Speed => StatusKind::TileSpeed,
+            crate::map::EffectTilePresentation::Slow => StatusKind::TileSlow,
+            crate::map::EffectTilePresentation::Damage => StatusKind::TileDamage,
+        })
+}
+
 #[derive(Component)]
 pub(in super::super) struct DashTrailVisual3d {
     last_position: Vec2,
@@ -259,16 +269,9 @@ pub(in super::super) fn reconcile_status_visuals(
         {
             desired_status.insert((entity, StatusKind::Reveal), position.0);
         }
-        if let Some(tile) = tile {
-            let kind = match tile
-                .behavior
-                .kind()
-                .expect("occupied effect tiles always have a behavior kind")
-            {
-                crate::map::EffectTileKind::Speed => StatusKind::TileSpeed,
-                crate::map::EffectTileKind::Slow => StatusKind::TileSlow,
-                crate::map::EffectTileKind::Damage => StatusKind::TileDamage,
-            };
+        if let Some(tile) = tile
+            && let Some(kind) = effect_tile_status(tile)
+        {
             desired_status.insert((entity, kind), position.0);
         }
     }
@@ -448,6 +451,48 @@ mod tests {
             revealed_until_tick,
             ..default()
         }
+    }
+
+    fn tile_occupancy(
+        behavior: crate::map::MapEffectTileBehavior,
+    ) -> crate::map::EffectTileOccupancy {
+        crate::map::EffectTileOccupancy {
+            generation: crate::map::MapDynamicGeneration {
+                map_instance_id: crate::map::MapInstanceId(1),
+                generation: 1,
+            },
+            placement_id: crate::map::MapPlacementId(1),
+            behavior,
+            entered_at_tick: 0,
+            next_pulse_at_tick: None,
+        }
+    }
+
+    #[test]
+    fn effect_tile_feedback_uses_the_focused_presentation_capability() {
+        assert_eq!(
+            effect_tile_status(&tile_occupancy(crate::map::MapEffectTileBehavior::Speed {
+                movement_multiplier_milli: 1_250,
+            })),
+            Some(StatusKind::TileSpeed)
+        );
+        assert_eq!(
+            effect_tile_status(&tile_occupancy(crate::map::MapEffectTileBehavior::Slow {
+                movement_multiplier_milli: 700,
+            })),
+            Some(StatusKind::TileSlow)
+        );
+        assert_eq!(
+            effect_tile_status(&tile_occupancy(crate::map::MapEffectTileBehavior::Damage {
+                damage: 10,
+                interval_ticks: 30,
+            })),
+            Some(StatusKind::TileDamage)
+        );
+        assert_eq!(
+            effect_tile_status(&tile_occupancy(crate::map::MapEffectTileBehavior::None)),
+            None
+        );
     }
 
     #[test]

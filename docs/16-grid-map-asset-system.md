@@ -349,6 +349,14 @@ entry tick, and optional damage-pulse deadline. Consequently, crossing a tile bo
 authoritative on the next fixed-tick occupancy pass; presentation never decides whether a fighter
 is inside.
 
+The authored behavior enum is the closed catalog and serialization vocabulary. One central,
+headless-safe projection resolves it into orthogonal runtime capabilities: ordinary-movement
+scaling, periodic neutral damage, healing blocking, bot traversal cost, spawn clearance, and a
+presentation semantic. Runtime systems consume only the capability they own, so a composite or
+new authored behavior does not require them to branch on unrelated tile identities. The projection
+is deliberately separate from future plugin registration; it changes no map schema, fingerprint,
+replicated occupancy shape, or Balance Lab persistence contract.
+
 Speed and Slow multiply only ordinary player-driven movement. The composition is:
 
 ```text

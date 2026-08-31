@@ -104,7 +104,7 @@ pub(crate) fn resolved_movement_velocity(
             f32::from(slow.movement_multiplier_milli) / 1000.0
         });
     let tile_multiplier = modifiers.effect_tile.map_or(1.0, |occupancy| {
-        f32::from(occupancy.behavior.movement_multiplier_milli()) / 1000.0
+        f32::from(occupancy.capabilities().movement_multiplier_milli()) / 1000.0
     });
     let adrenaline_multiplier = super::input::adrenaline_multiplier(
         modifiers

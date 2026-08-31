@@ -90,12 +90,10 @@ fn resolve_effect_tile_occupancy(
         }) {
             continue;
         }
-        let next_pulse_at_tick = match tile.behavior {
-            super::super::MapEffectTileBehavior::Damage { interval_ticks, .. } => {
-                Some(tick.0.saturating_add(u64::from(interval_ticks)))
-            }
-            _ => None,
-        };
+        let next_pulse_at_tick = tile
+            .capabilities()
+            .periodic_damage
+            .map(|effect| tick.0.saturating_add(u64::from(effect.interval_ticks)));
         commands.entity(entity).insert(EffectTileOccupancy {
             generation,
             placement_id: tile.placement_id,
@@ -147,15 +145,12 @@ pub(crate) fn apply_damage_tile_pulses(world: &mut World) {
         .collect();
     due.sort_by_key(|(_, occupancy)| occupancy.placement_id);
     for (entity, occupancy) in due {
-        let super::super::MapEffectTileBehavior::Damage {
-            damage,
-            interval_ticks,
-        } = occupancy.behavior
-        else {
+        let Some(effect) = occupancy.capabilities().periodic_damage else {
             continue;
         };
         if let Some(mut current) = world.get_mut::<EffectTileOccupancy>(entity) {
-            current.next_pulse_at_tick = Some(tick.saturating_add(u64::from(interval_ticks)));
+            current.next_pulse_at_tick =
+                Some(tick.saturating_add(u64::from(effect.interval_ticks)));
         }
         let targets = [entity];
         if let Err(error) = crate::combat::environment::apply_environment_damage_batch(
@@ -164,7 +159,7 @@ pub(crate) fn apply_damage_tile_pulses(world: &mut World) {
                 targets: &targets,
                 generation: occupancy.generation,
                 placement_id: occupancy.placement_id,
-                damage,
+                damage: effect.damage,
                 tick,
                 origin: None,
                 attack: crate::combat::environment::EnvironmentAttack::Neutral,

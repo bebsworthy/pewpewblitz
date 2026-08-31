@@ -78,16 +78,9 @@ impl BotNavigationSnapshot {
             .effect_tiles
             .iter()
             .map(|tile| {
-                let cost = match tile.behavior {
-                    crate::map::MapEffectTileBehavior::Speed {
-                        movement_multiplier_milli,
-                    }
-                    | crate::map::MapEffectTileBehavior::Slow {
-                        movement_multiplier_milli,
-                    } => movement_terrain_cost_milli(movement_multiplier_milli),
-                    crate::map::MapEffectTileBehavior::Damage { .. } => damage_tile_cost_milli,
-                    crate::map::MapEffectTileBehavior::None => 1_000,
-                };
+                let cost = tile
+                    .capabilities()
+                    .traversal_cost_milli(damage_tile_cost_milli);
                 (index(dimensions, tile.cell.x, tile.cell.y), cost)
             })
             .filter(|(_, cost)| *cost != 1_000)
@@ -381,12 +374,6 @@ impl BotRouteSearch {
         }
         BotRouteProgress::Exhausted
     }
-}
-
-fn movement_terrain_cost_milli(movement_multiplier_milli: u16) -> u16 {
-    let multiplier = u32::from(movement_multiplier_milli.max(1));
-    let cost = 1_000_000_u32.div_ceil(multiplier);
-    u16::try_from(cost).unwrap_or(u16::MAX)
 }
 
 fn compress_collinear_route(start: Vec2, route: Vec<Vec2>) -> Vec<Vec2> {
