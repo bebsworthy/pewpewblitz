@@ -117,3 +117,20 @@ The native captures at `target/brl-0101-fire-noise-pass` (tick 42) and `target/b
 - Cross-tick captures at ticks 42 and 58 visibly change the turbulent silhouette while preserving the center and exact boundary. Reduced + primitive evidence retains 18 bounded mesh tongues.
 
 Feedback disposition: the original flat-disc presentation is replaced. Visual acceptance of the corrected normal-quality Fire field remains awaiting the user, so BRL-0101 stays `doing`.
+
+# Playtest feedback correction — Fire ground underlay, 2026-08-31
+
+Feedback: the improved normal Fire circumference is accepted directionally, but the fully transparent center exposes the neutral gray Lab floor and makes the ring feel detached from its affected ground area.
+
+Correction: add a separate retained low-opacity ember ground disc beneath the animated Fire circumference at the exact authoritative radius. The underlay must tint rather than obscure terrain, remain below the flame and exact-boundary layers, reuse the shared Fire fill material, allocate no per-instance assets, and appear in evidence diagnostics. Update the VfxLab guide to describe a subtly tinted center rather than an open center. Preserve the normal shader, deterministic tick sampling, exact ring, relationship inset, and reduced/primitive fallback.
+
+BRL-0101 remains `doing` pending a corrected native capture and user acceptance.
+
+# Fire ground-underlay verification — 2026-08-31
+
+- Added one retained exact-radius ember disc below the normal Fire shader layer and exact boundary. It reuses `elemental_fire_fill`; there is no new material allocation or gameplay/protocol change.
+- Evidence now reports `fire_area_underlays`; the focused evidence test passed and strict client Clippy passed.
+- `just _check-server` passed.
+- Native 1490x890 capture at `target/brl-0101-fire-underlay` records playback tick 50, radius 72, one animated Fire area, and one ground underlay. The affected center is visibly ember-tinted while the fighter reference remains readable.
+
+Feedback disposition: implemented; visual acceptance remains with the user. BRL-0101 remains `doing`.

@@ -1275,7 +1275,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             "The moving body follows the production launch/landing arc. Its ground shadow communicates where it will land."
         }
         VfxLabFixture::ElementalField => {
-            "The open center is the affected area. The thin bright ring is the exact gameplay boundary. Perimeter crystals or the living flame band identify the element without hiding fighters."
+            "The subtly tinted center is the affected ground area. The thin bright ring is the exact gameplay boundary. Perimeter crystals or the living flame band identify the element without hiding fighters."
         }
         VfxLabFixture::ConeSpray => {
             "The wedge shows the currently reached portion of the authoritative cone. Its outer silhouette, not its opacity, communicates attack coverage."

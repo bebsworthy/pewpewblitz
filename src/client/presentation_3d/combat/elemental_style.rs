@@ -57,6 +57,9 @@ pub(in crate::client::presentation_3d) struct ElementalMotionAccent3d {
 #[derive(Component)]
 pub(in crate::client::presentation_3d) struct AnimatedFireArea3d;
 
+#[derive(Component)]
+pub(in crate::client::presentation_3d) struct FireAreaUnderlay3d;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ElementalAccentMotion {
     ColdCrystal,
@@ -251,6 +254,17 @@ impl ElementalAreaStyle<'_> {
                 .with_rotation(Self::ground_rotation())
                 .with_scale(Vec3::splat(fill_scale));
         if self.is_normal_fire() {
+            parent.spawn((
+                FireAreaUnderlay3d,
+                Mesh3d(self.primitives.area_disc.clone()),
+                MeshMaterial3d(self.materials.elemental_fire_fill.clone()),
+                NotShadowCaster,
+                NotShadowReceiver,
+                Transform::from_xyz(0.0, super::common::GROUND_EFFECT_HEIGHT + 0.08, 0.0)
+                    .with_rotation(Self::ground_rotation())
+                    .with_scale(Vec3::splat(self.radius)),
+                Name::new("Fire area ember ground underlay"),
+            ));
             parent.spawn((
                 AnimatedFireArea3d,
                 Mesh3d(self.primitives.area_disc.clone()),

@@ -529,6 +529,7 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             "dash_trail_roots": component_count::<super::fighter_feedback::DashTrailVisual3d>(world),
             "elemental_motion_accents": component_count::<super::elemental_style::ElementalMotionAccent3d>(world),
             "animated_fire_areas": component_count::<super::elemental_style::AnimatedFireArea3d>(world),
+            "fire_area_underlays": component_count::<super::elemental_style::FireAreaUnderlay3d>(world),
         },
         "assets": {
             "meshes": mesh_assets,
@@ -697,6 +698,7 @@ mod tests {
             CombatVisualSignature::neutral_point(11, Vec2::new(2.0, 3.0)),
         ));
         world.spawn(super::super::elemental_style::AnimatedFireArea3d);
+        world.spawn(super::super::elemental_style::FireAreaUnderlay3d);
         world.spawn(crate::combat::ElementalFieldState {
             id: crate::combat::ElementalFieldId(11),
             kind: crate::combat::ElementalFieldKind::Fire,
@@ -716,6 +718,7 @@ mod tests {
         assert_eq!(snapshot["active"]["transient_roots"], 1);
         assert_eq!(snapshot["active"]["elemental_field_roots"], 1);
         assert_eq!(snapshot["active"]["animated_fire_areas"], 1);
+        assert_eq!(snapshot["active"]["fire_area_underlays"], 1);
         assert_eq!(snapshot["transient_effects"][0]["recipe_id"], "impact");
         assert_eq!(snapshot["transient_effects"][0]["order"], 7);
         assert_eq!(
