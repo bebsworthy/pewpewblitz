@@ -97,6 +97,11 @@ impl ClientPracticeModel {
     pub fn pending(&self) -> bool {
         self.pending.is_some()
     }
+
+    #[cfg(test)]
+    pub(crate) fn pending_request_for_test(&self) -> Option<&crate::lobby::PracticeStartRequest> {
+        self.pending.as_ref()
+    }
 }
 
 pub(super) fn send_practice_messages(

@@ -1,10 +1,10 @@
 use super::*;
 use crate::client::{
     ClientJoinPhase, ClientJoinStatus, ClientLobbyFailure, ClientLobbyMembership,
-    ClientNetworkConfig, RoutedClientSession, RuntimeLobbyTarget,
+    ClientNetworkConfig, RoutedClientPhase, RoutedClientSession, RuntimeLobbyTarget,
     connection_persistence::ConnectionsFileV1, server_select::MAX_RESOLVED_CANDIDATES,
 };
-use actions::{FlowUiAction, SessionObservation};
+use actions::{FlowUiAction, OverlayCommit, SessionObservation};
 use bevy::{
     input::{keyboard::KeyboardInput, mouse::MouseScrollUnit, mouse::MouseWheel},
     ui::{InteractionDisabled, ScrollPosition},
@@ -120,6 +120,14 @@ fn select_first_game(app: &mut App, membership: &ClientLobbyMembership) {
 fn inject_action(app: &mut App, action: FlowUiAction) {
     app.world_mut().resource_mut::<InjectedFlowActions>().0 = Some(PendingFlowActions {
         ordinary: Some(action),
+        ..PendingFlowActions::default()
+    });
+    app.update();
+}
+
+fn inject_session_observation(app: &mut App, observation: SessionObservation) {
+    app.world_mut().resource_mut::<InjectedFlowActions>().0 = Some(PendingFlowActions {
+        session: Some(observation),
         ..PendingFlowActions::default()
     });
     app.update();
@@ -417,6 +425,291 @@ fn configured_lobby_flow_app(membership: ClientLobbyMembership) -> App {
         .resource_mut::<super::super::ClientQueueModel>()
         .bind_lobby_generation(1);
     app
+}
+
+fn match_result_context(
+    game_type_id: crate::lobby::GameTypeId,
+) -> super::super::ClientMatchResultContext {
+    super::super::ClientMatchResultContext {
+        result: crate::matchplay::MatchResult::Draw,
+        local_team: None,
+        game_type_id: Some(game_type_id),
+        game_name: None,
+        final_score: None,
+    }
+}
+
+fn queue_membership(membership: &ClientLobbyMembership) -> crate::lobby::QueueMembership {
+    let brawler = &membership.profile.brawlers[0];
+    let recipe = crate::builds::BrawlerBuildRecipe {
+        weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+        ultimate: brawler.ultimate_id,
+        passives: brawler.passive_ids,
+    };
+    crate::lobby::QueueMembership {
+        ticket_id: crate::lobby::QueueTicketId::new(1).unwrap(),
+        catalog_revision: membership.catalog_revision,
+        game_type_id: membership.game_types[0].id.clone(),
+        game_type_configuration_revision: membership.game_types[0].configuration_revision,
+        brawler_id: brawler.id,
+        brawler_revision: brawler.revision,
+        accepted_build: crate::builds::AcceptedBuildSummary {
+            canonical_recipe: recipe,
+            identity: crate::builds::SelectedBuild {
+                recipe_fingerprint: crate::builds::BuildRecipeFingerprint(1),
+                revision: crate::builds::BuildCatalog::embedded()
+                    .unwrap()
+                    .balance_revision,
+            },
+            total_points: 10,
+        },
+        admitted_at_pool_state_revision: 1,
+    }
+}
+
+#[test]
+fn match_transition_observations_preserve_loading_match_and_overlay_commits() {
+    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+
+    inject_session_observation(&mut app, SessionObservation::ReservationStarted);
+    let commit = app.world().resource::<FlowCommit>();
+    assert_eq!(commit.next_flow, Some(ClientFlow::MatchLoading));
+    assert_eq!(commit.overlay, Some(OverlayCommit::Clear));
+
+    inject_session_observation(&mut app, SessionObservation::CountdownObserved);
+    let commit = app.world().resource::<FlowCommit>();
+    assert_eq!(commit.next_flow, Some(ClientFlow::Match));
+    assert_eq!(commit.overlay, Some(OverlayCommit::Clear));
+}
+
+#[test]
+fn queue_outcomes_preserve_join_cancel_and_stale_content_policies() {
+    let membership = lobby_membership_with_brawler();
+    let joined = queue_membership(&membership);
+    let mut app = configured_lobby_flow_app(membership);
+    app.world_mut()
+        .resource_mut::<super::super::ClientMatchResultState>()
+        .context = Some(match_result_context(joined.game_type_id.clone()));
+
+    inject_session_observation(
+        &mut app,
+        SessionObservation::QueueOutcome(crate::lobby::QueueCommandOutcome {
+            request_id: crate::lobby::QueueRequestId::new(1).unwrap(),
+            decision: crate::lobby::QueueDecision::Joined(joined.clone()),
+        }),
+    );
+    assert!(
+        app.world()
+            .resource::<super::super::ClientMatchResultState>()
+            .context
+            .is_none()
+    );
+    assert_eq!(
+        app.world().resource::<SelectedGameType>().game_type_id,
+        Some(joined.game_type_id.clone())
+    );
+    assert_eq!(
+        app.world().resource::<FlowCommit>().next_flow,
+        Some(ClientFlow::Queue)
+    );
+
+    *app.world_mut().resource_mut::<SessionPurpose>() = SessionPurpose::Practice;
+    inject_session_observation(
+        &mut app,
+        SessionObservation::QueueOutcome(crate::lobby::QueueCommandOutcome {
+            request_id: crate::lobby::QueueRequestId::new(2).unwrap(),
+            decision: crate::lobby::QueueDecision::Cancelled {
+                ticket_id: joined.ticket_id,
+                resulting_pool_state_revision: 2,
+            },
+        }),
+    );
+    assert_eq!(
+        *app.world().resource::<SessionPurpose>(),
+        SessionPurpose::Multiplayer
+    );
+    assert_eq!(
+        app.world().resource::<DashboardReturnFocus>().0,
+        Some(DASHBOARD_PLAY_INDEX)
+    );
+    assert_eq!(
+        app.world().resource::<FlowCommit>().next_flow,
+        Some(ClientFlow::Dashboard)
+    );
+
+    inject_session_observation(
+        &mut app,
+        SessionObservation::QueueOutcome(crate::lobby::QueueCommandOutcome {
+            request_id: crate::lobby::QueueRequestId::new(3).unwrap(),
+            decision: crate::lobby::QueueDecision::Rejected(
+                crate::lobby::QueueRejection::StaleCatalog,
+            ),
+        }),
+    );
+    let commit = app.world().resource::<FlowCommit>();
+    assert!(commit.teardown);
+    let error = commit.error.as_ref().unwrap();
+    assert_eq!(error.kind, FlowErrorKind::Content);
+    assert_eq!(error.return_flow, ClientFlow::ServerSelect);
+    assert!(error.message.contains("content changed incompatibly"));
+}
+
+#[test]
+fn practice_rejections_distinguish_stale_content_from_ordinary_failures() {
+    let mut stale = configured_lobby_flow_app(lobby_membership_with_brawler());
+    inject_session_observation(
+        &mut stale,
+        SessionObservation::PracticeRejected(crate::lobby::PracticeStartRejection::StaleCatalog),
+    );
+    let commit = stale.world().resource::<FlowCommit>();
+    assert!(commit.teardown);
+    assert_eq!(commit.error.as_ref().unwrap().kind, FlowErrorKind::Content);
+    assert_eq!(
+        commit.error.as_ref().unwrap().return_flow,
+        ClientFlow::ServerSelect
+    );
+
+    let mut ordinary = configured_lobby_flow_app(lobby_membership_with_brawler());
+    inject_session_observation(
+        &mut ordinary,
+        SessionObservation::PracticeRejected(crate::lobby::PracticeStartRejection::Busy),
+    );
+    let commit = ordinary.world().resource::<FlowCommit>();
+    assert!(!commit.teardown);
+    let error = commit.error.as_ref().unwrap();
+    assert_eq!(error.kind, FlowErrorKind::Practice);
+    assert_eq!(error.return_flow, ClientFlow::Dashboard);
+    assert_eq!(error.message, "Another match start is already in progress.");
+}
+
+#[test]
+fn match_failure_and_fresh_lobby_return_preserve_result_and_one_shot_error_paths() {
+    let membership = lobby_membership_with_brawler();
+    let game_type_id = membership.game_types[0].id.clone();
+    let mut failed = configured_lobby_flow_app(membership.clone());
+    failed
+        .world_mut()
+        .resource_mut::<super::super::ClientMatchResultState>()
+        .context = Some(match_result_context(game_type_id.clone()));
+    failed
+        .world_mut()
+        .resource_mut::<RoutedClientLifecycle>()
+        .phase = RoutedClientPhase::Match;
+
+    inject_session_observation(&mut failed, SessionObservation::MatchFailed);
+    assert!(
+        failed
+            .world()
+            .resource::<super::super::ClientMatchResultState>()
+            .context
+            .is_none()
+    );
+    assert_eq!(
+        failed.world().resource::<RoutedClientLifecycle>().phase,
+        RoutedClientPhase::AwaitingMatchUnlink
+    );
+    inject_session_observation(&mut failed, SessionObservation::FreshLobbyReturn);
+    let commit = failed.world().resource::<FlowCommit>();
+    assert_eq!(commit.next_flow, Some(ClientFlow::Dashboard));
+    assert_eq!(commit.overlay, Some(OverlayCommit::Clear));
+    let error = commit.error.as_ref().unwrap();
+    assert_eq!(error.kind, FlowErrorKind::Connection);
+    assert_eq!(error.message, "The match server stopped unexpectedly");
+    assert_eq!(error.return_flow, ClientFlow::Dashboard);
+    assert_eq!(error.actions, [Some(FlowErrorAction::Back), None]);
+    assert_eq!(
+        *failed.world().resource::<SessionPurpose>(),
+        SessionPurpose::Multiplayer
+    );
+    assert_eq!(
+        failed.world().resource::<DashboardReturnFocus>().0,
+        Some(DASHBOARD_PLAY_INDEX)
+    );
+    inject_session_observation(&mut failed, SessionObservation::FreshLobbyReturn);
+    let commit = failed.world().resource::<FlowCommit>();
+    assert!(commit.error.is_none());
+    assert_eq!(commit.overlay, Some(OverlayCommit::Clear));
+
+    let mut completed = configured_lobby_flow_app(membership);
+    completed
+        .world_mut()
+        .resource_mut::<super::super::ClientMatchResultState>()
+        .context = Some(match_result_context(game_type_id.clone()));
+    *completed.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType::default();
+    *completed.world_mut().resource_mut::<SessionPurpose>() = SessionPurpose::Practice;
+    inject_session_observation(&mut completed, SessionObservation::FreshLobbyReturn);
+    let commit = completed.world().resource::<FlowCommit>();
+    assert_eq!(commit.next_flow, Some(ClientFlow::Results));
+    assert_eq!(commit.overlay, Some(OverlayCommit::Clear));
+    assert!(commit.error.is_none());
+    assert_eq!(
+        *completed.world().resource::<SessionPurpose>(),
+        SessionPurpose::Practice
+    );
+    assert_eq!(
+        completed
+            .world()
+            .resource::<super::super::ClientMatchResultState>()
+            .context
+            .as_ref()
+            .unwrap()
+            .game_name
+            .as_deref(),
+        Some("Wipeout 2v2")
+    );
+    assert_eq!(
+        completed
+            .world()
+            .resource::<SelectedGameType>()
+            .game_type_id,
+        Some(game_type_id)
+    );
+}
+
+#[test]
+fn practice_queue_again_uses_fresh_generation_game_and_selected_brawler() {
+    let membership = lobby_membership_with_brawler();
+    let game_type_id = membership.game_types[0].id.clone();
+    let selected_brawler = membership.profile.brawlers[0].clone();
+    let mut app = configured_lobby_flow_app(membership);
+    let mut stale_membership = lobby_membership_with_brawler();
+    stale_membership.game_types[0].id = crate::lobby::GameTypeId::new("stale-wipeout").unwrap();
+    stale_membership.profile.brawlers[0].id = crate::profiles::SavedBrawlerId::new(77).unwrap();
+    stale_membership.profile.brawlers[0].revision =
+        crate::profiles::ProfileRevision::new(9).unwrap();
+    stale_membership.profile.selected_brawler_id = Some(stale_membership.profile.brawlers[0].id);
+    app.world_mut().spawn((
+        Client,
+        stale_membership,
+        RoutedClientSession {
+            generation: 2,
+            kind: super::super::RoutedClientSessionKind::Lobby,
+        },
+    ));
+    app.world_mut()
+        .resource_mut::<RoutedClientLifecycle>()
+        .generation = 1;
+    *app.world_mut().resource_mut::<SessionPurpose>() = SessionPurpose::Practice;
+    *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType::default();
+    app.world_mut()
+        .resource_mut::<super::super::ClientMatchResultState>()
+        .context = Some(match_result_context(game_type_id.clone()));
+
+    inject_action(&mut app, FlowUiAction::QueueAgain);
+
+    let request = app
+        .world()
+        .resource::<super::super::ClientPracticeModel>()
+        .pending_request_for_test()
+        .expect("fresh-generation Practice replay should emit one request");
+    assert_eq!(request.game_type_id, game_type_id);
+    assert_eq!(request.brawler_id, selected_brawler.id);
+    assert_eq!(request.brawler_revision, selected_brawler.revision);
+    let selection = app.world().resource::<SelectedGameType>();
+    assert_eq!(selection.game_type_id.as_ref(), Some(&request.game_type_id));
+    assert!(selection.catalog_revision.is_some());
+    assert!(selection.configuration_revision.is_some());
+    assert!(app.world().resource::<FlowCommit>().error.is_none());
 }
 
 fn configured_customization_app(membership: &ClientLobbyMembership) -> App {
