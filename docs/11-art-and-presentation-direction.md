@@ -280,12 +280,23 @@ remains an intentional typed renderer extension. Authoritative radii still arriv
 gameplay facts: the catalog may scale or anchor their presentation but never replaces their
 gameplay geometry.
 
-One-shot audio retains its strict client-only schema-2 catalog.
-`assets/catalogs/audio_profiles.ron` maps semantic cue families to stable IDs from
-`assets/manifest.ron`, which remains the one owner of shipped audio paths and provenance. Audio
-profiles own speed, volume, concurrency, and unavailable-asset fallback. One-shot playback that
-despawns when the source completes is the sole supported runtime mechanic, so it remains an audio
-adapter invariant rather than a misleading authored choice. Client presentation catalog revisions
+One-shot audio uses a strict client-only schema-3 catalog and a sealed producer registry. Feature
+plugins translate owned gameplay facts or replicated-state transitions into semantic
+`AudioRequest` messages identified by bounded stable keys; they do not select assets, profiles,
+playback settings, or concurrency policy. Shared semantic keys such as `ready`, `impact`, and
+`defeat` may be registered by multiple producers, while producer identities and ranks keep startup
+validation and generic-adapter ordering explicit. Producer-local monotonic sequences preserve each
+feature's fact order within its declared rank, so same-frame cap precedence does not depend on Bevy
+message merge order.
+
+`assets/catalogs/audio_profiles.ron` maps those request keys to stable IDs from
+`assets/manifest.ron`, which remains the one owner of shipped audio paths and provenance. A single
+generic adapter owns occurrence deduplication, loaded-asset fallback, shared one-shot reservations,
+and Bevy playback materialization. Audio profiles own speed, volume, concurrency, and
+unavailable-asset fallback. One-shot playback that despawns when the source completes is the sole
+supported runtime mechanic, so it remains an adapter invariant rather than a misleading authored
+choice. Adding a cue with existing playback primitives requires a feature producer registration
+and authored mapping, not a central playback dispatch edit. Client presentation catalog revisions
 do not enter the gameplay content fingerprint or dedicated-server dependency graph.
 
 Only assets owned by a current gameplay, map, product-shell, accessibility, or presentation use are

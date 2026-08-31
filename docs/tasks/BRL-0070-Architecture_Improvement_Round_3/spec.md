@@ -270,3 +270,8 @@ Completed the process-local mode registration and installation lifecycle. Wipeou
 BRL-0082 completed the next architecture-improvement phase. Client gameplay/domain systems now emit registered stable-key VFX requests, while the generic renderer exclusively owns authored profile resolution and concrete Bevy materialization. The closed `VfxCueFamily` inventory was removed, exact presentation values and authority/protocol boundaries were preserved, final automated/native evidence passed, and independent review corrections were incorporated.
 
 The next planned child is the separate audio request/playback boundary. Audio will reuse the proven bounded registration and feature-owned producer pattern but remain a sibling implementation because its occurrence deduplication, asset readiness, playback reservations, speed/volume policy, and one-shot lifecycle are not VFX renderer concerns.
+
+
+## Completed phase — BRL-0083 audio request/playback separation
+
+BRL-0083 is complete. Client audio now uses feature-owned stable-key request producers, a bounded sealed registry, schema-3 authored mappings, validated producer-rank/local-sequence ordering, and one generic playback adapter. All focused/canonical/native gates passed, independent review is clean, and dedicated-server isolation is preserved. The next implementation phase is the authoritative projectile sweep decomposition previously audited for BRL-0070.
