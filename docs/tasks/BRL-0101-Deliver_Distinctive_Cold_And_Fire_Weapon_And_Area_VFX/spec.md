@@ -57,3 +57,19 @@ Native paired evidence passed at 1280x720 using the production asynchronous capt
 - normal Fire ultimate impact sampled at eight canonical ticks: five selected layers and explicit `fire_ultimate_impact` resolution — `target/brl-0101-fire-ultimate-impact-peak`.
 
 The ticket remains doing. A native gameplay-scale player playtest is still required to judge immediate Cold-versus-Fire distinction, relationship readability in match context, area-center subtlety, impact size, and clutter under real combat. BRL-0102 continues to own the separate particle-adapter gate.
+
+# Playtest feedback correction — VfxLab comprehension, 2026-08-31
+
+Feedback: the viewer showed an effect and implementation diagnostics, but did not explain what the operator was looking at. This made the comparison unusable without prior knowledge of the VFX architecture.
+
+Implemented:
+
+- The default inspector is now a plain-language guide naming the gameplay subject and explaining the meaning of its body, fill, exact boundary, and elemental identity channels.
+- `I` toggles the existing technical recipe/signature/resource diagnostics for engineering inspection; those details no longer dominate the default view.
+- Two neutral gray production-scale fighter spheres provide an inside/outside size reference and are explicitly identified as fixture guides, not VFX.
+- The guide gives fixture-specific interpretation and tells the operator how to compare Cold/Fire and normal/reduced/primitive variants.
+- README and CLI help document the guide/details control and reference fixtures.
+
+Verification: focused VfxLab tests passed (3), strict client Clippy passed, and native paired evidence at `target/brl-0101-feedback-guide` confirmed the guide is legible beside a normal Cold field with one fighter reference inside and one outside its exact radius.
+
+Feedback remains awaiting user confirmation after the corrected viewer is tried.

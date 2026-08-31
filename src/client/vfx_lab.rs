@@ -7,10 +7,10 @@ use super::{
     },
     hud::ClientHeistReadiness,
     presentation_3d::{
-        CombatEffect3d, ImportedWorldFallbackPolicy, PendingCombatEffect,
-        VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, animate_combat_effect_layers,
-        collect_vfx_evidence_snapshot, materialize_combat_effects, resolve_vfx_requests,
-        setup_3d_foundation,
+        CombatEffect3d, ImportedWorldFallbackPolicy, Material3dAssets, PendingCombatEffect,
+        Primitive3dAssets, VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet,
+        animate_combat_effect_layers, collect_vfx_evidence_snapshot, materialize_combat_effects,
+        resolve_vfx_requests, setup_3d_foundation,
     },
     settings::persistence::ClientShellSettings,
     vfx::{
@@ -279,6 +279,7 @@ struct VfxLabState {
     ultimate: bool,
     reduced: bool,
     primitive: bool,
+    show_diagnostics: bool,
     paused: bool,
     step_once: bool,
     capture_dir: PathBuf,
@@ -414,6 +415,7 @@ impl Plugin for VfxLabPlugin {
             ultimate: self.config.ultimate,
             reduced: self.config.reduced,
             primitive: self.config.primitive,
+            show_diagnostics: false,
             paused: self.config.paused,
             step_once: false,
             capture_dir: self
@@ -480,6 +482,8 @@ fn setup_lab_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    primitives: Res<Primitive3dAssets>,
+    presentation_materials: Res<Material3dAssets>,
     mut requests: MessageWriter<VfxRequest>,
     state: Res<VfxLabState>,
 ) {
@@ -493,6 +497,14 @@ fn setup_lab_scene(
         Transform::from_xyz(0.0, -0.5, 0.0),
         Name::new("VfxLab neutral floor"),
     ));
+    for (index, x) in [0.0, 96.0].into_iter().enumerate() {
+        commands.spawn((
+            Mesh3d(primitives.fighter.clone()),
+            MeshMaterial3d(presentation_materials.neutral.clone()),
+            Transform::from_xyz(x, 14.0, 0.0),
+            Name::new(format!("VfxLab fighter-size reference {}", index + 1)),
+        ));
+    }
     commands.spawn((
         VfxLabInspector,
         Text::new("VfxLab loading production catalog…"),
@@ -838,6 +850,9 @@ fn handle_lab_input(
             ImportedWorldFallbackPolicy::Auto
         };
         restart = true;
+    }
+    if keyboard.just_pressed(KeyCode::KeyI) {
+        state.show_diagnostics = !state.show_diagnostics;
     }
     if keyboard.just_pressed(KeyCode::Enter) {
         state.paused = !state.paused;
@@ -1189,7 +1204,7 @@ fn update_lab_inspector(
         || "window unavailable".to_string(),
         |window| format!("{:.0}x{:.0}", window.width(), window.height()),
     );
-    let text = format!(
+    let diagnostic_text = format!(
         "VFXLAB - READ-ONLY PRODUCTION VIEWER\n\n\
          {}\n\n\
          Variant  {}{}\n\
@@ -1203,7 +1218,7 @@ fn update_lab_inspector(
          Cache     {}/{} attacks - {} FIFO evictions\n\
          Active transient {} - fixture facts {} - cameras {} - {}\n\n\
          Tab fixture   <-/-> mapping   Space restart   Enter pause   . step\n\
-         N identity   C accent   U ultimate   R reduced   P primitive   F12 capture   Esc quit",
+         N identity   C accent   U ultimate   R reduced   P primitive   I guide   F12 capture   Esc quit",
         scenario_details,
         if state.reduced { "reduced" } else { "normal" },
         if state.primitive { " + primitive" } else { "" },
@@ -1225,9 +1240,79 @@ fn update_lab_inspector(
         cameras.iter().count(),
         dimensions,
     );
+    let text = if state.show_diagnostics {
+        diagnostic_text
+    } else {
+        lab_guide_text(&state, scenario, &dimensions)
+    };
     for mut inspector in &mut inspector {
         (**inspector).clone_from(&text);
     }
+}
+
+fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &str) -> String {
+    let subject = match state.fixture {
+        VfxLabFixture::Transient => match scenario.key.as_str() {
+            "combat.muzzle" => "WEAPON FIRING FLASH",
+            "combat.impact" => "WEAPON HIT / IMPACT",
+            "ability.elemental-field" => "ULTIMATE FIELD ACTIVATION",
+            _ => "ONE-SHOT GAMEPLAY EFFECT",
+        },
+        VfxLabFixture::StraightProjectile => "STRAIGHT PROJECTILE IN FLIGHT",
+        VfxLabFixture::LobbedProjectile => "LOBBED PROJECTILE IN FLIGHT",
+        VfxLabFixture::ElementalField => "PERSISTENT ELEMENTAL AREA",
+        VfxLabFixture::ConeSpray => "PROPAGATING ATTACK CONE",
+        VfxLabFixture::Status => "STATUS ATTACHED TO A FIGHTER",
+    };
+    let meaning = match state.fixture {
+        VfxLabFixture::Transient => {
+            "The effect is centered on the gray target. Flash bodies communicate the event; expanding rings communicate its ground position. Use . to move one tick or restart with another --sample-ticks value."
+        }
+        VfxLabFixture::StraightProjectile => {
+            "The colored body is the projectile's exact collision footprint. Cold adds rigid crystal fins; Fire adds soft trailing lobes."
+        }
+        VfxLabFixture::LobbedProjectile => {
+            "The moving body follows the production launch/landing arc. Its ground shadow communicates where it will land."
+        }
+        VfxLabFixture::ElementalField => {
+            "The faint center is the affected area. The bright outer ring is the exact gameplay boundary. Perimeter crystals or flame lobes identify the element without hiding fighters."
+        }
+        VfxLabFixture::ConeSpray => {
+            "The wedge shows the currently reached portion of the authoritative cone. Its outer silhouette, not its opacity, communicates attack coverage."
+        }
+        VfxLabFixture::Status => {
+            "The ring is attached presentation for the fighter's active status. It follows the fighter and disappears when the authoritative status ends."
+        }
+    };
+    let style = match state.accent {
+        VfxLabAccent::Neutral => {
+            "NEUTRAL is the safe fallback. Press C to compare the Cold and Fire identities."
+        }
+        VfxLabAccent::Cold => {
+            "COLD should feel slow, crisp, and crystalline. Press C once to compare Fire."
+        }
+        VfxLabAccent::Fire => {
+            "FIRE should feel fast, round, and rising. Press C to return to the neutral fallback."
+        }
+    };
+    format!(
+        "VFXLAB - WHAT YOU ARE LOOKING AT\n\n\
+         {subject}\n\
+         Style: {}{}   Variant: {}{}\n\n\
+         {meaning}\n\n\
+         {style}\n\n\
+         GRAY SPHERES ARE FIGHTER-SIZE REFERENCES.\n\
+         They are not part of the effect.\n\n\
+         C compare style    R reduced    P primitive\n\
+         Space restart      Enter pause  . next tick\n\
+         Tab fixture        <-/-> effect U ultimate\n\
+         I technical details             Esc quit\n\n\
+         Window {dimensions}",
+        state.accent.label().to_uppercase(),
+        if state.ultimate { " + ULTIMATE" } else { "" },
+        if state.reduced { "reduced" } else { "normal" },
+        if state.primitive { " + primitive" } else { "" },
+    )
 }
 
 const fn fixture_index(fixture: VfxLabFixture) -> u8 {
@@ -1313,6 +1398,7 @@ mod tests {
             ultimate: false,
             reduced: false,
             primitive: false,
+            show_diagnostics: false,
             paused: false,
             step_once: false,
             capture_dir: PathBuf::from("target/vfx-lab"),
@@ -1327,6 +1413,10 @@ mod tests {
             exit_after_capture: false,
             pending_capture_paths: None,
         };
+        let guide = lab_guide_text(&state, scenario, "1280x720");
+        assert!(guide.contains("WHAT YOU ARE LOOKING AT"));
+        assert!(guide.contains("FIGHTER-SIZE REFERENCES"));
+        assert!(guide.contains("Press C"));
         state.select_relative(-1);
         assert_eq!(state.selected, 0);
         state.select_relative(9);

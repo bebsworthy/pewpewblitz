@@ -5,7 +5,7 @@ use std::{env, process};
 fn usage() {
     eprintln!(
         "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--sample-ticks N] [--accent neutral|cold|fire] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
-         Controls: Left/Right select · Space restart · Enter pause · . step · N identity · C accent · U ultimate · R reduced · P primitive · F12 capture · Esc quit"
+         Controls: Left/Right select · Space restart · Enter pause · . step · N identity · C accent · U ultimate · R reduced · P primitive · I guide/details · F12 capture · Esc quit"
     );
 }
 

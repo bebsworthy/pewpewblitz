@@ -98,7 +98,8 @@ cone propagation, and attached fighter status. Space restarts with the same pres
 N advances to a new identity, C cycles neutral/Cold/Fire styling, U toggles ultimate escalation,
 Enter pauses, and `.` advances one simulation tick. R toggles the production reduced-effects
 variant, P toggles the primitive variant, F12 writes paired PNG/JSON evidence under
-`target/vfx-lab`, and Escape quits.
+`target/vfx-lab`, I switches between the plain-language guide and technical diagnostics, and Escape
+quits. Two gray fighter-sized reference spheres provide scale and are not part of the effect.
 
 `just vfx-lab '--effect world-object.explosion --reduced'` starts at an exact transient request.
 Use `--fixture transient|straight|lobbed|field|cone|status` to start at a lifecycle fixture. Native
