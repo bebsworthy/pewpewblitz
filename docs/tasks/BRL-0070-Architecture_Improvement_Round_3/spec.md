@@ -301,3 +301,11 @@ BRL-0086 completed the client customization reducer extraction. `resolve_flow_ac
 Independent review is clean after exact accepted/rejected create/edit characterization was completed. Focused flow tests, strict client Clippy, canonical check/lint/test, all 97 routed network cases, and all 12 performance gates pass. No native rerun was required for this organization-only phase.
 
 The next Stage 6 slice is the server lobby profile-transaction adapter currently embedded in `src/server/lobby/mod.rs`: extract Hello-to-profile-load admission and authenticated profile-command/result bridging into one private module while preserving load-before-command polling, queue lock semantics, and the exact trailing ApplyDeferred visibility boundary.
+
+## BRL-0087 phase completion
+
+BRL-0087 completed the server lobby profile-transaction adapter extraction. One private module now owns profile-backed Hello admission, pending-load correlation, the single load/mutation result pump, and authenticated profile-command submission/mapping. The lobby root retains plugin composition, startup, queue/match ownership, cleanup, and publication.
+
+The outer lobby set chain and inner result -> command -> ApplyDeferred chain remain exact, preserving load-before-command processing, deferred LobbyClient visibility, existing-ticket queue locks, and profile-before-new-Join same-tick policy. Exhaustive request-ID and rejection/decision mapping tests were added. Independent review found no P0/P1/P2 issue; focused, role, lint, canonical, all 97 routed network, and all 12 performance gates pass. No native rerun was required.
+
+The next Stage 6 slice is the smaller projected damageable-object health presentation boundary in `client::presentation_3d`: isolate its screen-space UI/index lifecycle while leaving dynamic map reconciliation, Heist safe visuals, and the PostUpdate schedule composition in their current owners.

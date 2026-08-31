@@ -6,6 +6,7 @@
 //! not need a running network endpoint.
 
 mod catalog;
+mod profile_transactions;
 mod queue;
 
 pub use queue::{
@@ -14,6 +15,11 @@ pub use queue::{
 };
 
 pub(crate) use catalog::resolve_operator_catalog;
+
+use profile_transactions::{
+    PendingLobbyAdmissions, collect_profile_commands, lobby_receive_hellos,
+    process_profile_storage_results,
+};
 
 use super::{LobbyControlInbox, LobbyControlOutbox, RoutedPeer, ServerRoleResource};
 use crate::{
@@ -24,15 +30,14 @@ use crate::{
     content::GameplayContentFingerprint,
     lobby::{duplicate_display_name, normalize_proposed_display_name},
     protocol::{
-        LobbyHello, LobbyJoinOutcome, LobbyJoinRejection, LobbyServerIdentity, MatchRouteGrant,
-        ProfileChannel, QueueSnapshotChannel, RouteCapability, SUPPORTED_PROTOCOL_VERSION,
-        SessionChannel,
+        LobbyHello, LobbyJoinRejection, LobbyServerIdentity, MatchRouteGrant, QueueSnapshotChannel,
+        RouteCapability, SUPPORTED_PROTOCOL_VERSION, SessionChannel,
     },
 };
 use bevy::prelude::*;
 use brawler_routing::{
     AllocateParticipant, AllocateRequestBody, AllocationGrantedBody, AllocationRejectedBody,
-    Capability, CodecError, ControlBody, ControlFrame, LobbyAuthenticatedBody, LobbyManifest,
+    Capability, CodecError, ControlBody, ControlFrame, LobbyManifest,
     LobbyNetcodeAuthenticatedBody, LobbySessionId, NetcodeClientId, PeerId, PlayerId, RequestId,
     RouteId,
 };
@@ -1101,17 +1106,6 @@ struct CollectedQueueMessages {
 struct LobbySessionLosses(BTreeMap<LobbySessionId, NetcodeClientId>);
 
 #[derive(Resource, Default)]
-struct PendingLobbyAdmissions(BTreeMap<u64, PendingLobbyAdmission>);
-
-#[derive(Clone)]
-struct PendingLobbyAdmission {
-    entity: Entity,
-    route_id: RouteId,
-    peer_id: PeerId,
-    hello: LobbyHello,
-}
-
-#[derive(Resource, Default)]
 struct QueueSnapshotPublication {
     initial_pending: bool,
     mutation_pending: bool,
@@ -1343,264 +1337,6 @@ fn initialize_lobby_state(
     commands.insert_resource(profile_authority);
     commands.insert_resource(LobbyState::new(manifest, config.game_mode, build));
     commands.insert_resource(QueueState::new(&catalog));
-}
-
-#[allow(
-    clippy::type_complexity,
-    clippy::needless_pass_by_value,
-    reason = "the query is the one bounded lobby authentication transaction"
-)]
-fn lobby_receive_hellos(
-    state: Res<LobbyState>,
-    mut authority: ResMut<crate::profiles::ProfileAuthority>,
-    mut pending: ResMut<PendingLobbyAdmissions>,
-    mut receivers: Query<(
-        Entity,
-        &RemoteId,
-        &mut MessageReceiver<LobbyHello>,
-        &mut MessageSender<LobbyJoinOutcome>,
-        Option<&RoutedPeer>,
-        Has<Connected>,
-        Has<Disconnected>,
-    )>,
-) {
-    for (entity, remote_id, mut receiver, mut sender, routed_peer, connected, disconnected) in
-        &mut receivers
-    {
-        if !connected || disconnected {
-            continue;
-        }
-        let messages: Vec<_> = receiver.receive().collect();
-        for hello in messages {
-            let Some(client_id) = authenticated_netcode_id(remote_id) else {
-                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
-                    reason: LobbySessionError::InvalidClientId.rejection(),
-                });
-                continue;
-            };
-            let Some(peer) = routed_peer else {
-                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
-                    reason: LobbySessionError::NotRouted.rejection(),
-                });
-                continue;
-            };
-            if let Err(error) = state.validate_hello(&hello) {
-                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
-                    reason: error.rejection(),
-                });
-                continue;
-            }
-            if state.session_for_client(client_id).is_some() {
-                continue;
-            }
-            if let Some(existing) = pending.0.get(&client_id) {
-                if existing.hello != hello {
-                    sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
-                        reason: LobbyJoinRejection::InvalidAccount,
-                    });
-                }
-                continue;
-            }
-            match authority.begin_load(client_id, hello.account_id) {
-                Ok(()) => {
-                    pending.0.insert(
-                        client_id,
-                        PendingLobbyAdmission {
-                            entity,
-                            route_id: peer.route_id,
-                            peer_id: peer.peer_id,
-                            hello,
-                        },
-                    );
-                }
-                Err(error) => sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
-                    reason: profile_authority_join_rejection(&error),
-                }),
-            }
-        }
-    }
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::type_complexity,
-    clippy::needless_pass_by_value,
-    reason = "one ordered authority result pump atomically promotes pending sessions and publishes outcomes"
-)]
-fn process_profile_storage_results(
-    mut commands: Commands,
-    mut state: ResMut<LobbyState>,
-    mut authority: ResMut<crate::profiles::ProfileAuthority>,
-    mut pending: ResMut<PendingLobbyAdmissions>,
-    mut outbox: ResMut<LobbyControlOutbox>,
-    catalog: Res<catalog::ResolvedLobbyCatalog>,
-    mut publications: ResMut<QueueSnapshotPublication>,
-    mut clients: Query<(
-        &RemoteId,
-        &mut MessageSender<LobbyJoinOutcome>,
-        &mut MessageSender<crate::profiles::ProfileOutcome>,
-        Has<Connected>,
-        Has<Disconnected>,
-    )>,
-) {
-    let (loads, mutations) = authority
-        .poll_loads()
-        .unwrap_or_else(|error| panic!("profile storage executor failed: {error:?}"));
-    for completion in loads {
-        let Some(admission) = pending.0.remove(&completion.client_key) else {
-            authority.remove_client(completion.client_key);
-            continue;
-        };
-        let Ok((remote_id, mut sender, _, connected, disconnected)) =
-            clients.get_mut(admission.entity)
-        else {
-            authority.remove_client(completion.client_key);
-            continue;
-        };
-        if !connected
-            || disconnected
-            || authenticated_netcode_id(remote_id) != Some(completion.client_key)
-        {
-            authority.remove_client(completion.client_key);
-            continue;
-        }
-        let profile = match completion.result {
-            Ok(profile) => profile,
-            Err(decision) => {
-                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
-                    reason: match decision {
-                        crate::profiles::ProfileDecision::StorageFault => {
-                            LobbyJoinRejection::StorageUnavailable
-                        }
-                        _ => LobbyJoinRejection::InvalidAccount,
-                    },
-                });
-                authority.remove_client(completion.client_key);
-                continue;
-            }
-        };
-        let session = match state.accept_client(
-            completion.client_key,
-            admission.route_id,
-            admission.peer_id,
-            &admission.hello,
-        ) {
-            Ok(session) => session,
-            Err(error) => {
-                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
-                    reason: error.rejection(),
-                });
-                authority.remove_client(completion.client_key);
-                continue;
-            }
-        };
-        commands.entity(admission.entity).insert(LobbyClient {
-            client_id: session.netcode_client_id,
-            lobby_session_id: session.lobby_session_id,
-        });
-        let _ = outbox.push_authenticated(LobbyAuthenticatedBody {
-            route_id: session.route_id,
-            peer_id: session.peer_id,
-            lobby_session_id: session.lobby_session_id,
-            netcode_client_id: session.netcode_client_id,
-        });
-        if state.mark_welcome_sent(session.netcode_client_id) {
-            sender.send::<SessionChannel>(LobbyJoinOutcome::Accepted {
-                logical_server_id: state.manifest.common.logical_server_id.get(),
-                player_id: crate::protocol::PlayerId(session.player_id.get()),
-                accepted_display_name: state
-                    .accepted_name(session.netcode_client_id)
-                    .expect("accepted session owns a name")
-                    .to_string(),
-                server_name: catalog.server_name.clone(),
-                catalog_revision: catalog.revision,
-                game_types: catalog.game_types.clone(),
-                brawler_catalog: Box::new(catalog.brawler_catalog.clone()),
-                profile: Box::new(profile),
-            });
-            publications.initial_pending = true;
-        }
-    }
-    for (client_key, outcome) in mutations {
-        for (remote_id, _, mut sender, connected, disconnected) in &mut clients {
-            if connected && !disconnected && authenticated_netcode_id(remote_id) == Some(client_key)
-            {
-                sender.send::<ProfileChannel>(outcome.clone());
-                break;
-            }
-        }
-    }
-}
-
-#[allow(
-    clippy::type_complexity,
-    clippy::needless_pass_by_value,
-    reason = "the bounded profile command receiver serializes mutations before queue admission"
-)]
-fn collect_profile_commands(
-    mut authority: ResMut<crate::profiles::ProfileAuthority>,
-    queue: Res<QueueState>,
-    mut clients: Query<(
-        &LobbyClient,
-        &mut MessageReceiver<crate::profiles::ProfileCommand>,
-        &mut MessageSender<crate::profiles::ProfileOutcome>,
-        Has<Disconnected>,
-    )>,
-) {
-    for (client, mut receiver, mut sender, disconnected) in &mut clients {
-        if disconnected {
-            continue;
-        }
-        let queue_locked = queue.ticket_for_client(client.client_id).is_some();
-        for command in receiver.receive().take(4) {
-            match authority.submit_command(client.client_id.get(), command.clone(), queue_locked) {
-                Ok(crate::profiles::ProfileMutationSubmission::Pending) => {}
-                Ok(crate::profiles::ProfileMutationSubmission::Immediate(outcome)) => {
-                    sender.send::<ProfileChannel>(outcome);
-                }
-                Err(crate::profiles::ProfileAuthorityError::StorageStopped) => {
-                    panic!("profile storage executor stopped")
-                }
-                Err(error) => sender.send::<ProfileChannel>(crate::profiles::ProfileOutcome {
-                    request_id: profile_command_request_id(&command),
-                    decision: match error {
-                        crate::profiles::ProfileAuthorityError::QueueLocked => {
-                            crate::profiles::ProfileDecision::QueueLocked
-                        }
-                        crate::profiles::ProfileAuthorityError::InvalidRequest
-                        | crate::profiles::ProfileAuthorityError::UnknownSession => {
-                            crate::profiles::ProfileDecision::InvalidRequest
-                        }
-                        _ => crate::profiles::ProfileDecision::TemporarilyUnavailable,
-                    },
-                    snapshot: None,
-                }),
-            }
-        }
-    }
-}
-
-fn profile_command_request_id(command: &crate::profiles::ProfileCommand) -> u64 {
-    match command {
-        crate::profiles::ProfileCommand::CreateBrawler { request_id, .. }
-        | crate::profiles::ProfileCommand::EditBrawler { request_id, .. }
-        | crate::profiles::ProfileCommand::SelectBrawler { request_id, .. }
-        | crate::profiles::ProfileCommand::DeleteBrawler { request_id, .. }
-        | crate::profiles::ProfileCommand::EquipWeaponParts { request_id, .. } => *request_id,
-    }
-}
-
-fn profile_authority_join_rejection(
-    error: &crate::profiles::ProfileAuthorityError,
-) -> LobbyJoinRejection {
-    match error {
-        crate::profiles::ProfileAuthorityError::AccountInUse => LobbyJoinRejection::AccountInUse,
-        crate::profiles::ProfileAuthorityError::StorageStopped => {
-            LobbyJoinRejection::StorageUnavailable
-        }
-        _ => LobbyJoinRejection::InvalidAccount,
-    }
 }
 
 #[allow(
