@@ -3,6 +3,7 @@ use super::common::{
     CombatVfxContext, GROUND_EFFECT_HEIGHT, GroundMarkerRelation, ground_marker_material,
     ground_marker_relation, unique_roots,
 };
+use super::elemental_style::{spawn_elemental_area_style, spawn_elemental_projectile_style};
 
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const STRAIGHT_PROJECTILE_VISUAL_THICKNESS: f32 = 6.0;
@@ -374,14 +375,6 @@ pub(in super::super) fn reconcile_elemental_field_visuals(
         if !roots.contains(&owner)
             && let Some(radius) = state.radius()
         {
-            let material = match state.kind {
-                crate::combat::ElementalFieldKind::Cryogenic => materials.elemental_cold.clone(),
-                crate::combat::ElementalFieldKind::Fire => materials.elemental_fire.clone(),
-                crate::combat::ElementalFieldKind::Poison => materials.elemental_poison.clone(),
-                crate::combat::ElementalFieldKind::Restoration => {
-                    materials.elemental_restoration.clone()
-                }
-            };
             let signature = vfx::CombatVisualSignature {
                 carrier: vfx::VfxCarrier::PersistentArea,
                 phase: vfx::VfxPhase::Active,
@@ -403,10 +396,10 @@ pub(in super::super) fn reconcile_elemental_field_visuals(
             spawn_elemental_field(
                 &mut commands,
                 &primitives,
+                &materials,
                 owner,
                 state.center_vec2(),
                 radius,
-                material,
                 signature,
             );
         }
@@ -487,8 +480,19 @@ pub(in super::super) fn reconcile_persistent_splash_visuals(
             .flatten()
             .copied()
             .find_map(|effect| {
-                (!matches!(effect, crate::combat::PayloadEffectDefinition::Heal { .. }))
-                    .then(|| effect_material(effect))
+                (!matches!(effect, crate::combat::PayloadEffectDefinition::Heal { .. })).then(
+                    || match effect {
+                        crate::combat::PayloadEffectDefinition::Cold { .. }
+                        | crate::combat::PayloadEffectDefinition::Slow { .. } => {
+                            materials.elemental_cold_bright.clone()
+                        }
+                        crate::combat::PayloadEffectDefinition::DamageOverTime {
+                            kind: crate::combat::DamageOverTimeKind::Fire,
+                            ..
+                        } => materials.elemental_fire_bright.clone(),
+                        _ => effect_material(effect),
+                    },
+                )
             })
             .unwrap_or_else(|| fill.clone());
         let geometry = match state.shape {
@@ -536,6 +540,7 @@ pub(in super::super) fn reconcile_persistent_splash_visuals(
         spawn_persistent_splash(
             &mut commands,
             &primitives,
+            &materials,
             owner,
             *state,
             fill,
@@ -550,9 +555,14 @@ pub(in super::super) fn reconcile_persistent_splash_visuals(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the helper receives one complete immutable persistent-area presentation profile"
+)]
 fn spawn_persistent_splash(
     commands: &mut Commands,
     primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
     owner: Entity,
     state: crate::combat::PersistentSplashState,
     fill: Handle<StandardMaterial>,
@@ -574,26 +584,28 @@ fn spawn_persistent_splash(
         .entity(root)
         .with_children(|parent| match state.shape {
             crate::combat::PersistentAreaShape::Circle { radius } => {
-                parent.spawn((
-                    Mesh3d(primitives.area_disc.clone()),
-                    MeshMaterial3d(fill),
-                    NotShadowCaster,
-                    NotShadowReceiver,
-                    Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT, 0.0)
-                        .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
-                        .with_scale(Vec3::splat(radius)),
-                    Name::new("Persistent Splash circle fill"),
-                ));
-                parent.spawn((
-                    Mesh3d(primitives.area_ring.clone()),
-                    MeshMaterial3d(boundary),
-                    NotShadowCaster,
-                    NotShadowReceiver,
-                    Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT + 0.6, 0.0)
-                        .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
-                        .with_scale(Vec3::splat(radius)),
-                    Name::new("Persistent Splash circle boundary"),
-                ));
+                if !spawn_elemental_area_style(parent, primitives, materials, signature, radius) {
+                    parent.spawn((
+                        Mesh3d(primitives.area_disc.clone()),
+                        MeshMaterial3d(fill),
+                        NotShadowCaster,
+                        NotShadowReceiver,
+                        Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT, 0.0)
+                            .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                            .with_scale(Vec3::splat(radius)),
+                        Name::new("Persistent Splash circle fill"),
+                    ));
+                    parent.spawn((
+                        Mesh3d(primitives.area_ring.clone()),
+                        MeshMaterial3d(boundary),
+                        NotShadowCaster,
+                        NotShadowReceiver,
+                        Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT + 0.6, 0.0)
+                            .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                            .with_scale(Vec3::splat(radius)),
+                        Name::new("Persistent Splash circle boundary"),
+                    ));
+                }
             }
             crate::combat::PersistentAreaShape::Rectangle {
                 half_extents: [x, y],
@@ -807,10 +819,10 @@ pub(in super::super) fn write_sticky_blob_visual_poses(
 fn spawn_elemental_field(
     commands: &mut Commands,
     primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
     owner: Entity,
     center: Vec2,
     radius: f32,
-    material: Handle<StandardMaterial>,
     signature: vfx::CombatVisualSignature,
 ) {
     let root = commands
@@ -824,26 +836,33 @@ fn spawn_elemental_field(
         ))
         .id();
     commands.entity(root).with_children(|parent| {
-        parent.spawn((
-            Mesh3d(primitives.area_disc.clone()),
-            MeshMaterial3d(material.clone()),
-            NotShadowCaster,
-            NotShadowReceiver,
-            Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT, 0.0)
-                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
-                .with_scale(Vec3::splat(radius)),
-            Name::new("Elemental Field fill"),
-        ));
-        parent.spawn((
-            Mesh3d(primitives.area_ring.clone()),
-            MeshMaterial3d(material),
-            NotShadowCaster,
-            NotShadowReceiver,
-            Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT + 0.6, 0.0)
-                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
-                .with_scale(Vec3::splat(radius)),
-            Name::new("Elemental Field boundary"),
-        ));
+        if !spawn_elemental_area_style(parent, primitives, materials, signature, radius) {
+            let material = match signature.accents[0] {
+                Some(vfx::VfxAccent::Poison) => materials.elemental_poison.clone(),
+                Some(vfx::VfxAccent::Restoration) => materials.elemental_restoration.clone(),
+                _ => materials.neutral.clone(),
+            };
+            parent.spawn((
+                Mesh3d(primitives.area_disc.clone()),
+                MeshMaterial3d(material.clone()),
+                NotShadowCaster,
+                NotShadowReceiver,
+                Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT, 0.0)
+                    .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::splat(radius)),
+                Name::new("Elemental Field fill"),
+            ));
+            parent.spawn((
+                Mesh3d(primitives.area_ring.clone()),
+                MeshMaterial3d(material),
+                NotShadowCaster,
+                NotShadowReceiver,
+                Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT + 0.6, 0.0)
+                    .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::splat(radius)),
+                Name::new("Elemental Field boundary"),
+            ));
+        }
     });
 }
 
@@ -1027,17 +1046,31 @@ fn spawn_projectile(
                 *body.expect("straight projectile visual requires replicated body"),
             ))
         };
-        parent.spawn((
-            Mesh3d(if lobbed {
-                primitives.lobbed_projectile.clone()
-            } else {
-                primitives.projectile.clone()
-            }),
-            MeshMaterial3d(team_material(team, materials)),
-            NotShadowCaster,
+        let mesh = if lobbed {
+            primitives.lobbed_projectile.clone()
+        } else {
+            primitives.projectile.clone()
+        };
+        let relationship_material = team_material(team, materials);
+        let visual_radius = body.map_or(9.0, |body| body.shape.bounding_radius());
+        if !spawn_elemental_projectile_style(
+            parent,
+            primitives,
+            materials,
+            signature,
+            mesh.clone(),
             transform,
-            Name::new("V3 projectile geometry"),
-        ));
+            relationship_material.clone(),
+            visual_radius,
+        ) {
+            parent.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(relationship_material),
+                NotShadowCaster,
+                transform,
+                Name::new("V3 projectile geometry"),
+            ));
+        }
     });
 }
 

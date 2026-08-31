@@ -95,16 +95,19 @@ just vfx-lab
 The default fixture previews the 15 production semantic mappings; use Left/Right to select one.
 Tab cycles production-lifecycle fixtures for straight and lobbed projectiles, elemental fields,
 cone propagation, and attached fighter status. Space restarts with the same presentation identity,
-N advances to a new identity, Enter pauses, and `.` advances one simulation tick. R toggles the
-production reduced-effects variant, P toggles the primitive variant, F12 writes paired PNG/JSON
-evidence under `target/vfx-lab`, and Escape quits.
+N advances to a new identity, C cycles neutral/Cold/Fire styling, U toggles ultimate escalation,
+Enter pauses, and `.` advances one simulation tick. R toggles the production reduced-effects
+variant, P toggles the primitive variant, F12 writes paired PNG/JSON evidence under
+`target/vfx-lab`, and Escape quits.
 
 `just vfx-lab '--effect world-object.explosion --reduced'` starts at an exact transient request.
 Use `--fixture transient|straight|lobbed|field|cone|status` to start at a lifecycle fixture. Native
 automation may add `--identity N --radius WORLD_UNITS` and
-`--capture-dir PATH --capture-after UPDATES --exit-after-capture`; `--paused` captures a stable
-initial state. The current viewer is intentionally read-only; BRL-0096 owns the later authoring
-workbench.
+`--sample-ticks N --accent neutral|cold|fire --ultimate --capture-dir PATH --capture-after UPDATES
+--exit-after-capture`; `--paused` captures a stable exact sample, with `--sample-ticks` advancing
+the production timeline before it freezes. Allow about 30 updates before an automated capture so
+the native renderer has prepared newly spawned meshes. The current viewer is intentionally
+read-only; BRL-0096 owns the later authoring workbench.
 
 ## Canonical commands
 

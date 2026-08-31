@@ -31,6 +31,51 @@ use serde_json::json;
 use std::path::PathBuf;
 
 const DEFAULT_RADIUS: u16 = 72;
+const MAX_INITIAL_SAMPLE_TICKS: u16 = 600;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VfxLabAccent {
+    #[default]
+    Neutral,
+    Cold,
+    Fire,
+}
+
+impl VfxLabAccent {
+    #[must_use]
+    pub fn from_key(value: &str) -> Option<Self> {
+        match value {
+            "neutral" => Some(Self::Neutral),
+            "cold" => Some(Self::Cold),
+            "fire" => Some(Self::Fire),
+            _ => None,
+        }
+    }
+
+    const fn next(self) -> Self {
+        match self {
+            Self::Neutral => Self::Cold,
+            Self::Cold => Self::Fire,
+            Self::Fire => Self::Neutral,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Neutral => "neutral",
+            Self::Cold => "cold",
+            Self::Fire => "fire",
+        }
+    }
+
+    const fn signature_accent(self) -> crate::client::vfx::VfxAccent {
+        match self {
+            Self::Neutral => crate::client::vfx::VfxAccent::Neutral,
+            Self::Cold => crate::client::vfx::VfxAccent::Cold,
+            Self::Fire => crate::client::vfx::VfxAccent::Fire,
+        }
+    }
+}
 
 /// Command-line configuration for the read-only production VFX viewer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -43,6 +88,9 @@ pub struct VfxLabConfig {
     pub fixture: Option<String>,
     pub presentation_identity: Option<u64>,
     pub radius: Option<u16>,
+    pub sample_ticks: Option<u16>,
+    pub accent: VfxLabAccent,
+    pub ultimate: bool,
     pub reduced: bool,
     pub primitive: bool,
     pub paused: bool,
@@ -95,6 +143,14 @@ impl VfxLabConfig {
             .is_some_and(|radius| !(1..=256).contains(&radius))
         {
             return Err("VfxLab radius must be between 1 and 256 world units".to_string());
+        }
+        if self
+            .sample_ticks
+            .is_some_and(|ticks| ticks > MAX_INITIAL_SAMPLE_TICKS)
+        {
+            return Err(format!(
+                "VfxLab initial sample must be at most {MAX_INITIAL_SAMPLE_TICKS} ticks"
+            ));
         }
         Ok(())
     }
@@ -157,7 +213,13 @@ impl VfxLabFixture {
 }
 
 impl VfxLabScenario {
-    fn request(self, event_id: u64, radius: u16) -> VfxRequest {
+    fn request(
+        self,
+        event_id: u64,
+        radius: u16,
+        accent: VfxLabAccent,
+        ultimate: bool,
+    ) -> VfxRequest {
         let authoritative_radius = self
             .capabilities
             .authoritative_radius
@@ -177,6 +239,26 @@ impl VfxLabScenario {
         .and_then(|request| {
             let mut signature = request.signature;
             signature.identity = crate::client::vfx::VfxPresentationIdentity::Explicit(event_id);
+            signature.accents = [Some(accent.signature_accent()), None];
+            if self.key == crate::client::vfx::COMBAT_IMPACT_VFX {
+                signature.phase = crate::client::vfx::VfxPhase::Impact;
+            }
+            signature.context = if self.key == crate::client::vfx::ELEMENTAL_FIELD_VFX {
+                Some(crate::client::vfx::VfxContextOverride::ElementalField(
+                    match accent {
+                        VfxLabAccent::Cold => crate::combat::ElementalFieldKind::Cryogenic,
+                        VfxLabAccent::Fire | VfxLabAccent::Neutral => {
+                            crate::combat::ElementalFieldKind::Fire
+                        }
+                    },
+                ))
+            } else if ultimate {
+                Some(crate::client::vfx::VfxContextOverride::Ultimate(
+                    crate::builds::UltimateDefinitionId(1),
+                ))
+            } else {
+                None
+            };
             request.with_signature(signature)
         })
         .expect("sealed production registration produces a valid lab request")
@@ -193,6 +275,8 @@ struct VfxLabState {
     selected: usize,
     presentation_identity: u64,
     radius: u16,
+    accent: VfxLabAccent,
+    ultimate: bool,
     reduced: bool,
     primitive: bool,
     paused: bool,
@@ -201,6 +285,8 @@ struct VfxLabState {
     capture_sequence: u32,
     fixture: VfxLabFixture,
     playback_tick: u64,
+    initial_sample_ticks: u16,
+    pending_sample_ticks: u16,
     tick_accumulator: Duration,
     capture_after_updates: Option<u32>,
     update_index: u32,
@@ -215,8 +301,12 @@ impl VfxLabState {
 
     fn transient_request(&self) -> Option<VfxRequest> {
         matches!(self.fixture, VfxLabFixture::Transient).then(|| {
-            self.selected()
-                .request(self.presentation_identity, self.radius)
+            self.selected().request(
+                self.presentation_identity,
+                self.radius,
+                self.accent,
+                self.ultimate,
+            )
         })
     }
 
@@ -226,6 +316,7 @@ impl VfxLabState {
 
     fn restart_playback(&mut self) {
         self.playback_tick = 30;
+        self.pending_sample_ticks = self.initial_sample_ticks;
         self.tick_accumulator = Duration::ZERO;
         self.step_once = false;
     }
@@ -285,7 +376,9 @@ impl Plugin for VfxLabPlugin {
         )
         .configure_sets(
             Update,
-            crate::client::vfx::VfxSignatureSet.before(handle_lab_input),
+            crate::client::vfx::VfxSignatureSet
+                .after(handle_lab_input)
+                .before(VfxLabLifecycleSet),
         )
         .configure_sets(Update, VfxLabLifecycleSet.after(update_lab_fixture_facts))
         .add_systems(PostUpdate, request_lab_capture);
@@ -317,6 +410,8 @@ impl Plugin for VfxLabPlugin {
             selected,
             presentation_identity: self.config.presentation_identity.unwrap_or(1),
             radius: self.config.radius.unwrap_or(DEFAULT_RADIUS),
+            accent: self.config.accent,
+            ultimate: self.config.ultimate,
             reduced: self.config.reduced,
             primitive: self.config.primitive,
             paused: self.config.paused,
@@ -334,6 +429,8 @@ impl Plugin for VfxLabPlugin {
                 .and_then(VfxLabFixture::from_key)
                 .unwrap_or_default(),
             playback_tick: 30,
+            initial_sample_ticks: self.config.sample_ticks.unwrap_or_default(),
+            pending_sample_ticks: self.config.sample_ticks.unwrap_or_default(),
             tick_accumulator: Duration::ZERO,
             capture_after_updates: self.config.capture_after_updates,
             update_index: 0,
@@ -433,12 +530,31 @@ fn spawn_lab_scenario(
         team_id: crate::combat::TeamId(0),
         weapon_definition_id: crate::combat::PULSE_SIDEARM_DEFINITION,
     };
+    if matches!(
+        state.fixture,
+        VfxLabFixture::StraightProjectile
+            | VfxLabFixture::LobbedProjectile
+            | VfxLabFixture::ConeSpray
+    ) {
+        spawn_lab_style_owner(
+            commands,
+            state.accent,
+            state.presentation_identity,
+            source.owner_network_entity_id,
+        );
+    }
     match state.fixture {
         VfxLabFixture::Transient => unreachable!("transient scenario returned above"),
         VfxLabFixture::StraightProjectile => spawn_straight_fixture(commands, source, tick),
         VfxLabFixture::LobbedProjectile => spawn_lobbed_fixture(commands, source, tick),
         VfxLabFixture::ElementalField => {
-            spawn_field_fixture(commands, state.presentation_identity, state.radius, tick);
+            spawn_field_fixture(
+                commands,
+                state.presentation_identity,
+                state.radius,
+                state.accent,
+                tick,
+            );
         }
         VfxLabFixture::ConeSpray => spawn_cone_fixture(commands, state.presentation_identity, tick),
         VfxLabFixture::Status => {
@@ -511,12 +627,23 @@ fn spawn_lobbed_fixture(
     ));
 }
 
-fn spawn_field_fixture(commands: &mut Commands, identity: u64, radius: u16, tick: u64) {
+fn spawn_field_fixture(
+    commands: &mut Commands,
+    identity: u64,
+    radius: u16,
+    accent: VfxLabAccent,
+    tick: u64,
+) {
     commands.spawn((
         VfxLabFixtureOwner,
         crate::combat::ElementalFieldState {
             id: crate::combat::ElementalFieldId(identity),
-            kind: crate::combat::ElementalFieldKind::Fire,
+            kind: match accent {
+                VfxLabAccent::Cold => crate::combat::ElementalFieldKind::Cryogenic,
+                VfxLabAccent::Neutral | VfxLabAccent::Fire => {
+                    crate::combat::ElementalFieldKind::Fire
+                }
+            },
             owner_network_entity_id: crate::protocol::NetworkEntityId(1),
             team_id: crate::combat::TeamId(0),
             center: crate::combat::WorldPoint::from(Vec2::ZERO),
@@ -605,6 +732,54 @@ fn lab_attack_source(
     }
 }
 
+fn spawn_lab_style_owner(
+    commands: &mut Commands,
+    accent: VfxLabAccent,
+    fingerprint: u64,
+    network_id: crate::protocol::NetworkEntityId,
+) {
+    let mut loadout = crate::builds::resolve_build_recipe(
+        &crate::builds::BuildCatalog::embedded().expect("embedded build catalog is valid"),
+        &crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog is valid"),
+        crate::builds::BrawlerBuildRecipe {
+            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+            ultimate: crate::builds::UltimateDefinitionId(1),
+            passives: [
+                crate::builds::PassiveDefinitionId(1),
+                crate::builds::PassiveDefinitionId(6),
+            ],
+        },
+    )
+    .expect("built-in VfxLab loadout resolves");
+    loadout.primary_weapon.recipe_fingerprint = crate::combat::WeaponRecipeFingerprint(fingerprint);
+    loadout.primary_weapon.recipe.payload_bundles[0].effects = vec![match accent {
+        VfxLabAccent::Cold => crate::combat::PayloadEffectDefinition::Cold {
+            amount: 10,
+            recipients: crate::combat::RecipientPolicy::Hostiles,
+        },
+        VfxLabAccent::Fire => crate::combat::PayloadEffectDefinition::DamageOverTime {
+            kind: crate::combat::DamageOverTimeKind::Fire,
+            damage_per_tick: 2,
+            tick_interval: 10,
+            duration_ticks: 30,
+            recipients: crate::combat::RecipientPolicy::Hostiles,
+        },
+        VfxLabAccent::Neutral => crate::combat::PayloadEffectDefinition::Damage {
+            amount: 10,
+            falloff: crate::combat::DamageFalloff::None,
+            recipients: crate::combat::RecipientPolicy::Hostiles,
+        },
+    }];
+    commands.spawn((
+        VfxLabFixtureOwner,
+        crate::protocol::Fighter,
+        network_id,
+        crate::combat::TeamId(0),
+        loadout,
+        Name::new("VfxLab signature-only loadout owner"),
+    ));
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
@@ -640,6 +815,14 @@ fn handle_lab_input(
         restart = true;
     }
     if keyboard.just_pressed(KeyCode::Space) {
+        restart = true;
+    }
+    if keyboard.just_pressed(KeyCode::KeyC) {
+        state.accent = state.accent.next();
+        restart = true;
+    }
+    if keyboard.just_pressed(KeyCode::KeyU) {
+        state.ultimate = !state.ultimate;
         restart = true;
     }
     if keyboard.just_pressed(KeyCode::KeyR) {
@@ -695,7 +878,11 @@ fn advance_lab_effects(
     mut effects: Query<(Entity, &mut CombatEffect3d)>,
     mut clocks: Query<&mut AuthoritativeTick, With<VfxLabClock>>,
 ) {
-    let delta = if state.step_once {
+    let delta = if state.pending_sample_ticks > 0 {
+        let ticks = state.pending_sample_ticks;
+        state.pending_sample_ticks = 0;
+        crate::timing::SIMULATION_TICK.saturating_mul(u32::from(ticks))
+    } else if state.step_once {
         state.step_once = false;
         crate::timing::SIMULATION_TICK
     } else if state.paused {
@@ -782,6 +969,10 @@ fn hide_gameplay_hud(mut hud: VfxLabGameplayHudQuery) {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "paired Lab capture keeps the selected style, recipe, lifecycle snapshot, and paths atomic"
+)]
 fn request_lab_capture(world: &mut World) {
     let keyboard_requested = world
         .get_resource::<ButtonInput<KeyCode>>()
@@ -806,6 +997,8 @@ fn request_lab_capture(world: &mut World) {
                 state.selected(),
                 state.fixture,
                 state.presentation_identity,
+                state.accent,
+                state.ultimate,
                 state.reduced,
                 state.primitive,
                 state.paused,
@@ -813,14 +1006,25 @@ fn request_lab_capture(world: &mut World) {
             ))
         }
     };
-    let Some((directory, sequence, scenario, fixture, identity, reduced, primitive, paused, tick)) =
-        capture
+    let Some((
+        directory,
+        sequence,
+        scenario,
+        fixture,
+        identity,
+        accent,
+        ultimate,
+        reduced,
+        primitive,
+        paused,
+        tick,
+    )) = capture
     else {
         return;
     };
     let radius = world.resource::<VfxLabState>().radius;
-    let request =
-        matches!(fixture, VfxLabFixture::Transient).then(|| scenario.request(identity, radius));
+    let request = matches!(fixture, VfxLabFixture::Transient)
+        .then(|| scenario.request(identity, radius, accent, ultimate));
     let recipe = request.as_ref().map(|request| {
         world
             .resource::<VfxRegistry>()
@@ -860,8 +1064,11 @@ fn request_lab_capture(world: &mut World) {
             "request_key": request.as_ref().map(|_| scenario.key.as_str()),
             "producer_rank": request.as_ref().map(|_| scenario.producer_rank),
             "presentation_identity": identity,
+            "accent": accent.label(),
+            "ultimate": ultimate,
             "radius": radius,
             "playback_tick": tick,
+            "initial_sample_ticks": world.resource::<VfxLabState>().initial_sample_ticks,
             "authoritative_radius": request.as_ref().and_then(|request| request.authoritative_radius),
             "authoritative_deadline": request.as_ref().and_then(|request| request.deadline).map(|deadline| json!({
                 "activated_at_tick": deadline.activated_at_tick,
@@ -986,7 +1193,9 @@ fn update_lab_inspector(
         "VFXLAB - READ-ONLY PRODUCTION VIEWER\n\n\
          {}\n\n\
          Variant  {}{}\n\
+         Style    {}{}\n\
          Playback {} - identity {}\n\
+         Sample   {} initial ticks\n\
          Radius   {} world units\n\
          Capture  {}\n\
          Catalog  {:016x} - sealed/valid\n\
@@ -994,12 +1203,15 @@ fn update_lab_inspector(
          Cache     {}/{} attacks - {} FIFO evictions\n\
          Active transient {} - fixture facts {} - cameras {} - {}\n\n\
          Tab fixture   <-/-> mapping   Space restart   Enter pause   . step\n\
-         N identity   R reduced   P primitive   F12 capture   Esc quit",
+         N identity   C accent   U ultimate   R reduced   P primitive   F12 capture   Esc quit",
         scenario_details,
         if state.reduced { "reduced" } else { "normal" },
         if state.primitive { " + primitive" } else { "" },
+        state.accent.label(),
+        if state.ultimate { " + ultimate" } else { "" },
         if state.paused { "paused" } else { "running" },
         state.presentation_identity,
+        state.initial_sample_ticks,
         state.radius,
         state.capture_dir.display(),
         embedded_vfx_catalog_fingerprint(),
@@ -1075,6 +1287,14 @@ mod tests {
             .validate()
             .is_err()
         );
+        assert!(
+            VfxLabConfig {
+                sample_ticks: Some(MAX_INITIAL_SAMPLE_TICKS + 1),
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
+        );
     }
 
     #[test]
@@ -1089,6 +1309,8 @@ mod tests {
             selected: 0,
             presentation_identity: 7,
             radius: DEFAULT_RADIUS,
+            accent: VfxLabAccent::Neutral,
+            ultimate: false,
             reduced: false,
             primitive: false,
             paused: false,
@@ -1097,6 +1319,8 @@ mod tests {
             capture_sequence: 0,
             fixture: VfxLabFixture::Transient,
             playback_tick: 30,
+            initial_sample_ticks: 0,
+            pending_sample_ticks: 0,
             tick_accumulator: Duration::ZERO,
             capture_after_updates: None,
             update_index: 0,

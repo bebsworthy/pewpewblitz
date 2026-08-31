@@ -230,9 +230,9 @@ it does not replace these ownership and cleanup paths:
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
 | Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with one to eight authored mesh-layer children, each selecting a retained primitive/material, scale, anchor, and timeline | Root lifetime is the maximum layer delay plus duration or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
-| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Projectile visual root and shared primitive body | Root follows the replicated owner and disappears with it; lob height derives from replicated launch/landing ticks |
-| Elemental/concealment field | Replicated field state | Low disc/ring root selected by semantic field/team | Recreated after late join from public state; owner removal is cleanup truth |
-| Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
+| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Cold adds slow crystal fins and Fire adds fast trailing lobes; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height derives from replicated launch/landing ticks |
+| Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion and Fire uses fast rising flame motion | Recreated after late join from public state; owner removal is cleanup truth |
+| Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary; circular Cold/Fire areas reuse the elemental area style | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
 | Sticky payload | Replicated position, fuse ticks, radius, role, and attack source | Moving body, exact warning ring, authoritative fuse-progress fill | Recreated at the observed tick and removed with the owner |
 | Cone spray | Replicated origin, facing, propagation and deadline | Fixed bounded clipped-segment root | Reconstructed from authoritative tick; owner removal clears all segments |
 | Fighter status/dash | Replicated status, ability, concealment, and observed tick | Fighter-owned status markers and bounded trail | Reconciled from current state and removed on status/owner lifecycle |
@@ -277,9 +277,12 @@ later demonstrate an accepted cue path that cannot be observed or cached before 
 
 #### Recipe and layer schema
 
-Catalog schema 4 uses three bounded tables: semantic request mappings, recipes, and reusable mesh
-layers. IDs are client-only validated lowercase ASCII names and never enter gameplay content
-fingerprints or protocol state.
+Catalog schema 5 uses four bounded tables: semantic request mappings, typed style mappings, recipes,
+and reusable mesh layers. A style mapping may select on an implemented accent, lifecycle phase, and
+ultimate context over the existing typed signature. Every styled request retains one key-only
+fallback, duplicate selectors fail validation, and the most-specific matching selector wins
+deterministically. IDs are client-only validated lowercase ASCII names and never enter gameplay
+content fingerprints or protocol state.
 
 A recipe owns an ordered list of layer IDs, a total concurrency cap, one fallback recipe, and an
 optional reduced recipe. Recipes do not recursively include other recipes. References must exist;
@@ -360,7 +363,10 @@ representative replicated projectile, field, cone, and fighter-status facts, the
 lifecycle materializers create and own their visual roots. Fixtures do not contain a second visual
 implementation. Restart preserves the explicit presentation identity; choosing a new identity is a
 separate action. Pause and single-step use the canonical simulation tick, so persistent deadlines
-and attached motion can be inspected predictably.
+and attached motion can be inspected predictably. Cold/Fire accent and ultimate controls resolve
+through the same production signature. Automation may apply an exact bounded initial sample in
+ticks before freezing, allowing a warmed native capture to inspect a transient at its activation,
+peak, or tail.
 
 Every Lab capture uses the production asynchronous screenshot path and writes a paired PNG and JSON
 snapshot. The JSON identifies the build and VFX catalog, fixture, semantic request and resolved
@@ -445,7 +451,7 @@ The asset boundary has four distinct sources:
 | `assets/catalogs/` | Client-owned paths, transforms, material values, theme profiles, and degradation mappings |
 | `content/` | Stable server/client-neutral gameplay, map-asset, gameplay-profile, and theme identities |
 
-Transient VFX uses a strict client-only schema-4 recipe catalog and a sealed request registry. Feature
+Transient VFX uses a strict client-only schema-5 recipe catalog and a sealed request registry. Feature
 plugins translate their owned gameplay facts into validated semantic request keys such as
 `combat.muzzle`, `world-object.explosion`, or `heist.critical`; these producers do not select
 meshes, materials, renderer families, reduced-effects policy, or resolved lifetimes. During plugin

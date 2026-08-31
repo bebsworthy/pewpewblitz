@@ -1,7 +1,7 @@
 //! Typed client-only combat presentation signatures and bounded attack-style retention.
 
 use bevy::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
 
 pub(crate) const MAX_CACHED_VFX_ATTACK_SIGNATURES: usize = 512;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub(crate) enum VfxCarrier {
     PointTransient,
     StraightProjectile,
@@ -30,7 +30,7 @@ pub(crate) enum VfxCarrier {
     WorldFeedback,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub(crate) enum VfxPhase {
     Activation,
     Travel,
@@ -41,7 +41,7 @@ pub(crate) enum VfxPhase {
     Interruption,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub(crate) enum VfxAccent {
     Neutral,
     Cold,
@@ -273,6 +273,24 @@ impl CombatVisualSignature {
     pub(crate) const fn with_variant(mut self, variant: VfxPresentationVariant) -> Self {
         self.variant = variant;
         self
+    }
+
+    pub(crate) const fn stable_seed(self) -> u64 {
+        match self.identity {
+            VfxPresentationIdentity::Neutral(value)
+            | VfxPresentationIdentity::CombatEvent(value)
+            | VfxPresentationIdentity::ReplicatedField(value)
+            | VfxPresentationIdentity::Deployable(value)
+            | VfxPresentationIdentity::Explicit(value) => value,
+            VfxPresentationIdentity::Attack {
+                attack_id,
+                delivery_index,
+            } => attack_id ^ (delivery_index as u64).rotate_left(17),
+            VfxPresentationIdentity::NetworkEntity {
+                network_id,
+                generation,
+            } => network_id ^ generation.rotate_left(29),
+        }
     }
 
     pub(crate) fn validate(self) -> Result<(), String> {

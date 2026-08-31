@@ -149,9 +149,12 @@ impl VfxRegistry {
         {
             return None;
         }
-        let recipe =
-            self.catalog
-                .resolve(request.key.as_str(), reduced, request.deadline.is_some())?;
+        let recipe = self.catalog.resolve(
+            request.key.as_str(),
+            &request.signature,
+            reduced,
+            request.deadline.is_some(),
+        )?;
         if recipe
             .layers
             .iter()

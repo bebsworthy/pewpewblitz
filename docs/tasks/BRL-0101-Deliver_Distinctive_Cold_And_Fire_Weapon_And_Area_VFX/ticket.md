@@ -1,13 +1,13 @@
 ---
 id: BRL-0101
 title: Deliver distinctive Cold and Fire weapon and area VFX
-status: todo
+status: doing
 theme:
 release:
 created: 2026-08-31T08:21:40Z
-modified: 2026-08-31T11:01:53Z
+modified: 2026-08-31T15:40:22Z
 closed:
-revision: a8332bad0698625a
+revision: 2f82c8778a78be44
 blocks: [BRL-0102]
 related: [BRL-0094]
 ---

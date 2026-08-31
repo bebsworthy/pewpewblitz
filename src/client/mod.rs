@@ -103,7 +103,7 @@ pub use settings::{
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
 pub use shell::ClientShellPlugin;
-pub use vfx_lab::{VfxLabConfig, build_vfx_lab_app};
+pub use vfx_lab::{VfxLabAccent, VfxLabConfig, build_vfx_lab_app};
 
 /// Installs client-side gameplay state reconstructed from authoritative replication and messages.
 /// Connection lifecycle and transport remain owned by [`ClientNetworkPlugin`].

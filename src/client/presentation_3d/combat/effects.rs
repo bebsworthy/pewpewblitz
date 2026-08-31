@@ -262,6 +262,10 @@ fn vfx_material(key: VfxMaterialKey, materials: &Material3dAssets) -> Handle<Sta
         VfxMaterialKey::ScanArea => materials.scan_area.clone(),
         VfxMaterialKey::DemolitionArea => materials.demolition_area.clone(),
         VfxMaterialKey::PickupGlow => materials.pickup_glow.clone(),
+        VfxMaterialKey::ColdBright => materials.elemental_cold_bright.clone(),
+        VfxMaterialKey::ColdSoft => materials.elemental_cold.clone(),
+        VfxMaterialKey::FireBright => materials.elemental_fire_bright.clone(),
+        VfxMaterialKey::FireSoft => materials.elemental_fire.clone(),
     }
 }
 /// Keeps fighter animation feedback separate from semantic VFX production.
@@ -520,6 +524,7 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             "cone_spray_roots": component_count::<super::cone_spray::ConeSprayVisual3d>(world),
             "status_roots": component_count::<super::fighter_feedback::StatusVisual3d>(world),
             "dash_trail_roots": component_count::<super::fighter_feedback::DashTrailVisual3d>(world),
+            "elemental_motion_accents": component_count::<super::elemental_style::ElementalMotionAccent3d>(world),
         },
         "assets": {
             "meshes": mesh_assets,

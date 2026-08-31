@@ -1,11 +1,11 @@
 use bevy::app::AppExit;
-use brawler::client::{VfxLabConfig, build_vfx_lab_app};
+use brawler::client::{VfxLabAccent, VfxLabConfig, build_vfx_lab_app};
 use std::{env, process};
 
 fn usage() {
     eprintln!(
-        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
-         Controls: Left/Right select · Space restart · Enter pause · . step · N identity · R reduced · P primitive · F12 capture · Esc quit"
+        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--sample-ticks N] [--accent neutral|cold|fire] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
+         Controls: Left/Right select · Space restart · Enter pause · . step · N identity · C accent · U ultimate · R reduced · P primitive · F12 capture · Esc quit"
     );
 }
 
@@ -23,6 +23,7 @@ fn parse_args() -> Result<VfxLabConfig, String> {
             "--reduced" => config.reduced = true,
             "--primitive" => config.primitive = true,
             "--paused" => config.paused = true,
+            "--ultimate" => config.ultimate = true,
             "--exit-after-capture" => config.exit_after_capture = true,
             "--identity" => {
                 config.presentation_identity = Some(
@@ -39,6 +40,21 @@ fn parse_args() -> Result<VfxLabConfig, String> {
                         .parse()
                         .map_err(|_| "invalid --radius value".to_string())?,
                 );
+            }
+            "--sample-ticks" => {
+                config.sample_ticks = Some(
+                    args.next()
+                        .ok_or_else(|| "--sample-ticks requires an integer".to_string())?
+                        .parse()
+                        .map_err(|_| "invalid --sample-ticks value".to_string())?,
+                );
+            }
+            "--accent" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--accent requires neutral, cold, or fire".to_string())?;
+                config.accent = VfxLabAccent::from_key(&value)
+                    .ok_or_else(|| "invalid --accent value".to_string())?;
             }
             "--fixture" => {
                 config.fixture = Some(

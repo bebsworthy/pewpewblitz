@@ -8,9 +8,10 @@ use super::recipes::{
     VfxRecipe,
 };
 use super::request::valid_vfx_request_key;
+use super::{CombatVisualSignature, VfxAccent, VfxContextOverride, VfxPhase};
 
 pub(super) const VFX_CATALOG: &str = include_str!("../../../assets/catalogs/vfx.ron");
-const VFX_SCHEMA_VERSION: u16 = 4;
+const VFX_SCHEMA_VERSION: u16 = 5;
 const MAX_VFX_MAPPINGS: usize = 64;
 const MAX_VFX_FIXED_WORLD: f32 =
     crate::map::MAX_MAP_DIMENSION_CELLS as f32 * crate::map::MAP_CELL_SIZE_WORLD;
@@ -44,6 +45,10 @@ pub(crate) enum VfxMaterialKey {
     ScanArea,
     DemolitionArea,
     PickupGlow,
+    ColdBright,
+    ColdSoft,
+    FireBright,
+    FireSoft,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
@@ -121,6 +126,7 @@ pub(super) struct VfxCatalogSource {
     schema_version: u16,
     default_recipe: String,
     mappings: Vec<VfxRequestMapping>,
+    style_mappings: Vec<VfxStyleMapping>,
     recipes: Vec<VfxRecipe>,
     mesh_layers: Vec<VfxMeshLayer>,
 }
@@ -130,6 +136,41 @@ pub(super) struct VfxCatalogSource {
 struct VfxRequestMapping {
     key: String,
     recipe: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct VfxStyleMapping {
+    key: String,
+    accent: VfxAccent,
+    phase: Option<VfxPhase>,
+    ultimate: bool,
+    recipe: String,
+}
+
+impl VfxStyleMapping {
+    fn matches(&self, key: &str, signature: &CombatVisualSignature) -> bool {
+        self.key == key
+            && signature.accents.contains(&Some(self.accent))
+            && self.phase.is_none_or(|phase| phase == signature.phase)
+            && (!self.ultimate || signature.context.is_some_and(is_ultimate_context))
+    }
+
+    const fn specificity(&self) -> u8 {
+        1 + self.phase.is_some() as u8 + self.ultimate as u8
+    }
+}
+
+const fn is_ultimate_context(context: VfxContextOverride) -> bool {
+    matches!(
+        context,
+        VfxContextOverride::Ultimate(_)
+            | VfxContextOverride::Deployable { .. }
+            | VfxContextOverride::StickyUltimateSecondary
+            | VfxContextOverride::ElementalField(_)
+            | VfxContextOverride::DemolitionStrike
+            | VfxContextOverride::Sentry
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -142,6 +183,7 @@ pub(super) struct VfxRecipeRequirements {
 pub(super) struct VfxCatalog {
     default_recipe: String,
     mappings: BTreeMap<String, String>,
+    style_mappings: Vec<VfxStyleMapping>,
     recipes: BTreeMap<String, VfxRecipe>,
     mesh_layers: BTreeMap<String, VfxMeshLayer>,
 }
@@ -157,6 +199,10 @@ impl VfxCatalog {
         Self::from_source(source)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "catalog sealing validates the complete bounded cross-reference graph atomically"
+    )]
     pub(super) fn from_source(source: VfxCatalogSource) -> Result<Self, String> {
         if source.schema_version != VFX_SCHEMA_VERSION {
             return Err(format!(
@@ -170,7 +216,12 @@ impl VfxCatalog {
         if source.mesh_layers.len() > MAX_VFX_LAYERS {
             return Err("VFX catalog exceeds mesh-layer capacity".into());
         }
-        if source.mappings.len() > MAX_VFX_MAPPINGS {
+        if source
+            .mappings
+            .len()
+            .saturating_add(source.style_mappings.len())
+            > MAX_VFX_MAPPINGS
+        {
             return Err("VFX catalog exceeds request-mapping capacity".into());
         }
 
@@ -242,9 +293,36 @@ impl VfxCatalog {
         if mappings.is_empty() {
             return Err("VFX catalog must contain at least one request mapping".into());
         }
+        let mut style_selectors = std::collections::BTreeSet::new();
+        for mapping in &source.style_mappings {
+            if !valid_vfx_request_key(&mapping.key) {
+                return Err(format!("invalid VFX style mapping key: {}", mapping.key));
+            }
+            if !mappings.contains_key(&mapping.key) {
+                return Err(format!(
+                    "VFX style mapping {} has no key-only fallback",
+                    mapping.key
+                ));
+            }
+            if !recipes.contains_key(&mapping.recipe) {
+                return Err(format!(
+                    "VFX style mapping {} references missing recipe {}",
+                    mapping.key, mapping.recipe
+                ));
+            }
+            if !style_selectors.insert((
+                mapping.key.clone(),
+                mapping.accent,
+                mapping.phase,
+                mapping.ultimate,
+            )) {
+                return Err(format!("duplicate VFX style mapping: {}", mapping.key));
+            }
+        }
         Ok(Self {
             default_recipe: source.default_recipe,
             mappings,
+            style_mappings: source.style_mappings,
             recipes,
             mesh_layers,
         })
@@ -255,23 +333,35 @@ impl VfxCatalog {
     }
 
     pub(super) fn requirements(&self, key: &str) -> Option<VfxRecipeRequirements> {
-        let recipe = self.mapped_recipe(key)?;
-        let reduced = recipe
-            .reduced_recipe
-            .as_deref()
-            .and_then(|id| self.recipes.get(id));
-        Some([Some(recipe), reduced].into_iter().flatten().fold(
-            VfxRecipeRequirements::default(),
-            |requirements, recipe| {
-                let requirements = requirements.including(recipe, &self.mesh_layers);
-                if recipe_requires_deadline(recipe, &self.mesh_layers) {
-                    requirements
-                        .including(&self.recipes[&recipe.fallback_recipe], &self.mesh_layers)
-                } else {
-                    requirements
-                }
-            },
-        ))
+        let fallback = self.mapped_recipe(key)?;
+        let recipes = std::iter::once(fallback).chain(
+            self.style_mappings
+                .iter()
+                .filter(|mapping| mapping.key == key)
+                .map(|mapping| &self.recipes[&mapping.recipe]),
+        );
+        Some(
+            recipes.fold(VfxRecipeRequirements::default(), |requirements, recipe| {
+                let reduced = recipe
+                    .reduced_recipe
+                    .as_deref()
+                    .and_then(|id| self.recipes.get(id));
+                [Some(recipe), reduced].into_iter().flatten().fold(
+                    requirements,
+                    |requirements, recipe| {
+                        let requirements = requirements.including(recipe, &self.mesh_layers);
+                        if recipe_requires_deadline(recipe, &self.mesh_layers) {
+                            requirements.including(
+                                &self.recipes[&recipe.fallback_recipe],
+                                &self.mesh_layers,
+                            )
+                        } else {
+                            requirements
+                        }
+                    },
+                )
+            }),
+        )
     }
 
     #[cfg(test)]
@@ -300,10 +390,17 @@ impl VfxCatalog {
     pub(super) fn resolve(
         &self,
         key: &str,
+        signature: &CombatVisualSignature,
         reduced: bool,
         authoritative_deadline_available: bool,
     ) -> Option<ResolvedVfxRecipe> {
-        let recipe = self.mapped_recipe(key)?;
+        let recipe = self
+            .style_mappings
+            .iter()
+            .filter(|mapping| mapping.matches(key, signature))
+            .max_by_key(|mapping| mapping.specificity())
+            .and_then(|mapping| self.recipes.get(&mapping.recipe))
+            .or_else(|| self.mapped_recipe(key))?;
         let recipe = if reduced {
             recipe
                 .reduced_recipe
@@ -468,8 +565,13 @@ mod tests {
             assert_eq!(catalog.mapped_recipe(key).unwrap().id, recipe_id);
         }
 
-        let normal = catalog.resolve("combat.muzzle", false, false).unwrap();
-        let reduced = catalog.resolve("combat.muzzle", true, false).unwrap();
+        let signature = CombatVisualSignature::neutral_point(1, bevy::prelude::Vec2::ZERO);
+        let normal = catalog
+            .resolve("combat.muzzle", &signature, false, false)
+            .unwrap();
+        let reduced = catalog
+            .resolve("combat.muzzle", &signature, true, false)
+            .unwrap();
         assert_eq!(normal.id, "muzzle");
         assert_eq!(normal.layers.len(), 1);
         assert_eq!(normal.layers[0].material, VfxMaterialKey::EffectMuzzle);
@@ -487,9 +589,54 @@ mod tests {
     }
 
     #[test]
+    fn typed_style_selection_prefers_accent_phase_and_ultimate_specificity() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let mut cold = CombatVisualSignature::neutral_point(1, bevy::prelude::Vec2::ZERO);
+        cold.accents = [Some(VfxAccent::Cold), None];
+        cold.phase = VfxPhase::Activation;
+        assert_eq!(
+            catalog
+                .resolve("combat.muzzle", &cold, false, false)
+                .unwrap()
+                .id,
+            "cold_muzzle"
+        );
+        assert_eq!(
+            catalog
+                .resolve("combat.muzzle", &cold, true, false)
+                .unwrap()
+                .id,
+            "cold_muzzle_reduced"
+        );
+
+        let mut fire = CombatVisualSignature::neutral_point(2, bevy::prelude::Vec2::ZERO);
+        fire.accents = [Some(VfxAccent::Fire), None];
+        fire.phase = VfxPhase::Impact;
+        fire.context = Some(VfxContextOverride::Ultimate(
+            crate::builds::UltimateDefinitionId(4),
+        ));
+        assert_eq!(
+            catalog
+                .resolve("combat.impact", &fire, false, false)
+                .unwrap()
+                .id,
+            "fire_ultimate_impact"
+        );
+
+        let neutral = CombatVisualSignature::neutral_point(3, bevy::prelude::Vec2::ZERO);
+        assert_eq!(
+            catalog
+                .resolve("combat.impact", &neutral, false, false)
+                .unwrap()
+                .id,
+            "impact"
+        );
+    }
+
+    #[test]
     fn strict_schema_keys_references_values_and_capacity_are_validated() {
         for (needle, replacement) in [
-            ("schema_version: 4", "schema_version: 3"),
+            ("schema_version: 5", "schema_version: 4"),
             ("key: \"combat.muzzle\"", "key: \"Combat/Muzzle\""),
             ("recipe: \"muzzle\"", "recipe: \"missing\""),
             ("scale: FixedWorld(8.0)", "scale: FixedWorld(0.0)"),
@@ -522,6 +669,25 @@ mod tests {
             .mesh_layers
             .push(duplicate_layer.mesh_layers[0].clone());
         assert!(VfxCatalog::from_source(duplicate_layer).is_err());
+
+        let mut duplicate_style: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
+        duplicate_style
+            .style_mappings
+            .push(duplicate_style.style_mappings[0].clone());
+        assert!(VfxCatalog::from_source(duplicate_style).is_err());
+    }
+
+    #[test]
+    fn style_mapping_requires_a_key_only_fallback() {
+        let mut missing_fallback: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
+        missing_fallback
+            .mappings
+            .retain(|mapping| mapping.key != "combat.muzzle");
+        assert!(
+            VfxCatalog::from_source(missing_fallback)
+                .unwrap_err()
+                .contains("has no key-only fallback")
+        );
     }
 
     #[test]

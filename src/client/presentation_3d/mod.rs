@@ -112,7 +112,9 @@ pub(crate) struct Material3dAssets {
     pub(crate) status_poison: Handle<StandardMaterial>,
     pub(crate) status_fire: Handle<StandardMaterial>,
     pub(crate) elemental_cold: Handle<StandardMaterial>,
+    pub(crate) elemental_cold_bright: Handle<StandardMaterial>,
     pub(crate) elemental_fire: Handle<StandardMaterial>,
+    pub(crate) elemental_fire_bright: Handle<StandardMaterial>,
     pub(crate) elemental_poison: Handle<StandardMaterial>,
     pub(crate) elemental_restoration: Handle<StandardMaterial>,
     pub(crate) sticky_blob: Handle<StandardMaterial>,
@@ -350,6 +352,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::reconcile_dash_trails,
                     combat::update_sticky_blob_fuse_progress,
                     combat::update_cone_spray_visuals,
+                    combat::animate_elemental_motion_accents,
                     combat::update_aim_preview,
                     animate_combat_effect_layers,
                     update_character_animation,
@@ -1122,10 +1125,22 @@ pub(in crate::client) fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
+        elemental_cold_bright: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.58, 0.94, 1.0),
+            emissive: LinearRgba::new(0.22, 1.5, 2.5, 1.0),
+            unlit: true,
+            ..default()
+        }),
         elemental_fire: materials.add(StandardMaterial {
             base_color: Color::srgba(1.0, 0.18, 0.02, 0.36),
             emissive: LinearRgba::new(2.2, 0.08, 0.01, 1.0),
             alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        elemental_fire_bright: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.58, 0.08),
+            emissive: LinearRgba::new(2.8, 0.62, 0.03, 1.0),
             unlit: true,
             ..default()
         }),
