@@ -4,11 +4,11 @@ use bevy::prelude::{App, Plugin, Resource};
 use std::collections::BTreeSet;
 
 use super::{
-    CombatVfxProducerPlugin, HeistVfxProducerPlugin, PickupVfxProducerPlugin, VfxLifetime,
-    VfxProfile, VfxRequest, VfxRequestKey, WorldObjectVfxProducerPlugin, catalog::VfxCatalog,
+    CombatVfxProducerPlugin, HeistVfxProducerPlugin, PickupVfxProducerPlugin, ResolvedVfxRecipe,
+    VfxMeshLayer, VfxRequest, VfxRequestKey, WorldObjectVfxProducerPlugin, catalog::VfxCatalog,
 };
 
-pub(crate) const MAX_VFX_REQUEST_REGISTRATIONS: usize = 32;
+pub(crate) const MAX_VFX_REQUEST_REGISTRATIONS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct VfxRequestCapabilities {
@@ -138,7 +138,7 @@ pub(crate) struct VfxRegistry {
 }
 
 impl VfxRegistry {
-    pub(crate) fn resolve(&self, request: &VfxRequest, reduced: bool) -> Option<&VfxProfile> {
+    pub(crate) fn resolve(&self, request: &VfxRequest, reduced: bool) -> Option<ResolvedVfxRecipe> {
         request.validate().ok()?;
         let registration = self.registration(request.key)?;
         if request.order.producer_rank != registration.producer_rank
@@ -148,21 +148,26 @@ impl VfxRegistry {
         {
             return None;
         }
-        let profile =
+        let recipe =
             self.catalog
                 .resolve(request.key.as_str(), reduced, request.deadline.is_some())?;
-        if (profile.scale.requires_authoritative_radius()
-            || profile.anchor.requires_authoritative_radius())
+        if recipe
+            .layers
+            .iter()
+            .any(VfxMeshLayer::requires_authoritative_radius)
             && request.authoritative_radius.is_none()
         {
             return None;
         }
-        if matches!(profile.lifetime, VfxLifetime::AuthoritativeDeadline)
+        if recipe
+            .layers
+            .iter()
+            .any(VfxMeshLayer::requires_authoritative_deadline)
             && request.deadline.is_none()
         {
             return None;
         }
-        Some(profile)
+        Some(recipe)
     }
 
     #[cfg(test)]
@@ -325,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_and_profile_capabilities_are_fail_closed() {
+    fn coverage_and_recipe_capabilities_are_fail_closed() {
         let catalog = VfxCatalog::embedded().unwrap();
         let mut missing = VfxRegistryBuilder::default();
         missing
@@ -347,11 +352,17 @@ mod tests {
             .capabilities = VfxRequestCapabilities::NONE;
         assert!(wrong_capability.seal(catalog).is_err());
 
-        let source = super::super::catalog::VFX_CATALOG.replacen(
-            "scale: AuthoritativeRadius(1.0), anchor: GroundOffset(2.5), lifetime: AuthoritativeDeadline, concurrency_cap: 96, fallback_profile: \"impact\"",
-            "scale: FixedWorld(10.0), anchor: GroundOffset(2.5), lifetime: AuthoritativeDeadline, concurrency_cap: 96, fallback_profile: \"elemental_field\"",
-            1,
-        );
+        let source = super::super::catalog::VFX_CATALOG
+            .replacen(
+                "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"impact\"",
+                "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"elemental_field\"",
+                1,
+            )
+            .replacen(
+                "id: \"reveal_scan\", renderer: GroundRing, material: ScanArea, scale: AuthoritativeRadius(1.0)",
+                "id: \"reveal_scan\", renderer: GroundRing, material: ScanArea, scale: FixedWorld(10.0)",
+                1,
+            );
         let catalog = VfxCatalog::from_ron(&source).unwrap();
         let mut missing_fallback_radius = builder_for_embedded();
         missing_fallback_radius
@@ -401,7 +412,7 @@ mod tests {
         const SYNTHETIC_RANK: u16 = 900;
         let source = super::super::catalog::VFX_CATALOG.replacen(
             "mappings: [",
-            "mappings: [(key: \"synthetic.spark\", profile: \"impact\"),",
+            "mappings: [(key: \"synthetic.spark\", recipe: \"impact\"),",
             1,
         );
         let catalog = VfxCatalog::from_ron(&source).unwrap();

@@ -221,12 +221,12 @@ lifecycle-owned materializer -- transient / attached / persistent
 shared meshes, materials, optional particles, diagnostics, cleanup
 ```
 
-The current pre-recipe presentation paths are intentionally preserved while the migration is
-sequenced:
+The non-transient lifecycle presentation paths remain intentionally preserved while recipe work is
+sequenced. Catalogued transients now use the first recipe/layer vertical slice:
 
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
-| Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One `VfxProfile`: sphere or ground ring, one material, scale, anchor, lifetime | Fixed real-time timer or authoritative Reveal Scan deadline; oldest-first total and per-profile eviction; reduced profile |
+| Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with one to eight authored mesh-layer children, each selecting a retained primitive/material, scale, anchor, and timeline | Root lifetime is the maximum layer delay plus duration or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
 | Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Projectile visual root and shared primitive body | Root follows the replicated owner and disappears with it; lob height derives from replicated launch/landing ticks |
 | Elemental/concealment field | Replicated field state | Low disc/ring root selected by semantic field/team | Recreated after late join from public state; owner removal is cleanup truth |
 | Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
@@ -274,13 +274,14 @@ later demonstrate an accepted cue path that cannot be observed or cached before 
 
 #### Recipe and layer schema
 
-The first catalog evolution uses three bounded tables: semantic request mappings, recipes, and
-reusable layers. IDs are client-only validated lowercase ASCII names and never enter gameplay
-content fingerprints or protocol state.
+Catalog schema 4 uses three bounded tables: semantic request mappings, recipes, and reusable mesh
+layers. IDs are client-only validated lowercase ASCII names and never enter gameplay content
+fingerprints or protocol state.
 
-A recipe owns an ordered list of layer IDs, a total concurrency cap, one fixed-lifetime fallback
-recipe, and an optional reduced recipe. Recipes do not recursively include other recipes. Fallback
-and reduced references must exist and be acyclic. Resolution expands to at most eight layers.
+A recipe owns an ordered list of layer IDs, a total concurrency cap, one fallback recipe, and an
+optional reduced recipe. Recipes do not recursively include other recipes. References must exist;
+reduced-recipe chains and executable authoritative-deadline fallback chains must be acyclic.
+Resolution expands to at most eight layers.
 
 A layer owns:
 
@@ -293,8 +294,9 @@ A layer owns:
 
 The demonstrated mesh vocabulary is sphere/flash body, disc/fill, annulus/boundary, unit cuboid or
 segment, exact projectile body, and lobbed body/shadow. A new primitive is added only with a real
-carrier/layer use. The first mesh migration authors delay, fixed or authoritative duration, easing,
-and transform/scale keyframes. It retains static material alpha. Per-instance animated alpha is not
+carrier/layer use. The first mesh migration authors delay, fixed or authoritative duration, linear
+or smooth-step easing, and transform/scale keyframes. It retains static material alpha. Per-instance
+animated alpha is not
 authored until a bounded material-uniform or explicitly reclaimed material-pool implementation is
 proven; cloning `StandardMaterial` every frame or leaving per-effect assets behind is forbidden.
 
@@ -340,8 +342,8 @@ Transient recipe roots retain oldest-first total/per-recipe eviction and timer/d
 Attached and persistent roots retain `CombatVisualOwner` and their source entity as cleanup truth.
 Owner removal, interruption, reset, match transition, and failed layer materialization must still
 remove the complete root. Native render evidence records the VFX catalog fingerprint, selected
-presentation variants, active lifecycle-root counts, transient profile/order/timing, and retained
-asset counts alongside the authoritative state and rendered PNG.
+presentation variants, active lifecycle-root counts, transient recipe and authored layer
+order/timing, and retained asset counts alongside the authoritative state and rendered PNG.
 
 #### Read-only VfxLab
 
@@ -359,7 +361,8 @@ and attached motion can be inspected predictably.
 
 Every Lab capture uses the production asynchronous screenshot path and writes a paired PNG and JSON
 snapshot. The JSON identifies the build and VFX catalog, fixture, semantic request and resolved
-profile where applicable, presentation identity, playback tick, normal/reduced/primitive variant,
+recipe with ordered layers where applicable, presentation identity, playback tick,
+normal/reduced/primitive variant,
 authoritative geometry/deadline inputs, active lifecycle-root counts, and retained asset counts.
 The Lab is read-only: future authoring and validation workflow belongs to the separate VFX Workbench
 and must publish through validated catalog transactions rather than mutating production resources
@@ -436,7 +439,7 @@ The asset boundary has four distinct sources:
 | `assets/catalogs/` | Client-owned paths, transforms, material values, theme profiles, and degradation mappings |
 | `content/` | Stable server/client-neutral gameplay, map-asset, gameplay-profile, and theme identities |
 
-Transient VFX uses a strict client-only schema-3 catalog and a sealed request registry. Feature
+Transient VFX uses a strict client-only schema-4 recipe catalog and a sealed request registry. Feature
 plugins translate their owned gameplay facts into validated semantic request keys such as
 `combat.muzzle`, `world-object.explosion`, or `heist.critical`; these producers do not select
 meshes, materials, renderer families, reduced-effects policy, or resolved lifetimes. During plugin
@@ -445,9 +448,10 @@ authored request mappings, including authoritative-radius and deadline capabilit
 duplicate, missing, extra, or incompatible requests fail closed. Stable producer ranks plus event
 identities preserve deterministic cross-feature effect ordering without a central cue-family enum.
 
-`assets/catalogs/vfx.ron` maps semantic request keys to profiles and owns the supported
-renderer/material key, complete fixed-world or authoritative-radius scale policy, anchor
-height/offset, lifetime, concurrency cap, fallback, and reduced-effects profile. Adding semantic
+`assets/catalogs/vfx.ron` maps semantic request keys to recipes and ordered reusable mesh layers.
+Layers own the supported renderer/material key, fixed-world or authoritative-radius scale and
+anchor policy, readability class, shadow policy, and bounded timeline; recipes own concurrency,
+fallback, and reduced-effects policy. Adding semantic
 VFX with existing renderer primitives requires a feature producer registration and authored
 mapping, not renderer dispatch changes. Adding a genuinely new concrete primitive or material
 remains an intentional typed renderer extension. Authoritative radii still arrive from replicated

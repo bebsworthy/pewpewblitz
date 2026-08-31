@@ -1,13 +1,13 @@
 ---
 id: BRL-0099
 title: Migrate transient combat VFX to bounded layered mesh recipes
-status: todo
+status: done
 theme:
 release:
 created: 2026-08-31T08:21:40Z
-modified: 2026-08-31T11:01:53Z
-closed:
-revision: 7d1a0ff322422603
+modified: 2026-08-31T13:27:20Z
+closed: 2026-08-31T13:26:25Z
+revision: 23cd709a8df79111
 blocks: [BRL-0100]
 related: [BRL-0094]
 ---

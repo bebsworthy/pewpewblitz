@@ -34,7 +34,8 @@ use camera::{
 pub(super) use combat::collect_vfx_evidence_snapshot;
 pub(in crate::client) use combat::{
     CombatEffect3d, PendingCombatEffect, VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet,
-    cleanup_combat_effects, materialize_combat_effects, resolve_vfx_requests,
+    animate_combat_effect_layers, cleanup_combat_effects, materialize_combat_effects,
+    resolve_vfx_requests,
 };
 use coordinates::{ground_point, ground_position, ground_rotation};
 use map::{GeneratedMapMesh, Presented3dMap};
@@ -344,6 +345,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::update_sticky_blob_fuse_progress,
                     combat::update_cone_spray_visuals,
                     combat::update_aim_preview,
+                    animate_combat_effect_layers,
                     update_character_animation,
                     tint_3d_zone,
                 )

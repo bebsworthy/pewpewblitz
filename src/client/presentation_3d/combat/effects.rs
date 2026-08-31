@@ -1,6 +1,7 @@
 use super::super::*;
 use crate::client::vfx::{
-    VfxLifetime, VfxMaterialKey, VfxProfile, VfxRegistry, VfxRendererFamily, VfxRequest,
+    ResolvedVfxRecipe, VfxDeadline, VfxLifetime, VfxMaterialKey, VfxMeshLayer, VfxReadabilityClass,
+    VfxRegistry, VfxRendererFamily, VfxRequest, VfxTimeline, vfx_counter_sample,
 };
 use crate::combat::client::DeduplicatedCombatCue;
 use serde_json::{Value, json};
@@ -13,7 +14,7 @@ pub(in crate::client) struct CombatEffect3d {
     timer: Timer,
     expires_at_tick: Option<u64>,
     order: u64,
-    profile_id: String,
+    recipe_id: String,
 }
 
 impl CombatEffect3d {
@@ -38,42 +39,156 @@ pub(in crate::client) struct CombatEffectSequence(u64);
 pub(in crate::client) struct PendingCombatEffect {
     lifetime: Duration,
     expires_at_tick: Option<u64>,
+    layers: Vec<PendingCombatEffectLayer>,
+    label: &'static str,
+    recipe_id: String,
+    concurrency_cap: usize,
+}
+
+struct PendingCombatEffectLayer {
+    id: String,
     mesh: Handle<Mesh>,
     material: Handle<StandardMaterial>,
     transform: Transform,
-    label: &'static str,
-    profile_id: String,
-    concurrency_cap: usize,
+    timeline: VfxTimeline,
+    duration: Duration,
+    casts_shadows: bool,
+    receives_shadows: bool,
+    readability: VfxReadabilityClass,
+    variant_sample: u64,
+}
+
+#[derive(Component)]
+pub(in crate::client) struct CombatEffectLayer3d {
+    root: Entity,
+    layer_index: u8,
+    layer_id: String,
+    timeline: VfxTimeline,
+    duration: Duration,
+    base_scale: Vec3,
+    readability: VfxReadabilityClass,
+    variant_sample: u64,
 }
 
 impl PendingCombatEffect {
     fn spawn(&self, commands: &mut Commands, order: u64) -> Entity {
-        commands
+        let root = commands
             .spawn((
                 CombatEffect3d {
                     timer: Timer::new(self.lifetime, TimerMode::Once),
                     expires_at_tick: self.expires_at_tick,
                     order,
-                    profile_id: self.profile_id.clone(),
+                    recipe_id: self.recipe_id.clone(),
                 },
-                Mesh3d(self.mesh.clone()),
-                MeshMaterial3d(self.material.clone()),
-                NotShadowCaster,
-                NotShadowReceiver,
-                self.transform,
+                Transform::default(),
+                Visibility::default(),
                 Name::new(self.label),
             ))
-            .id()
+            .id();
+        commands.entity(root).with_children(|parent| {
+            for (index, layer) in self.layers.iter().enumerate() {
+                let initial_scale = layer
+                    .timeline
+                    .scale_at(Duration::ZERO, layer.duration)
+                    .unwrap_or(0.0);
+                let mut transform = layer.transform;
+                let base_scale = transform.scale;
+                transform.scale *= initial_scale;
+                let mut child = parent.spawn((
+                    CombatEffectLayer3d {
+                        root,
+                        layer_index: u8::try_from(index)
+                            .expect("validated recipe layer count fits u8"),
+                        layer_id: layer.id.clone(),
+                        timeline: layer.timeline,
+                        duration: layer.duration,
+                        base_scale,
+                        readability: layer.readability,
+                        variant_sample: layer.variant_sample,
+                    },
+                    Mesh3d(layer.mesh.clone()),
+                    MeshMaterial3d(layer.material.clone()),
+                    transform,
+                    if layer.timeline.delay_millis == 0 {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
+                    },
+                    Name::new(format!("{} / {}", self.label, layer.id)),
+                ));
+                if !layer.casts_shadows {
+                    child.insert(NotShadowCaster);
+                }
+                if !layer.receives_shadows {
+                    child.insert(NotShadowReceiver);
+                }
+            }
+        });
+        root
     }
 }
 
 fn resolved_effect(
     request: &VfxRequest,
-    profile: &VfxProfile,
+    recipe: &ResolvedVfxRecipe,
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
 ) -> PendingCombatEffect {
-    let (lifetime, expires_at_tick) = match (profile.lifetime, request.deadline) {
+    let mut lifetime = Duration::ZERO;
+    let mut expires_at_tick = None;
+    let layers = recipe
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(occurrence, layer)| {
+            let (duration, authoritative_expiry) = resolved_layer_duration(layer, request.deadline);
+            lifetime = lifetime.max(
+                Duration::from_millis(u64::from(layer.timeline.delay_millis))
+                    .saturating_add(duration),
+            );
+            expires_at_tick = expires_at_tick.or(authoritative_expiry);
+            PendingCombatEffectLayer {
+                id: layer.id.clone(),
+                mesh: match layer.renderer {
+                    VfxRendererFamily::Sphere => primitives.effect_sphere.clone(),
+                    VfxRendererFamily::GroundRing => primitives.area_ring.clone(),
+                },
+                material: vfx_material(layer.material, materials),
+                transform: effect_layer_transform(
+                    layer,
+                    request.position,
+                    request.authoritative_radius,
+                ),
+                timeline: layer.timeline,
+                duration,
+                casts_shadows: layer.casts_shadows,
+                receives_shadows: layer.receives_shadows,
+                readability: layer.readability,
+                variant_sample: vfx_counter_sample(
+                    request.order.event_id,
+                    &recipe.id,
+                    &layer.id,
+                    u8::try_from(occurrence).expect("validated recipe layer count fits u8"),
+                    0,
+                ),
+            }
+        })
+        .collect();
+    PendingCombatEffect {
+        lifetime,
+        expires_at_tick,
+        layers,
+        label: request.label,
+        recipe_id: recipe.id.clone(),
+        concurrency_cap: recipe.concurrency_cap,
+    }
+}
+
+fn resolved_layer_duration(
+    layer: &VfxMeshLayer,
+    deadline: Option<VfxDeadline>,
+) -> (Duration, Option<u64>) {
+    match (layer.timeline.duration, deadline) {
         (VfxLifetime::AuthoritativeDeadline, Some(deadline)) => (
             reveal_ring_remaining_duration(
                 deadline.activated_at_tick,
@@ -84,39 +199,25 @@ fn resolved_effect(
         ),
         (VfxLifetime::Millis(millis), _) => (Duration::from_millis(u64::from(millis)), None),
         (VfxLifetime::AuthoritativeDeadline, None) => {
-            unreachable!("the VFX registry rejects deadline profiles without a deadline")
+            unreachable!("the VFX registry rejects deadline recipes without a deadline")
         }
-    };
-    let transform = effect_transform(profile, request.position, request.authoritative_radius);
-    PendingCombatEffect {
-        lifetime,
-        expires_at_tick,
-        mesh: match profile.renderer {
-            VfxRendererFamily::Sphere => primitives.effect_sphere.clone(),
-            VfxRendererFamily::GroundRing => primitives.area_ring.clone(),
-        },
-        material: vfx_material(profile.material, materials),
-        transform,
-        label: request.label,
-        profile_id: profile.id.clone(),
-        concurrency_cap: profile.concurrency_cap,
     }
 }
 
-fn effect_transform(
-    profile: &VfxProfile,
+fn effect_layer_transform(
+    layer: &VfxMeshLayer,
     position: Vec2,
     authoritative_radius: Option<f32>,
 ) -> Transform {
-    let scale = profile
+    let scale = layer
         .scale
         .resolve(authoritative_radius)
-        .expect("validated VFX family supplies required authoritative radius");
-    let height = profile
+        .expect("validated VFX layer supplies required authoritative radius");
+    let height = layer
         .anchor
         .resolve_height(authoritative_radius)
-        .expect("validated VFX family supplies required authoritative radius");
-    match profile.renderer {
+        .expect("validated VFX layer supplies required authoritative radius");
+    match layer.renderer {
         VfxRendererFamily::GroundRing => Transform {
             translation: ground_position(position) + Vec3::Y * height,
             rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
@@ -125,6 +226,26 @@ fn effect_transform(
         VfxRendererFamily::Sphere => {
             Transform::from_translation(ground_position(position) + Vec3::Y * height)
                 .with_scale(Vec3::splat(scale))
+        }
+    }
+}
+
+pub(in crate::client) fn animate_combat_effect_layers(
+    effects: Query<&CombatEffect3d>,
+    mut layers: Query<(&CombatEffectLayer3d, &mut Transform, &mut Visibility)>,
+) {
+    for (layer, mut transform, mut visibility) in &mut layers {
+        let Ok(effect) = effects.get(layer.root) else {
+            continue;
+        };
+        if let Some(scale) = layer
+            .timeline
+            .scale_at(effect.timer.elapsed(), layer.duration)
+        {
+            *visibility = Visibility::Inherited;
+            transform.scale = layer.base_scale * scale;
+        } else {
+            *visibility = Visibility::Hidden;
         }
     }
 }
@@ -183,10 +304,10 @@ pub(in crate::client) fn resolve_vfx_requests(
     let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
     let ordered = ordered_vfx_requests(requests.read().copied());
     for request in &ordered {
-        let Some(profile) = registry.resolve(request, reduced) else {
+        let Some(recipe) = registry.resolve(request, reduced) else {
             continue;
         };
-        pending_effects.write(resolved_effect(request, profile, &primitives, &materials));
+        pending_effects.write(resolved_effect(request, &recipe, &primitives, &materials));
     }
 }
 
@@ -204,7 +325,7 @@ pub(in crate::client) fn materialize_combat_effects(
 ) {
     let mut active = effects
         .iter()
-        .map(|(entity, effect)| (effect.order, entity, effect.profile_id.clone()))
+        .map(|(entity, effect)| (effect.order, entity, effect.recipe_id.clone()))
         .collect::<VecDeque<_>>();
     active
         .make_contiguous()
@@ -221,13 +342,13 @@ pub(in crate::client) fn materialize_combat_effects(
     for descriptor in pending_effects.read() {
         while active
             .iter()
-            .filter(|(_, _, profile)| profile == &descriptor.profile_id)
+            .filter(|(_, _, recipe)| recipe == &descriptor.recipe_id)
             .count()
             >= descriptor.concurrency_cap
         {
             let Some(index) = active
                 .iter()
-                .position(|(_, _, profile)| profile == &descriptor.profile_id)
+                .position(|(_, _, recipe)| recipe == &descriptor.recipe_id)
             else {
                 break;
             };
@@ -242,7 +363,7 @@ pub(in crate::client) fn materialize_combat_effects(
         }
         sequence.0 = sequence.0.saturating_add(1);
         let entity = descriptor.spawn(&mut commands, sequence.0);
-        active.push_back((sequence.0, entity, descriptor.profile_id.clone()));
+        active.push_back((sequence.0, entity, descriptor.recipe_id.clone()));
     }
 }
 
@@ -287,13 +408,30 @@ pub(in crate::client) fn cleanup_combat_effects(
 /// gameplay facts (projectiles, fields, fighters, and authoritative ticks) are captured by the
 /// ordinary evidence path alongside this renderer view.
 pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Value {
+    let mut layer_query = world.query::<&CombatEffectLayer3d>();
+    let mut layers_by_root = HashMap::<Entity, Vec<(u8, Value)>>::new();
+    for layer in layer_query.iter(world) {
+        layers_by_root.entry(layer.root).or_default().push((
+            layer.layer_index,
+            json!({
+                "index": layer.layer_index,
+                "id": layer.layer_id,
+                "readability": layer.readability,
+                "variant_sample": layer.variant_sample,
+            }),
+        ));
+    }
     let mut transient_query = world.query::<(Entity, &CombatEffect3d, Option<&Name>)>();
     let mut transient_effects = transient_query
         .iter(world)
         .map(|(entity, effect, name)| {
             json!({
                 "entity": entity.to_bits(),
-                "profile_id": effect.profile_id,
+                "recipe_id": effect.recipe_id,
+                "layers": layers_by_root.remove(&entity).map(|mut layers| {
+                    layers.sort_unstable_by_key(|(index, _)| *index);
+                    layers.into_iter().map(|(_, layer)| layer).collect::<Vec<_>>()
+                }).unwrap_or_default(),
                 "order": effect.order,
                 "label": name.map(Name::as_str),
                 "elapsed_seconds": effect.timer.elapsed_secs(),
@@ -428,20 +566,20 @@ mod tests {
         app.world().resource::<VfxRegistry>().clone()
     }
 
-    fn profile(
+    fn recipe(
         registry: &VfxRegistry,
         key: VfxRequestKey,
         reduced: bool,
         radius: Option<f32>,
         deadline: Option<VfxDeadline>,
-    ) -> VfxProfile {
+    ) -> ResolvedVfxRecipe {
         let request = VfxRequest::try_new(
             key,
             VfxRequestOrder::new(registry.producer_rank(key).unwrap(), 1),
             Vec2::ZERO,
             radius,
             deadline,
-            "renderer profile test",
+            "renderer recipe test",
         )
         .unwrap();
         registry.resolve(&request, reduced).unwrap().clone()
@@ -451,12 +589,30 @@ mod tests {
         PendingCombatEffect {
             lifetime,
             expires_at_tick: None,
+            layers: Vec::new(),
+            label,
+            recipe_id: label.to_string(),
+            concurrency_cap: MAX_EFFECTS,
+        }
+    }
+
+    fn pending_layer(layer: &VfxMeshLayer) -> PendingCombatEffectLayer {
+        PendingCombatEffectLayer {
+            id: layer.id.clone(),
             mesh: Handle::default(),
             material: Handle::default(),
-            transform: Transform::default(),
-            label,
-            profile_id: label.to_string(),
-            concurrency_cap: MAX_EFFECTS,
+            transform: effect_layer_transform(layer, Vec2::ZERO, None),
+            timeline: layer.timeline,
+            duration: match layer.timeline.duration {
+                VfxLifetime::Millis(millis) => Duration::from_millis(u64::from(millis)),
+                VfxLifetime::AuthoritativeDeadline => {
+                    panic!("test layer requires a fixed duration")
+                }
+            },
+            casts_shadows: layer.casts_shadows,
+            receives_shadows: layer.receives_shadows,
+            readability: layer.readability,
+            variant_sample: 7,
         }
     }
 
@@ -473,7 +629,7 @@ mod tests {
                 timer: Timer::new(Duration::from_millis(180), TimerMode::Once),
                 expires_at_tick: None,
                 order: 7,
-                profile_id: "impact".to_string(),
+                recipe_id: "impact".to_string(),
             },
             Name::new("Impact evidence fixture"),
         ));
@@ -500,7 +656,7 @@ mod tests {
         assert_eq!(snapshot["primitive_world"], true);
         assert_eq!(snapshot["active"]["transient_roots"], 1);
         assert_eq!(snapshot["active"]["elemental_field_roots"], 1);
-        assert_eq!(snapshot["transient_effects"][0]["profile_id"], "impact");
+        assert_eq!(snapshot["transient_effects"][0]["recipe_id"], "impact");
         assert_eq!(snapshot["transient_effects"][0]["order"], 7);
         assert_eq!(
             snapshot["persistent_facts"]["elemental_fields"][0]["state"]["kind"],
@@ -526,7 +682,7 @@ mod tests {
                         timer: Timer::new(Duration::from_mins(1), TimerMode::Once),
                         expires_at_tick: None,
                         order: u64::try_from(order).expect("bounded effect order fits u64"),
-                        profile_id: "existing".to_string(),
+                        recipe_id: "existing".to_string(),
                     })
                     .id()
             })
@@ -677,21 +833,82 @@ mod tests {
             .effect_sphere
             .clone();
         let world = app.world_mut();
-        let mut effects = world.query::<(&CombatEffect3d, &Name, &Mesh3d, &Transform)>();
-        let (effect, name, mesh, transform) = effects.single(world).unwrap();
-        assert_eq!(effect.profile_id, "impact");
+        let mut effects = world.query::<(&CombatEffect3d, &Name)>();
+        let (effect, name) = effects.single(world).unwrap();
+        assert_eq!(effect.recipe_id, "impact");
         assert_eq!(name.as_str(), "synthetic renderer extension");
+        let mut layers = world.query::<(&CombatEffectLayer3d, &Mesh3d, &Transform)>();
+        let (layer, mesh, transform) = layers.single(world).unwrap();
+        assert_eq!(layer.layer_id, "impact");
         assert_eq!(mesh.0, sphere);
         assert_eq!(transform.translation, Vec3::new(10.0, 6.3, -20.0));
         assert_eq!(transform.scale, Vec3::splat(14.0));
     }
 
     #[test]
-    fn effect_allocation_enforces_the_catalog_profile_cap() {
+    fn synthetic_layered_recipe_materializes_in_authored_order_and_animates_scale() {
+        let registry = registry();
+        let mut first = recipe(&registry, COMBAT_IMPACT_VFX, false, None, None).layers[0].clone();
+        first.id = "first".to_string();
+        let mut second = first.clone();
+        second.id = "second".to_string();
+        second.timeline.delay_millis = 20;
+        second.timeline.scale.start = 0.5;
+        second.timeline.scale.peak = 1.5;
+        second.timeline.scale.end = 1.0;
+
+        let mut app = App::new();
+        app.add_message::<PendingCombatEffect>().add_systems(
+            Update,
+            (materialize_combat_effects, animate_combat_effect_layers).chain(),
+        );
+        let mut descriptor = pending_effect("layered", Duration::from_millis(120));
+        descriptor.layers = vec![pending_layer(&first), pending_layer(&second)];
+        app.world_mut().write_message(descriptor);
+        app.update();
+
+        {
+            let world = app.world_mut();
+            let mut layers = world.query::<(&CombatEffectLayer3d, &Visibility)>();
+            let mut ordered = layers
+                .iter(world)
+                .map(|(layer, visibility)| {
+                    (layer.layer_index, layer.layer_id.as_str(), *visibility)
+                })
+                .collect::<Vec<_>>();
+            ordered.sort_unstable_by_key(|(index, ..)| *index);
+            assert_eq!(ordered[0].1, "first");
+            assert_eq!(ordered[1].1, "second");
+            assert_eq!(ordered[1].2, Visibility::Hidden);
+        }
+
+        {
+            let world = app.world_mut();
+            let mut effects = world.query::<&mut CombatEffect3d>();
+            effects
+                .single_mut(world)
+                .unwrap()
+                .timer
+                .tick(Duration::from_millis(70));
+        }
+        app.update();
+
+        let world = app.world_mut();
+        let mut layers = world.query::<(&CombatEffectLayer3d, &Transform, &Visibility)>();
+        let (_, transform, visibility) = layers
+            .iter(world)
+            .find(|(layer, ..)| layer.layer_id == "second")
+            .unwrap();
+        assert_eq!(*visibility, Visibility::Inherited);
+        assert!(transform.scale.x > second.scale.resolve(None).unwrap());
+    }
+
+    #[test]
+    fn effect_allocation_enforces_the_catalog_recipe_cap() {
         let mut app = effect_allocation_app();
         for label in ["first", "second", "third"] {
             let mut effect = pending_effect(label, Duration::from_millis(100));
-            effect.profile_id = "capped-family".to_string();
+            effect.recipe_id = "capped-family".to_string();
             effect.concurrency_cap = 2;
             app.world_mut().write_message(effect);
         }
@@ -717,12 +934,12 @@ mod tests {
     #[test]
     fn reduced_effect_duration_survives_central_allocation() {
         let registry = registry();
-        let normal = profile(&registry, COMBAT_RESET_VFX, false, None, None);
-        let reduced = profile(&registry, COMBAT_RESET_VFX, true, None, None);
-        let VfxLifetime::Millis(normal) = normal.lifetime else {
+        let normal = recipe(&registry, COMBAT_RESET_VFX, false, None, None);
+        let reduced = recipe(&registry, COMBAT_RESET_VFX, true, None, None);
+        let VfxLifetime::Millis(normal) = normal.layers[0].timeline.duration else {
             panic!("reset VFX uses a fixed lifetime")
         };
-        let VfxLifetime::Millis(reduced) = reduced.lifetime else {
+        let VfxLifetime::Millis(reduced) = reduced.layers[0].timeline.duration else {
             panic!("reduced reset VFX uses a fixed lifetime")
         };
         let normal = Duration::from_millis(u64::from(normal));
@@ -741,16 +958,11 @@ mod tests {
     #[test]
     fn reduced_sphere_scale_preserves_the_semantic_center_height() {
         let registry = registry();
-        let normal = effect_transform(
-            &profile(&registry, COMBAT_MUZZLE_VFX, false, None, None),
-            Vec2::new(10.0, 20.0),
-            None,
-        );
-        let reduced = effect_transform(
-            &profile(&registry, COMBAT_MUZZLE_VFX, true, None, None),
-            Vec2::new(10.0, 20.0),
-            None,
-        );
+        let normal_recipe = recipe(&registry, COMBAT_MUZZLE_VFX, false, None, None);
+        let reduced_recipe = recipe(&registry, COMBAT_MUZZLE_VFX, true, None, None);
+        let normal = effect_layer_transform(&normal_recipe.layers[0], Vec2::new(10.0, 20.0), None);
+        let reduced =
+            effect_layer_transform(&reduced_recipe.layers[0], Vec2::new(10.0, 20.0), None);
 
         assert_eq!(reduced.translation, normal.translation);
         assert_eq!(normal.scale, Vec3::splat(8.0));
@@ -760,14 +972,14 @@ mod tests {
     #[test]
     fn renderer_family_owns_ground_ring_orientation_and_placement() {
         let registry = registry();
-        let profile = profile(
+        let recipe = recipe(
             &registry,
             REVEAL_SCAN_VFX,
             false,
             Some(5.2),
             Some(VfxDeadline::new(1, 2, Some(1))),
         );
-        let ring = effect_transform(&profile, Vec2::new(10.0, 20.0), Some(5.2));
+        let ring = effect_layer_transform(&recipe.layers[0], Vec2::new(10.0, 20.0), Some(5.2));
 
         assert_eq!(
             ring.translation,
@@ -783,26 +995,22 @@ mod tests {
     #[test]
     fn authored_fixed_and_authoritative_radius_geometry_reaches_runtime_transform() {
         let registry = registry();
-        let fixed = effect_transform(
-            &profile(&registry, WORLD_OBJECT_DAMAGED_VFX, true, None, None),
-            Vec2::ZERO,
-            None,
-        );
+        let fixed_recipe = recipe(&registry, WORLD_OBJECT_DAMAGED_VFX, true, None, None);
+        let fixed = effect_layer_transform(&fixed_recipe.layers[0], Vec2::ZERO, None);
         assert!((fixed.translation.y - 8.0).abs() < f32::EPSILON);
         assert_eq!(fixed.scale, Vec3::splat(7.0));
 
         let radius = 20.0;
-        let area = effect_transform(
-            &profile(&registry, ELEMENTAL_FIELD_VFX, true, Some(radius), None),
-            Vec2::ZERO,
-            Some(radius),
-        );
+        let area_recipe = recipe(&registry, ELEMENTAL_FIELD_VFX, true, Some(radius), None);
+        let area = effect_layer_transform(&area_recipe.layers[0], Vec2::ZERO, Some(radius));
         assert!((area.translation.y - radius * 0.45).abs() < f32::EPSILON);
         assert_eq!(area.scale, Vec3::splat(radius * 0.65));
     }
 
     #[test]
     fn authoritative_effect_expiry_cleans_up_materialized_effect() {
+        let registry = registry();
+        let impact = recipe(&registry, COMBAT_IMPACT_VFX, false, None, None);
         let mut app = App::new();
         app.add_message::<PendingCombatEffect>()
             .insert_resource(Time::<Real>::default())
@@ -813,12 +1021,15 @@ mod tests {
         app.world_mut().spawn(AuthoritativeTick(40));
         let mut descriptor = pending_effect("authoritative", Duration::from_mins(1));
         descriptor.expires_at_tick = Some(40);
+        descriptor.layers = vec![pending_layer(&impact.layers[0])];
         app.world_mut().write_message(descriptor);
 
         app.update();
         let world = app.world_mut();
         let mut effects = world.query_filtered::<Entity, With<CombatEffect3d>>();
         assert_eq!(effects.iter(world).count(), 0);
+        let mut layers = world.query_filtered::<Entity, With<CombatEffectLayer3d>>();
+        assert_eq!(layers.iter(world).count(), 0);
     }
 
     #[test]

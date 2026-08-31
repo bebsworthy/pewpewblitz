@@ -2,6 +2,7 @@
 
 mod catalog;
 mod producers;
+mod recipes;
 mod registry;
 mod request;
 
@@ -11,7 +12,10 @@ pub(crate) use producers::{
 };
 
 pub(crate) use catalog::{
-    VfxLifetime, VfxMaterialKey, VfxProfile, VfxRendererFamily, embedded_vfx_catalog_fingerprint,
+    VfxLifetime, VfxMaterialKey, VfxRendererFamily, embedded_vfx_catalog_fingerprint,
+};
+pub(crate) use recipes::{
+    ResolvedVfxRecipe, VfxMeshLayer, VfxReadabilityClass, VfxTimeline, vfx_counter_sample,
 };
 #[cfg(test)]
 pub(crate) use registry::VfxRegistryPlugin;

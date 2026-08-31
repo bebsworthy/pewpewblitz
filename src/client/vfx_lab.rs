@@ -8,8 +8,9 @@ use super::{
     hud::ClientHeistReadiness,
     presentation_3d::{
         CombatEffect3d, ImportedWorldFallbackPolicy, PendingCombatEffect,
-        VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, collect_vfx_evidence_snapshot,
-        materialize_combat_effects, resolve_vfx_requests, setup_3d_foundation,
+        VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, animate_combat_effect_layers,
+        collect_vfx_evidence_snapshot, materialize_combat_effects, resolve_vfx_requests,
+        setup_3d_foundation,
     },
     settings::persistence::ClientShellSettings,
     vfx::{
@@ -269,6 +270,7 @@ impl Plugin for VfxLabPlugin {
                 resolve_vfx_requests,
                 materialize_combat_effects,
                 advance_lab_effects,
+                animate_combat_effect_layers,
                 update_lab_fixture_facts,
                 hide_gameplay_hud,
                 update_lab_inspector,
@@ -762,7 +764,7 @@ fn request_lab_capture(world: &mut World) {
     let radius = world.resource::<VfxLabState>().radius;
     let request =
         matches!(fixture, VfxLabFixture::Transient).then(|| scenario.request(identity, radius));
-    let profile = request.as_ref().map(|request| {
+    let recipe = request.as_ref().map(|request| {
         world
             .resource::<VfxRegistry>()
             .resolve(request, reduced)
@@ -812,7 +814,7 @@ fn request_lab_capture(world: &mut World) {
             "reduced": reduced,
             "primitive": primitive,
             "paused": paused,
-            "resolved_profile": profile,
+            "resolved_recipe": recipe,
         },
         "vfx": collect_vfx_evidence_snapshot(world),
     });
@@ -848,26 +850,40 @@ fn update_lab_inspector(
 ) {
     let scenario = state.selected();
     let scenario_details = if let Some(request) = state.transient_request() {
-        let profile = registry
+        let recipe = registry
             .resolve(&request, state.reduced)
             .expect("production lab scenario resolves");
-        let lifetime = match profile.lifetime {
-            VfxLifetime::Millis(value) => format!("{value} ms"),
-            VfxLifetime::AuthoritativeDeadline => "authoritative deadline".to_string(),
-        };
+        let layers = recipe
+            .layers
+            .iter()
+            .enumerate()
+            .map(|(index, layer)| {
+                let lifetime = match layer.timeline.duration {
+                    VfxLifetime::Millis(value) => format!("{value} ms"),
+                    VfxLifetime::AuthoritativeDeadline => "deadline".to_string(),
+                };
+                format!(
+                    "{}. {} {:?}/{:?} {:?} {}",
+                    index + 1,
+                    layer.id,
+                    layer.renderer,
+                    layer.material,
+                    layer.readability,
+                    lifetime,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         format!(
-            "Mapping  {}/{}  {}\nProfile {}\nRenderer {:?} - material {:?}\nScale {:?} - anchor {:?}\nLifetime {} - cap {}\nFallback {}",
+            "Mapping  {}/{}  {}\nRecipe  {} - {} layer(s) - cap {}\n{}\nFallback {}",
             state.selected + 1,
             state.scenarios.len(),
             scenario.key.as_str(),
-            profile.id,
-            profile.renderer,
-            profile.material,
-            profile.scale,
-            profile.anchor,
-            lifetime,
-            profile.concurrency_cap,
-            profile.fallback_profile,
+            recipe.id,
+            recipe.layers.len(),
+            recipe.concurrency_cap,
+            layers,
+            recipe.fallback_recipe,
         )
     } else {
         format!(

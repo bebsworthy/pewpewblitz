@@ -3,14 +3,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use super::recipes::{
+    MAX_VFX_LAYERS, MAX_VFX_RECIPES, ResolvedVfxRecipe, VfxMeshLayer, VfxReadabilityClass,
+    VfxRecipe,
+};
 use super::request::valid_vfx_request_key;
 
 pub(super) const VFX_CATALOG: &str = include_str!("../../../assets/catalogs/vfx.ron");
-const VFX_SCHEMA_VERSION: u16 = 3;
-const MAX_VFX_MAPPINGS: usize = 32;
-const MAX_VFX_PROFILES: usize = 64;
-const MAX_VFX_LIFETIME_MILLIS: u32 = 10_000;
-const MAX_VFX_CONCURRENCY: usize = 96;
+const VFX_SCHEMA_VERSION: u16 = 4;
+const MAX_VFX_MAPPINGS: usize = 64;
 const MAX_VFX_FIXED_WORLD: f32 =
     crate::map::MAX_MAP_DIMENSION_CELLS as f32 * crate::map::MAP_CELL_SIZE_WORLD;
 const MAX_VFX_RADIUS_MULTIPLIER: f32 = 16.0;
@@ -65,7 +66,7 @@ impl VfxScalePolicy {
         matches!(self, Self::AuthoritativeRadius(_))
     }
 
-    fn has_valid_bounds(self) -> bool {
+    pub(super) fn has_valid_bounds(self) -> bool {
         let value = match self {
             Self::FixedWorld(value) | Self::AuthoritativeRadius(value) => value,
         };
@@ -99,7 +100,7 @@ impl VfxAnchorPolicy {
         matches!(self, Self::AuthoritativeRadiusHeight(_))
     }
 
-    fn has_valid_bounds(self) -> bool {
+    pub(super) fn has_valid_bounds(self) -> bool {
         let value = match self {
             Self::FixedWorldHeight(value)
             | Self::AuthoritativeRadiusHeight(value)
@@ -118,43 +119,31 @@ impl VfxAnchorPolicy {
 #[serde(deny_unknown_fields)]
 pub(super) struct VfxCatalogSource {
     schema_version: u16,
-    default_profile: String,
+    default_recipe: String,
     mappings: Vec<VfxRequestMapping>,
-    profiles: Vec<VfxProfile>,
+    recipes: Vec<VfxRecipe>,
+    mesh_layers: Vec<VfxMeshLayer>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct VfxRequestMapping {
     key: String,
-    profile: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct VfxProfile {
-    pub(crate) id: String,
-    pub(crate) renderer: VfxRendererFamily,
-    pub(crate) material: VfxMaterialKey,
-    pub(crate) scale: VfxScalePolicy,
-    pub(crate) anchor: VfxAnchorPolicy,
-    pub(crate) lifetime: VfxLifetime,
-    pub(crate) concurrency_cap: usize,
-    pub(crate) fallback_profile: String,
-    pub(crate) reduced_profile: Option<String>,
+    recipe: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct VfxProfileRequirements {
+pub(super) struct VfxRecipeRequirements {
     pub(super) authoritative_radius: bool,
     pub(super) authoritative_deadline: bool,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct VfxCatalog {
-    default_profile: String,
+    default_recipe: String,
     mappings: BTreeMap<String, String>,
-    profiles: BTreeMap<String, VfxProfile>,
+    recipes: BTreeMap<String, VfxRecipe>,
+    mesh_layers: BTreeMap<String, VfxMeshLayer>,
 }
 
 impl VfxCatalog {
@@ -175,55 +164,61 @@ impl VfxCatalog {
                 source.schema_version
             ));
         }
-        if source.profiles.len() > MAX_VFX_PROFILES {
-            return Err("VFX catalog exceeds profile capacity".into());
+        if source.recipes.len() > MAX_VFX_RECIPES {
+            return Err("VFX catalog exceeds recipe capacity".into());
+        }
+        if source.mesh_layers.len() > MAX_VFX_LAYERS {
+            return Err("VFX catalog exceeds mesh-layer capacity".into());
         }
         if source.mappings.len() > MAX_VFX_MAPPINGS {
             return Err("VFX catalog exceeds request-mapping capacity".into());
         }
 
-        let mut profiles = BTreeMap::new();
-        for profile in source.profiles {
-            validate_profile(&profile)?;
-            if profiles.insert(profile.id.clone(), profile).is_some() {
-                return Err("duplicate VFX profile id".to_string());
+        let mut mesh_layers = BTreeMap::new();
+        for layer in source.mesh_layers {
+            layer.validate()?;
+            if mesh_layers.insert(layer.id.clone(), layer).is_some() {
+                return Err("duplicate VFX mesh-layer id".to_string());
             }
         }
-        if !profiles.contains_key(&source.default_profile) {
-            return Err("VFX default profile reference is missing".to_string());
+        let mut recipes = BTreeMap::new();
+        for recipe in source.recipes {
+            recipe.validate()?;
+            if recipes.insert(recipe.id.clone(), recipe).is_some() {
+                return Err("duplicate VFX recipe id".to_string());
+            }
         }
-        if matches!(
-            profiles[&source.default_profile].lifetime,
-            VfxLifetime::AuthoritativeDeadline
-        ) {
-            return Err("VFX default profile must use a fixed lifetime".to_string());
+        if !recipes.contains_key(&source.default_recipe) {
+            return Err("VFX default recipe reference is missing".to_string());
         }
-        for profile in profiles.values() {
+        for recipe in recipes.values() {
+            for layer in &recipe.layers {
+                if !mesh_layers.contains_key(layer) {
+                    return Err(format!(
+                        "VFX recipe {} references missing mesh layer {layer}",
+                        recipe.id
+                    ));
+                }
+            }
             for reference in [
-                Some(&profile.fallback_profile),
-                profile.reduced_profile.as_ref(),
+                Some(&recipe.fallback_recipe),
+                recipe.reduced_recipe.as_ref(),
             ]
             .into_iter()
             .flatten()
             {
-                if !profiles.contains_key(reference) {
+                if !recipes.contains_key(reference) {
                     return Err(format!(
-                        "VFX profile {} references missing profile {reference}",
-                        profile.id
+                        "VFX recipe {} references missing recipe {reference}",
+                        recipe.id
                     ));
                 }
             }
-            if matches!(profile.lifetime, VfxLifetime::AuthoritativeDeadline)
-                && matches!(
-                    profiles[&profile.fallback_profile].lifetime,
-                    VfxLifetime::AuthoritativeDeadline
-                )
-            {
-                return Err(format!(
-                    "VFX authoritative profile {} must fall back to a fixed lifetime",
-                    profile.id
-                ));
-            }
+        }
+        validate_recipe_reference_graphs(&recipes, &mesh_layers)?;
+        validate_reduced_readability(&recipes, &mesh_layers)?;
+        if recipe_requires_deadline(&recipes[&source.default_recipe], &mesh_layers) {
+            return Err("VFX default recipe must use fixed layer durations".to_string());
         }
 
         let mut mappings = BTreeMap::new();
@@ -231,14 +226,14 @@ impl VfxCatalog {
             if !valid_vfx_request_key(&mapping.key) {
                 return Err(format!("invalid VFX request mapping key: {}", mapping.key));
             }
-            if !profiles.contains_key(&mapping.profile) {
+            if !recipes.contains_key(&mapping.recipe) {
                 return Err(format!(
-                    "VFX request {} references missing profile {}",
-                    mapping.key, mapping.profile
+                    "VFX request {} references missing recipe {}",
+                    mapping.key, mapping.recipe
                 ));
             }
             if mappings
-                .insert(mapping.key.clone(), mapping.profile)
+                .insert(mapping.key.clone(), mapping.recipe)
                 .is_some()
             {
                 return Err(format!("duplicate VFX request mapping: {}", mapping.key));
@@ -248,9 +243,10 @@ impl VfxCatalog {
             return Err("VFX catalog must contain at least one request mapping".into());
         }
         Ok(Self {
-            default_profile: source.default_profile,
+            default_recipe: source.default_recipe,
             mappings,
-            profiles,
+            recipes,
+            mesh_layers,
         })
     }
 
@@ -258,18 +254,19 @@ impl VfxCatalog {
         self.mappings.keys().map(String::as_str)
     }
 
-    pub(super) fn requirements(&self, key: &str) -> Option<VfxProfileRequirements> {
-        let profile = self.mapped_profile(key)?;
-        let reduced = profile
-            .reduced_profile
+    pub(super) fn requirements(&self, key: &str) -> Option<VfxRecipeRequirements> {
+        let recipe = self.mapped_recipe(key)?;
+        let reduced = recipe
+            .reduced_recipe
             .as_deref()
-            .and_then(|id| self.profiles.get(id));
-        Some([Some(profile), reduced].into_iter().flatten().fold(
-            VfxProfileRequirements::default(),
-            |requirements, profile| {
-                let requirements = requirements.including(profile);
-                if matches!(profile.lifetime, VfxLifetime::AuthoritativeDeadline) {
-                    requirements.including(&self.profiles[&profile.fallback_profile])
+            .and_then(|id| self.recipes.get(id));
+        Some([Some(recipe), reduced].into_iter().flatten().fold(
+            VfxRecipeRequirements::default(),
+            |requirements, recipe| {
+                let requirements = requirements.including(recipe, &self.mesh_layers);
+                if recipe_requires_deadline(recipe, &self.mesh_layers) {
+                    requirements
+                        .including(&self.recipes[&recipe.fallback_recipe], &self.mesh_layers)
                 } else {
                     requirements
                 }
@@ -278,25 +275,21 @@ impl VfxCatalog {
     }
 
     #[cfg(test)]
-    pub(super) fn insert_test_mapping(
-        &mut self,
-        key: &str,
-        profile_id: &str,
-    ) -> Result<(), String> {
+    pub(super) fn insert_test_mapping(&mut self, key: &str, recipe_id: &str) -> Result<(), String> {
         if !valid_vfx_request_key(key) {
             return Err(format!("invalid VFX request mapping key: {key}"));
         }
         if self.mappings.len() >= MAX_VFX_MAPPINGS {
             return Err("VFX catalog exceeds request-mapping capacity".into());
         }
-        if !self.profiles.contains_key(profile_id) {
+        if !self.recipes.contains_key(recipe_id) {
             return Err(format!(
-                "VFX request {key} references missing profile {profile_id}"
+                "VFX request {key} references missing recipe {recipe_id}"
             ));
         }
         if self
             .mappings
-            .insert(key.to_owned(), profile_id.to_owned())
+            .insert(key.to_owned(), recipe_id.to_owned())
             .is_some()
         {
             return Err(format!("duplicate VFX request mapping: {key}"));
@@ -309,72 +302,138 @@ impl VfxCatalog {
         key: &str,
         reduced: bool,
         authoritative_deadline_available: bool,
-    ) -> Option<&VfxProfile> {
-        let profile = self.mapped_profile(key)?;
-        let profile = if reduced {
-            profile
-                .reduced_profile
+    ) -> Option<ResolvedVfxRecipe> {
+        let recipe = self.mapped_recipe(key)?;
+        let recipe = if reduced {
+            recipe
+                .reduced_recipe
                 .as_deref()
-                .and_then(|id| self.profiles.get(id))
-                .unwrap_or(profile)
+                .and_then(|id| self.recipes.get(id))
+                .unwrap_or(recipe)
         } else {
-            profile
+            recipe
         };
-        if authoritative_deadline_available
-            || !matches!(profile.lifetime, VfxLifetime::AuthoritativeDeadline)
+        let recipe = if authoritative_deadline_available
+            || !recipe_requires_deadline(recipe, &self.mesh_layers)
         {
-            return Some(profile);
-        }
-        self.profiles
-            .get(&profile.fallback_profile)
-            .or_else(|| self.profiles.get(&self.default_profile))
+            recipe
+        } else {
+            self.recipes
+                .get(&recipe.fallback_recipe)
+                .or_else(|| self.recipes.get(&self.default_recipe))?
+        };
+        self.resolved(recipe)
     }
 
-    fn mapped_profile(&self, key: &str) -> Option<&VfxProfile> {
+    fn mapped_recipe(&self, key: &str) -> Option<&VfxRecipe> {
         self.mappings
             .get(key)
-            .and_then(|profile_id| self.profiles.get(profile_id))
+            .and_then(|recipe_id| self.recipes.get(recipe_id))
+    }
+
+    fn resolved(&self, recipe: &VfxRecipe) -> Option<ResolvedVfxRecipe> {
+        Some(ResolvedVfxRecipe {
+            id: recipe.id.clone(),
+            layers: recipe
+                .layers
+                .iter()
+                .map(|id| self.mesh_layers.get(id).cloned())
+                .collect::<Option<Vec<_>>>()?,
+            concurrency_cap: recipe.concurrency_cap,
+            fallback_recipe: recipe.fallback_recipe.clone(),
+            reduced_recipe: recipe.reduced_recipe.clone(),
+        })
     }
 }
 
-impl VfxProfileRequirements {
-    fn including(mut self, profile: &VfxProfile) -> Self {
-        self.authoritative_radius |= profile.scale.requires_authoritative_radius()
-            || profile.anchor.requires_authoritative_radius();
-        self.authoritative_deadline |=
-            matches!(profile.lifetime, VfxLifetime::AuthoritativeDeadline);
+impl VfxRecipeRequirements {
+    fn including(mut self, recipe: &VfxRecipe, layers: &BTreeMap<String, VfxMeshLayer>) -> Self {
+        for layer in &recipe.layers {
+            let layer = &layers[layer];
+            self.authoritative_radius |= layer.requires_authoritative_radius();
+            self.authoritative_deadline |= layer.requires_authoritative_deadline();
+        }
         self
     }
 }
 
-fn validate_profile(profile: &VfxProfile) -> Result<(), String> {
-    if profile.id.trim().is_empty() || profile.fallback_profile.trim().is_empty() {
-        return Err("VFX profile ids and fallback references must be non-empty".to_string());
+fn recipe_requires_deadline(recipe: &VfxRecipe, layers: &BTreeMap<String, VfxMeshLayer>) -> bool {
+    recipe
+        .layers
+        .iter()
+        .any(|layer| layers[layer].requires_authoritative_deadline())
+}
+
+fn validate_recipe_reference_graphs(
+    recipes: &BTreeMap<String, VfxRecipe>,
+    layers: &BTreeMap<String, VfxMeshLayer>,
+) -> Result<(), String> {
+    for start in recipes.values() {
+        let mut visited = std::collections::BTreeSet::new();
+        let mut current = Some(start);
+        while let Some(recipe) = current {
+            if !visited.insert(recipe.id.as_str()) {
+                return Err(format!("VFX reduced-recipe cycle reaches {}", recipe.id));
+            }
+            current = recipe
+                .reduced_recipe
+                .as_deref()
+                .and_then(|id| recipes.get(id));
+        }
     }
-    if !(profile.scale.has_valid_bounds()
-        && profile.anchor.has_valid_bounds()
-        && matches!(
-            (profile.renderer, profile.anchor),
-            (
-                VfxRendererFamily::Sphere,
-                VfxAnchorPolicy::FixedWorldHeight(_)
-                    | VfxAnchorPolicy::AuthoritativeRadiusHeight(_)
-            ) | (
-                VfxRendererFamily::GroundRing,
-                VfxAnchorPolicy::GroundOffset(_)
+    for start in recipes.values() {
+        if !recipe_requires_deadline(start, layers) {
+            continue;
+        }
+        let mut visited = std::collections::BTreeSet::new();
+        let mut current = start;
+        loop {
+            if !visited.insert(current.id.as_str()) {
+                return Err(format!(
+                    "VFX authoritative fallback cycle reaches {}",
+                    current.id
+                ));
+            }
+            let fallback = &recipes[&current.fallback_recipe];
+            if !recipe_requires_deadline(fallback, layers) {
+                break;
+            }
+            current = fallback;
+        }
+    }
+    Ok(())
+}
+
+fn validate_reduced_readability(
+    recipes: &BTreeMap<String, VfxRecipe>,
+    layers: &BTreeMap<String, VfxMeshLayer>,
+) -> Result<(), String> {
+    for recipe in recipes.values() {
+        let critical = recipe.layers.iter().any(|layer| {
+            matches!(
+                layers[layer].readability,
+                VfxReadabilityClass::CriticalGeometry
             )
-        )
-        && profile.concurrency_cap > 0
-        && profile.concurrency_cap <= MAX_VFX_CONCURRENCY
-        && match profile.lifetime {
-            VfxLifetime::Millis(millis) => millis > 0 && millis <= MAX_VFX_LIFETIME_MILLIS,
-            VfxLifetime::AuthoritativeDeadline => true,
-        })
-    {
-        return Err(format!(
-            "VFX profile {} has unsafe runtime values",
-            profile.id
-        ));
+        });
+        let Some(reduced) = recipe
+            .reduced_recipe
+            .as_deref()
+            .and_then(|id| recipes.get(id))
+        else {
+            continue;
+        };
+        let reduced_critical = reduced.layers.iter().any(|layer| {
+            matches!(
+                layers[layer].readability,
+                VfxReadabilityClass::CriticalGeometry
+            )
+        });
+        if critical && !reduced_critical {
+            return Err(format!(
+                "VFX reduced recipe {} drops critical geometry from {}",
+                reduced.id, recipe.id
+            ));
+        }
     }
     Ok(())
 }
@@ -402,31 +461,39 @@ mod tests {
     ];
 
     #[test]
-    fn embedded_catalog_preserves_all_fifteen_profile_mappings() {
+    fn embedded_catalog_preserves_all_fifteen_recipe_mappings() {
         let catalog = VfxCatalog::embedded().unwrap();
         assert_eq!(catalog.mappings.len(), BUILTIN_MAPPINGS.len());
-        for (key, profile_id) in BUILTIN_MAPPINGS {
-            assert_eq!(catalog.mapped_profile(key).unwrap().id, profile_id);
+        for (key, recipe_id) in BUILTIN_MAPPINGS {
+            assert_eq!(catalog.mapped_recipe(key).unwrap().id, recipe_id);
         }
 
         let normal = catalog.resolve("combat.muzzle", false, false).unwrap();
         let reduced = catalog.resolve("combat.muzzle", true, false).unwrap();
-        assert_eq!(normal.material, VfxMaterialKey::EffectMuzzle);
-        assert_eq!(normal.scale, VfxScalePolicy::FixedWorld(8.0));
-        assert_eq!(normal.anchor, VfxAnchorPolicy::FixedWorldHeight(3.6));
-        assert_eq!(normal.lifetime, VfxLifetime::Millis(180));
-        assert_eq!(reduced.scale, VfxScalePolicy::FixedWorld(5.2));
-        assert_eq!(reduced.lifetime, VfxLifetime::Millis(100));
+        assert_eq!(normal.id, "muzzle");
+        assert_eq!(normal.layers.len(), 1);
+        assert_eq!(normal.layers[0].material, VfxMaterialKey::EffectMuzzle);
+        assert_eq!(normal.layers[0].scale, VfxScalePolicy::FixedWorld(8.0));
+        assert_eq!(
+            normal.layers[0].anchor,
+            VfxAnchorPolicy::FixedWorldHeight(3.6)
+        );
+        assert_eq!(normal.layers[0].timeline.duration, VfxLifetime::Millis(180));
+        assert_eq!(reduced.layers[0].scale, VfxScalePolicy::FixedWorld(5.2));
+        assert_eq!(
+            reduced.layers[0].timeline.duration,
+            VfxLifetime::Millis(100)
+        );
     }
 
     #[test]
     fn strict_schema_keys_references_values_and_capacity_are_validated() {
         for (needle, replacement) in [
-            ("schema_version: 3", "schema_version: 2"),
+            ("schema_version: 4", "schema_version: 3"),
             ("key: \"combat.muzzle\"", "key: \"Combat/Muzzle\""),
-            ("profile: \"muzzle\"", "profile: \"missing\""),
+            ("recipe: \"muzzle\"", "recipe: \"missing\""),
             ("scale: FixedWorld(8.0)", "scale: FixedWorld(0.0)"),
-            ("lifetime: Millis(180)", "lifetime: Millis(0)"),
+            ("duration: Millis(180)", "duration: Millis(0)"),
             ("concurrency_cap: 96", "concurrency_cap: 97"),
         ] {
             assert!(
@@ -437,27 +504,119 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_mapping_and_profile_ids_are_rejected() {
+    fn duplicate_mapping_recipe_and_layer_ids_are_rejected() {
         let mut duplicate_mapping: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
         duplicate_mapping
             .mappings
             .push(duplicate_mapping.mappings[0].clone());
         assert!(VfxCatalog::from_source(duplicate_mapping).is_err());
 
-        let mut duplicate_profile: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
-        duplicate_profile
-            .profiles
-            .push(duplicate_profile.profiles[0].clone());
-        assert!(VfxCatalog::from_source(duplicate_profile).is_err());
+        let mut duplicate_recipe: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
+        duplicate_recipe
+            .recipes
+            .push(duplicate_recipe.recipes[0].clone());
+        assert!(VfxCatalog::from_source(duplicate_recipe).is_err());
+
+        let mut duplicate_layer: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
+        duplicate_layer
+            .mesh_layers
+            .push(duplicate_layer.mesh_layers[0].clone());
+        assert!(VfxCatalog::from_source(duplicate_layer).is_err());
     }
 
     #[test]
-    fn profile_requirements_are_derived_without_a_closed_family_switch() {
+    fn missing_layers_expansion_bounds_and_reference_cycles_are_rejected() {
+        let missing = VFX_CATALOG.replacen("layers: [\"muzzle\"]", "layers: [\"missing\"]", 1);
+        assert!(
+            VfxCatalog::from_ron(&missing)
+                .unwrap_err()
+                .contains("missing mesh layer")
+        );
+
+        let excessive = VFX_CATALOG.replacen(
+            "layers: [\"muzzle\"]",
+            "layers: [\"muzzle\", \"muzzle\", \"muzzle\", \"muzzle\", \"muzzle\", \"muzzle\", \"muzzle\", \"muzzle\", \"muzzle\"]",
+            1,
+        );
+        assert!(
+            VfxCatalog::from_ron(&excessive)
+                .unwrap_err()
+                .contains("unsafe runtime values")
+        );
+
+        let reduced_cycle = VFX_CATALOG.replacen(
+            "id: \"muzzle_reduced\", layers: [\"muzzle_reduced\"], concurrency_cap: 96, fallback_recipe: \"impact\", reduced_recipe: None",
+            "id: \"muzzle_reduced\", layers: [\"muzzle_reduced\"], concurrency_cap: 96, fallback_recipe: \"impact\", reduced_recipe: Some(\"muzzle\")",
+            1,
+        );
+        assert!(
+            VfxCatalog::from_ron(&reduced_cycle)
+                .unwrap_err()
+                .contains("reduced-recipe cycle")
+        );
+
+        let fallback_cycle = VFX_CATALOG.replacen(
+            "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"impact\"",
+            "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"reveal_scan\"",
+            1,
+        );
+        assert!(
+            VfxCatalog::from_ron(&fallback_cycle)
+                .unwrap_err()
+                .contains("authoritative fallback cycle")
+        );
+
+        let mut dropped_critical: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
+        dropped_critical
+            .mesh_layers
+            .iter_mut()
+            .find(|layer| layer.id == "world_explosion_reduced")
+            .unwrap()
+            .readability = VfxReadabilityClass::Identity;
+        assert!(
+            VfxCatalog::from_source(dropped_critical)
+                .unwrap_err()
+                .contains("drops critical geometry")
+        );
+    }
+
+    #[test]
+    fn frozen_recipe_and_layer_capacities_are_enforced() {
+        let mut recipe_capacity: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
+        let template = recipe_capacity.recipes[0].clone();
+        while recipe_capacity.recipes.len() <= MAX_VFX_RECIPES {
+            let mut recipe = template.clone();
+            recipe.id = format!("extra_recipe_{}", recipe_capacity.recipes.len());
+            recipe.reduced_recipe = None;
+            recipe_capacity.recipes.push(recipe);
+        }
+        assert!(
+            VfxCatalog::from_source(recipe_capacity)
+                .unwrap_err()
+                .contains("recipe capacity")
+        );
+
+        let mut layer_capacity: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
+        let template = layer_capacity.mesh_layers[0].clone();
+        while layer_capacity.mesh_layers.len() <= MAX_VFX_LAYERS {
+            let mut layer = template.clone();
+            layer.id = format!("extra_layer_{}", layer_capacity.mesh_layers.len());
+            layer_capacity.mesh_layers.push(layer);
+        }
+        assert!(
+            VfxCatalog::from_source(layer_capacity)
+                .unwrap_err()
+                .contains("mesh-layer capacity")
+        );
+    }
+
+    #[test]
+    fn recipe_requirements_are_derived_without_a_closed_family_switch() {
         assert_eq!(
             VfxCatalog::embedded()
                 .unwrap()
                 .requirements("ability.reveal-scan"),
-            Some(VfxProfileRequirements {
+            Some(VfxRecipeRequirements {
                 authoritative_radius: true,
                 authoritative_deadline: true,
             })
@@ -465,17 +624,23 @@ mod tests {
     }
 
     #[test]
-    fn profile_requirements_include_reachable_deadline_fallback_capabilities() {
-        let source = VFX_CATALOG.replacen(
-            "scale: AuthoritativeRadius(1.0), anchor: GroundOffset(2.5), lifetime: AuthoritativeDeadline, concurrency_cap: 96, fallback_profile: \"impact\"",
-            "scale: FixedWorld(10.0), anchor: GroundOffset(2.5), lifetime: AuthoritativeDeadline, concurrency_cap: 96, fallback_profile: \"elemental_field\"",
-            1,
-        );
+    fn recipe_requirements_include_reachable_deadline_fallback_capabilities() {
+        let source = VFX_CATALOG
+            .replacen(
+                "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"impact\"",
+                "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"elemental_field\"",
+                1,
+            )
+            .replacen(
+                "id: \"reveal_scan\", renderer: GroundRing, material: ScanArea, scale: AuthoritativeRadius(1.0)",
+                "id: \"reveal_scan\", renderer: GroundRing, material: ScanArea, scale: FixedWorld(10.0)",
+                1,
+            );
         let catalog = VfxCatalog::from_ron(&source).unwrap();
 
         assert_eq!(
             catalog.requirements("ability.reveal-scan"),
-            Some(VfxProfileRequirements {
+            Some(VfxRecipeRequirements {
                 authoritative_radius: true,
                 authoritative_deadline: true,
             })
