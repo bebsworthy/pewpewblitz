@@ -263,6 +263,45 @@ pub enum PassiveKind {
     HeatShielding,
 }
 
+/// Inclusive authored bounds for one numeric passive-parameter family.
+///
+/// These remain crate-private because they coordinate build validation with development tooling;
+/// they are not a runtime capability or a public content API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PassiveParameterBounds<T> {
+    pub(crate) minimum: T,
+    pub(crate) maximum: T,
+}
+
+impl<T> PassiveParameterBounds<T> {
+    pub(crate) const fn new(minimum: T, maximum: T) -> Self {
+        Self { minimum, maximum }
+    }
+}
+
+impl<T: PartialOrd> PassiveParameterBounds<T> {
+    pub(crate) fn contains(self, value: &T) -> bool {
+        value >= &self.minimum && value <= &self.maximum
+    }
+}
+
+pub(crate) const PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS: PassiveParameterBounds<u64> =
+    PassiveParameterBounds::new(1, 3_600);
+pub(crate) const PASSIVE_ADRENAL_REARM_TICKS_BOUNDS: PassiveParameterBounds<u64> =
+    PassiveParameterBounds::new(1, 36_000);
+pub(crate) const PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS: PassiveParameterBounds<u16> =
+    PassiveParameterBounds::new(1, 10_000);
+pub(crate) const PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS: PassiveParameterBounds<u32> =
+    PassiveParameterBounds::new(1, 4_096_000);
+pub(crate) const PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS: PassiveParameterBounds<u16> =
+    PassiveParameterBounds::new(1, 30_000);
+pub(crate) const PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS: PassiveParameterBounds<u16> =
+    PassiveParameterBounds::new(1, 10_000);
+pub(crate) const PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS: PassiveParameterBounds<u16> =
+    PassiveParameterBounds::new(1, 10_000);
+pub(crate) const PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS: PassiveParameterBounds<u16> =
+    PassiveParameterBounds::new(1, 6_000);
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PassiveParameters {
     LightweightFrame,

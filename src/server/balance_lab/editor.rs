@@ -2,7 +2,7 @@ use super::BalanceLabSnapshotV3;
 use crate::{
     builds::{
         MAX_COLD_CAPACITY, MAX_FIGHTER_MOVEMENT_SPEED, MAX_REVEAL_PROXIMITY_RADIUS,
-        MIN_REVEAL_PROXIMITY_RADIUS, PassiveParameters, UltimateParameters,
+        MIN_REVEAL_PROXIMITY_RADIUS, UltimateParameters,
     },
     combat::{
         DamageFalloff, DeliveryMethod, EngineWeaponLimits, FiringPattern, PayloadEffectDefinition,
@@ -11,6 +11,8 @@ use crate::{
     timing::{SIMULATION_TICK_HZ_F64, simulation_seconds_f64},
 };
 use serde::Serialize;
+
+mod passives;
 
 pub(super) const EDITOR_SCHEMA_VERSION: u16 = 9;
 
@@ -233,7 +235,7 @@ impl BalanceLabEditorManifest {
             add_weapon_fields(&mut fields, index, weapon, weapons);
         }
         add_ultimate_fields(&mut fields, snapshot);
-        add_passive_fields(&mut fields, snapshot);
+        passives::add_fields(&mut fields, snapshot);
         add_effect_tile_fields(&mut fields);
         add_world_fields(&mut fields);
         Self {
@@ -1548,106 +1550,6 @@ fn add_ultimate_fields(fields: &mut Vec<EditorFieldDescriptor>, snapshot: &Balan
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "explicit descriptors keep the small passive editor contract auditable"
-)]
-fn add_passive_fields(fields: &mut Vec<EditorFieldDescriptor>, snapshot: &BalanceLabSnapshotV3) {
-    for (index, passive) in snapshot.passives.iter().enumerate() {
-        let variant = match passive.parameters {
-            PassiveParameters::LightweightFrame | PassiveParameters::ReinforcedFrame => continue,
-            PassiveParameters::AdrenalResponse { .. } => "AdrenalResponse",
-            PassiveParameters::CloseQuarters { .. } => "CloseQuarters",
-            PassiveParameters::QuickCycle { .. } => "QuickCycle",
-            PassiveParameters::Tenacity { .. } => "Tenacity",
-            PassiveParameters::CryogenicInsulation { .. } => "CryogenicInsulation",
-            PassiveParameters::FilteredCirculation { .. } => "FilteredCirculation",
-            PassiveParameters::HeatShielding { .. } => "HeatShielding",
-        };
-        let descriptors: &[(&str, &str, &str, NumberSpec)] = match passive.parameters {
-            PassiveParameters::AdrenalResponse { .. } => &[
-                (
-                    "duration_ticks",
-                    "Timing",
-                    "Boost duration",
-                    NumberSpec::ticks(1, 3_600),
-                ),
-                (
-                    "rearm_ticks",
-                    "Timing",
-                    "Rearm time",
-                    NumberSpec::ticks(1, 36_000),
-                ),
-                (
-                    "movement_bonus_basis_points",
-                    "Effect",
-                    "Movement bonus",
-                    NumberSpec::basis_points(1, 10_000),
-                ),
-            ],
-            PassiveParameters::CloseQuarters { .. } => &[
-                (
-                    "near_distance_milliunits",
-                    "Distance",
-                    "Near distance",
-                    NumberSpec::milliunits(1, 4_096_000),
-                ),
-                (
-                    "far_distance_milliunits",
-                    "Distance",
-                    "Far distance",
-                    NumberSpec::milliunits(1, 4_096_000),
-                ),
-                (
-                    "near_damage_basis_points",
-                    "Effect",
-                    "Near damage",
-                    NumberSpec::basis_points(1, 30_000),
-                ),
-                (
-                    "far_damage_basis_points",
-                    "Effect",
-                    "Far damage",
-                    NumberSpec::basis_points(1, 30_000),
-                ),
-            ],
-            PassiveParameters::QuickCycle { .. } => &[(
-                "refill_duration_basis_points",
-                "Effect",
-                "Refill duration",
-                NumberSpec::basis_points(1, 10_000),
-            )],
-            PassiveParameters::Tenacity { .. } => &[(
-                "slow_duration_basis_points",
-                "Effect",
-                "Slow duration",
-                NumberSpec::basis_points(1, 10_000),
-            )],
-            PassiveParameters::CryogenicInsulation { .. }
-            | PassiveParameters::FilteredCirculation { .. }
-            | PassiveParameters::HeatShielding { .. } => &[(
-                "resistance_basis_points",
-                "Effect",
-                "Resistance",
-                NumberSpec::basis_points(1, 6_000),
-            )],
-            PassiveParameters::LightweightFrame | PassiveParameters::ReinforcedFrame => &[],
-        };
-        for (tail, group, label, spec) in descriptors {
-            add_field(
-                fields,
-                path!["passives", index, "parameters", variant, *tail],
-                EditorSection::Ultimates,
-                &passive.key,
-                &passive.display_name,
-                group,
-                label,
-                *spec,
-            );
-        }
-    }
-}
-
 fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
     add_field(
         fields,
@@ -1768,6 +1670,34 @@ mod tests {
             .join("/")
     }
 
+    fn collect_numeric_leaf_paths(
+        value: &serde_json::Value,
+        prefix: &mut Vec<String>,
+        paths: &mut std::collections::BTreeSet<String>,
+    ) {
+        match value {
+            serde_json::Value::Number(_) => {
+                assert!(paths.insert(prefix.join("/")), "duplicate numeric leaf");
+            }
+            serde_json::Value::Array(values) => {
+                for (index, value) in values.iter().enumerate() {
+                    prefix.push(index.to_string());
+                    collect_numeric_leaf_paths(value, prefix, paths);
+                    prefix.pop();
+                }
+            }
+            serde_json::Value::Object(values) => {
+                for (key, value) in values {
+                    prefix.push(key.clone());
+                    collect_numeric_leaf_paths(value, prefix, paths);
+                    prefix.pop();
+                }
+            }
+            serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::String(_) => {
+            }
+        }
+    }
+
     #[test]
     fn manifest_exposes_only_the_supported_numeric_leaves() {
         let (snapshot, weapons) = fixture();
@@ -1803,6 +1733,347 @@ mod tests {
                 "missing authored tuning path {expected}"
             );
         }
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "explicit expected descriptors freeze the complete passive manifest contract"
+    )]
+    fn passive_manifest_projection_preserves_exact_descriptor_contract() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let actual: Vec<_> = manifest
+            .fields
+            .into_iter()
+            .filter(|field| {
+                matches!(
+                    field.path.first(),
+                    Some(EditorPathSegment::Key(root)) if root == "passives"
+                )
+            })
+            .collect();
+        let literal_descriptor = |path,
+                                  subject_key,
+                                  subject_label,
+                                  group,
+                                  label,
+                                  unit,
+                                  storage_scale,
+                                  minimum,
+                                  maximum,
+                                  step,
+                                  control,
+                                  help| {
+            serde_json::json!({
+                "path": path,
+                "section": "ultimates",
+                "subjectKey": subject_key,
+                "subjectLabel": subject_label,
+                "group": group,
+                "label": label,
+                "storageKind": "integer",
+                "unit": unit,
+                "storageScale": storage_scale,
+                "minimum": minimum,
+                "maximum": maximum,
+                "minimumExclusive": false,
+                "step": step,
+                "control": control,
+                "help": help,
+            })
+        };
+        let expected = serde_json::Value::Array(vec![
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    2,
+                    "parameters",
+                    "AdrenalResponse",
+                    "duration_ticks"
+                ]),
+                "adrenal-response",
+                "Adrenal Response",
+                "Timing",
+                "Boost duration",
+                "s",
+                60.0,
+                0.016_666_666_666_666_666,
+                60.0,
+                0.016_666_666_666_666_666,
+                "number",
+                "Enter seconds; saved to the nearest authoritative server tick.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    2,
+                    "parameters",
+                    "AdrenalResponse",
+                    "rearm_ticks"
+                ]),
+                "adrenal-response",
+                "Adrenal Response",
+                "Timing",
+                "Rearm time",
+                "s",
+                60.0,
+                0.016_666_666_666_666_666,
+                600.0,
+                0.016_666_666_666_666_666,
+                "number",
+                "Enter seconds; saved to the nearest authoritative server tick.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    2,
+                    "parameters",
+                    "AdrenalResponse",
+                    "movement_bonus_basis_points"
+                ]),
+                "adrenal-response",
+                "Adrenal Response",
+                "Effect",
+                "Movement bonus",
+                "%",
+                100.0,
+                0.01,
+                100.0,
+                0.01,
+                "range-and-number",
+                "Displayed as a percentage and stored in basis points.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    3,
+                    "parameters",
+                    "CloseQuarters",
+                    "near_distance_milliunits"
+                ]),
+                "close-quarters",
+                "Close Quarters",
+                "Distance",
+                "Near distance",
+                "world units",
+                1_000.0,
+                0.001,
+                4_096.0,
+                0.001,
+                "number",
+                "Displayed in world units and stored to the nearest thousandth.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    3,
+                    "parameters",
+                    "CloseQuarters",
+                    "far_distance_milliunits"
+                ]),
+                "close-quarters",
+                "Close Quarters",
+                "Distance",
+                "Far distance",
+                "world units",
+                1_000.0,
+                0.001,
+                4_096.0,
+                0.001,
+                "number",
+                "Displayed in world units and stored to the nearest thousandth.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    3,
+                    "parameters",
+                    "CloseQuarters",
+                    "near_damage_basis_points"
+                ]),
+                "close-quarters",
+                "Close Quarters",
+                "Effect",
+                "Near damage",
+                "%",
+                100.0,
+                0.01,
+                300.0,
+                0.01,
+                "range-and-number",
+                "Displayed as a percentage and stored in basis points.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    3,
+                    "parameters",
+                    "CloseQuarters",
+                    "far_damage_basis_points"
+                ]),
+                "close-quarters",
+                "Close Quarters",
+                "Effect",
+                "Far damage",
+                "%",
+                100.0,
+                0.01,
+                300.0,
+                0.01,
+                "range-and-number",
+                "Displayed as a percentage and stored in basis points.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    4,
+                    "parameters",
+                    "QuickCycle",
+                    "refill_duration_basis_points"
+                ]),
+                "quick-cycle",
+                "Quick Cycle",
+                "Effect",
+                "Refill duration",
+                "%",
+                100.0,
+                0.01,
+                100.0,
+                0.01,
+                "range-and-number",
+                "Displayed as a percentage and stored in basis points.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    5,
+                    "parameters",
+                    "Tenacity",
+                    "slow_duration_basis_points"
+                ]),
+                "tenacity",
+                "Tenacity",
+                "Effect",
+                "Slow duration",
+                "%",
+                100.0,
+                0.01,
+                100.0,
+                0.01,
+                "range-and-number",
+                "Displayed as a percentage and stored in basis points.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    6,
+                    "parameters",
+                    "CryogenicInsulation",
+                    "resistance_basis_points"
+                ]),
+                "cryogenic-insulation",
+                "Cryogenic Insulation",
+                "Effect",
+                "Resistance",
+                "%",
+                100.0,
+                0.01,
+                60.0,
+                0.01,
+                "range-and-number",
+                "Displayed as a percentage and stored in basis points.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    7,
+                    "parameters",
+                    "FilteredCirculation",
+                    "resistance_basis_points"
+                ]),
+                "filtered-circulation",
+                "Filtered Circulation",
+                "Effect",
+                "Resistance",
+                "%",
+                100.0,
+                0.01,
+                60.0,
+                0.01,
+                "range-and-number",
+                "Displayed as a percentage and stored in basis points.",
+            ),
+            literal_descriptor(
+                serde_json::json!([
+                    "passives",
+                    8,
+                    "parameters",
+                    "HeatShielding",
+                    "resistance_basis_points"
+                ]),
+                "heat-shielding",
+                "Heat Shielding",
+                "Effect",
+                "Resistance",
+                "%",
+                100.0,
+                0.01,
+                60.0,
+                0.01,
+                "range-and-number",
+                "Displayed as a percentage and stored in basis points.",
+            ),
+        ]);
+        assert_eq!(serde_json::to_value(actual).unwrap(), expected);
+    }
+
+    #[test]
+    fn every_passive_numeric_parameter_leaf_has_exactly_one_descriptor() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let mut total_numeric_leaves = 0;
+        for (index, passive) in snapshot.passives.iter().enumerate() {
+            let mut numeric_leaves = std::collections::BTreeSet::new();
+            collect_numeric_leaf_paths(
+                &serde_json::to_value(passive.parameters).unwrap(),
+                &mut Vec::new(),
+                &mut numeric_leaves,
+            );
+            let descriptor_paths: Vec<_> = manifest
+                .fields
+                .iter()
+                .filter_map(|field| match field.path.as_slice() {
+                    [
+                        EditorPathSegment::Key(root),
+                        EditorPathSegment::Index(field_index),
+                        EditorPathSegment::Key(parameters),
+                        tail @ ..,
+                    ] if root == "passives"
+                        && *field_index == index
+                        && parameters == "parameters" =>
+                    {
+                        Some(path_key(tail))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let unique_descriptor_paths: std::collections::BTreeSet<_> =
+                descriptor_paths.iter().cloned().collect();
+            assert_eq!(
+                descriptor_paths.len(),
+                unique_descriptor_paths.len(),
+                "{} has duplicate passive descriptors",
+                passive.key
+            );
+            assert_eq!(
+                unique_descriptor_paths, numeric_leaves,
+                "{} passive metadata does not cover its numeric schema exactly",
+                passive.key
+            );
+            total_numeric_leaves += numeric_leaves.len();
+        }
+        assert_eq!(total_numeric_leaves, 12);
     }
 
     #[test]

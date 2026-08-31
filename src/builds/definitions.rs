@@ -1,5 +1,10 @@
 use super::{
     BrawlerBuildRecipe, BuildRecipeFingerprint, BuildRevision, ElementalFieldEffect, FighterBody,
+    PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS, PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS,
+    PASSIVE_ADRENAL_REARM_TICKS_BOUNDS, PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS,
+    PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS,
+    PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS,
+    PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS, PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS,
     PassiveDefinitionId, PassiveKind, PassiveParameters, PulseMagazine, PulsePower, PulseReach,
     ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate,
     RevealProximityModifier, SelectedBuild, UltimateChargePolicy, UltimateDefinitionId,
@@ -474,74 +479,82 @@ fn validate_ultimate_definitions(definitions: &[UltimateDefinition]) -> Result<(
 }
 
 fn validate_passive_definitions(definitions: &[PassiveDefinition]) -> Result<(), String> {
-    let valid = definitions.iter().all(|definition| {
-        matches!(
-            (definition.kind, definition.parameters),
-            (
-                PassiveKind::LightweightFrame,
-                PassiveParameters::LightweightFrame
-            ) | (
-                PassiveKind::ReinforcedFrame,
-                PassiveParameters::ReinforcedFrame
-            ) | (
-                PassiveKind::AdrenalResponse,
-                PassiveParameters::AdrenalResponse {
-                    duration_ticks: 1..=3_600,
-                    rearm_ticks: 1..=36_000,
-                    movement_bonus_basis_points: 1..=10_000,
+    let valid =
+        definitions.iter().all(
+            |definition| match (definition.kind, definition.parameters) {
+                (PassiveKind::LightweightFrame, PassiveParameters::LightweightFrame)
+                | (PassiveKind::ReinforcedFrame, PassiveParameters::ReinforcedFrame) => true,
+                (
+                    PassiveKind::AdrenalResponse,
+                    PassiveParameters::AdrenalResponse {
+                        duration_ticks,
+                        rearm_ticks,
+                        movement_bonus_basis_points,
+                    },
+                ) => {
+                    PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS.contains(&duration_ticks)
+                        && PASSIVE_ADRENAL_REARM_TICKS_BOUNDS.contains(&rearm_ticks)
+                        && PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS
+                            .contains(&movement_bonus_basis_points)
+                        && rearm_ticks >= duration_ticks
                 }
-            ) | (
-                PassiveKind::CloseQuarters,
-                PassiveParameters::CloseQuarters {
-                    near_distance_milliunits: 1..=4_096_000,
-                    far_distance_milliunits: 1..=4_096_000,
-                    near_damage_basis_points: 1..=30_000,
-                    far_damage_basis_points: 1..=30_000,
+                (
+                    PassiveKind::CloseQuarters,
+                    PassiveParameters::CloseQuarters {
+                        near_distance_milliunits,
+                        far_distance_milliunits,
+                        near_damage_basis_points,
+                        far_damage_basis_points,
+                    },
+                ) => {
+                    PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS
+                        .contains(&near_distance_milliunits)
+                        && PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS
+                            .contains(&far_distance_milliunits)
+                        && PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS
+                            .contains(&near_damage_basis_points)
+                        && PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS
+                            .contains(&far_damage_basis_points)
+                        && near_distance_milliunits < far_distance_milliunits
+                        && near_damage_basis_points > far_damage_basis_points
                 }
-            ) | (
-                PassiveKind::QuickCycle,
-                PassiveParameters::QuickCycle {
-                    refill_duration_basis_points: 1..=10_000,
+                (
+                    PassiveKind::QuickCycle,
+                    PassiveParameters::QuickCycle {
+                        refill_duration_basis_points,
+                    },
+                ) => PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS
+                    .contains(&refill_duration_basis_points),
+                (
+                    PassiveKind::Tenacity,
+                    PassiveParameters::Tenacity {
+                        slow_duration_basis_points,
+                    },
+                ) => {
+                    PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS.contains(&slow_duration_basis_points)
                 }
-            ) | (
-                PassiveKind::Tenacity,
-                PassiveParameters::Tenacity {
-                    slow_duration_basis_points: 1..=10_000,
-                }
-            ) | (
-                PassiveKind::CryogenicInsulation,
-                PassiveParameters::CryogenicInsulation {
-                    resistance_basis_points: 1..=6_000,
-                }
-            ) | (
-                PassiveKind::FilteredCirculation,
-                PassiveParameters::FilteredCirculation {
-                    resistance_basis_points: 1..=6_000,
-                }
-            ) | (
-                PassiveKind::HeatShielding,
-                PassiveParameters::HeatShielding {
-                    resistance_basis_points: 1..=6_000,
-                }
-            )
-        ) && !matches!(
-            definition.parameters,
-            PassiveParameters::AdrenalResponse {
-                duration_ticks,
-                rearm_ticks,
-                ..
-            } if rearm_ticks < duration_ticks
-        ) && !matches!(
-            definition.parameters,
-            PassiveParameters::CloseQuarters {
-                near_distance_milliunits,
-                far_distance_milliunits,
-                near_damage_basis_points,
-                far_damage_basis_points,
-            } if near_distance_milliunits >= far_distance_milliunits
-                || near_damage_basis_points <= far_damage_basis_points
-        )
-    });
+                (
+                    PassiveKind::CryogenicInsulation,
+                    PassiveParameters::CryogenicInsulation {
+                        resistance_basis_points,
+                    },
+                )
+                | (
+                    PassiveKind::FilteredCirculation,
+                    PassiveParameters::FilteredCirculation {
+                        resistance_basis_points,
+                    },
+                )
+                | (
+                    PassiveKind::HeatShielding,
+                    PassiveParameters::HeatShielding {
+                        resistance_basis_points,
+                    },
+                ) => PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS
+                    .contains(&resistance_basis_points),
+                _ => false,
+            },
+        );
     valid
         .then_some(())
         .ok_or_else(|| "passive kind and parameters do not match engine bounds".into())

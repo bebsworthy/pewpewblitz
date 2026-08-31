@@ -327,3 +327,9 @@ A fresh audit rejected the proposed equipment-only extraction from `client::flow
 Completed the remaining demonstrated client-flow reducer boundary. Private `client::flow::reducer::match_flow` now owns game selection, queue/Practice, loading, Results, fresh-lobby return, and replay reduction; the root remains the single profile-first and explicit -> session -> ordinary precedence coordinator plus connection/server-selection shell, teardown, and deferred commit owner. Five grouped characterization tests cover moved transitions, including competing-generation replay and one-shot match-failure return. Independent review found no P0/P1 drift; both P2 evidence gaps were corrected. Focused, role, lint, canonical, exact cross-feature, all 97 routed network, and all 12 performance gates pass. No native rerun was required.
 
 A fresh ownership audit confirms the remaining connection/server-selection reducer root is cohesive with `flow::connection` attempt mechanics and should not be split solely by size. Stage 6.2 is complete.
+
+## Phase BRL-0091 — passive Balance Lab metadata pilot
+
+Completed and independently reviewed. Passive numeric bounds now have one crate-private authoritative owner shared by validation and Balance Lab projection; passive-only editor projection is private and exhaustive; 12 numeric leaves have bidirectional coverage and an independent literal serialized parity oracle. All focused and canonical `check`, `lint`, and `test` gates pass. No player-visible, schema, protocol, role, or public-API changes occurred.
+
+The initially reported resistance-minimum mismatch was an audit error caught by parity evidence; BRL-0092 was canceled without implementation. The remaining ultimate/weapon-family follow-up is being decided from a separate evidence audit under the repository's demonstrated-use rule.

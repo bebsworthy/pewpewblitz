@@ -476,6 +476,355 @@ fn catalog_accepts_additive_inventory_and_rejects_identity_and_cost_mutations() 
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one boundary matrix keeps every passive range and relational invariant visible"
+)]
+fn passive_parameter_bounds_and_cross_field_invariants_are_enforced() {
+    let (builds, _) = catalogs();
+    let replace = |catalog: &mut BuildCatalog, kind: PassiveKind, parameters| {
+        catalog
+            .passives
+            .iter_mut()
+            .find(|definition| definition.kind == kind)
+            .expect("embedded passive family exists")
+            .parameters = parameters;
+    };
+
+    let mut boundary = builds.clone();
+    replace(
+        &mut boundary,
+        PassiveKind::AdrenalResponse,
+        PassiveParameters::AdrenalResponse {
+            duration_ticks: PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS.minimum,
+            rearm_ticks: PASSIVE_ADRENAL_REARM_TICKS_BOUNDS.maximum,
+            movement_bonus_basis_points: PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS.maximum,
+        },
+    );
+    replace(
+        &mut boundary,
+        PassiveKind::CloseQuarters,
+        PassiveParameters::CloseQuarters {
+            near_distance_milliunits: PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+            far_distance_milliunits: PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum,
+            near_damage_basis_points: PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum,
+            far_damage_basis_points: PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+        },
+    );
+    replace(
+        &mut boundary,
+        PassiveKind::QuickCycle,
+        PassiveParameters::QuickCycle {
+            refill_duration_basis_points: PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS.maximum,
+        },
+    );
+    replace(
+        &mut boundary,
+        PassiveKind::Tenacity,
+        PassiveParameters::Tenacity {
+            slow_duration_basis_points: PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS.minimum,
+        },
+    );
+    for (kind, parameters) in [
+        (
+            PassiveKind::CryogenicInsulation,
+            PassiveParameters::CryogenicInsulation {
+                resistance_basis_points: PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.maximum,
+            },
+        ),
+        (
+            PassiveKind::FilteredCirculation,
+            PassiveParameters::FilteredCirculation {
+                resistance_basis_points: PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.maximum,
+            },
+        ),
+        (
+            PassiveKind::HeatShielding,
+            PassiveParameters::HeatShielding {
+                resistance_basis_points: PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.maximum,
+            },
+        ),
+    ] {
+        replace(&mut boundary, kind, parameters);
+    }
+    assert!(boundary.validate().is_ok());
+
+    let adrenal = |duration_ticks, rearm_ticks, movement_bonus_basis_points| {
+        PassiveParameters::AdrenalResponse {
+            duration_ticks,
+            rearm_ticks,
+            movement_bonus_basis_points,
+        }
+    };
+    let close_quarters = |near_distance_milliunits,
+                          far_distance_milliunits,
+                          near_damage_basis_points,
+                          far_damage_basis_points| {
+        PassiveParameters::CloseQuarters {
+            near_distance_milliunits,
+            far_distance_milliunits,
+            near_damage_basis_points,
+            far_damage_basis_points,
+        }
+    };
+    let assert_invalid = |label: &str, kind, parameters| {
+        let mut invalid = builds.clone();
+        replace(&mut invalid, kind, parameters);
+        assert!(
+            invalid.validate().is_err(),
+            "{label} unexpectedly validated"
+        );
+    };
+    for (label, kind, parameters) in [
+        (
+            "Adrenal duration below minimum",
+            PassiveKind::AdrenalResponse,
+            adrenal(
+                PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS.minimum - 1,
+                PASSIVE_ADRENAL_REARM_TICKS_BOUNDS.maximum,
+                PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Adrenal duration above maximum",
+            PassiveKind::AdrenalResponse,
+            adrenal(
+                PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS.maximum + 1,
+                PASSIVE_ADRENAL_REARM_TICKS_BOUNDS.maximum,
+                PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Adrenal rearm below minimum",
+            PassiveKind::AdrenalResponse,
+            adrenal(
+                PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS.minimum,
+                PASSIVE_ADRENAL_REARM_TICKS_BOUNDS.minimum - 1,
+                PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Adrenal rearm above maximum",
+            PassiveKind::AdrenalResponse,
+            adrenal(
+                PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS.minimum,
+                PASSIVE_ADRENAL_REARM_TICKS_BOUNDS.maximum + 1,
+                PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Adrenal movement below minimum",
+            PassiveKind::AdrenalResponse,
+            adrenal(
+                PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS.minimum,
+                PASSIVE_ADRENAL_REARM_TICKS_BOUNDS.maximum,
+                PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS.minimum - 1,
+            ),
+        ),
+        (
+            "Adrenal movement above maximum",
+            PassiveKind::AdrenalResponse,
+            adrenal(
+                PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS.minimum,
+                PASSIVE_ADRENAL_REARM_TICKS_BOUNDS.maximum,
+                PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS.maximum + 1,
+            ),
+        ),
+        (
+            "Close Quarters near distance below minimum",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum - 1,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Close Quarters near distance above maximum",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum + 1,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Close Quarters far distance below minimum",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum - 1,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Close Quarters far distance above maximum",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum + 1,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Close Quarters near damage below minimum",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum - 1,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Close Quarters near damage above maximum",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum + 1,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Close Quarters far damage below minimum",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum - 1,
+            ),
+        ),
+        (
+            "Close Quarters far damage above maximum",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum + 1,
+            ),
+        ),
+        (
+            "Quick Cycle below minimum",
+            PassiveKind::QuickCycle,
+            PassiveParameters::QuickCycle {
+                refill_duration_basis_points: PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS
+                    .minimum
+                    - 1,
+            },
+        ),
+        (
+            "Quick Cycle above maximum",
+            PassiveKind::QuickCycle,
+            PassiveParameters::QuickCycle {
+                refill_duration_basis_points: PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS
+                    .maximum
+                    + 1,
+            },
+        ),
+        (
+            "Tenacity below minimum",
+            PassiveKind::Tenacity,
+            PassiveParameters::Tenacity {
+                slow_duration_basis_points: PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS.minimum - 1,
+            },
+        ),
+        (
+            "Tenacity above maximum",
+            PassiveKind::Tenacity,
+            PassiveParameters::Tenacity {
+                slow_duration_basis_points: PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS.maximum + 1,
+            },
+        ),
+        (
+            "Cryogenic resistance below minimum",
+            PassiveKind::CryogenicInsulation,
+            PassiveParameters::CryogenicInsulation {
+                resistance_basis_points: PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.minimum
+                    - 1,
+            },
+        ),
+        (
+            "Cryogenic resistance above maximum",
+            PassiveKind::CryogenicInsulation,
+            PassiveParameters::CryogenicInsulation {
+                resistance_basis_points: PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.maximum
+                    + 1,
+            },
+        ),
+        (
+            "Filtered resistance below minimum",
+            PassiveKind::FilteredCirculation,
+            PassiveParameters::FilteredCirculation {
+                resistance_basis_points: PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.minimum
+                    - 1,
+            },
+        ),
+        (
+            "Filtered resistance above maximum",
+            PassiveKind::FilteredCirculation,
+            PassiveParameters::FilteredCirculation {
+                resistance_basis_points: PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.maximum
+                    + 1,
+            },
+        ),
+        (
+            "Heat resistance below minimum",
+            PassiveKind::HeatShielding,
+            PassiveParameters::HeatShielding {
+                resistance_basis_points: PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.minimum
+                    - 1,
+            },
+        ),
+        (
+            "Heat resistance above maximum",
+            PassiveKind::HeatShielding,
+            PassiveParameters::HeatShielding {
+                resistance_basis_points: PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.maximum
+                    + 1,
+            },
+        ),
+        (
+            "Adrenal rearm precedes duration",
+            PassiveKind::AdrenalResponse,
+            adrenal(
+                PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS.minimum + 1,
+                PASSIVE_ADRENAL_REARM_TICKS_BOUNDS.minimum,
+                PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Close Quarters distances are equal",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+        (
+            "Close Quarters damage is equal",
+            PassiveKind::CloseQuarters,
+            close_quarters(
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS.maximum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+                PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum,
+            ),
+        ),
+    ] {
+        assert_invalid(label, kind, parameters);
+    }
+}
+
+#[test]
 fn weapon_costs_must_exactly_cover_an_additive_weapon_catalog() {
     let (mut builds, mut weapons) = catalogs();
     let mut eighth = weapons.presets.last().unwrap().clone();
