@@ -283,3 +283,13 @@ BRL-0084 completed the authoritative composed-projectile sweep decomposition. Th
 Independent review rejected the initial shallow extraction and verified the corrected three-phase boundary with no remaining P0/P1 finding. Canonical checks, lint, full tests, 97 network cases, and 12 performance gates pass; isolated lob-heavy and 200-projectile p95 measurements are 1.050125 ms and 1.171416 ms. No native rerun was required for this organization-only phase.
 
 The next coordinator-decomposition slice will be selected from the remaining audited client-flow, Balance Lab apply, lobby, and presentation ownership hotspots after a focused current-source boundary audit; it will receive its own linked ticket before implementation.
+
+## BRL-0085 phase completion
+
+BRL-0085 completed the Balance Lab authoritative Apply/Restore decomposition. One unchanged FixedUpdate/MatchRestartSet::Prepare system now coordinates explicit normalize, immutable prepare, persist, infallible authoritative commit, same-tick restart staging, and publication phases through a private transaction module and named fighter QueryData.
+
+Rollback coverage now proves filesystem failure and precondition rejection cannot mutate catalogs, resolved map, condition/Heist rules, fighter projections, restart state/policy, match identity allocation, or runtime/published applied revisions. Roster planning is stable by PlayerId while preserving historical per-fighter rejection precedence and exact manifest coverage. Restore baseline rebuilding and Prepare -> ModeReset -> EnvironmentReset -> Commit visibility are characterized.
+
+Independent review is clean. Focused tests, combined Balance Lab/network smoke, canonical checks/lint, all 97 network cases, and all 12 performance gates pass. No native evidence was required because schemas, tuning, schedule timing, UI, and player-visible behavior are unchanged.
+
+The next Stage 6 slice is the lower-risk client customization reducer extraction: move brawler/profile and weapon-equipment action ownership into private helper modules while retaining the single resolve_flow_action precedence coordinator and existing FlowCommit/schedule pipeline.

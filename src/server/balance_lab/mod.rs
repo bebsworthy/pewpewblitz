@@ -4,29 +4,29 @@ mod editor;
 mod http;
 mod persistence;
 mod roster;
+mod transaction;
 
 #[cfg(test)]
-use crate::combat::WeaponPhase;
+use crate::{
+    builds::ResolvedMatchLoadout,
+    combat::{CurrentHealth, HealthRecoveryState, WeaponPhase, WeaponState},
+    matchplay::{MatchRoot, MatchState, PendingMatchRestart, RestartBuildPolicy},
+    protocol::{Fighter, PlayerId},
+    timing::SimulationTick,
+};
 use crate::{
     builds::{
-        BuildCatalog, BuildCatalogResource, ElementalFieldEffect, FighterBody, FighterStatProfiles,
-        PassiveDefinitionId, PassiveKind, PassiveParameters, ResolvedFighterStats,
-        ResolvedMatchLoadout, SelectedBuild, UltimateChargePolicy, UltimateDefinitionId,
-        UltimateKind, UltimateParameters,
+        BuildCatalog, BuildCatalogResource, ElementalFieldEffect, FighterStatProfiles,
+        PassiveDefinitionId, PassiveKind, PassiveParameters, UltimateChargePolicy,
+        UltimateDefinitionId, UltimateKind, UltimateParameters,
     },
     combat::{
-        CurrentHealth, DamageFalloff, DeliveryMethod, FiringPattern, HealthRecoveryState,
-        PayloadEffectDefinition, RecipientPolicy, ResolvedWeapon, TargetSelection, WeaponCatalog,
-        WeaponCatalogResource, WeaponConfiguration, WeaponPresetId, WeaponRecipe, WeaponState,
-        WorldEffectDefinition,
+        DamageFalloff, DeliveryMethod, FiringPattern, PayloadEffectDefinition, RecipientPolicy,
+        TargetSelection, WeaponCatalog, WeaponCatalogResource, WeaponConfiguration, WeaponPresetId,
+        WeaponRecipe, WorldEffectDefinition,
     },
-    matchplay::{
-        MatchRestartSet, MatchRoot, MatchState, PendingMatchRestart, PendingMatchRestartSlot,
-        RestartBuildPolicy,
-    },
-    protocol::{Fighter, PlayerId},
+    matchplay::MatchRestartSet,
     server::ServerRoleResource,
-    timing::SimulationTick,
 };
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -57,7 +57,7 @@ impl Plugin for BalanceLabPlugin {
         )
         .add_systems(
             FixedUpdate,
-            apply_balance_lab_transaction
+            transaction::apply_balance_lab_transaction
                 .in_set(MatchRestartSet::Prepare)
                 .before(crate::matchplay::prepare_match_restart),
         );
@@ -630,257 +630,6 @@ fn configured_address() -> Result<SocketAddr, String> {
         ));
     }
     Ok(address)
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::type_complexity,
-    reason = "this fixed-tick Bevy transaction coordinates validation and one atomic commit"
-)]
-fn apply_balance_lab_transaction(
-    mut runtime: Option<ResMut<BalanceLabRuntime>>,
-    role: Res<ServerRoleResource>,
-    tick: Res<SimulationTick>,
-    mut builds: ResMut<BuildCatalogResource>,
-    mut weapons: ResMut<WeaponCatalogResource>,
-    mut maps: ResMut<crate::map::MapCatalogResource>,
-    mut resolved_map: ResMut<crate::map::ResolvedMap>,
-    mut condition_rules: ResMut<crate::combat::CombatConditionRulesResource>,
-    mut heist_rules: Option<ResMut<crate::matchplay::HeistRules>>,
-    mut restart: ResMut<PendingMatchRestart>,
-    mut restart_policy: ResMut<RestartBuildPolicy>,
-    mut next_match_id: ResMut<crate::matchplay::NextMatchId>,
-    roots: Query<&MatchState, With<MatchRoot>>,
-    identities: Query<(Entity, &PlayerId), With<Fighter>>,
-    mut fighters: Query<(
-        &mut SelectedBuild,
-        &mut ResolvedMatchLoadout,
-        &mut ResolvedFighterStats,
-        &mut FighterBody,
-        &mut ResolvedWeapon,
-        &mut crate::builds::ResolvedUltimate,
-        &mut crate::builds::ResolvedPassives,
-        &mut CurrentHealth,
-        &mut WeaponState,
-        &mut HealthRecoveryState,
-    )>,
-) {
-    let Some(runtime) = runtime.as_deref_mut() else {
-        return;
-    };
-    let command = runtime
-        .receiver
-        .lock()
-        .ok()
-        .and_then(|receiver| receiver.try_recv().ok());
-    let Some(command) = command else { return };
-    let (transaction_id, expected_revision, candidate, restore_defaults) = match command {
-        BalanceLabCommand::Apply {
-            transaction_id,
-            request,
-        } => {
-            let request = *request;
-            if request.schema_version != SNAPSHOT_SCHEMA_VERSION {
-                reject(runtime, transaction_id, "unsupported apply schema");
-                return;
-            }
-            (
-                transaction_id,
-                request.expected_revision,
-                request.snapshot,
-                false,
-            )
-        }
-        BalanceLabCommand::Restore {
-            transaction_id,
-            expected_revision,
-        } => (
-            transaction_id,
-            expected_revision,
-            runtime.baseline.clone(),
-            true,
-        ),
-    };
-    if expected_revision != runtime.revision.0 {
-        reject(runtime, transaction_id, "stale applied revision");
-        return;
-    }
-    let Some(manifest) = role.manifest() else {
-        reject(runtime, transaction_id, "worker manifest is unavailable");
-        return;
-    };
-    let Ok(state) = roots.single() else {
-        reject(runtime, transaction_id, "match root is unavailable");
-        return;
-    };
-    if restart.slot().is_some() {
-        reject(runtime, transaction_id, "another match reset is pending");
-        return;
-    }
-    let (next_builds, next_weapons, next_maps) = match validate_snapshot(
-        &candidate,
-        &runtime.baseline,
-        &builds.0,
-        &weapons.0,
-        &maps.0,
-    ) {
-        Ok(catalogs) => catalogs,
-        Err(error) => {
-            reject(runtime, transaction_id, &error);
-            return;
-        }
-    };
-    if let Err(error) = validate_mode_specific_tuning(
-        &candidate,
-        &runtime.applied,
-        state.mode_definition_id,
-        restore_defaults,
-    ) {
-        reject(runtime, transaction_id, error);
-        return;
-    }
-    let selections = match manifest_selections(manifest) {
-        Ok(selections) => selections,
-        Err(error) => {
-            reject(runtime, transaction_id, &error);
-            return;
-        }
-    };
-    let mut resolved = Vec::new();
-    for (entity, player_id) in &identities {
-        if fighters.get(entity).is_err() {
-            reject(
-                runtime,
-                transaction_id,
-                "practice fighter runtime is incomplete",
-            );
-            return;
-        }
-        let Some(snapshot) = selections.get(&player_id.0) else {
-            reject(
-                runtime,
-                transaction_id,
-                "practice fighter has no admitted build snapshot",
-            );
-            return;
-        };
-        let Ok(loadout) =
-            snapshot.resolve_revised_balance_lab_catalogs(&next_builds, &next_weapons)
-        else {
-            reject(
-                runtime,
-                transaction_id,
-                "revised practice loadout did not resolve",
-            );
-            return;
-        };
-        resolved.push((entity, loadout));
-    }
-    if resolved.len() != selections.len() {
-        reject(
-            runtime,
-            transaction_id,
-            "admitted practice roster is not fully instantiated",
-        );
-        return;
-    }
-    let Some(source_preset_id) = resolved_map.snapshot.identity.source_preset_id else {
-        reject(
-            runtime,
-            transaction_id,
-            "authoritative Practice map has no source preset",
-        );
-        return;
-    };
-    let next_resolved_map = match next_maps
-        .resolve_preset(source_preset_id, resolved_map.snapshot.identity.instance_id)
-    {
-        Ok(map) => map,
-        Err(error) => {
-            reject(
-                runtime,
-                transaction_id,
-                &format!("revised Practice map did not resolve: {error}"),
-            );
-            return;
-        }
-    };
-    let Some(next_revision) = runtime.revision.0.checked_add(1) else {
-        reject(
-            runtime,
-            transaction_id,
-            "applied revision space is exhausted",
-        );
-        return;
-    };
-    let persistence_result = if restore_defaults {
-        persistence::clear(&runtime.persistence_path)
-    } else {
-        persistence::save(
-            &runtime.persistence_path,
-            &candidate,
-            BalanceLabRevision(next_revision),
-        )
-    };
-    if let Err(error) = persistence_result {
-        reject(
-            runtime,
-            transaction_id,
-            &format!("could not persist accepted tuning: {error}"),
-        );
-        return;
-    }
-    let slot = PendingMatchRestartSlot {
-        previous_id: state.match_id,
-        next_id: next_match_id.allocate(),
-        restart_tick: tick.0,
-    };
-    if !restart.stage(slot) {
-        reject(runtime, transaction_id, "another match reset is pending");
-        return;
-    }
-    let next_body = next_builds.fighter_body;
-    builds.0 = next_builds;
-    weapons.0 = next_weapons;
-    maps.0 = next_maps;
-    *resolved_map = next_resolved_map;
-    condition_rules.0 = candidate.condition_rules;
-    if let Some(rules) = heist_rules.as_deref_mut() {
-        install_heist_tuning(rules, &candidate);
-    }
-    for (entity, loadout) in resolved {
-        let (
-            mut selected,
-            mut current,
-            mut fighter_stats,
-            mut fighter_body,
-            mut resolved_weapon,
-            mut resolved_ultimate,
-            mut resolved_passives,
-            mut health,
-            mut weapon,
-            mut recovery,
-        ) = fighters
-            .get_mut(entity)
-            .expect("prevalidated fighter runtime remains available during atomic apply");
-        *selected = loadout.identity;
-        *health = CurrentHealth(loadout.fighter_stats.maximum_health);
-        *weapon = WeaponState::ready(loadout.primary_weapon.recipe.economy.capacity());
-        *recovery = HealthRecoveryState::starting_at(tick.0);
-        *fighter_stats = loadout.fighter_stats;
-        *fighter_body = next_body;
-        *resolved_weapon = loadout.primary_weapon.clone();
-        *resolved_ultimate = loadout.ultimate;
-        resolved_passives.passives = loadout.passives;
-        *current = loadout.clone();
-    }
-    *restart_policy = RestartBuildPolicy::Retain;
-    runtime.revision = BalanceLabRevision(next_revision);
-    runtime.applied = candidate;
-    let message = format!("applied revision {}", runtime.revision.0);
-    publish_result(runtime, transaction_id, TransactionStatus::Applied, message);
 }
 
 fn install_heist_tuning(rules: &mut crate::matchplay::HeistRules, snapshot: &BalanceLabSnapshotV3) {
@@ -1485,7 +1234,7 @@ fn publish_result(
 mod tests {
     use super::*;
 
-    fn admitted_brawler(
+    pub(super) fn admitted_brawler(
         builds: &BuildCatalog,
         weapons: &WeaponCatalog,
         fighter_profile_id: u16,
@@ -1509,7 +1258,7 @@ mod tests {
         (snapshot, resolved)
     }
 
-    fn practice_manifest(
+    pub(super) fn practice_manifest(
         human: &crate::profiles::MatchBuildSnapshotV3,
         bot: &crate::profiles::MatchBuildSnapshotV3,
     ) -> brawler_routing::MatchManifestV1 {
@@ -1931,7 +1680,7 @@ mod tests {
             crate::builds::MatchLoadoutProjection::new(&bot_loadout, builds.fighter_body);
 
         let mut app = App::new();
-        app.add_systems(FixedUpdate, apply_balance_lab_transaction)
+        app.add_systems(FixedUpdate, transaction::apply_balance_lab_transaction)
             .insert_resource(BalanceLabRuntime {
                 baseline: baseline.clone(),
                 applied,
