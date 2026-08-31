@@ -9,11 +9,15 @@ use super::catalog::{
 
 pub(super) const MAX_VFX_RECIPES: usize = 128;
 pub(super) const MAX_VFX_LAYERS: usize = 256;
+pub(super) const MAX_VFX_PARTICLE_LAYERS: usize = 64;
 pub(super) const MAX_VFX_LAYERS_PER_RECIPE: usize = 8;
+pub(super) const MAX_VFX_PARTICLE_LAYERS_PER_RECIPE: usize = 2;
 pub(super) const MAX_VFX_CONCURRENCY: usize = 96;
 pub(super) const MAX_VFX_LIFETIME_MILLIS: u32 = 10_000;
+pub(crate) const MAX_VFX_PARTICLES_PER_LAYER: u16 = 256;
 const MAX_VFX_ID_BYTES: usize = 64;
 const MAX_TIMELINE_SCALE: f32 = 16.0;
+const MAX_PARTICLE_WORLD_VALUE: f32 = 512.0;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) enum VfxReadabilityClass {
@@ -159,11 +163,72 @@ impl VfxMeshLayer {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) enum VfxParticleProfile {
+    ColdFragments,
+    FireEmbers,
+}
+
+/// Bounded authored input for a decorative GPU-particle layer.
+///
+/// Particle layers deliberately cannot declare a readability class. They are always decorative;
+/// mesh layers remain responsible for geometry, identity, timing, and fallbacks.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct VfxParticleLayer {
+    pub(crate) id: String,
+    pub(crate) profile: VfxParticleProfile,
+    pub(crate) capacity: u16,
+    pub(crate) burst_count: u16,
+    pub(crate) lifetime_millis: u16,
+    pub(crate) spawn_radius: f32,
+    pub(crate) speed_min: f32,
+    pub(crate) speed_max: f32,
+    pub(crate) size_start: f32,
+    pub(crate) size_end: f32,
+    pub(crate) anchor_height: f32,
+}
+
+impl VfxParticleLayer {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        let finite_world_value =
+            |value: f32| value.is_finite() && (0.0..=MAX_PARTICLE_WORLD_VALUE).contains(&value);
+        if !valid_vfx_catalog_id(&self.id)
+            || self.capacity == 0
+            || self.capacity > MAX_VFX_PARTICLES_PER_LAYER
+            || self.burst_count == 0
+            || self.burst_count > self.capacity
+            || self.lifetime_millis == 0
+            || u32::from(self.lifetime_millis) > MAX_VFX_LIFETIME_MILLIS
+            || !finite_world_value(self.spawn_radius)
+            || !finite_world_value(self.speed_min)
+            || !finite_world_value(self.speed_max)
+            || self.speed_min > self.speed_max
+            || !finite_world_value(self.size_start)
+            || !finite_world_value(self.size_end)
+            || self.size_start <= 0.0
+            || !finite_world_value(self.anchor_height)
+        {
+            return Err(format!(
+                "VFX particle layer {} has unsafe runtime values",
+                self.id
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) const fn lifetime(&self) -> Duration {
+        Duration::from_millis(self.lifetime_millis as u64)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct VfxRecipe {
     pub(crate) id: String,
     pub(crate) layers: Vec<String>,
+    #[serde(default)]
+    pub(crate) particle_layers: Vec<String>,
     pub(crate) concurrency_cap: usize,
     pub(crate) fallback_recipe: String,
     pub(crate) reduced_recipe: Option<String>,
@@ -175,8 +240,15 @@ impl VfxRecipe {
             || !valid_vfx_catalog_id(&self.fallback_recipe)
             || self.layers.is_empty()
             || self.layers.len() > MAX_VFX_LAYERS_PER_RECIPE
+            || self.particle_layers.len() > MAX_VFX_PARTICLE_LAYERS_PER_RECIPE
+            || self.layers.len().saturating_add(self.particle_layers.len())
+                > MAX_VFX_LAYERS_PER_RECIPE
             || !(1..=MAX_VFX_CONCURRENCY).contains(&self.concurrency_cap)
             || self.layers.iter().any(|layer| !valid_vfx_catalog_id(layer))
+            || self
+                .particle_layers
+                .iter()
+                .any(|layer| !valid_vfx_catalog_id(layer))
             || self
                 .reduced_recipe
                 .as_deref()
@@ -192,6 +264,7 @@ impl VfxRecipe {
 pub(crate) struct ResolvedVfxRecipe {
     pub(crate) id: String,
     pub(crate) layers: Vec<VfxMeshLayer>,
+    pub(crate) particle_layers: Vec<VfxParticleLayer>,
     pub(crate) concurrency_cap: usize,
     pub(crate) fallback_recipe: String,
     pub(crate) reduced_recipe: Option<String>,
@@ -275,5 +348,32 @@ mod tests {
         assert_eq!(first, vfx_counter_sample(7, "impact", "flash", 0, 11));
         assert_ne!(first, vfx_counter_sample(8, "impact", "flash", 0, 11));
         assert_ne!(first, vfx_counter_sample(7, "impact", "flash", 0, 12));
+    }
+
+    #[test]
+    fn particle_layers_are_decorative_and_strictly_bounded() {
+        let mut layer = VfxParticleLayer {
+            id: "cold_fragments".to_string(),
+            profile: VfxParticleProfile::ColdFragments,
+            capacity: 64,
+            burst_count: 24,
+            lifetime_millis: 600,
+            spawn_radius: 4.0,
+            speed_min: 12.0,
+            speed_max: 36.0,
+            size_start: 3.0,
+            size_end: 0.0,
+            anchor_height: 5.0,
+        };
+        assert!(layer.validate().is_ok());
+        layer.burst_count = 65;
+        assert!(layer.validate().is_err());
+        layer.burst_count = 24;
+        layer.capacity = MAX_VFX_PARTICLES_PER_LAYER + 1;
+        assert!(layer.validate().is_err());
+        layer.capacity = 64;
+        layer.speed_min = 40.0;
+        layer.speed_max = 20.0;
+        assert!(layer.validate().is_err());
     }
 }

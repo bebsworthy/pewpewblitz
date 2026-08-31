@@ -15,6 +15,7 @@ default = ["client"]
 client = [
   "dep:arboard",
   "dep:atomic-write-file",
+  "dep:bevy_hanabi",
   "dep:directories",
   "dep:serde_json",
   "bevy-client",
@@ -108,6 +109,7 @@ bevy = { version = "=0.19.1", default-features = false, features = [
   "multi_threaded",
   "std",
 ] }
+bevy_hanabi = { version = "=0.19.0", default-features = false, features = ["3d"], optional = true }
 lightyear = { version = "=0.29.0", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 postcard = { version = "1.1", features = ["alloc"] }

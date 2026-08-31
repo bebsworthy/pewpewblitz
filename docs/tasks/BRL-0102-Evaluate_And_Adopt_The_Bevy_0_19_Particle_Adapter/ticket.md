@@ -1,13 +1,13 @@
 ---
 id: BRL-0102
 title: Evaluate and adopt the Bevy 0.19 particle adapter
-status: todo
+status: done
 theme:
 release:
 created: 2026-08-31T08:21:40Z
-modified: 2026-08-31T11:01:53Z
-closed:
-revision: 1bee0204228e8d8d
+modified: 2026-08-31T19:34:31Z
+closed: 2026-08-31T19:34:31Z
+revision: 992640eed0d6895e
 blocks: [BRL-0103]
 related: [BRL-0094]
 ---

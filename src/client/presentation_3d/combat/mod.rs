@@ -8,6 +8,7 @@ mod elemental_style;
 mod entities;
 mod fighter_feedback;
 mod fighter_ui;
+mod particles;
 
 use bevy::prelude::{App, IntoScheduleConfigs, Plugin, PostUpdate, SystemSet, Update};
 
@@ -36,6 +37,10 @@ pub(super) use fighter_feedback::{
 pub(super) use fighter_ui::{
     prepare_cold_pie_assets, project_fighter_overhead_ui, reconcile_fighter_overheads,
     update_fighter_overhead_state,
+};
+pub(in crate::client) use particles::{
+    MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, VfxParticleAdapterPlugin,
+    VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
 
 /// Schedule seam used only by the offline `VfxLab` to run production lifecycle materializers.

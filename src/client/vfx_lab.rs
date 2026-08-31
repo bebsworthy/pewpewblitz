@@ -7,10 +7,12 @@ use super::{
     },
     hud::ClientHeistReadiness,
     presentation_3d::{
-        CombatEffect3d, ImportedWorldFallbackPolicy, Material3dAssets, PendingCombatEffect,
-        Primitive3dAssets, VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet,
-        animate_combat_effect_layers, collect_vfx_evidence_snapshot, materialize_combat_effects,
-        resolve_vfx_requests, setup_3d_foundation,
+        CombatEffect3d, ImportedWorldFallbackPolicy, MAX_ACTIVE_PARTICLE_EMITTERS,
+        Material3dAssets, PendingCombatEffect, Primitive3dAssets,
+        VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, VfxParticleAdapterPlugin,
+        VfxParticleDiagnostics, VfxParticleEmitter3d, animate_combat_effect_layers,
+        collect_vfx_evidence_snapshot, materialize_combat_effects, resolve_vfx_requests,
+        setup_3d_foundation,
     },
     settings::persistence::ClientShellSettings,
     vfx::{
@@ -25,6 +27,7 @@ use bevy::{
     prelude::*,
     window::{PrimaryWindow, WindowResolution},
 };
+use bevy_hanabi::{EffectSimulation, EffectSimulationTime};
 use core::time::Duration;
 use lightyear::prelude::Controlled;
 use serde_json::json;
@@ -364,6 +367,7 @@ impl Plugin for VfxLabPlugin {
             Update,
             (
                 handle_lab_input,
+                sync_lab_particle_time,
                 resolve_vfx_requests,
                 materialize_combat_effects,
                 advance_lab_effects,
@@ -445,6 +449,7 @@ impl Plugin for VfxLabPlugin {
 /// Build the offline, windowed `VfxLab` application.
 pub fn build_vfx_lab_app(config: VfxLabConfig) -> App {
     config.validate().expect("VfxLab configuration is valid");
+    let initially_paused = config.paused;
     let (width, height) = config.window_size.unwrap_or((1280, 720));
     let mut app = App::new();
     app.add_plugins(
@@ -468,10 +473,31 @@ pub fn build_vfx_lab_app(config: VfxLabConfig) -> App {
     .add_message::<crate::matchplay::ReceivedHeistObjectiveCue>()
     .insert_resource(ClientHeistReadiness::default())
     .add_plugins(ProductionVfxPlugin)
+    .add_plugins(VfxParticleAdapterPlugin)
     .add_plugins(VfxLabLifecyclePresentationPlugin)
     .add_plugins(ClientEvidenceCapturePlugin)
     .add_plugins(VfxLabPlugin { config });
+    if initially_paused {
+        app.world_mut()
+            .resource_mut::<Time<EffectSimulation>>()
+            .pause();
+    }
     app
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "resources are Bevy system parameters owned by the scheduler"
+)]
+fn sync_lab_particle_time(
+    state: Res<VfxLabState>,
+    mut particle_time: ResMut<Time<EffectSimulation>>,
+) {
+    if state.paused && !state.step_once && state.pending_sample_ticks == 0 {
+        particle_time.pause();
+    } else {
+        particle_time.unpause();
+    }
 }
 
 #[allow(
@@ -1125,6 +1151,8 @@ fn update_lab_inspector(
     registry: Res<VfxRegistry>,
     signature_cache: Res<crate::client::vfx::VfxSignatureCache>,
     effects: Query<(), With<CombatEffect3d>>,
+    emitters: Query<(), With<VfxParticleEmitter3d>>,
+    particle_diagnostics: Res<VfxParticleDiagnostics>,
     signatures: Query<(&crate::client::vfx::CombatVisualSignature, Option<&Name>)>,
     fixtures: Query<(), With<VfxLabFixtureOwner>>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -1136,7 +1164,7 @@ fn update_lab_inspector(
         let recipe = registry
             .resolve(&request, state.reduced)
             .expect("production lab scenario resolves");
-        let layers = recipe
+        let mut layers = recipe
             .layers
             .iter()
             .enumerate()
@@ -1155,15 +1183,32 @@ fn update_lab_inspector(
                     lifetime,
                 )
             })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect::<Vec<_>>();
+        layers.extend(
+            recipe
+                .particle_layers
+                .iter()
+                .enumerate()
+                .map(|(index, layer)| {
+                    format!(
+                        "P{}. {} {:?} Decorative {} particles / {} ms",
+                        index + 1,
+                        layer.id,
+                        layer.profile,
+                        layer.burst_count,
+                        layer.lifetime_millis,
+                    )
+                }),
+        );
+        let layers = layers.join("\n");
         format!(
-            "Mapping  {}/{}  {}\nRecipe  {} - {} layer(s) - cap {}\n{}\nFallback {}",
+            "Mapping  {}/{}  {}\nRecipe  {} - {} mesh + {} particle layer(s) - cap {}\n{}\nFallback {}",
             state.selected + 1,
             state.scenarios.len(),
             scenario.key.as_str(),
             recipe.id,
             recipe.layers.len(),
+            recipe.particle_layers.len(),
             recipe.concurrency_cap,
             layers,
             recipe.fallback_recipe,
@@ -1216,7 +1261,7 @@ fn update_lab_inspector(
          Catalog  {:016x} - sealed/valid\n\
          Signature {} active - {}\n\
          Cache     {}/{} attacks - {} FIFO evictions\n\
-         Active transient {} - fixture facts {} - cameras {} - {}\n\n\
+         Active transient {} - particles {}/{} (high {}, suppressed {}) - fixture facts {} - cameras {} - {}\n\n\
          Tab fixture   <-/-> mapping   Space restart   Enter pause   . step\n\
          N identity   C accent   U ultimate   R reduced   P primitive   I guide   F12 capture   Esc quit",
         scenario_details,
@@ -1236,6 +1281,10 @@ fn update_lab_inspector(
         cache.capacity,
         cache.evictions,
         effects.iter().count(),
+        emitters.iter().count(),
+        MAX_ACTIVE_PARTICLE_EMITTERS,
+        particle_diagnostics.high_water,
+        particle_diagnostics.suppressed,
         fixtures.iter().count(),
         cameras.iter().count(),
         dimensions,

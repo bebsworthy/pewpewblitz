@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use super::{
     CombatVfxProducerPlugin, HeistVfxProducerPlugin, PickupVfxProducerPlugin, ResolvedVfxRecipe,
-    VfxMeshLayer, VfxRequest, VfxRequestKey, VfxSignatureCache, VfxSignatureSet,
+    VfxMeshLayer, VfxParticleLayer, VfxRequest, VfxRequestKey, VfxSignatureCache, VfxSignatureSet,
     WorldObjectVfxProducerPlugin, catalog::VfxCatalog, update_vfx_signature_cache,
 };
 
@@ -204,6 +204,10 @@ impl VfxRegistry {
 
     pub(crate) fn registrations(&self) -> &[VfxRequestRegistration] {
         &self.registrations
+    }
+
+    pub(crate) fn particle_layers(&self) -> impl Iterator<Item = &VfxParticleLayer> {
+        self.catalog.particle_layers()
     }
 }
 

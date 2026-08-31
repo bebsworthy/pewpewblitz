@@ -229,7 +229,7 @@ it does not replace these ownership and cleanup paths:
 
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
-| Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with one to eight authored mesh-layer children, each selecting a retained primitive/material, scale, anchor, and timeline | Root lifetime is the maximum layer delay plus duration or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
+| Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with one to eight authored mesh-layer children plus zero to two optional decorative GPU-particle children; every particle layer has an authored bounded profile and a shaped retained mesh | Root lifetime is the maximum mesh or particle lifetime, or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
 | Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Cold adds slow crystal fins and Fire adds fast trailing lobes; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height derives from replicated launch/landing ticks |
 | Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained ember ground underlay plus a procedural material for a coherent turbulent circumference and layered heat bands; reduced/primitive Fire uses bounded tapered mesh tongues | Recreated after late join from public state; owner removal is cleanup truth |
 | Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary; circular Cold/Fire areas reuse the elemental area style | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
@@ -277,17 +277,17 @@ later demonstrate an accepted cue path that cannot be observed or cached before 
 
 #### Recipe and layer schema
 
-Catalog schema 5 uses four bounded tables: semantic request mappings, typed style mappings, recipes,
-and reusable mesh layers. A style mapping may select on an implemented accent, lifecycle phase, and
-ultimate context over the existing typed signature. Every styled request retains one key-only
-fallback, duplicate selectors fail validation, and the most-specific matching selector wins
-deterministically. IDs are client-only validated lowercase ASCII names and never enter gameplay
-content fingerprints or protocol state.
+Catalog schema 6 uses five bounded tables: semantic request mappings, typed style mappings, recipes,
+reusable mesh layers, and decorative particle layers. A style mapping may select on an implemented
+accent, lifecycle phase, and ultimate context over the existing typed signature. Every styled
+request retains one key-only fallback, duplicate selectors fail validation, and the most-specific
+matching selector wins deterministically. IDs are client-only validated lowercase ASCII names and
+never enter gameplay content fingerprints or protocol state.
 
-A recipe owns an ordered list of layer IDs, a total concurrency cap, one fallback recipe, and an
-optional reduced recipe. Recipes do not recursively include other recipes. References must exist;
-reduced-recipe chains and executable authoritative-deadline fallback chains must be acyclic.
-Resolution expands to at most eight layers.
+A recipe owns an ordered list of mesh-layer IDs, zero to two particle-layer IDs, a total concurrency
+cap, one fallback recipe, and an optional reduced recipe. Recipes do not recursively include other
+recipes. References must exist; reduced-recipe chains and executable authoritative-deadline
+fallback chains must be acyclic. Resolution expands to at most eight combined layers.
 
 A layer owns:
 
@@ -320,8 +320,22 @@ Initial validated engine bounds are:
 - persistent-root counts remain bounded by their authoritative gameplay caps rather than receiving
   a second VFX-owned capacity rule.
 
-Phase-one recipes use shared retained mesh and material handles. The later particle gate must set a
-separate measured emitter/particle cap before a particle field can be authored.
+Normal Cold and Fire impact recipes demonstrate the optional particle adapter with seeded fragment
+and ember bursts. The adapter is a client-feature-only Hanabi 0.19 integration; it never enters the
+server feature graph. Particle layers have no readability-class field and are therefore always
+`Decorative`. Reduced and primitive variants omit them, while retained mesh layers remain a complete
+fallback. The materializer waits for a stable compiled GPU pipeline before releasing a one-shot
+burst, parents emitters to the recipe root, and removes them with that root.
+
+Particle limits are separate and explicit:
+
+- 64 authored particle layers in the catalog;
+- at most two particle layers per recipe and eight combined layers;
+- at most 256 particles per emitter;
+- at most 96 active particle emitters across transient roots;
+- a maximum particle lifetime of 10 seconds;
+- normal variants only; reduced and primitive variants materialize zero particle emitters;
+- no per-frame particle-effect, mesh, or material asset creation.
 
 #### Determinism, variants, and cleanup
 
@@ -331,7 +345,9 @@ uses counter-based hash sampling from a versioned tuple containing the stable pr
 identity, recipe ID, layer ID, occurrence index, and property salt. It does not consume a mutable
 global random stream, so adding one decorative choice cannot perturb other layers. The same tuple
 selects the same bounded values. GPU particle motion may be statistically rather than pixel
-identical across hardware, but its seed and parameter bounds remain captured.
+identical across hardware, but its seed and parameter bounds remain captured. The seed derives
+from the stable presentation identity, recipe ID, layer ID, and occurrence index; it does not
+consume a mutable global gameplay RNG.
 
 Every recipe variant obeys these rules:
 
@@ -356,8 +372,9 @@ Transient recipe roots retain oldest-first total/per-recipe eviction and timer/d
 Attached and persistent roots retain `CombatVisualOwner` and their source entity as cleanup truth.
 Owner removal, interruption, reset, match transition, and failed layer materialization must still
 remove the complete root. Native render evidence records the VFX catalog fingerprint, selected
-presentation variants, active lifecycle-root counts, transient recipe and authored layer
-order/timing, and retained asset counts alongside the authoritative state and rendered PNG.
+presentation variants, active lifecycle-root counts, transient recipe and authored mesh/particle
+layer order, particle profile, capacity, burst count and seed, emitter high-water/suppression
+diagnostics, and retained asset counts alongside the authoritative state and rendered PNG.
 
 #### Read-only VfxLab
 

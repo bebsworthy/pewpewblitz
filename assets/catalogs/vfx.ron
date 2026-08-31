@@ -1,5 +1,5 @@
 (
-    schema_version: 5,
+    schema_version: 6,
     default_recipe: "impact",
     mappings: [
         (key: "combat.muzzle", recipe: "muzzle"),
@@ -62,13 +62,13 @@
         (id: "cold_muzzle_reduced", layers: ["cold_muzzle_core_reduced"], concurrency_cap: 96, fallback_recipe: "muzzle_reduced", reduced_recipe: None),
         (id: "fire_muzzle", layers: ["fire_muzzle_core", "fire_muzzle_echo", "fire_muzzle_ring"], concurrency_cap: 96, fallback_recipe: "muzzle", reduced_recipe: Some("fire_muzzle_reduced")),
         (id: "fire_muzzle_reduced", layers: ["fire_muzzle_core_reduced"], concurrency_cap: 96, fallback_recipe: "muzzle_reduced", reduced_recipe: None),
-        (id: "cold_impact", layers: ["cold_impact_core", "cold_impact_ring", "cold_impact_halo"], concurrency_cap: 96, fallback_recipe: "impact", reduced_recipe: Some("cold_impact_reduced")),
+        (id: "cold_impact", layers: ["cold_impact_core", "cold_impact_ring", "cold_impact_halo"], particle_layers: ["cold_impact_fragments"], concurrency_cap: 96, fallback_recipe: "impact", reduced_recipe: Some("cold_impact_reduced")),
         (id: "cold_impact_reduced", layers: ["cold_impact_core_reduced", "cold_impact_ring_reduced"], concurrency_cap: 96, fallback_recipe: "impact_reduced", reduced_recipe: None),
-        (id: "fire_impact", layers: ["fire_impact_core", "fire_impact_echo", "fire_impact_ring"], concurrency_cap: 96, fallback_recipe: "impact", reduced_recipe: Some("fire_impact_reduced")),
+        (id: "fire_impact", layers: ["fire_impact_core", "fire_impact_echo", "fire_impact_ring"], particle_layers: ["fire_impact_embers"], concurrency_cap: 96, fallback_recipe: "impact", reduced_recipe: Some("fire_impact_reduced")),
         (id: "fire_impact_reduced", layers: ["fire_impact_core_reduced", "fire_impact_ring_reduced"], concurrency_cap: 96, fallback_recipe: "impact_reduced", reduced_recipe: None),
-        (id: "cold_ultimate_impact", layers: ["cold_impact_core", "cold_impact_ring", "cold_impact_halo", "cold_ultimate_ring", "cold_ultimate_halo"], concurrency_cap: 48, fallback_recipe: "cold_impact", reduced_recipe: Some("cold_ultimate_impact_reduced")),
+        (id: "cold_ultimate_impact", layers: ["cold_impact_core", "cold_impact_ring", "cold_impact_halo", "cold_ultimate_ring", "cold_ultimate_halo"], particle_layers: ["cold_impact_fragments"], concurrency_cap: 48, fallback_recipe: "cold_impact", reduced_recipe: Some("cold_ultimate_impact_reduced")),
         (id: "cold_ultimate_impact_reduced", layers: ["cold_impact_core_reduced", "cold_ultimate_ring_reduced"], concurrency_cap: 48, fallback_recipe: "cold_impact_reduced", reduced_recipe: None),
-        (id: "fire_ultimate_impact", layers: ["fire_impact_core", "fire_impact_echo", "fire_impact_ring", "fire_ultimate_ring", "fire_ultimate_echo"], concurrency_cap: 48, fallback_recipe: "fire_impact", reduced_recipe: Some("fire_ultimate_impact_reduced")),
+        (id: "fire_ultimate_impact", layers: ["fire_impact_core", "fire_impact_echo", "fire_impact_ring", "fire_ultimate_ring", "fire_ultimate_echo"], particle_layers: ["fire_impact_embers"], concurrency_cap: 48, fallback_recipe: "fire_impact", reduced_recipe: Some("fire_ultimate_impact_reduced")),
         (id: "fire_ultimate_impact_reduced", layers: ["fire_impact_core_reduced", "fire_ultimate_ring_reduced"], concurrency_cap: 48, fallback_recipe: "fire_impact_reduced", reduced_recipe: None),
         (id: "cold_area_activation", layers: ["cold_area_fill", "cold_area_boundary", "cold_area_crystal"], concurrency_cap: 24, fallback_recipe: "elemental_field", reduced_recipe: Some("cold_area_activation_reduced")),
         (id: "cold_area_activation_reduced", layers: ["cold_area_boundary_reduced", "cold_area_crystal_reduced"], concurrency_cap: 24, fallback_recipe: "elemental_field_reduced", reduced_recipe: None),
@@ -139,5 +139,9 @@
         (id: "fire_area_echo", renderer: Sphere, material: FireSoft, scale: AuthoritativeRadius(0.36), anchor: AuthoritativeRadiusHeight(0.6), timeline: (delay_millis: 70, duration: Millis(220), easing: Linear, scale: (start: 0.1, peak_at_basis_points: 2800, peak: 1.15, end: 0.0)), readability: Decorative, casts_shadows: false, receives_shadows: false),
         (id: "fire_area_boundary_reduced", renderer: GroundRing, material: FireBright, scale: AuthoritativeRadius(1.0), anchor: GroundOffset(2.8), timeline: (delay_millis: 0, duration: Millis(130), easing: Linear, scale: (start: 0.2, peak_at_basis_points: 3500, peak: 1.03, end: 1.0)), readability: CriticalGeometry, casts_shadows: false, receives_shadows: false),
         (id: "fire_area_burst_reduced", renderer: Sphere, material: FireBright, scale: AuthoritativeRadius(0.18), anchor: AuthoritativeRadiusHeight(0.4), timeline: (delay_millis: 15, duration: Millis(90), easing: Linear, scale: (start: 0.1, peak_at_basis_points: 2200, peak: 1.2, end: 0.0)), readability: Identity, casts_shadows: false, receives_shadows: false),
+    ],
+    particle_layers: [
+        (id: "cold_impact_fragments", profile: ColdFragments, capacity: 64, burst_count: 22, lifetime_millis: 650, spawn_radius: 17.0, speed_min: 18.0, speed_max: 44.0, size_start: 4.5, size_end: 0.2, anchor_height: 14.0),
+        (id: "fire_impact_embers", profile: FireEmbers, capacity: 64, burst_count: 28, lifetime_millis: 520, spawn_radius: 18.0, speed_min: 24.0, speed_max: 60.0, size_start: 5.0, size_end: 0.0, anchor_height: 14.0),
     ],
 )

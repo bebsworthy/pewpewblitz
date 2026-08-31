@@ -33,9 +33,10 @@ use camera::{
 };
 pub(super) use combat::collect_vfx_evidence_snapshot;
 pub(in crate::client) use combat::{
-    CombatEffect3d, PendingCombatEffect, VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet,
-    animate_combat_effect_layers, cleanup_combat_effects, materialize_combat_effects,
-    resolve_vfx_requests,
+    CombatEffect3d, MAX_ACTIVE_PARTICLE_EMITTERS, PendingCombatEffect,
+    VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, VfxParticleAdapterPlugin,
+    VfxParticleDiagnostics, VfxParticleEmitter3d, animate_combat_effect_layers,
+    cleanup_combat_effects, materialize_combat_effects, resolve_vfx_requests,
 };
 use coordinates::{ground_point, ground_position, ground_rotation};
 use map::{GeneratedMapMesh, Presented3dMap};
@@ -284,7 +285,11 @@ impl Plugin for WorldPresentationPlugin {
             app.add_plugins(diagnostics::RenderMeasurementPlugin(config));
         }
         configure_world_presentation_schedule(app);
-        app.add_plugins((vfx::ProductionVfxPlugin, combat::FireAreaMaterialPlugin));
+        app.add_plugins((
+            vfx::ProductionVfxPlugin,
+            VfxParticleAdapterPlugin,
+            combat::FireAreaMaterialPlugin,
+        ));
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .add_message::<PendingCombatEffect>()
             .init_resource::<combat::ConcealedMaterialVariants>()

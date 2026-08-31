@@ -96,19 +96,23 @@ The default fixture previews the 15 production semantic mappings; use Left/Right
 Tab cycles production-lifecycle fixtures for straight and lobbed projectiles, elemental fields,
 cone propagation, and attached fighter status. Space restarts with the same presentation identity,
 N advances to a new identity, C cycles neutral/Cold/Fire styling, U toggles ultimate escalation,
-Enter pauses, and `.` advances one simulation tick. R toggles the production reduced-effects
-variant, P toggles the primitive variant, F12 writes paired PNG/JSON evidence under
+Enter pauses both retained and GPU-particle timelines, and `.` advances one simulation tick. R
+toggles the production reduced-effects variant, P toggles the primitive variant, F12 writes paired
+PNG/JSON evidence under
 `target/vfx-lab`, I switches between the plain-language guide and technical diagnostics, and Escape
-quits. Two gray fighter-sized reference spheres provide scale and are not part of the effect.
+quits. Technical diagnostics and JSON evidence include particle profile, seed, burst/capacity,
+active-emitter high-water, and suppression counts. Two gray fighter-sized reference spheres provide
+scale and are not part of the effect.
 
 `just vfx-lab '--effect world-object.explosion --reduced'` starts at an exact transient request.
 Use `--fixture transient|straight|lobbed|field|cone|status` to start at a lifecycle fixture. Native
 automation may add `--identity N --radius WORLD_UNITS` and
 `--sample-ticks N --accent neutral|cold|fire --ultimate --capture-dir PATH --capture-after UPDATES
---exit-after-capture`; `--paused` captures a stable exact sample, with `--sample-ticks` advancing
-the production timeline before it freezes. Allow about 30 updates before an automated capture so
-the native renderer has prepared newly spawned meshes. The current viewer is intentionally
-read-only; BRL-0096 owns the later authoring workbench.
+--exit-after-capture`; `--paused` captures a stable sample, with `--sample-ticks` advancing the
+retained production timeline before it freezes. Allow about 12 updates before an automated paused
+capture so native mesh and particle pipelines are ready. A running transient must be captured inside
+its authored lifetime. The current viewer is intentionally read-only; BRL-0096 owns the later
+authoring workbench.
 
 ## Canonical commands
 

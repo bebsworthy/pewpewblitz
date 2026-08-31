@@ -1,10 +1,15 @@
 use super::super::*;
+use super::{
+    MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, VfxParticleAssets,
+    VfxParticleDiagnostics, VfxParticleEmitter3d,
+};
 use crate::client::vfx::{
     CombatVisualSignature, ResolvedVfxRecipe, VfxDeadline, VfxLifetime, VfxMaterialKey,
-    VfxMeshLayer, VfxReadabilityClass, VfxRegistry, VfxRendererFamily, VfxRequest,
-    VfxSignatureCache, VfxTimeline, vfx_counter_sample, vfx_presentation_variant,
+    VfxMeshLayer, VfxPresentationVariant, VfxReadabilityClass, VfxRegistry, VfxRendererFamily,
+    VfxRequest, VfxSignatureCache, VfxTimeline, vfx_counter_sample, vfx_presentation_variant,
 };
 use crate::combat::client::DeduplicatedCombatCue;
+use bevy_hanabi::EffectAsset;
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 
@@ -16,6 +21,7 @@ pub(in crate::client) struct CombatEffect3d {
     expires_at_tick: Option<u64>,
     order: u64,
     recipe_id: String,
+    particle_emitters: u8,
 }
 
 impl CombatEffect3d {
@@ -41,6 +47,7 @@ pub(in crate::client) struct PendingCombatEffect {
     lifetime: Duration,
     expires_at_tick: Option<u64>,
     layers: Vec<PendingCombatEffectLayer>,
+    particle_layers: Vec<PendingVfxParticleLayer>,
     label: &'static str,
     recipe_id: String,
     concurrency_cap: usize,
@@ -73,7 +80,13 @@ pub(in crate::client) struct CombatEffectLayer3d {
 }
 
 impl PendingCombatEffect {
-    fn spawn(&self, commands: &mut Commands, order: u64) -> Entity {
+    fn spawn(
+        &self,
+        commands: &mut Commands,
+        order: u64,
+        particle_budget: usize,
+    ) -> (Entity, usize) {
+        let particle_emitters = self.particle_layers.len().min(particle_budget);
         let root = commands
             .spawn((
                 CombatEffect3d {
@@ -81,6 +94,8 @@ impl PendingCombatEffect {
                     expires_at_tick: self.expires_at_tick,
                     order,
                     recipe_id: self.recipe_id.clone(),
+                    particle_emitters: u8::try_from(particle_emitters)
+                        .expect("bounded particle emitter count fits u8"),
                 },
                 self.signature,
                 Transform::default(),
@@ -126,8 +141,11 @@ impl PendingCombatEffect {
                     child.insert(NotShadowReceiver);
                 }
             }
+            for layer in self.particle_layers.iter().take(particle_emitters) {
+                layer.spawn(parent, root);
+            }
         });
-        root
+        (root, particle_emitters)
     }
 }
 
@@ -136,6 +154,7 @@ fn resolved_effect(
     recipe: &ResolvedVfxRecipe,
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
+    particle_assets: Option<&VfxParticleAssets>,
 ) -> PendingCombatEffect {
     let mut lifetime = Duration::ZERO;
     let mut expires_at_tick = None;
@@ -177,15 +196,38 @@ fn resolved_effect(
             }
         })
         .collect();
+    let mut particle_layers = Vec::new();
+    if particle_layers_enabled(request.signature.variant)
+        && let Some(assets) = particle_assets
+    {
+        for (occurrence, layer) in recipe.particle_layers.iter().enumerate() {
+            if let Some(pending) = assets.pending(
+                layer,
+                primitives,
+                request.position,
+                &recipe.id,
+                request.order.event_id,
+                u8::try_from(occurrence).expect("validated particle layer count fits u8"),
+            ) {
+                lifetime = lifetime.max(layer.lifetime());
+                particle_layers.push(pending);
+            }
+        }
+    }
     PendingCombatEffect {
         lifetime,
         expires_at_tick,
         layers,
+        particle_layers,
         label: request.label,
         recipe_id: recipe.id.clone(),
         concurrency_cap: recipe.concurrency_cap,
         signature: request.signature,
     }
+}
+
+const fn particle_layers_enabled(variant: VfxPresentationVariant) -> bool {
+    matches!(variant, VfxPresentationVariant::Normal)
 }
 
 fn resolved_layer_duration(
@@ -242,6 +284,12 @@ pub(in crate::client) fn animate_combat_effect_layers(
         let Ok(effect) = effects.get(layer.root) else {
             continue;
         };
+        let layer_end = Duration::from_millis(u64::from(layer.timeline.delay_millis))
+            .saturating_add(layer.duration);
+        if effect.timer.elapsed() >= layer_end {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
         if let Some(scale) = layer
             .timeline
             .scale_at(effect.timer.elapsed(), layer.duration)
@@ -309,6 +357,7 @@ pub(in crate::client) fn resolve_vfx_requests(
     registry: Res<VfxRegistry>,
     settings: Option<Res<ClientShellSettings>>,
     fallback: Option<Res<ImportedWorldFallbackPolicy>>,
+    particle_assets: Option<Res<VfxParticleAssets>>,
 ) {
     let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
     let primitive = fallback
@@ -322,7 +371,13 @@ pub(in crate::client) fn resolve_vfx_requests(
         let Some(recipe) = registry.resolve(&request, reduced) else {
             continue;
         };
-        pending_effects.write(resolved_effect(&request, &recipe, &primitives, &materials));
+        pending_effects.write(resolved_effect(
+            &request,
+            &recipe,
+            &primitives,
+            &materials,
+            particle_assets.as_deref(),
+        ));
     }
 }
 
@@ -337,19 +392,32 @@ pub(in crate::client) fn materialize_combat_effects(
     mut pending_effects: MessageReader<PendingCombatEffect>,
     effects: Query<(Entity, &CombatEffect3d)>,
     mut sequence: Local<CombatEffectSequence>,
+    mut particle_diagnostics: Option<ResMut<VfxParticleDiagnostics>>,
 ) {
     let mut active = effects
         .iter()
-        .map(|(entity, effect)| (effect.order, entity, effect.recipe_id.clone()))
+        .map(|(entity, effect)| {
+            (
+                effect.order,
+                entity,
+                effect.recipe_id.clone(),
+                usize::from(effect.particle_emitters),
+            )
+        })
         .collect::<VecDeque<_>>();
     active
         .make_contiguous()
-        .sort_unstable_by_key(|(order, entity, _)| (*order, entity.to_bits()));
+        .sort_unstable_by_key(|(order, entity, ..)| (*order, entity.to_bits()));
     if let Some((maximum_order, ..)) = active.back() {
         sequence.0 = sequence.0.max(*maximum_order);
     }
+    let mut active_particle_emitters = active
+        .iter()
+        .map(|(_, _, _, emitters)| *emitters)
+        .sum::<usize>();
     while active.len() > MAX_EFFECTS {
-        if let Some((_, oldest, _)) = active.pop_front() {
+        if let Some((_, oldest, _, emitters)) = active.pop_front() {
+            active_particle_emitters = active_particle_emitters.saturating_sub(emitters);
             commands.entity(oldest).try_despawn();
         }
     }
@@ -357,28 +425,53 @@ pub(in crate::client) fn materialize_combat_effects(
     for descriptor in pending_effects.read() {
         while active
             .iter()
-            .filter(|(_, _, recipe)| recipe == &descriptor.recipe_id)
+            .filter(|(_, _, recipe, _)| recipe == &descriptor.recipe_id)
             .count()
             >= descriptor.concurrency_cap
         {
             let Some(index) = active
                 .iter()
-                .position(|(_, _, recipe)| recipe == &descriptor.recipe_id)
+                .position(|(_, _, recipe, _)| recipe == &descriptor.recipe_id)
             else {
                 break;
             };
-            if let Some((_, oldest, _)) = active.remove(index) {
+            if let Some((_, oldest, _, emitters)) = active.remove(index) {
+                active_particle_emitters = active_particle_emitters.saturating_sub(emitters);
                 commands.entity(oldest).try_despawn();
             }
         }
         while active.len() >= MAX_EFFECTS {
-            if let Some((_, oldest, _)) = active.pop_front() {
+            if let Some((_, oldest, _, emitters)) = active.pop_front() {
+                active_particle_emitters = active_particle_emitters.saturating_sub(emitters);
                 commands.entity(oldest).try_despawn();
             }
         }
         sequence.0 = sequence.0.saturating_add(1);
-        let entity = descriptor.spawn(&mut commands, sequence.0);
-        active.push_back((sequence.0, entity, descriptor.recipe_id.clone()));
+        let particle_budget = MAX_ACTIVE_PARTICLE_EMITTERS.saturating_sub(active_particle_emitters);
+        let (entity, particle_emitters) =
+            descriptor.spawn(&mut commands, sequence.0, particle_budget);
+        if let Some(diagnostics) = particle_diagnostics.as_deref_mut() {
+            diagnostics.suppressed = diagnostics.suppressed.saturating_add(
+                u64::try_from(
+                    descriptor
+                        .particle_layers
+                        .len()
+                        .saturating_sub(particle_emitters),
+                )
+                .expect("bounded particle emitter count fits u64"),
+            );
+        }
+        active_particle_emitters = active_particle_emitters.saturating_add(particle_emitters);
+        active.push_back((
+            sequence.0,
+            entity,
+            descriptor.recipe_id.clone(),
+            particle_emitters,
+        ));
+    }
+    if let Some(diagnostics) = particle_diagnostics.as_deref_mut() {
+        diagnostics.active = active_particle_emitters;
+        diagnostics.high_water = diagnostics.high_water.max(active_particle_emitters);
     }
 }
 
@@ -440,6 +533,20 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             }),
         ));
     }
+    let mut particle_query = world.query::<&VfxParticleEmitter3d>();
+    let mut particle_layers_by_root = HashMap::<Entity, Vec<Value>>::new();
+    for emitter in particle_query.iter(world) {
+        particle_layers_by_root
+            .entry(emitter.root)
+            .or_default()
+            .push(json!({
+                "id": emitter.layer_id,
+                "profile": emitter.profile,
+                "capacity": emitter.capacity,
+                "burst_count": emitter.burst_count,
+                "seed": emitter.seed,
+            }));
+    }
     let mut transient_query = world.query::<(
         Entity,
         &CombatEffect3d,
@@ -457,6 +564,7 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
                     layers.sort_unstable_by_key(|(index, _)| *index);
                     layers.into_iter().map(|(_, layer)| layer).collect::<Vec<_>>()
                 }).unwrap_or_default(),
+                "particle_layers": particle_layers_by_root.remove(&entity).unwrap_or_default(),
                 "order": effect.order,
                 "label": name.map(Name::as_str),
                 "elapsed_seconds": effect.timer.elapsed_secs(),
@@ -480,10 +588,17 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
     let fire_area_material_assets = world
         .get_resource::<Assets<super::elemental_style::FireAreaMaterial>>()
         .map_or(0, Assets::len);
+    let particle_effect_assets = world
+        .get_resource::<Assets<EffectAsset>>()
+        .map_or(0, Assets::len);
     let image_assets = world.get_resource::<Assets<Image>>().map_or(0, Assets::len);
     let signature_cache = world
         .get_resource::<VfxSignatureCache>()
         .map(VfxSignatureCache::diagnostics);
+    let particle_diagnostics = world
+        .get_resource::<VfxParticleDiagnostics>()
+        .copied()
+        .unwrap_or_default();
     let mut signature_query = world.query::<(
         Entity,
         &CombatVisualSignature,
@@ -530,11 +645,16 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             "elemental_motion_accents": component_count::<super::elemental_style::ElementalMotionAccent3d>(world),
             "animated_fire_areas": component_count::<super::elemental_style::AnimatedFireArea3d>(world),
             "fire_area_underlays": component_count::<super::elemental_style::FireAreaUnderlay3d>(world),
+            "particle_emitters": component_count::<VfxParticleEmitter3d>(world),
+            "particle_emitter_capacity": MAX_ACTIVE_PARTICLE_EMITTERS,
+            "particle_emitter_high_water": particle_diagnostics.high_water,
+            "particle_emitters_suppressed": particle_diagnostics.suppressed,
         },
         "assets": {
             "meshes": mesh_assets,
             "standard_materials": material_assets,
             "fire_area_materials": fire_area_material_assets,
+            "particle_effects": particle_effect_assets,
             "images": image_assets,
         },
         "signature_cache": signature_cache,
@@ -645,6 +765,7 @@ mod tests {
             lifetime,
             expires_at_tick: None,
             layers: Vec::new(),
+            particle_layers: Vec::new(),
             label,
             recipe_id: label.to_string(),
             concurrency_cap: MAX_EFFECTS,
@@ -673,6 +794,16 @@ mod tests {
     }
 
     #[test]
+    fn particles_are_normal_only_and_never_define_degraded_variants() {
+        assert!(particle_layers_enabled(VfxPresentationVariant::Normal));
+        assert!(!particle_layers_enabled(VfxPresentationVariant::Reduced));
+        assert!(!particle_layers_enabled(VfxPresentationVariant::Primitive));
+        assert!(!particle_layers_enabled(
+            VfxPresentationVariant::ReducedPrimitive
+        ));
+    }
+
+    #[test]
     fn evidence_snapshot_names_catalog_variant_and_active_lifecycle_owners() {
         let mut world = World::new();
         world.insert_resource(ClientShellSettings {
@@ -686,9 +817,10 @@ mod tests {
                 expires_at_tick: None,
                 order: 7,
                 recipe_id: "impact".to_string(),
+                particle_emitters: 0,
             },
             CombatVisualSignature::neutral_point(7, Vec2::ZERO)
-                .with_variant(vfx::VfxPresentationVariant::ReducedPrimitive),
+                .with_variant(VfxPresentationVariant::ReducedPrimitive),
             Name::new("Impact evidence fixture"),
         ));
         let owner = world.spawn_empty().id();
@@ -731,6 +863,7 @@ mod tests {
     fn effect_allocation_app() -> App {
         let mut app = App::new();
         app.add_message::<PendingCombatEffect>()
+            .init_resource::<VfxParticleDiagnostics>()
             .add_systems(Update, materialize_combat_effects);
         app
     }
@@ -746,6 +879,7 @@ mod tests {
                         expires_at_tick: None,
                         order: u64::try_from(order).expect("bounded effect order fits u64"),
                         recipe_id: "existing".to_string(),
+                        particle_emitters: 0,
                     })
                     .id()
             })
@@ -771,6 +905,32 @@ mod tests {
         assert_eq!(orders.len(), MAX_EFFECTS);
         assert_eq!(orders.iter().copied().min(), Some(4));
         assert_eq!(orders.iter().copied().max(), Some(99));
+    }
+
+    #[test]
+    fn particle_emitters_settle_at_the_global_capacity() {
+        let mut app = effect_allocation_app();
+        for index in 0..(MAX_ACTIVE_PARTICLE_EMITTERS + 12) {
+            let mut pending = pending_effect("particle family", Duration::from_secs(1));
+            pending
+                .particle_layers
+                .push(PendingVfxParticleLayer::test_layer(&format!(
+                    "particle_{index}"
+                )));
+            app.world_mut().write_message(pending);
+        }
+
+        app.update();
+
+        let world = app.world_mut();
+        assert_eq!(
+            component_count::<VfxParticleEmitter3d>(world),
+            MAX_ACTIVE_PARTICLE_EMITTERS
+        );
+        let diagnostics = world.resource::<VfxParticleDiagnostics>();
+        assert_eq!(diagnostics.active, MAX_ACTIVE_PARTICLE_EMITTERS);
+        assert_eq!(diagnostics.high_water, MAX_ACTIVE_PARTICLE_EMITTERS);
+        assert_eq!(diagnostics.suppressed, 0);
     }
 
     #[test]

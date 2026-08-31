@@ -326,6 +326,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "as-raw-xcb-connection"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175571dd1d178ced59193a6fc02dde1b972eb0bc56c892cde9beeceac5bf0f6b"
+
+[[package]]
 name = "ascii"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1113,6 +1119,28 @@ dependencies = [
  "thiserror 2.0.20",
  "tracing",
  "wgpu-types",
+]
+
+[[package]]
+name = "bevy_hanabi"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "516d188f4fe6f6a330d1449ab647919f9533af25696b54bf0b1fa0d45ef1b9ed"
+dependencies = [
+ "anyhow",
+ "bevy",
+ "bitflags 2.13.1",
+ "bytemuck",
+ "fixedbitset",
+ "getrandom 0.4.3",
+ "naga",
+ "naga_oil",
+ "rand 0.10.2",
+ "rand_pcg",
+ "ron",
+ "serde",
+ "thiserror 2.0.20",
+ "wgpu",
 ]
 
 [[package]]
@@ -2067,6 +2095,7 @@ dependencies = [
  "atomic-write-file",
  "avian2d",
  "bevy",
+ "bevy_hanabi",
  "brawler-routing",
  "directories",
  "getrandom 0.3.4",
@@ -8548,6 +8577,7 @@ dependencies = [
  "atomic-waker",
  "bitflags 2.13.1",
  "block2 0.5.1",
+ "bytemuck",
  "calloop",
  "cfg_aliases",
  "concurrent-queue",
@@ -8563,6 +8593,7 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "objc2-ui-kit",
  "orbclient",
+ "percent-encoding",
  "pin-project",
  "raw-window-handle",
  "redox_syscall 0.4.1",
@@ -8575,6 +8606,8 @@ dependencies = [
  "web-sys",
  "web-time",
  "windows-sys 0.52.0",
+ "x11-dl",
+ "x11rb",
  "xkbcommon-dl",
 ]
 
@@ -8637,12 +8670,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "x11-dl"
+version = "2.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38735924fedd5314a6e548792904ed8c6de6636285cb9fec04d5b1db85c1516f"
+dependencies = [
+ "libc",
+ "once_cell",
+ "pkg-config",
+]
+
+[[package]]
 name = "x11rb"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9993aa5be5a26815fe2c3eacfc1fde061fc1a1f094bf1ad2a18bf9c495dd7414"
 dependencies = [
+ "as-raw-xcb-connection",
  "gethostname",
+ "libc",
+ "libloading",
+ "once_cell",
  "rustix 1.1.4",
  "x11rb-protocol",
 ]

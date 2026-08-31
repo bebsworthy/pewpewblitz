@@ -3,15 +3,17 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[cfg(test)]
+use super::recipes::VfxParticleProfile;
 use super::recipes::{
-    MAX_VFX_LAYERS, MAX_VFX_RECIPES, ResolvedVfxRecipe, VfxMeshLayer, VfxReadabilityClass,
-    VfxRecipe,
+    MAX_VFX_LAYERS, MAX_VFX_PARTICLE_LAYERS, MAX_VFX_RECIPES, ResolvedVfxRecipe, VfxMeshLayer,
+    VfxParticleLayer, VfxReadabilityClass, VfxRecipe,
 };
 use super::request::valid_vfx_request_key;
 use super::{CombatVisualSignature, VfxAccent, VfxContextOverride, VfxPhase};
 
 pub(super) const VFX_CATALOG: &str = include_str!("../../../assets/catalogs/vfx.ron");
-const VFX_SCHEMA_VERSION: u16 = 5;
+const VFX_SCHEMA_VERSION: u16 = 6;
 const MAX_VFX_MAPPINGS: usize = 64;
 const MAX_VFX_FIXED_WORLD: f32 =
     crate::map::MAX_MAP_DIMENSION_CELLS as f32 * crate::map::MAP_CELL_SIZE_WORLD;
@@ -129,6 +131,8 @@ pub(super) struct VfxCatalogSource {
     style_mappings: Vec<VfxStyleMapping>,
     recipes: Vec<VfxRecipe>,
     mesh_layers: Vec<VfxMeshLayer>,
+    #[serde(default)]
+    particle_layers: Vec<VfxParticleLayer>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -186,6 +190,7 @@ pub(super) struct VfxCatalog {
     style_mappings: Vec<VfxStyleMapping>,
     recipes: BTreeMap<String, VfxRecipe>,
     mesh_layers: BTreeMap<String, VfxMeshLayer>,
+    particle_layers: BTreeMap<String, VfxParticleLayer>,
 }
 
 impl VfxCatalog {
@@ -216,6 +221,9 @@ impl VfxCatalog {
         if source.mesh_layers.len() > MAX_VFX_LAYERS {
             return Err("VFX catalog exceeds mesh-layer capacity".into());
         }
+        if source.particle_layers.len() > MAX_VFX_PARTICLE_LAYERS {
+            return Err("VFX catalog exceeds particle-layer capacity".into());
+        }
         if source
             .mappings
             .len()
@@ -230,6 +238,15 @@ impl VfxCatalog {
             layer.validate()?;
             if mesh_layers.insert(layer.id.clone(), layer).is_some() {
                 return Err("duplicate VFX mesh-layer id".to_string());
+            }
+        }
+        let mut particle_layers = BTreeMap::new();
+        for layer in source.particle_layers {
+            layer.validate()?;
+            if mesh_layers.contains_key(&layer.id)
+                || particle_layers.insert(layer.id.clone(), layer).is_some()
+            {
+                return Err("duplicate VFX layer id".to_string());
             }
         }
         let mut recipes = BTreeMap::new();
@@ -247,6 +264,14 @@ impl VfxCatalog {
                 if !mesh_layers.contains_key(layer) {
                     return Err(format!(
                         "VFX recipe {} references missing mesh layer {layer}",
+                        recipe.id
+                    ));
+                }
+            }
+            for layer in &recipe.particle_layers {
+                if !particle_layers.contains_key(layer) {
+                    return Err(format!(
+                        "VFX recipe {} references missing particle layer {layer}",
                         recipe.id
                     ));
                 }
@@ -325,11 +350,16 @@ impl VfxCatalog {
             style_mappings: source.style_mappings,
             recipes,
             mesh_layers,
+            particle_layers,
         })
     }
 
     pub(super) fn mapping_keys(&self) -> impl Iterator<Item = &str> {
         self.mappings.keys().map(String::as_str)
+    }
+
+    pub(super) fn particle_layers(&self) -> impl Iterator<Item = &VfxParticleLayer> {
+        self.particle_layers.values()
     }
 
     pub(super) fn requirements(&self, key: &str) -> Option<VfxRecipeRequirements> {
@@ -435,6 +465,11 @@ impl VfxCatalog {
                 .layers
                 .iter()
                 .map(|id| self.mesh_layers.get(id).cloned())
+                .collect::<Option<Vec<_>>>()?,
+            particle_layers: recipe
+                .particle_layers
+                .iter()
+                .map(|id| self.particle_layers.get(id).cloned())
                 .collect::<Option<Vec<_>>>()?,
             concurrency_cap: recipe.concurrency_cap,
             fallback_recipe: recipe.fallback_recipe.clone(),
@@ -634,9 +669,33 @@ mod tests {
     }
 
     #[test]
+    fn normal_elemental_impacts_add_bounded_particles_while_reduced_omits_them() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        for (accent, expected_profile) in [
+            (VfxAccent::Cold, VfxParticleProfile::ColdFragments),
+            (VfxAccent::Fire, VfxParticleProfile::FireEmbers),
+        ] {
+            let mut signature = CombatVisualSignature::neutral_point(1, bevy::prelude::Vec2::ZERO);
+            signature.accents = [Some(accent), None];
+            signature.phase = VfxPhase::Impact;
+            let normal = catalog
+                .resolve("combat.impact", &signature, false, false)
+                .unwrap();
+            let reduced = catalog
+                .resolve("combat.impact", &signature, true, false)
+                .unwrap();
+
+            assert_eq!(normal.particle_layers.len(), 1);
+            assert_eq!(normal.particle_layers[0].profile, expected_profile);
+            assert!(normal.particle_layers[0].burst_count <= normal.particle_layers[0].capacity);
+            assert!(reduced.particle_layers.is_empty());
+        }
+    }
+
+    #[test]
     fn strict_schema_keys_references_values_and_capacity_are_validated() {
         for (needle, replacement) in [
-            ("schema_version: 5", "schema_version: 4"),
+            ("schema_version: 6", "schema_version: 5"),
             ("key: \"combat.muzzle\"", "key: \"Combat/Muzzle\""),
             ("recipe: \"muzzle\"", "recipe: \"missing\""),
             ("scale: FixedWorld(8.0)", "scale: FixedWorld(0.0)"),
@@ -670,6 +729,12 @@ mod tests {
             .push(duplicate_layer.mesh_layers[0].clone());
         assert!(VfxCatalog::from_source(duplicate_layer).is_err());
 
+        let mut duplicate_particle: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
+        duplicate_particle
+            .particle_layers
+            .push(duplicate_particle.particle_layers[0].clone());
+        assert!(VfxCatalog::from_source(duplicate_particle).is_err());
+
         let mut duplicate_style: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
         duplicate_style
             .style_mappings
@@ -697,6 +762,17 @@ mod tests {
             VfxCatalog::from_ron(&missing)
                 .unwrap_err()
                 .contains("missing mesh layer")
+        );
+
+        let missing_particle = VFX_CATALOG.replacen(
+            "particle_layers: [\"cold_impact_fragments\"]",
+            "particle_layers: [\"missing_particle\"]",
+            1,
+        );
+        assert!(
+            VfxCatalog::from_ron(&missing_particle)
+                .unwrap_err()
+                .contains("missing particle layer")
         );
 
         let excessive = VFX_CATALOG.replacen(
@@ -773,6 +849,19 @@ mod tests {
             VfxCatalog::from_source(layer_capacity)
                 .unwrap_err()
                 .contains("mesh-layer capacity")
+        );
+
+        let mut particle_capacity: VfxCatalogSource = ron::from_str(VFX_CATALOG).unwrap();
+        let template = particle_capacity.particle_layers[0].clone();
+        while particle_capacity.particle_layers.len() <= MAX_VFX_PARTICLE_LAYERS {
+            let mut layer = template.clone();
+            layer.id = format!("extra_particle_{}", particle_capacity.particle_layers.len());
+            particle_capacity.particle_layers.push(layer);
+        }
+        assert!(
+            VfxCatalog::from_source(particle_capacity)
+                .unwrap_err()
+                .contains("particle-layer capacity")
         );
     }
 
