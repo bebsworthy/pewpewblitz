@@ -222,7 +222,10 @@ shared meshes, materials, optional particles, diagnostics, cleanup
 ```
 
 The non-transient lifecycle presentation paths remain intentionally preserved while recipe work is
-sequenced. Catalogued transients now use the first recipe/layer vertical slice:
+sequenced. Catalogued transients use the first recipe/layer vertical slice, and every listed
+lifecycle root snapshots the same typed semantic signature that production diagnostics and
+VfxLab inspect. Distinctive authored lifecycle material selection is layered onto that signature;
+it does not replace these ownership and cleanup paths:
 
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
@@ -264,7 +267,7 @@ general priority/tag engine.
 The client does not initially need a protocol change for exact weapon identity. Delivery entities
 already replicate `ReplicatedAttackSource`, whose `AttackSource` includes the immutable
 `WeaponRecipeFingerprint`, source kind, team, owner, attack ID, and ultimate/deployable identity.
-Fighters also replicate `ResolvedMatchLoadout`. The resolver will maintain a FIFO-bounded cache of
+Fighters also replicate `ResolvedMatchLoadout`. The resolver maintains a FIFO-bounded cache of
 at most 512 attack signatures, learning exact fingerprints from replicated delivery state and
 snapshotting the current loadout at `AttackAccepted`. A signature remains valid after a projectile
 or source visual disappears. Persistent Splash carries its effect semantics directly; elemental
@@ -364,6 +367,9 @@ snapshot. The JSON identifies the build and VFX catalog, fixture, semantic reque
 recipe with ordered layers where applicable, presentation identity, playback tick,
 normal/reduced/primitive variant,
 authoritative geometry/deadline inputs, active lifecycle-root counts, and retained asset counts.
+The same snapshot also records every active typed lifecycle signature and the bounded attack-cache
+size and eviction count, so a production fact and its isolated fixture can be compared without
+inferring style from pixels alone.
 The Lab is read-only: future authoring and validation workflow belongs to the separate VFX Workbench
 and must publish through validated catalog transactions rather than mutating production resources
 inside this viewer.

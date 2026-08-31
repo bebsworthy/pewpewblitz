@@ -1,5 +1,5 @@
 use super::super::*;
-use super::common::GROUND_EFFECT_HEIGHT;
+use super::common::{CombatVfxContext, GROUND_EFFECT_HEIGHT};
 use crate::combat::client::{
     AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, MAX_CONE_SPRAY_SEGMENTS,
     PreviewGeometry, cone_spray_primitives,
@@ -15,23 +15,72 @@ pub(in super::super) struct ConeSpraySegmentVisual3d {
     slot: u8,
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "cone reconciliation joins one bounded authoritative carrier tuple with its visual root"
+)]
 pub(in super::super) fn reconcile_cone_spray_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
-    sprays: Query<Entity, With<crate::combat::ConeSpray>>,
+    vfx: CombatVfxContext,
+    sprays: Query<
+        (
+            Entity,
+            &crate::combat::ConeSprayState,
+            Option<&crate::combat::ReplicatedAttackSource>,
+            Option<&crate::combat::AttackDelivery>,
+        ),
+        With<crate::combat::ConeSpray>,
+    >,
     visuals: Query<(Entity, &CombatVisualOwner), With<ConeSprayVisual3d>>,
 ) {
     let roots = super::common::unique_roots(&mut commands, &visuals);
-    for owner in &sprays {
+    for (owner, state, source, delivery) in &sprays {
         if roots.contains(&owner) {
             continue;
         }
+        let geometry = vfx::VfxGeometry::Cone {
+            origin: state.origin.as_vec2().to_array(),
+            facing: state.facing,
+            reach: state.maximum_reach,
+            angle_degrees: state.angle_degrees,
+        };
+        let timing = vfx::VfxAuthoritativeTiming::persistent(
+            state.emitted_at_tick,
+            None,
+            state.expires_at_tick,
+        );
+        let signature = source.map_or_else(
+            || vfx::CombatVisualSignature {
+                carrier: vfx::VfxCarrier::Cone,
+                phase: vfx::VfxPhase::Active,
+                accents: [Some(vfx::VfxAccent::Neutral), None],
+                relationship: vfx::VfxRelationship::Neutral,
+                context: None,
+                geometry,
+                identity: vfx::VfxPresentationIdentity::Neutral(state.emitted_at_tick),
+                timing,
+                variant: vfx.variant(),
+            },
+            |source| {
+                vfx.cache().signature_for_source(
+                    source.attack,
+                    delivery.map_or(0, |delivery| delivery.delivery_index),
+                    vfx::VfxCarrier::Cone,
+                    vfx::VfxPhase::Active,
+                    geometry,
+                    timing,
+                    vfx.variant(),
+                )
+            },
+        );
         let root = commands
             .spawn((
                 CombatVisualOwner(owner),
                 ConeSprayVisual3d,
+                signature,
                 Transform::default(),
                 Visibility::default(),
                 Name::new("Spray gas visual root"),

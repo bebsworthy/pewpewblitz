@@ -174,6 +174,11 @@ impl VfxLabScenario {
             deadline,
             self.key.as_str(),
         )
+        .and_then(|request| {
+            let mut signature = request.signature;
+            signature.identity = crate::client::vfx::VfxPresentationIdentity::Explicit(event_id);
+            request.with_signature(signature)
+        })
         .expect("sealed production registration produces a valid lab request")
     }
 }
@@ -277,6 +282,10 @@ impl Plugin for VfxLabPlugin {
                 exit_after_lab_capture,
             )
                 .chain(),
+        )
+        .configure_sets(
+            Update,
+            crate::client::vfx::VfxSignatureSet.before(handle_lab_input),
         )
         .configure_sets(Update, VfxLabLifecycleSet.after(update_lab_fixture_facts))
         .add_systems(PostUpdate, request_lab_capture);
@@ -431,7 +440,7 @@ fn spawn_lab_scenario(
         VfxLabFixture::ElementalField => {
             spawn_field_fixture(commands, state.presentation_identity, state.radius, tick);
         }
-        VfxLabFixture::ConeSpray => spawn_cone_fixture(commands, tick),
+        VfxLabFixture::ConeSpray => spawn_cone_fixture(commands, state.presentation_identity, tick),
         VfxLabFixture::Status => {
             spawn_status_fixture(commands, state.presentation_identity, tick);
         }
@@ -443,6 +452,7 @@ fn spawn_straight_fixture(
     source: crate::combat::ProjectileSource,
     tick: u64,
 ) {
+    let attack = lab_attack_source(source, Vec2::new(-160.0, 0.0));
     commands.spawn((
         VfxLabFixtureOwner,
         crate::combat::Projectile,
@@ -457,6 +467,14 @@ fn spawn_straight_fixture(
             launched_at_tick: tick,
         },
         crate::combat::ProjectileBody::circle(6.0),
+        crate::combat::ProjectileDeadline {
+            expires_at_tick: tick.saturating_add(120),
+        },
+        crate::combat::ReplicatedAttackSource { attack },
+        crate::combat::AttackDelivery {
+            attack_id: attack.attack_id,
+            delivery_index: 0,
+        },
         Name::new("VfxLab straight projectile fixture"),
     ));
 }
@@ -466,13 +484,15 @@ fn spawn_lobbed_fixture(
     source: crate::combat::ProjectileSource,
     tick: u64,
 ) {
+    let source = crate::combat::ProjectileSource {
+        weapon_definition_id: crate::combat::ARC_LAUNCHER_DEFINITION,
+        ..source
+    };
+    let attack = lab_attack_source(source, Vec2::new(-140.0, 0.0));
     commands.spawn((
         VfxLabFixtureOwner,
         crate::combat::Projectile,
-        crate::combat::ProjectileSource {
-            weapon_definition_id: crate::combat::ARC_LAUNCHER_DEFINITION,
-            ..source
-        },
+        source,
         Position::from_xy(-140.0, 0.0),
         Rotation::radians(0.0),
         crate::combat::LobbedFlight {
@@ -481,6 +501,11 @@ fn spawn_lobbed_fixture(
             launched_at_tick: tick,
             lands_at_tick: tick.saturating_add(90),
             visual_arc_height: 120.0,
+        },
+        crate::combat::ReplicatedAttackSource { attack },
+        crate::combat::AttackDelivery {
+            attack_id: attack.attack_id,
+            delivery_index: 0,
         },
         Name::new("VfxLab lobbed projectile fixture"),
     ));
@@ -504,7 +529,15 @@ fn spawn_field_fixture(commands: &mut Commands, identity: u64, radius: u16, tick
     ));
 }
 
-fn spawn_cone_fixture(commands: &mut Commands, tick: u64) {
+fn spawn_cone_fixture(commands: &mut Commands, identity: u64, tick: u64) {
+    let source = crate::combat::ProjectileSource {
+        shot_id: crate::combat::ShotId(identity),
+        player_id: crate::protocol::PlayerId(1),
+        owner_network_entity_id: crate::protocol::NetworkEntityId(1),
+        team_id: crate::combat::TeamId(0),
+        weapon_definition_id: crate::combat::SPRAY_DEFINITION,
+    };
+    let attack = lab_attack_source(source, Vec2::new(-120.0, 0.0));
     commands.spawn((
         VfxLabFixtureOwner,
         crate::combat::ConeSpray,
@@ -521,6 +554,11 @@ fn spawn_cone_fixture(commands: &mut Commands, tick: u64) {
             map_occlusion: false,
             max_targets: 6,
         },
+        crate::combat::ReplicatedAttackSource { attack },
+        crate::combat::AttackDelivery {
+            attack_id: attack.attack_id,
+            delivery_index: 0,
+        },
         Name::new("VfxLab cone spray fixture"),
     ));
 }
@@ -531,6 +569,7 @@ fn spawn_status_fixture(commands: &mut Commands, identity: u64, tick: u64) {
         VfxLabClock,
         crate::protocol::Fighter,
         Controlled,
+        crate::protocol::NetworkEntityId(1),
         crate::combat::TeamId(0),
         Position::from_xy(0.0, 0.0),
         Rotation::radians(0.0),
@@ -546,6 +585,24 @@ fn spawn_status_fixture(commands: &mut Commands, identity: u64, tick: u64) {
         },
         Name::new("VfxLab attached status fixture"),
     ));
+}
+
+fn lab_attack_source(
+    source: crate::combat::ProjectileSource,
+    origin: Vec2,
+) -> crate::combat::AttackSource {
+    crate::combat::AttackSource {
+        kind: crate::combat::CombatSourceKind::PrimaryWeapon,
+        attack_id: crate::combat::AttackId(source.shot_id.0),
+        player_id: source.player_id,
+        owner_network_entity_id: source.owner_network_entity_id,
+        team_id: source.team_id,
+        recipe_fingerprint: crate::combat::WeaponRecipeFingerprint(source.shot_id.0),
+        legacy_compatibility: false,
+        source_preset_id: None,
+        origin: crate::combat::WorldPoint::from(origin),
+        facing: 0.0,
+    }
 }
 
 #[allow(
@@ -837,12 +894,16 @@ fn exit_after_lab_capture(state: Res<VfxLabState>, mut exits: MessageWriter<AppE
 
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "resources are Bevy system parameters owned by the scheduler"
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "the read-only inspector presents one atomic view of lab, registry, signature, fixture, and camera state"
 )]
 fn update_lab_inspector(
     state: Res<VfxLabState>,
     registry: Res<VfxRegistry>,
+    signature_cache: Res<crate::client::vfx::VfxSignatureCache>,
     effects: Query<(), With<CombatEffect3d>>,
+    signatures: Query<(&crate::client::vfx::CombatVisualSignature, Option<&Name>)>,
     fixtures: Query<(), With<VfxLabFixtureOwner>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut inspector: Query<&mut Text, With<VfxLabInspector>>,
@@ -894,6 +955,28 @@ fn update_lab_inspector(
             state.playback_tick,
         )
     };
+    let mut signature_rows = signatures
+        .iter()
+        .map(|(signature, name)| {
+            (
+                name.map_or("unnamed", Name::as_str).to_string(),
+                format!(
+                    "{:?}/{:?} {:?} {:?} {:?}",
+                    signature.carrier,
+                    signature.phase,
+                    signature.accents,
+                    signature.relationship,
+                    signature.identity,
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    signature_rows.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    let signature_summary = signature_rows.first().map_or_else(
+        || "none".to_string(),
+        |(name, signature)| format!("{name}: {signature}"),
+    );
+    let cache = signature_cache.diagnostics();
     let window = windows.single().ok();
     let dimensions = window.map_or_else(
         || "window unavailable".to_string(),
@@ -907,6 +990,8 @@ fn update_lab_inspector(
          Radius   {} world units\n\
          Capture  {}\n\
          Catalog  {:016x} - sealed/valid\n\
+         Signature {} active - {}\n\
+         Cache     {}/{} attacks - {} FIFO evictions\n\
          Active transient {} - fixture facts {} - cameras {} - {}\n\n\
          Tab fixture   <-/-> mapping   Space restart   Enter pause   . step\n\
          N identity   R reduced   P primitive   F12 capture   Esc quit",
@@ -918,6 +1003,11 @@ fn update_lab_inspector(
         state.radius,
         state.capture_dir.display(),
         embedded_vfx_catalog_fingerprint(),
+        signature_rows.len(),
+        signature_summary,
+        cache.entries,
+        cache.capacity,
+        cache.evictions,
         effects.iter().count(),
         fixtures.iter().count(),
         cameras.iter().count(),

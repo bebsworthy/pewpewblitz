@@ -2,7 +2,9 @@ use bevy::prelude::*;
 
 use super::VfxRequestSet;
 use crate::client::vfx::{
-    VfxAppExt, VfxRequest, VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration,
+    CombatVisualSignature, VfxAccent, VfxAppExt, VfxAuthoritativeTiming, VfxCarrier,
+    VfxContextOverride, VfxGeometry, VfxPhase, VfxPresentationIdentity, VfxPresentationVariant,
+    VfxRelationship, VfxRequest, VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration,
     WORLD_OBJECT_DAMAGED_VFX, WORLD_OBJECT_EXPLOSION_VFX, WORLD_OBJECT_VFX_PRODUCER_RANK,
 };
 
@@ -60,21 +62,26 @@ fn world_object_vfx_request(
         return None;
     }
     let event_id = cue.event_id().0;
-    let (key, position, radius, label) = match cue {
-        crate::map::WorldObjectCue::Damaged { position, .. } => (
+    let (key, position, radius, tick, accent, label) = match cue {
+        crate::map::WorldObjectCue::Damaged { position, tick, .. } => (
             WORLD_OBJECT_DAMAGED_VFX,
             position.as_vec2(),
             None,
+            tick,
+            VfxAccent::Neutral,
             "V10 oil-barrel damage response",
         ),
         crate::map::WorldObjectCue::Exploded {
             position,
             radius_world_units,
+            tick,
             ..
         } => (
             WORLD_OBJECT_EXPLOSION_VFX,
             position.as_vec2(),
             Some(f32::from(radius_world_units)),
+            tick,
+            VfxAccent::Fire,
             "V10 authoritative oil-barrel blast",
         ),
     };
@@ -86,6 +93,22 @@ fn world_object_vfx_request(
         None,
         label,
     )
+    .and_then(|request| {
+        request.with_signature(CombatVisualSignature {
+            carrier: VfxCarrier::WorldFeedback,
+            phase: VfxPhase::Impact,
+            accents: [Some(accent), None],
+            relationship: VfxRelationship::Neutral,
+            context: Some(VfxContextOverride::Environment),
+            geometry: radius.map_or_else(
+                || VfxGeometry::point(position),
+                |radius| VfxGeometry::circle(position, radius),
+            ),
+            identity: VfxPresentationIdentity::CombatEvent(event_id),
+            timing: VfxAuthoritativeTiming::instant(tick),
+            variant: VfxPresentationVariant::Normal,
+        })
+    })
     .ok()
 }
 

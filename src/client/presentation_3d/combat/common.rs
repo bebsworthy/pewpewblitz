@@ -1,8 +1,36 @@
 use super::super::{CombatVisualOwner, Material3dAssets};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::HashSet;
 
 pub(super) const GROUND_EFFECT_HEIGHT: f32 = 2.5;
+
+#[derive(SystemParam)]
+pub(in crate::client) struct CombatVfxContext<'w> {
+    cache: Res<'w, crate::client::vfx::VfxSignatureCache>,
+    settings: Option<Res<'w, crate::client::settings::persistence::ClientShellSettings>>,
+    fallback: Option<Res<'w, super::super::ImportedWorldFallbackPolicy>>,
+}
+
+impl CombatVfxContext<'_> {
+    pub(super) fn cache(&self) -> &crate::client::vfx::VfxSignatureCache {
+        &self.cache
+    }
+
+    pub(super) fn variant(&self) -> crate::client::vfx::VfxPresentationVariant {
+        crate::client::vfx::vfx_presentation_variant(
+            self.settings
+                .as_deref()
+                .is_some_and(|settings| settings.reduced_combat_effects),
+            self.fallback.as_deref().is_some_and(|fallback| {
+                matches!(
+                    fallback,
+                    super::super::ImportedWorldFallbackPolicy::ForcePrimitive
+                )
+            }),
+        )
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum GroundMarkerRelation {

@@ -2,6 +2,8 @@
 
 use bevy::prelude::{Message, Vec2};
 
+use super::CombatVisualSignature;
+
 pub(crate) const MAX_VFX_REQUEST_KEY_LENGTH: usize = 64;
 const MAX_VFX_DIAGNOSTIC_LABEL_LENGTH: usize = 96;
 
@@ -104,6 +106,7 @@ pub(crate) struct VfxRequest {
     pub(crate) position: Vec2,
     pub(crate) authoritative_radius: Option<f32>,
     pub(crate) deadline: Option<VfxDeadline>,
+    pub(crate) signature: CombatVisualSignature,
     pub(crate) label: &'static str,
 }
 
@@ -122,10 +125,20 @@ impl VfxRequest {
             position,
             authoritative_radius,
             deadline,
+            signature: CombatVisualSignature::neutral_point(order.event_id, position),
             label,
         };
         request.validate()?;
         Ok(request)
+    }
+
+    pub(crate) fn with_signature(
+        mut self,
+        signature: CombatVisualSignature,
+    ) -> Result<Self, String> {
+        self.signature = signature;
+        self.validate()?;
+        Ok(self)
     }
 
     pub(super) fn validate(&self) -> Result<(), String> {
@@ -144,6 +157,7 @@ impl VfxRequest {
         if self.deadline.is_some_and(|deadline| !deadline.is_valid()) {
             return Err("VFX request deadline expires before activation".into());
         }
+        self.signature.validate()?;
         if self.label.is_empty() || self.label.len() > MAX_VFX_DIAGNOSTIC_LABEL_LENGTH {
             return Err("VFX request diagnostic label is empty or oversized".into());
         }

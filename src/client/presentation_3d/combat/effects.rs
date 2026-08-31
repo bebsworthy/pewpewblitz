@@ -1,7 +1,8 @@
 use super::super::*;
 use crate::client::vfx::{
-    ResolvedVfxRecipe, VfxDeadline, VfxLifetime, VfxMaterialKey, VfxMeshLayer, VfxReadabilityClass,
-    VfxRegistry, VfxRendererFamily, VfxRequest, VfxTimeline, vfx_counter_sample,
+    CombatVisualSignature, ResolvedVfxRecipe, VfxDeadline, VfxLifetime, VfxMaterialKey,
+    VfxMeshLayer, VfxReadabilityClass, VfxRegistry, VfxRendererFamily, VfxRequest,
+    VfxSignatureCache, VfxTimeline, vfx_counter_sample, vfx_presentation_variant,
 };
 use crate::combat::client::DeduplicatedCombatCue;
 use serde_json::{Value, json};
@@ -43,6 +44,7 @@ pub(in crate::client) struct PendingCombatEffect {
     label: &'static str,
     recipe_id: String,
     concurrency_cap: usize,
+    signature: CombatVisualSignature,
 }
 
 struct PendingCombatEffectLayer {
@@ -80,6 +82,7 @@ impl PendingCombatEffect {
                     order,
                     recipe_id: self.recipe_id.clone(),
                 },
+                self.signature,
                 Transform::default(),
                 Visibility::default(),
                 Name::new(self.label),
@@ -181,6 +184,7 @@ fn resolved_effect(
         label: request.label,
         recipe_id: recipe.id.clone(),
         concurrency_cap: recipe.concurrency_cap,
+        signature: request.signature,
     }
 }
 
@@ -300,14 +304,21 @@ pub(in crate::client) fn resolve_vfx_requests(
     materials: Res<Material3dAssets>,
     registry: Res<VfxRegistry>,
     settings: Option<Res<ClientShellSettings>>,
+    fallback: Option<Res<ImportedWorldFallbackPolicy>>,
 ) {
     let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
+    let primitive = fallback
+        .as_deref()
+        .is_some_and(|policy| matches!(policy, ImportedWorldFallbackPolicy::ForcePrimitive));
+    let variant = vfx_presentation_variant(reduced, primitive);
     let ordered = ordered_vfx_requests(requests.read().copied());
     for request in &ordered {
-        let Some(recipe) = registry.resolve(request, reduced) else {
+        let mut request = *request;
+        request.signature = request.signature.with_variant(variant);
+        let Some(recipe) = registry.resolve(&request, reduced) else {
             continue;
         };
-        pending_effects.write(resolved_effect(request, &recipe, &primitives, &materials));
+        pending_effects.write(resolved_effect(&request, &recipe, &primitives, &materials));
     }
 }
 
@@ -407,6 +418,10 @@ pub(in crate::client) fn cleanup_combat_effects(
 /// The snapshot intentionally reports renderer ownership rather than gameplay outcomes. Durable
 /// gameplay facts (projectiles, fields, fighters, and authoritative ticks) are captured by the
 /// ordinary evidence path alongside this renderer view.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one evidence snapshot keeps the transient, durable-signature, registry, and cache views atomic"
+)]
 pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Value {
     let mut layer_query = world.query::<&CombatEffectLayer3d>();
     let mut layers_by_root = HashMap::<Entity, Vec<(u8, Value)>>::new();
@@ -421,13 +436,19 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             }),
         ));
     }
-    let mut transient_query = world.query::<(Entity, &CombatEffect3d, Option<&Name>)>();
+    let mut transient_query = world.query::<(
+        Entity,
+        &CombatEffect3d,
+        &CombatVisualSignature,
+        Option<&Name>,
+    )>();
     let mut transient_effects = transient_query
         .iter(world)
-        .map(|(entity, effect, name)| {
+        .map(|(entity, effect, signature, name)| {
             json!({
                 "entity": entity.to_bits(),
                 "recipe_id": effect.recipe_id,
+                "signature": signature,
                 "layers": layers_by_root.remove(&entity).map(|mut layers| {
                     layers.sort_unstable_by_key(|(index, _)| *index);
                     layers.into_iter().map(|(_, layer)| layer).collect::<Vec<_>>()
@@ -453,6 +474,27 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
         .get_resource::<Assets<StandardMaterial>>()
         .map_or(0, Assets::len);
     let image_assets = world.get_resource::<Assets<Image>>().map_or(0, Assets::len);
+    let signature_cache = world
+        .get_resource::<VfxSignatureCache>()
+        .map(VfxSignatureCache::diagnostics);
+    let mut signature_query = world.query::<(
+        Entity,
+        &CombatVisualSignature,
+        Option<&CombatVisualOwner>,
+        Option<&Name>,
+    )>();
+    let mut signatures = signature_query
+        .iter(world)
+        .map(|(entity, signature, owner, name)| {
+            json!({
+                "entity": entity.to_bits(),
+                "owner": owner.map(|owner| owner.0.to_bits()),
+                "name": name.map(Name::as_str),
+                "signature": signature,
+            })
+        })
+        .collect::<Vec<_>>();
+    signatures.sort_by_key(|entry| entry["entity"].as_u64().unwrap_or(u64::MAX));
     let elemental_fields =
         serialized_component_snapshots::<crate::combat::ElementalFieldState>(world);
     let concealment_fields =
@@ -484,6 +526,8 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             "standard_materials": material_assets,
             "images": image_assets,
         },
+        "signature_cache": signature_cache,
+        "signatures": signatures,
         "transient_effects": transient_effects,
         "persistent_facts": {
             "elemental_fields": elemental_fields,
@@ -593,6 +637,7 @@ mod tests {
             label,
             recipe_id: label.to_string(),
             concurrency_cap: MAX_EFFECTS,
+            signature: CombatVisualSignature::neutral_point(0, Vec2::ZERO),
         }
     }
 
@@ -631,12 +676,15 @@ mod tests {
                 order: 7,
                 recipe_id: "impact".to_string(),
             },
+            CombatVisualSignature::neutral_point(7, Vec2::ZERO)
+                .with_variant(vfx::VfxPresentationVariant::ReducedPrimitive),
             Name::new("Impact evidence fixture"),
         ));
         let owner = world.spawn_empty().id();
         world.spawn((
             CombatVisualOwner(owner),
             super::super::entities::ElementalFieldVisual3d,
+            CombatVisualSignature::neutral_point(11, Vec2::new(2.0, 3.0)),
         ));
         world.spawn(crate::combat::ElementalFieldState {
             id: crate::combat::ElementalFieldId(11),

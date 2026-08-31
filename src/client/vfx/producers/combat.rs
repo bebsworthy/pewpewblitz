@@ -4,11 +4,15 @@ use super::VfxRequestSet;
 use crate::{
     client::vfx::{
         COMBAT_DAMAGE_VFX, COMBAT_IMPACT_VFX, COMBAT_MUZZLE_VFX, COMBAT_RESET_VFX,
-        COMBAT_VFX_PRODUCER_RANK, DEMOLITION_STRIKE_VFX, ELEMENTAL_FIELD_VFX, REVEAL_SCAN_VFX,
-        VfxAppExt, VfxDeadline, VfxRequest, VfxRequestCapabilities, VfxRequestOrder,
-        VfxRequestRegistration,
+        COMBAT_VFX_PRODUCER_RANK, CombatVisualSignature, DEMOLITION_STRIKE_VFX,
+        ELEMENTAL_FIELD_VFX, REVEAL_SCAN_VFX, VfxAccent, VfxAppExt, VfxAuthoritativeTiming,
+        VfxCarrier, VfxContextOverride, VfxDeadline, VfxGeometry, VfxPhase,
+        VfxPresentationIdentity, VfxPresentationVariant, VfxRelationship, VfxRequest,
+        VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration, VfxSignatureCache,
+        accent_for_elemental_field,
     },
     combat::{AuthoritativeTick, CombatCue, client::DeduplicatedCombatCue, combat_cue_key},
+    protocol::{Fighter, NetworkEntityId},
 };
 
 const REGISTRATIONS: [VfxRequestRegistration; 7] = [
@@ -53,6 +57,7 @@ pub(crate) struct CombatVfxProducerPlugin;
 
 impl Plugin for CombatVfxProducerPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<VfxSignatureCache>();
         for registration in REGISTRATIONS {
             app.try_register_vfx_request(registration)
                 .expect("combat VFX request registration must be valid");
@@ -61,10 +66,16 @@ impl Plugin for CombatVfxProducerPlugin {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the signature cache is a read-only Bevy system resource"
+)]
 fn produce_combat_vfx_requests(
     mut cues: MessageReader<DeduplicatedCombatCue>,
     mut requests: MessageWriter<VfxRequest>,
     authoritative_ticks: Query<&AuthoritativeTick>,
+    cache: Res<VfxSignatureCache>,
+    fighters: Query<(&NetworkEntityId, &crate::combat::TeamId), With<Fighter>>,
 ) {
     let observed_at_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     for DeduplicatedCombatCue(cue) in cues.read() {
@@ -74,6 +85,8 @@ fn produce_combat_vfx_requests(
             continue;
         };
         let event_id = combat_cue_key(cue).event_id.0;
+        let signature =
+            combat_vfx_signature(cue, position, radius, observed_at_tick, &cache, &fighters);
         if let Ok(request) = VfxRequest::try_new(
             key,
             VfxRequestOrder::new(COMBAT_VFX_PRODUCER_RANK, event_id),
@@ -81,9 +94,262 @@ fn produce_combat_vfx_requests(
             radius,
             deadline,
             label,
-        ) {
+        )
+        .and_then(|request| request.with_signature(signature))
+        {
             requests.write(request);
         }
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the exhaustive combat-cue match is the single auditable semantic-signature adapter"
+)]
+fn combat_vfx_signature(
+    cue: &CombatCue,
+    position: Vec2,
+    radius: Option<f32>,
+    observed_at_tick: Option<u64>,
+    cache: &VfxSignatureCache,
+    fighters: &Query<(&NetworkEntityId, &crate::combat::TeamId), With<Fighter>>,
+) -> CombatVisualSignature {
+    use CombatCue as C;
+    let point = VfxGeometry::point(position);
+    let instant = |tick| VfxAuthoritativeTiming {
+        observed_at_tick,
+        ..VfxAuthoritativeTiming::instant(tick)
+    };
+    let direct = |carrier, phase, accents, relationship, context, geometry, identity, timing| {
+        CombatVisualSignature {
+            carrier,
+            phase,
+            accents,
+            relationship,
+            context,
+            geometry,
+            identity,
+            timing,
+            variant: VfxPresentationVariant::Normal,
+        }
+    };
+    match cue {
+        C::AttackAccepted {
+            tick, attack_id, ..
+        } => cache.signature_for_attack(
+            *attack_id,
+            0,
+            VfxCarrier::PointTransient,
+            VfxPhase::Activation,
+            point,
+            instant(*tick),
+            VfxPresentationVariant::Normal,
+        ),
+        C::DeliveryImpact {
+            tick,
+            attack_id,
+            delivery_index,
+            normal,
+            ..
+        } => cache.signature_for_attack(
+            *attack_id,
+            *delivery_index,
+            VfxCarrier::PointTransient,
+            VfxPhase::Impact,
+            VfxGeometry::Point {
+                position: position.to_array(),
+                normal: Some(normal.as_vec2().to_array()),
+                direction: None,
+            },
+            instant(*tick),
+            VfxPresentationVariant::Normal,
+        ),
+        C::LobLanded {
+            tick,
+            attack_id,
+            delivery_index,
+            ..
+        }
+        | C::MeleeContact {
+            tick,
+            attack_id,
+            delivery_index,
+            ..
+        } => cache.signature_for_attack(
+            *attack_id,
+            *delivery_index,
+            VfxCarrier::PointTransient,
+            VfxPhase::Impact,
+            point,
+            instant(*tick),
+            VfxPresentationVariant::Normal,
+        ),
+        C::DamageApplied {
+            tick, attack_id, ..
+        }
+        | C::EffectApplied {
+            tick, attack_id, ..
+        }
+        | C::FighterDefeated {
+            tick, attack_id, ..
+        } => cache.signature_for_attack(
+            *attack_id,
+            0,
+            VfxCarrier::AttachedStatus,
+            VfxPhase::Impact,
+            point,
+            instant(*tick),
+            VfxPresentationVariant::Normal,
+        ),
+        C::SentryFired {
+            tick,
+            owner,
+            deployable_id,
+            ..
+        } => direct(
+            VfxCarrier::Deployable,
+            VfxPhase::Activation,
+            [Some(VfxAccent::Neutral), None],
+            relationship_for_owner(cache, fighters, *owner),
+            Some(VfxContextOverride::Sentry),
+            point,
+            VfxPresentationIdentity::Deployable(deployable_id.0),
+            instant(*tick),
+        ),
+        C::DeployableRemoved {
+            tick,
+            owner,
+            deployable_id,
+            reason,
+            ..
+        } => direct(
+            VfxCarrier::Deployable,
+            if matches!(reason, crate::abilities::SentryCleanupReason::Expired) {
+                VfxPhase::Expiry
+            } else {
+                VfxPhase::Interruption
+            },
+            [Some(VfxAccent::Neutral), None],
+            relationship_for_owner(cache, fighters, *owner),
+            Some(VfxContextOverride::Sentry),
+            point,
+            VfxPresentationIdentity::Deployable(deployable_id.0),
+            instant(*tick),
+        ),
+        C::FighterReset {
+            event_id,
+            tick,
+            target,
+            ..
+        } => direct(
+            VfxCarrier::AttachedStatus,
+            VfxPhase::Expiry,
+            [Some(VfxAccent::Neutral), None],
+            relationship_for_owner(cache, fighters, *target),
+            None,
+            point,
+            VfxPresentationIdentity::CombatEvent(event_id.0),
+            instant(*tick),
+        ),
+        C::RevealScanActivated {
+            event_id,
+            tick,
+            revealing_team,
+            expires_at_tick,
+            ..
+        } => direct(
+            VfxCarrier::PersistentArea,
+            VfxPhase::Activation,
+            [Some(VfxAccent::Reveal), None],
+            relationship_for_team(cache, *revealing_team),
+            Some(VfxContextOverride::RevealScan),
+            VfxGeometry::circle(position, radius.unwrap_or(1.0)),
+            VfxPresentationIdentity::CombatEvent(event_id.0),
+            VfxAuthoritativeTiming::persistent(*tick, observed_at_tick, *expires_at_tick),
+        ),
+        C::ElementalFieldActivated {
+            tick,
+            source,
+            field_id,
+            kind,
+            expires_at_tick,
+            ..
+        } => direct(
+            VfxCarrier::PersistentArea,
+            VfxPhase::Activation,
+            [Some(accent_for_elemental_field(*kind)), None],
+            relationship_for_owner(cache, fighters, *source),
+            Some(VfxContextOverride::ElementalField(*kind)),
+            VfxGeometry::circle(position, radius.unwrap_or(1.0)),
+            VfxPresentationIdentity::ReplicatedField(field_id.0),
+            VfxAuthoritativeTiming::persistent(*tick, observed_at_tick, *expires_at_tick),
+        ),
+        C::DemolitionStrikeActivated {
+            event_id,
+            tick,
+            source,
+            ..
+        } => direct(
+            VfxCarrier::PersistentArea,
+            VfxPhase::Activation,
+            [Some(VfxAccent::Demolition), None],
+            relationship_for_owner(cache, fighters, *source),
+            Some(VfxContextOverride::DemolitionStrike),
+            VfxGeometry::circle(position, radius.unwrap_or(1.0)),
+            VfxPresentationIdentity::CombatEvent(event_id.0),
+            instant(*tick),
+        ),
+        C::ConeSprayPulse {
+            tick,
+            attack_id,
+            delivery_index,
+            origin,
+            facing,
+            reached_distance,
+            angle_degrees,
+            ..
+        } => cache.signature_for_attack(
+            *attack_id,
+            *delivery_index,
+            VfxCarrier::Cone,
+            VfxPhase::Pulse,
+            VfxGeometry::Cone {
+                origin: origin.as_vec2().to_array(),
+                facing: *facing,
+                reach: (*reached_distance).max(f32::EPSILON),
+                angle_degrees: *angle_degrees,
+            },
+            instant(*tick),
+            VfxPresentationVariant::Normal,
+        ),
+        _ => CombatVisualSignature::neutral_point(combat_cue_key(cue).event_id.0, position),
+    }
+}
+
+fn relationship_for_owner(
+    cache: &VfxSignatureCache,
+    fighters: &Query<(&NetworkEntityId, &crate::combat::TeamId), With<Fighter>>,
+    owner: NetworkEntityId,
+) -> VfxRelationship {
+    fighters
+        .iter()
+        .find_map(|(network_id, team)| {
+            (*network_id == owner).then(|| cache.observer().relationship(owner, *team))
+        })
+        .unwrap_or(VfxRelationship::Neutral)
+}
+
+fn relationship_for_team(
+    cache: &VfxSignatureCache,
+    team: crate::combat::TeamId,
+) -> VfxRelationship {
+    let observer = cache.observer();
+    if team.0 == 0 || observer.team_id.is_none() {
+        VfxRelationship::Neutral
+    } else if observer.team_id == Some(team) {
+        VfxRelationship::Ally
+    } else {
+        VfxRelationship::Enemy
     }
 }
 

@@ -1,11 +1,12 @@
 //! Plugin-populated VFX request registration and immutable catalog lookup.
 
-use bevy::prelude::{App, Plugin, Resource};
+use bevy::prelude::{App, IntoScheduleConfigs, Plugin, Resource, Update};
 use std::collections::BTreeSet;
 
 use super::{
     CombatVfxProducerPlugin, HeistVfxProducerPlugin, PickupVfxProducerPlugin, ResolvedVfxRecipe,
-    VfxMeshLayer, VfxRequest, VfxRequestKey, WorldObjectVfxProducerPlugin, catalog::VfxCatalog,
+    VfxMeshLayer, VfxRequest, VfxRequestKey, VfxSignatureCache, VfxSignatureSet,
+    WorldObjectVfxProducerPlugin, catalog::VfxCatalog, update_vfx_signature_cache,
 };
 
 pub(crate) const MAX_VFX_REQUEST_REGISTRATIONS: usize = 64;
@@ -256,12 +257,15 @@ pub(crate) struct ProductionVfxPlugin;
 
 impl Plugin for ProductionVfxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(VfxRegistryPlugin).add_plugins((
-            CombatVfxProducerPlugin,
-            WorldObjectVfxProducerPlugin,
-            PickupVfxProducerPlugin,
-            HeistVfxProducerPlugin,
-        ));
+        app.add_plugins(VfxRegistryPlugin)
+            .init_resource::<VfxSignatureCache>()
+            .add_systems(Update, update_vfx_signature_cache.in_set(VfxSignatureSet))
+            .add_plugins((
+                CombatVfxProducerPlugin,
+                WorldObjectVfxProducerPlugin,
+                PickupVfxProducerPlugin,
+                HeistVfxProducerPlugin,
+            ));
     }
 }
 

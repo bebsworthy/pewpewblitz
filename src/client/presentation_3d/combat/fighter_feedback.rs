@@ -1,5 +1,5 @@
 use super::super::*;
-use super::entities::FighterGroundMarker3d;
+use super::{common::CombatVfxContext, entities::FighterGroundMarker3d};
 use std::collections::{HashMap, HashSet};
 
 const CONCEALED_FIGHTER_ALPHA: f32 = 0.52;
@@ -65,6 +65,8 @@ type StatusFighterQuery<'w, 's> = Query<
     (
         Entity,
         &'static Position,
+        &'static NetworkEntityId,
+        &'static crate::combat::TeamId,
         Option<&'static crate::combat::Defeated>,
         Option<&'static AuthoritativeTick>,
         Option<&'static crate::combat::ActiveEffects>,
@@ -81,6 +83,10 @@ type DashFighterQuery<'w, 's> = Query<
     (
         Entity,
         &'static Position,
+        &'static NetworkEntityId,
+        &'static crate::combat::TeamId,
+        &'static crate::builds::ResolvedMatchLoadout,
+        Option<&'static AuthoritativeTick>,
         Option<&'static crate::builds::AbilityState>,
         Option<&'static DashTrailLink>,
     ),
@@ -210,18 +216,30 @@ fn concealed_material_variant(
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     reason = "durable status reconciliation reads the authoritative status sources and owns only status visuals"
 )]
 pub(in super::super) fn reconcile_status_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    vfx: CombatVfxContext,
     fighters: StatusFighterQuery,
     statuses: Query<(Entity, &CombatVisualOwner, &StatusVisual3d)>,
 ) {
     let mut desired_status = HashMap::new();
-    for (entity, position, defeated, authoritative_tick, effects, knockback, concealment, tile) in
-        &fighters
+    for (
+        entity,
+        position,
+        network_id,
+        team,
+        defeated,
+        authoritative_tick,
+        effects,
+        knockback,
+        concealment,
+        tile,
+    ) in &fighters
     {
         if defeated.is_some() {
             continue;
@@ -231,30 +249,132 @@ pub(in super::super) fn reconcile_status_visuals(
                 authoritative_tick.is_none_or(|now| now.0 < slow.expires_at_tick)
             })
         }) {
-            desired_status.insert((entity, StatusKind::Slow), position.0);
+            desired_status.insert(
+                (entity, StatusKind::Slow),
+                (
+                    position.0,
+                    status_signature(
+                        StatusKind::Slow,
+                        position.0,
+                        *network_id,
+                        *team,
+                        authoritative_tick,
+                        effects,
+                        knockback,
+                        concealment,
+                        tile,
+                        &vfx,
+                    ),
+                ),
+            );
         }
         if knockback.is_some() {
-            desired_status.insert((entity, StatusKind::Knockback), position.0);
+            desired_status.insert(
+                (entity, StatusKind::Knockback),
+                (
+                    position.0,
+                    status_signature(
+                        StatusKind::Knockback,
+                        position.0,
+                        *network_id,
+                        *team,
+                        authoritative_tick,
+                        effects,
+                        knockback,
+                        concealment,
+                        tile,
+                        &vfx,
+                    ),
+                ),
+            );
         }
         if effects
             .is_some_and(|value| authoritative_tick.is_some_and(|now| value.is_poisoned(now.0)))
         {
-            desired_status.insert((entity, StatusKind::Poison), position.0);
+            desired_status.insert(
+                (entity, StatusKind::Poison),
+                (
+                    position.0,
+                    status_signature(
+                        StatusKind::Poison,
+                        position.0,
+                        *network_id,
+                        *team,
+                        authoritative_tick,
+                        effects,
+                        knockback,
+                        concealment,
+                        tile,
+                        &vfx,
+                    ),
+                ),
+            );
         }
         if effects.is_some_and(|value| value.cold.meter > 0) {
-            desired_status.insert((entity, StatusKind::Cold), position.0);
+            desired_status.insert(
+                (entity, StatusKind::Cold),
+                (
+                    position.0,
+                    status_signature(
+                        StatusKind::Cold,
+                        position.0,
+                        *network_id,
+                        *team,
+                        authoritative_tick,
+                        effects,
+                        knockback,
+                        concealment,
+                        tile,
+                        &vfx,
+                    ),
+                ),
+            );
         }
         if effects.is_some_and(|value| authoritative_tick.is_some_and(|now| value.is_frozen(now.0)))
         {
             desired_status.remove(&(entity, StatusKind::Cold));
-            desired_status.insert((entity, StatusKind::Frozen), position.0);
+            desired_status.insert(
+                (entity, StatusKind::Frozen),
+                (
+                    position.0,
+                    status_signature(
+                        StatusKind::Frozen,
+                        position.0,
+                        *network_id,
+                        *team,
+                        authoritative_tick,
+                        effects,
+                        knockback,
+                        concealment,
+                        tile,
+                        &vfx,
+                    ),
+                ),
+            );
         }
         if effects.is_some_and(|value| {
             value.fire.is_some_and(|fire| {
                 authoritative_tick.is_some_and(|now| now.0 <= fire.expires_at_tick)
             })
         }) {
-            desired_status.insert((entity, StatusKind::Fire), position.0);
+            desired_status.insert(
+                (entity, StatusKind::Fire),
+                (
+                    position.0,
+                    status_signature(
+                        StatusKind::Fire,
+                        position.0,
+                        *network_id,
+                        *team,
+                        authoritative_tick,
+                        effects,
+                        knockback,
+                        concealment,
+                        tile,
+                        &vfx,
+                    ),
+                ),
+            );
         }
         // Forced reveal is a public status wherever the subject is otherwise legally present.
         // Observer-specific entity visibility still prevents this marker leaking a hidden target.
@@ -267,12 +387,46 @@ pub(in super::super) fn reconcile_status_visuals(
                     .any(|reveal| now.0 < reveal.expires_at_tick)
             })
         {
-            desired_status.insert((entity, StatusKind::Reveal), position.0);
+            desired_status.insert(
+                (entity, StatusKind::Reveal),
+                (
+                    position.0,
+                    status_signature(
+                        StatusKind::Reveal,
+                        position.0,
+                        *network_id,
+                        *team,
+                        authoritative_tick,
+                        effects,
+                        knockback,
+                        concealment,
+                        tile,
+                        &vfx,
+                    ),
+                ),
+            );
         }
         if let Some(tile) = tile
             && let Some(kind) = effect_tile_status(tile)
         {
-            desired_status.insert((entity, kind), position.0);
+            desired_status.insert(
+                (entity, kind),
+                (
+                    position.0,
+                    status_signature(
+                        kind,
+                        position.0,
+                        *network_id,
+                        *team,
+                        authoritative_tick,
+                        effects,
+                        knockback,
+                        concealment,
+                        Some(tile),
+                        &vfx,
+                    ),
+                ),
+            );
         }
     }
 
@@ -285,13 +439,14 @@ pub(in super::super) fn reconcile_status_visuals(
             commands.entity(entity).despawn();
         }
     }
-    for (&(owner, kind), &position) in &desired_status {
+    for (&(owner, kind), &(position, signature)) in &desired_status {
         if existing_status.contains(&(owner, kind)) {
             continue;
         }
         commands.spawn((
             CombatVisualOwner(owner),
             StatusVisual3d(kind),
+            signature,
             Mesh3d(primitives.ground_ring.clone()),
             MeshMaterial3d(status_material(kind, &materials)),
             NotShadowCaster,
@@ -334,19 +489,138 @@ const fn status_scale(kind: StatusKind) -> f32 {
 }
 
 #[allow(
+    clippy::too_many_arguments,
+    reason = "status signatures snapshot the same authoritative facts used by status reconciliation"
+)]
+fn status_signature(
+    kind: StatusKind,
+    position: Vec2,
+    network_id: NetworkEntityId,
+    team: crate::combat::TeamId,
+    authoritative_tick: Option<&AuthoritativeTick>,
+    effects: Option<&crate::combat::ActiveEffects>,
+    knockback: Option<&crate::combat::KnockbackFeedback>,
+    concealment: Option<&crate::concealment::ConcealmentPresentationState>,
+    tile: Option<&crate::map::EffectTileOccupancy>,
+    vfx: &CombatVfxContext,
+) -> vfx::CombatVisualSignature {
+    let observed_at_tick = authoritative_tick.map(|tick| tick.0);
+    let (attack_id, expires_at_tick) = match kind {
+        StatusKind::Slow => effects
+            .and_then(|effects| effects.slow)
+            .map_or((None, None), |slow| {
+                (Some(slow.source_attack_id), Some(slow.expires_at_tick))
+            }),
+        StatusKind::Cold | StatusKind::Frozen => effects.map_or((None, None), |effects| {
+            (
+                effects.cold.source.map(|source| source.action_id),
+                effects.cold.frozen_until_tick,
+            )
+        }),
+        StatusKind::Poison => {
+            effects
+                .and_then(|effects| effects.poison)
+                .map_or((None, None), |condition| {
+                    (
+                        Some(condition.source.action_id),
+                        Some(condition.expires_at_tick),
+                    )
+                })
+        }
+        StatusKind::Fire => {
+            effects
+                .and_then(|effects| effects.fire)
+                .map_or((None, None), |condition| {
+                    (
+                        Some(condition.source.action_id),
+                        Some(condition.expires_at_tick),
+                    )
+                })
+        }
+        StatusKind::Knockback => (None, knockback.map(|feedback| feedback.expires_at_tick)),
+        StatusKind::Reveal => (
+            None,
+            concealment.and_then(|state| {
+                state
+                    .forced_reveals
+                    .iter()
+                    .map(|reveal| reveal.expires_at_tick)
+                    .max()
+            }),
+        ),
+        StatusKind::TileSpeed | StatusKind::TileSlow | StatusKind::TileDamage => (None, None),
+    };
+    let timing = vfx::VfxAuthoritativeTiming {
+        activated_at_tick: tile.map(|tile| tile.entered_at_tick),
+        observed_at_tick,
+        expires_at_tick,
+    };
+    let geometry = vfx::VfxGeometry::point(position);
+    let mut signature = attack_id.map_or_else(
+        || vfx::CombatVisualSignature {
+            carrier: vfx::VfxCarrier::AttachedStatus,
+            phase: vfx::VfxPhase::Active,
+            accents: [Some(status_accent(kind)), None],
+            relationship: vfx.cache().observer().relationship(network_id, team),
+            context: (kind == StatusKind::Reveal).then_some(vfx::VfxContextOverride::RevealScan),
+            geometry,
+            identity: vfx::VfxPresentationIdentity::NetworkEntity {
+                network_id: network_id.0,
+                generation: expires_at_tick
+                    .or_else(|| tile.map(|tile| tile.entered_at_tick))
+                    .unwrap_or_default(),
+            },
+            timing,
+            variant: vfx.variant(),
+        },
+        |attack_id| {
+            vfx.cache().signature_for_attack(
+                attack_id,
+                0,
+                vfx::VfxCarrier::AttachedStatus,
+                vfx::VfxPhase::Active,
+                geometry,
+                timing,
+                vfx.variant(),
+            )
+        },
+    );
+    signature.carrier = vfx::VfxCarrier::AttachedStatus;
+    signature.accents = [Some(status_accent(kind)), None];
+    signature.relationship = vfx.cache().observer().relationship(network_id, team);
+    signature
+}
+
+const fn status_accent(kind: StatusKind) -> vfx::VfxAccent {
+    match kind {
+        StatusKind::Slow | StatusKind::Cold | StatusKind::Frozen | StatusKind::TileSlow => {
+            vfx::VfxAccent::Cold
+        }
+        StatusKind::Poison => vfx::VfxAccent::Poison,
+        StatusKind::Fire | StatusKind::TileDamage => vfx::VfxAccent::Fire,
+        StatusKind::Reveal => vfx::VfxAccent::Reveal,
+        StatusKind::Knockback | StatusKind::TileSpeed => vfx::VfxAccent::Neutral,
+    }
+}
+
+#[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
     reason = "dash presentation owns the direct fighter-to-trail lifecycle"
 )]
 pub(in super::super) fn reconcile_dash_trails(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    vfx: CombatVfxContext,
     fighters: DashFighterQuery,
     mut trails: Query<(&mut DashTrailVisual3d, &mut Transform)>,
     orphan_trails: Query<(Entity, &CombatVisualOwner), With<DashTrailVisual3d>>,
     fighter_owners: Query<(), With<Fighter>>,
 ) {
-    for (fighter, position, ability, link) in &fighters {
+    for (fighter, position, network_id, team, loadout, authoritative_tick, ability, link) in
+        &fighters
+    {
         let dashing = ability.is_some_and(|value| {
             matches!(value.phase, crate::builds::AbilityPhase::Dashing { .. })
         });
@@ -370,8 +644,40 @@ pub(in super::super) fn reconcile_dash_trails(
                 }
             }
             DashTrailAction::Spawn => {
-                let trail =
-                    spawn_dash_trail(&mut commands, &primitives, &materials, fighter, position.0);
+                let ends_at_tick = ability.and_then(|ability| match ability.phase {
+                    crate::builds::AbilityPhase::Dashing { ends_at_tick } => Some(ends_at_tick),
+                    _ => None,
+                });
+                let signature = vfx::CombatVisualSignature {
+                    carrier: vfx::VfxCarrier::AttachedStatus,
+                    phase: vfx::VfxPhase::Travel,
+                    accents: [Some(vfx::VfxAccent::Neutral), None],
+                    relationship: vfx.cache().observer().relationship(*network_id, *team),
+                    context: Some(vfx::VfxContextOverride::Ultimate(loadout.ultimate.id)),
+                    geometry: vfx::VfxGeometry::Point {
+                        position: position.0.to_array(),
+                        normal: None,
+                        direction: None,
+                    },
+                    identity: vfx::VfxPresentationIdentity::NetworkEntity {
+                        network_id: network_id.0,
+                        generation: ends_at_tick.unwrap_or_default(),
+                    },
+                    timing: vfx::VfxAuthoritativeTiming {
+                        activated_at_tick: None,
+                        observed_at_tick: authoritative_tick.map(|tick| tick.0),
+                        expires_at_tick: ends_at_tick,
+                    },
+                    variant: vfx.variant(),
+                };
+                let trail = spawn_dash_trail(
+                    &mut commands,
+                    &primitives,
+                    &materials,
+                    fighter,
+                    position.0,
+                    signature,
+                );
                 commands.entity(fighter).insert(DashTrailLink(trail));
             }
             DashTrailAction::Remove(trail) => {
@@ -411,6 +717,7 @@ fn spawn_dash_trail(
     materials: &Material3dAssets,
     fighter: Entity,
     position: Vec2,
+    signature: vfx::CombatVisualSignature,
 ) -> Entity {
     commands
         .spawn((
@@ -418,6 +725,7 @@ fn spawn_dash_trail(
             DashTrailVisual3d {
                 last_position: position,
             },
+            signature,
             Mesh3d(primitives.unit_cuboid.clone()),
             MeshMaterial3d(materials.dash.clone()),
             NotShadowCaster,

@@ -5,6 +5,7 @@ mod producers;
 mod recipes;
 mod registry;
 mod request;
+mod signature;
 
 pub(crate) use producers::{
     CombatVfxProducerPlugin, HeistVfxProducerPlugin, PickupVfxProducerPlugin, VfxRequestSet,
@@ -29,4 +30,10 @@ pub(crate) use request::{
     PICKUP_EXPIRED_VFX, PICKUP_SPAWNED_VFX, PICKUP_VFX_PRODUCER_RANK, REVEAL_SCAN_VFX, VfxDeadline,
     VfxRequest, VfxRequestKey, VfxRequestOrder, WORLD_OBJECT_DAMAGED_VFX,
     WORLD_OBJECT_EXPLOSION_VFX, WORLD_OBJECT_VFX_PRODUCER_RANK,
+};
+pub(crate) use signature::{
+    CombatVisualSignature, VfxAccent, VfxAuthoritativeTiming, VfxCarrier, VfxContextOverride,
+    VfxGeometry, VfxPhase, VfxPresentationIdentity, VfxPresentationVariant, VfxRelationship,
+    VfxSignatureCache, VfxSignatureSet, accent_for_elemental_field, accents_for_payload_effects,
+    update_vfx_signature_cache, vfx_presentation_variant,
 };

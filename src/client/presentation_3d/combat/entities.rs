@@ -1,7 +1,7 @@
 use super::super::*;
 use super::common::{
-    GROUND_EFFECT_HEIGHT, GroundMarkerRelation, ground_marker_material, ground_marker_relation,
-    unique_roots,
+    CombatVfxContext, GROUND_EFFECT_HEIGHT, GroundMarkerRelation, ground_marker_material,
+    ground_marker_relation, unique_roots,
 };
 
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
@@ -161,6 +161,7 @@ pub(in super::super) fn reconcile_projectile_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    vfx: CombatVfxContext,
     projectiles: Query<
         (
             Entity,
@@ -169,17 +170,68 @@ pub(in super::super) fn reconcile_projectile_visuals(
             Option<&crate::combat::StraightFlight>,
             Option<&crate::combat::ProjectileBody>,
             Option<&crate::combat::LobbedFlight>,
+            Option<&crate::combat::ProjectileDeadline>,
+            Option<&crate::combat::ReplicatedAttackSource>,
+            Option<&crate::combat::AttackDelivery>,
         ),
         With<crate::combat::Projectile>,
     >,
     visuals: Query<(Entity, &CombatVisualOwner), With<V3ProjectileVisual>>,
 ) {
     let roots = unique_roots(&mut commands, &visuals);
-    for (owner, position, source, straight, body, lobbed) in &projectiles {
+    for (owner, position, source, straight, body, lobbed, deadline, attack_source, delivery) in
+        &projectiles
+    {
         if straight.is_some() && body.is_none() {
             continue;
         }
         if !roots.contains(&owner) {
+            let carrier = if lobbed.is_some() {
+                vfx::VfxCarrier::LobbedProjectile
+            } else {
+                vfx::VfxCarrier::StraightProjectile
+            };
+            let radius = body.map_or(1.0, |body| body.shape.bounding_radius());
+            let timing = if let Some(lobbed) = lobbed {
+                vfx::VfxAuthoritativeTiming::persistent(
+                    lobbed.launched_at_tick,
+                    None,
+                    lobbed.lands_at_tick,
+                )
+            } else {
+                vfx::VfxAuthoritativeTiming {
+                    activated_at_tick: straight.map(|flight| flight.launched_at_tick),
+                    observed_at_tick: None,
+                    expires_at_tick: deadline.map(|deadline| deadline.expires_at_tick),
+                }
+            };
+            let signature = attack_source.map_or_else(
+                || vfx::CombatVisualSignature {
+                    carrier,
+                    phase: vfx::VfxPhase::Travel,
+                    accents: [Some(vfx::VfxAccent::Neutral), None],
+                    relationship: vfx
+                        .cache()
+                        .observer()
+                        .relationship(source.owner_network_entity_id, source.team_id),
+                    context: None,
+                    geometry: vfx::VfxGeometry::Projectile { radius },
+                    identity: vfx::VfxPresentationIdentity::Neutral(source.shot_id.0),
+                    timing,
+                    variant: vfx.variant(),
+                },
+                |attack_source| {
+                    vfx.cache().signature_for_source(
+                        attack_source.attack,
+                        delivery.map_or(0, |delivery| delivery.delivery_index),
+                        carrier,
+                        vfx::VfxPhase::Travel,
+                        vfx::VfxGeometry::Projectile { radius },
+                        timing,
+                        vfx.variant(),
+                    )
+                },
+            );
             spawn_projectile(
                 &mut commands,
                 &primitives,
@@ -190,6 +242,7 @@ pub(in super::super) fn reconcile_projectile_visuals(
                 straight,
                 body,
                 lobbed.is_some(),
+                signature,
             );
         }
     }
@@ -205,15 +258,42 @@ pub(in super::super) fn reconcile_sentry_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    vfx: CombatVfxContext,
     sentries: Query<
-        (Entity, &Position, &crate::abilities::SentryIdentity),
+        (
+            Entity,
+            &Position,
+            &crate::abilities::SentryIdentity,
+            Option<&crate::abilities::SentryDeadline>,
+        ),
         With<crate::abilities::Sentry>,
     >,
     visuals: Query<(Entity, &CombatVisualOwner), With<SentryVisual3d>>,
 ) {
     let roots = unique_roots(&mut commands, &visuals);
-    for (owner, position, identity) in &sentries {
+    for (owner, position, identity, deadline) in &sentries {
         if !roots.contains(&owner) {
+            let signature = vfx::CombatVisualSignature {
+                carrier: vfx::VfxCarrier::Deployable,
+                phase: vfx::VfxPhase::Active,
+                accents: [Some(vfx::VfxAccent::Neutral), None],
+                relationship: vfx
+                    .cache()
+                    .observer()
+                    .relationship(identity.owner_network_id, identity.team_id),
+                context: Some(vfx::VfxContextOverride::Deployable {
+                    ultimate_id: identity.ultimate_id,
+                    deployable_id: identity.deployable_id,
+                }),
+                geometry: vfx::VfxGeometry::point(position.0),
+                identity: vfx::VfxPresentationIdentity::Deployable(identity.deployable_id.0),
+                timing: vfx::VfxAuthoritativeTiming {
+                    activated_at_tick: None,
+                    observed_at_tick: None,
+                    expires_at_tick: deadline.map(|deadline| deadline.expires_at_tick),
+                },
+                variant: vfx.variant(),
+            };
             spawn_sentry(
                 &mut commands,
                 &primitives,
@@ -221,6 +301,7 @@ pub(in super::super) fn reconcile_sentry_visuals(
                 owner,
                 position.0,
                 identity.team_id,
+                signature,
             );
         }
     }
@@ -236,6 +317,7 @@ pub(in super::super) fn reconcile_concealment_field_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    vfx: CombatVfxContext,
     fields: Query<(Entity, &crate::concealment::ConcealmentFieldState)>,
     visuals: Query<(Entity, &CombatVisualOwner), With<ConcealmentFieldVisual3d>>,
 ) {
@@ -244,6 +326,21 @@ pub(in super::super) fn reconcile_concealment_field_visuals(
         if !roots.contains(&owner)
             && let Some(radius) = state.radius()
         {
+            let signature = vfx::CombatVisualSignature {
+                carrier: vfx::VfxCarrier::PersistentArea,
+                phase: vfx::VfxPhase::Active,
+                accents: [Some(vfx::VfxAccent::Concealment), None],
+                relationship: relationship_for_team(vfx.cache(), state.team),
+                context: Some(vfx::VfxContextOverride::ConcealmentField),
+                geometry: vfx::VfxGeometry::circle(state.center_vec2(), radius),
+                identity: vfx::VfxPresentationIdentity::ReplicatedField(state.id.0),
+                timing: vfx::VfxAuthoritativeTiming::persistent(
+                    state.activated_at_tick,
+                    None,
+                    state.expires_at_tick,
+                ),
+                variant: vfx.variant(),
+            };
             spawn_concealment_field(
                 &mut commands,
                 &primitives,
@@ -252,6 +349,7 @@ pub(in super::super) fn reconcile_concealment_field_visuals(
                 state.center_vec2(),
                 radius,
                 state.team,
+                signature,
             );
         }
     }
@@ -267,6 +365,7 @@ pub(in super::super) fn reconcile_elemental_field_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    vfx: CombatVfxContext,
     fields: Query<(Entity, &crate::combat::ElementalFieldState)>,
     visuals: Query<(Entity, &CombatVisualOwner), With<ElementalFieldVisual3d>>,
 ) {
@@ -283,6 +382,24 @@ pub(in super::super) fn reconcile_elemental_field_visuals(
                     materials.elemental_restoration.clone()
                 }
             };
+            let signature = vfx::CombatVisualSignature {
+                carrier: vfx::VfxCarrier::PersistentArea,
+                phase: vfx::VfxPhase::Active,
+                accents: [Some(vfx::accent_for_elemental_field(state.kind)), None],
+                relationship: vfx
+                    .cache()
+                    .observer()
+                    .relationship(state.owner_network_entity_id, state.team_id),
+                context: Some(vfx::VfxContextOverride::ElementalField(state.kind)),
+                geometry: vfx::VfxGeometry::circle(state.center_vec2(), radius),
+                identity: vfx::VfxPresentationIdentity::ReplicatedField(state.id.0),
+                timing: vfx::VfxAuthoritativeTiming::persistent(
+                    state.activated_at_tick,
+                    None,
+                    state.expires_at_tick,
+                ),
+                variant: vfx.variant(),
+            };
             spawn_elemental_field(
                 &mut commands,
                 &primitives,
@@ -290,6 +407,7 @@ pub(in super::super) fn reconcile_elemental_field_visuals(
                 state.center_vec2(),
                 radius,
                 material,
+                signature,
             );
         }
     }
@@ -300,16 +418,26 @@ pub(in super::super) fn reconcile_elemental_field_visuals(
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_lines,
+    reason = "persistent Splash reconciliation owns its bounded geometry, material, signature, and root lifecycle"
+)]
 pub(in super::super) fn reconcile_persistent_splash_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
-    splashes: Query<(Entity, &crate::combat::PersistentSplashState)>,
+    vfx: CombatVfxContext,
+    splashes: Query<(
+        Entity,
+        &crate::combat::PersistentSplashState,
+        Option<&crate::combat::ReplicatedAttackSource>,
+        Option<&crate::combat::AttackDelivery>,
+    )>,
     visuals: Query<(Entity, &CombatVisualOwner), With<PersistentSplashVisual3d>>,
 ) {
     let roots = unique_roots(&mut commands, &visuals);
-    for (owner, state) in &splashes {
+    for (owner, state, source, delivery) in &splashes {
         if roots.contains(&owner) {
             continue;
         }
@@ -363,7 +491,57 @@ pub(in super::super) fn reconcile_persistent_splash_visuals(
                     .then(|| effect_material(effect))
             })
             .unwrap_or_else(|| fill.clone());
-        spawn_persistent_splash(&mut commands, &primitives, owner, *state, fill, boundary);
+        let geometry = match state.shape {
+            crate::combat::PersistentAreaShape::Circle { radius } => {
+                vfx::VfxGeometry::circle(state.center.as_vec2(), radius)
+            }
+            crate::combat::PersistentAreaShape::Rectangle { half_extents } => {
+                vfx::VfxGeometry::Rectangle {
+                    center: state.center.as_vec2().to_array(),
+                    facing: state.facing,
+                    half_extents,
+                }
+            }
+        };
+        let timing = vfx::VfxAuthoritativeTiming::persistent(
+            state.activated_at_tick,
+            None,
+            state.expires_at_tick,
+        );
+        let mut signature = source.map_or_else(
+            || vfx::CombatVisualSignature {
+                carrier: vfx::VfxCarrier::PersistentArea,
+                phase: vfx::VfxPhase::Active,
+                accents: [Some(vfx::VfxAccent::Neutral), None],
+                relationship: vfx::VfxRelationship::Neutral,
+                context: None,
+                geometry,
+                identity: vfx::VfxPresentationIdentity::Neutral(state.activated_at_tick),
+                timing,
+                variant: vfx.variant(),
+            },
+            |source| {
+                vfx.cache().signature_for_source(
+                    source.attack,
+                    delivery.map_or(0, |delivery| delivery.delivery_index),
+                    vfx::VfxCarrier::PersistentArea,
+                    vfx::VfxPhase::Active,
+                    geometry,
+                    timing,
+                    vfx.variant(),
+                )
+            },
+        );
+        signature.accents = vfx::accents_for_payload_effects(state.effects.into_iter().flatten());
+        spawn_persistent_splash(
+            &mut commands,
+            &primitives,
+            owner,
+            *state,
+            fill,
+            boundary,
+            signature,
+        );
     }
     for (root, owner) in &visuals {
         if splashes.get(owner.0).is_err() {
@@ -379,11 +557,13 @@ fn spawn_persistent_splash(
     state: crate::combat::PersistentSplashState,
     fill: Handle<StandardMaterial>,
     boundary: Handle<StandardMaterial>,
+    signature: vfx::CombatVisualSignature,
 ) {
     let root = commands
         .spawn((
             CombatVisualOwner(owner),
             PersistentSplashVisual3d,
+            signature,
             Transform::from_translation(ground_position(state.center.as_vec2()))
                 .with_rotation(ground_rotation(Rotation::radians(state.facing))),
             Visibility::default(),
@@ -461,16 +641,27 @@ fn spawn_persistent_splash(
         });
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "sticky reconciliation joins the complete replicated payload identity needed by one visual root"
+)]
 pub(in super::super) fn reconcile_sticky_blob_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
-    blobs: Query<(Entity, &Position, &crate::combat::StickyBlobState)>,
+    vfx: CombatVfxContext,
+    blobs: Query<(
+        Entity,
+        &Position,
+        &crate::combat::StickyBlobState,
+        Option<&crate::combat::ReplicatedAttackSource>,
+        Option<&crate::combat::AttackDelivery>,
+    )>,
     visuals: Query<(Entity, &CombatVisualOwner), With<StickyBlobVisual3d>>,
 ) {
     let roots = unique_roots(&mut commands, &visuals);
-    for (owner, position, state) in &blobs {
+    for (owner, position, state, source, delivery) in &blobs {
         if roots.contains(&owner) {
             continue;
         }
@@ -478,10 +669,41 @@ pub(in super::super) fn reconcile_sticky_blob_visuals(
             crate::combat::StickyBlobKind::Primary => 9.0,
             crate::combat::StickyBlobKind::UltimateSecondary => 6.0,
         };
+        let timing = vfx::VfxAuthoritativeTiming::persistent(
+            state.armed_at_tick,
+            None,
+            state.detonates_at_tick,
+        );
+        let signature = source.map_or_else(
+            || vfx::CombatVisualSignature {
+                carrier: vfx::VfxCarrier::StickyPayload,
+                phase: vfx::VfxPhase::Active,
+                accents: [Some(vfx::VfxAccent::Neutral), None],
+                relationship: vfx::VfxRelationship::Neutral,
+                context: matches!(state.kind, crate::combat::StickyBlobKind::UltimateSecondary)
+                    .then_some(vfx::VfxContextOverride::StickyUltimateSecondary),
+                geometry: vfx::VfxGeometry::circle(position.0, state.explosion_radius),
+                identity: vfx::VfxPresentationIdentity::Neutral(state.armed_at_tick),
+                timing,
+                variant: vfx.variant(),
+            },
+            |source| {
+                vfx.cache().signature_for_source(
+                    source.attack,
+                    delivery.map_or(0, |delivery| delivery.delivery_index),
+                    vfx::VfxCarrier::StickyPayload,
+                    vfx::VfxPhase::Active,
+                    vfx::VfxGeometry::circle(position.0, state.explosion_radius),
+                    timing,
+                    vfx.variant(),
+                )
+            },
+        );
         let root = commands
             .spawn((
                 CombatVisualOwner(owner),
                 StickyBlobVisual3d,
+                signature,
                 Transform::from_translation(ground_position(position.0)),
                 Visibility::default(),
                 Name::new("Sticky Blomb armed visual root"),
@@ -589,11 +811,13 @@ fn spawn_elemental_field(
     center: Vec2,
     radius: f32,
     material: Handle<StandardMaterial>,
+    signature: vfx::CombatVisualSignature,
 ) {
     let root = commands
         .spawn((
             CombatVisualOwner(owner),
             ElementalFieldVisual3d,
+            signature,
             Transform::from_translation(ground_position(center)),
             Visibility::default(),
             Name::new("Elemental Field visual root"),
@@ -623,6 +847,10 @@ fn spawn_elemental_field(
     });
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the field helper receives one explicit visual recipe plus its semantic signature"
+)]
 fn spawn_concealment_field(
     commands: &mut Commands,
     primitives: &Primitive3dAssets,
@@ -631,6 +859,7 @@ fn spawn_concealment_field(
     center: Vec2,
     radius: f32,
     team: crate::combat::TeamId,
+    signature: vfx::CombatVisualSignature,
 ) {
     let (fill, boundary) = if team.0 == 1 {
         (
@@ -647,6 +876,7 @@ fn spawn_concealment_field(
         .spawn((
             CombatVisualOwner(owner),
             ConcealmentFieldVisual3d,
+            signature,
             Transform::from_translation(ground_position(center)),
             Visibility::default(),
             Name::new("V9 Concealment Field visual root"),
@@ -674,6 +904,20 @@ fn spawn_concealment_field(
             Name::new("V9 Concealment Field boundary"),
         ));
     });
+}
+
+fn relationship_for_team(
+    cache: &vfx::VfxSignatureCache,
+    team: crate::combat::TeamId,
+) -> vfx::VfxRelationship {
+    let observer = cache.observer();
+    if team.0 == 0 || observer.team_id.is_none() {
+        vfx::VfxRelationship::Neutral
+    } else if observer.team_id == Some(team) {
+        vfx::VfxRelationship::Ally
+    } else {
+        vfx::VfxRelationship::Enemy
+    }
 }
 
 fn update_ground_markers(
@@ -761,6 +1005,7 @@ fn spawn_projectile(
     straight: Option<&crate::combat::StraightFlight>,
     body: Option<&crate::combat::ProjectileBody>,
     lobbed: bool,
+    signature: vfx::CombatVisualSignature,
 ) {
     let root = commands
         .spawn((
@@ -768,6 +1013,7 @@ fn spawn_projectile(
             V3ProjectileVisual {
                 planar_position: straight.map_or(position, |flight| flight.origin.as_vec2()),
             },
+            signature,
             Transform::from_translation(ground_position(position)),
             Visibility::default(),
             Name::new("V3 independent projectile visual root"),
@@ -810,11 +1056,13 @@ fn spawn_sentry(
     owner: Entity,
     position: Vec2,
     team: crate::combat::TeamId,
+    signature: vfx::CombatVisualSignature,
 ) {
     let root = commands
         .spawn((
             CombatVisualOwner(owner),
             SentryVisual3d,
+            signature,
             Transform::from_translation(ground_position(position)),
             Visibility::default(),
             Name::new("V3 independent sentry visual root"),

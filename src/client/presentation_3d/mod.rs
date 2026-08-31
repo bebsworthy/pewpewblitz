@@ -248,6 +248,12 @@ fn configure_world_presentation_schedule(app: &mut App) {
         Update,
         vfx::VfxRequestSet.in_set(WorldPresentationSet::ConsumeCues),
     );
+    app.configure_sets(
+        Update,
+        vfx::VfxSignatureSet
+            .after(CombatClientSet::Sync)
+            .before(WorldPresentationSet::ReconcileState),
+    );
 }
 
 impl Plugin for WorldPresentationPlugin {
