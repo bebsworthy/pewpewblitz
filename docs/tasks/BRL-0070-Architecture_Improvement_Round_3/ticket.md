@@ -1,13 +1,13 @@
 ---
 id: BRL-0070
 title: Architecture improvement round 3
-status: doing
+status: done
 theme:
 release:
 created: 2026-08-30T18:38:17Z
-modified: 2026-08-31T07:52:59Z
-closed:
-revision: 7deabb3e7bf46147
+modified: 2026-08-31T08:47:47Z
+closed: 2026-08-31T08:47:47Z
+revision: e516388312e28a8d
 blocks: []
 related: [BRL-0043, BRL-0071, BRL-0072, BRL-0073, BRL-0074, BRL-0075, BRL-0076, BRL-0077, BRL-0078, BRL-0079, BRL-0080, BRL-0081, BRL-0082, BRL-0083, BRL-0084, BRL-0085, BRL-0086, BRL-0087, BRL-0088, BRL-0089, BRL-0090, BRL-0091, BRL-0092, BRL-0093, BRL-0094, BRL-0095]
 ---

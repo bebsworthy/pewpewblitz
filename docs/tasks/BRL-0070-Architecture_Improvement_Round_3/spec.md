@@ -349,3 +349,69 @@ The ultimate-family exact-output follow-up remains the last demonstrated Stage 6
 ## Follow-up decision — ultimate metadata
 
 The post-passive audit found the same demonstrated maintenance failure in ultimate metadata: bounds are duplicated between build validation and the Balance Lab adapter, all eight parameter projections use wildcard matches, and current one-way coverage cannot detect a newly added numeric field. BRL-0095 owns an exact-output typed-bounds/exhaustive-projection phase with 11-definition/68-leaf bidirectional coverage. No schema or behavior change is authorized.
+
+
+## BRL-0095 phase completion
+
+BRL-0095 completed the last demonstrated Stage 6.3 phase. Crate-private typed ultimate bounds now live beside `UltimateParameters`; authoritative build validation and the deliberately partial advertised-profile validator consume the same owners without changing their distinct semantics. Private `editor::ultimates` exhaustively projects all eleven definitions and 68 numeric leaves. Exact bidirectional coverage, an independently literal ordered digest, isolated per-leaf boundary mutations, compatibility/relational tests, and partial-validator characterization protect the unchanged 215-field manifest and schema revisions. Independent review corrections are complete with no remaining P0/P1/P2 finding. The phase was committed as `03fe7ea`.
+
+## Final acceptance crosswalk — 2026-08-31
+
+### Data and balance
+
+- BRL-0071 moved concealment reveal timing into validated fingerprinted content.
+- BRL-0073 authored the direct-diagnostic loadout through the ordinary build catalog; BRL-0074 centralized shared tick conversions and operator-owned formation deadlines.
+- BRL-0091, BRL-0093, and BRL-0095 co-located passive, weapon, and ultimate Balance Lab bounds with typed owners and exhaustive private projection adapters. Player-visible values, stable wire shapes, and schema revisions stayed unchanged except BRL-0093's separately evidenced correction of UI limits to pre-existing authoritative weapon policy.
+- Engine/protocol capacities remain code-owned. BRL-0070 introduced no dependency on retired point-cost machinery; its independent cleanup remains explicitly owned by linked backlog ticket BRL-0043.
+
+### ECS, authority, and deterministic scheduling
+
+- BRL-0077 separated pure admission planning from commit; BRL-0078 routed environment damage through the one combat authority path. Human and Practice assembly share the supported invariant fighter construction.
+- BRL-0084 decomposed projectile sweep into immutable collection/planning and sequential decision-free commit while preserving ordering and deferred boundaries.
+- BRL-0085 explicitly owns Balance Lab normalize -> immutable prepare -> persist -> infallible authoritative commit/publication, rollback, same-tick restart visibility, and named `BalanceLabFighterRuntime` `QueryData`. A final source audit confirmed Stage 6.4 and 6.6 require no additional ticket.
+- Role isolation, stable IDs, bounded state, facts/cues/telemetry, replication, and fixed-tick behavior remain covered by final role, network, and performance gates.
+
+### Open/Closed extension seams
+
+- BRL-0072 and BRL-0075 delivered bounded plugin-populated bot-behavior and object-reaction registries with duplicate, capacity, coverage, fallback, and synthetic-extension tests.
+- BRL-0076 projected semantic AI objects/objectives; BRL-0079 resolved authored effect tiles into orthogonal runtime capabilities.
+- BRL-0080 made gameplay fingerprints contributor-registered; BRL-0081 made local mode installation registry-owned while intentionally retaining closed stable wire IDs.
+- BRL-0082 and BRL-0083 separated feature-owned stable VFX/audio requests from generic materialization/playback.
+- Linked BRL-0089 deliberately defers executable effect-tile handler registration until a second real mechanic demonstrates a reusable handler shape. Linked BRL-0094 is separate new player-visible layered-VFX product scope and is not a BRL-0070 residual.
+
+### Organization
+
+- BRL-0086, BRL-0087, BRL-0088, and BRL-0090 extracted demonstrated client customization, lobby profile transaction, projected object-health, and match-flow ownership boundaries. Composition roots retain visible schedule/plugin relationships.
+- A proposed equipment-screen split was rejected because it would only relocate a cohesive builder by line count. The remaining connection reducer root was likewise retained after ownership audit.
+- `docs/15-balance-lab.md` now documents all eleven ultimate definitions plus the shared typed-bound and private passive/weapon/ultimate adapter ownership.
+
+## Final verification and native evidence
+
+Final-tree commands passed:
+
+- `just check`
+- `just ci`, including formatting, all strict Clippy/role-isolation gates, web tests/build, all client/server/Balance Lab/package suites, 97 routed network scenarios, 12 performance gates, real-process 2/4/6-client product matches, and all nine Wipeout/Hot Zone/Heist Practice game types
+- `git diff --check`
+
+The cumulative native matrix is complete:
+
+- BRL-0082: normal Wipeout and reduced-effects Heist VFX request/materialization evidence accepted.
+- BRL-0083: routed Wipeout audio request/playback evidence accepted.
+- BRL-0093: live routed Balance Lab editor/validation evidence accepted, including exact corrected weapon limits and disabled Apply on invalid drafts.
+- BRL-0070 closeout: `BRAWLER_RENDER_MODE=hot-zone BRAWLER_RENDER_COMBAT=1 BRAWLER_RENDER_PRACTICE=1 BRAWLER_RENDER_WARMUP_SECONDS=5 BRAWLER_RENDER_MEASURE_SECONDS=20 just v3-render-evidence target/brl-0070-hot-zone-practice-final.txt` passed on Metal at 2560x1440. The report observed four fighters, projectile and effect activity, 1,201 samples, p50 16.673 ms, p95 16.972 ms, p99 17.191 ms, maximum 17.751 ms, zero frames over 25/50/100 ms, and `result=pass`.
+
+Two prior Hot Zone attempts are diagnosed rather than hidden: the default 40-second sample outlived the bounded Practice automation, and a 10-second sample produced only 601 frames against the locked minimum. The accepted 20-second sample met the threshold before automation exit. The later clean `just ci` Hot Zone 1v1/2v2/3v3 Practice runs confirm the normal routed lifecycle. No gameplay correction was indicated.
+
+All review and native observations are either corrected or accepted. There is no feedback item awaiting evidence. BRL-0092 was canceled because independent literal parity evidence proved its supposed resistance-bound mismatch was an audit error, not a product defect.
+
+## Learn-from-errors review
+
+- A shallow file move is not decomposition. BRL-0084's first extraction was rejected until immutable collection/planning and decision-free commit became real testable phases. Future coordinator work must name state ownership and mutation boundaries before moving code.
+- Validation precedence is behavior. Admission, Balance Lab transactions, reducers, and profile adapters needed characterization around both accepted and rejected paths before extraction; refactors must preserve which error wins, not merely the final success state.
+- Registration order and runtime order are separate contracts. Registries should seal deterministically by stable identity, while request playback and authoritative commits retain explicit producer/event ordering.
+- Presentation evidence needs an action driver. VFX/audio/native checks must cause the relevant combat or mode transitions rather than only opening a window and measuring idle frames.
+- Independently literal adapter tests prevent shared mistakes. Calling production bound, descriptor, or hash helpers from parity tests can make both sides wrong together; exact external literals plus bidirectional leaf coverage caught real UI-policy drift and disproved the false BRL-0092 mismatch.
+- Exhaustive endpoints are insufficient when one fixture violates multiple fields. The BRL-0095 review required one isolated mutation per numeric leaf and explicit characterization of what a deliberately partial secondary validator does not own.
+- Native harness durations are part of the evidence contract. Measurement windows must satisfy locked sample minima while completing before bounded automation exits; failures from those competing constraints should be retained and classified rather than mistaken for gameplay regressions.
+
+The reusable prevention rule for future architecture rounds is: prove a demonstrated ownership or extension cost, preserve explicit ECS/authority ordering, and use independent exact evidence at every adapter boundary. No new general framework, crate, protocol abstraction, or line-count-only split was introduced.

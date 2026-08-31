@@ -53,9 +53,10 @@ editable numeric path, gameplay unit, storage conversion, authoritative bound, s
 control. The browser does not infer editability or limits from serialized field names. Its
 **Global** tab currently contains a **Cold & Freeze** section for buildup decay delay/rate, Freeze
 duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, seven
-canonical weapon-base recipes, and the bounded parameters of all nine tunable ultimates,
-including every Sticky Blomb delivery/fuse value, every Splash numeric delivery value, and every
-Big Blob parent/secondary value. The **World objects** tab exposes an **Effect tiles** subject with
+canonical weapon-base recipes, and the bounded parameters of all eleven tunable ultimates.
+Weapon coverage includes every Sticky Blomb delivery/fuse value and every Splash numeric delivery
+value; ultimate coverage includes every Big Blob parent/secondary value. The **World objects** tab
+exposes an **Effect tiles** subject with
 Speed and Slow multipliers, Damage per pulse, and pulse interval. These controls tune the three
 supported authored identities; there is no Heal tile control or runtime tile behavior. Damage
 amount and interval are consumed from the rebuilt map catalog by authoritative damage pulses.
@@ -217,12 +218,12 @@ Review this checklist:
   implementation milestone.
 
 Primary implementation ownership currently lives in `src/server/balance_lab/`, with authored global
-condition tuning in `content/catalogs/combat_conditions.ron`, authored build
-tuning in `src/builds/definitions.rs`, weapon definitions and map-destruction bounds in
-`src/combat/definitions/`, the private weapon-manifest adapter in
-`src/server/balance_lab/editor/weapons.rs`, effect-tile and object/chest definitions in `src/map/`,
-Heist safe rules in `src/matchplay/heist.rs`, and the operator application in
-`tools/balance-lab-web/`.
+condition tuning in `content/catalogs/combat_conditions.ron`, authored build tuning and shared
+passive/ultimate bounds beside their typed models in `src/builds/`, weapon definitions and shared
+weapon bounds in `src/combat/definitions/`, and private exhaustive manifest projections in
+`src/server/balance_lab/editor/{passives,weapons,ultimates}.rs`. Effect-tile and object/chest
+definitions remain in `src/map/`, Heist safe rules in `src/matchplay/heist.rs`, and the operator
+application in `tools/balance-lab-web/`.
 
 Elemental field timing, range, radius, and effect strength are part of the editable ultimate
 snapshot. The snapshot/persistence schema is migrated when these fields, fighter elemental
