@@ -411,112 +411,66 @@ pub(super) fn queue_area_payloads(
     world_pending: &mut ResMut<crate::map::PendingWorldTargetDamages>,
     objective_pending: &mut ResMut<crate::matchplay::PendingModeObjectiveDamages>,
 ) -> usize {
-    let mut queued = 0;
     let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(
         FIGHTER_LAYER | crate::movement::DEPLOYABLE_LAYER,
     );
-    for (bundle_index, bundle) in recipe
-        .payload_bundles
-        .iter()
-        .enumerate()
-        .filter(|(_, bundle)| matches!(bundle.target, TargetSelection::Area { .. }))
-    {
-        let TargetSelection::Area {
-            radius,
-            map_occlusion,
-            max_targets,
-        } = bundle.target
-        else {
-            continue;
-        };
-        let candidate_entities = spatial_query.shape_intersections(
-            &Collider::circle(radius),
-            landing,
-            0.0,
-            &fighter_filter,
-        );
-        let mut candidates: Vec<_> = candidate_entities
-            .into_iter()
-            .filter_map(|entity| fighters.get(entity).ok().map(|data| (entity, data)))
-            .collect();
-        candidates.sort_by_key(|(_, (_, _, _, network_id, _, _))| network_id.0);
-        let mut collected = 0_u8;
-        for (target, (_, position, team, network_id, defeated, controlled)) in candidates {
-            if collected >= max_targets {
-                break;
-            }
-            if defeated.is_some()
-                || controlled.is_some_and(|controlled| disconnected.contains(&controlled.owner))
-                || (map_occlusion && !area_line_of_sight_clear(landing, position.0, spatial_query))
-                || !payload_can_affect_target(bundle, source, *team, *network_id)
-            {
-                continue;
-            }
-            pending.write(PendingPayload {
-                source,
-                delivery_index,
-                bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
-                target,
-                target_network_id: *network_id,
-                position: landing,
-                engagement_distance: source.origin.as_vec2().distance(position.0),
-                delivery_travel: lob_launch_point(source, recipe).distance(landing),
-                contact_fraction: 1.0,
-                bundle: bundle.clone(),
-            });
-            queued += 1;
-            collected = collected.saturating_add(1);
-        }
-        let mut object_candidates: Vec<_> = objects
-            .iter()
-            .filter(|(_, position, _, health, life)| {
-                crate::map::object_is_live(**health, **life)
-                    && position.0.distance_squared(landing) <= radius * radius
-            })
-            .collect();
-        object_candidates.sort_by_key(|(_, _, identity, ..)| identity.stable_order_key());
-        for (entity, position, identity, _, _) in object_candidates {
-            if collected >= max_targets {
-                break;
-            }
-            if map_occlusion
-                && !area_line_of_sight_clear_excluding(landing, position.0, entity, spatial_query)
-            {
-                continue;
-            }
-            for (effect_index, effect) in bundle.effects.iter().enumerate() {
-                let PayloadEffectDefinition::Damage {
-                    amount, falloff, ..
-                } = *effect
-                else {
-                    continue;
-                };
-                delivery::queue_damageable_target(
-                    world_pending,
-                    objective_pending,
-                    crate::map::PendingWorldTargetDamage {
-                        target: *identity,
-                        source,
-                        attack_id: source.attack_id,
-                        requested_damage: effects::requested_damage(
-                            amount,
-                            falloff,
-                            lob_launch_point(source, recipe).distance(landing),
-                            1.0,
-                            None,
-                            source.origin.as_vec2().distance(position.0),
-                        ),
-                        delivery_index,
-                        bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
-                        effect_index: u8::try_from(effect_index).unwrap_or(u8::MAX),
+    let candidates = delivery::collect_area_bundle_candidates(
+        recipe,
+        |radius, map_occlusion| {
+            spatial_query
+                .shape_intersections(&Collider::circle(radius), landing, 0.0, &fighter_filter)
+                .into_iter()
+                .filter_map(|entity| {
+                    fighters.get(entity).ok().map(
+                        |(_, position, team, network_id, defeated, controlled)| {
+                            delivery::AreaFighterCandidate {
+                                entity,
+                                position: position.0,
+                                team: *team,
+                                network_id: *network_id,
+                                defeated: defeated.is_some(),
+                                disconnected: controlled.is_some_and(|controlled| {
+                                    disconnected.contains(&controlled.owner)
+                                }),
+                                line_of_sight_clear: !map_occlusion
+                                    || area_line_of_sight_clear(landing, position.0, spatial_query),
+                            }
+                        },
+                    )
+                })
+                .collect()
+        },
+        |radius, map_occlusion| {
+            objects
+                .iter()
+                .filter(|(_, position, _, health, life)| {
+                    crate::map::object_is_live(**health, **life)
+                        && position.0.distance_squared(landing) <= radius * radius
+                })
+                .map(
+                    |(entity, position, identity, _, _)| delivery::AreaObjectCandidate {
+                        position: position.0,
+                        identity: *identity,
+                        line_of_sight_clear: !map_occlusion
+                            || area_line_of_sight_clear_excluding(
+                                landing,
+                                position.0,
+                                entity,
+                                spatial_query,
+                            ),
                     },
-                );
-            }
-            collected = collected.saturating_add(1);
-            queued += 1;
-        }
+                )
+                .collect()
+        },
+    );
+    let plan = delivery::plan_area_payloads(landing, source, delivery_index, recipe, candidates);
+    for payload in plan.payloads {
+        pending.write(payload);
     }
-    queued
+    for request in plan.world_damages {
+        delivery::queue_damageable_target(world_pending, objective_pending, request);
+    }
+    plan.selected_targets
 }
 
 #[cfg(feature = "server")]

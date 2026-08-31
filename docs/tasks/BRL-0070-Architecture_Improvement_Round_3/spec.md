@@ -275,3 +275,11 @@ The next planned child is the separate audio request/playback boundary. Audio wi
 ## Completed phase — BRL-0083 audio request/playback separation
 
 BRL-0083 is complete. Client audio now uses feature-owned stable-key request producers, a bounded sealed registry, schema-3 authored mappings, validated producer-rank/local-sequence ordering, and one generic playback adapter. All focused/canonical/native gates passed, independent review is clean, and dedicated-server isolation is preserved. The next implementation phase is the authoritative projectile sweep decomposition previously audited for BRL-0070.
+
+## BRL-0084 phase completion
+
+BRL-0084 completed the authoritative composed-projectile sweep decomposition. The server sweep now collects one owned immutable projectile/target batch, produces a complete deterministic action vector, and sequentially applies decision-free commits. Sticky cap/chaining uses a local planning ledger, and lob/sticky area selection shares one deterministic fighter/object policy. Schedule and ApplyDeferred placement, protocol, balance, telemetry/tracker settlement, splash oversubscription semantics, and object/Heist authority remain unchanged.
+
+Independent review rejected the initial shallow extraction and verified the corrected three-phase boundary with no remaining P0/P1 finding. Canonical checks, lint, full tests, 97 network cases, and 12 performance gates pass; isolated lob-heavy and 200-projectile p95 measurements are 1.050125 ms and 1.171416 ms. No native rerun was required for this organization-only phase.
+
+The next coordinator-decomposition slice will be selected from the remaining audited client-flow, Balance Lab apply, lobby, and presentation ownership hotspots after a focused current-source boundary audit; it will receive its own linked ticket before implementation.

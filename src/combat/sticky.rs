@@ -6,127 +6,170 @@ use super::*;
 
 pub(crate) const MAX_ACTIVE_STICKY_BLOBS: usize = 96;
 
-pub(crate) struct StickySweepState {
+pub(crate) struct StickyPlanningLedger {
     active_by_owner: HashMap<u64, usize>,
     active_total: usize,
-    newly_attached_primaries: HashMap<u64, Entity>,
+    existing_primaries_by_target: HashMap<u64, Vec<(Entity, StickyBlobState)>>,
+    newest_planned_primary_by_target: HashMap<u64, Entity>,
 }
 
-impl StickySweepState {
-    pub(crate) fn from_active(blobs: &Query<(&mut StickyBlobState, &StickyBlobRuntime)>) -> Self {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct StickyArmPlan {
+    entity: Entity,
+    position: Vec2,
+    travelled: f32,
+    state: StickyBlobState,
+    runtime: StickyBlobRuntime,
+    chain_writes: Vec<(Entity, StickyBlobState)>,
+}
+
+impl StickyPlanningLedger {
+    pub(crate) fn from_active(
+        blobs: &Query<(Entity, &StickyBlobState, &StickyBlobRuntime)>,
+    ) -> Self {
+        Self::from_snapshots(blobs.iter().map(|(entity, state, runtime)| {
+            (entity, *state, runtime.source.owner_network_entity_id)
+        }))
+    }
+
+    fn from_snapshots(
+        blobs: impl IntoIterator<Item = (Entity, StickyBlobState, NetworkEntityId)>,
+    ) -> Self {
         let mut active_by_owner = HashMap::new();
         let mut active_total = 0_usize;
-        for (_, runtime) in blobs {
-            *active_by_owner
-                .entry(runtime.source.owner_network_entity_id.0)
-                .or_default() += 1;
+        let mut existing_primaries_by_target =
+            HashMap::<u64, Vec<(Entity, StickyBlobState)>>::new();
+        for (entity, state, owner) in blobs {
+            *active_by_owner.entry(owner.0).or_default() += 1;
             active_total = active_total.saturating_add(1);
+            if matches!(state.kind, StickyBlobKind::Primary)
+                && let Some(target) = state.attached_to
+            {
+                existing_primaries_by_target
+                    .entry(target.0)
+                    .or_default()
+                    .push((entity, state));
+            }
         }
         Self {
             active_by_owner,
             active_total,
-            newly_attached_primaries: HashMap::new(),
+            existing_primaries_by_target,
+            newest_planned_primary_by_target: HashMap::new(),
         }
     }
 
-    pub(crate) fn try_arm_expired(
-        &mut self,
-        commands: &mut Commands,
-        entity: Entity,
-        runtime: &ComposedProjectileRuntime,
-        position: Vec2,
-        tick: u64,
-    ) -> bool {
-        if !self.has_capacity(runtime) {
-            return false;
-        }
-        let kind = sticky_kind(runtime.source.kind);
-        if !arm_projectile(
-            commands,
-            entity,
-            runtime.clone(),
-            position,
-            None,
-            kind,
-            tick,
-        ) {
-            return false;
-        }
-        self.record_arm(runtime.source.owner_network_entity_id);
-        true
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        Self::from_snapshots([])
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn try_arm_impact(
+    pub(crate) fn try_plan_arm(
         &mut self,
-        commands: &mut Commands,
         entity: Entity,
         runtime: &ComposedProjectileRuntime,
-        armed_position: Vec2,
+        position: Vec2,
         attached_to: Option<NetworkEntityId>,
         tick: u64,
-        blobs: &mut Query<(&mut StickyBlobState, &StickyBlobRuntime)>,
-    ) -> bool {
-        if !self.has_capacity(runtime) {
-            return false;
-        }
-        let kind = sticky_kind(runtime.source.kind);
-        if kind == StickyBlobKind::Primary
-            && let Some(target) = attached_to
-        {
-            for (mut existing, _) in blobs.iter_mut() {
-                if primary_impact_triggers_existing(kind, *existing, target) {
-                    existing.detonates_at_tick = tick;
-                }
-            }
-            if let Some(previous) = self.newly_attached_primaries.get(&target.0).copied() {
-                let (_, _, explosion_radius) = sticky_delivery_parameters(&runtime.recipe)
-                    .expect("capacity check requires a validated sticky recipe");
-                commands.entity(previous).insert(StickyBlobState {
-                    kind: StickyBlobKind::Primary,
-                    attached_to: Some(target),
-                    armed_at_tick: tick,
-                    detonates_at_tick: tick,
-                    explosion_radius,
-                });
-            }
-        }
-        if !arm_projectile(
-            commands,
-            entity,
-            runtime.clone(),
-            armed_position,
-            attached_to,
-            kind,
-            tick,
-        ) {
-            return false;
-        }
-        if kind == StickyBlobKind::Primary
-            && let Some(target) = attached_to
-        {
-            self.newly_attached_primaries.insert(target.0, entity);
-        }
-        self.record_arm(runtime.source.owner_network_entity_id);
-        true
-    }
-
-    fn has_capacity(&self, runtime: &ComposedProjectileRuntime) -> bool {
-        let Some((_, max_active, _)) = sticky_delivery_parameters(&runtime.recipe) else {
-            return false;
-        };
-        self.active_by_owner
-            .get(&runtime.source.owner_network_entity_id.0)
+        travelled: f32,
+    ) -> Option<StickyArmPlan> {
+        let (fuse_ticks, max_active, explosion_radius) =
+            sticky_delivery_parameters(&runtime.recipe)?;
+        let owner = runtime.source.owner_network_entity_id;
+        if self
+            .active_by_owner
+            .get(&owner.0)
             .copied()
             .unwrap_or_default()
-            < usize::from(max_active)
-            && self.active_total < MAX_ACTIVE_STICKY_BLOBS
-    }
-
-    fn record_arm(&mut self, owner: NetworkEntityId) {
+            >= usize::from(max_active)
+            || self.active_total >= MAX_ACTIVE_STICKY_BLOBS
+        {
+            return None;
+        }
+        let kind = sticky_kind(runtime.source.kind);
+        let mut chain_writes = Vec::new();
+        if kind == StickyBlobKind::Primary
+            && let Some(target) = attached_to
+        {
+            chain_writes.extend(
+                self.existing_primaries_by_target
+                    .get(&target.0)
+                    .into_iter()
+                    .flatten()
+                    .map(|(existing, state)| {
+                        (
+                            *existing,
+                            StickyBlobState {
+                                detonates_at_tick: tick,
+                                ..*state
+                            },
+                        )
+                    }),
+            );
+            if let Some(previous) = self
+                .newest_planned_primary_by_target
+                .get(&target.0)
+                .copied()
+            {
+                chain_writes.push((
+                    previous,
+                    StickyBlobState {
+                        kind: StickyBlobKind::Primary,
+                        attached_to: Some(target),
+                        armed_at_tick: tick,
+                        detonates_at_tick: tick,
+                        explosion_radius,
+                    },
+                ));
+            }
+            self.newest_planned_primary_by_target
+                .insert(target.0, entity);
+        }
         *self.active_by_owner.entry(owner.0).or_default() += 1;
         self.active_total = self.active_total.saturating_add(1);
+        Some(StickyArmPlan {
+            entity,
+            position,
+            travelled,
+            state: StickyBlobState {
+                kind,
+                attached_to,
+                armed_at_tick: tick,
+                detonates_at_tick: tick.saturating_add(fuse_ticks),
+                explosion_radius,
+            },
+            runtime: StickyBlobRuntime {
+                source: runtime.source,
+                delivery_index: runtime.delivery_index,
+                recipe: runtime.recipe.clone(),
+            },
+            chain_writes,
+        })
     }
+}
+
+pub(crate) fn commit_arm_plan(
+    commands: &mut Commands,
+    projectile_runtime: &mut ComposedProjectileRuntime,
+    plan: StickyArmPlan,
+) {
+    projectile_runtime.travelled = plan.travelled;
+    for (entity, state) in plan.chain_writes {
+        commands.entity(entity).insert(state);
+    }
+    commands
+        .entity(plan.entity)
+        .remove::<(
+            Projectile,
+            StraightFlight,
+            ProjectileBody,
+            ProjectileDeadline,
+            Collider,
+            CollisionLayers,
+            ComposedProjectileRuntime,
+        )>()
+        .insert((Position(plan.position), plan.state, plan.runtime));
 }
 
 const fn sticky_kind(source: CombatSourceKind) -> StickyBlobKind {
@@ -155,17 +198,6 @@ pub(crate) fn sticky_delivery_parameters(recipe: &WeaponRecipe) -> Option<(u64, 
         }
     })?;
     Some((fuse_ticks, max_active_per_owner, explosion_radius))
-}
-
-#[must_use]
-pub(crate) const fn primary_impact_triggers_existing(
-    incoming: StickyBlobKind,
-    existing: StickyBlobState,
-    target: NetworkEntityId,
-) -> bool {
-    matches!(incoming, StickyBlobKind::Primary)
-        && matches!(existing.kind, StickyBlobKind::Primary)
-        && matches!(existing.attached_to, Some(attached) if attached.0 == target.0)
 }
 
 pub(crate) fn arm_projectile(
@@ -347,6 +379,42 @@ pub(crate) fn detonate_sticky_blobs(
 mod tests {
     use super::*;
 
+    fn sticky_runtime(
+        owner_entity: Entity,
+        owner: NetworkEntityId,
+        attack_id: u64,
+    ) -> ComposedProjectileRuntime {
+        ComposedProjectileRuntime {
+            owner_entity,
+            source_entity: owner_entity,
+            source: AttackSource {
+                kind: CombatSourceKind::PrimaryWeapon,
+                attack_id: AttackId(attack_id),
+                player_id: PlayerId(owner.0),
+                owner_network_entity_id: owner,
+                team_id: TeamId(0),
+                recipe_fingerprint: WeaponRecipeFingerprint(11),
+                legacy_compatibility: false,
+                source_preset_id: Some(WeaponPresetId(5)),
+                origin: WorldPoint::from(Vec2::ZERO),
+                facing: 0.0,
+            },
+            delivery_index: 0,
+            velocity: Vec2::X,
+            travelled: 0.0,
+            expires_at_tick: 100,
+            maximum_range: 1_000.0,
+            landing: None,
+            recipe: WeaponCatalog::embedded()
+                .unwrap()
+                .preset(WeaponPresetId(5))
+                .unwrap()
+                .configuration
+                .recipe
+                .clone(),
+        }
+    }
+
     #[test]
     fn sticky_parameters_use_authored_fuse_ceiling_and_area_radius() {
         let recipe = WeaponCatalog::embedded()
@@ -360,7 +428,13 @@ mod tests {
     }
 
     #[test]
-    fn only_primary_hits_chain_an_existing_primary_on_the_same_carrier() {
+    fn planning_ledger_owns_existing_and_same_batch_primary_chain_writes() {
+        let mut world = World::new();
+        let owner_entity = world.spawn_empty().id();
+        let existing_entity = world.spawn_empty().id();
+        let first_entity = world.spawn_empty().id();
+        let second_entity = world.spawn_empty().id();
+        let owner = NetworkEntityId(7);
         let carrier = NetworkEntityId(41);
         let existing = StickyBlobState {
             kind: StickyBlobKind::Primary,
@@ -369,21 +443,79 @@ mod tests {
             detonates_at_tick: 79,
             explosion_radius: 85.44,
         };
-        assert!(primary_impact_triggers_existing(
-            StickyBlobKind::Primary,
-            existing,
-            carrier
-        ));
-        assert!(!primary_impact_triggers_existing(
-            StickyBlobKind::UltimateSecondary,
-            existing,
-            carrier
-        ));
-        assert!(!primary_impact_triggers_existing(
-            StickyBlobKind::Primary,
-            existing,
-            NetworkEntityId(42)
-        ));
+        let mut ledger = StickyPlanningLedger::from_snapshots([(existing_entity, existing, owner)]);
+        let first_runtime = sticky_runtime(owner_entity, owner, 51);
+        let first = ledger
+            .try_plan_arm(
+                first_entity,
+                &first_runtime,
+                Vec2::X,
+                Some(carrier),
+                20,
+                4.0,
+            )
+            .unwrap();
+        assert_eq!(first.chain_writes.len(), 1);
+        assert_eq!(first.chain_writes[0].0, existing_entity);
+        assert_eq!(
+            first.chain_writes[0].1,
+            StickyBlobState {
+                detonates_at_tick: 20,
+                ..existing
+            }
+        );
+
+        // Carrier chaining is intentionally cross-owner and follows sorted projectile order.
+        let second_owner = NetworkEntityId(8);
+        let second_runtime = sticky_runtime(owner_entity, second_owner, 52);
+        let second = ledger
+            .try_plan_arm(
+                second_entity,
+                &second_runtime,
+                Vec2::X * 2.0,
+                Some(carrier),
+                20,
+                8.0,
+            )
+            .unwrap();
+        assert_eq!(second.chain_writes.len(), 2);
+        assert_eq!(second.chain_writes[0].0, existing_entity);
+        assert_eq!(second.chain_writes[1].0, first_entity);
+        assert_eq!(second.chain_writes[1].1.armed_at_tick, 20);
+        assert_eq!(second.chain_writes[1].1.detonates_at_tick, 20);
+        assert!((second.chain_writes[1].1.explosion_radius - 85.44).abs() < f32::EPSILON);
+        assert_eq!(second.state.detonates_at_tick, 89);
+    }
+
+    #[test]
+    fn planning_ledger_rejects_owner_capacity_without_mutating_chain_state() {
+        let mut world = World::new();
+        let owner_entity = world.spawn_empty().id();
+        let projectile = world.spawn_empty().id();
+        let owner = NetworkEntityId(7);
+        let snapshots = (0..6)
+            .map(|_| {
+                (
+                    world.spawn_empty().id(),
+                    StickyBlobState {
+                        kind: StickyBlobKind::Primary,
+                        attached_to: None,
+                        armed_at_tick: 1,
+                        detonates_at_tick: 70,
+                        explosion_radius: 85.44,
+                    },
+                    owner,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut ledger = StickyPlanningLedger::from_snapshots(snapshots);
+        let runtime = sticky_runtime(owner_entity, owner, 51);
+
+        assert!(
+            ledger
+                .try_plan_arm(projectile, &runtime, Vec2::ZERO, None, 20, 4.0)
+                .is_none()
+        );
     }
 
     #[test]

@@ -5,6 +5,11 @@
 use super::*;
 use bevy::prelude::Vec2;
 
+#[cfg(feature = "server")]
+mod projectiles;
+#[cfg(feature = "server")]
+pub(super) use projectiles::sweep_composed_projectiles;
+
 #[must_use]
 #[cfg(feature = "client")]
 pub fn lob_height(progress: f32, visual_arc_height: f32) -> f32 {
@@ -103,581 +108,158 @@ pub(super) fn queue_damageable_target(
 }
 
 #[cfg(feature = "server")]
-#[derive(bevy::ecs::system::SystemParam)]
-pub(super) struct ProjectileEnvironmentState<'w, 's> {
-    active_splashes: Query<'w, 's, &'static PersistentSplashRuntime>,
-    roots: Query<'w, 's, &'static crate::matchplay::MatchState, With<crate::matchplay::MatchRoot>>,
-    walls: Query<'w, 's, Entity, With<ArenaWall>>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct AreaFighterCandidate {
+    pub(super) entity: Entity,
+    pub(super) position: Vec2,
+    pub(super) team: TeamId,
+    pub(super) network_id: NetworkEntityId,
+    pub(super) defeated: bool,
+    pub(super) disconnected: bool,
+    pub(super) line_of_sight_clear: bool,
 }
 
 #[cfg(feature = "server")]
-type FighterSweepSnapshot = (Vec2, TeamId, NetworkEntityId, bool, bool);
-
-#[cfg(feature = "server")]
-type ObjectSweepSnapshot = (
-    Vec2,
-    crate::map::DamageableTargetIdentity,
-    CurrentHealth,
-    crate::map::DamageableLifeState,
-);
-
-#[cfg(feature = "server")]
-struct ProjectileSweepIndex {
-    fighters: HashMap<Entity, FighterSweepSnapshot>,
-    objects: HashMap<Entity, ObjectSweepSnapshot>,
-    blocking_geometry: HashSet<Entity>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct AreaObjectCandidate {
+    pub(super) position: Vec2,
+    pub(super) identity: crate::map::DamageableTargetIdentity,
+    pub(super) line_of_sight_clear: bool,
 }
 
 #[cfg(feature = "server")]
-impl ProjectileSweepIndex {
-    fn owner_is_connected(&self, owner: NetworkEntityId) -> bool {
-        self.fighters
-            .values()
-            .any(|(_, _, network_id, _, disconnected)| *network_id == owner && !disconnected)
-    }
-
-    fn accepts_candidate(&self, candidate: Entity, runtime: &ComposedProjectileRuntime) -> bool {
-        self.fighters.get(&candidate).map_or_else(
-            || {
-                self.objects.get(&candidate).map_or_else(
-                    || self.blocking_geometry.contains(&candidate),
-                    |(_, _, health, life)| crate::map::object_is_live(*health, *life),
-                )
-            },
-            |(_, team, network_id, defeated, disconnected)| {
-                let has_contact_delivery = runtime.recipe.payload_bundles.iter().any(|bundle| {
-                    matches!(bundle.target, TargetSelection::Direct)
-                        || (matches!(
-                            runtime.recipe.delivery,
-                            DeliveryMethod::StickyStraight { .. }
-                        ) && matches!(bundle.target, TargetSelection::Area { .. }))
-                });
-                let has_affecting_payload = runtime.recipe.payload_bundles.iter().any(|bundle| {
-                    (matches!(bundle.target, TargetSelection::Direct)
-                        || matches!(bundle.target, TargetSelection::Area { .. }))
-                        && payload_can_affect_target(bundle, runtime.source, *team, *network_id)
-                });
-                has_contact_delivery && has_affecting_payload && !defeated && !disconnected
-            },
-        )
-    }
+pub(super) struct AreaBundleCandidates {
+    bundle_index: usize,
+    fighters: Vec<AreaFighterCandidate>,
+    objects: Vec<AreaObjectCandidate>,
 }
 
 #[cfg(feature = "server")]
-enum LobTrajectoryPlan {
-    InFlight(Vec2),
-    Landed(Vec2),
+pub(super) struct PlannedAreaPayloads {
+    pub(super) payloads: Vec<PendingPayload>,
+    pub(super) world_damages: Vec<crate::map::PendingWorldTargetDamage>,
+    pub(super) selected_targets: usize,
 }
 
 #[cfg(feature = "server")]
-fn plan_lob_trajectory(tick: u64, lob: &LobbedFlight) -> LobTrajectoryPlan {
-    let launch = lob.launch.as_vec2();
-    let landing = lob.landing.as_vec2();
-    if tick >= lob.lands_at_tick {
-        return LobTrajectoryPlan::Landed(landing);
-    }
-    let progress = (tick.saturating_sub(lob.launched_at_tick) as f32)
-        / (lob
-            .lands_at_tick
-            .saturating_sub(lob.launched_at_tick)
-            .max(1) as f32);
-    LobTrajectoryPlan::InFlight(launch.lerp(landing, progress.clamp(0.0, 1.0)))
-}
-
-#[cfg(feature = "server")]
-struct StraightTrajectoryPlan {
-    body: ProjectileBody,
-    step: f32,
-    direction: Dir2,
-}
-
-#[cfg(feature = "server")]
-fn plan_straight_trajectory(
-    runtime: &ComposedProjectileRuntime,
-    body: Option<&ProjectileBody>,
-) -> Option<StraightTrajectoryPlan> {
-    let body = body.copied().filter(|body| body.shape.is_valid())?;
-    let step = (runtime.velocity.length() / crate::timing::SIMULATION_TICK_HZ as f32)
-        .min((runtime.maximum_range - runtime.travelled).max(0.0));
-    let direction = Dir2::new(runtime.velocity.normalize_or_zero()).ok()?;
-    Some(StraightTrajectoryPlan {
-        body,
-        step,
-        direction,
-    })
-}
-
-#[cfg(feature = "server")]
-struct ProjectileTerminationContext<'a, 'w, 's> {
-    commands: &'a mut Commands<'w, 's>,
-    ids: &'a mut NextCombatIds,
-    trackers: &'a mut ActiveAttackTrackers,
-    telemetry: &'a mut WeaponTelemetry,
-}
-
-#[cfg(feature = "server")]
-impl ProjectileTerminationContext<'_, '_, '_> {
-    fn commit(
-        &mut self,
-        tick: u64,
-        entity: Entity,
-        position: Vec2,
-        runtime: &ComposedProjectileRuntime,
-        outcome: WeaponTelemetryOutcome,
-    ) {
-        record_delivery_termination(self.ids, self.telemetry, tick, runtime, position, outcome);
-        self.commands.entity(entity).try_despawn();
-        finish_attack_delivery(self.trackers, runtime.source.attack_id);
-    }
-}
-
-#[cfg(feature = "server")]
-fn direct_world_damage_requests(
-    runtime: &ComposedProjectileRuntime,
-    target: crate::map::DamageableTargetIdentity,
-    hit_point: Vec2,
-) -> Vec<crate::map::PendingWorldTargetDamage> {
-    let mut requests = Vec::new();
-    for (bundle_index, bundle) in runtime
-        .recipe
+pub(super) fn collect_area_bundle_candidates(
+    recipe: &WeaponRecipe,
+    mut fighters: impl FnMut(f32, bool) -> Vec<AreaFighterCandidate>,
+    mut objects: impl FnMut(f32, bool) -> Vec<AreaObjectCandidate>,
+) -> Vec<AreaBundleCandidates> {
+    recipe
         .payload_bundles
         .iter()
         .enumerate()
-        .filter(|(_, bundle)| matches!(bundle.target, TargetSelection::Direct))
-    {
-        for (effect_index, effect) in bundle.effects.iter().enumerate() {
-            let PayloadEffectDefinition::Damage {
-                amount, falloff, ..
-            } = *effect
-            else {
-                continue;
-            };
-            requests.push(crate::map::PendingWorldTargetDamage {
-                target,
-                source: runtime.source,
-                attack_id: runtime.source.attack_id,
-                requested_damage: effects::requested_damage(
-                    amount,
-                    falloff,
-                    runtime.travelled,
-                    1.0,
-                    None,
-                    runtime.source.origin.as_vec2().distance(hit_point),
-                ),
-                delivery_index: runtime.delivery_index,
-                bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
-                effect_index: u8::try_from(effect_index).unwrap_or(u8::MAX),
-            });
-        }
-    }
-    requests
-}
-
-#[cfg(feature = "server")]
-#[allow(clippy::too_many_arguments)]
-fn queue_direct_fighter_payloads(
-    pending: &mut MessageWriter<PendingPayload>,
-    runtime: &ComposedProjectileRuntime,
-    target_entity: Entity,
-    target: FighterSweepSnapshot,
-    hit_point: Vec2,
-    hit_distance: f32,
-    step: f32,
-) {
-    let (target_position, target_team, target_network_id, defeated, _) = target;
-    if defeated {
-        return;
-    }
-    for (bundle_index, bundle) in
-        runtime
-            .recipe
-            .payload_bundles
-            .iter()
-            .enumerate()
-            .filter(|(_, bundle)| {
-                matches!(bundle.target, TargetSelection::Direct)
-                    && payload_can_affect_target(
-                        bundle,
-                        runtime.source,
-                        target_team,
-                        target_network_id,
-                    )
-            })
-    {
-        pending.write(PendingPayload {
-            source: runtime.source,
-            delivery_index: runtime.delivery_index,
-            bundle_index: u8::try_from(bundle_index).unwrap_or(u8::MAX),
-            target: target_entity,
-            target_network_id,
-            position: hit_point,
-            engagement_distance: runtime.source.origin.as_vec2().distance(target_position),
-            delivery_travel: runtime.travelled,
-            contact_fraction: (hit_distance / step.max(f32::EPSILON)).clamp(0.0, 1.0),
-            bundle: bundle.clone(),
-        });
-    }
-}
-
-#[cfg(feature = "server")]
-fn write_straight_impact(
-    deliveries: &mut MessageWriter<PendingDelivery>,
-    runtime: &ComposedProjectileRuntime,
-    entity: Entity,
-    target: Option<FighterSweepSnapshot>,
-    tick: u64,
-    point: Vec2,
-    normal: Vec2,
-) {
-    deliveries.write(PendingDelivery {
-        entity: Some(entity),
-        source: runtime.source,
-        delivery_index: runtime.delivery_index,
-        tick,
-        engagement_distance: target.map_or(0.0, |(position, ..)| {
-            runtime.source.origin.as_vec2().distance(position)
-        }),
-        delivery_travel: runtime.travelled,
-        kind: PendingDeliveryKind::StraightImpact {
-            target: target.map(|(_, _, network_id, _, _)| network_id),
-            position: WorldPoint::from(point),
-            normal: WorldPoint::from(normal),
-            distance_band: distance_band(runtime.travelled),
-        },
-        world_effects: runtime.recipe.world_effects.clone(),
-    });
-}
-
-#[cfg(feature = "server")]
-#[allow(clippy::too_many_lines)]
-#[allow(clippy::too_many_arguments)]
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
-)]
-pub(super) fn sweep_composed_projectiles(
-    mut commands: Commands,
-    tick: Res<SimulationTick>,
-    mut ids: ResMut<NextCombatIds>,
-    mut trackers: ResMut<ActiveAttackTrackers>,
-    mut telemetry: ResMut<WeaponTelemetry>,
-    mut pending: MessageWriter<PendingPayload>,
-    mut world_pending: ResMut<crate::map::PendingWorldTargetDamages>,
-    mut objective_pending: ResMut<crate::matchplay::PendingModeObjectiveDamages>,
-    mut deliveries: MessageWriter<PendingDelivery>,
-    mut projectiles: Query<(
-        Entity,
-        &Position,
-        &mut ComposedProjectileRuntime,
-        Option<&ProjectileBody>,
-        Option<&LobbedFlight>,
-    )>,
-    mut sticky_blobs: Query<(&mut StickyBlobState, &StickyBlobRuntime)>,
-    environment: ProjectileEnvironmentState,
-    fighters: Query<
-        (
-            Entity,
-            &Position,
-            &TeamId,
-            &NetworkEntityId,
-            Option<&Defeated>,
-            Option<&lightyear::prelude::ControlledBy>,
-        ),
-        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
-    >,
-    objects: Query<
-        (
-            Entity,
-            &Position,
-            &crate::map::DamageableTargetIdentity,
-            &CurrentHealth,
-            &crate::map::DamageableLifeState,
-        ),
-        Or<(
-            With<crate::map::DamageableWorldObject>,
-            With<crate::matchplay::HeistSafe>,
-        )>,
-    >,
-    disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
-    spatial_query: avian2d::prelude::SpatialQuery,
-) {
-    let disconnected: HashSet<_> = disconnected.iter().collect();
-    let fighter_lookup = fighters
-        .iter()
-        .map(
-            |(entity, position, team, network_id, defeated, controlled)| {
-                (
-                    entity,
-                    (
-                        position.0,
-                        *team,
-                        *network_id,
-                        defeated.is_some(),
-                        controlled
-                            .is_some_and(|controlled| disconnected.contains(&controlled.owner)),
-                    ),
-                )
-            },
-        )
-        .collect();
-    let object_lookup = objects
-        .iter()
-        .map(|(entity, position, identity, health, life)| {
-            (entity, (position.0, *identity, *health, *life))
-        })
-        .collect();
-    // Static authoritative geometry stops projectiles: permanent map colliders (the
-    // ArenaWall entities) and destructible chunk colliders alike, so cover works and
-    // carved lanes are the only way through.
-    let index = ProjectileSweepIndex {
-        fighters: fighter_lookup,
-        objects: object_lookup,
-        blocking_geometry: environment.walls.iter().collect(),
-    };
-    let mut sticky_sweep = sticky::StickySweepState::from_active(&sticky_blobs);
-    let mut ordered: Vec<_> = projectiles.iter_mut().collect();
-    ordered.sort_by_key(|(_, _, runtime, _, lob)| {
-        (
-            runtime.source.attack_id.0,
-            runtime.delivery_index,
-            lob.is_some(),
-        )
-    });
-    for (entity, position, mut runtime, body, lob) in ordered {
-        if !index.owner_is_connected(runtime.source.owner_network_entity_id) {
-            ProjectileTerminationContext {
-                commands: &mut commands,
-                ids: &mut ids,
-                trackers: &mut trackers,
-                telemetry: &mut telemetry,
-            }
-            .commit(
-                tick.0,
-                entity,
-                position.0,
-                &runtime,
-                WeaponTelemetryOutcome::DeliveryCancelled,
-            );
-            continue;
-        }
-        if let Some(lob) = lob {
-            let landing = match plan_lob_trajectory(tick.0, lob) {
-                LobTrajectoryPlan::InFlight(position) => {
-                    commands.entity(entity).insert(Position(position));
-                    continue;
-                }
-                LobTrajectoryPlan::Landed(landing) => landing,
-            };
-            if let DeliveryMethod::Splash {
-                shape,
-                duration_ticks,
-                pulse_interval_ticks,
+        .filter_map(|(bundle_index, bundle)| {
+            let TargetSelection::Area {
+                radius,
                 map_occlusion,
-                max_targets,
-                max_active_per_owner,
                 ..
-            } = runtime.recipe.delivery
+            } = bundle.target
+            else {
+                return None;
+            };
+            Some(AreaBundleCandidates {
+                bundle_index,
+                fighters: fighters(radius, map_occlusion),
+                objects: objects(radius, map_occlusion),
+            })
+        })
+        .collect()
+}
+
+/// Deterministic area-target policy shared by immediate and projectile-delivered payloads.
+#[cfg(feature = "server")]
+pub(super) fn plan_area_payloads(
+    landing: Vec2,
+    source: AttackSource,
+    delivery_index: u8,
+    recipe: &WeaponRecipe,
+    candidates: Vec<AreaBundleCandidates>,
+) -> PlannedAreaPayloads {
+    let delivery_travel = lob_launch_point(source, recipe).distance(landing);
+    let mut payloads = Vec::new();
+    let mut world_damages = Vec::new();
+    let mut selected_targets = 0;
+    for mut candidates in candidates {
+        let bundle = &recipe.payload_bundles[candidates.bundle_index];
+        let TargetSelection::Area { max_targets, .. } = bundle.target else {
+            continue;
+        };
+        candidates
+            .fighters
+            .sort_by_key(|fighter| fighter.network_id.0);
+        let mut collected = 0_u8;
+        for fighter in candidates.fighters {
+            if collected >= max_targets {
+                break;
+            }
+            if fighter.defeated
+                || fighter.disconnected
+                || !fighter.line_of_sight_clear
+                || !payload_can_affect_target(bundle, source, fighter.team, fighter.network_id)
             {
-                let owner_active = environment
-                    .active_splashes
-                    .iter()
-                    .filter(|splash| {
-                        splash.source.owner_network_entity_id
-                            == runtime.source.owner_network_entity_id
-                    })
-                    .count();
-                if owner_active >= usize::from(max_active_per_owner)
-                    || environment.active_splashes.iter().count()
-                        >= splash::MAX_ACTIVE_PERSISTENT_SPLASHES
-                {
-                    record_delivery_termination(
-                        &mut ids,
-                        &mut telemetry,
-                        tick.0,
-                        &runtime,
-                        landing,
-                        WeaponTelemetryOutcome::DeliveryCancelled,
-                    );
-                    commands.entity(entity).try_despawn();
-                    splash::settle_unresolved_splash(&mut trackers, runtime.source.attack_id);
-                    continue;
-                }
-                let (expires_at_tick, _) =
-                    splash::splash_timing(tick.0, duration_ticks, pulse_interval_ticks);
-                let mut splash_entity = commands.spawn((
-                    PersistentSplash,
-                    PersistentSplashState {
-                        center: WorldPoint::from(landing),
-                        facing: runtime.source.facing,
-                        shape,
-                        activated_at_tick: tick.0,
-                        next_pulse_tick: tick.0,
-                        expires_at_tick,
-                        pulse_interval_ticks,
-                        map_occlusion,
-                        max_targets,
-                        effects: splash::presentation_effects(&runtime.recipe),
-                    },
-                    ReplicatedAttackSource {
-                        attack: runtime.source,
-                    },
-                    PersistentSplashRuntime {
-                        source: runtime.source,
-                        recipe: runtime.recipe.clone(),
-                        next_delivery_index: 1,
-                        match_id: environment.roots.single().ok().map(|root| root.match_id),
-                    },
-                    Replicate::to_clients(NetworkTarget::All),
-                ));
-                if let Ok(root) = environment.roots.single() {
-                    splash_entity.insert(crate::matchplay::MatchMember(root.match_id));
-                }
-                commands.entity(entity).try_despawn();
-                deliveries.write(PendingDelivery {
-                    entity: None,
-                    source: runtime.source,
-                    delivery_index: 0,
-                    tick: tick.0,
-                    engagement_distance: 0.0,
-                    delivery_travel: lob_launch_point(runtime.source, &runtime.recipe)
-                        .distance(landing),
-                    kind: PendingDeliveryKind::LobLanded {
-                        position: WorldPoint::from(landing),
-                    },
-                    world_effects: Vec::new(),
-                });
                 continue;
             }
-            let _queued_payloads = queue_area_payloads(
-                landing,
-                runtime.source,
-                runtime.delivery_index,
-                &runtime.recipe,
-                &fighters,
-                &objects,
-                &disconnected,
-                &spatial_query,
-                &mut pending,
-                &mut world_pending,
-                &mut objective_pending,
-            );
-            deliveries.write(PendingDelivery {
-                entity: Some(entity),
-                source: runtime.source,
-                delivery_index: runtime.delivery_index,
-                tick: tick.0,
-                engagement_distance: 0.0,
-                delivery_travel: lob_launch_point(runtime.source, &runtime.recipe)
-                    .distance(landing),
-                kind: PendingDeliveryKind::LobLanded {
-                    position: WorldPoint::from(landing),
-                },
-                world_effects: runtime.recipe.world_effects.clone(),
+            payloads.push(PendingPayload {
+                source,
+                delivery_index,
+                bundle_index: u8::try_from(candidates.bundle_index).unwrap_or(u8::MAX),
+                target: fighter.entity,
+                target_network_id: fighter.network_id,
+                position: landing,
+                engagement_distance: source.origin.as_vec2().distance(fighter.position),
+                delivery_travel,
+                contact_fraction: 1.0,
+                bundle: bundle.clone(),
             });
-            continue;
+            collected = collected.saturating_add(1);
+            selected_targets += 1;
         }
-        if tick.0 >= runtime.expires_at_tick || runtime.travelled >= runtime.maximum_range {
-            if sticky_sweep.try_arm_expired(&mut commands, entity, &runtime, position.0, tick.0) {
+        candidates
+            .objects
+            .sort_by_key(|object| object.identity.stable_order_key());
+        for object in candidates.objects {
+            if collected >= max_targets {
+                break;
+            }
+            if !object.line_of_sight_clear {
                 continue;
             }
-            ProjectileTerminationContext {
-                commands: &mut commands,
-                ids: &mut ids,
-                trackers: &mut trackers,
-                telemetry: &mut telemetry,
+            for (effect_index, effect) in bundle.effects.iter().enumerate() {
+                let PayloadEffectDefinition::Damage {
+                    amount, falloff, ..
+                } = *effect
+                else {
+                    continue;
+                };
+                world_damages.push(crate::map::PendingWorldTargetDamage {
+                    target: object.identity,
+                    source,
+                    attack_id: source.attack_id,
+                    requested_damage: effects::requested_damage(
+                        amount,
+                        falloff,
+                        delivery_travel,
+                        1.0,
+                        None,
+                        source.origin.as_vec2().distance(object.position),
+                    ),
+                    delivery_index,
+                    bundle_index: u8::try_from(candidates.bundle_index).unwrap_or(u8::MAX),
+                    effect_index: u8::try_from(effect_index).unwrap_or(u8::MAX),
+                });
             }
-            .commit(
-                tick.0,
-                entity,
-                position.0,
-                &runtime,
-                WeaponTelemetryOutcome::DeliveryExpired,
-            );
-            continue;
+            // Objects consume the shared target budget even when a bundle has no Damage effect.
+            collected = collected.saturating_add(1);
+            selected_targets += 1;
         }
-        let Some(trajectory) = plan_straight_trajectory(&runtime, body) else {
-            ProjectileTerminationContext {
-                commands: &mut commands,
-                ids: &mut ids,
-                trackers: &mut trackers,
-                telemetry: &mut telemetry,
-            }
-            .commit(
-                tick.0,
-                entity,
-                position.0,
-                &runtime,
-                WeaponTelemetryOutcome::DeliveryCancelled,
-            );
-            continue;
-        };
-        let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
-            FIGHTER_LAYER
-                | crate::movement::DEPLOYABLE_LAYER
-                | STATIC_MAP_LAYER
-                | DESTRUCTIBLE_MAP_LAYER,
-        )
-        .with_excluded_entities([entity, runtime.owner_entity, runtime.source_entity]);
-        let hit = spatial_query.cast_shape_predicate(
-            &trajectory.body.collider(),
-            position.0,
-            0.0,
-            trajectory.direction,
-            &avian2d::prelude::ShapeCastConfig::from_max_distance(trajectory.step),
-            &filter,
-            &|candidate| index.accepts_candidate(candidate, &runtime),
-        );
-        let Some(hit) = hit else {
-            runtime.travelled += trajectory.step;
-            commands.entity(entity).insert(Position(
-                position.0 + trajectory.direction.as_vec2() * trajectory.step,
-            ));
-            continue;
-        };
-        runtime.travelled += hit.distance.clamp(0.0, trajectory.step);
-        let target = index.fighters.get(&hit.entity).copied();
-        let attached_to =
-            target.and_then(|(_, _, network_id, defeated, _)| (!defeated).then_some(network_id));
-        let armed_position = target.map_or(hit.point2, |(position, ..)| position);
-        if sticky_sweep.try_arm_impact(
-            &mut commands,
-            entity,
-            &runtime,
-            armed_position,
-            attached_to,
-            tick.0,
-            &mut sticky_blobs,
-        ) {
-            continue;
-        }
-        if let Some(target) = target {
-            queue_direct_fighter_payloads(
-                &mut pending,
-                &runtime,
-                hit.entity,
-                target,
-                hit.point2,
-                hit.distance,
-                trajectory.step,
-            );
-        }
-        if let Some((_, identity, health, life)) = index.objects.get(&hit.entity).copied()
-            && crate::map::object_is_live(health, life)
-        {
-            for request in direct_world_damage_requests(&runtime, identity, hit.point2) {
-                queue_damageable_target(&mut world_pending, &mut objective_pending, request);
-            }
-        }
-        write_straight_impact(
-            &mut deliveries,
-            &runtime,
-            entity,
-            target,
-            tick.0,
-            hit.point2,
-            hit.normal1,
-        );
+    }
+    PlannedAreaPayloads {
+        payloads,
+        world_damages,
+        selected_targets,
     }
 }
 
@@ -1054,6 +636,79 @@ mod tests {
 
     #[test]
     #[cfg(feature = "server")]
+    fn shared_area_plan_stably_orders_candidates_and_shares_one_target_budget() {
+        use crate::map::{
+            DamageableTargetIdentity, MapDynamicGeneration, MapInstanceId, MapPlacementId,
+        };
+
+        let mut world = World::new();
+        let fighter = world.spawn_empty().id();
+        let mut recipe = WeaponCatalog::embedded()
+            .unwrap()
+            .preset(WeaponPresetId(5))
+            .unwrap()
+            .configuration
+            .recipe
+            .clone();
+        let bundle_index = recipe
+            .payload_bundles
+            .iter()
+            .position(|bundle| matches!(bundle.target, TargetSelection::Area { .. }))
+            .unwrap();
+        recipe.payload_bundles[bundle_index].target = TargetSelection::Area {
+            radius: 100.0,
+            map_occlusion: false,
+            max_targets: 2,
+        };
+        let generation = MapDynamicGeneration {
+            map_instance_id: MapInstanceId(1),
+            generation: 1,
+        };
+        let later_object = DamageableTargetIdentity::MapObject {
+            generation,
+            placement_id: MapPlacementId(2),
+        };
+        let earlier_object = DamageableTargetIdentity::MapObject {
+            generation,
+            placement_id: MapPlacementId(1),
+        };
+        let candidates = vec![AreaBundleCandidates {
+            bundle_index,
+            fighters: vec![AreaFighterCandidate {
+                entity: fighter,
+                position: Vec2::X,
+                team: TeamId(1),
+                network_id: NetworkEntityId(9),
+                defeated: false,
+                disconnected: false,
+                line_of_sight_clear: true,
+            }],
+            // Deliberately reverse stable object order. The fighter consumes the first slot.
+            objects: vec![
+                AreaObjectCandidate {
+                    position: Vec2::X * 3.0,
+                    identity: later_object,
+                    line_of_sight_clear: true,
+                },
+                AreaObjectCandidate {
+                    position: Vec2::X * 2.0,
+                    identity: earlier_object,
+                    line_of_sight_clear: true,
+                },
+            ],
+        }];
+
+        let plan = plan_area_payloads(Vec2::ZERO, test_attack_source(), 2, &recipe, candidates);
+
+        assert_eq!(plan.selected_targets, 2);
+        assert_eq!(plan.payloads.len(), 1);
+        assert_eq!(plan.payloads[0].target_network_id, NetworkEntityId(9));
+        assert_eq!(plan.world_damages.len(), 1);
+        assert_eq!(plan.world_damages[0].target, earlier_object);
+    }
+
+    #[test]
+    #[cfg(feature = "server")]
     fn production_sweep_arms_an_expired_sticky_at_its_last_position() {
         let mut app = sticky_sweep_app(20);
         let owner_id = NetworkEntityId(70);
@@ -1202,27 +857,6 @@ mod tests {
         let incoming_state = app.world().get::<StickyBlobState>(incoming).unwrap();
         assert_eq!(incoming_state.attached_to, Some(target_id));
         assert_eq!(incoming_state.detonates_at_tick, 89);
-    }
-
-    #[test]
-    #[cfg(feature = "server")]
-    fn lob_trajectory_plan_interpolates_then_lands_at_the_exact_tick() {
-        let flight = LobbedFlight {
-            launch: WorldPoint::from(Vec2::ZERO),
-            landing: WorldPoint::from(Vec2::new(120.0, 60.0)),
-            launched_at_tick: 10,
-            lands_at_tick: 16,
-            visual_arc_height: 40.0,
-        };
-
-        assert!(matches!(
-            plan_lob_trajectory(13, &flight),
-            LobTrajectoryPlan::InFlight(position) if position == Vec2::new(60.0, 30.0)
-        ));
-        assert!(matches!(
-            plan_lob_trajectory(16, &flight),
-            LobTrajectoryPlan::Landed(position) if position == Vec2::new(120.0, 60.0)
-        ));
     }
 
     #[test]
