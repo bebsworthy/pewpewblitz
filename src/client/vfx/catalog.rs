@@ -47,6 +47,8 @@ pub(crate) enum VfxMaterialKey {
     EffectMuzzle,
     EffectImpact,
     EffectDamage,
+    NeutralBright,
+    NeutralSoft,
     ScanArea,
     DemolitionArea,
     PickupGlow,
@@ -737,6 +739,52 @@ mod tests {
                 .unwrap()
                 .id,
             "fire_lob_explosion_ultimate"
+        );
+    }
+
+    #[test]
+    fn neutral_straight_transients_use_layered_recipes_without_changing_fallbacks() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let mut signature = CombatVisualSignature::neutral_point(11, bevy::prelude::Vec2::ZERO);
+        signature.carrier = VfxCarrier::StraightProjectile;
+        signature.phase = VfxPhase::Activation;
+
+        let muzzle = catalog
+            .resolve("combat.muzzle", &signature, false, false)
+            .unwrap();
+        let reduced_muzzle = catalog
+            .resolve("combat.muzzle", &signature, true, false)
+            .unwrap();
+        assert_eq!(muzzle.id, "neutral_straight_muzzle");
+        assert_eq!(muzzle.layers.len(), 3);
+        assert_eq!(muzzle.particle_layers.len(), 1);
+        assert_eq!(
+            muzzle.particle_layers[0].profile,
+            VfxParticleProfile::NeutralSparks
+        );
+        assert_eq!(reduced_muzzle.id, "neutral_straight_muzzle_reduced");
+        assert!(reduced_muzzle.particle_layers.is_empty());
+
+        signature.phase = VfxPhase::Impact;
+        let impact = catalog
+            .resolve("combat.impact", &signature, false, false)
+            .unwrap();
+        let reduced_impact = catalog
+            .resolve("combat.impact", &signature, true, false)
+            .unwrap();
+        assert_eq!(impact.id, "neutral_straight_impact");
+        assert_eq!(impact.layers.len(), 3);
+        assert_eq!(impact.particle_layers.len(), 1);
+        assert_eq!(reduced_impact.id, "neutral_straight_impact_reduced");
+        assert!(reduced_impact.particle_layers.is_empty());
+
+        let fallback = CombatVisualSignature::neutral_point(12, bevy::prelude::Vec2::ZERO);
+        assert_eq!(
+            catalog
+                .resolve("combat.impact", &fallback, false, false)
+                .unwrap()
+                .id,
+            "impact"
         );
     }
 

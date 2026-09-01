@@ -250,3 +250,33 @@ Corrected both normal-quality filament phase equations from negative to positive
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 
 The reported backwards-pulse defect is implemented. Native user confirmation remains requested; BRL-0104 stays `doing`.
+
+## Phase 2 neutral straight muzzle/impact slice — 2026-09-01
+
+The user instructed “commit and continue” after the neutral comet motion correction. Treat this as acceptance of the retained Pulse/Scatter comet direction and proceed to the previously ordered transient integration slice.
+
+Current inspection shows neutral `combat.muzzle` and direct `combat.impact` still resolve to one generic fixed-size yellow/orange sphere each. Implement carrier-specific authored recipes through typed style mappings rather than changing the global neutral fallbacks or branching on Pulse/Scatter preset IDs:
+
+- Match only Neutral + StraightProjectile + Activation for the muzzle recipe and Neutral + StraightProjectile + Impact for the direct-impact recipe. Lobbed explosions and other neutral carriers must remain unchanged.
+- Reuse one cool-white/cyan energy language: compressed core/shell launch layers for muzzle, then core/shell/ground-wave dissipation for impact.
+- Add bounded deterministic neutral energy-spark particle bursts to normal recipes; reduced recipes retain mesh identity without particles.
+- Preserve current request/signature/gameplay/protocol contracts. BRL-0107 still owns observer-relative ownership color integration, so this slice must not add a competing ownership overlay or relationship branch.
+- Use the existing read-only transient VfxLab fixture for gameplay-scale normal/reduced inspection before accepting the slice.
+
+No gameplay, collision, damage, delivery, server, or protocol changes are in scope. BRL-0104 remains `doing`.
+
+## Phase 2 neutral straight transient implementation evidence — 2026-09-01
+
+Implemented typed Neutral + StraightProjectile recipes for `combat.muzzle` Activation and `combat.impact` Impact. Normal launch uses compressed bright/soft energy layers, a short ground echo, and a bounded deterministic cyan spark burst; normal impact stages a bright core, soft shell, expanding ground wave, and a larger bounded spark burst. Reduced recipes retain mesh identity and omit particles. Generic point, elemental, and lobbed recipes remain unchanged.
+
+Added `NeutralBright`/`NeutralSoft` material keys and one reusable `NeutralSparks` GPU-particle profile. VfxLab now authors the same StraightProjectile phase signatures for neutral muzzle/impact previews, flanks transient effects with fighter-size references instead of occluding the effect, and describes the neutral energy language accurately. No gameplay, authority, protocol, collision, or ownership-color behavior changed.
+
+Verification passed:
+- `cargo test --features client client::vfx::catalog::tests --lib`: 11/11.
+- `cargo test --features client client::vfx --lib`: 44/44.
+- `cargo check --locked --no-default-features --features client --all-targets`.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`.
+- `cargo test --locked --no-default-features --features client --all-targets`: 606 library tests plus the client binary targets passed.
+- Read-only VfxLab sampled the muzzle at tick 2 and impact at ticks 4 and 8, with paired PNG/JSON evidence under `target/brl-0104-neutral-muzzle-clear`, `target/brl-0104-neutral-impact-clear-t4`, and `target/brl-0104-neutral-impact-clear-t8`. The samples confirmed an unobstructed gameplay-scale launch flash, shell/ground-wave impact timing, and lingering deterministic spark dissipation.
+
+BRL-0104 remains `doing`; native gameplay feedback for this slice and the remaining ordered closeout work are still pending.

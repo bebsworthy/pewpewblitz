@@ -168,6 +168,7 @@ impl VfxMeshLayer {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) enum VfxParticleProfile {
+    NeutralSparks,
     ColdFragments,
     FireEmbers,
     PoisonBubbles,

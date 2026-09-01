@@ -139,9 +139,9 @@ impl VfxParticleAssets {
             handle: self.effects.get(&layer.id)?.clone(),
             mesh: Some(match layer.profile {
                 VfxParticleProfile::ColdFragments => primitives.unit_cuboid.clone(),
-                VfxParticleProfile::FireEmbers | VfxParticleProfile::ExplosionSparks => {
-                    primitives.fire_tongue.clone()
-                }
+                VfxParticleProfile::NeutralSparks
+                | VfxParticleProfile::FireEmbers
+                | VfxParticleProfile::ExplosionSparks => primitives.fire_tongue.clone(),
                 VfxParticleProfile::PoisonBubbles => primitives.effect_sphere.clone(),
                 VfxParticleProfile::RestorationPetals => primitives.vitality_spark.clone(),
                 VfxParticleProfile::ExplosionSmoke | VfxParticleProfile::ProjectileSmoke => {
@@ -361,6 +361,7 @@ fn build_effect_asset(layer: &VfxParticleLayer) -> EffectAsset {
     );
     let age = SetAttributeModifier::new(Attribute::AGE, writer.lit(0.0).expr());
     let acceleration = match layer.profile {
+        VfxParticleProfile::NeutralSparks => Vec3::new(0.0, -38.0, 0.0),
         VfxParticleProfile::ColdFragments => Vec3::new(0.0, -24.0, 0.0),
         VfxParticleProfile::FireEmbers => Vec3::new(0.0, -14.0, 0.0),
         VfxParticleProfile::PoisonBubbles => Vec3::new(0.0, 7.0, 0.0),
@@ -371,9 +372,9 @@ fn build_effect_asset(layer: &VfxParticleLayer) -> EffectAsset {
     };
     let acceleration = AccelModifier::new(writer.lit(acceleration).expr());
     let orientation = match layer.profile {
-        VfxParticleProfile::ColdFragments | VfxParticleProfile::ExplosionSparks => {
-            OrientMode::AlongVelocity
-        }
+        VfxParticleProfile::NeutralSparks
+        | VfxParticleProfile::ColdFragments
+        | VfxParticleProfile::ExplosionSparks => OrientMode::AlongVelocity,
         VfxParticleProfile::FireEmbers
         | VfxParticleProfile::PoisonBubbles
         | VfxParticleProfile::RestorationPetals
@@ -419,6 +420,11 @@ fn build_effect_asset(layer: &VfxParticleLayer) -> EffectAsset {
 fn color_gradient(profile: VfxParticleProfile) -> HanabiGradient<Vec4> {
     let mut gradient = HanabiGradient::new();
     match profile {
+        VfxParticleProfile::NeutralSparks => {
+            gradient.add_key(0.0, Vec4::new(0.94, 1.0, 1.0, 1.0));
+            gradient.add_key(0.28, Vec4::new(0.18, 0.9, 1.0, 0.95));
+            gradient.add_key(1.0, Vec4::new(0.02, 0.32, 0.52, 0.0));
+        }
         VfxParticleProfile::ColdFragments => {
             gradient.add_key(0.0, Vec4::new(0.9, 1.0, 1.0, 1.0));
             gradient.add_key(0.35, Vec4::new(0.2, 0.82, 1.0, 0.95));
@@ -473,7 +479,7 @@ fn size_gradient(layer: &VfxParticleLayer) -> HanabiGradient<Vec3> {
         | VfxParticleProfile::RestorationPetals
         | VfxParticleProfile::ExplosionSmoke
         | VfxParticleProfile::ProjectileSmoke => Vec3::splat(layer.size_start),
-        VfxParticleProfile::ExplosionSparks => Vec3::new(
+        VfxParticleProfile::NeutralSparks | VfxParticleProfile::ExplosionSparks => Vec3::new(
             layer.size_start * 1.8,
             layer.size_start * 0.22,
             layer.size_start * 0.22,
@@ -513,6 +519,7 @@ mod tests {
     #[test]
     fn authored_particle_profiles_compile_to_bounded_assets() {
         for profile in [
+            VfxParticleProfile::NeutralSparks,
             VfxParticleProfile::ColdFragments,
             VfxParticleProfile::FireEmbers,
             VfxParticleProfile::ExplosionSparks,

@@ -255,7 +255,12 @@ impl VfxLabScenario {
             let mut signature = request.signature;
             signature.identity = crate::client::vfx::VfxPresentationIdentity::Explicit(event_id);
             signature.accents = [Some(accent.signature_accent()), None];
+            if self.key == crate::client::vfx::COMBAT_MUZZLE_VFX {
+                signature.carrier = crate::client::vfx::VfxCarrier::StraightProjectile;
+                signature.phase = crate::client::vfx::VfxPhase::Activation;
+            }
             if self.key == crate::client::vfx::COMBAT_IMPACT_VFX {
+                signature.carrier = crate::client::vfx::VfxCarrier::StraightProjectile;
                 signature.phase = crate::client::vfx::VfxPhase::Impact;
                 if lobbed_impact {
                     signature.carrier = crate::client::vfx::VfxCarrier::LobbedProjectile;
@@ -551,11 +556,7 @@ fn setup_lab_scene(
         Transform::from_xyz(0.0, -0.5, 0.0),
         Name::new("VfxLab neutral floor"),
     ));
-    let reference_positions = if state.fixture == VfxLabFixture::LobbedProjectile {
-        [-80.0, 80.0]
-    } else {
-        [0.0, 96.0]
-    };
+    let reference_positions = lab_reference_positions(state.fixture);
     for (index, x) in reference_positions.into_iter().enumerate() {
         commands.spawn((
             VfxLabReference(u8::try_from(index).expect("two reference indices fit u8")),
@@ -593,13 +594,20 @@ fn update_lab_reference_positions(
     state: Res<VfxLabState>,
     mut references: Query<(&VfxLabReference, &mut Transform)>,
 ) {
-    let positions = if state.fixture == VfxLabFixture::LobbedProjectile {
-        [-80.0, 80.0]
-    } else {
-        [0.0, 96.0]
-    };
+    let positions = lab_reference_positions(state.fixture);
     for (reference, mut transform) in &mut references {
         transform.translation.x = positions[usize::from(reference.0)];
+    }
+}
+
+const fn lab_reference_positions(fixture: VfxLabFixture) -> [f32; 2] {
+    match fixture {
+        VfxLabFixture::Transient => [-64.0, 96.0],
+        VfxLabFixture::LobbedProjectile => [-80.0, 80.0],
+        VfxLabFixture::StraightProjectile
+        | VfxLabFixture::ElementalField
+        | VfxLabFixture::ConeSpray
+        | VfxLabFixture::Status => [0.0, 96.0],
     }
 }
 
@@ -1386,7 +1394,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             if state.lobbed_impact {
                 "This is a lobbed landing. The thin outer ring is the exact payload radius; the ground flash, central burst, expanding shockwave, sparks, and smoke are staged presentation. Use . to move one tick or restart with another --sample-ticks value."
             } else {
-                "The effect is centered on the gray target. Flash bodies communicate the event; expanding rings communicate its ground position. Use . to move one tick or restart with another --sample-ticks value."
+                "The effect is centered between the two gray scale references. Flash bodies communicate the event; expanding rings communicate its ground position. Use . to move one tick or restart with another --sample-ticks value."
             }
         }
         VfxLabFixture::StraightProjectile => {
@@ -1408,6 +1416,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
     let style = match state.accent {
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::StraightProjectile => {
             "NEUTRAL is the reusable Pulse/Scatter comet language: a dimensional team-colored nucleus embedded inside a deterministic wrapping energy wake. Press C to compare each elemental identity."
+        }
+        VfxLabAccent::Neutral if state.fixture == VfxLabFixture::Transient => {
+            "NEUTRAL straight shots use a cool-white energy language: a compressed launch flash and a layered impact that dissipates through a ground wave and deterministic sparks. Press C to compare each elemental identity."
         }
         VfxLabAccent::Neutral => {
             "NEUTRAL is the safe fallback. Press C to compare each authored elemental identity."
@@ -1575,6 +1586,36 @@ mod tests {
             request.signature.geometry,
             crate::client::vfx::VfxGeometry::circle(Vec2::ZERO, 150.0)
         );
+    }
+
+    #[test]
+    fn neutral_transient_preview_uses_straight_production_signatures() {
+        let muzzle = VfxLabScenario {
+            key: crate::client::vfx::COMBAT_MUZZLE_VFX,
+            producer_rank: crate::client::vfx::COMBAT_VFX_PRODUCER_RANK,
+            capabilities: VfxRequestCapabilities::NONE,
+        }
+        .request(10, DEFAULT_RADIUS, VfxLabAccent::Neutral, false, false);
+        assert_eq!(
+            muzzle.signature.carrier,
+            crate::client::vfx::VfxCarrier::StraightProjectile
+        );
+        assert_eq!(
+            muzzle.signature.phase,
+            crate::client::vfx::VfxPhase::Activation
+        );
+
+        let impact = VfxLabScenario {
+            key: crate::client::vfx::COMBAT_IMPACT_VFX,
+            producer_rank: crate::client::vfx::COMBAT_VFX_PRODUCER_RANK,
+            capabilities: VfxRequestCapabilities::NONE,
+        }
+        .request(11, DEFAULT_RADIUS, VfxLabAccent::Neutral, false, false);
+        assert_eq!(
+            impact.signature.carrier,
+            crate::client::vfx::VfxCarrier::StraightProjectile
+        );
+        assert_eq!(impact.signature.phase, crate::client::vfx::VfxPhase::Impact);
     }
 
     #[test]

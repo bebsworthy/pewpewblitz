@@ -153,6 +153,8 @@ pub(crate) struct Material3dAssets {
     pub(crate) effect_muzzle: Handle<StandardMaterial>,
     pub(crate) effect_impact: Handle<StandardMaterial>,
     pub(crate) effect_damage: Handle<StandardMaterial>,
+    pub(crate) neutral_energy_bright: Handle<StandardMaterial>,
+    pub(crate) neutral_energy_soft: Handle<StandardMaterial>,
     pub(crate) lobbed_shadow: Handle<StandardMaterial>,
     pub(crate) dash: Handle<StandardMaterial>,
     pub(crate) barrel: Handle<StandardMaterial>,
@@ -1330,6 +1332,19 @@ pub(in crate::client) fn setup_3d_foundation(
         effect_damage: materials.add(StandardMaterial {
             base_color: Color::srgb(0.95, 0.08, 0.12),
             emissive: LinearRgba::new(1.2, 0.02, 0.02, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        neutral_energy_bright: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.82, 0.98, 1.0),
+            emissive: LinearRgba::new(1.35, 2.8, 3.4, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        neutral_energy_soft: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.16, 0.88, 1.0, 0.28),
+            emissive: LinearRgba::new(0.08, 1.15, 1.8, 1.0),
+            alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
