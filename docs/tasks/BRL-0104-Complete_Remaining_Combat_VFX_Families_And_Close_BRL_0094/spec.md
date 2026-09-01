@@ -718,3 +718,53 @@ Verification:
 A focused test initially panicked because it installed the allocator system without the new diagnostics resource. Making diagnostics an optional observer preserves the existing reusable system seam; production and VfxLab still initialize it explicitly. This prevents evidence instrumentation from becoming a hidden execution prerequisite.
 
 The next Phase 3 work is the representative normal/reduced/primitive overlap and recreation evidence matrix, followed by durable documentation reconciliation and required native/user acceptance. BRL-0104 remains `doing`.
+
+## Phase 3 Normal/Reduced/Primitive isolated matrix — first complete pass (2026-09-01)
+
+Captured the committed catalog and lifecycle materializers across the read-only VfxLab matrix:
+
+- `target/brl-0104-phase3-matrix-v2`: 33 captures covering all 11 retained/lifecycle fixtures in Normal, Reduced, and Primitive.
+- `target/brl-0104-phase3-transient-matrix`: 51 captures covering all 17 registered request keys in Normal, Reduced, and Primitive.
+- All 84 captures use one catalog fingerprint (`17706612301903382016`), contain catalog diagnostics, resolve an intentional recipe, and show zero particle emitters in Reduced/Primitive.
+- Retained fixture roots are present in the expected owner category in all modes. The retained pass peaks at two transient roots, seven transient mesh layers, and one particle emitter. The transient pass peaks at one root, six mesh layers, and two emitters.
+- The first retained pass used tick 8 uniformly and placed moving projectile bodies behind the guide. The accepted v2 pass uses lifecycle-specific sampling: straight 30, lobbed 45, Dash 20, melee/Sentry 2, and retained-static fixtures 8. This is an evidence-timing correction, not a production-renderer correction.
+
+Visual review confirms that the upgraded carriers and fields survive degradation, but it also reveals unresolved quality debt that prevents AAA/BRL-0094 closeout: `combat.damage`, `combat.reset`, all three Heist cues, all three pickup cues, and `world-object.damaged` still use one-layer legacy primitives. Correct routing and fallback are not sufficient visual acceptance.
+
+## Phase 3 next quality slice — fighter outcome cues (2026-09-01)
+
+Upgrade the highest-frequency core subset of that debt before touching lower-frequency objective/pickup utility feedback:
+
+- Distinguish ordinary damage, status application, fighter defeat, and fighter reset through the existing `combat.damage`/`combat.reset` request seam and semantic phases; do not add gameplay or protocol cues.
+- Ordinary damage should be a compact target-attached hit composition, not an opaque ball. Status application should remain subordinate because the retained status owns lasting state. Defeat needs a clear outward break/collapse silhouette, while reset needs a clean re-entry/restore silhouette.
+- Reuse the bounded mesh and accepted neutral particle vocabulary, but author distinct timing and silhouettes. Normal may use up to four mesh layers and one bounded particle layer; Reduced/Primitive preserve the essential two-layer event silhouette without particles.
+- Preserve request ordering, authoritative positions, source accents/relationships, cleanup, and the current cap policy. Do not create duplicate defeat/reset paths from legacy compatibility cues.
+- Add focused signature/catalog tests and isolate the results in VfxLab. Run strict client and role-isolation checks plus native Normal/Reduced/Primitive evidence before commit.
+
+Heist, pickup, and world-object damage remediation remain in BRL-0104 after this independently reviewable fighter-outcome slice. Routed overlap/recreation, durable documentation, and user AAA acceptance remain open.
+
+## Phase 3 fighter-outcome quality slice — implemented and verified (2026-09-01)
+
+Implementation:
+
+- Replaced the former one-layer `combat.damage` and `combat.reset` fallbacks with bounded layered recipes for ordinary damage, fighter defeat, and fighter reset.
+- Ordinary damage uses a compact contact core, ground slash, echo, and bounded neutral sparks. Defeat uses a larger floor release, core, fracture, ring, and sparks. Reset uses ordered restoration floor/core/spark/ring layers plus bounded restoration petals.
+- Added explicit reduced recipes containing the essential two-layer silhouette and no particles. Primitive mode continues through the same recipe/signature path.
+- `FighterDefeated` now produces an `AttachedStatus`/`Interruption` signature with combat-event identity, distinct from ordinary damage (`Impact`) and reset (`Expiry`). Gameplay authority, cue payloads, wire contracts, and server scheduling are unchanged.
+- VfxLab now previews production-parity attached outcome signatures. For `--effect combat.damage`, `U` compares HIT and DEFEAT; `combat.reset` is labeled as a single reset outcome. The Lab toggle does not inject a production-inaccurate Ultimate context.
+- Kept the catalog bounded: the slice adds two recipes and remains below the fixed recipe/layer capacities. Reduced recipes omit particle emitters.
+
+Verification:
+
+- Focused catalog, producer, and VfxLab fighter-outcome tests: pass.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: pass.
+- `just _test-client`: pass (638 library tests plus the client binary targets and one integration test; zero failures).
+- `./scripts/check-server-features.sh`: pass; client presentation remains excluded from the server feature graph.
+- `./scripts/check-v3-world-presentation.sh`: pass; no retired 2D renderer contract was reintroduced.
+- Native evidence: `target/brl-0104-fighter-outcomes-v2/` contains normal HIT, DEFEAT, and RESET PNG/JSON captures at representative animation samples. `target/brl-0104-fighter-outcomes/` additionally records reduced and primitive recipes. Normal captures resolved to 3+1, 4+1, and 4+1 mesh/particle layer compositions respectively; reduced captures resolve to two mesh layers and zero particles.
+
+Review notes:
+
+- Normal, reduced, and primitive paths are distinct and legible in isolation. Defeat has materially more footprint and outward motion than a hit; reset uses a separate restoration language.
+- Early automated screenshots at `capture-after 2` were taken before the render surface was reliably populated on this host even though JSON reported live entities. The accepted visual captures use `capture-after 12`; future native evidence should retain a sufficient render warm-up.
+- This completes the fighter-outcome remediation slice, not the AAA-quality acceptance gate for BRL-0094. The first matrix still identified Heist, pickup, and world-object damage as remaining one-layer presentation debt.

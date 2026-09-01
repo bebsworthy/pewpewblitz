@@ -273,9 +273,6 @@ fn combat_vfx_signature(
         }
         | C::EffectApplied {
             tick, attack_id, ..
-        }
-        | C::FighterDefeated {
-            tick, attack_id, ..
         } => cache.signature_for_attack(
             *attack_id,
             0,
@@ -284,6 +281,21 @@ fn combat_vfx_signature(
             point,
             instant(*tick),
             VfxPresentationVariant::Normal,
+        ),
+        C::FighterDefeated {
+            event_id,
+            tick,
+            target,
+            ..
+        } => direct(
+            VfxCarrier::AttachedStatus,
+            VfxPhase::Interruption,
+            [Some(VfxAccent::Neutral), None],
+            relationship_for_owner(cache, fighters, *target),
+            None,
+            point,
+            VfxPresentationIdentity::CombatEvent(event_id.0),
+            instant(*tick),
         ),
         C::SentryFired {
             tick,
@@ -769,6 +781,72 @@ mod tests {
             position: WorldPoint { x: 2.0, y: 3.0 },
         };
         assert!(combat_vfx_request(&legacy, None, &cache, |_| None).is_none());
+
+        let defeated = CombatCue::FighterDefeated {
+            event_id: CombatEventId(16),
+            tick: 22,
+            attack_id: AttackId(11),
+            source: None,
+            target: NetworkEntityId(12),
+            position: WorldPoint { x: 7.0, y: 8.0 },
+        };
+        let (key, _, _, _, _) = combat_vfx_request(&defeated, None, &cache, |_| None).unwrap();
+        assert_eq!(key, COMBAT_DAMAGE_VFX);
+
+        let reset = CombatCue::FighterReset {
+            event_id: CombatEventId(17),
+            tick: 23,
+            target: NetworkEntityId(12),
+            position: WorldPoint { x: 7.0, y: 8.0 },
+        };
+        let (key, _, _, _, _) = combat_vfx_request(&reset, None, &cache, |_| None).unwrap();
+        assert_eq!(key, COMBAT_RESET_VFX);
+    }
+
+    #[test]
+    fn fighter_outcome_signatures_distinguish_defeat_from_reset() {
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<VfxRequest>()
+            .init_resource::<VfxSignatureCache>()
+            .init_resource::<CapturedRequests>()
+            .add_systems(
+                Update,
+                (produce_combat_vfx_requests, capture_requests).chain(),
+            );
+        for cue in [
+            CombatCue::FighterDefeated {
+                event_id: CombatEventId(16),
+                tick: 22,
+                attack_id: AttackId(11),
+                source: None,
+                target: NetworkEntityId(12),
+                position: WorldPoint { x: 7.0, y: 8.0 },
+            },
+            CombatCue::FighterReset {
+                event_id: CombatEventId(17),
+                tick: 23,
+                target: NetworkEntityId(12),
+                position: WorldPoint { x: 7.0, y: 8.0 },
+            },
+        ] {
+            app.world_mut().write_message(DeduplicatedCombatCue(cue));
+        }
+
+        app.update();
+
+        let requests = &app.world().resource::<CapturedRequests>().0;
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].key, COMBAT_DAMAGE_VFX);
+        assert_eq!(requests[0].signature.carrier, VfxCarrier::AttachedStatus);
+        assert_eq!(requests[0].signature.phase, VfxPhase::Interruption);
+        assert_eq!(
+            requests[0].signature.identity,
+            VfxPresentationIdentity::CombatEvent(16)
+        );
+        assert_eq!(requests[1].key, COMBAT_RESET_VFX);
+        assert_eq!(requests[1].signature.carrier, VfxCarrier::AttachedStatus);
+        assert_eq!(requests[1].signature.phase, VfxPhase::Expiry);
     }
 
     #[test]

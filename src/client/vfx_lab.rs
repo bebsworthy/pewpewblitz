@@ -306,20 +306,7 @@ impl VfxLabScenario {
             if self.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
                 signature.accents = [Some(crate::client::vfx::VfxAccent::Demolition), None];
             }
-            if self.key == crate::client::vfx::SELF_CLOAK_VFX {
-                signature.carrier = crate::client::vfx::VfxCarrier::AttachedStatus;
-                signature.phase = if ultimate {
-                    crate::client::vfx::VfxPhase::Interruption
-                } else {
-                    crate::client::vfx::VfxPhase::Activation
-                };
-                signature.accents = [Some(crate::client::vfx::VfxAccent::Concealment), None];
-            }
-            if self.key == crate::client::vfx::FORCED_REVEAL_VFX {
-                signature.carrier = crate::client::vfx::VfxCarrier::AttachedStatus;
-                signature.phase = crate::client::vfx::VfxPhase::Activation;
-                signature.accents = [Some(crate::client::vfx::VfxAccent::Reveal), None];
-            }
+            apply_attached_transient_signature(self.key, ultimate, &mut signature);
             if self.key == crate::client::vfx::COMBAT_MUZZLE_VFX {
                 signature.carrier = crate::client::vfx::VfxCarrier::StraightProjectile;
                 signature.phase = crate::client::vfx::VfxPhase::Activation;
@@ -337,7 +324,10 @@ impl VfxLabScenario {
             }
             signature.context = if matches!(
                 self.key,
-                crate::client::vfx::SELF_CLOAK_VFX | crate::client::vfx::FORCED_REVEAL_VFX
+                crate::client::vfx::SELF_CLOAK_VFX
+                    | crate::client::vfx::FORCED_REVEAL_VFX
+                    | crate::client::vfx::COMBAT_DAMAGE_VFX
+                    | crate::client::vfx::COMBAT_RESET_VFX
             ) {
                 None
             } else if self.key == crate::client::vfx::REVEAL_SCAN_VFX {
@@ -366,6 +356,47 @@ impl VfxLabScenario {
         })
         .expect("sealed production registration produces a valid lab request")
     }
+}
+
+fn apply_attached_transient_signature(
+    key: VfxRequestKey,
+    alternate: bool,
+    signature: &mut crate::client::vfx::CombatVisualSignature,
+) {
+    let (phase, accent) = if key == crate::client::vfx::SELF_CLOAK_VFX {
+        (
+            if alternate {
+                crate::client::vfx::VfxPhase::Interruption
+            } else {
+                crate::client::vfx::VfxPhase::Activation
+            },
+            crate::client::vfx::VfxAccent::Concealment,
+        )
+    } else if key == crate::client::vfx::FORCED_REVEAL_VFX {
+        (
+            crate::client::vfx::VfxPhase::Activation,
+            crate::client::vfx::VfxAccent::Reveal,
+        )
+    } else if key == crate::client::vfx::COMBAT_DAMAGE_VFX {
+        (
+            if alternate {
+                crate::client::vfx::VfxPhase::Interruption
+            } else {
+                crate::client::vfx::VfxPhase::Impact
+            },
+            crate::client::vfx::VfxAccent::Neutral,
+        )
+    } else if key == crate::client::vfx::COMBAT_RESET_VFX {
+        (
+            crate::client::vfx::VfxPhase::Expiry,
+            crate::client::vfx::VfxAccent::Neutral,
+        )
+    } else {
+        return;
+    };
+    signature.carrier = crate::client::vfx::VfxCarrier::AttachedStatus;
+    signature.phase = phase;
+    signature.accents = [Some(accent), None];
 }
 
 #[derive(Resource)]
@@ -1869,6 +1900,8 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         (VfxLabFixture::Transient, crate::client::vfx::FORCED_REVEAL_VFX) => {
             "FORCED REVEAL".to_string()
         }
+        (VfxLabFixture::Transient, crate::client::vfx::COMBAT_DAMAGE_VFX) => "DAMAGE".to_string(),
+        (VfxLabFixture::Transient, crate::client::vfx::COMBAT_RESET_VFX) => "RESET".to_string(),
         (VfxLabFixture::PersistentSplash, _) => "SPLASH DUAL".to_string(),
         (VfxLabFixture::ConcealmentField, _) => "CONCEALMENT".to_string(),
         (VfxLabFixture::Sentry, _) => "DEPLOYABLE NEUTRAL".to_string(),
@@ -1884,6 +1917,8 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             "ability.demolition-strike" => "DEMOLITION STRIKE MAP BREACH",
             "ability.self-cloak" => "SELF CLOAK ATTACHED LIFECYCLE CUE",
             "ability.forced-reveal" => "FORCED REVEAL TARGET ACQUISITION",
+            "combat.damage" => "FIGHTER HIT / DEFEAT OUTCOME",
+            "combat.reset" => "FIGHTER RESET OUTCOME",
             _ => "ONE-SHOT GAMEPLAY EFFECT",
         },
         VfxLabFixture::StraightProjectile => "STRAIGHT PROJECTILE IN FLIGHT",
@@ -1937,6 +1972,14 @@ fn lab_fixture_meaning(state: &VfxLabState, scenario: VfxLabScenario) -> &'stati
                 "This compact veil is attached to the authoritative fighter position. Activation seals inward as retained fighter translucency begins; press U to compare the sharp interruption used when attacking, taking damage, or being defeated."
             } else if scenario.key == crate::client::vfx::FORCED_REVEAL_VFX {
                 "This compact magenta acquisition burst appears on the revealed fighter. The separately retained Reveal status owns the authoritative deadline; this transient only marks the moment the reveal is applied."
+            } else if scenario.key == crate::client::vfx::COMBAT_DAMAGE_VFX {
+                if state.ultimate {
+                    "This outward fracture marks authoritative defeat at the fighter position. The broad break and release ring distinguish it from an ordinary hit; press U to compare the compact damage response."
+                } else {
+                    "This compact flash and ground slash mark an authoritative damage result at the fighter position. Press U to compare the larger outward defeat response."
+                }
+            } else if scenario.key == crate::client::vfx::COMBAT_RESET_VFX {
+                "This clean restoration pulse marks an authoritative fighter reset. Its ordered green-white rise is intentionally distinct from both incoming damage and defeat."
             } else if state.lobbed_impact {
                 "This is a lobbed landing. The thin outer ring is the exact payload radius; the ground flash, central burst, expanding shockwave, sparks, and smoke are staged presentation. Use . to move one tick or restart with another --sample-ticks value."
             } else {
@@ -1992,6 +2035,23 @@ fn lab_mode_labels(state: &VfxLabState) -> (&'static str, &'static str) {
             "U lifecycle mode",
         );
     }
+    if state.fixture == VfxLabFixture::Transient
+        && state.selected().key == crate::client::vfx::COMBAT_DAMAGE_VFX
+    {
+        return (
+            if state.ultimate {
+                " + DEFEAT"
+            } else {
+                " + HIT"
+            },
+            "U outcome mode",
+        );
+    }
+    if state.fixture == VfxLabFixture::Transient
+        && state.selected().key == crate::client::vfx::COMBAT_RESET_VFX
+    {
+        return ("", "U no alternate");
+    }
     if state.fixture == VfxLabFixture::Sentry {
         return (
             if state.ultimate {
@@ -2024,6 +2084,9 @@ const fn status_fixture_label(state: &VfxLabState) -> &'static str {
 }
 
 fn lab_guide_style(state: &VfxLabState) -> &'static str {
+    if let Some(style) = fighter_outcome_guide_style(state) {
+        return style;
+    }
     if state.fixture == VfxLabFixture::Transient
         && state.selected().key == crate::client::vfx::SELF_CLOAK_VFX
     {
@@ -2114,6 +2177,22 @@ fn lab_guide_style(state: &VfxLabState) -> &'static str {
             "RESTORATION should feel ordered, buoyant, and life-giving through a rotating vitality motif. Press C to return to Neutral."
         }
     }
+}
+
+fn fighter_outcome_guide_style(state: &VfxLabState) -> Option<&'static str> {
+    if state.fixture != VfxLabFixture::Transient {
+        return None;
+    }
+    if state.selected().key == crate::client::vfx::COMBAT_DAMAGE_VFX {
+        return Some(if state.ultimate {
+            "DEFEAT expands into a broad red fracture and release ring, giving the terminal outcome more visual weight than an ordinary hit."
+        } else {
+            "DAMAGE stays compact and immediate: a red contact core, directional ground slash, short echo, and bounded sparks."
+        });
+    }
+    (state.selected().key == crate::client::vfx::COMBAT_RESET_VFX).then_some(
+        "RESET uses ordered restoration geometry, a rising green-white core, and a clean expanding ring to read as recovery rather than impact.",
+    )
 }
 
 const fn fixture_index(fixture: VfxLabFixture) -> u8 {
@@ -2282,6 +2361,48 @@ mod tests {
             crate::client::vfx::VfxCarrier::StraightProjectile
         );
         assert_eq!(impact.signature.phase, crate::client::vfx::VfxPhase::Impact);
+    }
+
+    #[test]
+    fn fighter_outcome_previews_use_production_lifecycle_signatures() {
+        let damage_scenario = VfxLabScenario {
+            key: crate::client::vfx::COMBAT_DAMAGE_VFX,
+            producer_rank: crate::client::vfx::COMBAT_VFX_PRODUCER_RANK,
+            capabilities: VfxRequestCapabilities::NONE,
+        };
+        let hit = damage_scenario.request(12, DEFAULT_RADIUS, VfxLabAccent::Fire, false, false);
+        let defeat = damage_scenario.request(13, DEFAULT_RADIUS, VfxLabAccent::Fire, false, true);
+        assert_eq!(
+            hit.signature.carrier,
+            crate::client::vfx::VfxCarrier::AttachedStatus
+        );
+        assert_eq!(hit.signature.phase, crate::client::vfx::VfxPhase::Impact);
+        assert_eq!(
+            defeat.signature.phase,
+            crate::client::vfx::VfxPhase::Interruption
+        );
+        assert_eq!(
+            defeat.signature.accents,
+            [Some(crate::client::vfx::VfxAccent::Neutral), None]
+        );
+        assert_eq!(defeat.signature.context, None);
+
+        let reset = VfxLabScenario {
+            key: crate::client::vfx::COMBAT_RESET_VFX,
+            producer_rank: crate::client::vfx::COMBAT_VFX_PRODUCER_RANK,
+            capabilities: VfxRequestCapabilities::NONE,
+        }
+        .request(14, DEFAULT_RADIUS, VfxLabAccent::Fire, false, false);
+        assert_eq!(
+            reset.signature.carrier,
+            crate::client::vfx::VfxCarrier::AttachedStatus
+        );
+        assert_eq!(reset.signature.phase, crate::client::vfx::VfxPhase::Expiry);
+        assert_eq!(
+            reset.signature.accents,
+            [Some(crate::client::vfx::VfxAccent::Neutral), None]
+        );
+        assert_eq!(reset.signature.context, None);
     }
 
     #[test]

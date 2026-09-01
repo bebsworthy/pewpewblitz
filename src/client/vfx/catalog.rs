@@ -1006,6 +1006,55 @@ mod tests {
     }
 
     #[test]
+    fn fighter_outcome_recipes_are_layered_and_degrade_without_particles() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let mut signature = CombatVisualSignature::neutral_point(13, bevy::prelude::Vec2::ZERO);
+        signature.carrier = VfxCarrier::AttachedStatus;
+        signature.phase = VfxPhase::Impact;
+
+        let damage = catalog
+            .resolve("combat.damage", &signature, false, false)
+            .unwrap();
+        let reduced_damage = catalog
+            .resolve("combat.damage", &signature, true, false)
+            .unwrap();
+        assert_eq!(damage.id, "damage");
+        assert_eq!(damage.layers.len(), 3);
+        assert_eq!(damage.particle_layers.len(), 1);
+        assert_eq!(reduced_damage.id, "damage_reduced");
+        assert_eq!(reduced_damage.layers.len(), 2);
+        assert!(reduced_damage.particle_layers.is_empty());
+
+        signature.phase = VfxPhase::Interruption;
+        let defeat = catalog
+            .resolve("combat.damage", &signature, false, false)
+            .unwrap();
+        let reduced_defeat = catalog
+            .resolve("combat.damage", &signature, true, false)
+            .unwrap();
+        assert_eq!(defeat.id, "defeat");
+        assert_eq!(defeat.layers.len(), 4);
+        assert_eq!(defeat.particle_layers.len(), 1);
+        assert_eq!(reduced_defeat.id, "defeat_reduced");
+        assert_eq!(reduced_defeat.layers.len(), 2);
+        assert!(reduced_defeat.particle_layers.is_empty());
+
+        signature.phase = VfxPhase::Expiry;
+        let reset = catalog
+            .resolve("combat.reset", &signature, false, false)
+            .unwrap();
+        let reduced_reset = catalog
+            .resolve("combat.reset", &signature, true, false)
+            .unwrap();
+        assert_eq!(reset.id, "reset");
+        assert_eq!(reset.layers.len(), 4);
+        assert_eq!(reset.particle_layers.len(), 1);
+        assert_eq!(reduced_reset.id, "reset_reduced");
+        assert_eq!(reduced_reset.layers.len(), 2);
+        assert!(reduced_reset.particle_layers.is_empty());
+    }
+
+    #[test]
     fn normal_elemental_impacts_add_bounded_particles_while_reduced_omits_them() {
         let catalog = VfxCatalog::embedded().unwrap();
         for (accent, expected_profile) in [
