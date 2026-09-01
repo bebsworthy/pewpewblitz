@@ -7,6 +7,7 @@ use super::elemental_style::{spawn_elemental_area_style, spawn_elemental_project
 use super::{
     MAX_ACTIVE_PARTICLE_EMITTERS, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
+use std::collections::{BTreeMap, btree_map::Entry};
 
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const STRAIGHT_PROJECTILE_VISUAL_THICKNESS: f32 = 6.0;
@@ -51,6 +52,42 @@ pub(in super::super) struct LobbedProjectileAid3d {
 #[derive(Component)]
 pub(in super::super) struct LobbedProjectileBody3d {
     owner: Entity,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ProjectileVisualReconcileAction {
+    Keep,
+    Spawn,
+    Replace(Entity),
+}
+
+fn projectile_visual_reconcile_action(
+    existing: Option<(Entity, vfx::CombatVisualSignature)>,
+    desired: vfx::CombatVisualSignature,
+) -> ProjectileVisualReconcileAction {
+    match existing {
+        None => ProjectileVisualReconcileAction::Spawn,
+        Some((_, signature)) if signature == desired => ProjectileVisualReconcileAction::Keep,
+        Some((root, _)) => ProjectileVisualReconcileAction::Replace(root),
+    }
+}
+
+fn unique_projectile_visual_roots(
+    commands: &mut Commands,
+    visuals: &ProjectileVisualRootQuery,
+) -> BTreeMap<Entity, (Entity, vfx::CombatVisualSignature)> {
+    let mut roots = BTreeMap::new();
+    let mut ordered_roots = visuals.iter().collect::<Vec<_>>();
+    ordered_roots.sort_unstable_by_key(|(root, ..)| root.index());
+    for (root, owner, signature) in ordered_roots {
+        match roots.entry(owner.0) {
+            Entry::Vacant(entry) => {
+                entry.insert((root, *signature));
+            }
+            Entry::Occupied(_) => commands.entity(root).despawn(),
+        }
+    }
+    roots
 }
 
 #[allow(
@@ -122,6 +159,17 @@ type ProjectileVisualPoseQuery<'w, 's> = Query<
     (Without<V3FighterVisual>, Without<SentryVisual3d>),
 >;
 
+type ProjectileVisualRootQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static CombatVisualOwner,
+        &'static vfx::CombatVisualSignature,
+    ),
+    With<V3ProjectileVisual>,
+>;
+
 type SentryVisualPoseQuery<'w, 's> = Query<
     'w,
     's,
@@ -188,7 +236,7 @@ pub(in super::super) fn reconcile_projectile_visuals(
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     particle_assets: Option<Res<VfxParticleAssets>>,
-    particle_emitters: Query<(), With<VfxParticleEmitter3d>>,
+    particle_emitters: Query<(Entity, &VfxParticleEmitter3d)>,
     mut particle_diagnostics: Option<ResMut<VfxParticleDiagnostics>>,
     vfx: CombatVfxContext,
     projectiles: Query<
@@ -205,89 +253,102 @@ pub(in super::super) fn reconcile_projectile_visuals(
         ),
         With<crate::combat::Projectile>,
     >,
-    visuals: Query<(Entity, &CombatVisualOwner), With<V3ProjectileVisual>>,
+    visuals: ProjectileVisualRootQuery,
 ) {
-    let roots = unique_roots(&mut commands, &visuals);
+    let roots = unique_projectile_visual_roots(&mut commands, &visuals);
     let mut particle_budget =
-        MAX_ACTIVE_PARTICLE_EMITTERS.saturating_sub(particle_emitters.count());
+        MAX_ACTIVE_PARTICLE_EMITTERS.saturating_sub(particle_emitters.iter().count());
     for (owner, position, source, straight, body, lobbed, deadline, attack_source, delivery) in
         &projectiles
     {
         if straight.is_some() && body.is_none() {
             continue;
         }
-        if !roots.contains(&owner) {
-            let carrier = if lobbed.is_some() {
-                vfx::VfxCarrier::LobbedProjectile
-            } else {
-                vfx::VfxCarrier::StraightProjectile
-            };
-            let radius = body.map_or(1.0, |body| body.shape.bounding_radius());
-            let timing = if let Some(lobbed) = lobbed {
-                vfx::VfxAuthoritativeTiming::persistent(
-                    lobbed.launched_at_tick,
-                    None,
-                    lobbed.lands_at_tick,
-                )
-            } else {
-                vfx::VfxAuthoritativeTiming {
-                    activated_at_tick: straight.map(|flight| flight.launched_at_tick),
-                    observed_at_tick: None,
-                    expires_at_tick: deadline.map(|deadline| deadline.expires_at_tick),
-                }
-            };
-            let signature = attack_source.map_or_else(
-                || vfx::CombatVisualSignature {
+        let carrier = if lobbed.is_some() {
+            vfx::VfxCarrier::LobbedProjectile
+        } else {
+            vfx::VfxCarrier::StraightProjectile
+        };
+        let radius = body.map_or(1.0, |body| body.shape.bounding_radius());
+        let timing = if let Some(lobbed) = lobbed {
+            vfx::VfxAuthoritativeTiming::persistent(
+                lobbed.launched_at_tick,
+                None,
+                lobbed.lands_at_tick,
+            )
+        } else {
+            vfx::VfxAuthoritativeTiming {
+                activated_at_tick: straight.map(|flight| flight.launched_at_tick),
+                observed_at_tick: None,
+                expires_at_tick: deadline.map(|deadline| deadline.expires_at_tick),
+            }
+        };
+        let signature = attack_source.map_or_else(
+            || vfx::CombatVisualSignature {
+                carrier,
+                phase: vfx::VfxPhase::Travel,
+                accents: [Some(vfx::VfxAccent::Neutral), None],
+                relationship: vfx
+                    .cache()
+                    .observer()
+                    .relationship(source.owner_network_entity_id, source.team_id),
+                context: None,
+                geometry: vfx::VfxGeometry::Projectile { radius },
+                identity: vfx::VfxPresentationIdentity::Neutral(source.shot_id.0),
+                timing,
+                variant: vfx.variant(),
+            },
+            |attack_source| {
+                vfx.cache().signature_for_source(
+                    attack_source.attack,
+                    delivery.map_or(0, |delivery| delivery.delivery_index),
                     carrier,
-                    phase: vfx::VfxPhase::Travel,
-                    accents: [Some(vfx::VfxAccent::Neutral), None],
-                    relationship: vfx
-                        .cache()
-                        .observer()
-                        .relationship(source.owner_network_entity_id, source.team_id),
-                    context: None,
-                    geometry: vfx::VfxGeometry::Projectile { radius },
-                    identity: vfx::VfxPresentationIdentity::Neutral(source.shot_id.0),
+                    vfx::VfxPhase::Travel,
+                    vfx::VfxGeometry::Projectile { radius },
                     timing,
-                    variant: vfx.variant(),
-                },
-                |attack_source| {
-                    vfx.cache().signature_for_source(
-                        attack_source.attack,
-                        delivery.map_or(0, |delivery| delivery.delivery_index),
-                        carrier,
-                        vfx::VfxPhase::Travel,
-                        vfx::VfxGeometry::Projectile { radius },
-                        timing,
-                        vfx.variant(),
-                    )
-                },
-            );
-            let wants_smoke = lobbed.is_some()
-                && signature.accents.contains(&Some(vfx::VfxAccent::Fire))
-                && signature.variant == vfx::VfxPresentationVariant::Normal;
-            let spawned_smoke = spawn_projectile(
-                &mut commands,
-                &primitives,
-                &materials,
-                particle_assets.as_deref(),
-                particle_budget > 0,
-                owner,
-                position.0,
-                source.team_id,
-                straight,
-                body,
-                lobbed,
-                signature,
-            );
-            if spawned_smoke {
-                particle_budget = particle_budget.saturating_sub(1);
-            } else if wants_smoke && let Some(diagnostics) = particle_diagnostics.as_deref_mut() {
-                diagnostics.suppressed = diagnostics.suppressed.saturating_add(1);
+                    vfx.variant(),
+                )
+            },
+        );
+        match projectile_visual_reconcile_action(roots.get(&owner).copied(), signature) {
+            ProjectileVisualReconcileAction::Keep => continue,
+            ProjectileVisualReconcileAction::Spawn => {}
+            ProjectileVisualReconcileAction::Replace(root) => {
+                commands.entity(root).despawn();
+                for (emitter_entity, emitter) in &particle_emitters {
+                    if emitter.root == root {
+                        commands.entity(emitter_entity).despawn();
+                        particle_budget = particle_budget
+                            .saturating_add(1)
+                            .min(MAX_ACTIVE_PARTICLE_EMITTERS);
+                    }
+                }
             }
         }
+        let wants_smoke = lobbed.is_some()
+            && signature.accents.contains(&Some(vfx::VfxAccent::Fire))
+            && signature.variant == vfx::VfxPresentationVariant::Normal;
+        let spawned_smoke = spawn_projectile(
+            &mut commands,
+            &primitives,
+            &materials,
+            particle_assets.as_deref(),
+            particle_budget > 0,
+            owner,
+            position.0,
+            source.team_id,
+            straight,
+            body,
+            lobbed,
+            signature,
+        );
+        if spawned_smoke {
+            particle_budget = particle_budget.saturating_sub(1);
+        } else if wants_smoke && let Some(diagnostics) = particle_diagnostics.as_deref_mut() {
+            diagnostics.suppressed = diagnostics.suppressed.saturating_add(1);
+        }
     }
-    for (root, owner) in &visuals {
+    for (root, owner, _) in &visuals {
         if projectiles.get(owner.0).is_err() {
             commands.entity(root).despawn();
         }
@@ -1487,6 +1548,148 @@ mod tests {
         assert!(trail.translation.y.abs() > f32::EPSILON);
         let trail_forward = trail.rotation * Vec3::X;
         assert!(trail_forward.dot(ascending) > 0.999);
+    }
+
+    #[test]
+    fn late_replicated_projectile_style_replaces_the_neutral_visual() {
+        let root = Entity::from_bits(42);
+        let neutral = vfx::CombatVisualSignature::neutral_point(7, Vec2::ZERO);
+        let mut fire = neutral;
+        fire.carrier = vfx::VfxCarrier::LobbedProjectile;
+        fire.phase = vfx::VfxPhase::Travel;
+        fire.accents = [Some(vfx::VfxAccent::Fire), None];
+        fire.geometry = vfx::VfxGeometry::Projectile { radius: 1.0 };
+
+        assert_eq!(
+            projectile_visual_reconcile_action(None, neutral),
+            ProjectileVisualReconcileAction::Spawn
+        );
+        assert_eq!(
+            projectile_visual_reconcile_action(Some((root, neutral)), neutral),
+            ProjectileVisualReconcileAction::Keep
+        );
+        assert_eq!(
+            projectile_visual_reconcile_action(Some((root, neutral)), fire),
+            ProjectileVisualReconcileAction::Replace(root)
+        );
+    }
+
+    fn fire_lobbed_test_loadout_and_attack() -> (
+        crate::builds::ResolvedMatchLoadout,
+        crate::combat::AttackSource,
+    ) {
+        let mut loadout = crate::builds::resolve_build_recipe(
+            &crate::builds::BuildCatalog::embedded().unwrap(),
+            &crate::combat::WeaponCatalog::embedded().unwrap(),
+            crate::builds::BrawlerBuildRecipe {
+                weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(3)),
+                ultimate: crate::builds::UltimateDefinitionId(1),
+                passives: [
+                    crate::builds::PassiveDefinitionId(1),
+                    crate::builds::PassiveDefinitionId(6),
+                ],
+            },
+        )
+        .unwrap();
+        let fingerprint = crate::combat::WeaponRecipeFingerprint(0xfeed);
+        loadout.primary_weapon.recipe_fingerprint = fingerprint;
+        loadout.primary_weapon.recipe.payload_bundles[0]
+            .effects
+            .push(crate::combat::PayloadEffectDefinition::DamageOverTime {
+                kind: crate::combat::DamageOverTimeKind::Fire,
+                damage_per_tick: 2,
+                tick_interval: 10,
+                duration_ticks: 30,
+                recipients: crate::combat::RecipientPolicy::Hostiles,
+            });
+        let attack = crate::combat::AttackSource {
+            kind: crate::combat::CombatSourceKind::PrimaryWeapon,
+            attack_id: crate::combat::AttackId(77),
+            player_id: PlayerId(1),
+            owner_network_entity_id: NetworkEntityId(9),
+            team_id: crate::combat::TeamId(1),
+            recipe_fingerprint: fingerprint,
+            legacy_compatibility: false,
+            source_preset_id: Some(crate::combat::WeaponPresetId(3)),
+            origin: crate::combat::WorldPoint::from(Vec2::ZERO),
+            facing: 0.0,
+        };
+        (loadout, attack)
+    }
+
+    #[test]
+    fn production_reconcile_upgrades_a_late_replicated_lobbed_fire_style() {
+        let (loadout, attack) = fire_lobbed_test_loadout_and_attack();
+
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<super::super::elemental_style::FireAreaMaterial>>()
+            .init_resource::<crate::builds::BuildCatalogResource>()
+            .init_resource::<vfx::VfxSignatureCache>()
+            .add_message::<crate::combat::client::DeduplicatedCombatCue>()
+            .add_systems(Startup, setup_3d_foundation)
+            .add_systems(
+                Update,
+                (
+                    vfx::update_vfx_signature_cache,
+                    reconcile_projectile_visuals,
+                )
+                    .chain(),
+            );
+        app.world_mut().spawn((
+            Fighter,
+            attack.owner_network_entity_id,
+            attack.team_id,
+            loadout,
+        ));
+        app.world_mut().spawn(AuthoritativeTick(20));
+        let projectile = app
+            .world_mut()
+            .spawn((
+                crate::combat::Projectile,
+                crate::combat::ProjectileSource {
+                    shot_id: crate::combat::ShotId(77),
+                    player_id: attack.player_id,
+                    owner_network_entity_id: attack.owner_network_entity_id,
+                    team_id: attack.team_id,
+                    weapon_definition_id: crate::combat::ARC_LAUNCHER_DEFINITION,
+                },
+                Position(Vec2::ZERO),
+                crate::combat::LobbedFlight {
+                    launch: Vec2::ZERO.into(),
+                    landing: Vec2::new(100.0, 0.0).into(),
+                    launched_at_tick: 20,
+                    lands_at_tick: 65,
+                    visual_arc_height: 140.0,
+                },
+            ))
+            .id();
+
+        app.update();
+        {
+            let world = app.world_mut();
+            let mut visuals =
+                world.query_filtered::<&vfx::CombatVisualSignature, With<V3ProjectileVisual>>();
+            let signature = *visuals.single(world).unwrap();
+            assert_eq!(signature.accents, [Some(vfx::VfxAccent::Neutral), None]);
+        }
+
+        app.world_mut().entity_mut(projectile).insert((
+            crate::combat::ReplicatedAttackSource { attack },
+            crate::combat::AttackDelivery {
+                attack_id: attack.attack_id,
+                delivery_index: 0,
+            },
+        ));
+        app.update();
+
+        let world = app.world_mut();
+        let mut visuals =
+            world.query_filtered::<&vfx::CombatVisualSignature, With<V3ProjectileVisual>>();
+        let signature = *visuals.single(world).unwrap();
+        assert_eq!(signature.carrier, vfx::VfxCarrier::LobbedProjectile);
+        assert!(signature.accents.contains(&Some(vfx::VfxAccent::Fire)));
     }
 
     #[test]

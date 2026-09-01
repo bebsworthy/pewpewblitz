@@ -120,3 +120,18 @@ Trajectory/shadow/timeline/cleanup tests, recipe validation, lifecycle and late-
 - The first projectile tail used an unsuitable child-frame orientation, so it did not follow the trajectory normal/tangent. Future moving-effect reviews must exercise ascent, apex, and descent rather than judging one pose.
 - The first smoke correction used fixed mesh samples that moved as a formation. That met a still-image approximation but not the requested temporal behavior. When feedback says an effect must emit, linger, and fade, verification must inspect world-space lifetime ownership over motion, not only a screenshot.
 - The reusable contract is now explicit: a moving source drives a globally simulated retained emitter; source removal stops spawning; the emitter remains for the authored particle lifetime; and the shared emitter cap bounds the result.
+
+# Reopened production integration feedback — 2026-09-01
+
+- Native user feedback after the previous closeout: the emitted smoke trail works in VfxLab but does not work in the real game.
+- BRL-0103 is reopened. Completion now requires evidence from the production gameplay path, not VfxLab alone: the real lobbed Fire projectile must select and materialize the same retained world-space smoke emitter, particles must visibly linger and fade during live gameplay, and the affected production lifecycle must have an automated regression check where practical.
+
+# Production integration correction — 2026-09-01
+
+- Root cause: VfxLab creates a complete fixture entity atomically, while Lightyear may expose a production projectile before its replicate-once `ReplicatedAttackSource` identity is available. `reconcile_projectile_visuals` materialized a neutral root on that partial frame and treated the root as final for the projectile lifetime. When the authored Fire signature arrived later, neither the Fire body style nor its retained smoke emitter could be added.
+- Correction: projectile reconciliation now retains the signature attached to each visual root. An unchanged signature keeps the root; a late or changed authored signature replaces the root through the same production `spawn_projectile` path. Any emitter owned by the replaced root is removed before the replacement is allocated, preserving the shared 96-emitter budget and preventing duplicates.
+- Regression coverage includes the pure spawn/keep/replace decision and a production ECS sequence that first materializes a neutral lobbed projectile, then inserts its replicated attack identity, resolves an Arc Launcher Fire loadout, and verifies that exactly one rebuilt lobbed Fire visual remains.
+- Full client library verification: 596 passed, 0 failed. Strict client all-target Clippy passed. Dedicated-server build and client-feature exclusion passed. Formatting and diff checks passed.
+- Production routed evidence used an isolated persisted profile with Arc Launcher plus Incendiary Module in a real Practice match. `target/brl-0103-production-smoke-4y8HXn/captures/brawler-000400.{png,json}` visibly shows the emitted world-space smoke wake; its evidence records Fire `LobbedProjectile` signatures, three retained projectile-smoke emitters, seven total bounded particle emitters, and zero suppressed emitters. Adjacent captures repeatedly record one to three retained emitters with zero suppression.
+- The dense ten-update screenshot cadence deliberately prioritized temporal VFX evidence and caused the auxiliary render report to miss only its sample-count threshold; it is not performance acceptance evidence. The prior bounded performance gate remains unchanged.
+- Remaining acceptance: user confirmation in their normal game profile. BRL-0103 remains `doing` until that retest is accepted.
