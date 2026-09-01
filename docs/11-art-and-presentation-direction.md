@@ -230,12 +230,13 @@ it does not replace these ownership and cleanup paths:
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
 | Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with up to eight combined children: ordered mesh layers plus zero to two optional decorative GPU-particle layers; every particle layer has an authored bounded profile and a shaped retained mesh | Root lifetime is the maximum mesh or particle lifetime, or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
-| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Cold adds slow crystal fins, Fire adds fast trailing lobes, Poison leaves a bubbly wake, and Restoration carries a rotating vitality spark; lobbed flight also has a projected shadow and fixed landing marker, while Fire may emit lingering world-space smoke; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
+| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Neutral straight shots wrap a dimensional nucleus in one animated comet wake, Cold adds slow crystal fins, Fire adds fast trailing lobes, Poison leaves a bubbly wake, and Restoration carries a rotating vitality spark; lobbed flight also has a projected shadow and fixed landing marker, while Fire may emit lingering world-space smoke; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
 | Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained ember ground underlay plus a procedural material for a coherent turbulent circumference and layered heat bands. Normal Poison uses animated cellular contamination with perimeter bubbles; Normal Restoration uses rotating vitality arcs with petal markers. Reduced/primitive variants use bounded mesh geometry | Recreated after late join from public state; owner removal is cleanup truth |
 | Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary; circular Cold/Fire areas reuse the elemental area style | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
-| Sticky payload | Replicated position, fuse ticks, radius, role, and attack source | Moving body, exact warning ring, authoritative fuse-progress fill | Recreated at the observed tick and removed with the owner |
-| Cone spray | Replicated origin, facing, propagation and deadline | Fixed bounded clipped-segment root | Reconstructed from authoritative tick; owner removal clears all segments |
-| Fighter status/dash | Replicated status, ability, concealment, and observed tick | Fighter-owned status markers and bounded trail | Reconciled from current state and removed on status/owner lifecycle |
+| Sticky payload | Replicated position, fuse ticks, radius, role, and attack source | Volatile dimensional body, animated veins and droplets, exact warning ring, and authoritative fuse-progress fill | Recreated at the observed tick and removed with the owner |
+| Cone spray | Replicated origin, facing, propagation and deadline | One bounded triangle-fan surface rebuilt from blocker-clipped authoritative rays; normal/reduced use deterministic flowing gas and primitive uses the same exact silhouette | Reconstructed from authoritative tick; owner removal clears the retained mesh and dynamic mesh asset |
+| Fighter status/dash | Replicated status, ability, concealment, and observed tick | Distinct attached Slow, Cold, Frozen, Fire, Poison, Reveal, and Knockback motifs; Dash uses a deterministic retained wake | Reconciled from current state and removed on status/owner lifecycle |
+| Deployable/sentry | Replicated deployable state plus ordered fire/removal cues | Grounded sentry presentation; compact muzzle discharge; orderly expiry or sharper interrupted collapse | Retained root follows deployable ownership; ordered cues own transient fire/cleanup effects |
 
 Poison and Restoration transient recipes cover muzzle, direct impact, lobbed impact, ultimate
 impact, and elemental-field activation. Poison layers use central contamination accents plus
@@ -244,6 +245,16 @@ bursts. Lobbed variants retain a thin authoritative-radius boundary. Decorative 
 stable presentation seeds, and reduced/primitive variants omit them while preserving the accent's
 mesh identity. Shared ground discs and rings use high-resolution retained meshes so large
 authoritative radii do not expose a coarse polygonal silhouette.
+
+Neutral transient recipes separately cover straight-shot launch/impact, melee sweep/contact,
+damage, defeat, reset, sentry fire/cleanup, concealment activation/interruption, Reveal, and
+demolition. World feedback recipes cover local world-object damage, restoration-pickup
+spawn/collection/expiry, and escalating Heist safe damage/critical/destruction. These semantic
+outcomes do not share one generic flash: normal variants layer compact cores, exact or expressive
+ground geometry, timed echoes, and at most the bounded decorative particles required by the event;
+reduced and primitive variants preserve a complete mesh-only silhouette. Pickup expiry deliberately
+uses no particles so it cannot read as successful collection. Observer-relative ownership remains
+a separate channel owned by BRL-0107 rather than an overlay drawn above these identities.
 
 Aim previews remain intent UI rather than weapon VFX recipes. Imported fighter/weapon scenes and
 map visuals retain their existing owners. The recipe system may reuse presentation assets, but it
@@ -401,13 +412,15 @@ It composes the production client catalog, resolver, retained assets, materializ
 roots, degradation settings, cleanup, and evidence capture without starting a server or entering a
 match. It is excluded from the server feature graph and production player flow.
 
-The transient fixture enumerates registered semantic requests. Additional bounded fixtures create
-representative replicated projectile, field, cone, and fighter-status facts, then let the production
-lifecycle materializers create and own their visual roots. Fixtures do not contain a second visual
-implementation. Restart preserves the explicit presentation identity; choosing a new identity is a
-separate action. Pause and single-step use the canonical simulation tick, so persistent deadlines
-and attached motion can be inspected predictably. Neutral, Cold, Fire, Poison, and Restoration
-accent controls plus the ultimate control resolve through the same production signature.
+The transient fixture enumerates all 17 registered semantic requests. Eleven additional bounded
+fixtures cover straight, melee, lobbed, sticky, persistent Splash, elemental field, concealment,
+cone, dash, sentry, and attached-status facts, then let the production lifecycle materializers
+create and own their visual roots. Fixtures do not contain a second visual implementation. Restart
+preserves the explicit presentation identity; choosing a new identity is a separate action. Pause
+and single-step use the canonical simulation tick, so persistent deadlines and attached motion can
+be inspected predictably. Neutral, Cold, Fire, Poison, and Restoration accent controls plus the
+context-sensitive alternate control resolve through the same production signature; fixed-style
+world feedback disables irrelevant comparisons in the guide.
 Automation may apply an exact bounded initial sample in
 ticks before freezing, allowing a warmed native capture to inspect a transient at its activation,
 peak, or tail.
@@ -420,6 +433,11 @@ authoritative geometry/deadline inputs, active lifecycle-root counts, and retain
 The same snapshot also records every active typed lifecycle signature and the bounded attack-cache
 size and eviction count, so a production fact and its isolated fixture can be compared without
 inferring style from pixels alone.
+Technical diagnostics also report current request/style-mapping, recipe, mesh-layer, and
+particle-layer occupancy against the sealed capacities, plus transient root/layer high-water,
+eviction, particle-emitter high-water, and suppression counts. Evidence automation must warm the
+native render surface sufficiently before taking a paused screenshot; the paired JSON remains the
+semantic/resource record rather than requiring facts to be inferred from one animation frame.
 The Lab is read-only: future authoring and validation workflow belongs to the separate VFX Workbench
 and must publish through validated catalog transactions rather than mutating production resources
 inside this viewer.

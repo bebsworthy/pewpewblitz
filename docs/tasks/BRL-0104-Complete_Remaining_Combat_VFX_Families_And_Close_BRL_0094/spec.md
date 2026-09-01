@@ -807,3 +807,12 @@ Feedback/review disposition:
 - First-pass flat Heist fills and noisy pickup starbursts were rejected during self-review and retuned before commit.
 - The existing renderer test identified that the reduced world-damage core's 7-unit scale and 8-unit height were an established authored transform contract. Those values were restored; the new fracture layer and animated timing remain.
 - The known one-layer legacy debt from the first Phase 3 matrix is now removed. BRL-0104 remains `doing`: representative routed overlap/recreation evidence, durable documentation reconciliation, learning review, and explicit user AAA-quality acceptance remain open.
+
+## Phase 3 durable documentation reconciliation — completed (2026-09-01)
+
+- Updated the root VfxLab runbook from the obsolete 15-request/three-accent/six-fixture description to the production 17-request, five-accent, twelve-fixture surface, including every accepted `--fixture` value and the context-sensitive alternate control.
+- Reconciled `docs/11-art-and-presentation-direction.md` with the delivered neutral comet, sticky payload, clipped triangle-fan Cone Spray, attached statuses, Dash, sentry, fighter outcomes, world feedback, pickup lifecycle, and Heist escalation contracts.
+- Documented that reduced/primitive modes retain complete mesh-only silhouettes, pickup expiry intentionally omits particles, ownership integration remains BRL-0107, and diagnostics expose catalog capacity plus transient/particle high-water and suppression evidence.
+- Preserved the read-only VfxLab boundary and recorded the native screenshot warm-up requirement; the paired JSON remains the authoritative semantic/resource evidence for a selected frame.
+
+Durable architecture/runbook reconciliation is complete. Routed overlap/recreation evidence, the learn-from-errors review, and explicit user AAA-quality acceptance remain open before BRL-0104/BRL-0094 closeout.

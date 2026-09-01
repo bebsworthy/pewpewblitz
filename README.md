@@ -92,10 +92,12 @@ development viewer:
 just vfx-lab
 ```
 
-The default fixture previews the 15 production semantic mappings; use Left/Right to select one.
-Tab cycles production-lifecycle fixtures for straight and lobbed projectiles, elemental fields,
-cone propagation, and attached fighter status. Space restarts with the same presentation identity,
-N advances to a new identity, C cycles neutral/Cold/Fire styling, U toggles ultimate escalation,
+The default fixture previews the 17 production semantic mappings; use Left/Right to select one.
+Tab cycles twelve production-lifecycle fixtures: transient, straight, melee, lobbed, sticky,
+persistent Splash, elemental field, concealment, cone, dash, sentry, and attached status. Space
+restarts with the same presentation identity, N advances to a new identity, C cycles
+neutral/Cold/Fire/Poison/Restoration styling where the selected effect permits it, and U selects the
+effect-specific alternate (ultimate escalation, lifecycle/outcome comparison, or status variant),
 Enter pauses both retained and GPU-particle timelines, and `.` advances one simulation tick. R
 toggles the production reduced-effects variant, P toggles the primitive variant, F12 writes paired
 PNG/JSON evidence under
@@ -108,7 +110,8 @@ scale and are not part of the effect.
 Use `just vfx-lab '--effect combat.impact --lobbed-impact --radius 150'` to preview the production
 lobbed-landing explosion with its exact payload radius. The `--lobbed-impact` switch changes only
 the Lab's semantic carrier fixture; it does not introduce another renderer path.
-Use `--fixture transient|straight|lobbed|field|cone|status` to start at a lifecycle fixture. Native
+Use `--fixture transient|straight|melee|lobbed|sticky|splash|field|concealment|cone|dash|sentry|status`
+to start at a lifecycle fixture. Native
 automation may add `--identity N --radius WORLD_UNITS` and
 `--sample-ticks N --accent neutral|cold|fire|poison|restoration --ultimate --capture-dir PATH --capture-after UPDATES
 --exit-after-capture`; `--paused` captures a stable sample, with `--sample-ticks` advancing the
