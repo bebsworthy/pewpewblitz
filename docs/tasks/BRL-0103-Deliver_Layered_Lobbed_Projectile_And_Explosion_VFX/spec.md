@@ -150,3 +150,9 @@ Trajectory/shadow/timeline/cleanup tests, recipe validation, lifecycle and late-
 - Verification: focused arc/body and late-replication production ECS tests passed; the full client library suite passed 596/596; strict client all-target Clippy passed; server all-target check and server feature-exclusion check passed; formatting and `git diff --check` passed.
 - Routed native Practice evidence with the isolated Arc Launcher plus Incendiary Module profile: `target/brl-0103-production-no-debug-tail/captures/brawler-000400.{png,json}`. The frame visibly shows the orange projectile and lingering smoke without the solid yellow projectile tail; JSON records one lobbed projectile root, exactly two lobbed aids, two retained projectile-smoke emitters, four total bounded emitters, and zero suppressed emitters.
 - BRL-0103 remains `doing` pending user visual confirmation of this final correction.
+
+# Final playtest acceptance — 2026-09-01
+
+- The user accepted the production correction after reviewing the Arc Launcher without the debug-like solid yellow projectile tail ("ok").
+- All later feedback is dispositioned: the explosion was accepted, Fire smoke emits in production and lingers in world space, the solid mesh tail is removed, and the separate aiming indicator remains unchanged.
+- BRL-0103 is complete and unblocks the remaining BRL-0094 combat VFX family work in BRL-0104.
