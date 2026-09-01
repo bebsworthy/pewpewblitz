@@ -1268,9 +1268,7 @@ fn spawn_projectile_geometry(
         primitives,
         materials,
         signature,
-        mesh.clone(),
         transform,
-        relationship_material.clone(),
         team,
         visual_radius,
     ) {

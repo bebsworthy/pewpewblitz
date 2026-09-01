@@ -104,9 +104,7 @@ pub(super) fn spawn_neutral_straight_projectile_style(
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
     signature: vfx::CombatVisualSignature,
-    core_mesh: Handle<Mesh>,
     core_transform: Transform,
-    core_material: Handle<StandardMaterial>,
     team: crate::combat::TeamId,
     visual_radius: f32,
 ) -> bool {
@@ -114,21 +112,10 @@ pub(super) fn spawn_neutral_straight_projectile_style(
         return false;
     };
 
+    let nucleus_transform = Transform::from_xyz(0.0, core_transform.scale.y * 0.48, 0.0)
+        .with_scale(Vec3::new(visual_radius, visual_radius, visual_radius));
     parent.spawn((
-        Mesh3d(core_mesh.clone()),
-        MeshMaterial3d(core_material),
-        NotShadowCaster,
-        core_transform,
-        Name::new("Neutral straight bolt exact core"),
-    ));
-
-    let mut hot_cap_transform = core_transform;
-    hot_cap_transform.translation.y += core_transform.scale.y * 0.52;
-    hot_cap_transform.scale.x *= 0.56;
-    hot_cap_transform.scale.y *= 0.12;
-    hot_cap_transform.scale.z *= 0.56;
-    parent.spawn((
-        Mesh3d(core_mesh),
+        Mesh3d(primitives.effect_sphere.clone()),
         MeshMaterial3d(if team.0 == 1 {
             materials.projectile_hot_red.clone()
         } else {
@@ -136,12 +123,12 @@ pub(super) fn spawn_neutral_straight_projectile_style(
         }),
         NotShadowCaster,
         NotShadowReceiver,
-        hot_cap_transform,
-        Name::new("Neutral straight bolt emissive cap"),
+        nucleus_transform,
+        Name::new("Neutral straight bolt exact-footprint dimensional nucleus"),
     ));
 
     let trail_length = visual_radius.mul_add(4.0, 24.0).clamp(36.0, 56.0) * quality.length_scale();
-    let trail_width = visual_radius.mul_add(1.0, 3.0).clamp(6.0, 12.0);
+    let trail_width = visual_radius.mul_add(2.8, 5.0).clamp(18.0, 28.0);
     parent.spawn((
         Mesh3d(primitives.projectile_trail.clone()),
         MeshMaterial3d(projectile_trail_material(team, quality, materials)),

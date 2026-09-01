@@ -185,3 +185,44 @@ Verification:
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 
 The retained neutral straight-projectile slice is implemented. Native user visual feedback remains open; neutral muzzle/impact unification and the remaining Phase 2 carrier families remain in scope. BRL-0104 stays `doing`.
+
+## Neutral straight-projectile visual feedback — comet integration — 2026-09-01
+
+The user accepted the animated tail motion but rejected the leading core as a separate, boring “hockey puck.” The supplied reference shows the desired relationship: the trailing energy broadens and wraps around a dimensional leading nucleus so the projectile reads as one comet body.
+
+Accept this feedback for the active retained straight-projectile slice:
+
+- Preserve the exact replicated collision-footprint core, but subordinate it inside the presentation rather than leaving it as the dominant exposed silhouette.
+- Replace the flat emissive cap with a dimensional emissive nucleus centered on the authoritative core.
+- Broaden and round the custom wake around the core, including a forward nose and side wrap, so nucleus and tail read as one continuous comet.
+- Keep the local backward-facing trail direction, deterministic `AuthoritativeTick` animation, normal/reduced/primitive ladder, shared Pulse/Scatter recipe, and explicit lobbed exclusion.
+- Review the corrected silhouette at gameplay scale in VfxLab before extending the language to transient muzzle/impact recipes.
+
+This is an accepted presentation correction within BRL-0104; no gameplay, collision, protocol, or server change is authorized.
+
+## Neutral straight-projectile comet correction evidence — 2026-09-01
+
+Implemented the accepted “hockey puck” correction while preserving the retained recipe and degradation contracts.
+
+- Normal and Reduced no longer expose the flat cylinder as their dominant head. Their exact planar gameplay footprint is represented by a fully dimensional lit sphere with the same authoritative radius.
+- The shared wake mesh now has a rounded forward nose, broader side shoulders, and a closed comet silhouette extending around both sides and ahead of the nucleus.
+- The custom trail shader adds a separately weighted animated wrap rim around the head while retaining the deterministic dual-filament tail motion.
+- Nucleus materials use restrained emissive energy plus directional-light response, low roughness, and slight metallic response so the head reads as a solid orb inside the glow.
+- Primitive and ReducedPrimitive deliberately retain the raw exact-core fallback. Lobbed projectiles remain excluded.
+- VfxLab guide text now explains the exact-footprint dimensional nucleus and wrapping Pulse/Scatter comet language.
+
+Visual iteration disposition:
+
+- `target/brl-0104-straight-comet-v1/` was rejected because the original cylinder remained too exposed and the initial forward wrap collapsed to a small point.
+- `target/brl-0104-straight-comet-v2/` established the accepted integrated topology.
+- `target/brl-0104-straight-comet-v3/` refines the nucleus lighting and is the current normal candidate.
+- Degradation evidence is in `target/brl-0104-straight-comet-reduced/` and `target/brl-0104-straight-comet-primitive/`.
+
+Verification:
+
+- `cargo test --locked --no-default-features --features client --lib`: 604 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: passed.
+- `just _check-server` and `just _server-features`: passed.
+- `cargo fmt --all -- --check` and `git diff --check`: passed.
+
+The reported core/tail integration correction is implemented. Native user visual confirmation remains requested before this feedback item is accepted; BRL-0104 stays `doing`.

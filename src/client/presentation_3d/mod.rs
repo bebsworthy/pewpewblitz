@@ -1150,15 +1150,17 @@ pub(in crate::client) fn setup_3d_foundation(
             combat::StraightProjectileTrailMaterial::red(combat::TrailQuality::Reduced),
         ),
         projectile_hot_blue: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.52, 0.96, 1.0),
-            emissive: LinearRgba::new(0.4, 2.8, 4.2, 1.0),
-            unlit: true,
+            base_color: Color::srgb(0.1, 0.55, 0.82),
+            emissive: LinearRgba::new(0.04, 0.45, 0.85, 1.0),
+            perceptual_roughness: 0.2,
+            metallic: 0.22,
             ..default()
         }),
         projectile_hot_red: materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.72, 0.18),
-            emissive: LinearRgba::new(4.2, 0.75, 0.03, 1.0),
-            unlit: true,
+            base_color: Color::srgb(0.82, 0.25, 0.04),
+            emissive: LinearRgba::new(0.85, 0.14, 0.004, 1.0),
+            perceptual_roughness: 0.2,
+            metallic: 0.18,
             ..default()
         }),
         status_slow: materials.add(StandardMaterial {
@@ -1439,21 +1441,40 @@ fn fighter_facing_mesh(fighter_radius: f32) -> Mesh {
 
 fn projectile_trail_mesh() -> Mesh {
     let positions = vec![
-        [0.0, 0.0, -0.5],
-        [0.0, 0.0, 0.5],
-        [-0.54, 0.0, 0.36],
+        [-0.10, 0.0, 0.0],
+        [0.22, 0.0, 0.0],
+        [0.20, 0.0, -0.18],
+        [0.13, 0.0, -0.35],
+        [-0.03, 0.0, -0.54],
+        [-0.30, 0.0, -0.46],
+        [-0.62, 0.0, -0.28],
         [-1.0, 0.0, 0.0],
-        [-0.54, 0.0, -0.36],
+        [-0.62, 0.0, 0.28],
+        [-0.30, 0.0, 0.46],
+        [-0.03, 0.0, 0.54],
+        [0.13, 0.0, 0.35],
+        [0.20, 0.0, 0.18],
     ];
     let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
     let uvs = vec![
-        [1.0, 0.0],
-        [1.0, 1.0],
-        [0.46, 0.86],
+        [0.78, 0.5],
+        [1.0, 0.5],
+        [0.98, 0.33],
+        [0.92, 0.18],
+        [0.84, 0.0],
+        [0.61, 0.06],
+        [0.33, 0.23],
         [0.0, 0.5],
-        [0.46, 0.14],
+        [0.33, 0.77],
+        [0.61, 0.94],
+        [0.84, 1.0],
+        [0.92, 0.82],
+        [0.98, 0.67],
     ];
-    let indices = vec![0, 2, 1, 0, 4, 2, 4, 3, 2];
+    let indices = vec![
+        0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5, 0, 5, 6, 0, 6, 7, 0, 7, 8, 0, 8, 9, 0, 9, 10, 0, 10,
+        11, 0, 11, 12, 0, 12, 1,
+    ];
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),

@@ -15,6 +15,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let edge = 1.0 - smoothstep(0.34, 1.0, across);
     let head = smoothstep(0.08, 0.98, along);
     let tail_fade = smoothstep(0.0, 0.22, along);
+    let head_wrap = smoothstep(0.62, 0.96, along);
+    let wrap_rim = smoothstep(0.46, 0.82, across) * (1.0 - smoothstep(0.82, 1.0, across));
 
     var filament = 0.72;
     if quality < 0.5 {
@@ -24,11 +26,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let hot_center = 1.0 - smoothstep(0.0, 0.32, across);
-    let alpha = tail_fade * edge * head * (0.18 + filament * 0.42 + hot_center * 0.28);
+    let body_alpha = tail_fade * edge * head * (0.18 + filament * 0.42 + hot_center * 0.28);
+    let wrap_alpha = head_wrap * edge * (0.18 + wrap_rim * 0.56);
+    let alpha = max(body_alpha, wrap_alpha);
     if alpha < 0.01 {
         discard;
     }
     let white_hot = vec3<f32>(2.8, 3.2, 3.4);
-    let color = mix(trail_color.rgb * (0.42 + filament * 0.58), white_hot, hot_center * head * 0.62);
+    let wrap_light = max(hot_center * head * 0.62, wrap_rim * head_wrap * 0.46);
+    let color = mix(trail_color.rgb * (0.42 + filament * 0.58), white_hot, wrap_light);
     return vec4<f32>(color, alpha);
 }
