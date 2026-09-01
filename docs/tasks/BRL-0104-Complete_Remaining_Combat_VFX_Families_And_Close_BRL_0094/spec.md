@@ -768,3 +768,42 @@ Review notes:
 - Normal, reduced, and primitive paths are distinct and legible in isolation. Defeat has materially more footprint and outward motion than a hit; reset uses a separate restoration language.
 - Early automated screenshots at `capture-after 2` were taken before the render surface was reliably populated on this host even though JSON reported live entities. The accepted visual captures use `capture-after 12`; future native evidence should retain a sufficient render warm-up.
 - This completes the fighter-outcome remediation slice, not the AAA-quality acceptance gate for BRL-0094. The first matrix still identified Heist, pickup, and world-object damage as remaining one-layer presentation debt.
+
+## Phase 3 next quality slice — objective, pickup, and world-object feedback (2026-09-01)
+
+Complete the remaining one-layer debt identified by the isolated matrix as one independently reviewable catalog/presentation slice:
+
+- Heist safe damaged, critical-threshold, and destroyed cues must form a clear escalation: compact localized hit, urgent structural warning, then broad terminal collapse.
+- Restoration pickup spawned, collected, and expired cues must share one ordered restoration language while remaining distinguishable by motion: emergence, upward acquisition, and inward dissipation.
+- Generic world-object damage must read as localized material fracture and remain visually subordinate to the already-layered authoritative world-object explosion.
+- Producers must emit explicit typed `WorldFeedback` signatures with cue-appropriate phases, accents, deterministic combat-event identity, and authoritative tick timing rather than relying on neutral-point defaults. No gameplay, protocol, map-generation, readiness, or authority contract changes are authorized.
+- Normal recipes may use at most four mesh layers and one bounded particle layer. Reduced recipes preserve a two-layer essential silhouette and omit particles; primitive mode must use the same recipes/signatures.
+- VfxLab generic transient previews must apply the same semantic signatures so catalog and degraded-mode inspection remain production-faithful. Ownership/faction overlays remain deferred to BRL-0107.
+- Verify with focused catalog/producer/Lab tests, strict client Clippy, the full client suite, server/presentation isolation checks, and native normal/reduced/primitive captures. Record visual limitations honestly; this slice does not by itself satisfy the final AAA/user-acceptance gate.
+
+## Phase 3 objective, pickup, and world-feedback slice — implemented and verified (2026-09-01)
+
+Implementation:
+
+- Upgraded the remaining matrix-identified one-layer recipes: `world-object.damaged`; restoration pickup spawned, collected, and expired; and Heist safe damaged, critical, and destroyed.
+- Normal recipes now use three or four authored mesh layers and zero or one bounded particle layer. Every reduced recipe keeps two essential mesh layers and no particles; primitive mode uses the same signatures and recipes.
+- Heist cues form an explicit escalation from local impact to critical structural warning to broad terminal destruction. The second visual pass replaced a flat red composition with translucent fire/demolition surfaces, a hot core, structural fracture, and bounded debris. This is materially clearer but remains subject to the final user/AAA acceptance gate.
+- Pickup cues share restoration color and geometry while differentiating motion: spawn opens outward, collection concentrates and releases, and expiry contracts quietly without particles. Native review removed overlapping starburst layers from spawn/collection after the first pass proved visually noisy.
+- Heist and pickup producers now emit explicit deterministic `WorldFeedback` signatures with event identity, authoritative tick timing, Environment context, cue-appropriate phase, and neutral/restoration accent. Existing generation, readiness, safe-membership, authority, protocol, and schedule gates remain unchanged. World-object cues already carried the same typed contract.
+- VfxLab applies production-parity semantics for these keys (including the already-layered world-object explosion) and now names/explains the actual event instead of showing generic neutral-straight-shot copy. Irrelevant style/alternate controls are marked fixed.
+- Catalog occupancy is 249/256 mesh-layer definitions; recipe and particle-layer ceilings remain valid. This intentionally completes the known legacy layer debt without raising any capacity.
+
+Verification:
+
+- Focused catalog capacity/degradation, producer semantics/gating, renderer transform, VfxLab signature, and VfxLab guide tests: pass.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: pass.
+- `just _test-client`: pass (641 library tests, client binary targets, and one integration test; zero failures).
+- `./scripts/check-server-features.sh`: pass.
+- `./scripts/check-v3-world-presentation.sh`: pass.
+- Native evidence: `target/brl-0104-world-feedback/` records the first complete normal/reduced/primitive pass; `target/brl-0104-world-feedback-v2/` records the accepted retuned pickup and Heist normal compositions. JSON evidence resolves the intended recipes/signatures and reduced output omits particles.
+
+Feedback/review disposition:
+
+- First-pass flat Heist fills and noisy pickup starbursts were rejected during self-review and retuned before commit.
+- The existing renderer test identified that the reduced world-damage core's 7-unit scale and 8-unit height were an established authored transform contract. Those values were restored; the new fracture layer and animated timing remain.
+- The known one-layer legacy debt from the first Phase 3 matrix is now removed. BRL-0104 remains `doing`: representative routed overlap/recreation evidence, durable documentation reconciliation, learning review, and explicit user AAA-quality acceptance remain open.

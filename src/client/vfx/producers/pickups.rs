@@ -2,8 +2,10 @@ use bevy::prelude::*;
 
 use super::VfxRequestSet;
 use crate::client::vfx::{
-    PICKUP_COLLECTED_VFX, PICKUP_EXPIRED_VFX, PICKUP_SPAWNED_VFX, PICKUP_VFX_PRODUCER_RANK,
-    VfxAppExt, VfxRequest, VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration,
+    CombatVisualSignature, PICKUP_COLLECTED_VFX, PICKUP_EXPIRED_VFX, PICKUP_SPAWNED_VFX,
+    PICKUP_VFX_PRODUCER_RANK, VfxAccent, VfxAppExt, VfxAuthoritativeTiming, VfxCarrier,
+    VfxContextOverride, VfxGeometry, VfxPhase, VfxPresentationIdentity, VfxPresentationVariant,
+    VfxRelationship, VfxRequest, VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration,
 };
 
 const REGISTRATIONS: [VfxRequestRegistration; 3] = [
@@ -59,29 +61,44 @@ fn pickup_vfx_request(
     active_generation: crate::map::MapDynamicGeneration,
 ) -> Option<VfxRequest> {
     let event_id = cue.event_id().0;
-    let (identity, position, key, label) = match cue {
+    let (identity, position, tick, key, phase, label) = match cue {
         crate::map::PickupCue::Spawned {
-            identity, position, ..
+            identity,
+            position,
+            tick,
+            ..
         } => (
             identity,
             position.as_vec2(),
+            tick,
             PICKUP_SPAWNED_VFX,
+            VfxPhase::Activation,
             "V10 chest restoration drop",
         ),
         crate::map::PickupCue::Collected {
-            identity, position, ..
+            identity,
+            position,
+            tick,
+            ..
         } => (
             identity,
             position.as_vec2(),
+            tick,
             PICKUP_COLLECTED_VFX,
+            VfxPhase::Impact,
             "V10 restoration collected",
         ),
         crate::map::PickupCue::Expired {
-            identity, position, ..
+            identity,
+            position,
+            tick,
+            ..
         } => (
             identity,
             position.as_vec2(),
+            tick,
             PICKUP_EXPIRED_VFX,
+            VfxPhase::Expiry,
             "V10 restoration expired",
         ),
     };
@@ -96,6 +113,19 @@ fn pickup_vfx_request(
         None,
         label,
     )
+    .and_then(|request| {
+        request.with_signature(CombatVisualSignature {
+            carrier: VfxCarrier::WorldFeedback,
+            phase,
+            accents: [Some(VfxAccent::Restoration), None],
+            relationship: VfxRelationship::Neutral,
+            context: Some(VfxContextOverride::Environment),
+            geometry: VfxGeometry::point(position),
+            identity: VfxPresentationIdentity::CombatEvent(event_id),
+            timing: VfxAuthoritativeTiming::instant(tick),
+            variant: VfxPresentationVariant::Normal,
+        })
+    })
     .ok()
 }
 
@@ -137,5 +167,8 @@ mod tests {
         assert_eq!(request.key, PICKUP_SPAWNED_VFX);
         assert_eq!(request.order.event_id, 9);
         assert_eq!(request.position, Vec2::new(2.0, 3.0));
+        assert_eq!(request.signature.carrier, VfxCarrier::WorldFeedback);
+        assert_eq!(request.signature.phase, VfxPhase::Activation);
+        assert_eq!(request.signature.accents[0], Some(VfxAccent::Restoration));
     }
 }

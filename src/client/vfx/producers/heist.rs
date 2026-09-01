@@ -5,8 +5,11 @@ use crate::{
     client::{
         hud,
         vfx::{
-            HEIST_CRITICAL_VFX, HEIST_DAMAGED_VFX, HEIST_DESTROYED_VFX, HEIST_VFX_PRODUCER_RANK,
-            VfxAppExt, VfxRequest, VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration,
+            CombatVisualSignature, HEIST_CRITICAL_VFX, HEIST_DAMAGED_VFX, HEIST_DESTROYED_VFX,
+            HEIST_VFX_PRODUCER_RANK, VfxAccent, VfxAppExt, VfxAuthoritativeTiming, VfxCarrier,
+            VfxContextOverride, VfxGeometry, VfxPhase, VfxPresentationIdentity,
+            VfxPresentationVariant, VfxRelationship, VfxRequest, VfxRequestCapabilities,
+            VfxRequestOrder, VfxRequestRegistration,
         },
     },
     matchplay::{MatchRoot, MatchState},
@@ -82,16 +85,20 @@ fn heist_vfx_request(
     {
         return None;
     }
-    let (key, label) = match cue.kind {
+    let (key, phase, label) = match cue.kind {
         crate::matchplay::HeistObjectiveCueKind::Damaged => {
-            (HEIST_DAMAGED_VFX, "Heist safe hit cue")
+            (HEIST_DAMAGED_VFX, VfxPhase::Impact, "Heist safe hit cue")
         }
-        crate::matchplay::HeistObjectiveCueKind::Critical => {
-            (HEIST_CRITICAL_VFX, "Heist safe critical cue")
-        }
-        crate::matchplay::HeistObjectiveCueKind::Destroyed => {
-            (HEIST_DESTROYED_VFX, "Heist safe destroyed cue")
-        }
+        crate::matchplay::HeistObjectiveCueKind::Critical => (
+            HEIST_CRITICAL_VFX,
+            VfxPhase::Interruption,
+            "Heist safe critical cue",
+        ),
+        crate::matchplay::HeistObjectiveCueKind::Destroyed => (
+            HEIST_DESTROYED_VFX,
+            VfxPhase::Expiry,
+            "Heist safe destroyed cue",
+        ),
     };
     VfxRequest::try_new(
         key,
@@ -101,6 +108,19 @@ fn heist_vfx_request(
         None,
         label,
     )
+    .and_then(|request| {
+        request.with_signature(CombatVisualSignature {
+            carrier: VfxCarrier::WorldFeedback,
+            phase,
+            accents: [Some(VfxAccent::Neutral), None],
+            relationship: VfxRelationship::Neutral,
+            context: Some(VfxContextOverride::Environment),
+            geometry: VfxGeometry::point(cue.position.as_vec2()),
+            identity: VfxPresentationIdentity::CombatEvent(cue.event_id.0),
+            timing: VfxAuthoritativeTiming::instant(cue.tick),
+            variant: VfxPresentationVariant::Normal,
+        })
+    })
     .ok()
 }
 
@@ -144,5 +164,11 @@ mod tests {
         assert_eq!(request.key, HEIST_CRITICAL_VFX);
         assert_eq!(request.order.event_id, 9);
         assert_eq!(request.position, Vec2::new(2.0, 3.0));
+        assert_eq!(request.signature.carrier, VfxCarrier::WorldFeedback);
+        assert_eq!(request.signature.phase, VfxPhase::Interruption);
+        assert_eq!(
+            request.signature.context,
+            Some(VfxContextOverride::Environment)
+        );
     }
 }

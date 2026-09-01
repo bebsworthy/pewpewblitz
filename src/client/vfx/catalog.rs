@@ -657,6 +657,9 @@ fn validate_reduced_readability(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::vfx::recipes::{
+        MAX_VFX_LAYERS_PER_RECIPE, MAX_VFX_PARTICLE_LAYERS_PER_RECIPE,
+    };
 
     const BUILTIN_MAPPINGS: [(&str, &str); 17] = [
         ("ability.demolition-strike", "demolition"),
@@ -1052,6 +1055,36 @@ mod tests {
         assert_eq!(reduced_reset.id, "reset_reduced");
         assert_eq!(reduced_reset.layers.len(), 2);
         assert!(reduced_reset.particle_layers.is_empty());
+    }
+
+    #[test]
+    fn objective_pickup_and_world_damage_recipes_are_layered_and_bounded() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let mut signature = CombatVisualSignature::neutral_point(14, bevy::prelude::Vec2::ZERO);
+        signature.carrier = VfxCarrier::WorldFeedback;
+        signature.context = Some(VfxContextOverride::Environment);
+
+        for (key, normal_layers, particle_layers) in [
+            ("world-object.damaged", 3, 1),
+            ("pickup.spawned", 4, 1),
+            ("pickup.collected", 4, 1),
+            ("pickup.expired", 3, 0),
+            ("heist.damaged", 3, 1),
+            ("heist.critical", 4, 1),
+            ("heist.destroyed", 4, 1),
+        ] {
+            let normal = catalog.resolve(key, &signature, false, false).unwrap();
+            let reduced = catalog.resolve(key, &signature, true, false).unwrap();
+            assert_eq!(normal.layers.len(), normal_layers, "{key}");
+            assert_eq!(normal.particle_layers.len(), particle_layers, "{key}");
+            assert_eq!(reduced.layers.len(), 2, "{key}");
+            assert!(reduced.particle_layers.is_empty(), "{key}");
+        }
+
+        let diagnostics = catalog.diagnostics();
+        assert!(diagnostics.mesh_layers <= MAX_VFX_LAYERS);
+        assert!(diagnostics.maximum_recipe_mesh_layers <= MAX_VFX_LAYERS_PER_RECIPE);
+        assert!(diagnostics.maximum_recipe_particle_layers <= MAX_VFX_PARTICLE_LAYERS_PER_RECIPE);
     }
 
     #[test]

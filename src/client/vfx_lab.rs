@@ -352,6 +352,12 @@ impl VfxLabScenario {
             } else {
                 None
             };
+            apply_world_feedback_signature(
+                self.key,
+                authoritative_radius,
+                request.position,
+                &mut signature,
+            );
             request.with_signature(signature)
         })
         .expect("sealed production registration produces a valid lab request")
@@ -397,6 +403,68 @@ fn apply_attached_transient_signature(
     signature.carrier = crate::client::vfx::VfxCarrier::AttachedStatus;
     signature.phase = phase;
     signature.accents = [Some(accent), None];
+}
+
+fn apply_world_feedback_signature(
+    key: VfxRequestKey,
+    radius: Option<f32>,
+    position: Vec2,
+    signature: &mut crate::client::vfx::CombatVisualSignature,
+) {
+    let (phase, accent) = if matches!(
+        key,
+        crate::client::vfx::WORLD_OBJECT_DAMAGED_VFX
+            | crate::client::vfx::WORLD_OBJECT_EXPLOSION_VFX
+            | crate::client::vfx::HEIST_DAMAGED_VFX
+    ) {
+        (
+            crate::client::vfx::VfxPhase::Impact,
+            if key == crate::client::vfx::WORLD_OBJECT_EXPLOSION_VFX {
+                crate::client::vfx::VfxAccent::Fire
+            } else {
+                crate::client::vfx::VfxAccent::Neutral
+            },
+        )
+    } else if key == crate::client::vfx::HEIST_CRITICAL_VFX {
+        (
+            crate::client::vfx::VfxPhase::Interruption,
+            crate::client::vfx::VfxAccent::Neutral,
+        )
+    } else if matches!(
+        key,
+        crate::client::vfx::HEIST_DESTROYED_VFX | crate::client::vfx::PICKUP_EXPIRED_VFX
+    ) {
+        (
+            crate::client::vfx::VfxPhase::Expiry,
+            if key == crate::client::vfx::PICKUP_EXPIRED_VFX {
+                crate::client::vfx::VfxAccent::Restoration
+            } else {
+                crate::client::vfx::VfxAccent::Neutral
+            },
+        )
+    } else if matches!(
+        key,
+        crate::client::vfx::PICKUP_SPAWNED_VFX | crate::client::vfx::PICKUP_COLLECTED_VFX
+    ) {
+        (
+            if key == crate::client::vfx::PICKUP_SPAWNED_VFX {
+                crate::client::vfx::VfxPhase::Activation
+            } else {
+                crate::client::vfx::VfxPhase::Impact
+            },
+            crate::client::vfx::VfxAccent::Restoration,
+        )
+    } else {
+        return;
+    };
+    signature.carrier = crate::client::vfx::VfxCarrier::WorldFeedback;
+    signature.phase = phase;
+    signature.accents = [Some(accent), None];
+    signature.context = Some(crate::client::vfx::VfxContextOverride::Environment);
+    signature.geometry = radius.map_or_else(
+        || crate::client::vfx::VfxGeometry::point(position),
+        |radius| crate::client::vfx::VfxGeometry::circle(position, radius),
+    );
 }
 
 #[derive(Resource)]
@@ -1890,37 +1958,113 @@ fn update_lab_inspector(
     }
 }
 
+#[derive(Clone, Copy)]
+struct WorldFeedbackGuide {
+    style_label: &'static str,
+    subject: &'static str,
+    meaning: &'static str,
+    style: &'static str,
+}
+
+fn world_feedback_guide(key: VfxRequestKey) -> Option<WorldFeedbackGuide> {
+    if key == crate::client::vfx::WORLD_OBJECT_DAMAGED_VFX {
+        Some(WorldFeedbackGuide {
+            style_label: "STRUCTURAL DAMAGE",
+            subject: "WORLD OBJECT LOCAL DAMAGE",
+            meaning: "The compact red core and fracture mark authoritative damage at the object's position. The response stays smaller than the separate world-object explosion so it cannot imply destruction.",
+            style: "WORLD DAMAGE is a localized material break: short contact flash, grounded fracture, restrained echo, and bounded sparks.",
+        })
+    } else if key == crate::client::vfx::PICKUP_SPAWNED_VFX {
+        Some(WorldFeedbackGuide {
+            style_label: "RESTORATION EMERGENCE",
+            subject: "RESTORATION PICKUP SPAWNED",
+            meaning: "Concentric green rings open around the authoritative pickup position while a compact vitality core and petals rise. The pickup entity owns its retained presentation.",
+            style: "SPAWN opens outward from the ground, announcing availability without looking like healing has already been collected.",
+        })
+    } else if key == crate::client::vfx::PICKUP_COLLECTED_VFX {
+        Some(WorldFeedbackGuide {
+            style_label: "RESTORATION ACQUISITION",
+            subject: "RESTORATION PICKUP COLLECTED",
+            meaning: "The bright core and paired rings mark the authoritative collection point. Petals provide the vitality release; health mutation remains server-owned.",
+            style: "COLLECT concentrates restoration energy into a bright vertical core and clean release rings, making acquisition stronger and faster than spawn.",
+        })
+    } else if key == crate::client::vfx::PICKUP_EXPIRED_VFX {
+        Some(WorldFeedbackGuide {
+            style_label: "RESTORATION DISSIPATION",
+            subject: "RESTORATION PICKUP EXPIRED",
+            meaning: "The green boundary, floor glow, and small core contract toward the authoritative pickup position. The quiet particle-free collapse distinguishes expiry from collection.",
+            style: "EXPIRY removes energy inward with no celebratory burst, reading clearly as a missed pickup.",
+        })
+    } else if key == crate::client::vfx::HEIST_DAMAGED_VFX {
+        Some(WorldFeedbackGuide {
+            style_label: "HEIST HIT",
+            subject: "HEIST SAFE DAMAGED",
+            meaning: "A compact structural flash and fracture mark one authoritative safe hit. It stays local so repeated damage does not resemble the critical or destroyed cues.",
+            style: "HEIST HIT stays close to the safe: contact core, demolition fracture, soft echo, and bounded sparks.",
+        })
+    } else if key == crate::client::vfx::HEIST_CRITICAL_VFX {
+        Some(WorldFeedbackGuide {
+            style_label: "HEIST CRITICAL",
+            subject: "HEIST SAFE ENTERED CRITICAL HEALTH",
+            meaning: "The larger translucent floor, structural break, hot core, and ring mark the authoritative critical threshold. This is a one-time warning, not a retained health overlay.",
+            style: "CRITICAL escalates the safe's damage language with a wider demolition pulse and hot sparks while remaining smaller than terminal destruction.",
+        })
+    } else if key == crate::client::vfx::HEIST_DESTROYED_VFX {
+        Some(WorldFeedbackGuide {
+            style_label: "HEIST DESTROYED",
+            subject: "HEIST SAFE DESTROYED",
+            meaning: "The broad floor release, fracture, hot core, and demolition ring mark the authoritative terminal safe event. Match outcome remains server-owned.",
+            style: "DESTROYED is the largest Heist response: broad outward collapse geometry and hot debris establish terminal weight.",
+        })
+    } else {
+        None
+    }
+}
+
 fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &str) -> String {
-    let style_label = match (state.fixture, scenario.key) {
-        (VfxLabFixture::Transient, crate::client::vfx::REVEAL_SCAN_VFX) => "REVEAL".to_string(),
-        (VfxLabFixture::Transient, crate::client::vfx::DEMOLITION_STRIKE_VFX) => {
-            "DEMOLITION".to_string()
-        }
-        (VfxLabFixture::Transient, crate::client::vfx::SELF_CLOAK_VFX) => "SELF CLOAK".to_string(),
-        (VfxLabFixture::Transient, crate::client::vfx::FORCED_REVEAL_VFX) => {
-            "FORCED REVEAL".to_string()
-        }
-        (VfxLabFixture::Transient, crate::client::vfx::COMBAT_DAMAGE_VFX) => "DAMAGE".to_string(),
-        (VfxLabFixture::Transient, crate::client::vfx::COMBAT_RESET_VFX) => "RESET".to_string(),
-        (VfxLabFixture::PersistentSplash, _) => "SPLASH DUAL".to_string(),
-        (VfxLabFixture::ConcealmentField, _) => "CONCEALMENT".to_string(),
-        (VfxLabFixture::Sentry, _) => "DEPLOYABLE NEUTRAL".to_string(),
-        (VfxLabFixture::Status, _) => status_fixture_label(state).to_string(),
-        _ => state.accent.label().to_uppercase(),
-    };
-    let subject = match state.fixture {
-        VfxLabFixture::Transient => match scenario.key.as_str() {
-            "combat.muzzle" => "WEAPON FIRING FLASH",
-            "combat.impact" => "WEAPON HIT / IMPACT",
-            "ability.reveal-scan" => "REVEAL SCAN ACTIVATION",
-            "ability.elemental-field" => "ULTIMATE FIELD ACTIVATION",
-            "ability.demolition-strike" => "DEMOLITION STRIKE MAP BREACH",
-            "ability.self-cloak" => "SELF CLOAK ATTACHED LIFECYCLE CUE",
-            "ability.forced-reveal" => "FORCED REVEAL TARGET ACQUISITION",
-            "combat.damage" => "FIGHTER HIT / DEFEAT OUTCOME",
-            "combat.reset" => "FIGHTER RESET OUTCOME",
-            _ => "ONE-SHOT GAMEPLAY EFFECT",
+    let world_feedback = (state.fixture == VfxLabFixture::Transient)
+        .then(|| world_feedback_guide(scenario.key))
+        .flatten();
+    let style_label = world_feedback.map_or_else(
+        || match (state.fixture, scenario.key) {
+            (VfxLabFixture::Transient, crate::client::vfx::REVEAL_SCAN_VFX) => "REVEAL".to_string(),
+            (VfxLabFixture::Transient, crate::client::vfx::DEMOLITION_STRIKE_VFX) => {
+                "DEMOLITION".to_string()
+            }
+            (VfxLabFixture::Transient, crate::client::vfx::SELF_CLOAK_VFX) => {
+                "SELF CLOAK".to_string()
+            }
+            (VfxLabFixture::Transient, crate::client::vfx::FORCED_REVEAL_VFX) => {
+                "FORCED REVEAL".to_string()
+            }
+            (VfxLabFixture::Transient, crate::client::vfx::COMBAT_DAMAGE_VFX) => {
+                "DAMAGE".to_string()
+            }
+            (VfxLabFixture::Transient, crate::client::vfx::COMBAT_RESET_VFX) => "RESET".to_string(),
+            (VfxLabFixture::PersistentSplash, _) => "SPLASH DUAL".to_string(),
+            (VfxLabFixture::ConcealmentField, _) => "CONCEALMENT".to_string(),
+            (VfxLabFixture::Sentry, _) => "DEPLOYABLE NEUTRAL".to_string(),
+            (VfxLabFixture::Status, _) => status_fixture_label(state).to_string(),
+            _ => state.accent.label().to_uppercase(),
         },
+        |guide| guide.style_label.to_string(),
+    );
+    let subject = match state.fixture {
+        VfxLabFixture::Transient => world_feedback.map_or_else(
+            || match scenario.key.as_str() {
+                "combat.muzzle" => "WEAPON FIRING FLASH",
+                "combat.impact" => "WEAPON HIT / IMPACT",
+                "ability.reveal-scan" => "REVEAL SCAN ACTIVATION",
+                "ability.elemental-field" => "ULTIMATE FIELD ACTIVATION",
+                "ability.demolition-strike" => "DEMOLITION STRIKE MAP BREACH",
+                "ability.self-cloak" => "SELF CLOAK ATTACHED LIFECYCLE CUE",
+                "ability.forced-reveal" => "FORCED REVEAL TARGET ACQUISITION",
+                "combat.damage" => "FIGHTER HIT / DEFEAT OUTCOME",
+                "combat.reset" => "FIGHTER RESET OUTCOME",
+                _ => "ONE-SHOT GAMEPLAY EFFECT",
+            },
+            |guide| guide.subject,
+        ),
         VfxLabFixture::StraightProjectile => "STRAIGHT PROJECTILE IN FLIGHT",
         VfxLabFixture::Melee => "IMPACT BLADE SWEEP AND CONTACT",
         VfxLabFixture::LobbedProjectile => "LOBBED PROJECTILE IN FLIGHT",
@@ -1935,7 +2079,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
     };
     let meaning = lab_fixture_meaning(state, scenario);
     let style = lab_guide_style(state);
-    let style_control = if state_has_fixed_accent(state) {
+    let style_control = if state_has_fixed_accent(state) || world_feedback.is_some() {
         "C fixed style  "
     } else {
         "C compare style"
@@ -1964,7 +2108,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
 fn lab_fixture_meaning(state: &VfxLabState, scenario: VfxLabScenario) -> &'static str {
     match state.fixture {
         VfxLabFixture::Transient => {
-            if scenario.key == crate::client::vfx::REVEAL_SCAN_VFX {
+            if let Some(guide) = world_feedback_guide(scenario.key) {
+                guide.meaning
+            } else if scenario.key == crate::client::vfx::REVEAL_SCAN_VFX {
                 "The thin outer ring is the exact 192-unit scan radius and remains for the authoritative reveal deadline. The concentric waves are the one-time activation sweep. Fighters found by that scan retain separate attached Reveal markers; this area does not scan repeatedly."
             } else if scenario.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
                 "The thin outer ring is the exact 64-unit map-destruction radius. The fracture flash, hot core, expanding shockwave, sparks, and smoke present an authoritative destruction event that has already resolved; this is not a pending danger telegraph."
@@ -2023,6 +2169,11 @@ fn lab_fixture_meaning(state: &VfxLabState, scenario: VfxLabScenario) -> &'stati
 }
 
 fn lab_mode_labels(state: &VfxLabState) -> (&'static str, &'static str) {
+    if state.fixture == VfxLabFixture::Transient
+        && world_feedback_guide(state.selected().key).is_some()
+    {
+        return ("", "U no alternate");
+    }
     if state.fixture == VfxLabFixture::Transient
         && state.selected().key == crate::client::vfx::SELF_CLOAK_VFX
     {
@@ -2084,6 +2235,11 @@ const fn status_fixture_label(state: &VfxLabState) -> &'static str {
 }
 
 fn lab_guide_style(state: &VfxLabState) -> &'static str {
+    if state.fixture == VfxLabFixture::Transient
+        && let Some(guide) = world_feedback_guide(state.selected().key)
+    {
+        return guide.style;
+    }
     if let Some(style) = fighter_outcome_guide_style(state) {
         return style;
     }
@@ -2403,6 +2559,70 @@ mod tests {
             [Some(crate::client::vfx::VfxAccent::Neutral), None]
         );
         assert_eq!(reset.signature.context, None);
+    }
+
+    #[test]
+    fn world_feedback_previews_use_production_semantics() {
+        for (key, phase, accent) in [
+            (
+                crate::client::vfx::WORLD_OBJECT_DAMAGED_VFX,
+                crate::client::vfx::VfxPhase::Impact,
+                crate::client::vfx::VfxAccent::Neutral,
+            ),
+            (
+                crate::client::vfx::HEIST_CRITICAL_VFX,
+                crate::client::vfx::VfxPhase::Interruption,
+                crate::client::vfx::VfxAccent::Neutral,
+            ),
+            (
+                crate::client::vfx::HEIST_DESTROYED_VFX,
+                crate::client::vfx::VfxPhase::Expiry,
+                crate::client::vfx::VfxAccent::Neutral,
+            ),
+            (
+                crate::client::vfx::PICKUP_SPAWNED_VFX,
+                crate::client::vfx::VfxPhase::Activation,
+                crate::client::vfx::VfxAccent::Restoration,
+            ),
+            (
+                crate::client::vfx::PICKUP_COLLECTED_VFX,
+                crate::client::vfx::VfxPhase::Impact,
+                crate::client::vfx::VfxAccent::Restoration,
+            ),
+            (
+                crate::client::vfx::PICKUP_EXPIRED_VFX,
+                crate::client::vfx::VfxPhase::Expiry,
+                crate::client::vfx::VfxAccent::Restoration,
+            ),
+        ] {
+            let request = VfxLabScenario {
+                key,
+                producer_rank: 100,
+                capabilities: VfxRequestCapabilities::NONE,
+            }
+            .request(15, DEFAULT_RADIUS, VfxLabAccent::Fire, false, true);
+            assert_eq!(
+                request.signature.carrier,
+                crate::client::vfx::VfxCarrier::WorldFeedback
+            );
+            assert_eq!(request.signature.phase, phase);
+            assert_eq!(request.signature.accents, [Some(accent), None]);
+            assert_eq!(
+                request.signature.context,
+                Some(crate::client::vfx::VfxContextOverride::Environment)
+            );
+        }
+    }
+
+    #[test]
+    fn world_feedback_guides_name_the_actual_event_and_fixed_controls() {
+        let guide = world_feedback_guide(crate::client::vfx::HEIST_DESTROYED_VFX).unwrap();
+        assert_eq!(guide.subject, "HEIST SAFE DESTROYED");
+        assert!(guide.meaning.contains("authoritative terminal safe event"));
+
+        let guide = world_feedback_guide(crate::client::vfx::PICKUP_EXPIRED_VFX).unwrap();
+        assert_eq!(guide.style_label, "RESTORATION DISSIPATION");
+        assert!(guide.style.contains("no celebratory burst"));
     }
 
     #[test]
