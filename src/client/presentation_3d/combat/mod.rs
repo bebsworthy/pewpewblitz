@@ -57,6 +57,21 @@ pub(in crate::client) struct VfxLabLifecycleSet;
 /// The Lab supplies replicated-shape fixture facts but never duplicates their visual construction.
 pub(in crate::client) struct VfxLabLifecyclePresentationPlugin;
 
+pub(super) fn add_retained_material_animation_systems<S>(app: &mut App, set: S)
+where
+    S: SystemSet + Clone,
+{
+    app.add_systems(
+        Update,
+        (
+            animate_fire_area_material,
+            animate_elemental_support_area_materials,
+            animate_cone_spray_materials,
+        )
+            .in_set(set),
+    );
+}
+
 impl Plugin for VfxLabLifecyclePresentationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
@@ -75,9 +90,6 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
                 reconcile_status_visuals,
                 update_cone_spray_visuals,
                 animate_elemental_motion_accents,
-                animate_fire_area_material,
-                animate_elemental_support_area_materials,
-                animate_cone_spray_materials,
             )
                 .chain()
                 .in_set(VfxLabLifecycleSet),
@@ -94,6 +106,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
                     .chain(),
             ),
         );
+        add_retained_material_animation_systems(app, VfxLabLifecycleSet);
     }
 }
 #[cfg(test)]

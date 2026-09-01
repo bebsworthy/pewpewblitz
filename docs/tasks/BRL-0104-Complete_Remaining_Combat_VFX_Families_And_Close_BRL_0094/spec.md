@@ -123,3 +123,21 @@ Verification:
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 
 The Cone Spray implementation slice is complete. Native user visual feedback remains open, and the remaining Phase 2 carrier families remain in scope; BRL-0104 stays `doing`.
+
+## Cone Spray production parity feedback — 2026-09-01
+
+The user confirmed that Cone Spray animates in VfxLab but remains static in gameplay. Inspection found that production installed `ConeSprayMaterialPlugin` and materialized the retained surface, but omitted `animate_cone_spray_materials` from `WorldPresentationSet::Animate`; VfxLab scheduled the same system correctly. Accept this as an implementation defect. Add the missing production schedule entry, verify the client/server gates, and retain one production-composition regression assertion so future custom retained materials cannot silently diverge from VfxLab.
+
+## Cone Spray production parity correction evidence — 2026-09-01
+
+Implemented the accepted gameplay-animation correction. Production and VfxLab now call one shared retained-material animation installer covering Fire, Poison/Restoration, and Cone Spray materials; the production call assigns it to `WorldPresentationSet::Animate`. A regression test builds the production foundation, advances `AuthoritativeTick` by one second, runs the production animation set, and verifies the Cone Spray material time uniform advances to one second.
+
+Verification:
+
+- Focused production schedule regression: passed.
+- `cargo test --locked --no-default-features --features client --lib`: 601 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: passed.
+- `just _check-server` and `just _server-features`: passed.
+- `cargo fmt --all -- --check` and `git diff --check`: passed.
+
+The reported VfxLab/game parity defect is implemented and automated. Native gameplay confirmation remains requested before the feedback item is considered accepted.

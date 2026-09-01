@@ -303,6 +303,7 @@ impl Plugin for WorldPresentationPlugin {
             combat::ElementalSupportAreaMaterialPlugin,
             combat::ConeSprayMaterialPlugin,
         ));
+        combat::add_retained_material_animation_systems(app, WorldPresentationSet::Animate);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .add_message::<PendingCombatEffect>()
             .init_resource::<combat::ConcealedMaterialVariants>()
@@ -376,8 +377,6 @@ impl Plugin for WorldPresentationPlugin {
                     combat::update_sticky_blob_fuse_progress,
                     combat::update_cone_spray_visuals,
                     combat::animate_elemental_motion_accents,
-                    combat::animate_fire_area_material,
-                    combat::animate_elemental_support_area_materials,
                     combat::update_aim_preview,
                     animate_combat_effect_layers,
                     update_character_animation,

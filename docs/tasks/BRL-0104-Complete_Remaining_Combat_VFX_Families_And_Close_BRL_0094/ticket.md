@@ -5,9 +5,9 @@ status: doing
 theme:
 release:
 created: 2026-08-31T08:21:41Z
-modified: 2026-09-01T07:08:25Z
+modified: 2026-09-01T07:34:08Z
 closed:
-revision: 97388af7225b0691
+revision: '214020177517e060'
 blocks: [BRL-0107]
 related: [BRL-0094]
 ---

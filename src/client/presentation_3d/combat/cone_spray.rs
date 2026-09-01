@@ -350,4 +350,33 @@ mod tests {
         assert!((ConeSprayMaterial::reduced().params.y - 1.0).abs() < f32::EPSILON);
         assert!((ConeSprayMaterial::primitive().params.y - 2.0).abs() < f32::EPSILON);
     }
+
+    #[test]
+    fn production_retained_material_schedule_advances_cone_time() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<super::super::elemental_style::FireAreaMaterial>>()
+            .init_resource::<Assets<super::super::elemental_style::ElementalSupportAreaMaterial>>()
+            .init_resource::<Assets<ConeSprayMaterial>>()
+            .init_resource::<crate::builds::BuildCatalogResource>()
+            .add_systems(Startup, setup_3d_foundation);
+        configure_world_presentation_schedule(&mut app);
+        super::super::add_retained_material_animation_systems(
+            &mut app,
+            WorldPresentationSet::Animate,
+        );
+        app.world_mut()
+            .spawn(AuthoritativeTick(crate::timing::SIMULATION_TICK_HZ));
+
+        app.update();
+
+        let handle = app.world().resource::<Material3dAssets>().spray_gas.clone();
+        let material = app
+            .world()
+            .resource::<Assets<ConeSprayMaterial>>()
+            .get(&handle)
+            .expect("startup prepares the production cone material");
+        assert!((material.params.x - 1.0).abs() < f32::EPSILON);
+    }
 }
