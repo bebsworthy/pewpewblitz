@@ -4,6 +4,7 @@ use super::common::{
     ground_marker_relation, unique_roots,
 };
 use super::elemental_style::{spawn_elemental_area_style, spawn_elemental_projectile_style};
+use super::splash_style::spawn_dual_purpose_splash_style;
 use super::{
     MAX_ACTIVE_PARTICLE_EMITTERS, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
@@ -683,7 +684,11 @@ fn spawn_persistent_splash(
         .entity(root)
         .with_children(|parent| match state.shape {
             crate::combat::PersistentAreaShape::Circle { radius } => {
-                if !spawn_elemental_area_style(parent, primitives, materials, signature, radius) {
+                if !spawn_dual_purpose_splash_style(
+                    parent, primitives, materials, signature, radius,
+                ) && !spawn_elemental_area_style(
+                    parent, primitives, materials, signature, radius,
+                ) {
                     parent.spawn((
                         Mesh3d(primitives.area_disc.clone()),
                         MeshMaterial3d(fill),

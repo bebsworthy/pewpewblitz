@@ -142,6 +142,8 @@ pub(crate) struct Material3dAssets {
     pub(crate) elemental_restoration: Handle<StandardMaterial>,
     pub(crate) elemental_restoration_bright: Handle<StandardMaterial>,
     pub(in crate::client) elemental_restoration_area: Handle<combat::ElementalSupportAreaMaterial>,
+    pub(in crate::client) splash_area: Handle<combat::SplashAreaMaterial>,
+    pub(in crate::client) splash_area_reduced: Handle<combat::SplashAreaMaterial>,
     pub(crate) sticky_blob: Handle<StandardMaterial>,
     pub(crate) sticky_warning: Handle<StandardMaterial>,
     pub(crate) sticky_warning_fill: Handle<StandardMaterial>,
@@ -317,6 +319,7 @@ impl Plugin for WorldPresentationPlugin {
             combat::DashTrailMaterialPlugin,
             combat::StraightProjectileTrailMaterialPlugin,
             combat::StickyBlobMaterialPlugin,
+            combat::SplashAreaMaterialPlugin,
         ));
         combat::add_retained_material_animation_systems(app, WorldPresentationSet::Animate);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
@@ -1058,6 +1061,7 @@ pub(in crate::client) fn setup_3d_foundation(
     mut straight_projectile_trail_materials: ResMut<
         Assets<combat::StraightProjectileTrailMaterial>,
     >,
+    splash_area_materials: Option<ResMut<Assets<combat::SplashAreaMaterial>>>,
 ) {
     let fighter_radius = builds.0.fighter_body.radius;
     let fighter_metrics = FighterPresentationMetrics {
@@ -1096,6 +1100,15 @@ pub(in crate::client) fn setup_3d_foundation(
         metallic: 0.0,
         ..default()
     };
+    let (splash_area, splash_area_reduced) = splash_area_materials.map_or_else(
+        || (Handle::default(), Handle::default()),
+        |mut materials| {
+            (
+                materials.add(combat::SplashAreaMaterial::normal()),
+                materials.add(combat::SplashAreaMaterial::reduced()),
+            )
+        },
+    );
     let material_assets = Material3dAssets {
         team_blue: materials.add(matte(Color::srgb(0.12, 0.72, 0.96))),
         team_red: materials.add(matte(Color::srgb(1.0, 0.42, 0.12))),
@@ -1264,6 +1277,8 @@ pub(in crate::client) fn setup_3d_foundation(
         }),
         elemental_restoration_area: elemental_support_area_materials
             .add(combat::ElementalSupportAreaMaterial::restoration()),
+        splash_area,
+        splash_area_reduced,
         elemental_restoration_bright: materials.add(StandardMaterial {
             base_color: Color::srgb(0.42, 1.0, 0.74),
             emissive: LinearRgba::new(0.12, 2.4, 0.82, 1.0),

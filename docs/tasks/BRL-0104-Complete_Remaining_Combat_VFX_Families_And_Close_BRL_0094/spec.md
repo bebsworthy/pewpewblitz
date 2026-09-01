@@ -356,3 +356,29 @@ Verification:
 - Native normal/reduced/primitive/dissipation captures are under target/brl-0104-dash-v3-normal, target/brl-0104-dash-v3-reduced, target/brl-0104-dash-v3-primitive, and target/brl-0104-dash-v4-dissipating. Normal shows the animated layered wake; reduced preserves its tapered identity; primitive remains the stable cheap fallback; the post-dash sample confirms bounded linger.
 
 The Dash implementation slice is complete. Native user visual feedback and the remaining Phase 2 families remain open; BRL-0104 stays doing.
+
+## Phase 2 next slice — dual-purpose Persistent Splash presentation — 2026-09-01
+
+Production inspection confirms the built-in Splash area carries Damage plus Heal as the ordered semantic accents Restoration plus Neutral. The generic elemental-area path selects the first element, so the weapon currently looks like a Restoration ultimate field and loses its mixed hostile/support identity. VfxLab has no PersistentSplash lifecycle fixture.
+
+Implement one composable dual-purpose PersistentArea style selected from carrier plus accent semantics, never from the built-in Splash preset ID:
+
+- Normal uses a deterministic animated fluid surface with restrained center coverage, traveling ripples/caustics, a readable exact boundary, and bounded fluid droplets that communicate both restorative teal and neutral impact energy.
+- Reduced preserves the fluid silhouette and dual-color identity with lower shader/accent detail. Primitive and ReducedPrimitive use a stable disc/ring mesh fallback with no custom shader animation.
+- AuthoritativeTick drives all surface and droplet motion. The replicated PersistentSplashState remains the only area geometry, pulse, and expiry authority.
+- Add --fixture splash to VfxLab using a real circle PersistentSplashState with the production Damage plus Heal effects and the production reconciler/material plugins.
+- Verify semantic selection, variants, production/VfxLab scheduling, root cleanup, and bounded asset/entity counts.
+
+No gameplay, server, payload, ownership-color, map-preview, protocol, or editable-workbench changes are in scope. Rectangle support remains on the existing generic fallback because no authored current weapon demonstrates that shape.
+
+### Phase 2 Splash implementation evidence — 2026-09-01
+
+- Implemented a semantic dual-purpose persistent Splash style selected from the existing `PersistentArea` carrier plus Restoration and Neutral accents; no built-in preset-ID branch was added.
+- Normal presentation uses an AuthoritativeTick-driven fluid material with traveling ripples and caustics, exact cyan gameplay boundary, restorative inner motion, and a bounded deterministic droplet set. Reduced removes caustic detail and lowers droplet count; primitive remains a stable disc-and-ring fallback.
+- Production and VfxLab share `reconcile_persistent_splash_visuals`, the Splash material plugin, retained animation systems, and lifecycle cleanup. The VfxLab `--fixture splash` creates the real Damage + Heal PersistentSplash state.
+- Focused verification: `cargo test --locked --no-default-features --features client client::presentation_3d::combat --lib` — 56 passed.
+- Canonical client verification: `cargo test --locked --no-default-features --features client --lib` — 614 passed.
+- Strict client lint: `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings` — passed.
+- Server isolation: `cargo check --locked --no-default-features --features server --all-targets` and strict server Clippy — passed.
+- Native evidence captured at playback tick 60 for normal, reduced, and primitive at 1280x720. Each capture reports one persistent Splash root, one visual root, two bounded shared Splash materials, zero particle emitters, and the authored Damage(36 Hostiles) + Heal(24 AlliesAndOwner) facts. Visual inspection confirmed readable fighter silhouettes, exact outer boundary, distinct degradation tiers, and no ownership overlay.
+- Feedback gate remains open for subjective native review; BRL-0104 stays doing.

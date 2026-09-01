@@ -144,7 +144,7 @@ impl VfxLabConfig {
             .is_some_and(|fixture| VfxLabFixture::from_key(fixture).is_none())
         {
             return Err(
-                "VfxLab fixture must be transient, straight, lobbed, sticky, field, cone, dash, or status"
+                "VfxLab fixture must be transient, straight, lobbed, sticky, splash, field, cone, dash, or status"
                     .to_string(),
             );
         }
@@ -186,6 +186,7 @@ enum VfxLabFixture {
     StraightProjectile,
     LobbedProjectile,
     StickyPayload,
+    PersistentSplash,
     ElementalField,
     ConeSpray,
     Dash,
@@ -193,14 +194,15 @@ enum VfxLabFixture {
 }
 
 impl VfxLabFixture {
-    const COUNT: u8 = 8;
+    const COUNT: u8 = 9;
 
     fn next(self) -> Self {
         match self {
             Self::Transient => Self::StraightProjectile,
             Self::StraightProjectile => Self::LobbedProjectile,
             Self::LobbedProjectile => Self::StickyPayload,
-            Self::StickyPayload => Self::ElementalField,
+            Self::StickyPayload => Self::PersistentSplash,
+            Self::PersistentSplash => Self::ElementalField,
             Self::ElementalField => Self::ConeSpray,
             Self::ConeSpray => Self::Dash,
             Self::Dash => Self::Status,
@@ -214,6 +216,7 @@ impl VfxLabFixture {
             Self::StraightProjectile => "straight projectile / line",
             Self::LobbedProjectile => "lobbed projectile / arc",
             Self::StickyPayload => "armed sticky payload / fuse",
+            Self::PersistentSplash => "persistent Splash / dual-purpose fluid area",
             Self::ElementalField => "elemental field / area",
             Self::ConeSpray => "cone spray / propagation",
             Self::Dash => "dash / retained wake",
@@ -227,6 +230,7 @@ impl VfxLabFixture {
             "straight" => Some(Self::StraightProjectile),
             "lobbed" => Some(Self::LobbedProjectile),
             "sticky" => Some(Self::StickyPayload),
+            "splash" => Some(Self::PersistentSplash),
             "field" => Some(Self::ElementalField),
             "cone" => Some(Self::ConeSpray),
             "dash" => Some(Self::Dash),
@@ -459,12 +463,22 @@ impl Plugin for VfxLabPlugin {
                     .position(|scenario| scenario.key.as_str() == key)
             })
             .unwrap_or(0);
+        let fixture = self
+            .config
+            .fixture
+            .as_deref()
+            .and_then(VfxLabFixture::from_key)
+            .unwrap_or_default();
         app.insert_resource(VfxLabState {
             scenarios,
             selected,
             presentation_identity: self.config.presentation_identity.unwrap_or(1),
             radius: self.config.radius.unwrap_or(DEFAULT_RADIUS),
-            accent: self.config.accent,
+            accent: if fixture == VfxLabFixture::PersistentSplash {
+                VfxLabAccent::Neutral
+            } else {
+                self.config.accent
+            },
             lobbed_impact: self.config.lobbed_impact,
             ultimate: self.config.ultimate,
             reduced: self.config.reduced,
@@ -478,12 +492,7 @@ impl Plugin for VfxLabPlugin {
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("target/vfx-lab")),
             capture_sequence: 0,
-            fixture: self
-                .config
-                .fixture
-                .as_deref()
-                .and_then(VfxLabFixture::from_key)
-                .unwrap_or_default(),
+            fixture,
             playback_tick: 30,
             initial_sample_ticks: self.config.sample_ticks.unwrap_or_default(),
             pending_sample_ticks: self.config.sample_ticks.unwrap_or_default(),
@@ -623,6 +632,7 @@ const fn lab_reference_positions(fixture: VfxLabFixture) -> [f32; 2] {
         VfxLabFixture::LobbedProjectile => [-80.0, 80.0],
         VfxLabFixture::StraightProjectile
         | VfxLabFixture::ElementalField
+        | VfxLabFixture::PersistentSplash
         | VfxLabFixture::ConeSpray
         | VfxLabFixture::Status => [0.0, 96.0],
         VfxLabFixture::Dash => [-250.0, 380.0],
@@ -670,6 +680,9 @@ fn spawn_lab_scenario(
             state.ultimate,
             tick,
         ),
+        VfxLabFixture::PersistentSplash => {
+            spawn_splash_fixture(commands, state.presentation_identity, state.radius, tick);
+        }
         VfxLabFixture::ElementalField => {
             spawn_field_fixture(
                 commands,
@@ -804,6 +817,38 @@ fn spawn_field_fixture(
             expires_at_tick: tick.saturating_add(300),
         },
         Name::new("VfxLab elemental field fixture"),
+    ));
+}
+
+fn spawn_splash_fixture(commands: &mut Commands, identity: u64, radius: u16, tick: u64) {
+    commands.spawn((
+        VfxLabFixtureOwner,
+        crate::combat::PersistentSplash,
+        crate::combat::PersistentSplashState {
+            center: crate::combat::WorldPoint::from(Vec2::ZERO),
+            facing: 0.0,
+            shape: crate::combat::PersistentAreaShape::Circle {
+                radius: f32::from(radius),
+            },
+            activated_at_tick: tick,
+            next_pulse_tick: tick.saturating_add(30),
+            expires_at_tick: tick.saturating_add(240),
+            pulse_interval_ticks: 30,
+            map_occlusion: true,
+            max_targets: 6,
+            effects: [
+                Some(crate::combat::PayloadEffectDefinition::Damage {
+                    amount: 36,
+                    falloff: crate::combat::DamageFalloff::None,
+                    recipients: crate::combat::RecipientPolicy::Hostiles,
+                }),
+                Some(crate::combat::PayloadEffectDefinition::Heal {
+                    amount: 24,
+                    recipients: crate::combat::RecipientPolicy::AlliesAndOwner,
+                }),
+            ],
+        },
+        Name::new(format!("VfxLab Persistent Splash fixture {identity}")),
     ));
 }
 
@@ -1006,12 +1051,15 @@ fn handle_lab_input(
     }
     if keyboard.just_pressed(KeyCode::Tab) {
         state.fixture = state.fixture.next();
+        if state.fixture == VfxLabFixture::PersistentSplash {
+            state.accent = VfxLabAccent::Neutral;
+        }
         restart = true;
     }
     if keyboard.just_pressed(KeyCode::Space) {
         restart = true;
     }
-    if keyboard.just_pressed(KeyCode::KeyC) {
+    if keyboard.just_pressed(KeyCode::KeyC) && state.fixture != VfxLabFixture::PersistentSplash {
         state.accent = state.accent.next();
         restart = true;
     }
@@ -1498,6 +1546,11 @@ fn update_lab_inspector(
 }
 
 fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &str) -> String {
+    let style_label = if state.fixture == VfxLabFixture::PersistentSplash {
+        "SPLASH DUAL".to_string()
+    } else {
+        state.accent.label().to_uppercase()
+    };
     let subject = match state.fixture {
         VfxLabFixture::Transient => match scenario.key.as_str() {
             "combat.muzzle" => "WEAPON FIRING FLASH",
@@ -1508,6 +1561,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::StraightProjectile => "STRAIGHT PROJECTILE IN FLIGHT",
         VfxLabFixture::LobbedProjectile => "LOBBED PROJECTILE IN FLIGHT",
         VfxLabFixture::StickyPayload => "ARMED STICKY PAYLOAD",
+        VfxLabFixture::PersistentSplash => "PERSISTENT DUAL-PURPOSE SPLASH AREA",
         VfxLabFixture::ElementalField => "PERSISTENT ELEMENTAL AREA",
         VfxLabFixture::ConeSpray => "PROPAGATING ATTACK CONE",
         VfxLabFixture::Dash => "FIGHTER DASH WAKE",
@@ -1530,6 +1584,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::StickyPayload => {
             "The viscous body is the armed payload. Its bright crawling veins and orbiting droplets accelerate with the authoritative fuse; the exact ground boundary and subtle growing fill communicate the future explosion radius and fuse progression. Press U to compare the smaller Big Blob ultimate secondary."
         }
+        VfxLabFixture::PersistentSplash => {
+            "The animated fluid is the exact persistent Splash area. Cyan impact energy communicates hostile damage while teal vitality motion communicates allied healing; the thin outer ring remains the exact gameplay boundary."
+        }
         VfxLabFixture::ElementalField => {
             "The subtly treated center is the affected ground area. The thin bright ring is the exact gameplay boundary. Crystals, living flame, cellular contamination, or ordered vitality arcs identify the element without hiding fighters."
         }
@@ -1543,7 +1600,29 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             "The ring is attached presentation for the fighter's active status. It follows the fighter and disappears when the authoritative status ends."
         }
     };
-    let style = match state.accent {
+    let style = lab_guide_style(state);
+    format!(
+        "VFXLAB - WHAT YOU ARE LOOKING AT\n\n\
+         {subject}\n\
+         Style: {}{}   Variant: {}{}\n\n\
+         {meaning}\n\n\
+         {style}\n\n\
+         GRAY SPHERES ARE FIGHTER-SIZE REFERENCES.\n\
+         They are not part of the effect.\n\n\
+         C compare style    R reduced    P primitive\n\
+         Space restart      Enter pause  . next tick\n\
+         Tab fixture        <-/-> effect U ultimate\n\
+         I technical details             Esc quit\n\n\
+         Window {dimensions}",
+        style_label,
+        if state.ultimate { " + ULTIMATE" } else { "" },
+        if state.reduced { "reduced" } else { "normal" },
+        if state.primitive { " + primitive" } else { "" },
+    )
+}
+
+fn lab_guide_style(state: &VfxLabState) -> &'static str {
+    match state.accent {
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::StraightProjectile => {
             "NEUTRAL is the reusable Pulse/Scatter comet language: a dimensional team-colored nucleus embedded inside a deterministic wrapping energy wake. Press C to compare each elemental identity."
         }
@@ -1552,6 +1631,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         }
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::StickyPayload => {
             "NEUTRAL sticky payloads use a volatile violet language shared by Sticky Blomb and Big Blob: a dark dimensional core, living emissive veins, detached viscous droplets, and an exact delayed-blast telegraph."
+        }
+        VfxLabAccent::Neutral if state.fixture == VfxLabFixture::PersistentSplash => {
+            "SPLASH is intentionally dual-purpose rather than purely elemental: traveling ripples, bright caustics, and alternating fluid droplets keep hostile impact and allied restoration legible together."
         }
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::Dash => {
             "NEUTRAL Dash uses a cool-white high-velocity wake: a hot central lane, turbulent cyan filaments, and sparse speed cuts that dissipate after the authoritative movement ends."
@@ -1571,25 +1653,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabAccent::Restoration => {
             "RESTORATION should feel ordered, buoyant, and life-giving through a rotating vitality motif. Press C to return to Neutral."
         }
-    };
-    format!(
-        "VFXLAB - WHAT YOU ARE LOOKING AT\n\n\
-         {subject}\n\
-         Style: {}{}   Variant: {}{}\n\n\
-         {meaning}\n\n\
-         {style}\n\n\
-         GRAY SPHERES ARE FIGHTER-SIZE REFERENCES.\n\
-         They are not part of the effect.\n\n\
-         C compare style    R reduced    P primitive\n\
-         Space restart      Enter pause  . next tick\n\
-         Tab fixture        <-/-> effect U ultimate\n\
-         I technical details             Esc quit\n\n\
-         Window {dimensions}",
-        state.accent.label().to_uppercase(),
-        if state.ultimate { " + ULTIMATE" } else { "" },
-        if state.reduced { "reduced" } else { "normal" },
-        if state.primitive { " + primitive" } else { "" },
-    )
+    }
 }
 
 const fn fixture_index(fixture: VfxLabFixture) -> u8 {
@@ -1598,10 +1662,11 @@ const fn fixture_index(fixture: VfxLabFixture) -> u8 {
         VfxLabFixture::StraightProjectile => 2,
         VfxLabFixture::LobbedProjectile => 3,
         VfxLabFixture::StickyPayload => 4,
-        VfxLabFixture::ElementalField => 5,
-        VfxLabFixture::ConeSpray => 6,
-        VfxLabFixture::Dash => 7,
-        VfxLabFixture::Status => 8,
+        VfxLabFixture::PersistentSplash => 5,
+        VfxLabFixture::ElementalField => 6,
+        VfxLabFixture::ConeSpray => 7,
+        VfxLabFixture::Dash => 8,
+        VfxLabFixture::Status => 9,
     }
 }
 
@@ -1763,6 +1828,7 @@ mod tests {
             ("straight", VfxLabFixture::StraightProjectile),
             ("lobbed", VfxLabFixture::LobbedProjectile),
             ("sticky", VfxLabFixture::StickyPayload),
+            ("splash", VfxLabFixture::PersistentSplash),
             ("field", VfxLabFixture::ElementalField),
             ("cone", VfxLabFixture::ConeSpray),
             ("dash", VfxLabFixture::Dash),

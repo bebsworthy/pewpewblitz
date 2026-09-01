@@ -615,6 +615,9 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
     let dash_trail_material_assets = world
         .get_resource::<Assets<super::dash_style::DashTrailMaterial>>()
         .map_or(0, Assets::len);
+    let splash_area_material_assets = world
+        .get_resource::<Assets<super::splash_style::SplashAreaMaterial>>()
+        .map_or(0, Assets::len);
     let particle_effect_assets = world
         .get_resource::<Assets<EffectAsset>>()
         .map_or(0, Assets::len);
@@ -687,6 +690,7 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             "cone_spray_materials": cone_spray_material_assets,
             "straight_projectile_trail_materials": straight_projectile_trail_material_assets,
             "dash_trail_materials": dash_trail_material_assets,
+            "splash_area_materials": splash_area_material_assets,
             "particle_effects": particle_effect_assets,
             "images": image_assets,
         },
