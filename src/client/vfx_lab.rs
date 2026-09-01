@@ -144,7 +144,7 @@ impl VfxLabConfig {
             .is_some_and(|fixture| VfxLabFixture::from_key(fixture).is_none())
         {
             return Err(
-                "VfxLab fixture must be transient, straight, lobbed, sticky, splash, field, cone, dash, sentry, or status"
+                "VfxLab fixture must be transient, straight, melee, lobbed, sticky, splash, field, cone, dash, sentry, or status"
                     .to_string(),
             );
         }
@@ -184,6 +184,7 @@ enum VfxLabFixture {
     #[default]
     Transient,
     StraightProjectile,
+    Melee,
     LobbedProjectile,
     StickyPayload,
     PersistentSplash,
@@ -195,12 +196,13 @@ enum VfxLabFixture {
 }
 
 impl VfxLabFixture {
-    const COUNT: u8 = 10;
+    const COUNT: u8 = 11;
 
     fn next(self) -> Self {
         match self {
             Self::Transient => Self::StraightProjectile,
-            Self::StraightProjectile => Self::LobbedProjectile,
+            Self::StraightProjectile => Self::Melee,
+            Self::Melee => Self::LobbedProjectile,
             Self::LobbedProjectile => Self::StickyPayload,
             Self::StickyPayload => Self::PersistentSplash,
             Self::PersistentSplash => Self::ElementalField,
@@ -216,6 +218,7 @@ impl VfxLabFixture {
         match self {
             Self::Transient => "transient recipe",
             Self::StraightProjectile => "straight projectile / line",
+            Self::Melee => "melee / authored sweep and contact",
             Self::LobbedProjectile => "lobbed projectile / arc",
             Self::StickyPayload => "armed sticky payload / fuse",
             Self::PersistentSplash => "persistent Splash / dual-purpose fluid area",
@@ -231,6 +234,7 @@ impl VfxLabFixture {
         match value {
             "transient" => Some(Self::Transient),
             "straight" => Some(Self::StraightProjectile),
+            "melee" => Some(Self::Melee),
             "lobbed" => Some(Self::LobbedProjectile),
             "sticky" => Some(Self::StickyPayload),
             "splash" => Some(Self::PersistentSplash),
@@ -247,7 +251,7 @@ impl VfxLabFixture {
 const fn fixture_has_fixed_accent(fixture: VfxLabFixture) -> bool {
     matches!(
         fixture,
-        VfxLabFixture::PersistentSplash | VfxLabFixture::Sentry
+        VfxLabFixture::Melee | VfxLabFixture::PersistentSplash | VfxLabFixture::Sentry
     )
 }
 
@@ -641,6 +645,7 @@ const fn lab_reference_positions(fixture: VfxLabFixture) -> [f32; 2] {
     match fixture {
         VfxLabFixture::Transient | VfxLabFixture::StickyPayload => [-64.0, 96.0],
         VfxLabFixture::LobbedProjectile => [-80.0, 80.0],
+        VfxLabFixture::Melee => [0.0, 108.0],
         VfxLabFixture::StraightProjectile
         | VfxLabFixture::ElementalField
         | VfxLabFixture::PersistentSplash
@@ -656,6 +661,10 @@ fn spawn_lab_scenario(
     state: &VfxLabState,
     requests: &mut MessageWriter<VfxRequest>,
 ) {
+    if state.fixture == VfxLabFixture::Melee {
+        spawn_melee_fixture(state, requests);
+        return;
+    }
     if let Some(request) = state.transient_request() {
         requests.write(request);
         return;
@@ -684,6 +693,7 @@ fn spawn_lab_scenario(
     match state.fixture {
         VfxLabFixture::Transient => unreachable!("transient scenario returned above"),
         VfxLabFixture::StraightProjectile => spawn_straight_fixture(commands, source, tick),
+        VfxLabFixture::Melee => unreachable!("melee requests return before lifecycle fixtures"),
         VfxLabFixture::LobbedProjectile => spawn_lobbed_fixture(commands, source, tick),
         VfxLabFixture::StickyPayload => spawn_sticky_fixture(
             commands,
@@ -736,6 +746,56 @@ fn spawn_sticky_fixture(
         },
         Name::new(format!("VfxLab sticky payload fixture {identity}")),
     ));
+}
+
+fn spawn_melee_fixture(state: &VfxLabState, requests: &mut MessageWriter<VfxRequest>) {
+    const REACH: f32 = 120.0;
+    const ANGLE_DEGREES: f32 = 100.0;
+    let origin = Vec2::ZERO;
+    let contact = Vec2::new(108.0, 0.0);
+    let scenario = |key| {
+        state
+            .scenarios
+            .iter()
+            .copied()
+            .find(|scenario| scenario.key == key)
+            .expect("production VFX registry contains the melee transient key")
+    };
+
+    let mut swing = scenario(crate::client::vfx::COMBAT_MUZZLE_VFX).request(
+        state.presentation_identity,
+        state.radius,
+        VfxLabAccent::Neutral,
+        false,
+        false,
+    );
+    swing.position = origin;
+    swing.signature.carrier = crate::client::vfx::VfxCarrier::Melee;
+    swing.signature.phase = crate::client::vfx::VfxPhase::Activation;
+    swing.signature.geometry = crate::client::vfx::VfxGeometry::Cone {
+        origin: origin.to_array(),
+        facing: 0.0,
+        reach: REACH,
+        angle_degrees: ANGLE_DEGREES,
+    };
+    swing.signature.timing =
+        crate::client::vfx::VfxAuthoritativeTiming::instant(state.playback_tick);
+    requests.write(swing);
+
+    let mut impact = scenario(crate::client::vfx::COMBAT_IMPACT_VFX).request(
+        state.presentation_identity.saturating_add(1),
+        state.radius,
+        VfxLabAccent::Neutral,
+        false,
+        false,
+    );
+    impact.position = contact;
+    impact.signature.carrier = crate::client::vfx::VfxCarrier::Melee;
+    impact.signature.phase = crate::client::vfx::VfxPhase::Impact;
+    impact.signature.geometry = crate::client::vfx::VfxGeometry::point(contact);
+    impact.signature.timing =
+        crate::client::vfx::VfxAuthoritativeTiming::instant(state.playback_tick);
+    requests.write(impact);
 }
 
 fn spawn_straight_fixture(
@@ -1596,6 +1656,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             _ => "ONE-SHOT GAMEPLAY EFFECT",
         },
         VfxLabFixture::StraightProjectile => "STRAIGHT PROJECTILE IN FLIGHT",
+        VfxLabFixture::Melee => "IMPACT BLADE SWEEP AND CONTACT",
         VfxLabFixture::LobbedProjectile => "LOBBED PROJECTILE IN FLIGHT",
         VfxLabFixture::StickyPayload => "ARMED STICKY PAYLOAD",
         VfxLabFixture::PersistentSplash => "PERSISTENT DUAL-PURPOSE SPLASH AREA",
@@ -1615,6 +1676,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         }
         VfxLabFixture::StraightProjectile => {
             "The exact collision footprint remains beneath the bright leading nucleus. Neutral wraps a tapered animated energy body around it; Cold adds rigid crystal fins, Fire adds soft trailing lobes, Poison adds an unstable bubbling wake, and Restoration forms an ordered vitality spark."
+        }
+        VfxLabFixture::Melee => {
+            "The layered crescents inhabit the authored 120-unit, 100-degree melee envelope and face outward from the fighter reference at its origin. The flash at the far reference is a separate contact event; gameplay still resolves targets and damage authoritatively."
         }
         VfxLabFixture::LobbedProjectile => {
             "The moving body follows the production launch/landing arc and rotates along its current tangent. The dark disc tracks its ground projection, the orange ring marks the fixed landing point, and emitted smoke remains behind to expand and fade."
@@ -1667,6 +1731,9 @@ fn lab_guide_style(state: &VfxLabState) -> &'static str {
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::StraightProjectile => {
             "NEUTRAL is the reusable Pulse/Scatter comet language: a dimensional team-colored nucleus embedded inside a deterministic wrapping energy wake. Press C to compare each elemental identity."
         }
+        VfxLabAccent::Neutral if state.fixture == VfxLabFixture::Melee => {
+            "IMPACT BLADE uses a fast cool-white energy sweep: a tapered cutting crescent, a brighter inner blade, a delayed afterimage, and a compact contact burst. Its reach, angle, and facing come from signature geometry rather than a weapon-ID branch."
+        }
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::Transient => {
             "NEUTRAL straight shots use a cool-white energy language: a compressed launch flash and a layered impact that dissipates through a ground wave and deterministic sparks. Press C to compare each elemental identity."
         }
@@ -1704,14 +1771,15 @@ const fn fixture_index(fixture: VfxLabFixture) -> u8 {
     match fixture {
         VfxLabFixture::Transient => 1,
         VfxLabFixture::StraightProjectile => 2,
-        VfxLabFixture::LobbedProjectile => 3,
-        VfxLabFixture::StickyPayload => 4,
-        VfxLabFixture::PersistentSplash => 5,
-        VfxLabFixture::ElementalField => 6,
-        VfxLabFixture::ConeSpray => 7,
-        VfxLabFixture::Dash => 8,
-        VfxLabFixture::Sentry => 9,
-        VfxLabFixture::Status => 10,
+        VfxLabFixture::Melee => 3,
+        VfxLabFixture::LobbedProjectile => 4,
+        VfxLabFixture::StickyPayload => 5,
+        VfxLabFixture::PersistentSplash => 6,
+        VfxLabFixture::ElementalField => 7,
+        VfxLabFixture::ConeSpray => 8,
+        VfxLabFixture::Dash => 9,
+        VfxLabFixture::Sentry => 10,
+        VfxLabFixture::Status => 11,
     }
 }
 
@@ -1871,6 +1939,7 @@ mod tests {
         let expected = [
             ("transient", VfxLabFixture::Transient),
             ("straight", VfxLabFixture::StraightProjectile),
+            ("melee", VfxLabFixture::Melee),
             ("lobbed", VfxLabFixture::LobbedProjectile),
             ("sticky", VfxLabFixture::StickyPayload),
             ("splash", VfxLabFixture::PersistentSplash),

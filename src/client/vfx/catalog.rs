@@ -34,6 +34,7 @@ pub(crate) enum VfxRendererFamily {
     GroundThinRing,
     GroundDisc,
     GroundSpark,
+    MeleeArc,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -66,14 +67,22 @@ pub(crate) enum VfxMaterialKey {
 pub(crate) enum VfxScalePolicy {
     FixedWorld(f32),
     AuthoritativeRadius(f32),
+    GeometryReach(f32),
 }
 
 impl VfxScalePolicy {
-    pub(crate) fn resolve(self, authoritative_radius: Option<f32>) -> Option<f32> {
+    pub(crate) fn resolve(
+        self,
+        authoritative_radius: Option<f32>,
+        geometry_reach: Option<f32>,
+    ) -> Option<f32> {
         match self {
             Self::FixedWorld(scale) => Some(scale),
             Self::AuthoritativeRadius(multiplier) => authoritative_radius
                 .map(|radius| radius * multiplier)
+                .filter(|scale| scale.is_finite() && *scale > 0.0),
+            Self::GeometryReach(multiplier) => geometry_reach
+                .map(|reach| reach * multiplier)
                 .filter(|scale| scale.is_finite() && *scale > 0.0),
         }
     }
@@ -82,15 +91,23 @@ impl VfxScalePolicy {
         matches!(self, Self::AuthoritativeRadius(_))
     }
 
+    pub(super) const fn requires_geometry_reach(self) -> bool {
+        matches!(self, Self::GeometryReach(_))
+    }
+
     pub(super) fn has_valid_bounds(self) -> bool {
         let value = match self {
-            Self::FixedWorld(value) | Self::AuthoritativeRadius(value) => value,
+            Self::FixedWorld(value)
+            | Self::AuthoritativeRadius(value)
+            | Self::GeometryReach(value) => value,
         };
         value.is_finite()
             && value > 0.0
             && match self {
                 Self::FixedWorld(_) => value <= MAX_VFX_FIXED_WORLD,
-                Self::AuthoritativeRadius(_) => value <= MAX_VFX_RADIUS_MULTIPLIER,
+                Self::AuthoritativeRadius(_) | Self::GeometryReach(_) => {
+                    value <= MAX_VFX_RADIUS_MULTIPLIER
+                }
             }
     }
 }

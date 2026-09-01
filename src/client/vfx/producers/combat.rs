@@ -75,7 +75,14 @@ fn produce_combat_vfx_requests(
     mut requests: MessageWriter<VfxRequest>,
     authoritative_ticks: Query<&AuthoritativeTick>,
     cache: Res<VfxSignatureCache>,
-    fighters: Query<(&NetworkEntityId, &crate::combat::TeamId), With<Fighter>>,
+    fighters: Query<
+        (
+            &NetworkEntityId,
+            &crate::combat::TeamId,
+            Option<&avian2d::prelude::Rotation>,
+        ),
+        With<Fighter>,
+    >,
 ) {
     let observed_at_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     for DeduplicatedCombatCue(cue) in cues.read() {
@@ -112,7 +119,14 @@ fn combat_vfx_signature(
     radius: Option<f32>,
     observed_at_tick: Option<u64>,
     cache: &VfxSignatureCache,
-    fighters: &Query<(&NetworkEntityId, &crate::combat::TeamId), With<Fighter>>,
+    fighters: &Query<
+        (
+            &NetworkEntityId,
+            &crate::combat::TeamId,
+            Option<&avian2d::prelude::Rotation>,
+        ),
+        With<Fighter>,
+    >,
 ) -> CombatVisualSignature {
     use CombatCue as C;
     let point = VfxGeometry::point(position);
@@ -135,16 +149,28 @@ fn combat_vfx_signature(
     };
     match cue {
         C::AttackAccepted {
-            tick, attack_id, ..
-        } => cache.signature_for_attack(
-            *attack_id,
-            0,
-            VfxCarrier::PointTransient,
-            VfxPhase::Activation,
-            point,
-            instant(*tick),
-            VfxPresentationVariant::Normal,
-        ),
+            tick,
+            attack_id,
+            source,
+            ..
+        } => {
+            let facing = fighters.iter().find_map(|(network_id, _, rotation)| {
+                (*network_id == *source)
+                    .then(|| rotation.map_or(0.0, |rotation| rotation.as_radians()))
+            });
+            let geometry = facing
+                .and_then(|facing| cache.melee_activation_geometry(*attack_id, position, facing))
+                .unwrap_or(point);
+            cache.signature_for_attack(
+                *attack_id,
+                0,
+                VfxCarrier::PointTransient,
+                VfxPhase::Activation,
+                geometry,
+                instant(*tick),
+                VfxPresentationVariant::Normal,
+            )
+        }
         C::DeliveryImpact {
             tick,
             attack_id,
@@ -336,12 +362,19 @@ fn combat_vfx_signature(
 
 fn relationship_for_owner(
     cache: &VfxSignatureCache,
-    fighters: &Query<(&NetworkEntityId, &crate::combat::TeamId), With<Fighter>>,
+    fighters: &Query<
+        (
+            &NetworkEntityId,
+            &crate::combat::TeamId,
+            Option<&avian2d::prelude::Rotation>,
+        ),
+        With<Fighter>,
+    >,
     owner: NetworkEntityId,
 ) -> VfxRelationship {
     fighters
         .iter()
-        .find_map(|(network_id, team)| {
+        .find_map(|(network_id, team, _)| {
             (*network_id == owner).then(|| cache.observer().relationship(owner, *team))
         })
         .unwrap_or(VfxRelationship::Neutral)

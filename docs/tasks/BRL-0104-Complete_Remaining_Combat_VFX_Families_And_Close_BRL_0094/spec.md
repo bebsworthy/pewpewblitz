@@ -403,3 +403,36 @@ No gameplay, server, payload, ownership-color, map-preview, protocol, or editabl
 - Canonical client verification: 615 tests passed. Server all-target check and strict server Clippy passed.
 - Native normal/reduced/primitive captures at playback tick 60 each report exactly one Sentry visual root, the Deployable semantic signature, zero particle emitters, and bounded shared assets. Visual inspection confirmed aim direction, machine/energy contrast, readable fighter-scale silhouette, and distinct primitive degradation.
 - User visual feedback remains open. Sentry fire/removal transients and remaining Phase 2 families remain in scope; BRL-0104 stays doing.
+
+## Phase 2 next slice — Impact Blade melee sweep — 2026-09-01
+
+- Scope is the existing Impact Blade `MeleeArc` delivery: activation sweep plus contact impact, production/VfxLab parity, and normal/reduced/primitive degradation. No gameplay damage, hit selection, protocol, fighter animation, ownership-language, or Balance Lab changes.
+- The semantic signature cache will retain the authored melee reach and angle. At `AttackAccepted`, the client combines those immutable recipe facts with the replicated source fighter Rotation and cue origin to emit exact `Melee` cone geometry; `MeleeContact` remains a point impact.
+- Add a reusable catalog renderer family for melee sweep geometry. It consumes `VfxGeometry::Cone`, uses a bounded cache of quantized authored arc meshes, and scales/orients from the signature rather than recognizing Impact Blade or a preset ID.
+- Normal uses a layered fast energy blade sweep with a bright leading edge, softer body/afterimage, and bounded contact sparks. Reduced keeps exact sweep silhouette plus compact contact. Primitive keeps the exact ordinary mesh silhouette with particles suppressed by the existing variant policy.
+- Add `--fixture melee`, staging production `combat.muzzle` and `combat.impact` requests with the built-in 120-unit/100-degree authored geometry and fighter-size references.
+- Verification will cover cache-derived geometry, registry validation, bounded mesh caching, recipe selection, VfxLab cycling/evidence, strict client checks, server isolation, and native normal/reduced/primitive captures.
+
+## Phase 2 Impact Blade melee sweep implementation evidence — 2026-09-01
+
+Implemented the Impact Blade activation/contact slice without gameplay, protocol, fighter-animation, ownership-language, or Balance Lab changes.
+
+- `AttackAccepted` now combines the cached authored `MeleeArc` reach/angle with the replicated source fighter rotation and cue origin to emit `VfxGeometry::Cone`; non-melee and missing-style cases retain the point fallback.
+- The production catalog selects neutral Melee activation/contact recipes by semantic carrier and phase. Normal activation is a layered cool-white/cyan tapered cutting crescent with a delayed afterimage; contact is a compact flash, ground ring, and deterministic spark burst. Reduced retains two essential mesh layers with no particles. Primitive retains the deterministic crescent/contact silhouettes with particle materialization suppressed by the existing variant contract.
+- `MeleeArc` is a reusable catalog renderer driven by `GeometryReach`, not an Impact Blade or preset-ID branch. Catalog validation reserves geometry-reach scaling for the melee renderer and registry resolution fails closed to the recipe fallback when cone geometry is absent.
+- Authored angles use a tenth-degree, maximum-64-entry mesh cache. The generated 48-segment annular crescent stays within the authored angular envelope, tapers to sharp tips, and reaches the authored range at its cutting crest.
+- VfxLab now supports `--fixture melee`, explains the 120-unit/100-degree sweep and separate contact event, and emits the same production registry requests used by gameplay.
+
+Verification:
+
+- `cargo fmt --all -- --check` — pass.
+- `cargo test --features client --lib client::vfx` — 46 passed.
+- `cargo test --features client --lib client::presentation_3d::combat` — 60 passed.
+- `cargo test --features client --lib client::vfx_lab` — 6 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings` — pass.
+- `just _test-client` — canonical client suite passed: 620 library tests plus all client targets.
+- `just _server-features` — pass; server graph remains presentation-free.
+- `just _v3-world-presentation` — pass; no retired renderer contract reintroduced.
+- VfxLab normal/reduced/primitive captures completed and were visually reviewed under `target/brl-0104-melee-v2-normal-mid`, `target/brl-0104-melee-v2-reduced-mid`, and `target/brl-0104-melee-v2-primitive`. The first filled-sector attempt was rejected during self-review as a cheap targeting wedge; the retained version uses a layered tapered blade silhouette with an independently readable contact event.
+
+The slice is ready for native gameplay feedback. BRL-0104 remains `doing`; later Phase 2 families and closeout criteria remain open.

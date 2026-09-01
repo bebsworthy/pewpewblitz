@@ -9,6 +9,7 @@ mod elemental_style;
 mod entities;
 mod fighter_feedback;
 mod fighter_ui;
+mod melee_style;
 mod particles;
 mod sentry_style;
 mod splash_style;
@@ -49,6 +50,7 @@ pub(super) use fighter_ui::{
     prepare_cold_pie_assets, project_fighter_overhead_ui, reconcile_fighter_overheads,
     update_fighter_overhead_state,
 };
+pub(super) use melee_style::MeleeArcMeshCache;
 pub(in crate::client) use particles::{
     MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, RetainedProjectileSmoke3d,
     VfxParticleAdapterPlugin, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
@@ -104,6 +106,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
             StickyBlobMaterialPlugin,
             SplashAreaMaterialPlugin,
         ))
+        .init_resource::<MeleeArcMeshCache>()
         .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
         .add_systems(
             Update,

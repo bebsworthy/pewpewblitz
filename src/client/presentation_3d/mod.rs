@@ -326,6 +326,7 @@ impl Plugin for WorldPresentationPlugin {
         combat::add_retained_material_animation_systems(app, WorldPresentationSet::Animate);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .add_message::<PendingCombatEffect>()
+            .init_resource::<combat::MeleeArcMeshCache>()
             .init_resource::<combat::ConcealedMaterialVariants>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
             .init_resource::<DamageableObjectHealthUiIndex>()

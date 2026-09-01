@@ -174,6 +174,22 @@ impl VfxRegistry {
         if recipe
             .layers
             .iter()
+            .any(VfxMeshLayer::requires_geometry_reach)
+            && !matches!(request.signature.geometry, super::VfxGeometry::Cone { .. })
+        {
+            recipe = self.catalog.resolved_fallback(&recipe)?;
+        }
+        if recipe
+            .layers
+            .iter()
+            .any(VfxMeshLayer::requires_geometry_reach)
+            && !matches!(request.signature.geometry, super::VfxGeometry::Cone { .. })
+        {
+            return None;
+        }
+        if recipe
+            .layers
+            .iter()
             .any(VfxMeshLayer::requires_authoritative_deadline)
             && request.deadline.is_none()
         {
@@ -442,6 +458,51 @@ mod tests {
         assert_eq!(
             registry.resolve(&lobbed_without_radius, false).unwrap().id,
             "impact"
+        );
+
+        let mut melee_signature =
+            super::super::CombatVisualSignature::neutral_point(9, bevy::prelude::Vec2::ZERO);
+        melee_signature.carrier = super::super::VfxCarrier::Melee;
+        melee_signature.phase = super::super::VfxPhase::Activation;
+        melee_signature.geometry = super::super::VfxGeometry::Cone {
+            origin: [0.0, 0.0],
+            facing: 0.25,
+            reach: 120.0,
+            angle_degrees: 100.0,
+        };
+        let melee = VfxRequest::try_new(
+            COMBAT_MUZZLE_VFX,
+            super::super::VfxRequestOrder::new(COMBAT_VFX_PRODUCER_RANK, 9),
+            bevy::prelude::Vec2::ZERO,
+            None,
+            None,
+            "authored melee sweep",
+        )
+        .unwrap()
+        .with_signature(melee_signature)
+        .unwrap();
+        assert_eq!(
+            registry.resolve(&melee, false).unwrap().id,
+            "neutral_melee_swing"
+        );
+
+        let melee_without_geometry = VfxRequest::try_new(
+            COMBAT_MUZZLE_VFX,
+            super::super::VfxRequestOrder::new(COMBAT_VFX_PRODUCER_RANK, 10),
+            bevy::prelude::Vec2::ZERO,
+            None,
+            None,
+            "melee sweep missing authored geometry",
+        )
+        .unwrap()
+        .with_signature(super::super::CombatVisualSignature {
+            geometry: super::super::VfxGeometry::point(bevy::prelude::Vec2::ZERO),
+            ..melee_signature
+        })
+        .unwrap();
+        assert_eq!(
+            registry.resolve(&melee_without_geometry, false).unwrap().id,
+            "muzzle"
         );
     }
 

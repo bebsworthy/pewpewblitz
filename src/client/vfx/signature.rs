@@ -356,6 +356,7 @@ struct CachedAttackStyle {
     accents: [Option<VfxAccent>; 2],
     context: Option<VfxContextOverride>,
     impact_radius: Option<f32>,
+    melee_shape: Option<[f32; 2]>,
 }
 
 impl CachedAttackStyle {
@@ -368,6 +369,7 @@ impl CachedAttackStyle {
             accents: [Some(VfxAccent::Neutral), None],
             context: context_for_source(source.kind),
             impact_radius: None,
+            melee_shape: None,
         }
     }
 
@@ -378,10 +380,18 @@ impl CachedAttackStyle {
             };
             Some(largest.map_or(radius, |largest: f32| largest.max(radius)))
         });
+        let melee_shape = match recipe.delivery {
+            DeliveryMethod::MeleeArc {
+                reach,
+                angle_degrees,
+            } => Some([reach, angle_degrees]),
+            _ => None,
+        };
         Self {
             carrier,
             accents: accents_for_recipe(recipe),
             impact_radius,
+            melee_shape,
             ..Self::neutral(source, carrier)
         }
     }
@@ -496,6 +506,7 @@ impl VfxSignatureCache {
                 accents: [Some(VfxAccent::Neutral), None],
                 context: None,
                 impact_radius: None,
+                melee_shape: None,
             });
         style.signature(
             attack_id,
@@ -506,6 +517,21 @@ impl VfxSignatureCache {
             variant,
             self.observer,
         )
+    }
+
+    pub(crate) fn melee_activation_geometry(
+        &self,
+        attack_id: AttackId,
+        origin: Vec2,
+        facing: f32,
+    ) -> Option<VfxGeometry> {
+        let [reach, angle_degrees] = self.entries.get(&attack_id)?.melee_shape?;
+        Some(VfxGeometry::Cone {
+            origin: origin.to_array(),
+            facing,
+            reach,
+            angle_degrees,
+        })
     }
 
     #[allow(
@@ -925,6 +951,7 @@ mod tests {
                     accents: [Some(VfxAccent::Fire), None],
                     context: None,
                     impact_radius: None,
+                    melee_shape: None,
                 },
             );
         }
@@ -989,6 +1016,36 @@ mod tests {
     }
 
     #[test]
+    fn cached_attack_style_retains_authored_melee_geometry() {
+        let mut loadout = resolved_test_loadout();
+        loadout.primary_weapon.recipe.delivery = DeliveryMethod::MeleeArc {
+            reach: 120.0,
+            angle_degrees: 100.0,
+        };
+        let style = CachedAttackStyle::from_recipe(
+            attack_source(73, 82, CombatSourceKind::PrimaryWeapon),
+            &loadout.primary_weapon.recipe,
+            VfxCarrier::Melee,
+        );
+        let mut cache = VfxSignatureCache::default();
+        cache.remember(AttackId(73), style);
+
+        assert_eq!(
+            cache.melee_activation_geometry(AttackId(73), Vec2::new(4.0, 8.0), 0.75),
+            Some(VfxGeometry::Cone {
+                origin: [4.0, 8.0],
+                facing: 0.75,
+                reach: 120.0,
+                angle_degrees: 100.0,
+            })
+        );
+        assert_eq!(
+            cache.melee_activation_geometry(AttackId(999), Vec2::ZERO, 0.0),
+            None
+        );
+    }
+
+    #[test]
     fn immediate_impact_resolves_the_accepted_attack_signature_without_a_delivery_entity() {
         let mut cache = VfxSignatureCache {
             observer: VfxObserver {
@@ -1007,6 +1064,7 @@ mod tests {
                 accents: [Some(VfxAccent::Fire), None],
                 context: None,
                 impact_radius: None,
+                melee_shape: None,
             },
         );
 
@@ -1055,6 +1113,7 @@ mod tests {
                 accents: [Some(VfxAccent::Cold), None],
                 context: None,
                 impact_radius: None,
+                melee_shape: None,
             },
         );
         cache.reset_for_observed_tick(Some(1));

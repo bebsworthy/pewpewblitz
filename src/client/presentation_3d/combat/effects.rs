@@ -4,9 +4,10 @@ use super::{
     VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
 use crate::client::vfx::{
-    CombatVisualSignature, ResolvedVfxRecipe, VfxDeadline, VfxLifetime, VfxMaterialKey,
-    VfxMeshLayer, VfxPresentationVariant, VfxReadabilityClass, VfxRegistry, VfxRendererFamily,
-    VfxRequest, VfxSignatureCache, VfxTimeline, vfx_counter_sample, vfx_presentation_variant,
+    CombatVisualSignature, ResolvedVfxRecipe, VfxDeadline, VfxGeometry, VfxLifetime,
+    VfxMaterialKey, VfxMeshLayer, VfxPresentationVariant, VfxReadabilityClass, VfxRegistry,
+    VfxRendererFamily, VfxRequest, VfxSignatureCache, VfxTimeline, vfx_counter_sample,
+    vfx_presentation_variant,
 };
 use crate::combat::client::DeduplicatedCombatCue;
 use bevy_hanabi::EffectAsset;
@@ -155,6 +156,8 @@ fn resolved_effect(
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
     particle_assets: Option<&VfxParticleAssets>,
+    mut meshes: Option<&mut Assets<Mesh>>,
+    melee_meshes: &mut super::melee_style::MeleeArcMeshCache,
 ) -> PendingCombatEffect {
     let mut lifetime = Duration::ZERO;
     let mut expires_at_tick = None;
@@ -171,18 +174,19 @@ fn resolved_effect(
             expires_at_tick = expires_at_tick.or(authoritative_expiry);
             PendingCombatEffectLayer {
                 id: layer.id.clone(),
-                mesh: match layer.renderer {
-                    VfxRendererFamily::Sphere => primitives.effect_sphere.clone(),
-                    VfxRendererFamily::GroundRing => primitives.area_ring.clone(),
-                    VfxRendererFamily::GroundThinRing => primitives.area_thin_ring.clone(),
-                    VfxRendererFamily::GroundDisc => primitives.area_disc.clone(),
-                    VfxRendererFamily::GroundSpark => primitives.vitality_spark.clone(),
-                },
+                mesh: effect_layer_mesh(
+                    layer.renderer,
+                    request.signature,
+                    primitives,
+                    meshes.as_deref_mut(),
+                    melee_meshes,
+                ),
                 material: vfx_material(layer.material, materials),
                 transform: effect_layer_transform(
                     layer,
                     request.position,
                     request.authoritative_radius,
+                    request.signature.geometry,
                 ),
                 timeline: layer.timeline,
                 duration,
@@ -229,6 +233,31 @@ fn resolved_effect(
     }
 }
 
+fn effect_layer_mesh(
+    renderer: VfxRendererFamily,
+    signature: CombatVisualSignature,
+    primitives: &Primitive3dAssets,
+    meshes: Option<&mut Assets<Mesh>>,
+    melee_meshes: &mut super::melee_style::MeleeArcMeshCache,
+) -> Handle<Mesh> {
+    match renderer {
+        VfxRendererFamily::Sphere => primitives.effect_sphere.clone(),
+        VfxRendererFamily::GroundRing => primitives.area_ring.clone(),
+        VfxRendererFamily::GroundThinRing => primitives.area_thin_ring.clone(),
+        VfxRendererFamily::GroundDisc => primitives.area_disc.clone(),
+        VfxRendererFamily::GroundSpark => primitives.vitality_spark.clone(),
+        VfxRendererFamily::MeleeArc => {
+            let VfxGeometry::Cone { angle_degrees, .. } = signature.geometry else {
+                return primitives.area_ring.clone();
+            };
+            meshes.map_or_else(
+                || primitives.area_ring.clone(),
+                |meshes| melee_meshes.resolve(angle_degrees, meshes),
+            )
+        }
+    }
+}
+
 const fn particle_layers_enabled(variant: VfxPresentationVariant) -> bool {
     matches!(variant, VfxPresentationVariant::Normal)
 }
@@ -257,10 +286,15 @@ fn effect_layer_transform(
     layer: &VfxMeshLayer,
     position: Vec2,
     authoritative_radius: Option<f32>,
+    geometry: VfxGeometry,
 ) -> Transform {
+    let geometry_reach = match geometry {
+        VfxGeometry::Cone { reach, .. } => Some(reach),
+        _ => None,
+    };
     let scale = layer
         .scale
-        .resolve(authoritative_radius)
+        .resolve(authoritative_radius, geometry_reach)
         .expect("validated VFX layer supplies required authoritative radius");
     let height = layer
         .anchor
@@ -278,6 +312,17 @@ fn effect_layer_transform(
         VfxRendererFamily::Sphere => {
             Transform::from_translation(ground_position(position) + Vec3::Y * height)
                 .with_scale(Vec3::splat(scale))
+        }
+        VfxRendererFamily::MeleeArc => {
+            let VfxGeometry::Cone { origin, facing, .. } = geometry else {
+                unreachable!("validated melee arc layers require cone geometry")
+            };
+            Transform {
+                translation: ground_position(Vec2::from_array(origin)) + Vec3::Y * height,
+                rotation: ground_rotation(Rotation::radians(facing))
+                    * Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
+                scale: Vec3::splat(scale),
+            }
         }
     }
 }
@@ -370,12 +415,18 @@ pub(in crate::client) fn resolve_vfx_requests(
     settings: Option<Res<ClientShellSettings>>,
     fallback: Option<Res<ImportedWorldFallbackPolicy>>,
     particle_assets: Option<Res<VfxParticleAssets>>,
+    mut meshes: Option<ResMut<Assets<Mesh>>>,
+    mut melee_meshes: Option<ResMut<super::melee_style::MeleeArcMeshCache>>,
 ) {
     let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
     let primitive = fallback
         .as_deref()
         .is_some_and(|policy| matches!(policy, ImportedWorldFallbackPolicy::ForcePrimitive));
     let variant = vfx_presentation_variant(reduced, primitive);
+    let mut fallback_melee_meshes = super::melee_style::MeleeArcMeshCache::default();
+    let melee_meshes = melee_meshes
+        .as_deref_mut()
+        .unwrap_or(&mut fallback_melee_meshes);
     let ordered = ordered_vfx_requests(requests.read().copied());
     for request in &ordered {
         let mut request = *request;
@@ -389,6 +440,8 @@ pub(in crate::client) fn resolve_vfx_requests(
             &primitives,
             &materials,
             particle_assets.as_deref(),
+            meshes.as_deref_mut(),
+            melee_meshes,
         ));
     }
 }
@@ -815,7 +868,12 @@ mod tests {
             id: layer.id.clone(),
             mesh: Handle::default(),
             material: Handle::default(),
-            transform: effect_layer_transform(layer, Vec2::ZERO, None),
+            transform: effect_layer_transform(
+                layer,
+                Vec2::ZERO,
+                None,
+                VfxGeometry::point(Vec2::ZERO),
+            ),
             timeline: layer.timeline,
             duration: match layer.timeline.duration {
                 VfxLifetime::Millis(millis) => Duration::from_millis(u64::from(millis)),
@@ -1166,7 +1224,7 @@ mod tests {
             .find(|(layer, ..)| layer.layer_id == "second")
             .unwrap();
         assert_eq!(*visibility, Visibility::Inherited);
-        assert!(transform.scale.x > second.scale.resolve(None).unwrap());
+        assert!(transform.scale.x > second.scale.resolve(None, None).unwrap());
     }
 
     #[test]
@@ -1226,9 +1284,18 @@ mod tests {
         let registry = registry();
         let normal_recipe = recipe(&registry, COMBAT_MUZZLE_VFX, false, None, None);
         let reduced_recipe = recipe(&registry, COMBAT_MUZZLE_VFX, true, None, None);
-        let normal = effect_layer_transform(&normal_recipe.layers[0], Vec2::new(10.0, 20.0), None);
-        let reduced =
-            effect_layer_transform(&reduced_recipe.layers[0], Vec2::new(10.0, 20.0), None);
+        let normal = effect_layer_transform(
+            &normal_recipe.layers[0],
+            Vec2::new(10.0, 20.0),
+            None,
+            VfxGeometry::point(Vec2::new(10.0, 20.0)),
+        );
+        let reduced = effect_layer_transform(
+            &reduced_recipe.layers[0],
+            Vec2::new(10.0, 20.0),
+            None,
+            VfxGeometry::point(Vec2::new(10.0, 20.0)),
+        );
 
         assert_eq!(reduced.translation, normal.translation);
         assert_eq!(normal.scale, Vec3::splat(8.0));
@@ -1245,7 +1312,12 @@ mod tests {
             Some(5.2),
             Some(VfxDeadline::new(1, 2, Some(1))),
         );
-        let ring = effect_layer_transform(&recipe.layers[0], Vec2::new(10.0, 20.0), Some(5.2));
+        let ring = effect_layer_transform(
+            &recipe.layers[0],
+            Vec2::new(10.0, 20.0),
+            Some(5.2),
+            VfxGeometry::point(Vec2::new(10.0, 20.0)),
+        );
 
         assert_eq!(
             ring.translation,
@@ -1262,13 +1334,23 @@ mod tests {
     fn authored_fixed_and_authoritative_radius_geometry_reaches_runtime_transform() {
         let registry = registry();
         let fixed_recipe = recipe(&registry, WORLD_OBJECT_DAMAGED_VFX, true, None, None);
-        let fixed = effect_layer_transform(&fixed_recipe.layers[0], Vec2::ZERO, None);
+        let fixed = effect_layer_transform(
+            &fixed_recipe.layers[0],
+            Vec2::ZERO,
+            None,
+            VfxGeometry::point(Vec2::ZERO),
+        );
         assert!((fixed.translation.y - 8.0).abs() < f32::EPSILON);
         assert_eq!(fixed.scale, Vec3::splat(7.0));
 
         let radius = 20.0;
         let area_recipe = recipe(&registry, ELEMENTAL_FIELD_VFX, true, Some(radius), None);
-        let area = effect_layer_transform(&area_recipe.layers[0], Vec2::ZERO, Some(radius));
+        let area = effect_layer_transform(
+            &area_recipe.layers[0],
+            Vec2::ZERO,
+            Some(radius),
+            VfxGeometry::point(Vec2::ZERO),
+        );
         assert!((area.translation.y - radius * 0.45).abs() < f32::EPSILON);
         assert_eq!(area.scale, Vec3::splat(radius * 0.65));
     }

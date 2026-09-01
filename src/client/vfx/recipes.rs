@@ -131,9 +131,24 @@ impl VfxMeshLayer {
         if !valid_vfx_catalog_id(&self.id) {
             return Err(format!("invalid VFX mesh-layer id: {}", self.id));
         }
+        let geometry_scale_matches_renderer = matches!(
+            (self.renderer, self.scale),
+            (
+                VfxRendererFamily::MeleeArc,
+                VfxScalePolicy::GeometryReach(_)
+            ) | (
+                VfxRendererFamily::Sphere
+                    | VfxRendererFamily::GroundRing
+                    | VfxRendererFamily::GroundThinRing
+                    | VfxRendererFamily::GroundDisc
+                    | VfxRendererFamily::GroundSpark,
+                VfxScalePolicy::FixedWorld(_) | VfxScalePolicy::AuthoritativeRadius(_)
+            )
+        );
         if !(self.scale.has_valid_bounds()
             && self.anchor.has_valid_bounds()
             && self.timeline.validate()
+            && geometry_scale_matches_renderer
             && matches!(
                 (self.renderer, self.anchor),
                 (
@@ -144,7 +159,8 @@ impl VfxMeshLayer {
                     VfxRendererFamily::GroundRing
                         | VfxRendererFamily::GroundThinRing
                         | VfxRendererFamily::GroundDisc
-                        | VfxRendererFamily::GroundSpark,
+                        | VfxRendererFamily::GroundSpark
+                        | VfxRendererFamily::MeleeArc,
                     VfxAnchorPolicy::GroundOffset(_)
                 )
             ))
@@ -159,6 +175,10 @@ impl VfxMeshLayer {
 
     pub(super) const fn requires_authoritative_radius(&self) -> bool {
         self.scale.requires_authoritative_radius() || self.anchor.requires_authoritative_radius()
+    }
+
+    pub(super) const fn requires_geometry_reach(&self) -> bool {
+        self.scale.requires_geometry_reach()
     }
 
     pub(super) const fn requires_authoritative_deadline(&self) -> bool {
@@ -371,6 +391,44 @@ mod tests {
         assert_eq!(first, vfx_counter_sample(7, "impact", "flash", 0, 11));
         assert_ne!(first, vfx_counter_sample(8, "impact", "flash", 0, 11));
         assert_ne!(first, vfx_counter_sample(7, "impact", "flash", 0, 12));
+    }
+
+    #[test]
+    fn melee_reach_scaling_is_reserved_for_melee_arc_geometry() {
+        let timeline = VfxTimeline {
+            delay_millis: 0,
+            duration: VfxLifetime::Millis(150),
+            easing: VfxEasing::SmoothStep,
+            scale: VfxScaleKeyframes {
+                start: 0.0,
+                peak_at_basis_points: 4_000,
+                peak: 1.0,
+                end: 0.0,
+            },
+        };
+        let melee = VfxMeshLayer {
+            id: "melee_sweep".to_string(),
+            renderer: VfxRendererFamily::MeleeArc,
+            material: VfxMaterialKey::NeutralBright,
+            scale: VfxScalePolicy::GeometryReach(1.0),
+            anchor: VfxAnchorPolicy::GroundOffset(0.2),
+            timeline,
+            readability: VfxReadabilityClass::CriticalGeometry,
+            casts_shadows: false,
+            receives_shadows: false,
+        };
+        assert!(melee.validate().is_ok());
+
+        let wrong_renderer = VfxMeshLayer {
+            renderer: VfxRendererFamily::GroundDisc,
+            ..melee.clone()
+        };
+        assert!(wrong_renderer.validate().is_err());
+        let missing_reach = VfxMeshLayer {
+            scale: VfxScalePolicy::FixedWorld(120.0),
+            ..melee
+        };
+        assert!(missing_reach.validate().is_err());
     }
 
     #[test]
