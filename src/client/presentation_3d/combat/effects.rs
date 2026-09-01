@@ -361,6 +361,8 @@ fn vfx_material(key: VfxMaterialKey, materials: &Material3dAssets) -> Handle<Sta
         VfxMaterialKey::NeutralBright => materials.neutral_energy_bright.clone(),
         VfxMaterialKey::NeutralSoft => materials.neutral_energy_soft.clone(),
         VfxMaterialKey::ScanArea => materials.scan_area.clone(),
+        VfxMaterialKey::ConcealmentBright => materials.concealment_field_blue_boundary.clone(),
+        VfxMaterialKey::ConcealmentSoft => materials.concealment_field_blue_fill.clone(),
         VfxMaterialKey::DemolitionArea => materials.demolition_area.clone(),
         VfxMaterialKey::PickupGlow => materials.pickup_glow.clone(),
         VfxMaterialKey::ColdBright => materials.elemental_cold_bright.clone(),

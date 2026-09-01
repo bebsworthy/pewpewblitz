@@ -51,6 +51,8 @@ pub(crate) enum VfxMaterialKey {
     NeutralBright,
     NeutralSoft,
     ScanArea,
+    ConcealmentBright,
+    ConcealmentSoft,
     DemolitionArea,
     PickupGlow,
     ColdBright,
@@ -615,10 +617,12 @@ fn validate_reduced_readability(
 mod tests {
     use super::*;
 
-    const BUILTIN_MAPPINGS: [(&str, &str); 15] = [
+    const BUILTIN_MAPPINGS: [(&str, &str); 17] = [
         ("ability.demolition-strike", "demolition"),
         ("ability.elemental-field", "elemental_field"),
+        ("ability.forced-reveal", "forced_reveal"),
         ("ability.reveal-scan", "reveal_scan"),
+        ("ability.self-cloak", "cloak_activation"),
         ("combat.damage", "damage"),
         ("combat.impact", "impact"),
         ("combat.muzzle", "muzzle"),
@@ -634,7 +638,7 @@ mod tests {
     ];
 
     #[test]
-    fn embedded_catalog_preserves_all_fifteen_recipe_mappings() {
+    fn embedded_catalog_preserves_all_seventeen_recipe_mappings() {
         let catalog = VfxCatalog::embedded().unwrap();
         assert_eq!(catalog.mappings.len(), BUILTIN_MAPPINGS.len());
         for (key, recipe_id) in BUILTIN_MAPPINGS {
@@ -867,6 +871,51 @@ mod tests {
                 .id,
             "sentry_interruption_reduced"
         );
+    }
+
+    #[test]
+    fn concealment_transients_route_lifecycle_and_reveal_semantics() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let mut signature = CombatVisualSignature::neutral_point(9, bevy::prelude::Vec2::ZERO);
+        signature.carrier = VfxCarrier::AttachedStatus;
+        signature.accents = [Some(VfxAccent::Concealment), None];
+        signature.phase = VfxPhase::Activation;
+
+        let activation = catalog
+            .resolve("ability.self-cloak", &signature, false, false)
+            .unwrap();
+        assert_eq!(activation.id, "cloak_activation");
+        assert_eq!(activation.layers.len(), 3);
+        let reduced = catalog
+            .resolve("ability.self-cloak", &signature, true, false)
+            .unwrap();
+        assert_eq!(reduced.id, "cloak_activation_reduced");
+        assert_eq!(reduced.layers.len(), 2);
+
+        signature.phase = VfxPhase::Expiry;
+        assert_eq!(
+            catalog
+                .resolve("ability.self-cloak", &signature, false, false)
+                .unwrap()
+                .id,
+            "cloak_expiry"
+        );
+        signature.phase = VfxPhase::Interruption;
+        assert_eq!(
+            catalog
+                .resolve("ability.self-cloak", &signature, false, false)
+                .unwrap()
+                .id,
+            "cloak_interruption"
+        );
+
+        signature.phase = VfxPhase::Activation;
+        signature.accents = [Some(VfxAccent::Reveal), None];
+        let reveal = catalog
+            .resolve("ability.forced-reveal", &signature, false, false)
+            .unwrap();
+        assert_eq!(reveal.id, "forced_reveal");
+        assert_eq!(reveal.layers.len(), 4);
     }
 
     #[test]

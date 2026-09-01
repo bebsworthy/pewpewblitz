@@ -5,17 +5,18 @@ use crate::{
     client::vfx::{
         COMBAT_DAMAGE_VFX, COMBAT_IMPACT_VFX, COMBAT_MUZZLE_VFX, COMBAT_RESET_VFX,
         COMBAT_VFX_PRODUCER_RANK, CombatVisualSignature, DEMOLITION_STRIKE_VFX,
-        ELEMENTAL_FIELD_VFX, REVEAL_SCAN_VFX, SENTRY_MUZZLE_PRESENTATION_OFFSET, VfxAccent,
-        VfxAppExt, VfxAuthoritativeTiming, VfxCarrier, VfxContextOverride, VfxDeadline,
-        VfxGeometry, VfxPhase, VfxPresentationIdentity, VfxPresentationVariant, VfxRelationship,
-        VfxRequest, VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration,
-        VfxSignatureCache, accent_for_elemental_field,
+        ELEMENTAL_FIELD_VFX, FORCED_REVEAL_VFX, REVEAL_SCAN_VFX, SELF_CLOAK_VFX,
+        SENTRY_MUZZLE_PRESENTATION_OFFSET, VfxAccent, VfxAppExt, VfxAuthoritativeTiming,
+        VfxCarrier, VfxContextOverride, VfxDeadline, VfxGeometry, VfxPhase,
+        VfxPresentationIdentity, VfxPresentationVariant, VfxRelationship, VfxRequest,
+        VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration, VfxSignatureCache,
+        accent_for_elemental_field,
     },
     combat::{AuthoritativeTick, CombatCue, client::DeduplicatedCombatCue, combat_cue_key},
     protocol::{Fighter, NetworkEntityId},
 };
 
-const REGISTRATIONS: [VfxRequestRegistration; 7] = [
+const REGISTRATIONS: [VfxRequestRegistration; 9] = [
     VfxRequestRegistration::new(
         COMBAT_MUZZLE_VFX,
         COMBAT_VFX_PRODUCER_RANK,
@@ -40,6 +41,16 @@ const REGISTRATIONS: [VfxRequestRegistration; 7] = [
         REVEAL_SCAN_VFX,
         COMBAT_VFX_PRODUCER_RANK,
         VfxRequestCapabilities::RADIUS_AND_DEADLINE,
+    ),
+    VfxRequestRegistration::new(
+        SELF_CLOAK_VFX,
+        COMBAT_VFX_PRODUCER_RANK,
+        VfxRequestCapabilities::NONE,
+    ),
+    VfxRequestRegistration::new(
+        FORCED_REVEAL_VFX,
+        COMBAT_VFX_PRODUCER_RANK,
+        VfxRequestCapabilities::NONE,
     ),
     VfxRequestRegistration::new(
         ELEMENTAL_FIELD_VFX,
@@ -79,6 +90,7 @@ fn produce_combat_vfx_requests(
         (
             &NetworkEntityId,
             &crate::combat::TeamId,
+            &avian2d::prelude::Position,
             Option<&avian2d::prelude::Rotation>,
         ),
         With<Fighter>,
@@ -95,7 +107,9 @@ fn produce_combat_vfx_requests(
     let observed_at_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     for DeduplicatedCombatCue(cue) in cues.read() {
         let Some((key, cue_position, radius, deadline, label)) =
-            combat_vfx_request(cue, observed_at_tick, &cache)
+            combat_vfx_request(cue, observed_at_tick, &cache, |target| {
+                replicated_fighter_position(&fighters, target)
+            })
         else {
             continue;
         };
@@ -158,6 +172,7 @@ fn combat_vfx_signature(
         (
             &NetworkEntityId,
             &crate::combat::TeamId,
+            &avian2d::prelude::Position,
             Option<&avian2d::prelude::Rotation>,
         ),
         With<Fighter>,
@@ -189,7 +204,7 @@ fn combat_vfx_signature(
             source,
             ..
         } => {
-            let facing = fighters.iter().find_map(|(network_id, _, rotation)| {
+            let facing = fighters.iter().find_map(|(network_id, _, _, rotation)| {
                 (*network_id == *source)
                     .then(|| rotation.map_or(0.0, |rotation| rotation.as_radians()))
             });
@@ -320,6 +335,67 @@ fn combat_vfx_signature(
             VfxPresentationIdentity::CombatEvent(event_id.0),
             instant(*tick),
         ),
+        C::SelfCloakActivated {
+            tick,
+            source,
+            generation,
+            expires_at_tick,
+            ..
+        } => direct(
+            VfxCarrier::AttachedStatus,
+            VfxPhase::Activation,
+            [Some(VfxAccent::Concealment), None],
+            relationship_for_owner(cache, fighters, *source),
+            None,
+            point,
+            VfxPresentationIdentity::NetworkEntity {
+                network_id: source.0,
+                generation: *generation,
+            },
+            VfxAuthoritativeTiming::persistent(*tick, observed_at_tick, *expires_at_tick),
+        ),
+        C::SelfCloakEnded {
+            tick,
+            source,
+            generation,
+            reason,
+            ..
+        } => direct(
+            VfxCarrier::AttachedStatus,
+            if matches!(reason, crate::combat::SelfCloakEndReason::Expired) {
+                VfxPhase::Expiry
+            } else {
+                VfxPhase::Interruption
+            },
+            [Some(VfxAccent::Concealment), None],
+            relationship_for_owner(cache, fighters, *source),
+            None,
+            point,
+            VfxPresentationIdentity::NetworkEntity {
+                network_id: source.0,
+                generation: *generation,
+            },
+            instant(*tick),
+        ),
+        C::ForcedRevealApplied {
+            tick,
+            target,
+            source_generation,
+            expires_at_tick,
+            ..
+        } => direct(
+            VfxCarrier::AttachedStatus,
+            VfxPhase::Activation,
+            [Some(VfxAccent::Reveal), None],
+            relationship_for_owner(cache, fighters, *target),
+            None,
+            point,
+            VfxPresentationIdentity::NetworkEntity {
+                network_id: target.0,
+                generation: *source_generation,
+            },
+            VfxAuthoritativeTiming::persistent(*tick, observed_at_tick, *expires_at_tick),
+        ),
         C::RevealScanActivated {
             event_id,
             tick,
@@ -401,6 +477,7 @@ fn relationship_for_owner(
         (
             &NetworkEntityId,
             &crate::combat::TeamId,
+            &avian2d::prelude::Position,
             Option<&avian2d::prelude::Rotation>,
         ),
         With<Fighter>,
@@ -409,7 +486,7 @@ fn relationship_for_owner(
 ) -> VfxRelationship {
     fighters
         .iter()
-        .find_map(|(network_id, team, _)| {
+        .find_map(|(network_id, team, _, _)| {
             (*network_id == owner).then(|| cache.observer().relationship(owner, *team))
         })
         .unwrap_or(VfxRelationship::Neutral)
@@ -437,6 +514,7 @@ fn combat_vfx_request(
     cue: &CombatCue,
     observed_at_tick: Option<u64>,
     cache: &VfxSignatureCache,
+    fighter_position: impl Fn(NetworkEntityId) -> Option<Vec2>,
 ) -> Option<(
     crate::client::vfx::VfxRequestKey,
     Vec2,
@@ -445,6 +523,12 @@ fn combat_vfx_request(
     &'static str,
 )> {
     use CombatCue as C;
+    if matches!(
+        cue,
+        C::SelfCloakActivated { .. } | C::SelfCloakEnded { .. } | C::ForcedRevealApplied { .. }
+    ) {
+        return concealment_vfx_request(cue, fighter_position);
+    }
     match cue {
         C::AttackAccepted { position, .. } | C::SentryFired { position, .. } => Some((
             COMBAT_MUZZLE_VFX,
@@ -537,6 +621,71 @@ fn combat_vfx_request(
     }
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the tuple is the compact renderer-neutral VFX request payload"
+)]
+fn concealment_vfx_request(
+    cue: &CombatCue,
+    fighter_position: impl Fn(NetworkEntityId) -> Option<Vec2>,
+) -> Option<(
+    crate::client::vfx::VfxRequestKey,
+    Vec2,
+    Option<f32>,
+    Option<VfxDeadline>,
+    &'static str,
+)> {
+    match cue {
+        CombatCue::SelfCloakActivated { source, .. } => fighter_position(*source).map(|position| {
+            (
+                SELF_CLOAK_VFX,
+                position,
+                None,
+                None,
+                "Self Cloak activation veil",
+            )
+        }),
+        CombatCue::SelfCloakEnded { source, .. } => fighter_position(*source).map(|position| {
+            (
+                SELF_CLOAK_VFX,
+                position,
+                None,
+                None,
+                "Self Cloak lifecycle ending",
+            )
+        }),
+        CombatCue::ForcedRevealApplied { target, .. } => {
+            fighter_position(*target).map(|position| {
+                (
+                    FORCED_REVEAL_VFX,
+                    position,
+                    None,
+                    None,
+                    "Forced Reveal attached acquisition",
+                )
+            })
+        }
+        _ => None,
+    }
+}
+
+fn replicated_fighter_position(
+    fighters: &Query<
+        (
+            &NetworkEntityId,
+            &crate::combat::TeamId,
+            &avian2d::prelude::Position,
+            Option<&avian2d::prelude::Rotation>,
+        ),
+        With<Fighter>,
+    >,
+    target: NetworkEntityId,
+) -> Option<Vec2> {
+    fighters
+        .iter()
+        .find_map(|(network_id, _, position, _)| (*network_id == target).then_some(position.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,7 +706,7 @@ mod tests {
 
     #[test]
     fn built_in_combat_keys_have_one_owner_and_expected_capabilities() {
-        assert_eq!(REGISTRATIONS.len(), 7);
+        assert_eq!(REGISTRATIONS.len(), 9);
         assert!(
             REGISTRATIONS
                 .iter()
@@ -591,7 +740,7 @@ mod tests {
             weapon_definition_id: WeaponDefinitionId(13),
         };
         let (key, position, radius, deadline, _) =
-            combat_vfx_request(&attack, None, &cache).unwrap();
+            combat_vfx_request(&attack, None, &cache, |_| None).unwrap();
         assert_eq!(key, COMBAT_MUZZLE_VFX);
         assert_eq!(position, Vec2::new(2.0, 3.0));
         assert_eq!(radius, None);
@@ -605,7 +754,8 @@ mod tests {
             radius_milliunits: 6_000,
             expires_at_tick: 30,
         };
-        let (key, _, radius, deadline, _) = combat_vfx_request(&scan, Some(22), &cache).unwrap();
+        let (key, _, radius, deadline, _) =
+            combat_vfx_request(&scan, Some(22), &cache, |_| None).unwrap();
         assert_eq!(key, REVEAL_SCAN_VFX);
         assert_eq!(radius, Some(6.0));
         assert_eq!(deadline, Some(VfxDeadline::new(20, 30, Some(22))));
@@ -618,7 +768,101 @@ mod tests {
             weapon_definition_id: WeaponDefinitionId(13),
             position: WorldPoint { x: 2.0, y: 3.0 },
         };
-        assert!(combat_vfx_request(&legacy, None, &cache).is_none());
+        assert!(combat_vfx_request(&legacy, None, &cache, |_| None).is_none());
+    }
+
+    #[test]
+    fn concealment_cues_resolve_fighter_positions_and_fail_closed_when_absent() {
+        let cache = VfxSignatureCache::default();
+        let cue = CombatCue::SelfCloakActivated {
+            event_id: CombatEventId(16),
+            tick: 22,
+            source: NetworkEntityId(12),
+            generation: 3,
+            expires_at_tick: 80,
+        };
+        let resolved = combat_vfx_request(&cue, Some(22), &cache, |target| {
+            (target == NetworkEntityId(12)).then_some(Vec2::new(40.0, 50.0))
+        })
+        .unwrap();
+        assert_eq!(resolved.0, SELF_CLOAK_VFX);
+        assert_eq!(resolved.1, Vec2::new(40.0, 50.0));
+        assert!(combat_vfx_request(&cue, Some(22), &cache, |_| None).is_none());
+    }
+
+    #[test]
+    fn concealment_lifecycle_signatures_preserve_semantics() {
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<VfxRequest>()
+            .init_resource::<VfxSignatureCache>()
+            .init_resource::<CapturedRequests>()
+            .add_systems(
+                Update,
+                (produce_combat_vfx_requests, capture_requests).chain(),
+            );
+        app.world_mut().spawn((
+            Fighter,
+            NetworkEntityId(12),
+            crate::combat::TeamId(1),
+            avian2d::prelude::Position(Vec2::new(40.0, 50.0)),
+            avian2d::prelude::Rotation::radians(0.0),
+            AuthoritativeTick(22),
+        ));
+        for cue in [
+            CombatCue::SelfCloakActivated {
+                event_id: CombatEventId(20),
+                tick: 22,
+                source: NetworkEntityId(12),
+                generation: 3,
+                expires_at_tick: 80,
+            },
+            CombatCue::SelfCloakEnded {
+                event_id: CombatEventId(21),
+                tick: 40,
+                source: NetworkEntityId(12),
+                generation: 3,
+                reason: crate::combat::SelfCloakEndReason::Expired,
+            },
+            CombatCue::SelfCloakEnded {
+                event_id: CombatEventId(22),
+                tick: 41,
+                source: NetworkEntityId(12),
+                generation: 4,
+                reason: crate::combat::SelfCloakEndReason::Attack,
+            },
+            CombatCue::ForcedRevealApplied {
+                event_id: CombatEventId(23),
+                tick: 42,
+                target: NetworkEntityId(12),
+                revealing_team: crate::combat::TeamId(2),
+                source_generation: 8,
+                expires_at_tick: 100,
+            },
+        ] {
+            app.world_mut().write_message(DeduplicatedCombatCue(cue));
+        }
+
+        app.update();
+
+        let requests = &app.world().resource::<CapturedRequests>().0;
+        assert_eq!(requests.len(), 4);
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.position == Vec2::new(40.0, 50.0))
+        );
+        assert_eq!(requests[0].key, SELF_CLOAK_VFX);
+        assert_eq!(requests[0].signature.phase, VfxPhase::Activation);
+        assert_eq!(
+            requests[0].signature.accents[0],
+            Some(VfxAccent::Concealment)
+        );
+        assert_eq!(requests[1].signature.phase, VfxPhase::Expiry);
+        assert_eq!(requests[2].signature.phase, VfxPhase::Interruption);
+        assert_eq!(requests[3].key, FORCED_REVEAL_VFX);
+        assert_eq!(requests[3].signature.accents[0], Some(VfxAccent::Reveal));
+        assert_eq!(requests[3].signature.phase, VfxPhase::Activation);
     }
 
     #[test]

@@ -306,6 +306,20 @@ impl VfxLabScenario {
             if self.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
                 signature.accents = [Some(crate::client::vfx::VfxAccent::Demolition), None];
             }
+            if self.key == crate::client::vfx::SELF_CLOAK_VFX {
+                signature.carrier = crate::client::vfx::VfxCarrier::AttachedStatus;
+                signature.phase = if ultimate {
+                    crate::client::vfx::VfxPhase::Interruption
+                } else {
+                    crate::client::vfx::VfxPhase::Activation
+                };
+                signature.accents = [Some(crate::client::vfx::VfxAccent::Concealment), None];
+            }
+            if self.key == crate::client::vfx::FORCED_REVEAL_VFX {
+                signature.carrier = crate::client::vfx::VfxCarrier::AttachedStatus;
+                signature.phase = crate::client::vfx::VfxPhase::Activation;
+                signature.accents = [Some(crate::client::vfx::VfxAccent::Reveal), None];
+            }
             if self.key == crate::client::vfx::COMBAT_MUZZLE_VFX {
                 signature.carrier = crate::client::vfx::VfxCarrier::StraightProjectile;
                 signature.phase = crate::client::vfx::VfxPhase::Activation;
@@ -321,7 +335,12 @@ impl VfxLabScenario {
                     );
                 }
             }
-            signature.context = if self.key == crate::client::vfx::REVEAL_SCAN_VFX {
+            signature.context = if matches!(
+                self.key,
+                crate::client::vfx::SELF_CLOAK_VFX | crate::client::vfx::FORCED_REVEAL_VFX
+            ) {
+                None
+            } else if self.key == crate::client::vfx::REVEAL_SCAN_VFX {
                 Some(crate::client::vfx::VfxContextOverride::RevealScan)
             } else if self.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
                 Some(crate::client::vfx::VfxContextOverride::DemolitionStrike)
@@ -1399,7 +1418,10 @@ fn state_has_fixed_accent(state: &VfxLabState) -> bool {
         || (state.fixture == VfxLabFixture::Transient
             && matches!(
                 state.selected().key,
-                crate::client::vfx::REVEAL_SCAN_VFX | crate::client::vfx::DEMOLITION_STRIKE_VFX
+                crate::client::vfx::REVEAL_SCAN_VFX
+                    | crate::client::vfx::DEMOLITION_STRIKE_VFX
+                    | crate::client::vfx::SELF_CLOAK_VFX
+                    | crate::client::vfx::FORCED_REVEAL_VFX
             ))
 }
 
@@ -1842,6 +1864,10 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         (VfxLabFixture::Transient, crate::client::vfx::DEMOLITION_STRIKE_VFX) => {
             "DEMOLITION".to_string()
         }
+        (VfxLabFixture::Transient, crate::client::vfx::SELF_CLOAK_VFX) => "SELF CLOAK".to_string(),
+        (VfxLabFixture::Transient, crate::client::vfx::FORCED_REVEAL_VFX) => {
+            "FORCED REVEAL".to_string()
+        }
         (VfxLabFixture::PersistentSplash, _) => "SPLASH DUAL".to_string(),
         (VfxLabFixture::ConcealmentField, _) => "CONCEALMENT".to_string(),
         (VfxLabFixture::Sentry, _) => "DEPLOYABLE NEUTRAL".to_string(),
@@ -1855,6 +1881,8 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             "ability.reveal-scan" => "REVEAL SCAN ACTIVATION",
             "ability.elemental-field" => "ULTIMATE FIELD ACTIVATION",
             "ability.demolition-strike" => "DEMOLITION STRIKE MAP BREACH",
+            "ability.self-cloak" => "SELF CLOAK ATTACHED LIFECYCLE CUE",
+            "ability.forced-reveal" => "FORCED REVEAL TARGET ACQUISITION",
             _ => "ONE-SHOT GAMEPLAY EFFECT",
         },
         VfxLabFixture::StraightProjectile => "STRAIGHT PROJECTILE IN FLIGHT",
@@ -1904,6 +1932,10 @@ fn lab_fixture_meaning(state: &VfxLabState, scenario: VfxLabScenario) -> &'stati
                 "The thin outer ring is the exact 192-unit scan radius and remains for the authoritative reveal deadline. The concentric waves are the one-time activation sweep. Fighters found by that scan retain separate attached Reveal markers; this area does not scan repeatedly."
             } else if scenario.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
                 "The thin outer ring is the exact 64-unit map-destruction radius. The fracture flash, hot core, expanding shockwave, sparks, and smoke present an authoritative destruction event that has already resolved; this is not a pending danger telegraph."
+            } else if scenario.key == crate::client::vfx::SELF_CLOAK_VFX {
+                "This compact veil is attached to the authoritative fighter position. Activation seals inward as retained fighter translucency begins; press U to compare the sharp interruption used when attacking, taking damage, or being defeated."
+            } else if scenario.key == crate::client::vfx::FORCED_REVEAL_VFX {
+                "This compact magenta acquisition burst appears on the revealed fighter. The separately retained Reveal status owns the authoritative deadline; this transient only marks the moment the reveal is applied."
             } else if state.lobbed_impact {
                 "This is a lobbed landing. The thin outer ring is the exact payload radius; the ground flash, central burst, expanding shockwave, sparks, and smoke are staged presentation. Use . to move one tick or restart with another --sample-ticks value."
             } else {
@@ -1947,6 +1979,18 @@ fn lab_fixture_meaning(state: &VfxLabState, scenario: VfxLabScenario) -> &'stati
 }
 
 fn lab_mode_labels(state: &VfxLabState) -> (&'static str, &'static str) {
+    if state.fixture == VfxLabFixture::Transient
+        && state.selected().key == crate::client::vfx::SELF_CLOAK_VFX
+    {
+        return (
+            if state.ultimate {
+                " + INTERRUPTED"
+            } else {
+                " + ACTIVATION"
+            },
+            "U lifecycle mode",
+        );
+    }
     if state.fixture == VfxLabFixture::Sentry {
         return (
             if state.ultimate {
@@ -1979,6 +2023,20 @@ const fn status_fixture_label(state: &VfxLabState) -> &'static str {
 }
 
 fn lab_guide_style(state: &VfxLabState) -> &'static str {
+    if state.fixture == VfxLabFixture::Transient
+        && state.selected().key == crate::client::vfx::SELF_CLOAK_VFX
+    {
+        return if state.ultimate {
+            "INTERRUPTED CLOAK fractures the veil with a compact core flash, sharp ground break, and fast release rings; it reads as a broken state rather than a gentle timeout."
+        } else {
+            "SELF CLOAK pulls a low cyan veil inward around the fighter, briefly enclosing the body without becoming the lasting visibility state."
+        };
+    }
+    if state.fixture == VfxLabFixture::Transient
+        && state.selected().key == crate::client::vfx::FORCED_REVEAL_VFX
+    {
+        return "FORCED REVEAL uses the same magenta electronic detection language as Reveal Scan, compressed into a target-sized reticle and acquisition pulse.";
+    }
     if state.fixture == VfxLabFixture::ConcealmentField {
         return "CONCEALMENT uses a low, breathing energy veil with sparse drifting wisps. It is intentionally distinct from elemental hazard motion and preserves map readability; broader ownership colors remain tracked by BRL-0107.";
     }

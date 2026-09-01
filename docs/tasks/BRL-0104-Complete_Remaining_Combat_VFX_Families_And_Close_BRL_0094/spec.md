@@ -629,3 +629,50 @@ Verification:
 - `just _test-client`: 632 library tests plus all client targets passed.
 - `./scripts/check-server-features.sh`, `./scripts/check-v3-world-presentation.sh`, `cargo fmt --all -- --check`, and `git diff --check`: passed.
 - Native paired evidence reviewed in `target/brl-0104-concealment-v3-normal`, `target/brl-0104-concealment-v3-reduced`, and `target/brl-0104-concealment-v3-primitive`. The empty pre-fix evidence remains in `target/brl-0104-concealment-v1-normal` as the discovered parity failure.
+
+
+## Phase 2 next slice — self-cloak and forced-reveal lifecycle cues (2026-09-01)
+
+Outcome: stop dropping authoritative concealment lifecycle cues and materialize concise, configurable transients around the affected fighter while retained alpha/status presentation continues to own the lasting state.
+
+Scope and decisions:
+
+- Add client-only semantic request keys for self-cloak and forced-reveal presentation. `SelfCloakActivated`, `SelfCloakEnded`, and `ForcedRevealApplied` resolve fighter positions from replicated `NetworkEntityId`; if the target is not legally present, emit no request rather than falling back to world origin.
+- Self-cloak activation is an inward sealing veil. Natural expiry is a soft release; attack/damage/defeat endings are a sharper interruption. Forced reveal uses the existing magenta detection language in a compact target-attached burst.
+- Recipes, layer timing, materials, reduced variants, and fallbacks remain authored in `assets/catalogs/vfx.ron`; the producer emits only stable keys and semantic signatures.
+- These are presentation-only responses to authoritative cues. They do not control concealment, visibility, reveal duration, or fighter alpha.
+- VfxLab must expose the new registered recipes through its transient fixture, with the correct semantic accent/carrier/phase rather than a generic neutral signature.
+
+Acceptance and verification:
+
+- All three formerly omitted cue families produce bounded VFX requests at replicated fighter positions with correct semantic phase, accent, identity, relationship, and timing.
+- Missing/hidden targets fail closed with no request and no origin artifact.
+- Normal/reduced catalog resolution is validated and VfxLab can isolate activation, interruption, and forced-reveal presentation.
+- Strict client, catalog, producer, headless isolation, and native evidence checks pass before commit.
+
+### Self-cloak and forced-reveal lifecycle implementation and evidence (2026-09-01)
+
+Implemented the previously omitted authoritative concealment lifecycle cues through the production semantic-request boundary:
+
+- `SelfCloakActivated` resolves to `AttachedStatus + Activation + Concealment` and selects an inward-sealing cyan veil recipe.
+- `SelfCloakEnded` preserves its authoritative reason: natural timeout resolves to `Expiry` and a soft release, while attack, damage, defeat, or other early endings resolve to `Interruption` and a sharper fracture/release recipe.
+- `ForcedRevealApplied` resolves to `AttachedStatus + Activation + Reveal` and selects a compact magenta acquisition burst.
+- Requests resolve their presentation origin from the currently replicated fighter `NetworkEntityId`. An absent or non-relevant fighter fails closed with no request, preventing false world-origin artifacts.
+- The adapter preserves stable replicated identity, observer-relative relationship, authoritative cue timing, and persistent expiry where supplied. It does not mutate concealment, relevance, alpha, or gameplay duration.
+- All four Normal and Reduced recipe variants, their layer timing, materials, concurrency caps, and fallbacks are authored in `assets/catalogs/vfx.ron`. The renderer only received two reusable concealment material roles; it has no ability-ID branch.
+- VfxLab isolates `ability.self-cloak` activation and interruption (`U`) plus `ability.forced-reveal` using the exact production registry, semantic carrier, phase, and accent selection.
+
+The full client suite exposed that the registry's embedded-catalog test builder had not been extended with the two new producer registrations. Updating that explicit fixture restored the intended fail-closed catalog/producer agreement; production registration itself was already complete.
+
+Verification:
+
+- Focused catalog tests: 16 passed, including concealment lifecycle recipe routing and reduced variants.
+- Focused combat-producer tests: 5 passed, including replicated-position resolution, absent-target omission, activation/expiry/interruption/reveal signatures, and Sentry regression coverage.
+- Focused VfxLab tests: 8 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: passed.
+- `just _test-client`: 635 library tests plus all client targets passed.
+- `./scripts/check-server-features.sh`: passed; server feature graph remains presentation-free.
+- `./scripts/check-v3-world-presentation.sh`: passed; the sole 3D world renderer contract remains intact.
+- Native VfxLab evidence reviewed in `target/brl-0104-cloak-v1-activation`, `target/brl-0104-cloak-v1-forced-reveal`, and the earlier, more readable interruption timing capture `target/brl-0104-cloak-v2-interruption`.
+
+This slice completes the known concealment lifecycle-cue omission. Retained fighter alpha/state presentation remains authoritative-state-driven, and broader ownership colors remain deferred to BRL-0107.

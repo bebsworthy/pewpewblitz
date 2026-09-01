@@ -17,6 +17,8 @@ pub(crate) const COMBAT_IMPACT_VFX: VfxRequestKey = VfxRequestKey::new("combat.i
 pub(crate) const COMBAT_DAMAGE_VFX: VfxRequestKey = VfxRequestKey::new("combat.damage");
 pub(crate) const COMBAT_RESET_VFX: VfxRequestKey = VfxRequestKey::new("combat.reset");
 pub(crate) const REVEAL_SCAN_VFX: VfxRequestKey = VfxRequestKey::new("ability.reveal-scan");
+pub(crate) const SELF_CLOAK_VFX: VfxRequestKey = VfxRequestKey::new("ability.self-cloak");
+pub(crate) const FORCED_REVEAL_VFX: VfxRequestKey = VfxRequestKey::new("ability.forced-reveal");
 pub(crate) const ELEMENTAL_FIELD_VFX: VfxRequestKey = VfxRequestKey::new("ability.elemental-field");
 pub(crate) const DEMOLITION_STRIKE_VFX: VfxRequestKey =
     VfxRequestKey::new("ability.demolition-strike");

@@ -608,6 +608,16 @@ mod tests {
                 VfxRequestCapabilities::RADIUS,
             ),
             (
+                SELF_CLOAK_VFX,
+                COMBAT_VFX_PRODUCER_RANK,
+                VfxRequestCapabilities::NONE,
+            ),
+            (
+                FORCED_REVEAL_VFX,
+                COMBAT_VFX_PRODUCER_RANK,
+                VfxRequestCapabilities::NONE,
+            ),
+            (
                 WORLD_OBJECT_DAMAGED_VFX,
                 WORLD_OBJECT_VFX_PRODUCER_RANK,
                 VfxRequestCapabilities::NONE,
