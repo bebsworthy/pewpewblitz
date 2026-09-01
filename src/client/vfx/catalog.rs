@@ -792,6 +792,42 @@ mod tests {
     }
 
     #[test]
+    fn reveal_scan_keeps_deadline_boundary_and_fixed_activation_waves() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let mut signature = CombatVisualSignature::neutral_point(7, bevy::prelude::Vec2::ZERO);
+        signature.accents = [Some(VfxAccent::Reveal), None];
+        signature.carrier = VfxCarrier::PersistentArea;
+        signature.phase = VfxPhase::Activation;
+        signature.context = Some(VfxContextOverride::RevealScan);
+
+        let normal = catalog
+            .resolve("ability.reveal-scan", &signature, false, true)
+            .unwrap();
+        assert_eq!(normal.id, "reveal_scan");
+        assert_eq!(normal.layers.len(), 4);
+        assert_eq!(
+            normal.layers[0].timeline.duration,
+            VfxLifetime::AuthoritativeDeadline
+        );
+        assert!(
+            normal.layers[1..]
+                .iter()
+                .all(|layer| matches!(layer.timeline.duration, VfxLifetime::Millis(_)))
+        );
+
+        let reduced = catalog
+            .resolve("ability.reveal-scan", &signature, true, true)
+            .unwrap();
+        assert_eq!(reduced.id, "reveal_scan_reduced");
+        assert_eq!(reduced.layers.len(), 2);
+        assert_eq!(
+            reduced.layers[0].readability,
+            VfxReadabilityClass::CriticalGeometry
+        );
+        assert!(reduced.particle_layers.is_empty());
+    }
+
+    #[test]
     fn neutral_straight_transients_use_layered_recipes_without_changing_fallbacks() {
         let catalog = VfxCatalog::embedded().unwrap();
         let mut signature = CombatVisualSignature::neutral_point(11, bevy::prelude::Vec2::ZERO);
@@ -1009,8 +1045,8 @@ mod tests {
         );
 
         let fallback_cycle = VFX_CATALOG.replacen(
-            "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"impact\"",
-            "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"reveal_scan\"",
+            "id: \"reveal_scan\", layers: [\"reveal_scan_boundary\", \"reveal_scan_wave\", \"reveal_scan_echo\", \"reveal_scan_origin\"], concurrency_cap: 48, fallback_recipe: \"impact\"",
+            "id: \"reveal_scan\", layers: [\"reveal_scan_boundary\", \"reveal_scan_wave\", \"reveal_scan_echo\", \"reveal_scan_origin\"], concurrency_cap: 48, fallback_recipe: \"reveal_scan\"",
             1,
         );
         assert!(
@@ -1093,13 +1129,13 @@ mod tests {
     fn recipe_requirements_include_reachable_deadline_fallback_capabilities() {
         let source = VFX_CATALOG
             .replacen(
-                "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"impact\"",
-                "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"elemental_field\"",
+                "id: \"reveal_scan\", layers: [\"reveal_scan_boundary\", \"reveal_scan_wave\", \"reveal_scan_echo\", \"reveal_scan_origin\"], concurrency_cap: 48, fallback_recipe: \"impact\"",
+                "id: \"reveal_scan\", layers: [\"reveal_scan_boundary\", \"reveal_scan_wave\", \"reveal_scan_echo\", \"reveal_scan_origin\"], concurrency_cap: 48, fallback_recipe: \"elemental_field\"",
                 1,
             )
             .replacen(
-                "id: \"reveal_scan\", renderer: GroundRing, material: ScanArea, scale: AuthoritativeRadius(1.0)",
-                "id: \"reveal_scan\", renderer: GroundRing, material: ScanArea, scale: FixedWorld(10.0)",
+                "id: \"reveal_scan_boundary\", renderer: GroundThinRing, material: ScanArea, scale: AuthoritativeRadius(1.0)",
+                "id: \"reveal_scan_boundary\", renderer: GroundThinRing, material: ScanArea, scale: FixedWorld(10.0)",
                 1,
             );
         let catalog = VfxCatalog::from_ron(&source).unwrap();

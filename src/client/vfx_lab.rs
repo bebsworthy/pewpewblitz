@@ -284,12 +284,20 @@ impl VfxLabScenario {
             let mut signature = request.signature;
             signature.identity = crate::client::vfx::VfxPresentationIdentity::Explicit(event_id);
             signature.accents = [Some(accent.signature_accent()), None];
-            if self.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
+            if matches!(
+                self.key,
+                crate::client::vfx::REVEAL_SCAN_VFX | crate::client::vfx::DEMOLITION_STRIKE_VFX
+            ) {
                 signature.carrier = crate::client::vfx::VfxCarrier::PersistentArea;
                 signature.phase = crate::client::vfx::VfxPhase::Activation;
-                signature.accents = [Some(crate::client::vfx::VfxAccent::Demolition), None];
                 signature.geometry =
                     crate::client::vfx::VfxGeometry::circle(request.position, f32::from(radius));
+            }
+            if self.key == crate::client::vfx::REVEAL_SCAN_VFX {
+                signature.accents = [Some(crate::client::vfx::VfxAccent::Reveal), None];
+            }
+            if self.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
+                signature.accents = [Some(crate::client::vfx::VfxAccent::Demolition), None];
             }
             if self.key == crate::client::vfx::COMBAT_MUZZLE_VFX {
                 signature.carrier = crate::client::vfx::VfxCarrier::StraightProjectile;
@@ -306,7 +314,9 @@ impl VfxLabScenario {
                     );
                 }
             }
-            signature.context = if self.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
+            signature.context = if self.key == crate::client::vfx::REVEAL_SCAN_VFX {
+                Some(crate::client::vfx::VfxContextOverride::RevealScan)
+            } else if self.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
                 Some(crate::client::vfx::VfxContextOverride::DemolitionStrike)
             } else if self.key == crate::client::vfx::ELEMENTAL_FIELD_VFX {
                 Some(crate::client::vfx::VfxContextOverride::ElementalField(
@@ -1221,7 +1231,10 @@ fn handle_lab_input(
 fn state_has_fixed_accent(state: &VfxLabState) -> bool {
     fixture_has_fixed_accent(state.fixture)
         || (state.fixture == VfxLabFixture::Transient
-            && state.selected().key == crate::client::vfx::DEMOLITION_STRIKE_VFX)
+            && matches!(
+                state.selected().key,
+                crate::client::vfx::REVEAL_SCAN_VFX | crate::client::vfx::DEMOLITION_STRIKE_VFX
+            ))
 }
 
 #[allow(
@@ -1659,6 +1672,7 @@ fn update_lab_inspector(
 
 fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &str) -> String {
     let style_label = match (state.fixture, scenario.key) {
+        (VfxLabFixture::Transient, crate::client::vfx::REVEAL_SCAN_VFX) => "REVEAL".to_string(),
         (VfxLabFixture::Transient, crate::client::vfx::DEMOLITION_STRIKE_VFX) => {
             "DEMOLITION".to_string()
         }
@@ -1670,6 +1684,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::Transient => match scenario.key.as_str() {
             "combat.muzzle" => "WEAPON FIRING FLASH",
             "combat.impact" => "WEAPON HIT / IMPACT",
+            "ability.reveal-scan" => "REVEAL SCAN ACTIVATION",
             "ability.elemental-field" => "ULTIMATE FIELD ACTIVATION",
             "ability.demolition-strike" => "DEMOLITION STRIKE MAP BREACH",
             _ => "ONE-SHOT GAMEPLAY EFFECT",
@@ -1687,7 +1702,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
     };
     let meaning = match state.fixture {
         VfxLabFixture::Transient => {
-            if scenario.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
+            if scenario.key == crate::client::vfx::REVEAL_SCAN_VFX {
+                "The thin outer ring is the exact 192-unit scan radius and remains for the authoritative reveal deadline. The concentric waves are the one-time activation sweep. Fighters found by that scan retain separate attached Reveal markers; this area does not scan repeatedly."
+            } else if scenario.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
                 "The thin outer ring is the exact 64-unit map-destruction radius. The fracture flash, hot core, expanding shockwave, sparks, and smoke present an authoritative destruction event that has already resolved; this is not a pending danger telegraph."
             } else if state.lobbed_impact {
                 "This is a lobbed landing. The thin outer ring is the exact payload radius; the ground flash, central burst, expanding shockwave, sparks, and smoke are staged presentation. Use . to move one tick or restart with another --sample-ticks value."
@@ -1753,6 +1770,11 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
 }
 
 fn lab_guide_style(state: &VfxLabState) -> &'static str {
+    if state.fixture == VfxLabFixture::Transient
+        && state.selected().key == crate::client::vfx::REVEAL_SCAN_VFX
+    {
+        return "REVEAL uses a precise magenta sensor language: a restrained exact boundary, fast concentric acquisition waves, and a compact origin reticle. It is deliberately geometric and electronic rather than elemental.";
+    }
     if state.fixture == VfxLabFixture::Transient
         && state.selected().key == crate::client::vfx::DEMOLITION_STRIKE_VFX
     {
@@ -1993,6 +2015,34 @@ mod tests {
         assert_eq!(
             request.signature.geometry,
             crate::client::vfx::VfxGeometry::circle(Vec2::ZERO, 64.0)
+        );
+    }
+
+    #[test]
+    fn reveal_preview_uses_production_semantics_radius_and_deadline() {
+        let scenario = VfxLabScenario {
+            key: crate::client::vfx::REVEAL_SCAN_VFX,
+            producer_rank: crate::client::vfx::COMBAT_VFX_PRODUCER_RANK,
+            capabilities: VfxRequestCapabilities::RADIUS_AND_DEADLINE,
+        };
+        let request = scenario.request(13, 192, VfxLabAccent::Fire, false, false);
+        assert_eq!(request.authoritative_radius, Some(192.0));
+        assert_eq!(request.deadline, Some(VfxDeadline::new(0, 300, Some(0))));
+        assert_eq!(
+            request.signature.carrier,
+            crate::client::vfx::VfxCarrier::PersistentArea
+        );
+        assert_eq!(
+            request.signature.accents,
+            [Some(crate::client::vfx::VfxAccent::Reveal), None]
+        );
+        assert_eq!(
+            request.signature.context,
+            Some(crate::client::vfx::VfxContextOverride::RevealScan)
+        );
+        assert_eq!(
+            request.signature.geometry,
+            crate::client::vfx::VfxGeometry::circle(Vec2::ZERO, 192.0)
         );
     }
 

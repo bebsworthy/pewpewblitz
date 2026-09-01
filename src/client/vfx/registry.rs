@@ -389,13 +389,13 @@ mod tests {
 
         let source = super::super::catalog::VFX_CATALOG
             .replacen(
-                "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"impact\"",
-                "id: \"reveal_scan\", layers: [\"reveal_scan\"], concurrency_cap: 96, fallback_recipe: \"elemental_field\"",
+                "id: \"reveal_scan\", layers: [\"reveal_scan_boundary\", \"reveal_scan_wave\", \"reveal_scan_echo\", \"reveal_scan_origin\"], concurrency_cap: 48, fallback_recipe: \"impact\"",
+                "id: \"reveal_scan\", layers: [\"reveal_scan_boundary\", \"reveal_scan_wave\", \"reveal_scan_echo\", \"reveal_scan_origin\"], concurrency_cap: 48, fallback_recipe: \"elemental_field\"",
                 1,
             )
             .replacen(
-                "id: \"reveal_scan\", renderer: GroundRing, material: ScanArea, scale: AuthoritativeRadius(1.0)",
-                "id: \"reveal_scan\", renderer: GroundRing, material: ScanArea, scale: FixedWorld(10.0)",
+                "id: \"reveal_scan_boundary\", renderer: GroundThinRing, material: ScanArea, scale: AuthoritativeRadius(1.0)",
+                "id: \"reveal_scan_boundary\", renderer: GroundThinRing, material: ScanArea, scale: FixedWorld(10.0)",
                 1,
             );
         let catalog = VfxCatalog::from_ron(&source).unwrap();

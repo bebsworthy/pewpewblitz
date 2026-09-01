@@ -1321,7 +1321,7 @@ mod tests {
 
         assert_eq!(
             ring.translation,
-            ground_position(Vec2::new(10.0, 20.0)) + Vec3::Y * 2.5
+            ground_position(Vec2::new(10.0, 20.0)) + Vec3::Y * 2.7
         );
         assert_eq!(
             ring.rotation,

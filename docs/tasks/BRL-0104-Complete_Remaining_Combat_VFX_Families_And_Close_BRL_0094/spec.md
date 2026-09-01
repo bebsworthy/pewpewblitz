@@ -470,3 +470,37 @@ Verification:
 - `cargo fmt --all` and `git diff --check` — pass.
 
 The slice is ready for native gameplay feedback. Reveal/concealment, Sentry fire/removal, remaining status/expiry cues, the complete overlap/resource matrix, and closeout remain open; BRL-0104 stays `doing`.
+
+## Phase 2 next slice — Reveal Scan activation and retained deadline — 2026-09-01
+
+Baseline `target/brl-0104-reveal-baseline` confirms Reveal Scan is one static opaque magenta ring at the full 192-unit radius for the entire authoritative reveal deadline. VfxLab mislabels it as a neutral generic one-shot. Gameplay itself performs one instantaneous area scan, then retains forced-reveal deadlines on the affected fighters; attached Reveal status presentation already owns those target markers.
+
+Implement a layered scan recipe through the existing `ability.reveal-scan` request:
+
+- Preserve the exact authored radius and authoritative deadline. The exact outer boundary may remain as a restrained deadline-owned reference, while short fixed-lifetime concentric rings and a compact center flash communicate the activation sweep. Do not imply repeated scanning, damage, or a persistent gameplay field.
+- Use existing generic ring/sphere renderers; no Reveal-specific renderer or gameplay branch. Normal uses layered magenta scan waves. Reduced keeps the exact boundary and one activation wave. Primitive uses the same deterministic meshes and remains particle-free.
+- VfxLab `--effect ability.reveal-scan --radius 192` must freeze the production `Reveal + PersistentArea + Activation + RevealScan` signature, label the effect correctly, and explain the split between the area activation and attached target reveal markers.
+- No reveal rules, observer visibility, concealment ownership, cue/protocol, status lifecycle, balance, BRL-0107 ownership language, or BRL-0108 map-preview work is in scope.
+- Verify recipe/deadline requirements, production/VfxLab semantic parity, normal/reduced/primitive captures, focused tests, strict client checks, and server isolation.
+
+## Phase 2 Reveal Scan implementation evidence — 2026-09-01
+
+Implemented the Reveal Scan activation slice through the existing production `ability.reveal-scan` request without changing reveal authority, visibility, cues, protocol, balance, or target-marker ownership.
+
+- Replaced the single static opaque ring with a four-layer normal recipe: a thin exact 192-unit deadline-owned boundary, a fast full-radius acquisition wave, a delayed thinner echo, and a compact planar origin reticle. Only the exact boundary uses `AuthoritativeDeadline`; every activation layer has a fixed lifetime so the presentation cannot imply repeated scanning.
+- Reduced retains the exact deadline-owned boundary plus one activation wave. Primitive uses the same deterministic ordinary meshes and remains particle-free through the existing variant contract.
+- All layers use existing generic ground-ring/spark renderers; no Reveal-specific renderer, gameplay branch, or custom material was added.
+- VfxLab now freezes `--effect ability.reveal-scan --radius 192` to the production `Reveal + PersistentArea + Activation + RevealScan` signature. Its guide explicitly distinguishes the one-time area scan from the separately attached Reveal markers on affected fighters.
+- Baseline `target/brl-0104-reveal-baseline` showed the former single static full-radius ring. Reviewed normal/late/reduced/primitive paired evidence is under `target/brl-0104-reveal-v3-normal`, `target/brl-0104-reveal-v3-late`, `target/brl-0104-reveal-v3-reduced`, and `target/brl-0104-reveal-v3-primitive`. The first origin-sphere revision was rejected during self-review as a flat magenta puck and replaced with the bounded ground reticle.
+
+Verification:
+
+- Focused VFX catalog/registry tests: 42 passed.
+- Focused VfxLab tests: 8 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings` — pass.
+- `just _test-client` — canonical client suite passed: 624 library tests plus all client targets.
+- `just _server-features` — pass; server graph remains presentation-free.
+- `just _v3-world-presentation` — pass; no retired renderer contract was reintroduced.
+- `cargo fmt --all -- --check` and `git diff --check` — pass.
+
+The slice is ready for native gameplay feedback. Reveal target-marker polish, Sentry fire/removal, remaining status/expiry cues, the complete overlap/resource matrix, and closeout remain open; BRL-0104 stays `doing`.
