@@ -9,6 +9,7 @@ mod entities;
 mod fighter_feedback;
 mod fighter_ui;
 mod particles;
+mod straight_projectile_style;
 
 use bevy::prelude::{App, IntoScheduleConfigs, Plugin, PostUpdate, SystemSet, Update};
 
@@ -47,6 +48,10 @@ pub(in crate::client) use particles::{
     MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, RetainedProjectileSmoke3d,
     VfxParticleAdapterPlugin, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
+pub(super) use straight_projectile_style::{
+    StraightProjectileTrailMaterial, StraightProjectileTrailMaterialPlugin, TrailQuality,
+    animate_straight_projectile_trail_materials,
+};
 
 /// Schedule seam used only by the offline `VfxLab` to run production lifecycle materializers.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -67,6 +72,7 @@ where
             animate_fire_area_material,
             animate_elemental_support_area_materials,
             animate_cone_spray_materials,
+            animate_straight_projectile_trail_materials,
         )
             .in_set(set),
     );
@@ -78,6 +84,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
             FireAreaMaterialPlugin,
             ElementalSupportAreaMaterialPlugin,
             ConeSprayMaterialPlugin,
+            StraightProjectileTrailMaterialPlugin,
         ))
         .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
         .add_systems(

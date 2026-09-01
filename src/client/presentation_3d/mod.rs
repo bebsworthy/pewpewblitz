@@ -80,6 +80,7 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) sentry_direction: Handle<Mesh>,
     pub(crate) fighter_facing: Handle<Mesh>,
     pub(crate) projectile: Handle<Mesh>,
+    pub(crate) projectile_trail: Handle<Mesh>,
     pub(crate) lobbed_projectile: Handle<Mesh>,
     pub(crate) unit_cuboid: Handle<Mesh>,
     pub(crate) sentry_base: Handle<Mesh>,
@@ -115,6 +116,14 @@ pub(crate) struct Material3dAssets {
     pub(in crate::client) spray_gas: Handle<combat::ConeSprayMaterial>,
     pub(in crate::client) spray_gas_reduced: Handle<combat::ConeSprayMaterial>,
     pub(in crate::client) spray_gas_primitive: Handle<combat::ConeSprayMaterial>,
+    pub(in crate::client) projectile_trail_blue: Handle<combat::StraightProjectileTrailMaterial>,
+    pub(in crate::client) projectile_trail_red: Handle<combat::StraightProjectileTrailMaterial>,
+    pub(in crate::client) projectile_trail_blue_reduced:
+        Handle<combat::StraightProjectileTrailMaterial>,
+    pub(in crate::client) projectile_trail_red_reduced:
+        Handle<combat::StraightProjectileTrailMaterial>,
+    pub(crate) projectile_hot_blue: Handle<StandardMaterial>,
+    pub(crate) projectile_hot_red: Handle<StandardMaterial>,
     pub(crate) status_slow: Handle<StandardMaterial>,
     pub(crate) status_knockback: Handle<StandardMaterial>,
     pub(crate) status_reveal: Handle<StandardMaterial>,
@@ -302,6 +311,7 @@ impl Plugin for WorldPresentationPlugin {
             combat::FireAreaMaterialPlugin,
             combat::ElementalSupportAreaMaterialPlugin,
             combat::ConeSprayMaterialPlugin,
+            combat::StraightProjectileTrailMaterialPlugin,
         ));
         combat::add_retained_material_animation_systems(app, WorldPresentationSet::Animate);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
@@ -1028,8 +1038,9 @@ fn update_damageable_map_visuals(
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
     clippy::too_many_lines,
-    reason = "startup constructs one bounded shared mesh/material palette and the two cameras"
+    reason = "startup receives each registered material asset family and constructs one bounded shared palette plus the two cameras"
 )]
 pub(in crate::client) fn setup_3d_foundation(
     mut commands: Commands,
@@ -1039,6 +1050,9 @@ pub(in crate::client) fn setup_3d_foundation(
     mut fire_area_materials: ResMut<Assets<combat::FireAreaMaterial>>,
     mut elemental_support_area_materials: ResMut<Assets<combat::ElementalSupportAreaMaterial>>,
     mut cone_spray_materials: ResMut<Assets<combat::ConeSprayMaterial>>,
+    mut straight_projectile_trail_materials: ResMut<
+        Assets<combat::StraightProjectileTrailMaterial>,
+    >,
 ) {
     let fighter_radius = builds.0.fighter_body.radius;
     let fighter_metrics = FighterPresentationMetrics {
@@ -1052,6 +1066,7 @@ pub(in crate::client) fn setup_3d_foundation(
         sentry_direction: meshes.add(Cuboid::new(28.0, 7.0, 8.0)),
         fighter_facing: meshes.add(fighter_facing_mesh(fighter_radius)),
         projectile: meshes.add(Cylinder::new(1.0, 1.0)),
+        projectile_trail: meshes.add(projectile_trail_mesh()),
         lobbed_projectile: meshes.add(Sphere::new(9.0)),
         unit_cuboid: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
         sentry_base: meshes.add(Cylinder::new(22.0, 8.0)),
@@ -1122,6 +1137,30 @@ pub(in crate::client) fn setup_3d_foundation(
         spray_gas: cone_spray_materials.add(combat::ConeSprayMaterial::normal()),
         spray_gas_reduced: cone_spray_materials.add(combat::ConeSprayMaterial::reduced()),
         spray_gas_primitive: cone_spray_materials.add(combat::ConeSprayMaterial::primitive()),
+        projectile_trail_blue: straight_projectile_trail_materials.add(
+            combat::StraightProjectileTrailMaterial::blue(combat::TrailQuality::Normal),
+        ),
+        projectile_trail_red: straight_projectile_trail_materials.add(
+            combat::StraightProjectileTrailMaterial::red(combat::TrailQuality::Normal),
+        ),
+        projectile_trail_blue_reduced: straight_projectile_trail_materials.add(
+            combat::StraightProjectileTrailMaterial::blue(combat::TrailQuality::Reduced),
+        ),
+        projectile_trail_red_reduced: straight_projectile_trail_materials.add(
+            combat::StraightProjectileTrailMaterial::red(combat::TrailQuality::Reduced),
+        ),
+        projectile_hot_blue: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.52, 0.96, 1.0),
+            emissive: LinearRgba::new(0.4, 2.8, 4.2, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        projectile_hot_red: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.72, 0.18),
+            emissive: LinearRgba::new(4.2, 0.75, 0.03, 1.0),
+            unlit: true,
+            ..default()
+        }),
         status_slow: materials.add(StandardMaterial {
             base_color: Color::srgba(0.25, 0.75, 1.0, 0.82),
             alpha_mode: AlphaMode::Blend,
@@ -1387,6 +1426,34 @@ fn fighter_facing_mesh(fighter_radius: f32) -> Mesh {
         indices.extend([0, segment + 1, segment + 2]);
     }
 
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U16(indices));
+    mesh
+}
+
+fn projectile_trail_mesh() -> Mesh {
+    let positions = vec![
+        [0.0, 0.0, -0.5],
+        [0.0, 0.0, 0.5],
+        [-0.54, 0.0, 0.36],
+        [-1.0, 0.0, 0.0],
+        [-0.54, 0.0, -0.36],
+    ];
+    let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
+    let uvs = vec![
+        [1.0, 0.0],
+        [1.0, 1.0],
+        [0.46, 0.86],
+        [0.0, 0.5],
+        [0.46, 0.14],
+    ];
+    let indices = vec![0, 2, 1, 0, 4, 2, 4, 3, 2];
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),

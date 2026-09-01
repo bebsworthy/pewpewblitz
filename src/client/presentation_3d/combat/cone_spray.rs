@@ -359,6 +359,9 @@ mod tests {
             .init_resource::<Assets<super::super::elemental_style::FireAreaMaterial>>()
             .init_resource::<Assets<super::super::elemental_style::ElementalSupportAreaMaterial>>()
             .init_resource::<Assets<ConeSprayMaterial>>()
+            .init_resource::<
+                Assets<super::super::straight_projectile_style::StraightProjectileTrailMaterial>,
+            >()
             .init_resource::<crate::builds::BuildCatalogResource>()
             .add_systems(Startup, setup_3d_foundation);
         configure_world_presentation_schedule(&mut app);

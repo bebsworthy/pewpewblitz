@@ -1390,7 +1390,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             }
         }
         VfxLabFixture::StraightProjectile => {
-            "The bright core is the projectile's exact collision footprint. Cold adds rigid crystal fins, Fire adds soft trailing lobes, Poison adds an unstable bubbling wake, and Restoration forms an ordered vitality spark."
+            "The bright core is the projectile's exact collision footprint. Neutral adds a tapered animated energy wake; Cold adds rigid crystal fins, Fire adds soft trailing lobes, Poison adds an unstable bubbling wake, and Restoration forms an ordered vitality spark."
         }
         VfxLabFixture::LobbedProjectile => {
             "The moving body follows the production launch/landing arc and rotates along its current tangent. The dark disc tracks its ground projection, the orange ring marks the fixed landing point, and emitted smoke remains behind to expand and fade."
@@ -1406,6 +1406,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         }
     };
     let style = match state.accent {
+        VfxLabAccent::Neutral if state.fixture == VfxLabFixture::StraightProjectile => {
+            "NEUTRAL is the reusable Pulse/Scatter bolt language: a crisp team-colored core and deterministic energy wake. Press C to compare each elemental identity."
+        }
         VfxLabAccent::Neutral => {
             "NEUTRAL is the safe fallback. Press C to compare each authored elemental identity."
         }

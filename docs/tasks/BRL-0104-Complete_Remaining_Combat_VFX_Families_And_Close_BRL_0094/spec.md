@@ -141,3 +141,47 @@ Verification:
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 
 The reported VfxLab/game parity defect is implemented and automated. Native gameplay confirmation remains requested before the feedback item is considered accepted.
+
+## Phase 2 straight-projectile retained slice — 2026-09-01
+
+Native baseline `target/brl-0104-straight-baseline/` shows the neutral straight carrier as only a small matte collision disc, with no readable motion or weapon language.
+
+Implement one composable neutral straight-bolt presentation rather than branching on built-in preset IDs:
+- Preserve the exact replicated projectile-body core and authority geometry.
+- Normal adds a tapered, deterministic animated energy wake plus a smaller emissive cap.
+- Reduced keeps a lower-complexity, shorter wake.
+- Primitive and ReducedPrimitive retain only the exact core.
+- Pulse Sidearm reads as one strong bolt; Scatter Cannon gains identity from its authoritative five-delivery spread using the same reusable bolt recipe.
+- Exclude lobbed projectiles explicitly; this must not restore the removed Arc Launcher tail.
+- Drive material time from `AuthoritativeTick` through the shared production/VfxLab retained-material scheduler.
+- Keep current team-color ownership behavior for this slice; BRL-0107 owns the later integrated observer-relative ownership language.
+- Review the retained gameplay-scale silhouette in VfxLab before extending the same neutral language across muzzle/impact recipes.
+
+No gameplay, protocol, server, projectile movement, collision, or delivery changes are in scope.
+
+## Phase 2 neutral straight-projectile implementation evidence — 2026-09-01
+
+Implemented the reusable retained neutral bolt presentation shared by Pulse Sidearm and each authoritative Scatter Cannon delivery, without preset-ID branches or gameplay changes.
+
+- Preserved the original replicated projectile mesh and team material as the exact collision-footprint core.
+- Normal adds a smaller emissive cap plus a long tapered custom-material energy wake with two deterministic animated filaments.
+- Reduced retains a shorter, lower-complexity wake; Primitive and ReducedPrimitive materialize only the exact core.
+- The style selector requires the Neutral accent and StraightProjectile carrier, explicitly leaving the Arc Launcher/lobbed path unchanged.
+- Production gameplay and VfxLab install the same material plugin and share the AuthoritativeTick-driven retained-material animation schedule. A production-composition regression verifies the trail time uniform advances in gameplay, preventing recurrence of the prior Lab/game animation divergence.
+- VfxLab guide text now identifies the reusable Pulse/Scatter language and distinguishes the exact core from the presentation wake.
+
+Visual iteration disposition:
+
+- Baseline `target/brl-0104-straight-baseline/` was rejected because it showed only a small matte disc.
+- The first custom wake capture `target/brl-0104-straight-bolt-v1/` exposed incorrect triangle winding and back-face culling; the mesh winding was corrected before acceptance.
+- The readable but timid second pass was strengthened at fighter scale. Accepted implementation captures are `target/brl-0104-straight-bolt-v3/`, `target/brl-0104-straight-bolt-reduced/`, and `target/brl-0104-straight-bolt-primitive/`.
+
+Verification:
+
+- Focused straight-style selection/material/production-animation tests: 3 passed.
+- `cargo test --locked --no-default-features --features client --lib`: 604 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: passed.
+- `just _check-server` and `just _server-features`: passed.
+- `cargo fmt --all -- --check` and `git diff --check`: passed.
+
+The retained neutral straight-projectile slice is implemented. Native user visual feedback remains open; neutral muzzle/impact unification and the remaining Phase 2 carrier families remain in scope. BRL-0104 stays `doing`.

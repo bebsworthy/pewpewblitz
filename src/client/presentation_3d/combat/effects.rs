@@ -607,6 +607,9 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
     let cone_spray_material_assets = world
         .get_resource::<Assets<super::cone_spray::ConeSprayMaterial>>()
         .map_or(0, Assets::len);
+    let straight_projectile_trail_material_assets = world
+        .get_resource::<Assets<super::straight_projectile_style::StraightProjectileTrailMaterial>>()
+        .map_or(0, Assets::len);
     let particle_effect_assets = world
         .get_resource::<Assets<EffectAsset>>()
         .map_or(0, Assets::len);
@@ -677,6 +680,7 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
             "fire_area_materials": fire_area_material_assets,
             "elemental_support_area_materials": elemental_support_area_material_assets,
             "cone_spray_materials": cone_spray_material_assets,
+            "straight_projectile_trail_materials": straight_projectile_trail_material_assets,
             "particle_effects": particle_effect_assets,
             "images": image_assets,
         },
@@ -1053,6 +1057,9 @@ mod tests {
             .init_resource::<Assets<super::super::elemental_style::FireAreaMaterial>>()
             .init_resource::<Assets<super::super::elemental_style::ElementalSupportAreaMaterial>>()
             .init_resource::<Assets<super::super::cone_spray::ConeSprayMaterial>>()
+            .init_resource::<
+                Assets<super::super::straight_projectile_style::StraightProjectileTrailMaterial>,
+            >()
             .init_resource::<crate::builds::BuildCatalogResource>()
             .insert_resource(registry)
             .add_message::<VfxRequest>()

@@ -1171,6 +1171,7 @@ fn spawn_projectile(
                         mesh,
                         transform,
                         relationship_material,
+                        team,
                         visual_radius,
                     );
                 });
@@ -1183,6 +1184,7 @@ fn spawn_projectile(
                 mesh,
                 transform,
                 relationship_material,
+                team,
                 visual_radius,
             );
         }
@@ -1249,6 +1251,7 @@ fn spawn_projectile_geometry(
     mesh: Handle<Mesh>,
     transform: Transform,
     relationship_material: Handle<StandardMaterial>,
+    team: crate::combat::TeamId,
     visual_radius: f32,
 ) {
     if !spawn_elemental_projectile_style(
@@ -1259,6 +1262,16 @@ fn spawn_projectile_geometry(
         mesh.clone(),
         transform,
         relationship_material.clone(),
+        visual_radius,
+    ) && !super::straight_projectile_style::spawn_neutral_straight_projectile_style(
+        parent,
+        primitives,
+        materials,
+        signature,
+        mesh.clone(),
+        transform,
+        relationship_material.clone(),
+        team,
         visual_radius,
     ) {
         parent.spawn((
@@ -1577,6 +1590,9 @@ mod tests {
             .init_resource::<Assets<super::super::elemental_style::FireAreaMaterial>>()
             .init_resource::<Assets<super::super::elemental_style::ElementalSupportAreaMaterial>>()
             .init_resource::<Assets<super::super::cone_spray::ConeSprayMaterial>>()
+            .init_resource::<
+                Assets<super::super::straight_projectile_style::StraightProjectileTrailMaterial>,
+            >()
             .init_resource::<crate::builds::BuildCatalogResource>()
             .init_resource::<vfx::VfxSignatureCache>()
             .add_message::<crate::combat::client::DeduplicatedCombatCue>()
