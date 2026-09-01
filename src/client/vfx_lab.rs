@@ -670,7 +670,7 @@ const fn lab_reference_positions(fixture: VfxLabFixture) -> [f32; 2] {
         | VfxLabFixture::PersistentSplash
         | VfxLabFixture::ConeSpray
         | VfxLabFixture::Status => [0.0, 96.0],
-        VfxLabFixture::Sentry => [-92.0, 92.0],
+        VfxLabFixture::Sentry => [-120.0, 210.0],
         VfxLabFixture::Dash => [-250.0, 380.0],
     }
 }
@@ -735,7 +735,10 @@ fn spawn_lab_scenario(
         }
         VfxLabFixture::ConeSpray => spawn_cone_fixture(commands, state.presentation_identity, tick),
         VfxLabFixture::Dash => spawn_dash_fixture(commands, state.presentation_identity, tick),
-        VfxLabFixture::Sentry => spawn_sentry_fixture(commands, state.presentation_identity, tick),
+        VfxLabFixture::Sentry => {
+            spawn_sentry_fixture(commands, state.presentation_identity, tick);
+            spawn_sentry_transients(state, requests);
+        }
         VfxLabFixture::Status => {
             spawn_status_fixture(commands, state.presentation_identity, tick);
         }
@@ -1049,6 +1052,62 @@ fn spawn_sentry_fixture(commands: &mut Commands, identity: u64, tick: u64) {
         AuthoritativeTick(tick),
         Name::new("VfxLab replicated Sentry fixture"),
     ));
+}
+
+fn spawn_sentry_transients(state: &VfxLabState, requests: &mut MessageWriter<VfxRequest>) {
+    let scenario = |key| {
+        state
+            .scenarios
+            .iter()
+            .copied()
+            .find(|scenario| scenario.key == key)
+            .expect("production VFX registry contains the Sentry transient key")
+    };
+    let signature = |position, phase, identity| crate::client::vfx::CombatVisualSignature {
+        carrier: crate::client::vfx::VfxCarrier::Deployable,
+        phase,
+        accents: [Some(crate::client::vfx::VfxAccent::Neutral), None],
+        relationship: crate::client::vfx::VfxRelationship::SelfOwned,
+        context: Some(crate::client::vfx::VfxContextOverride::Sentry),
+        geometry: crate::client::vfx::VfxGeometry::point(position),
+        identity: crate::client::vfx::VfxPresentationIdentity::Deployable(identity),
+        timing: crate::client::vfx::VfxAuthoritativeTiming::instant(state.playback_tick),
+        variant: crate::client::vfx::VfxPresentationVariant::Normal,
+    };
+
+    let fire_position = Vec2::new(crate::client::vfx::SENTRY_MUZZLE_PRESENTATION_OFFSET, 0.0);
+    let mut fire = scenario(crate::client::vfx::COMBAT_MUZZLE_VFX).request(
+        state.presentation_identity,
+        state.radius,
+        VfxLabAccent::Neutral,
+        false,
+        true,
+    );
+    fire.position = fire_position;
+    fire.signature = signature(
+        fire_position,
+        crate::client::vfx::VfxPhase::Activation,
+        state.presentation_identity,
+    );
+    requests.write(fire);
+
+    let removal_position = Vec2::new(145.0, 0.0);
+    let removal_identity = state.presentation_identity.saturating_add(1);
+    let removal_phase = if state.ultimate {
+        crate::client::vfx::VfxPhase::Interruption
+    } else {
+        crate::client::vfx::VfxPhase::Expiry
+    };
+    let mut removal = scenario(crate::client::vfx::COMBAT_IMPACT_VFX).request(
+        removal_identity,
+        state.radius,
+        VfxLabAccent::Neutral,
+        false,
+        true,
+    );
+    removal.position = removal_position;
+    removal.signature = signature(removal_position, removal_phase, removal_identity);
+    requests.write(removal);
 }
 
 fn lab_attack_source(
@@ -1697,7 +1756,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::ElementalField => "PERSISTENT ELEMENTAL AREA",
         VfxLabFixture::ConeSpray => "PROPAGATING ATTACK CONE",
         VfxLabFixture::Dash => "FIGHTER DASH WAKE",
-        VfxLabFixture::Sentry => "REPLICATED SENTRY DEPLOYABLE",
+        VfxLabFixture::Sentry => "SENTRY DEPLOYABLE AND LIFECYCLE CUES",
         VfxLabFixture::Status => "STATUS ATTACHED TO A FIGHTER",
     };
     let meaning = match state.fixture {
@@ -1737,7 +1796,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             "The colored fighter follows the built-in authoritative Dash duration. Its wake grows from the activation point to the current position, then lingers briefly and dissipates after movement ends. The wake is presentation only."
         }
         VfxLabFixture::Sentry => {
-            "The grounded turret is the real replicated Sentry lifecycle presentation. Its barrel points along the replicated Rotation; the vertical gimbal, power core, and orbiting charge nodes communicate an active deployable without changing targeting or fire cadence."
+            "The grounded turret is the real replicated Sentry presentation. The compact discharge at its muzzle is the fire cue; the separate effect to the right is cleanup. Press U to compare orderly natural expiry with interrupted electrical collapse. Projectile delivery and cleanup remain authoritative."
         }
         VfxLabFixture::Status => {
             "The ring is attached presentation for the fighter's active status. It follows the fighter and disappears when the authoritative status ends."
@@ -1749,6 +1808,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
     } else {
         "C compare style"
     };
+    let (state_suffix, ultimate_control) = lab_mode_labels(state);
     format!(
         "VFXLAB - WHAT YOU ARE LOOKING AT\n\n\
          {subject}\n\
@@ -1759,13 +1819,30 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
          They are not part of the effect.\n\n\
          {style_control}    R reduced    P primitive\n\
          Space restart      Enter pause  . next tick\n\
-         Tab fixture        <-/-> effect U ultimate\n\
+         Tab fixture        <-/-> effect {ultimate_control}\n\
          I technical details             Esc quit\n\n\
-         Window {dimensions}",
+        Window {dimensions}",
         style_label,
-        if state.ultimate { " + ULTIMATE" } else { "" },
+        state_suffix,
         if state.reduced { "reduced" } else { "normal" },
         if state.primitive { " + primitive" } else { "" },
+    )
+}
+
+fn lab_mode_labels(state: &VfxLabState) -> (&'static str, &'static str) {
+    if state.fixture == VfxLabFixture::Sentry {
+        return (
+            if state.ultimate {
+                " + INTERRUPTED"
+            } else {
+                " + EXPIRY"
+            },
+            "U cleanup mode",
+        );
+    }
+    (
+        if state.ultimate { " + ULTIMATE" } else { "" },
+        "U ultimate",
     )
 }
 
@@ -1800,7 +1877,7 @@ fn lab_guide_style(state: &VfxLabState) -> &'static str {
             "NEUTRAL Dash uses a cool-white high-velocity wake: a hot central lane, turbulent cyan filaments, and sparse speed cuts that dissipate after the authoritative movement ends."
         }
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::Sentry => {
-            "SENTRY uses a compact arena-readable machine silhouette: planted armor, an aim-aligned barrel, and a contained energy mechanism. Team and ownership language remain separate from this neutral deployable identity."
+            "SENTRY uses a compact machine-energy language: planted armor, a contained charge discharge, an orderly contracting shutdown, and a sharper electrical collapse for interruption. Team and ownership language remain separate from this neutral deployable identity."
         }
         VfxLabAccent::Neutral => {
             "NEUTRAL is the safe fallback. Press C to compare each authored elemental identity."

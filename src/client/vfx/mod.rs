@@ -7,6 +7,8 @@ mod registry;
 mod request;
 mod signature;
 
+pub(crate) const SENTRY_MUZZLE_PRESENTATION_OFFSET: f32 = 47.0;
+
 pub(crate) use producers::{
     CombatVfxProducerPlugin, HeistVfxProducerPlugin, PickupVfxProducerPlugin, VfxRequestSet,
     WorldObjectVfxProducerPlugin,

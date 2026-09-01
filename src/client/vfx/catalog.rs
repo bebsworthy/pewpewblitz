@@ -828,6 +828,48 @@ mod tests {
     }
 
     #[test]
+    fn sentry_transients_route_fire_expiry_and_interruption_semantics() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let mut signature = CombatVisualSignature::neutral_point(8, bevy::prelude::Vec2::ZERO);
+        signature.carrier = VfxCarrier::Deployable;
+        signature.phase = VfxPhase::Activation;
+        signature.context = Some(VfxContextOverride::Sentry);
+
+        let fire = catalog
+            .resolve("combat.muzzle", &signature, false, false)
+            .unwrap();
+        assert_eq!(fire.id, "sentry_fire");
+        assert_eq!(fire.layers.len(), 4);
+        assert_eq!(fire.particle_layers.len(), 1);
+        let reduced_fire = catalog
+            .resolve("combat.muzzle", &signature, true, false)
+            .unwrap();
+        assert_eq!(reduced_fire.id, "sentry_fire_reduced");
+        assert!(reduced_fire.particle_layers.is_empty());
+
+        signature.phase = VfxPhase::Expiry;
+        let expiry = catalog
+            .resolve("combat.impact", &signature, false, false)
+            .unwrap();
+        assert_eq!(expiry.id, "sentry_expiry");
+        assert!(expiry.particle_layers.is_empty());
+
+        signature.phase = VfxPhase::Interruption;
+        let interruption = catalog
+            .resolve("combat.impact", &signature, false, false)
+            .unwrap();
+        assert_eq!(interruption.id, "sentry_interruption");
+        assert_eq!(interruption.particle_layers.len(), 1);
+        assert_eq!(
+            catalog
+                .resolve("combat.impact", &signature, true, false)
+                .unwrap()
+                .id,
+            "sentry_interruption_reduced"
+        );
+    }
+
+    #[test]
     fn neutral_straight_transients_use_layered_recipes_without_changing_fallbacks() {
         let catalog = VfxCatalog::embedded().unwrap();
         let mut signature = CombatVisualSignature::neutral_point(11, bevy::prelude::Vec2::ZERO);

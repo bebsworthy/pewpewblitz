@@ -504,3 +504,43 @@ Verification:
 - `cargo fmt --all -- --check` and `git diff --check` — pass.
 
 The slice is ready for native gameplay feedback. Reveal target-marker polish, Sentry fire/removal, remaining status/expiry cues, the complete overlap/resource matrix, and closeout remain open; BRL-0104 stays `doing`.
+
+## Phase 2 next slice — Sentry fire and removal transients — 2026-09-01
+
+Production inspection confirms `CombatCue::SentryFired` already emits `combat.muzzle` with the semantic `Deployable + Activation + Neutral + Sentry` signature, while `CombatCue::DeployableRemoved` emits `combat.impact` as `Deployable + Expiry` for natural expiry or `Deployable + Interruption` for every other cleanup reason. Both currently miss an intentional style mapping and collapse to the generic one-layer muzzle/impact fallbacks.
+
+Implement one independently reviewable transient completion for the existing Sentry lifecycle:
+
+- Preserve the authoritative fire cadence, projectile emission, target selection, cue positions, cleanup-reason priority, replicated deployable lifecycle, protocol, and balance.
+- Add semantic catalog mappings for Sentry fire, graceful expiry, and interrupted cleanup using carrier, phase, Neutral accent, and the existing ultimate/Sentry context; do not branch on the built-in ultimate ID.
+- Fire should read as a compact charged muzzle discharge attached to the retained machine language, with a fast core, contained bloom, ground echo, and bounded directional-looking sparks. The replicated projectile remains the delivery visual; do not invent a hitscan beam.
+- Natural expiry should read as an orderly energy shutdown/contraction. Interruption covers destroyed, replaced, owner/lifecycle, and match cleanup reasons, so it must use a compact electrical collapse rather than an explosion that would misrepresent every reason as damage.
+- Normal uses layered meshes plus bounded existing particle primitives where appropriate. Reduced keeps the essential mesh timing and silhouettes with particles removed. Primitive uses the same deterministic ordinary meshes with particle suppression.
+- Extend the existing read-only Sentry VfxLab fixture to stage the production semantic fire and cleanup requests alongside the retained turret for isolated inspection, with a clear guide explaining that these are cue presentations rather than authority.
+- Verify signature routing for activation/expiry/interruption, fallback/degradation, VfxLab staging, focused tests, normal/reduced/primitive evidence, strict client checks, and server feature isolation.
+
+No Sentry gameplay, protocol, ownership-color, map-preview, editable-workbench, or retained-turret redesign is in scope. BRL-0107 retains ownership-language integration and BRL-0108 retains production-map VfxLab preview.
+
+## Phase 2 Sentry fire and removal implementation evidence — 2026-09-01
+
+Implemented intentional Sentry fire, natural-expiry, and interrupted-cleanup transients through the existing production combat cues and semantic request boundary. No fire cadence, targeting, projectile delivery, cleanup priority, authority, protocol, or balance behavior changed.
+
+- `Deployable + Activation + Neutral + Sentry` now selects a compact four-layer charge discharge with a short core/bloom, planar muzzle reticle, echo ring, and bounded existing neutral sparks. The replicated projectile remains the delivery visual; no beam or hitscan presentation was introduced.
+- `Deployable + Expiry + Neutral + Sentry` selects a particle-free contracting ring/core/reticle shutdown. `Deployable + Interruption` selects a sharper electrical fracture/ring with bounded sparks. The interruption style is deliberately not a large explosion because that phase also covers replacement, owner loss, match cleanup, and restart.
+- Normal, reduced, and primitive variants use the existing catalog degradation contract. Reduced recipes keep the essential mesh timing with no particles; primitive keeps deterministic ordinary meshes while suppressing particle materialization.
+- Production now resolves the current replicated Sentry pose and offsets `SentryFired` presentation to the 47-unit aim-aligned muzzle rail. Missing retained state safely falls back to the authoritative cue center. A focused producer test locks the pose-derived attachment.
+- The existing `--fixture sentry` VfxLab scenario stages the retained production turret, its fire request, and a separate cleanup request. U now toggles natural expiry versus interruption, and the guide explains each cue's non-authoritative presentation role.
+- First-pass captures were refined after self-review: the initial discharge was too large and the interruption core read as a detached bubble. The final discharge was made compact and the cleanup core subordinated to the electrical fracture silhouette.
+
+Verification:
+
+- Focused VFX catalog/producer tests: 44 passed.
+- Focused VfxLab tests: 8 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings` — pass.
+- `just _test-client` — canonical client suite passed: 626 library tests plus all client targets.
+- `just _server-features` — pass; the server graph remains presentation-free.
+- `just _v3-world-presentation` — pass.
+- `cargo fmt --all -- --check` and `git diff --check` — pass.
+- Final visual evidence: natural expiry and primitive under `target/brl-0104-sentry-cues-v2-expiry` and `target/brl-0104-sentry-cues-v2-primitive`; refined normal interruption and reduced under `target/brl-0104-sentry-cues-v3-interrupted` and `target/brl-0104-sentry-cues-v3-reduced`.
+
+The Sentry transient slice is ready for native gameplay feedback. Remaining status/expiry cues, concealment coverage, the complete overlap/resource matrix, documentation reconciliation, and BRL-0094 closeout remain open; BRL-0104 stays `doing`.

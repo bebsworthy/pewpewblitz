@@ -5,11 +5,11 @@ use crate::{
     client::vfx::{
         COMBAT_DAMAGE_VFX, COMBAT_IMPACT_VFX, COMBAT_MUZZLE_VFX, COMBAT_RESET_VFX,
         COMBAT_VFX_PRODUCER_RANK, CombatVisualSignature, DEMOLITION_STRIKE_VFX,
-        ELEMENTAL_FIELD_VFX, REVEAL_SCAN_VFX, VfxAccent, VfxAppExt, VfxAuthoritativeTiming,
-        VfxCarrier, VfxContextOverride, VfxDeadline, VfxGeometry, VfxPhase,
-        VfxPresentationIdentity, VfxPresentationVariant, VfxRelationship, VfxRequest,
-        VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration, VfxSignatureCache,
-        accent_for_elemental_field,
+        ELEMENTAL_FIELD_VFX, REVEAL_SCAN_VFX, SENTRY_MUZZLE_PRESENTATION_OFFSET, VfxAccent,
+        VfxAppExt, VfxAuthoritativeTiming, VfxCarrier, VfxContextOverride, VfxDeadline,
+        VfxGeometry, VfxPhase, VfxPresentationIdentity, VfxPresentationVariant, VfxRelationship,
+        VfxRequest, VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration,
+        VfxSignatureCache, accent_for_elemental_field,
     },
     combat::{AuthoritativeTick, CombatCue, client::DeduplicatedCombatCue, combat_cue_key},
     protocol::{Fighter, NetworkEntityId},
@@ -83,14 +83,23 @@ fn produce_combat_vfx_requests(
         ),
         With<Fighter>,
     >,
+    sentries: Query<
+        (
+            &crate::abilities::SentryIdentity,
+            &avian2d::prelude::Position,
+            &avian2d::prelude::Rotation,
+        ),
+        With<crate::abilities::Sentry>,
+    >,
 ) {
     let observed_at_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     for DeduplicatedCombatCue(cue) in cues.read() {
-        let Some((key, position, radius, deadline, label)) =
+        let Some((key, cue_position, radius, deadline, label)) =
             combat_vfx_request(cue, observed_at_tick, &cache)
         else {
             continue;
         };
+        let position = sentry_fire_presentation_position(cue, cue_position, &sentries);
         let event_id = combat_cue_key(cue).event_id.0;
         let signature =
             combat_vfx_signature(cue, position, radius, observed_at_tick, &cache, &fighters);
@@ -107,6 +116,32 @@ fn produce_combat_vfx_requests(
             requests.write(request);
         }
     }
+}
+
+fn sentry_fire_presentation_position(
+    cue: &CombatCue,
+    fallback: Vec2,
+    sentries: &Query<
+        (
+            &crate::abilities::SentryIdentity,
+            &avian2d::prelude::Position,
+            &avian2d::prelude::Rotation,
+        ),
+        With<crate::abilities::Sentry>,
+    >,
+) -> Vec2 {
+    let CombatCue::SentryFired { deployable_id, .. } = cue else {
+        return fallback;
+    };
+    sentries
+        .iter()
+        .find_map(|(identity, position, rotation)| {
+            (identity.deployable_id == *deployable_id).then(|| {
+                position.0
+                    + Vec2::from_angle(rotation.as_radians()) * SENTRY_MUZZLE_PRESENTATION_OFFSET
+            })
+        })
+        .unwrap_or(fallback)
 }
 
 #[allow(
@@ -510,6 +545,16 @@ mod tests {
         protocol::NetworkEntityId,
     };
 
+    #[derive(Resource, Default)]
+    struct CapturedRequests(Vec<VfxRequest>);
+
+    fn capture_requests(
+        mut requests: MessageReader<VfxRequest>,
+        mut captured: ResMut<CapturedRequests>,
+    ) {
+        captured.0.extend(requests.read().copied());
+    }
+
     #[test]
     fn built_in_combat_keys_have_one_owner_and_expected_capabilities() {
         assert_eq!(REGISTRATIONS.len(), 7);
@@ -574,5 +619,50 @@ mod tests {
             position: WorldPoint { x: 2.0, y: 3.0 },
         };
         assert!(combat_vfx_request(&legacy, None, &cache).is_none());
+    }
+
+    #[test]
+    fn sentry_fire_request_is_attached_to_the_replicated_muzzle_rail() {
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<VfxRequest>()
+            .init_resource::<VfxSignatureCache>()
+            .init_resource::<CapturedRequests>()
+            .add_systems(
+                Update,
+                (produce_combat_vfx_requests, capture_requests).chain(),
+            );
+        app.world_mut().spawn((
+            crate::abilities::Sentry,
+            crate::abilities::SentryIdentity {
+                deployable_id: crate::builds::DeployableId(7),
+                owner_player_id: crate::protocol::PlayerId(1),
+                owner_network_id: NetworkEntityId(1),
+                team_id: crate::combat::TeamId(0),
+                ultimate_id: crate::builds::UltimateDefinitionId(2),
+                match_id: crate::matchplay::MatchId(1),
+            },
+            avian2d::prelude::Position(Vec2::new(10.0, 20.0)),
+            avian2d::prelude::Rotation::radians(core::f32::consts::FRAC_PI_2),
+        ));
+        app.world_mut()
+            .write_message(DeduplicatedCombatCue(CombatCue::SentryFired {
+                event_id: CombatEventId(22),
+                tick: 30,
+                owner: NetworkEntityId(1),
+                deployable_id: crate::builds::DeployableId(7),
+                target: None,
+                position: WorldPoint { x: 10.0, y: 20.0 },
+            }));
+
+        app.update();
+
+        let captured = app.world().resource::<CapturedRequests>();
+        assert_eq!(captured.0.len(), 1);
+        let request = &captured.0[0];
+        assert!(request.position.abs_diff_eq(Vec2::new(10.0, 67.0), 0.000_1));
+        assert_eq!(request.signature.carrier, VfxCarrier::Deployable);
+        assert_eq!(request.signature.phase, VfxPhase::Activation);
+        assert_eq!(request.signature.context, Some(VfxContextOverride::Sentry));
     }
 }
