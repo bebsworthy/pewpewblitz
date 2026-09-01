@@ -20,8 +20,9 @@ pub(in crate::client) use effects::{
     collect_vfx_evidence_snapshot, materialize_combat_effects, resolve_vfx_requests,
 };
 pub(super) use elemental_style::{
-    FireAreaMaterial, FireAreaMaterialPlugin, animate_elemental_motion_accents,
-    animate_fire_area_material,
+    ElementalSupportAreaMaterial, ElementalSupportAreaMaterialPlugin, FireAreaMaterial,
+    FireAreaMaterialPlugin, animate_elemental_motion_accents,
+    animate_elemental_support_area_materials, animate_fire_area_material,
 };
 pub(super) use entities::{
     reconcile_concealment_field_visuals, reconcile_elemental_field_visuals,
@@ -55,7 +56,7 @@ pub(in crate::client) struct VfxLabLifecyclePresentationPlugin;
 
 impl Plugin for VfxLabLifecyclePresentationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FireAreaMaterialPlugin)
+        app.add_plugins((FireAreaMaterialPlugin, ElementalSupportAreaMaterialPlugin))
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
             .add_systems(
                 Update,
@@ -68,6 +69,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
                     update_cone_spray_visuals,
                     animate_elemental_motion_accents,
                     animate_fire_area_material,
+                    animate_elemental_support_area_materials,
                 )
                     .chain()
                     .in_set(VfxLabLifecycleSet),

@@ -122,7 +122,11 @@ pub(crate) struct Material3dAssets {
     pub(crate) elemental_fire_hot: Handle<StandardMaterial>,
     pub(in crate::client) elemental_fire_area: Handle<combat::FireAreaMaterial>,
     pub(crate) elemental_poison: Handle<StandardMaterial>,
+    pub(crate) elemental_poison_bright: Handle<StandardMaterial>,
+    pub(in crate::client) elemental_poison_area: Handle<combat::ElementalSupportAreaMaterial>,
     pub(crate) elemental_restoration: Handle<StandardMaterial>,
+    pub(crate) elemental_restoration_bright: Handle<StandardMaterial>,
+    pub(in crate::client) elemental_restoration_area: Handle<combat::ElementalSupportAreaMaterial>,
     pub(crate) sticky_blob: Handle<StandardMaterial>,
     pub(crate) sticky_warning: Handle<StandardMaterial>,
     pub(crate) scan_area: Handle<StandardMaterial>,
@@ -290,6 +294,7 @@ impl Plugin for WorldPresentationPlugin {
             vfx::ProductionVfxPlugin,
             VfxParticleAdapterPlugin,
             combat::FireAreaMaterialPlugin,
+            combat::ElementalSupportAreaMaterialPlugin,
         ));
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .add_message::<PendingCombatEffect>()
@@ -365,6 +370,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::update_cone_spray_visuals,
                     combat::animate_elemental_motion_accents,
                     combat::animate_fire_area_material,
+                    combat::animate_elemental_support_area_materials,
                     combat::update_aim_preview,
                     animate_combat_effect_layers,
                     update_character_animation,
@@ -1025,6 +1031,7 @@ pub(in crate::client) fn setup_3d_foundation(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut fire_area_materials: ResMut<Assets<combat::FireAreaMaterial>>,
+    mut elemental_support_area_materials: ResMut<Assets<combat::ElementalSupportAreaMaterial>>,
 ) {
     let fighter_radius = builds.0.fighter_body.radius;
     let fighter_metrics = FighterPresentationMetrics {
@@ -1179,16 +1186,32 @@ pub(in crate::client) fn setup_3d_foundation(
         }),
         elemental_fire_area: fire_area_materials.add(combat::FireAreaMaterial::default()),
         elemental_poison: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.32, 0.92, 0.12, 0.34),
-            emissive: LinearRgba::new(0.2, 1.5, 0.04, 1.0),
+            base_color: Color::srgba(0.22, 0.62, 0.055, 0.28),
+            emissive: LinearRgba::new(0.12, 0.72, 0.018, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
+        elemental_poison_bright: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.68, 1.0, 0.16),
+            emissive: LinearRgba::new(0.62, 2.2, 0.035, 1.0),
+            unlit: true,
+            ..default()
+        }),
+        elemental_poison_area: elemental_support_area_materials
+            .add(combat::ElementalSupportAreaMaterial::poison()),
         elemental_restoration: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.12, 1.0, 0.56, 0.34),
-            emissive: LinearRgba::new(0.05, 1.8, 0.48, 1.0),
+            base_color: Color::srgba(0.04, 0.76, 0.48, 0.24),
+            emissive: LinearRgba::new(0.018, 0.92, 0.42, 1.0),
             alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        elemental_restoration_area: elemental_support_area_materials
+            .add(combat::ElementalSupportAreaMaterial::restoration()),
+        elemental_restoration_bright: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.42, 1.0, 0.74),
+            emissive: LinearRgba::new(0.12, 2.4, 0.82, 1.0),
             unlit: true,
             ..default()
         }),

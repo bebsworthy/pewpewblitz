@@ -230,8 +230,8 @@ it does not replace these ownership and cleanup paths:
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
 | Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with up to eight combined children: ordered mesh layers plus zero to two optional decorative GPU-particle layers; every particle layer has an authored bounded profile and a shaped retained mesh | Root lifetime is the maximum mesh or particle lifetime, or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
-| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Cold adds slow crystal fins and Fire adds fast trailing lobes; lobbed flight also has a projected shadow and fixed landing marker, while Fire may emit lingering world-space smoke; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
-| Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained ember ground underlay plus a procedural material for a coherent turbulent circumference and layered heat bands; reduced/primitive Fire uses bounded tapered mesh tongues | Recreated after late join from public state; owner removal is cleanup truth |
+| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Cold adds slow crystal fins, Fire adds fast trailing lobes, Poison leaves a bubbly wake, and Restoration carries a rotating vitality spark; lobbed flight also has a projected shadow and fixed landing marker, while Fire may emit lingering world-space smoke; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
+| Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained ember ground underlay plus a procedural material for a coherent turbulent circumference and layered heat bands. Normal Poison uses animated cellular contamination with perimeter bubbles; Normal Restoration uses rotating vitality arcs with petal markers. Reduced/primitive variants use bounded mesh geometry | Recreated after late join from public state; owner removal is cleanup truth |
 | Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary; circular Cold/Fire areas reuse the elemental area style | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
 | Sticky payload | Replicated position, fuse ticks, radius, role, and attack source | Moving body, exact warning ring, authoritative fuse-progress fill | Recreated at the observed tick and removed with the owner |
 | Cone spray | Replicated origin, facing, propagation and deadline | Fixed bounded clipped-segment root | Reconstructed from authoritative tick; owner removal clears all segments |
@@ -398,8 +398,9 @@ representative replicated projectile, field, cone, and fighter-status facts, the
 lifecycle materializers create and own their visual roots. Fixtures do not contain a second visual
 implementation. Restart preserves the explicit presentation identity; choosing a new identity is a
 separate action. Pause and single-step use the canonical simulation tick, so persistent deadlines
-and attached motion can be inspected predictably. Cold/Fire accent and ultimate controls resolve
-through the same production signature. Automation may apply an exact bounded initial sample in
+and attached motion can be inspected predictably. Neutral, Cold, Fire, Poison, and Restoration
+accent controls plus the ultimate control resolve through the same production signature.
+Automation may apply an exact bounded initial sample in
 ticks before freezing, allowing a warmed native capture to inspect a transient at its activation,
 peak, or tail.
 

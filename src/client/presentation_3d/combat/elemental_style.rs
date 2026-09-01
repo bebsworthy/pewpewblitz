@@ -1,9 +1,10 @@
-//! Retained primitive Cold/Fire styling shared by durable projectile and area roots.
+//! Retained elemental styling shared by durable projectile and area roots.
 
 use super::super::*;
 use bevy::{reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef};
 
 const FIRE_AREA_SHADER_PATH: &str = "shaders/fire_area.wgsl";
+const ELEMENTAL_SUPPORT_AREA_SHADER_PATH: &str = "shaders/elemental_support_area.wgsl";
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub(in crate::client) struct FireAreaMaterial {
@@ -45,6 +46,52 @@ impl Plugin for FireAreaMaterialPlugin {
     }
 }
 
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub(in crate::client) struct ElementalSupportAreaMaterial {
+    #[uniform(0)]
+    params: Vec4,
+}
+
+impl ElementalSupportAreaMaterial {
+    pub(in crate::client) const fn poison() -> Self {
+        Self {
+            params: Vec4::new(0.0, 0.0, 0.0, 0.0),
+        }
+    }
+
+    pub(in crate::client) const fn restoration() -> Self {
+        Self {
+            params: Vec4::new(0.0, 1.0, 0.0, 0.0),
+        }
+    }
+}
+
+impl Material for ElementalSupportAreaMaterial {
+    fn fragment_shader() -> ShaderRef {
+        ELEMENTAL_SUPPORT_AREA_SHADER_PATH.into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+
+    fn depth_bias(&self) -> f32 {
+        11.0
+    }
+
+    fn enable_shadows() -> bool {
+        false
+    }
+}
+
+pub(in crate::client) struct ElementalSupportAreaMaterialPlugin;
+
+impl Plugin for ElementalSupportAreaMaterialPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(MaterialPlugin::<ElementalSupportAreaMaterial>::default());
+    }
+}
+
 #[derive(Component, Clone, Copy, Debug)]
 pub(in crate::client::presentation_3d) struct ElementalMotionAccent3d {
     motion: ElementalAccentMotion,
@@ -65,6 +112,10 @@ enum ElementalAccentMotion {
     ColdCrystal,
     FireProjectileLobe,
     FireAreaTongue,
+    PoisonProjectileBubble,
+    PoisonAreaBubble,
+    RestorationProjectileSpark,
+    RestorationAreaPetal,
 }
 
 pub(super) fn elemental_materials(
@@ -79,6 +130,14 @@ pub(super) fn elemental_materials(
         Some(vfx::VfxAccent::Fire) => Some((
             materials.elemental_fire.clone(),
             materials.elemental_fire_bright.clone(),
+        )),
+        Some(vfx::VfxAccent::Poison) => Some((
+            materials.elemental_poison.clone(),
+            materials.elemental_poison_bright.clone(),
+        )),
+        Some(vfx::VfxAccent::Restoration) => Some((
+            materials.elemental_restoration.clone(),
+            materials.elemental_restoration_bright.clone(),
         )),
         _ => None,
     }
@@ -130,64 +189,202 @@ pub(super) fn spawn_elemental_projectile_style(
     let reduced = is_reduced(signature.variant);
     let seed = signature.stable_seed();
     match accent {
-        vfx::VfxAccent::Cold => {
-            let count: u8 = if reduced { 1 } else { 3 };
-            for slot in 0..count {
-                let angle =
-                    core::f32::consts::FRAC_PI_4 + f32::from(slot) * core::f32::consts::FRAC_PI_3;
-                let transform = Transform {
-                    translation: Vec3::Y * 0.35,
-                    rotation: Quat::from_rotation_y(angle),
-                    scale: Vec3::new(visual_radius * 1.45, 1.15, visual_radius * 0.16),
-                };
-                parent.spawn((
-                    ElementalMotionAccent3d::new(
-                        ElementalAccentMotion::ColdCrystal,
-                        seed_for(seed, slot),
-                        transform,
-                    ),
-                    Mesh3d(primitives.unit_cuboid.clone()),
-                    MeshMaterial3d(if slot == 0 {
-                        bright.clone()
-                    } else {
-                        soft.clone()
-                    }),
-                    NotShadowCaster,
-                    NotShadowReceiver,
-                    transform,
-                    Name::new("Cold projectile crystal fin"),
-                ));
-            }
-        }
-        vfx::VfxAccent::Fire => {
-            let count: u8 = if reduced { 1 } else { 4 };
-            for slot in 0..count {
-                let distance = visual_radius * (1.1 + f32::from(slot) * 0.9);
-                let scale = visual_radius * (0.64 - f32::from(slot) * 0.1);
-                let transform = Transform::from_translation(Vec3::new(-distance, 0.4, 0.0))
-                    .with_scale(Vec3::splat(scale.max(0.5)));
-                parent.spawn((
-                    ElementalMotionAccent3d::new(
-                        ElementalAccentMotion::FireProjectileLobe,
-                        seed_for(seed, slot),
-                        transform,
-                    ),
-                    Mesh3d(primitives.effect_sphere.clone()),
-                    MeshMaterial3d(if slot == 0 {
-                        bright.clone()
-                    } else {
-                        soft.clone()
-                    }),
-                    NotShadowCaster,
-                    NotShadowReceiver,
-                    transform,
-                    Name::new("Fire projectile trailing lobe"),
-                ));
-            }
-        }
+        vfx::VfxAccent::Cold => spawn_cold_projectile_accents(
+            parent,
+            primitives,
+            &soft,
+            &bright,
+            seed,
+            reduced,
+            visual_radius,
+        ),
+        vfx::VfxAccent::Fire => spawn_fire_projectile_accents(
+            parent,
+            primitives,
+            &soft,
+            &bright,
+            seed,
+            reduced,
+            visual_radius,
+        ),
+        vfx::VfxAccent::Poison => spawn_poison_projectile_accents(
+            parent,
+            primitives,
+            &soft,
+            &bright,
+            seed,
+            reduced,
+            visual_radius,
+        ),
+        vfx::VfxAccent::Restoration => spawn_restoration_projectile_accents(
+            parent,
+            primitives,
+            &soft,
+            &bright,
+            seed,
+            reduced,
+            visual_radius,
+        ),
         _ => {}
     }
     true
+}
+
+fn spawn_cold_projectile_accents(
+    parent: &mut ChildSpawnerCommands,
+    primitives: &Primitive3dAssets,
+    soft: &Handle<StandardMaterial>,
+    bright: &Handle<StandardMaterial>,
+    seed: u64,
+    reduced: bool,
+    visual_radius: f32,
+) {
+    let count: u8 = if reduced { 1 } else { 3 };
+    for slot in 0..count {
+        let angle = core::f32::consts::FRAC_PI_4 + f32::from(slot) * core::f32::consts::FRAC_PI_3;
+        let transform = Transform {
+            translation: Vec3::Y * 0.35,
+            rotation: Quat::from_rotation_y(angle),
+            scale: Vec3::new(visual_radius * 1.45, 1.15, visual_radius * 0.16),
+        };
+        parent.spawn((
+            ElementalMotionAccent3d::new(
+                ElementalAccentMotion::ColdCrystal,
+                seed_for(seed, slot),
+                transform,
+            ),
+            Mesh3d(primitives.unit_cuboid.clone()),
+            MeshMaterial3d(if slot == 0 {
+                bright.clone()
+            } else {
+                soft.clone()
+            }),
+            NotShadowCaster,
+            NotShadowReceiver,
+            transform,
+            Name::new("Cold projectile crystal fin"),
+        ));
+    }
+}
+
+fn spawn_fire_projectile_accents(
+    parent: &mut ChildSpawnerCommands,
+    primitives: &Primitive3dAssets,
+    soft: &Handle<StandardMaterial>,
+    bright: &Handle<StandardMaterial>,
+    seed: u64,
+    reduced: bool,
+    visual_radius: f32,
+) {
+    let count: u8 = if reduced { 1 } else { 4 };
+    for slot in 0..count {
+        let distance = visual_radius * (1.1 + f32::from(slot) * 0.9);
+        let scale = visual_radius * (0.64 - f32::from(slot) * 0.1);
+        let transform = Transform::from_translation(Vec3::new(-distance, 0.4, 0.0))
+            .with_scale(Vec3::splat(scale.max(0.5)));
+        parent.spawn((
+            ElementalMotionAccent3d::new(
+                ElementalAccentMotion::FireProjectileLobe,
+                seed_for(seed, slot),
+                transform,
+            ),
+            Mesh3d(primitives.effect_sphere.clone()),
+            MeshMaterial3d(if slot == 0 {
+                bright.clone()
+            } else {
+                soft.clone()
+            }),
+            NotShadowCaster,
+            NotShadowReceiver,
+            transform,
+            Name::new("Fire projectile trailing lobe"),
+        ));
+    }
+}
+
+fn spawn_poison_projectile_accents(
+    parent: &mut ChildSpawnerCommands,
+    primitives: &Primitive3dAssets,
+    soft: &Handle<StandardMaterial>,
+    bright: &Handle<StandardMaterial>,
+    seed: u64,
+    reduced: bool,
+    visual_radius: f32,
+) {
+    let count: u8 = if reduced { 1 } else { 4 };
+    let accent_radius = visual_radius.max(4.0);
+    for slot in 0..count {
+        let slot_seed = seed_for(seed, slot);
+        let lateral = (unit_sample(slot_seed) - 0.5) * accent_radius * 1.4;
+        let distance = accent_radius * (0.55 + f32::from(slot) * 0.72);
+        let scale = accent_radius * (0.54 - f32::from(slot) * 0.075).max(0.24);
+        let transform = Transform::from_translation(Vec3::new(
+            -distance,
+            accent_radius * (0.28 + unit_sample(seed_for(slot_seed, 17)) * 0.55),
+            lateral,
+        ))
+        .with_scale(Vec3::splat(scale));
+        parent.spawn((
+            ElementalMotionAccent3d::new(
+                ElementalAccentMotion::PoisonProjectileBubble,
+                slot_seed,
+                transform,
+            ),
+            Mesh3d(primitives.effect_sphere.clone()),
+            MeshMaterial3d(if slot.is_multiple_of(2) {
+                bright.clone()
+            } else {
+                soft.clone()
+            }),
+            NotShadowCaster,
+            NotShadowReceiver,
+            transform,
+            Name::new("Poison projectile bubbling wake"),
+        ));
+    }
+}
+
+fn spawn_restoration_projectile_accents(
+    parent: &mut ChildSpawnerCommands,
+    primitives: &Primitive3dAssets,
+    soft: &Handle<StandardMaterial>,
+    bright: &Handle<StandardMaterial>,
+    seed: u64,
+    reduced: bool,
+    visual_radius: f32,
+) {
+    let count: u8 = if reduced { 2 } else { 4 };
+    let accent_radius = visual_radius.max(18.0);
+    for slot in 0..count {
+        let transform = Transform {
+            translation: Vec3::new(-accent_radius * 0.08, accent_radius * 0.18, 0.0),
+            rotation: Quat::from_rotation_y(
+                f32::from(slot) * core::f32::consts::PI / f32::from(count),
+            ),
+            scale: Vec3::new(
+                accent_radius * 0.22,
+                accent_radius * 0.16,
+                accent_radius * 1.2,
+            ),
+        };
+        parent.spawn((
+            ElementalMotionAccent3d::new(
+                ElementalAccentMotion::RestorationProjectileSpark,
+                seed_for(seed, slot),
+                transform,
+            ),
+            Mesh3d(primitives.unit_cuboid.clone()),
+            MeshMaterial3d(if slot.is_multiple_of(2) {
+                bright.clone()
+            } else {
+                soft.clone()
+            }),
+            NotShadowCaster,
+            NotShadowReceiver,
+            transform,
+            Name::new("Restoration projectile vitality spark"),
+        ));
+    }
 }
 
 pub(super) fn spawn_elemental_area_style(
@@ -239,6 +436,13 @@ impl ElementalAreaStyle<'_> {
             && self.signature.variant == vfx::VfxPresentationVariant::Normal
     }
 
+    fn is_normal_support_area(&self) -> bool {
+        matches!(
+            self.accent,
+            vfx::VfxAccent::Poison | vfx::VfxAccent::Restoration
+        ) && self.signature.variant == vfx::VfxPresentationVariant::Normal
+    }
+
     fn ground_rotation() -> Quat {
         Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)
     }
@@ -273,6 +477,26 @@ impl ElementalAreaStyle<'_> {
                 NotShadowReceiver,
                 fill_transform,
                 Name::new("Fire area animated circumference"),
+            ));
+            return;
+        }
+        if self.is_normal_support_area() {
+            let material = if self.accent == vfx::VfxAccent::Poison {
+                self.materials.elemental_poison_area.clone()
+            } else {
+                self.materials.elemental_restoration_area.clone()
+            };
+            parent.spawn((
+                Mesh3d(self.primitives.area_disc.clone()),
+                MeshMaterial3d(material),
+                NotShadowCaster,
+                NotShadowReceiver,
+                fill_transform,
+                Name::new(if self.accent == vfx::VfxAccent::Poison {
+                    "Poison area animated contamination pool"
+                } else {
+                    "Restoration area animated vitality pattern"
+                }),
             ));
             return;
         }
@@ -354,15 +578,20 @@ impl ElementalAreaStyle<'_> {
             let angle = offset + f32::from(slot) * core::f32::consts::TAU / f32::from(count);
             let slot_seed = seed_for(seed, slot);
             let transform = self.accent_transform(seed, slot, angle, count);
-            let motion = if self.accent == vfx::VfxAccent::Cold {
-                ElementalAccentMotion::ColdCrystal
-            } else {
-                ElementalAccentMotion::FireAreaTongue
+            let motion = match self.accent {
+                vfx::VfxAccent::Cold => ElementalAccentMotion::ColdCrystal,
+                vfx::VfxAccent::Fire => ElementalAccentMotion::FireAreaTongue,
+                vfx::VfxAccent::Poison => ElementalAccentMotion::PoisonAreaBubble,
+                vfx::VfxAccent::Restoration => ElementalAccentMotion::RestorationAreaPetal,
+                _ => continue,
             };
-            let mesh = if self.accent == vfx::VfxAccent::Cold {
-                self.primitives.unit_cuboid.clone()
-            } else {
-                self.primitives.fire_tongue.clone()
+            let mesh = match self.accent {
+                vfx::VfxAccent::Cold | vfx::VfxAccent::Restoration => {
+                    self.primitives.unit_cuboid.clone()
+                }
+                vfx::VfxAccent::Fire => self.primitives.fire_tongue.clone(),
+                vfx::VfxAccent::Poison => self.primitives.effect_sphere.clone(),
+                _ => continue,
             };
             let material = self.accent_material(slot);
             parent.spawn((
@@ -372,10 +601,12 @@ impl ElementalAreaStyle<'_> {
                 NotShadowCaster,
                 NotShadowReceiver,
                 transform,
-                Name::new(if self.accent == vfx::VfxAccent::Cold {
-                    "Cold area crystal accent"
-                } else {
-                    "Fire area flame accent"
+                Name::new(match self.accent {
+                    vfx::VfxAccent::Cold => "Cold area crystal accent",
+                    vfx::VfxAccent::Fire => "Fire area flame accent",
+                    vfx::VfxAccent::Poison => "Poison area perimeter bubble",
+                    vfx::VfxAccent::Restoration => "Restoration area vitality petal",
+                    _ => "Elemental area accent",
                 }),
             ));
         }
@@ -383,35 +614,66 @@ impl ElementalAreaStyle<'_> {
 
     fn accent_transform(&self, seed: u64, slot: u8, angle: f32, count: u8) -> Transform {
         let radial_sample = unit_sample(seed_for(seed, slot.wrapping_add(41)));
-        if self.accent == vfx::VfxAccent::Cold {
-            let radial = self.radius * (0.76 + radial_sample * 0.12);
-            return Transform {
-                translation: Vec3::new(angle.cos() * radial, 3.2, angle.sin() * radial),
-                rotation: Quat::from_rotation_y(-angle),
-                scale: Vec3::new(self.radius * 0.11, 2.0, self.radius * 0.035),
-            };
-        }
-        let radial = self.radius * (0.92 + (radial_sample - 0.5) * 0.035);
-        let circumference_slot = core::f32::consts::TAU * radial / f32::from(count);
-        let length_sample = unit_sample(seed_for(seed, slot.wrapping_add(83)));
-        Transform {
-            translation: Vec3::new(
-                angle.cos() * radial,
-                super::common::GROUND_EFFECT_HEIGHT + 1.1,
-                angle.sin() * radial,
-            ),
-            rotation: Quat::from_rotation_y(core::f32::consts::FRAC_PI_2 - angle)
-                * Self::ground_rotation(),
-            scale: Vec3::new(
-                circumference_slot * 1.18,
-                self.radius * (0.10 + length_sample * 0.14),
-                1.0,
-            ),
+        match self.accent {
+            vfx::VfxAccent::Cold => {
+                let radial = self.radius * (0.76 + radial_sample * 0.12);
+                Transform {
+                    translation: Vec3::new(angle.cos() * radial, 3.2, angle.sin() * radial),
+                    rotation: Quat::from_rotation_y(-angle),
+                    scale: Vec3::new(self.radius * 0.11, 2.0, self.radius * 0.035),
+                }
+            }
+            vfx::VfxAccent::Fire => {
+                let radial = self.radius * (0.92 + (radial_sample - 0.5) * 0.035);
+                let circumference_slot = core::f32::consts::TAU * radial / f32::from(count);
+                let length_sample = unit_sample(seed_for(seed, slot.wrapping_add(83)));
+                Transform {
+                    translation: Vec3::new(
+                        angle.cos() * radial,
+                        super::common::GROUND_EFFECT_HEIGHT + 1.1,
+                        angle.sin() * radial,
+                    ),
+                    rotation: Quat::from_rotation_y(core::f32::consts::FRAC_PI_2 - angle)
+                        * Self::ground_rotation(),
+                    scale: Vec3::new(
+                        circumference_slot * 1.18,
+                        self.radius * (0.10 + length_sample * 0.14),
+                        1.0,
+                    ),
+                }
+            }
+            vfx::VfxAccent::Poison => {
+                let radial = self.radius * (0.78 + radial_sample * 0.15);
+                let bubble = self.radius
+                    * (0.035 + unit_sample(seed_for(seed, slot.wrapping_add(83))) * 0.035);
+                Transform::from_translation(Vec3::new(
+                    angle.cos() * radial,
+                    super::common::GROUND_EFFECT_HEIGHT + bubble * 0.7,
+                    angle.sin() * radial,
+                ))
+                .with_scale(Vec3::splat(bubble))
+            }
+            vfx::VfxAccent::Restoration => {
+                let radial = self.radius * (0.68 + radial_sample * 0.08);
+                Transform {
+                    translation: Vec3::new(
+                        angle.cos() * radial,
+                        super::common::GROUND_EFFECT_HEIGHT + 1.35,
+                        angle.sin() * radial,
+                    ),
+                    rotation: Quat::from_rotation_y(-angle),
+                    scale: Vec3::new(self.radius * 0.10, 1.6, self.radius * 0.025),
+                }
+            }
+            _ => Transform::default(),
         }
     }
 
     fn accent_material(&self, slot: u8) -> Handle<StandardMaterial> {
-        if self.accent == vfx::VfxAccent::Cold {
+        if matches!(
+            self.accent,
+            vfx::VfxAccent::Cold | vfx::VfxAccent::Poison | vfx::VfxAccent::Restoration
+        ) {
             return if slot.is_multiple_of(2) {
                 self.bright.clone()
             } else {
@@ -436,6 +698,10 @@ pub(in crate::client::presentation_3d) fn animate_elemental_motion_accents(
             ElementalAccentMotion::ColdCrystal => 120,
             ElementalAccentMotion::FireProjectileLobe => 24,
             ElementalAccentMotion::FireAreaTongue => 18 + accent.seed % 15,
+            ElementalAccentMotion::PoisonProjectileBubble => 42 + accent.seed % 18,
+            ElementalAccentMotion::PoisonAreaBubble => 72 + accent.seed % 36,
+            ElementalAccentMotion::RestorationProjectileSpark => 90,
+            ElementalAccentMotion::RestorationAreaPetal => 240,
         };
         let phase_tick = u16::try_from((tick + accent.seed % period) % period)
             .expect("elemental accent phase is bounded by its short period");
@@ -464,6 +730,33 @@ pub(in crate::client::presentation_3d) fn animate_elemental_motion_accents(
                     accent.base_scale.z,
                 );
             }
+            ElementalAccentMotion::PoisonProjectileBubble => {
+                let wave = (progress * core::f32::consts::TAU).sin();
+                transform.translation =
+                    accent.base_translation + Vec3::new(0.0, wave * 1.4, wave.cos() * 0.75);
+                transform.rotation = accent.base_rotation;
+                transform.scale = accent.base_scale * wave.mul_add(0.12, 0.88);
+            }
+            ElementalAccentMotion::PoisonAreaBubble => {
+                let wave = (progress * core::f32::consts::TAU).sin();
+                transform.translation = accent.base_translation + Vec3::Y * ((wave + 1.0) * 1.4);
+                transform.rotation = accent.base_rotation;
+                transform.scale = accent.base_scale * wave.mul_add(0.16, 0.88);
+            }
+            ElementalAccentMotion::RestorationProjectileSpark => {
+                let wave = (progress * core::f32::consts::TAU).sin();
+                transform.translation = accent.base_translation;
+                transform.rotation =
+                    accent.base_rotation * Quat::from_rotation_y(progress * core::f32::consts::TAU);
+                transform.scale = accent.base_scale * wave.mul_add(0.08, 0.94);
+            }
+            ElementalAccentMotion::RestorationAreaPetal => {
+                let wave = (progress * core::f32::consts::TAU).sin();
+                let rotation = Quat::from_rotation_y(progress * core::f32::consts::TAU);
+                transform.translation = rotation * accent.base_translation;
+                transform.rotation = rotation * accent.base_rotation;
+                transform.scale = accent.base_scale * wave.mul_add(0.08, 0.96);
+            }
         }
     }
 }
@@ -488,6 +781,33 @@ pub(in crate::client) fn animate_fire_area_material(
     }
 }
 
+pub(in crate::client) fn animate_elemental_support_area_materials(
+    ticks: Query<&AuthoritativeTick>,
+    handles: Option<Res<Material3dAssets>>,
+    mut materials: ResMut<Assets<ElementalSupportAreaMaterial>>,
+) {
+    const VISUAL_CYCLE_SECONDS: u64 = 900;
+
+    let Some(handles) = handles else {
+        return;
+    };
+    let tick = ticks.iter().map(|tick| tick.0).max().unwrap_or_default();
+    let cycle_ticks = crate::timing::SIMULATION_TICK_HZ * VISUAL_CYCLE_SECONDS;
+    let visual_tick = u16::try_from(tick % cycle_ticks)
+        .expect("the fifteen-minute elemental visual cycle fits u16");
+    let tick_hz = u16::try_from(crate::timing::SIMULATION_TICK_HZ)
+        .expect("the simulation tick rate fits u16");
+    let time = f32::from(visual_tick) / f32::from(tick_hz);
+    for handle in [
+        &handles.elemental_poison_area,
+        &handles.elemental_restoration_area,
+    ] {
+        if let Some(mut material) = materials.get_mut(handle) {
+            material.params.x = time;
+        }
+    }
+}
+
 impl ElementalMotionAccent3d {
     const fn new(motion: ElementalAccentMotion, seed: u64, transform: Transform) -> Self {
         Self {
@@ -501,11 +821,15 @@ impl ElementalMotionAccent3d {
 }
 
 fn primary_element(signature: vfx::CombatVisualSignature) -> Option<vfx::VfxAccent> {
-    signature
-        .accents
-        .into_iter()
-        .flatten()
-        .find(|accent| matches!(accent, vfx::VfxAccent::Cold | vfx::VfxAccent::Fire))
+    signature.accents.into_iter().flatten().find(|accent| {
+        matches!(
+            accent,
+            vfx::VfxAccent::Cold
+                | vfx::VfxAccent::Fire
+                | vfx::VfxAccent::Poison
+                | vfx::VfxAccent::Restoration
+        )
+    })
 }
 
 const fn is_reduced(variant: vfx::VfxPresentationVariant) -> bool {
@@ -525,6 +849,16 @@ const fn area_accent_count(accent: vfx::VfxAccent, variant: vfx::VfxPresentation
         (vfx::VfxAccent::Fire, vfx::VfxPresentationVariant::Normal) => 0,
         (vfx::VfxAccent::Fire, vfx::VfxPresentationVariant::Primitive) => 36,
         (vfx::VfxAccent::Fire, _) => 18,
+        (
+            vfx::VfxAccent::Poison,
+            vfx::VfxPresentationVariant::Normal | vfx::VfxPresentationVariant::Primitive,
+        ) => 10,
+        (vfx::VfxAccent::Poison, _) => 5,
+        (
+            vfx::VfxAccent::Restoration,
+            vfx::VfxPresentationVariant::Normal | vfx::VfxPresentationVariant::Primitive,
+        ) => 8,
+        (vfx::VfxAccent::Restoration, _) => 4,
         _ => 0,
     }
 }
@@ -570,6 +904,12 @@ mod tests {
     }
 
     #[test]
+    fn support_area_materials_select_distinct_shader_identities() {
+        assert!(ElementalSupportAreaMaterial::poison().params.y.abs() < f32::EPSILON);
+        assert!((ElementalSupportAreaMaterial::restoration().params.y - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn reduced_variants_preserve_a_bounded_elemental_identity_channel() {
         use vfx::VfxPresentationVariant::{Normal, Primitive, Reduced, ReducedPrimitive};
 
@@ -580,6 +920,10 @@ mod tests {
         assert_eq!(area_accent_count(vfx::VfxAccent::Fire, Normal), 0);
         assert_eq!(area_accent_count(vfx::VfxAccent::Fire, Primitive), 36);
         assert_eq!(area_accent_count(vfx::VfxAccent::Fire, Reduced), 18);
+        assert_eq!(area_accent_count(vfx::VfxAccent::Poison, Normal), 10);
+        assert_eq!(area_accent_count(vfx::VfxAccent::Poison, Reduced), 5);
+        assert_eq!(area_accent_count(vfx::VfxAccent::Restoration, Normal), 8);
+        assert_eq!(area_accent_count(vfx::VfxAccent::Restoration, Reduced), 4);
         assert_eq!(area_accent_count(vfx::VfxAccent::Neutral, Normal), 0);
     }
 }

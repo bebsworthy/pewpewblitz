@@ -4,7 +4,7 @@ use std::{env, process};
 
 fn usage() {
     eprintln!(
-        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--sample-ticks N] [--accent neutral|cold|fire] [--lobbed-impact] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
+        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--sample-ticks N] [--accent neutral|cold|fire|poison|restoration] [--lobbed-impact] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
          Controls: Left/Right select · Space restart · Enter pause · . step · N identity · C accent · U ultimate · R reduced · P primitive · I guide/details · F12 capture · Esc quit"
     );
 }
@@ -51,9 +51,9 @@ fn parse_args() -> Result<VfxLabConfig, String> {
                 );
             }
             "--accent" => {
-                let value = args
-                    .next()
-                    .ok_or_else(|| "--accent requires neutral, cold, or fire".to_string())?;
+                let value = args.next().ok_or_else(|| {
+                    "--accent requires neutral, cold, fire, poison, or restoration".to_string()
+                })?;
                 config.accent = VfxLabAccent::from_key(&value)
                     .ok_or_else(|| "invalid --accent value".to_string())?;
             }

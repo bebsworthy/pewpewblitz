@@ -1575,6 +1575,7 @@ mod tests {
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
             .init_resource::<Assets<super::super::elemental_style::FireAreaMaterial>>()
+            .init_resource::<Assets<super::super::elemental_style::ElementalSupportAreaMaterial>>()
             .init_resource::<crate::builds::BuildCatalogResource>()
             .init_resource::<vfx::VfxSignatureCache>()
             .add_message::<crate::combat::client::DeduplicatedCombatCue>()

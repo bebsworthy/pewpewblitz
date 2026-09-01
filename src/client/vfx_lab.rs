@@ -42,6 +42,8 @@ pub enum VfxLabAccent {
     Neutral,
     Cold,
     Fire,
+    Poison,
+    Restoration,
 }
 
 impl VfxLabAccent {
@@ -51,6 +53,8 @@ impl VfxLabAccent {
             "neutral" => Some(Self::Neutral),
             "cold" => Some(Self::Cold),
             "fire" => Some(Self::Fire),
+            "poison" => Some(Self::Poison),
+            "restoration" => Some(Self::Restoration),
             _ => None,
         }
     }
@@ -59,7 +63,9 @@ impl VfxLabAccent {
         match self {
             Self::Neutral => Self::Cold,
             Self::Cold => Self::Fire,
-            Self::Fire => Self::Neutral,
+            Self::Fire => Self::Poison,
+            Self::Poison => Self::Restoration,
+            Self::Restoration => Self::Neutral,
         }
     }
 
@@ -68,6 +74,8 @@ impl VfxLabAccent {
             Self::Neutral => "neutral",
             Self::Cold => "cold",
             Self::Fire => "fire",
+            Self::Poison => "poison",
+            Self::Restoration => "restoration",
         }
     }
 
@@ -76,6 +84,8 @@ impl VfxLabAccent {
             Self::Neutral => crate::client::vfx::VfxAccent::Neutral,
             Self::Cold => crate::client::vfx::VfxAccent::Cold,
             Self::Fire => crate::client::vfx::VfxAccent::Fire,
+            Self::Poison => crate::client::vfx::VfxAccent::Poison,
+            Self::Restoration => crate::client::vfx::VfxAccent::Restoration,
         }
     }
 }
@@ -259,6 +269,8 @@ impl VfxLabScenario {
                 Some(crate::client::vfx::VfxContextOverride::ElementalField(
                     match accent {
                         VfxLabAccent::Cold => crate::combat::ElementalFieldKind::Cryogenic,
+                        VfxLabAccent::Poison => crate::combat::ElementalFieldKind::Poison,
+                        VfxLabAccent::Restoration => crate::combat::ElementalFieldKind::Restoration,
                         VfxLabAccent::Fire | VfxLabAccent::Neutral => {
                             crate::combat::ElementalFieldKind::Fire
                         }
@@ -718,6 +730,8 @@ fn spawn_field_fixture(
             id: crate::combat::ElementalFieldId(identity),
             kind: match accent {
                 VfxLabAccent::Cold => crate::combat::ElementalFieldKind::Cryogenic,
+                VfxLabAccent::Poison => crate::combat::ElementalFieldKind::Poison,
+                VfxLabAccent::Restoration => crate::combat::ElementalFieldKind::Restoration,
                 VfxLabAccent::Neutral | VfxLabAccent::Fire => {
                     crate::combat::ElementalFieldKind::Fire
                 }
@@ -841,6 +855,17 @@ fn spawn_lab_style_owner(
             tick_interval: 10,
             duration_ticks: 30,
             recipients: crate::combat::RecipientPolicy::Hostiles,
+        },
+        VfxLabAccent::Poison => crate::combat::PayloadEffectDefinition::DamageOverTime {
+            kind: crate::combat::DamageOverTimeKind::Poison,
+            damage_per_tick: 2,
+            tick_interval: 10,
+            duration_ticks: 60,
+            recipients: crate::combat::RecipientPolicy::Hostiles,
+        },
+        VfxLabAccent::Restoration => crate::combat::PayloadEffectDefinition::Heal {
+            amount: 10,
+            recipients: crate::combat::RecipientPolicy::Allies,
         },
         VfxLabAccent::Neutral => crate::combat::PayloadEffectDefinition::Damage {
             amount: 10,
@@ -1365,13 +1390,13 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             }
         }
         VfxLabFixture::StraightProjectile => {
-            "The colored body is the projectile's exact collision footprint. Cold adds rigid crystal fins; Fire adds soft trailing lobes."
+            "The bright core is the projectile's exact collision footprint. Cold adds rigid crystal fins, Fire adds soft trailing lobes, Poison adds an unstable bubbling wake, and Restoration forms an ordered vitality spark."
         }
         VfxLabFixture::LobbedProjectile => {
             "The moving body follows the production launch/landing arc and rotates along its current tangent. The dark disc tracks its ground projection, the orange ring marks the fixed landing point, and emitted smoke remains behind to expand and fade."
         }
         VfxLabFixture::ElementalField => {
-            "The subtly tinted center is the affected ground area. The thin bright ring is the exact gameplay boundary. Perimeter crystals or the living flame band identify the element without hiding fighters."
+            "The subtly treated center is the affected ground area. The thin bright ring is the exact gameplay boundary. Crystals, living flame, cellular contamination, or ordered vitality arcs identify the element without hiding fighters."
         }
         VfxLabFixture::ConeSpray => {
             "The wedge shows the currently reached portion of the authoritative cone. Its outer silhouette, not its opacity, communicates attack coverage."
@@ -1382,13 +1407,19 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
     };
     let style = match state.accent {
         VfxLabAccent::Neutral => {
-            "NEUTRAL is the safe fallback. Press C to compare the Cold and Fire identities."
+            "NEUTRAL is the safe fallback. Press C to compare each authored elemental identity."
         }
         VfxLabAccent::Cold => {
             "COLD should feel slow, crisp, and crystalline. Press C once to compare Fire."
         }
         VfxLabAccent::Fire => {
-            "FIRE should feel turbulent, hot-edged, and continuously alive. Press C to return to the neutral fallback."
+            "FIRE should feel turbulent, hot-edged, and continuously alive. Press C once to compare Poison."
+        }
+        VfxLabAccent::Poison => {
+            "POISON should feel unstable, bubbling, and contaminating without becoming an opaque green fill. Press C once to compare Restoration."
+        }
+        VfxLabAccent::Restoration => {
+            "RESTORATION should feel ordered, buoyant, and life-giving through a rotating vitality motif. Press C to return to Neutral."
         }
     };
     format!(
@@ -1562,5 +1593,25 @@ mod tests {
             fixture = fixture.next();
         }
         assert_eq!(fixture, VfxLabFixture::Transient);
+    }
+
+    #[test]
+    fn accent_names_and_cycle_cover_all_authored_elements() {
+        let expected = [
+            ("neutral", VfxLabAccent::Neutral),
+            ("cold", VfxLabAccent::Cold),
+            ("fire", VfxLabAccent::Fire),
+            ("poison", VfxLabAccent::Poison),
+            ("restoration", VfxLabAccent::Restoration),
+        ];
+        for (name, accent) in expected {
+            assert_eq!(VfxLabAccent::from_key(name), Some(accent));
+        }
+
+        let mut accent = VfxLabAccent::Neutral;
+        for _ in 0..expected.len() {
+            accent = accent.next();
+        }
+        assert_eq!(accent, VfxLabAccent::Neutral);
     }
 }

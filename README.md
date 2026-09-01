@@ -110,7 +110,7 @@ lobbed-landing explosion with its exact payload radius. The `--lobbed-impact` sw
 the Lab's semantic carrier fixture; it does not introduce another renderer path.
 Use `--fixture transient|straight|lobbed|field|cone|status` to start at a lifecycle fixture. Native
 automation may add `--identity N --radius WORLD_UNITS` and
-`--sample-ticks N --accent neutral|cold|fire --ultimate --capture-dir PATH --capture-after UPDATES
+`--sample-ticks N --accent neutral|cold|fire|poison|restoration --ultimate --capture-dir PATH --capture-after UPDATES
 --exit-after-capture`; `--paused` captures a stable sample, with `--sample-ticks` advancing the
 retained production timeline before it freezes. Allow about 12 updates before an automated paused
 capture so native mesh and particle pipelines are ready. A running transient must be captured inside
