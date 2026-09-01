@@ -314,6 +314,7 @@ impl Plugin for WorldPresentationPlugin {
             combat::FireAreaMaterialPlugin,
             combat::ElementalSupportAreaMaterialPlugin,
             combat::ConeSprayMaterialPlugin,
+            combat::DashTrailMaterialPlugin,
             combat::StraightProjectileTrailMaterialPlugin,
             combat::StickyBlobMaterialPlugin,
         ));

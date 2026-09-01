@@ -3,6 +3,7 @@
 mod aim_preview;
 mod common;
 mod cone_spray;
+mod dash_style;
 mod effects;
 mod elemental_style;
 mod entities;
@@ -19,6 +20,7 @@ pub(super) use cone_spray::{
     ConeSprayMaterial, ConeSprayMaterialPlugin, animate_cone_spray_materials,
     reconcile_cone_spray_visuals, update_cone_spray_visuals,
 };
+pub(super) use dash_style::DashTrailMaterialPlugin;
 pub(super) use effects::animate_attack_acceptance;
 pub(in crate::client) use effects::{
     CombatEffect3d, PendingCombatEffect, animate_combat_effect_layers, cleanup_combat_effects,
@@ -87,6 +89,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
             FireAreaMaterialPlugin,
             ElementalSupportAreaMaterialPlugin,
             ConeSprayMaterialPlugin,
+            DashTrailMaterialPlugin,
             StraightProjectileTrailMaterialPlugin,
             StickyBlobMaterialPlugin,
         ))
@@ -99,6 +102,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
                 reconcile_elemental_field_visuals,
                 reconcile_cone_spray_visuals,
                 reconcile_status_visuals,
+                reconcile_dash_trails,
                 reconcile_sticky_blob_visuals,
                 update_cone_spray_visuals,
                 update_sticky_blob_fuse_progress,

@@ -320,3 +320,39 @@ Verification passed:
 - cargo fmt --all and git diff --check passed.
 
 The retained sticky implementation is complete. Native user visual feedback remains open, and the remaining Phase 2 families remain in scope; BRL-0104 stays doing.
+
+## Phase 2 next slice — Dash retained presentation — 2026-09-01
+
+Production inspection identifies Dash as the next uncompleted neutral carrier family. Its current client presentation is one translucent cuboid stretched only between the fighter's previous and current rendered positions; it has no accumulated wake, authored motion language, controlled linger, or isolated VfxLab lifecycle fixture.
+
+Implement one production-owned Dash wake through the existing AttachedStatus/Travel signature and direct fighter-to-trail lifecycle:
+
+- preserve the fighter's replicated `AbilityState::Dashing`, position, exact movement endpoint, authority, collision, and damage behavior;
+- replace the normal/reduced cuboid with a deterministic planar procedural wake that grows from the authoritative dash origin to the current fighter position, tapers behind the fighter, and layers a hot core, moving filaments, edge distortion, and sparse speed cuts without obscuring the fighter;
+- drive animation and a short post-dash dissipation from `AuthoritativeTick`; use no wall-clock randomness and allocate no unbounded particles or trail segments;
+- keep Primitive/ReducedPrimitive as the stable cheap mesh fallback; Reduced retains the silhouette with lower shader detail;
+- add a read-only `--fixture dash` scenario which constructs replicated-shape fighter/loadout/ability facts and moves them over the built-in Dash duration while production reconciliation/material animation owns the visible effect;
+- remove per-instance procedural material assets when their trail owner expires or disappears, and cover lifecycle, variant selection, deterministic timing, production/VfxLab scheduling, and bounded cleanup with focused tests.
+
+No server, gameplay, protocol, ownership-color, map-preview, or editable-workbench changes are in scope. BRL-0107 retains ownership-color integration and BRL-0108 retains production-map VfxLab preview.
+
+## Phase 2 Dash implementation evidence — 2026-09-01
+
+Implemented the production-owned Dash wake through the existing AttachedStatus/Travel signature and fighter-to-trail lifecycle.
+
+- Normal uses one bounded procedural planar wake accumulated from the observed Dash origin to the current fighter position. The shader layers a hot central lane, deterministic turbulent filaments, tapered edges, and sparse speed cuts.
+- Reduced uses the same silhouette and authoritative lifecycle with narrower geometry and the expensive filament/cut branch disabled. Primitive and ReducedPrimitive keep the original simple translucent cuboid fallback.
+- The built-in 18-tick Dash duration remains authoritative. A 15-tick presentation-only dissipation window is driven entirely by AuthoritativeTick; the endpoint geometry is finalized even when the first observed post-sample state is already Charging.
+- Each procedural Dash owns one material asset. Normal completion and orphan cleanup remove that asset; focused ECS coverage verifies release to zero.
+- VfxLab now supports --fixture dash. It constructs the real resolved Dash loadout, AbilityState, fighter identity, position, and tick facts, moves over the built-in duration, and invokes the same production reconciler/material plugin. Retained sample jumps now materialize the activation facts once before advancing, preserving origin-relative visuals.
+- Evidence snapshots now report dash_trail_materials alongside the retained root count.
+
+Verification:
+
+- cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings passed.
+- cargo test --locked --no-default-features --features client --all-targets passed: 612 library tests, client/VfxLab targets, and map public API.
+- just _check-server and just _server-features passed; the server graph excludes client presentation capabilities.
+- cargo fmt --all -- --check and git diff --check passed.
+- Native normal/reduced/primitive/dissipation captures are under target/brl-0104-dash-v3-normal, target/brl-0104-dash-v3-reduced, target/brl-0104-dash-v3-primitive, and target/brl-0104-dash-v4-dissipating. Normal shows the animated layered wake; reduced preserves its tapered identity; primitive remains the stable cheap fallback; the post-dash sample confirms bounded linger.
+
+The Dash implementation slice is complete. Native user visual feedback and the remaining Phase 2 families remain open; BRL-0104 stays doing.

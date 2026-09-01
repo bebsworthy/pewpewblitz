@@ -35,6 +35,8 @@ use std::path::PathBuf;
 
 const DEFAULT_RADIUS: u16 = 72;
 const MAX_INITIAL_SAMPLE_TICKS: u16 = 600;
+const VFX_LAB_DASH_START: Vec2 = Vec2::new(-70.0, 0.0);
+const VFX_LAB_DASH_END: Vec2 = Vec2::new(290.0, 0.0);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VfxLabAccent {
@@ -142,7 +144,7 @@ impl VfxLabConfig {
             .is_some_and(|fixture| VfxLabFixture::from_key(fixture).is_none())
         {
             return Err(
-                "VfxLab fixture must be transient, straight, lobbed, field, cone, or status"
+                "VfxLab fixture must be transient, straight, lobbed, sticky, field, cone, dash, or status"
                     .to_string(),
             );
         }
@@ -186,11 +188,12 @@ enum VfxLabFixture {
     StickyPayload,
     ElementalField,
     ConeSpray,
+    Dash,
     Status,
 }
 
 impl VfxLabFixture {
-    const COUNT: u8 = 7;
+    const COUNT: u8 = 8;
 
     fn next(self) -> Self {
         match self {
@@ -199,7 +202,8 @@ impl VfxLabFixture {
             Self::LobbedProjectile => Self::StickyPayload,
             Self::StickyPayload => Self::ElementalField,
             Self::ElementalField => Self::ConeSpray,
-            Self::ConeSpray => Self::Status,
+            Self::ConeSpray => Self::Dash,
+            Self::Dash => Self::Status,
             Self::Status => Self::Transient,
         }
     }
@@ -212,6 +216,7 @@ impl VfxLabFixture {
             Self::StickyPayload => "armed sticky payload / fuse",
             Self::ElementalField => "elemental field / area",
             Self::ConeSpray => "cone spray / propagation",
+            Self::Dash => "dash / retained wake",
             Self::Status => "fighter status / attached",
         }
     }
@@ -224,6 +229,7 @@ impl VfxLabFixture {
             "sticky" => Some(Self::StickyPayload),
             "field" => Some(Self::ElementalField),
             "cone" => Some(Self::ConeSpray),
+            "dash" => Some(Self::Dash),
             "status" => Some(Self::Status),
             _ => None,
         }
@@ -373,6 +379,12 @@ struct VfxLabFixtureOwner;
 struct VfxLabClock;
 
 #[derive(Component)]
+struct VfxLabDashFixture {
+    started_at_tick: u64,
+    ends_at_tick: u64,
+}
+
+#[derive(Component)]
 struct VfxLabReference(u8);
 
 struct VfxLabPlugin {
@@ -409,6 +421,7 @@ impl Plugin for VfxLabPlugin {
                 advance_lab_effects,
                 animate_combat_effect_layers,
                 update_lab_fixture_facts,
+                update_lab_dash_fixture,
                 hide_gameplay_hud,
                 update_lab_inspector,
                 exit_after_lab_capture,
@@ -612,6 +625,7 @@ const fn lab_reference_positions(fixture: VfxLabFixture) -> [f32; 2] {
         | VfxLabFixture::ElementalField
         | VfxLabFixture::ConeSpray
         | VfxLabFixture::Status => [0.0, 96.0],
+        VfxLabFixture::Dash => [-250.0, 380.0],
     }
 }
 
@@ -666,6 +680,7 @@ fn spawn_lab_scenario(
             );
         }
         VfxLabFixture::ConeSpray => spawn_cone_fixture(commands, state.presentation_identity, tick),
+        VfxLabFixture::Dash => spawn_dash_fixture(commands, state.presentation_identity, tick),
         VfxLabFixture::Status => {
             spawn_status_fixture(commands, state.presentation_identity, tick);
         }
@@ -850,6 +865,31 @@ fn spawn_status_fixture(commands: &mut Commands, identity: u64, tick: u64) {
     ));
 }
 
+fn spawn_dash_fixture(commands: &mut Commands, identity: u64, tick: u64) {
+    let ends_at_tick = tick.saturating_add(18);
+    commands.spawn((
+        VfxLabFixtureOwner,
+        VfxLabClock,
+        VfxLabDashFixture {
+            started_at_tick: tick,
+            ends_at_tick,
+        },
+        crate::protocol::Fighter,
+        Controlled,
+        crate::protocol::NetworkEntityId(1),
+        crate::combat::TeamId(0),
+        Position(VFX_LAB_DASH_START),
+        Rotation::radians(0.0),
+        AuthoritativeTick(tick),
+        lab_style_loadout(VfxLabAccent::Neutral, identity),
+        crate::builds::AbilityState {
+            charge: 0,
+            phase: crate::builds::AbilityPhase::Dashing { ends_at_tick },
+        },
+        Name::new("VfxLab Dash lifecycle fixture"),
+    ));
+}
+
 fn lab_attack_source(
     source: crate::combat::ProjectileSource,
     origin: Vec2,
@@ -874,6 +914,20 @@ fn spawn_lab_style_owner(
     fingerprint: u64,
     network_id: crate::protocol::NetworkEntityId,
 ) {
+    commands.spawn((
+        VfxLabFixtureOwner,
+        crate::protocol::Fighter,
+        network_id,
+        crate::combat::TeamId(0),
+        lab_style_loadout(accent, fingerprint),
+        Name::new("VfxLab signature-only loadout owner"),
+    ));
+}
+
+fn lab_style_loadout(
+    accent: VfxLabAccent,
+    fingerprint: u64,
+) -> crate::builds::ResolvedMatchLoadout {
     let mut loadout = crate::builds::resolve_build_recipe(
         &crate::builds::BuildCatalog::embedded().expect("embedded build catalog is valid"),
         &crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog is valid"),
@@ -917,14 +971,7 @@ fn spawn_lab_style_owner(
             recipients: crate::combat::RecipientPolicy::Hostiles,
         },
     }];
-    commands.spawn((
-        VfxLabFixtureOwner,
-        crate::protocol::Fighter,
-        network_id,
-        crate::combat::TeamId(0),
-        loadout,
-        Name::new("VfxLab signature-only loadout owner"),
-    ));
+    loadout
 }
 
 #[allow(
@@ -1028,7 +1075,9 @@ fn advance_lab_effects(
     mut effects: Query<(Entity, &mut CombatEffect3d)>,
     mut clocks: Query<&mut AuthoritativeTick, With<VfxLabClock>>,
 ) {
-    let delta = if state.pending_sample_ticks > 0 {
+    // Materialize retained lifecycle roots once at their activation facts before applying a
+    // requested sample jump. This keeps origin-relative production visuals (notably Dash) honest.
+    let delta = if state.pending_sample_ticks > 0 && state.update_index > 0 {
         let ticks = state.pending_sample_ticks;
         state.pending_sample_ticks = 0;
         crate::timing::SIMULATION_TICK.saturating_mul(u32::from(ticks))
@@ -1100,6 +1149,43 @@ fn update_lab_fixture_facts(
                 .as_vec2()
                 .lerp(flight.landing.as_vec2(), progress);
         }
+    }
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::needless_pass_by_value,
+    reason = "the bounded Dash fixture projects authoritative ticks into production movement facts"
+)]
+fn update_lab_dash_fixture(
+    state: Res<VfxLabState>,
+    mut fighters: Query<
+        (
+            &mut Position,
+            &mut crate::builds::AbilityState,
+            &VfxLabDashFixture,
+        ),
+        With<VfxLabFixtureOwner>,
+    >,
+) {
+    for (mut position, mut ability, dash) in &mut fighters {
+        let duration = dash
+            .ends_at_tick
+            .saturating_sub(dash.started_at_tick)
+            .max(1);
+        let elapsed = state
+            .playback_tick
+            .saturating_sub(dash.started_at_tick)
+            .min(duration);
+        let progress = elapsed as f32 / duration as f32;
+        position.0 = VFX_LAB_DASH_START.lerp(VFX_LAB_DASH_END, progress);
+        ability.phase = if state.playback_tick <= dash.ends_at_tick {
+            crate::builds::AbilityPhase::Dashing {
+                ends_at_tick: dash.ends_at_tick,
+            }
+        } else {
+            crate::builds::AbilityPhase::Charging
+        };
     }
 }
 
@@ -1424,6 +1510,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::StickyPayload => "ARMED STICKY PAYLOAD",
         VfxLabFixture::ElementalField => "PERSISTENT ELEMENTAL AREA",
         VfxLabFixture::ConeSpray => "PROPAGATING ATTACK CONE",
+        VfxLabFixture::Dash => "FIGHTER DASH WAKE",
         VfxLabFixture::Status => "STATUS ATTACHED TO A FIGHTER",
     };
     let meaning = match state.fixture {
@@ -1449,6 +1536,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::ConeSpray => {
             "The wedge shows the currently reached portion of the authoritative cone. Its outer silhouette, not its opacity, communicates attack coverage."
         }
+        VfxLabFixture::Dash => {
+            "The colored fighter follows the built-in authoritative Dash duration. Its wake grows from the activation point to the current position, then lingers briefly and dissipates after movement ends. The wake is presentation only."
+        }
         VfxLabFixture::Status => {
             "The ring is attached presentation for the fighter's active status. It follows the fighter and disappears when the authoritative status ends."
         }
@@ -1462,6 +1552,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         }
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::StickyPayload => {
             "NEUTRAL sticky payloads use a volatile violet language shared by Sticky Blomb and Big Blob: a dark dimensional core, living emissive veins, detached viscous droplets, and an exact delayed-blast telegraph."
+        }
+        VfxLabAccent::Neutral if state.fixture == VfxLabFixture::Dash => {
+            "NEUTRAL Dash uses a cool-white high-velocity wake: a hot central lane, turbulent cyan filaments, and sparse speed cuts that dissipate after the authoritative movement ends."
         }
         VfxLabAccent::Neutral => {
             "NEUTRAL is the safe fallback. Press C to compare each authored elemental identity."
@@ -1507,7 +1600,8 @@ const fn fixture_index(fixture: VfxLabFixture) -> u8 {
         VfxLabFixture::StickyPayload => 4,
         VfxLabFixture::ElementalField => 5,
         VfxLabFixture::ConeSpray => 6,
-        VfxLabFixture::Status => 7,
+        VfxLabFixture::Dash => 7,
+        VfxLabFixture::Status => 8,
     }
 }
 
@@ -1671,6 +1765,7 @@ mod tests {
             ("sticky", VfxLabFixture::StickyPayload),
             ("field", VfxLabFixture::ElementalField),
             ("cone", VfxLabFixture::ConeSpray),
+            ("dash", VfxLabFixture::Dash),
             ("status", VfxLabFixture::Status),
         ];
         for (name, fixture) in expected {

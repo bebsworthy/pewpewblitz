@@ -1,8 +1,15 @@
 use super::super::*;
-use super::{common::CombatVfxContext, entities::FighterGroundMarker3d};
+use super::{
+    common::CombatVfxContext,
+    dash_style::{DashTrailMaterial, DashTrailQuality, quality_for_variant},
+    entities::FighterGroundMarker3d,
+};
 use std::collections::{HashMap, HashSet};
 
 const CONCEALED_FIGHTER_ALPHA: f32 = 0.52;
+const DASH_DISSIPATION_TICKS: u64 = 15;
+const DASH_WAKE_WIDTH: f32 = 38.0;
+const DASH_WAKE_REDUCED_WIDTH: f32 = 30.0;
 
 #[derive(Component)]
 pub(in super::super) struct FighterConcealmentMaterial {
@@ -44,8 +51,16 @@ fn effect_tile_status(tile: &crate::map::EffectTileOccupancy) -> Option<StatusKi
 
 #[derive(Component)]
 pub(in super::super) struct DashTrailVisual3d {
+    origin_position: Vec2,
     last_position: Vec2,
+    ends_at_tick: u64,
+    dissipates_at_tick: u64,
+    procedural: bool,
+    reduced: bool,
 }
+
+#[derive(Component)]
+pub(in super::super) struct DashTrailMaterialAsset(Handle<DashTrailMaterial>);
 
 #[derive(Component, Clone, Copy)]
 pub(in super::super) struct DashTrailLink(Entity);
@@ -54,6 +69,7 @@ pub(in super::super) struct DashTrailLink(Entity);
 enum DashTrailAction {
     Spawn,
     Update(Entity),
+    Dissipate(Entity),
     Remove(Entity),
     ClearStaleLink,
     None,
@@ -95,6 +111,7 @@ type DashFighterQuery<'w, 's> = Query<
         Or<(
             Changed<Position>,
             Changed<crate::builds::AbilityState>,
+            Changed<AuthoritativeTick>,
             Added<DashTrailLink>,
         )>,
     ),
@@ -606,16 +623,19 @@ const fn status_accent(kind: StatusKind) -> vfx::VfxAccent {
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     reason = "dash presentation owns the direct fighter-to-trail lifecycle"
 )]
 pub(in super::super) fn reconcile_dash_trails(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    mut dash_materials: ResMut<Assets<DashTrailMaterial>>,
     vfx: CombatVfxContext,
     fighters: DashFighterQuery,
     mut trails: Query<(&mut DashTrailVisual3d, &mut Transform)>,
     orphan_trails: Query<(Entity, &CombatVisualOwner), With<DashTrailVisual3d>>,
+    material_handles: Query<&DashTrailMaterialAsset>,
     fighter_owners: Query<(), With<Fighter>>,
 ) {
     for (fighter, position, network_id, team, loadout, authoritative_tick, ability, link) in
@@ -624,24 +644,29 @@ pub(in super::super) fn reconcile_dash_trails(
         let dashing = ability.is_some_and(|value| {
             matches!(value.phase, crate::builds::AbilityPhase::Dashing { .. })
         });
+        let current_tick = authoritative_tick.map_or(0, |tick| tick.0);
         let linked_trail = link.map(|link| link.0);
+        let linked_trail_expired = linked_trail
+            .and_then(|trail| trails.get(trail).ok())
+            .is_some_and(|(trail, _)| current_tick >= trail.dissipates_at_tick);
         match dash_trail_action(
             dashing,
             linked_trail,
             linked_trail.is_some_and(|trail| trails.contains(trail)),
+            linked_trail_expired,
         ) {
             DashTrailAction::Update(trail_entity) => {
                 let Ok((mut trail, mut transform)) = trails.get_mut(trail_entity) else {
                     continue;
                 };
-                let delta = position.0 - trail.last_position;
-                if delta.length_squared() > f32::EPSILON {
-                    transform.translation =
-                        ground_position(trail.last_position.midpoint(position.0)) + Vec3::Y * 3.0;
-                    transform.rotation = ground_rotation(Rotation::radians(delta.y.atan2(delta.x)));
-                    transform.scale = Vec3::new(delta.length().max(2.0), 3.0, 12.0);
-                    trail.last_position = position.0;
-                }
+                let reduced = trail.reduced;
+                update_dash_trail_geometry(&mut trail, &mut transform, position.0, reduced);
+                update_dash_trail_material(
+                    material_handles.get(trail_entity).ok(),
+                    &mut dash_materials,
+                    current_tick,
+                    1.0,
+                );
             }
             DashTrailAction::Spawn => {
                 let ends_at_tick = ability.and_then(|ability| match ability.phase {
@@ -676,11 +701,32 @@ pub(in super::super) fn reconcile_dash_trails(
                     &materials,
                     fighter,
                     position.0,
+                    ends_at_tick.unwrap_or(current_tick),
                     signature,
+                    &mut dash_materials,
                 );
                 commands.entity(fighter).insert(DashTrailLink(trail));
             }
+            DashTrailAction::Dissipate(trail_entity) => {
+                let Ok((mut trail, mut transform)) = trails.get_mut(trail_entity) else {
+                    continue;
+                };
+                let Some(material) = material_handles.get(trail_entity).ok() else {
+                    commands.entity(trail_entity).despawn();
+                    commands.entity(fighter).remove::<DashTrailLink>();
+                    continue;
+                };
+                let reduced = trail.reduced;
+                update_dash_trail_geometry(&mut trail, &mut transform, position.0, reduced);
+                update_dash_trail_material(
+                    Some(material),
+                    &mut dash_materials,
+                    current_tick,
+                    dash_trail_opacity(current_tick, trail.ends_at_tick, trail.dissipates_at_tick),
+                );
+            }
             DashTrailAction::Remove(trail) => {
+                remove_dash_material(trail, &material_handles, &mut dash_materials);
                 commands.entity(trail).despawn();
                 commands.entity(fighter).remove::<DashTrailLink>();
             }
@@ -692,6 +738,7 @@ pub(in super::super) fn reconcile_dash_trails(
     }
     for (trail, owner) in &orphan_trails {
         if fighter_owners.get(owner.0).is_err() {
+            remove_dash_material(trail, &material_handles, &mut dash_materials);
             commands.entity(trail).despawn();
         }
     }
@@ -701,38 +748,148 @@ fn dash_trail_action(
     dashing: bool,
     linked_trail: Option<Entity>,
     linked_trail_exists: bool,
+    linked_trail_expired: bool,
 ) -> DashTrailAction {
-    match (dashing, linked_trail, linked_trail_exists) {
-        (true, Some(trail), true) => DashTrailAction::Update(trail),
-        (true, _, _) => DashTrailAction::Spawn,
-        (false, Some(trail), true) => DashTrailAction::Remove(trail),
-        (false, Some(_), false) => DashTrailAction::ClearStaleLink,
-        (false, None, _) => DashTrailAction::None,
+    match (
+        dashing,
+        linked_trail,
+        linked_trail_exists,
+        linked_trail_expired,
+    ) {
+        (true, Some(trail), true, _) => DashTrailAction::Update(trail),
+        (true, _, _, _) => DashTrailAction::Spawn,
+        (false, Some(trail), true, false) => DashTrailAction::Dissipate(trail),
+        (false, Some(trail), true, true) => DashTrailAction::Remove(trail),
+        (false, Some(_), false, _) => DashTrailAction::ClearStaleLink,
+        (false, None, _, _) => DashTrailAction::None,
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the helper receives the complete immutable Dash presentation profile and asset stores"
+)]
 fn spawn_dash_trail(
     commands: &mut Commands,
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
     fighter: Entity,
     position: Vec2,
+    ends_at_tick: u64,
     signature: vfx::CombatVisualSignature,
+    dash_materials: &mut Assets<DashTrailMaterial>,
 ) -> Entity {
-    commands
-        .spawn((
-            CombatVisualOwner(fighter),
-            DashTrailVisual3d {
-                last_position: position,
-            },
-            signature,
+    let quality = quality_for_variant(signature.variant);
+    let material = quality.map(|quality| dash_materials.add(DashTrailMaterial::new(quality)));
+    let mut entity = commands.spawn((
+        CombatVisualOwner(fighter),
+        DashTrailVisual3d {
+            origin_position: position,
+            last_position: position,
+            ends_at_tick,
+            dissipates_at_tick: ends_at_tick.saturating_add(DASH_DISSIPATION_TICKS),
+            procedural: quality.is_some(),
+            reduced: quality == Some(DashTrailQuality::Reduced),
+        },
+        signature,
+        NotShadowCaster,
+        NotShadowReceiver,
+        Transform::from_translation(ground_position(position) + Vec3::Y * 3.0),
+        Name::new("V3 dash trail"),
+    ));
+    if let Some(material) = material {
+        entity.insert((
+            DashTrailMaterialAsset(material.clone()),
+            Mesh3d(primitives.projectile_trail.clone()),
+            MeshMaterial3d(material),
+        ));
+    } else {
+        entity.insert((
             Mesh3d(primitives.unit_cuboid.clone()),
             MeshMaterial3d(materials.dash.clone()),
-            NotShadowCaster,
-            Transform::from_translation(ground_position(position) + Vec3::Y * 3.0),
-            Name::new("V3 dash trail"),
-        ))
-        .id()
+        ));
+    }
+    entity.id()
+}
+
+fn update_dash_trail_geometry(
+    trail: &mut DashTrailVisual3d,
+    transform: &mut Transform,
+    position: Vec2,
+    reduced: bool,
+) {
+    let delta = position
+        - if trail.procedural {
+            trail.origin_position
+        } else {
+            trail.last_position
+        };
+    if delta.length_squared() <= f32::EPSILON {
+        return;
+    }
+    let direction = delta.normalize();
+    let rotation = Rotation::radians(delta.y.atan2(delta.x));
+    if trail.procedural {
+        let length_scale = delta.length() / 1.22;
+        let head_offset = direction * (0.22 * length_scale);
+        transform.translation = ground_position(position - head_offset) + Vec3::Y * 2.4;
+        transform.rotation = ground_rotation(rotation);
+        transform.scale = Vec3::new(
+            length_scale.max(1.0),
+            1.0,
+            if reduced {
+                DASH_WAKE_REDUCED_WIDTH
+            } else {
+                DASH_WAKE_WIDTH
+            },
+        );
+    } else {
+        transform.translation =
+            ground_position(trail.last_position.midpoint(position)) + Vec3::Y * 3.0;
+        transform.rotation = ground_rotation(rotation);
+        transform.scale = Vec3::new(delta.length().max(2.0), 3.0, 12.0);
+    }
+    trail.last_position = position;
+}
+
+fn update_dash_trail_material(
+    handle: Option<&DashTrailMaterialAsset>,
+    materials: &mut Assets<DashTrailMaterial>,
+    current_tick: u64,
+    opacity: f32,
+) {
+    let Some(handle) = handle else {
+        return;
+    };
+    if let Some(mut material) = materials.get_mut(&handle.0) {
+        let cycle_ticks = crate::timing::SIMULATION_TICK_HZ * 900;
+        let visual_tick = u16::try_from(current_tick % cycle_ticks)
+            .expect("the fifteen-minute dash visual cycle fits u16");
+        let tick_hz = u16::try_from(crate::timing::SIMULATION_TICK_HZ)
+            .expect("the simulation tick rate fits u16");
+        material.set_time_and_opacity(f32::from(visual_tick) / f32::from(tick_hz), opacity);
+    }
+}
+
+fn dash_trail_opacity(current_tick: u64, ends_at_tick: u64, dissipates_at_tick: u64) -> f32 {
+    if current_tick <= ends_at_tick {
+        return 1.0;
+    }
+    let duration = dissipates_at_tick.saturating_sub(ends_at_tick).max(1);
+    let elapsed = current_tick.saturating_sub(ends_at_tick).min(duration);
+    let duration = u16::try_from(duration).expect("bounded dash dissipation fits u16");
+    let elapsed = u16::try_from(elapsed).expect("bounded dash dissipation fits u16");
+    1.0 - f32::from(elapsed) / f32::from(duration)
+}
+
+fn remove_dash_material(
+    entity: Entity,
+    handles: &Query<&DashTrailMaterialAsset>,
+    materials: &mut Assets<DashTrailMaterial>,
+) {
+    if let Ok(handle) = handles.get(entity) {
+        materials.remove(handle.0.id());
+    }
 }
 
 pub(in super::super) fn write_status_visual_poses(
@@ -851,22 +1008,57 @@ mod tests {
     fn dash_trail_lifecycle_uses_the_direct_link_and_repairs_stale_links() {
         let trail = Entity::from_raw_u32(7).expect("valid trail entity");
         assert_eq!(
-            dash_trail_action(true, Some(trail), true),
+            dash_trail_action(true, Some(trail), true, false),
             DashTrailAction::Update(trail)
         );
         assert_eq!(
-            dash_trail_action(false, Some(trail), true),
+            dash_trail_action(false, Some(trail), true, false),
+            DashTrailAction::Dissipate(trail)
+        );
+        assert_eq!(
+            dash_trail_action(false, Some(trail), true, true),
             DashTrailAction::Remove(trail)
         );
         assert_eq!(
-            dash_trail_action(true, Some(trail), false),
+            dash_trail_action(true, Some(trail), false, false),
             DashTrailAction::Spawn
         );
         assert_eq!(
-            dash_trail_action(false, Some(trail), false),
+            dash_trail_action(false, Some(trail), false, false),
             DashTrailAction::ClearStaleLink
         );
-        assert_eq!(dash_trail_action(false, None, false), DashTrailAction::None);
+        assert_eq!(
+            dash_trail_action(false, None, false, false),
+            DashTrailAction::None
+        );
+    }
+
+    #[test]
+    fn dash_dissipation_is_authoritative_tick_driven_and_bounded() {
+        assert!((dash_trail_opacity(100, 100, 115) - 1.0).abs() < f32::EPSILON);
+        assert!((dash_trail_opacity(107, 100, 115) - 8.0 / 15.0).abs() < f32::EPSILON);
+        assert!(dash_trail_opacity(115, 100, 115).abs() < f32::EPSILON);
+        assert!(dash_trail_opacity(200, 100, 115).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn dash_material_cleanup_releases_the_per_instance_asset() {
+        let mut world = World::new();
+        world.init_resource::<Assets<DashTrailMaterial>>();
+        let handle = world
+            .resource_mut::<Assets<DashTrailMaterial>>()
+            .add(DashTrailMaterial::new(DashTrailQuality::Normal));
+        let entity = world.spawn(DashTrailMaterialAsset(handle)).id();
+        let mut state = bevy::ecs::system::SystemState::<(
+            Query<&DashTrailMaterialAsset>,
+            ResMut<Assets<DashTrailMaterial>>,
+        )>::new(&mut world);
+        let (handles, mut materials) = state
+            .get_mut(&mut world)
+            .expect("Dash cleanup test system state is valid");
+        assert_eq!(materials.len(), 1);
+        remove_dash_material(entity, &handles, &mut materials);
+        assert!(materials.is_empty());
     }
 
     #[test]
