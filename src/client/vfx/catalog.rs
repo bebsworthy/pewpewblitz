@@ -760,6 +760,38 @@ mod tests {
     }
 
     #[test]
+    fn demolition_recipe_retains_boundary_and_degrades_without_particles() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let mut signature = CombatVisualSignature::neutral_point(6, bevy::prelude::Vec2::ZERO);
+        signature.accents = [Some(VfxAccent::Demolition), None];
+        signature.carrier = VfxCarrier::PersistentArea;
+        signature.phase = VfxPhase::Activation;
+        signature.context = Some(VfxContextOverride::DemolitionStrike);
+
+        let normal = catalog
+            .resolve("ability.demolition-strike", &signature, false, false)
+            .unwrap();
+        assert_eq!(normal.id, "demolition");
+        assert_eq!(normal.layers.len(), 6);
+        assert_eq!(normal.particle_layers.len(), 2);
+        assert_eq!(
+            normal.layers[0].readability,
+            VfxReadabilityClass::CriticalGeometry
+        );
+        assert_eq!(
+            normal.layers[0].scale,
+            VfxScalePolicy::AuthoritativeRadius(1.0)
+        );
+
+        let reduced = catalog
+            .resolve("ability.demolition-strike", &signature, true, false)
+            .unwrap();
+        assert_eq!(reduced.id, "demolition_reduced");
+        assert_eq!(reduced.layers.len(), 3);
+        assert!(reduced.particle_layers.is_empty());
+    }
+
+    #[test]
     fn neutral_straight_transients_use_layered_recipes_without_changing_fallbacks() {
         let catalog = VfxCatalog::embedded().unwrap();
         let mut signature = CombatVisualSignature::neutral_point(11, bevy::prelude::Vec2::ZERO);

@@ -284,6 +284,13 @@ impl VfxLabScenario {
             let mut signature = request.signature;
             signature.identity = crate::client::vfx::VfxPresentationIdentity::Explicit(event_id);
             signature.accents = [Some(accent.signature_accent()), None];
+            if self.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
+                signature.carrier = crate::client::vfx::VfxCarrier::PersistentArea;
+                signature.phase = crate::client::vfx::VfxPhase::Activation;
+                signature.accents = [Some(crate::client::vfx::VfxAccent::Demolition), None];
+                signature.geometry =
+                    crate::client::vfx::VfxGeometry::circle(request.position, f32::from(radius));
+            }
             if self.key == crate::client::vfx::COMBAT_MUZZLE_VFX {
                 signature.carrier = crate::client::vfx::VfxCarrier::StraightProjectile;
                 signature.phase = crate::client::vfx::VfxPhase::Activation;
@@ -299,7 +306,9 @@ impl VfxLabScenario {
                     );
                 }
             }
-            signature.context = if self.key == crate::client::vfx::ELEMENTAL_FIELD_VFX {
+            signature.context = if self.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
+                Some(crate::client::vfx::VfxContextOverride::DemolitionStrike)
+            } else if self.key == crate::client::vfx::ELEMENTAL_FIELD_VFX {
                 Some(crate::client::vfx::VfxContextOverride::ElementalField(
                     match accent {
                         VfxLabAccent::Cold => crate::combat::ElementalFieldKind::Cryogenic,
@@ -1156,7 +1165,7 @@ fn handle_lab_input(
     if keyboard.just_pressed(KeyCode::Space) {
         restart = true;
     }
-    if keyboard.just_pressed(KeyCode::KeyC) && !fixture_has_fixed_accent(state.fixture) {
+    if keyboard.just_pressed(KeyCode::KeyC) && !state_has_fixed_accent(&state) {
         state.accent = state.accent.next();
         restart = true;
     }
@@ -1207,6 +1216,12 @@ fn handle_lab_input(
     if keyboard.just_pressed(KeyCode::Escape) {
         exits.write(AppExit::Success);
     }
+}
+
+fn state_has_fixed_accent(state: &VfxLabState) -> bool {
+    fixture_has_fixed_accent(state.fixture)
+        || (state.fixture == VfxLabFixture::Transient
+            && state.selected().key == crate::client::vfx::DEMOLITION_STRIKE_VFX)
 }
 
 #[allow(
@@ -1643,9 +1658,12 @@ fn update_lab_inspector(
 }
 
 fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &str) -> String {
-    let style_label = match state.fixture {
-        VfxLabFixture::PersistentSplash => "SPLASH DUAL".to_string(),
-        VfxLabFixture::Sentry => "DEPLOYABLE NEUTRAL".to_string(),
+    let style_label = match (state.fixture, scenario.key) {
+        (VfxLabFixture::Transient, crate::client::vfx::DEMOLITION_STRIKE_VFX) => {
+            "DEMOLITION".to_string()
+        }
+        (VfxLabFixture::PersistentSplash, _) => "SPLASH DUAL".to_string(),
+        (VfxLabFixture::Sentry, _) => "DEPLOYABLE NEUTRAL".to_string(),
         _ => state.accent.label().to_uppercase(),
     };
     let subject = match state.fixture {
@@ -1653,6 +1671,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             "combat.muzzle" => "WEAPON FIRING FLASH",
             "combat.impact" => "WEAPON HIT / IMPACT",
             "ability.elemental-field" => "ULTIMATE FIELD ACTIVATION",
+            "ability.demolition-strike" => "DEMOLITION STRIKE MAP BREACH",
             _ => "ONE-SHOT GAMEPLAY EFFECT",
         },
         VfxLabFixture::StraightProjectile => "STRAIGHT PROJECTILE IN FLIGHT",
@@ -1668,7 +1687,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
     };
     let meaning = match state.fixture {
         VfxLabFixture::Transient => {
-            if state.lobbed_impact {
+            if scenario.key == crate::client::vfx::DEMOLITION_STRIKE_VFX {
+                "The thin outer ring is the exact 64-unit map-destruction radius. The fracture flash, hot core, expanding shockwave, sparks, and smoke present an authoritative destruction event that has already resolved; this is not a pending danger telegraph."
+            } else if state.lobbed_impact {
                 "This is a lobbed landing. The thin outer ring is the exact payload radius; the ground flash, central burst, expanding shockwave, sparks, and smoke are staged presentation. Use . to move one tick or restart with another --sample-ticks value."
             } else {
                 "The effect is centered between the two gray scale references. Flash bodies communicate the event; expanding rings communicate its ground position. Use . to move one tick or restart with another --sample-ticks value."
@@ -1706,6 +1727,11 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         }
     };
     let style = lab_guide_style(state);
+    let style_control = if state_has_fixed_accent(state) {
+        "C fixed style  "
+    } else {
+        "C compare style"
+    };
     format!(
         "VFXLAB - WHAT YOU ARE LOOKING AT\n\n\
          {subject}\n\
@@ -1714,7 +1740,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
          {style}\n\n\
          GRAY SPHERES ARE FIGHTER-SIZE REFERENCES.\n\
          They are not part of the effect.\n\n\
-         C compare style    R reduced    P primitive\n\
+         {style_control}    R reduced    P primitive\n\
          Space restart      Enter pause  . next tick\n\
          Tab fixture        <-/-> effect U ultimate\n\
          I technical details             Esc quit\n\n\
@@ -1727,6 +1753,11 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
 }
 
 fn lab_guide_style(state: &VfxLabState) -> &'static str {
+    if state.fixture == VfxLabFixture::Transient
+        && state.selected().key == crate::client::vfx::DEMOLITION_STRIKE_VFX
+    {
+        return "DEMOLITION uses a hard orange breach language: an exact destruction boundary, a radial fracture motif, a compact white-hot core, an expanding shock front, and ballistic debris with smoke. The blast is intentionally distinct from elemental fire.";
+    }
     match state.accent {
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::StraightProjectile => {
             "NEUTRAL is the reusable Pulse/Scatter comet language: a dimensional team-colored nucleus embedded inside a deterministic wrapping energy wake. Press C to compare each elemental identity."
@@ -1932,6 +1963,37 @@ mod tests {
             crate::client::vfx::VfxCarrier::StraightProjectile
         );
         assert_eq!(impact.signature.phase, crate::client::vfx::VfxPhase::Impact);
+    }
+
+    #[test]
+    fn demolition_preview_uses_production_semantics_and_authored_radius() {
+        let scenario = VfxLabScenario {
+            key: crate::client::vfx::DEMOLITION_STRIKE_VFX,
+            producer_rank: crate::client::vfx::COMBAT_VFX_PRODUCER_RANK,
+            capabilities: VfxRequestCapabilities::RADIUS,
+        };
+        let request = scenario.request(12, 64, VfxLabAccent::Cold, false, false);
+        assert_eq!(request.authoritative_radius, Some(64.0));
+        assert_eq!(
+            request.signature.carrier,
+            crate::client::vfx::VfxCarrier::PersistentArea
+        );
+        assert_eq!(
+            request.signature.phase,
+            crate::client::vfx::VfxPhase::Activation
+        );
+        assert_eq!(
+            request.signature.accents,
+            [Some(crate::client::vfx::VfxAccent::Demolition), None]
+        );
+        assert_eq!(
+            request.signature.context,
+            Some(crate::client::vfx::VfxContextOverride::DemolitionStrike)
+        );
+        assert_eq!(
+            request.signature.geometry,
+            crate::client::vfx::VfxGeometry::circle(Vec2::ZERO, 64.0)
+        );
     }
 
     #[test]

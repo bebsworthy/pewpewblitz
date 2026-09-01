@@ -436,3 +436,37 @@ Verification:
 - VfxLab normal/reduced/primitive captures completed and were visually reviewed under `target/brl-0104-melee-v2-normal-mid`, `target/brl-0104-melee-v2-reduced-mid`, and `target/brl-0104-melee-v2-primitive`. The first filled-sector attempt was rejected during self-review as a cheap targeting wedge; the retained version uses a layered tapered blade silhouette with an independently readable contact event.
 
 The slice is ready for native gameplay feedback. BRL-0104 remains `doing`; later Phase 2 families and closeout criteria remain open.
+
+## Phase 2 next slice — Demolition Strike breach VFX — 2026-09-01
+
+Baseline capture `target/brl-0104-demolition-baseline` confirms the immediate 64-unit map-destruction ultimate is still represented by one short-lived uniformly scaled orange sphere; at the standard automatic sample it has already vanished, and VfxLab labels it as a neutral generic one-shot.
+
+Implement one independently reviewable Demolition Strike activation slice through the existing `ability.demolition-strike` request and `Demolition` semantic signature:
+
+- Preserve the cue center and exact authored destruction radius as the critical ground boundary. Do not change the immediate server-authoritative `DestroyMap` world effect, activation, targeting, cue, protocol, or balance values.
+- Replace the sphere recipe with a staged breach: exact radius boundary, fast ground fracture/flash, compact hot vertical core, expanding shockwave, bounded outward sparks/debris, and trailing smoke. Reuse existing typed mesh and GPU-particle primitives; do not add a Demolition-specific renderer branch.
+- Normal uses the full mesh/particle composition. Reduced retains the exact boundary, fracture motif, and compact flash with no particles. Primitive uses the same ordinary mesh recipe while the existing variant policy suppresses particles.
+- Make VfxLab `--effect ability.demolition-strike --radius 64` emit the production Demolition accent/context and explain that the visual accompanies an already-resolved authoritative map-destruction event rather than a pending telegraph.
+- Verify catalog bounds/fallback, semantic production/VfxLab parity, normal/reduced/primitive captures, focused tests, strict client checks, and server feature isolation.
+
+Ownership-language integration remains BRL-0107; production-map VfxLab preview remains BRL-0108. BRL-0104 stays `doing`.
+
+## Phase 2 Demolition Strike implementation evidence — 2026-09-01
+
+Implemented the Demolition Strike activation slice through the existing production `ability.demolition-strike` request. Gameplay remains an immediate server-authoritative `DestroyMap` world effect at the authored center/radius; no targeting, cue, protocol, map mutation, or balance behavior changed.
+
+- Replaced the single orange sphere with a six-layer normal recipe: exact 64-unit thin boundary, radial ground fracture, short ground flash, white-hot flash, orange core, and expanding shockwave. Existing bounded explosion sparks and smoke supply the two decorative GPU-particle layers.
+- Reduced uses three mesh-only layers (exact boundary, fracture, compact flash). Primitive uses the normal ordinary-mesh composition while the existing variant contract suppresses particle materialization.
+- VfxLab now freezes the request to the production `Demolition + PersistentArea + Activation + DemolitionStrike` signature, regardless of the general elemental accent control. Its guide identifies the exact destruction radius and states that this is presentation for an already-resolved authoritative event, not a pending telegraph.
+- Baseline `target/brl-0104-demolition-baseline` was empty at the normal automatic sample because the prior uniform sphere had already despawned. Retained visual evidence is under `target/brl-0104-demolition-v2-normal`, `target/brl-0104-demolition-v2-reduced`, `target/brl-0104-demolition-v2-primitive`, and `target/brl-0104-demolition-v2-late`. Visual review confirmed the immediate boundary/flash beat, the later fracture/shockwave/smoke beat, deterministic reduced identity, and particle-free primitive behavior.
+
+Verification:
+
+- `cargo test --features client --lib client::vfx` — 48 passed.
+- `cargo test --features client --lib client::vfx_lab` — 7 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings` — pass.
+- `just _test-client` — canonical client suite passed: 622 library tests plus all client targets.
+- `just _server-features` and `just _v3-world-presentation` — pass.
+- `cargo fmt --all` and `git diff --check` — pass.
+
+The slice is ready for native gameplay feedback. Reveal/concealment, Sentry fire/removal, remaining status/expiry cues, the complete overlap/resource matrix, and closeout remain open; BRL-0104 stays `doing`.
