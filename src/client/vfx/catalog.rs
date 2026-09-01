@@ -33,6 +33,7 @@ pub(crate) enum VfxRendererFamily {
     GroundRing,
     GroundThinRing,
     GroundDisc,
+    GroundSpark,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -53,6 +54,10 @@ pub(crate) enum VfxMaterialKey {
     ColdSoft,
     FireBright,
     FireSoft,
+    PoisonBright,
+    PoisonSoft,
+    RestorationBright,
+    RestorationSoft,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
@@ -741,6 +746,11 @@ mod tests {
         for (accent, expected_profile) in [
             (VfxAccent::Cold, VfxParticleProfile::ColdFragments),
             (VfxAccent::Fire, VfxParticleProfile::FireEmbers),
+            (VfxAccent::Poison, VfxParticleProfile::PoisonBubbles),
+            (
+                VfxAccent::Restoration,
+                VfxParticleProfile::RestorationPetals,
+            ),
         ] {
             let mut signature = CombatVisualSignature::neutral_point(1, bevy::prelude::Vec2::ZERO);
             signature.accents = [Some(accent), None];
@@ -757,6 +767,43 @@ mod tests {
             assert!(normal.particle_layers[0].spawn.amount() <= normal.particle_layers[0].capacity);
             assert!(reduced.particle_layers.is_empty());
         }
+    }
+
+    #[test]
+    fn poison_lob_and_restoration_area_select_authored_transient_recipes() {
+        let catalog = VfxCatalog::embedded().unwrap();
+        let mut poison = CombatVisualSignature::neutral_point(7, bevy::prelude::Vec2::ZERO);
+        poison.accents = [Some(VfxAccent::Poison), None];
+        poison.carrier = VfxCarrier::LobbedProjectile;
+        poison.phase = VfxPhase::Impact;
+        poison.geometry = super::super::VfxGeometry::circle(bevy::prelude::Vec2::ZERO, 120.0);
+        let poison_recipe = catalog
+            .resolve("combat.impact", &poison, false, false)
+            .unwrap();
+        assert_eq!(poison_recipe.id, "poison_lob_explosion");
+        assert_eq!(
+            poison_recipe.layers[0].renderer,
+            VfxRendererFamily::GroundThinRing
+        );
+
+        let mut restoration = CombatVisualSignature::neutral_point(8, bevy::prelude::Vec2::ZERO);
+        restoration.accents = [Some(VfxAccent::Restoration), None];
+        restoration.carrier = VfxCarrier::PersistentArea;
+        restoration.phase = VfxPhase::Activation;
+        restoration.geometry = super::super::VfxGeometry::circle(bevy::prelude::Vec2::ZERO, 160.0);
+        restoration.context = Some(VfxContextOverride::Ultimate(
+            crate::builds::UltimateDefinitionId(5),
+        ));
+        let restoration_recipe = catalog
+            .resolve("ability.elemental-field", &restoration, false, false)
+            .unwrap();
+        assert_eq!(restoration_recipe.id, "restoration_area_activation");
+        assert!(
+            restoration_recipe
+                .layers
+                .iter()
+                .any(|layer| layer.renderer == VfxRendererFamily::GroundSpark)
+        );
     }
 
     #[test]

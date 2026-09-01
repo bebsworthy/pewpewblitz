@@ -143,7 +143,8 @@ impl VfxMeshLayer {
                 ) | (
                     VfxRendererFamily::GroundRing
                         | VfxRendererFamily::GroundThinRing
-                        | VfxRendererFamily::GroundDisc,
+                        | VfxRendererFamily::GroundDisc
+                        | VfxRendererFamily::GroundSpark,
                     VfxAnchorPolicy::GroundOffset(_)
                 )
             ))
@@ -169,6 +170,8 @@ impl VfxMeshLayer {
 pub(crate) enum VfxParticleProfile {
     ColdFragments,
     FireEmbers,
+    PoisonBubbles,
+    RestorationPetals,
     ExplosionSparks,
     ExplosionSmoke,
     ProjectileSmoke,

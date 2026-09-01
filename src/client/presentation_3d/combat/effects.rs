@@ -176,6 +176,7 @@ fn resolved_effect(
                     VfxRendererFamily::GroundRing => primitives.area_ring.clone(),
                     VfxRendererFamily::GroundThinRing => primitives.area_thin_ring.clone(),
                     VfxRendererFamily::GroundDisc => primitives.area_disc.clone(),
+                    VfxRendererFamily::GroundSpark => primitives.vitality_spark.clone(),
                 },
                 material: vfx_material(layer.material, materials),
                 transform: effect_layer_transform(
@@ -268,7 +269,8 @@ fn effect_layer_transform(
     match layer.renderer {
         VfxRendererFamily::GroundRing
         | VfxRendererFamily::GroundThinRing
-        | VfxRendererFamily::GroundDisc => Transform {
+        | VfxRendererFamily::GroundDisc
+        | VfxRendererFamily::GroundSpark => Transform {
             translation: ground_position(position) + Vec3::Y * height,
             rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
             scale: Vec3::splat(scale),
@@ -318,6 +320,10 @@ fn vfx_material(key: VfxMaterialKey, materials: &Material3dAssets) -> Handle<Sta
         VfxMaterialKey::ColdSoft => materials.elemental_cold.clone(),
         VfxMaterialKey::FireBright => materials.elemental_fire_bright.clone(),
         VfxMaterialKey::FireSoft => materials.elemental_fire.clone(),
+        VfxMaterialKey::PoisonBright => materials.elemental_poison_bright.clone(),
+        VfxMaterialKey::PoisonSoft => materials.elemental_poison.clone(),
+        VfxMaterialKey::RestorationBright => materials.elemental_restoration_bright.clone(),
+        VfxMaterialKey::RestorationSoft => materials.elemental_restoration.clone(),
     }
 }
 /// Keeps fighter animation feedback separate from semantic VFX production.

@@ -52,3 +52,35 @@ Verification:
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 
 Phase 1 remains incomplete until the Poison and Restoration transient recipe mappings/layers are implemented and the retained styles receive native visual feedback. BRL-0104 remains `doing`.
+
+## Phase 1 transient-style implementation evidence — 2026-09-01
+
+Completed the authored transient half of Phase 1:
+
+- Added typed Poison and Restoration material keys, a reusable ground vitality-star renderer, and bounded Poison-bubble and Restoration-petal Hanabi profiles.
+- Added normal and reduced recipes plus typed selectors for muzzle, direct impact, ultimate impact, lobbed impact, ultimate lobbed impact, and elemental-field activation.
+- Lobbed recipes preserve a thin authoritative-radius boundary. Reduced and primitive selection removes decorative particles while retaining mesh identity.
+- Upgraded shared retained discs and rings from the default 32-segment geometry to 96/128-segment meshes so large authoritative areas retain a smooth silhouette.
+- Stable request identities continue to seed particle randomness; the new profiles do not alter authoritative gameplay or the server feature graph.
+
+Visual iteration disposition:
+
+- Initial unfrozen captures correctly showed expired effects; the evidence path was corrected to use `--paused --sample-ticks N`.
+- The first large-radius recipes were rejected during implementation because broad fills obscured the play space and additive overlap washed particles to white.
+- Central fills/sparks were reduced, Poison and Restoration particles moved to alpha blending, Restoration burst counts were reduced, and shared ring resolution was raised before accepting the implementation slice.
+
+Native paired-capture evidence:
+
+- `target/brl-0104-poison-impact-frozen/`
+- `target/brl-0104-restoration-impact-frozen/`
+- `target/brl-0104-poison-lob-impact-v3/`
+- `target/brl-0104-restoration-area-activation-v3/`
+
+Verification:
+
+- `cargo test --locked --no-default-features --features client --lib`: 599 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: passed.
+- `just _check-server` and `just _server-features`: passed.
+- `cargo fmt --all -- --check` and `git diff --check`: passed.
+
+Phase 1 implementation is complete. Native user visual feedback remains open while Phase 2 proceeds with the neutral supported carrier families. BRL-0104 remains `doing`.

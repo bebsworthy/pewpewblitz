@@ -11,7 +11,10 @@ use bevy::{
     gltf::Gltf,
     light::{GlobalAmbientLight, NotShadowCaster, NotShadowReceiver},
     math::primitives::{Annulus, Circle},
-    mesh::Indices,
+    mesh::{
+        Indices,
+        primitives::{MeshBuilder, Meshable},
+    },
     render::render_resource::PrimitiveTopology,
     ui::UiSystems,
     world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady},
@@ -87,6 +90,7 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) area_disc: Handle<Mesh>,
     pub(crate) effect_sphere: Handle<Mesh>,
     pub(crate) fire_tongue: Handle<Mesh>,
+    pub(crate) vitality_spark: Handle<Mesh>,
     pub(crate) barrel_body: Handle<Mesh>,
 }
 
@@ -1049,12 +1053,18 @@ pub(in crate::client) fn setup_3d_foundation(
         unit_cuboid: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
         sentry_base: meshes.add(Cylinder::new(22.0, 8.0)),
         sentry_body: meshes.add(Cylinder::new(15.0, 24.0)),
-        ground_ring: meshes.add(Annulus::new(fighter_radius - 3.0, fighter_radius)),
-        area_ring: meshes.add(Annulus::new(0.93, 1.0)),
-        area_thin_ring: meshes.add(Annulus::new(0.978, 1.0)),
-        area_disc: meshes.add(Circle::new(1.0)),
+        ground_ring: meshes.add(
+            Annulus::new(fighter_radius - 3.0, fighter_radius)
+                .mesh()
+                .resolution(96)
+                .build(),
+        ),
+        area_ring: meshes.add(Annulus::new(0.93, 1.0).mesh().resolution(128).build()),
+        area_thin_ring: meshes.add(Annulus::new(0.978, 1.0).mesh().resolution(128).build()),
+        area_disc: meshes.add(Circle::new(1.0).mesh().resolution(128).build()),
         effect_sphere: meshes.add(Sphere::new(1.0)),
         fire_tongue: meshes.add(fire_tongue_mesh()),
+        vitality_spark: meshes.add(vitality_spark_mesh()),
         barrel_body: meshes.add(Cylinder::new(16.0, 28.0)),
     };
     let matte = |color: Color| StandardMaterial {
@@ -1405,6 +1415,37 @@ fn fire_tongue_mesh() -> Mesh {
         .map(|position| [position[0] + 0.5, position[1]])
         .collect::<Vec<_>>();
     let indices = vec![0, 1, 2, 0, 2, 6, 6, 2, 3, 6, 3, 5, 5, 3, 4];
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U16(indices));
+    mesh
+}
+
+fn vitality_spark_mesh() -> Mesh {
+    const POINTS: u16 = 16;
+
+    let mut positions = vec![[0.0, 0.0, 0.0]];
+    for slot in 0..POINTS {
+        let angle = f32::from(slot) / f32::from(POINTS) * core::f32::consts::TAU;
+        let radius = if slot.is_multiple_of(2) { 1.0 } else { 0.28 };
+        positions.push([angle.cos() * radius, angle.sin() * radius, 0.0]);
+    }
+    let normals = vec![[0.0, 0.0, 1.0]; positions.len()];
+    let uvs = positions
+        .iter()
+        .map(|position| [position[0].mul_add(0.5, 0.5), position[1].mul_add(0.5, 0.5)])
+        .collect::<Vec<_>>();
+    let mut indices = Vec::with_capacity(usize::from(POINTS) * 3);
+    for slot in 0..POINTS {
+        let current = slot + 1;
+        let next = (slot + 1) % POINTS + 1;
+        indices.extend([0, current, next]);
+    }
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),

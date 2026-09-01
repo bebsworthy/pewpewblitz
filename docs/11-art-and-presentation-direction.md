@@ -237,6 +237,14 @@ it does not replace these ownership and cleanup paths:
 | Cone spray | Replicated origin, facing, propagation and deadline | Fixed bounded clipped-segment root | Reconstructed from authoritative tick; owner removal clears all segments |
 | Fighter status/dash | Replicated status, ability, concealment, and observed tick | Fighter-owned status markers and bounded trail | Reconciled from current state and removed on status/owner lifecycle |
 
+Poison and Restoration transient recipes cover muzzle, direct impact, lobbed impact, ultimate
+impact, and elemental-field activation. Poison layers use central contamination accents plus
+bounded bubble bursts; Restoration layers use a reusable vitality-star mesh plus bounded petal
+bursts. Lobbed variants retain a thin authoritative-radius boundary. Decorative particles use
+stable presentation seeds, and reduced/primitive variants omit them while preserving the accent's
+mesh identity. Shared ground discs and rings use high-resolution retained meshes so large
+authoritative radii do not expose a coarse polygonal silhouette.
+
 Aim previews remain intent UI rather than weapon VFX recipes. Imported fighter/weapon scenes and
 map visuals retain their existing owners. The recipe system may reuse presentation assets, but it
 does not become a second gameplay-world renderer.

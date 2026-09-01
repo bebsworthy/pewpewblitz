@@ -142,6 +142,8 @@ impl VfxParticleAssets {
                 VfxParticleProfile::FireEmbers | VfxParticleProfile::ExplosionSparks => {
                     primitives.fire_tongue.clone()
                 }
+                VfxParticleProfile::PoisonBubbles => primitives.effect_sphere.clone(),
+                VfxParticleProfile::RestorationPetals => primitives.vitality_spark.clone(),
                 VfxParticleProfile::ExplosionSmoke | VfxParticleProfile::ProjectileSmoke => {
                     primitives.effect_sphere.clone()
                 }
@@ -361,6 +363,8 @@ fn build_effect_asset(layer: &VfxParticleLayer) -> EffectAsset {
     let acceleration = match layer.profile {
         VfxParticleProfile::ColdFragments => Vec3::new(0.0, -24.0, 0.0),
         VfxParticleProfile::FireEmbers => Vec3::new(0.0, -14.0, 0.0),
+        VfxParticleProfile::PoisonBubbles => Vec3::new(0.0, 7.0, 0.0),
+        VfxParticleProfile::RestorationPetals => Vec3::new(0.0, 2.0, 0.0),
         VfxParticleProfile::ExplosionSparks => Vec3::new(0.0, -72.0, 0.0),
         VfxParticleProfile::ExplosionSmoke => Vec3::new(0.0, 6.0, 0.0),
         VfxParticleProfile::ProjectileSmoke => Vec3::new(0.0, 4.0, 0.0),
@@ -371,13 +375,18 @@ fn build_effect_asset(layer: &VfxParticleLayer) -> EffectAsset {
             OrientMode::AlongVelocity
         }
         VfxParticleProfile::FireEmbers
+        | VfxParticleProfile::PoisonBubbles
+        | VfxParticleProfile::RestorationPetals
         | VfxParticleProfile::ExplosionSmoke
         | VfxParticleProfile::ProjectileSmoke => OrientMode::FaceCameraPosition,
     };
 
     let alpha_mode = if matches!(
         layer.profile,
-        VfxParticleProfile::ExplosionSmoke | VfxParticleProfile::ProjectileSmoke
+        VfxParticleProfile::PoisonBubbles
+            | VfxParticleProfile::RestorationPetals
+            | VfxParticleProfile::ExplosionSmoke
+            | VfxParticleProfile::ProjectileSmoke
     ) {
         HanabiAlphaMode::Blend
     } else {
@@ -420,6 +429,16 @@ fn color_gradient(profile: VfxParticleProfile) -> HanabiGradient<Vec4> {
             gradient.add_key(0.3, Vec4::new(1.0, 0.35, 0.025, 0.95));
             gradient.add_key(1.0, Vec4::new(0.72, 0.025, 0.0, 0.0));
         }
+        VfxParticleProfile::PoisonBubbles => {
+            gradient.add_key(0.0, Vec4::new(0.68, 1.0, 0.18, 0.95));
+            gradient.add_key(0.42, Vec4::new(0.12, 0.82, 0.20, 0.78));
+            gradient.add_key(1.0, Vec4::new(0.03, 0.24, 0.08, 0.0));
+        }
+        VfxParticleProfile::RestorationPetals => {
+            gradient.add_key(0.0, Vec4::new(0.38, 1.0, 0.62, 0.78));
+            gradient.add_key(0.38, Vec4::new(0.06, 0.74, 0.52, 0.66));
+            gradient.add_key(1.0, Vec4::new(0.02, 0.38, 0.34, 0.0));
+        }
         VfxParticleProfile::ExplosionSparks => {
             gradient.add_key(0.0, Vec4::new(1.0, 1.0, 0.72, 1.0));
             gradient.add_key(0.18, Vec4::new(1.0, 0.58, 0.06, 1.0));
@@ -450,6 +469,8 @@ fn size_gradient(layer: &VfxParticleLayer) -> HanabiGradient<Vec3> {
             layer.size_start * 0.28,
         ),
         VfxParticleProfile::FireEmbers
+        | VfxParticleProfile::PoisonBubbles
+        | VfxParticleProfile::RestorationPetals
         | VfxParticleProfile::ExplosionSmoke
         | VfxParticleProfile::ProjectileSmoke => Vec3::splat(layer.size_start),
         VfxParticleProfile::ExplosionSparks => Vec3::new(
