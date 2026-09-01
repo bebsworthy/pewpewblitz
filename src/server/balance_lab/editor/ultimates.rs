@@ -1,4 +1,7 @@
-use super::{EditorFieldDescriptor, EditorPathSegment, EditorSection, NumberSpec, add_field};
+use super::{
+    EditorFieldDescriptor, EditorPathSegment, EditorSection, NumberSpec, add_field,
+    relative_comparison_key,
+};
 use crate::builds::{ElementalFieldEffect, ULTIMATE_PARAMETER_BOUNDS, UltimateParameters};
 
 macro_rules! path {
@@ -34,12 +37,14 @@ pub(super) fn add_fields(
     let bounds = ULTIMATE_PARAMETER_BOUNDS;
     for (index, ultimate) in snapshot.ultimates.iter().enumerate() {
         let mut add = |tail: Vec<EditorPathSegment>, group: &str, label: &str, spec: NumberSpec| {
+            let comparison_key = relative_comparison_key(&tail);
             let mut descriptor_path = path!["ultimates", index, "parameters"];
             descriptor_path.extend(tail);
             add_field(
                 fields,
                 descriptor_path,
                 EditorSection::Ultimates,
+                &comparison_key,
                 &ultimate.key,
                 &ultimate.display_name,
                 group,

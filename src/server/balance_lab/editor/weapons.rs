@@ -1,4 +1,7 @@
-use super::{EditorFieldDescriptor, EditorPathSegment, EditorSection, NumberSpec, add_field};
+use super::{
+    EditorFieldDescriptor, EditorPathSegment, EditorSection, NumberSpec, add_field,
+    relative_comparison_key,
+};
 use crate::combat::definitions::{
     MAX_COLD_PAYLOAD_AMOUNT, MAX_SPLASH_ACTIVE_PER_OWNER, MAX_STICKY_ACTIVE_PER_OWNER,
 };
@@ -32,10 +35,12 @@ pub(super) fn add_fields(
         path
     };
     let mut add = |tail: Vec<EditorPathSegment>, group: &str, label: &str, spec: NumberSpec| {
+        let comparison_key = relative_comparison_key(&tail);
         add_field(
             fields,
             root(tail),
             EditorSection::Weapons,
+            &comparison_key,
             &weapon.key,
             &weapon.display_name,
             group,

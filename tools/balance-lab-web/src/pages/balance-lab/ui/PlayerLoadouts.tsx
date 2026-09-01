@@ -3,7 +3,7 @@ import { weaponModifierLabels } from "../lib/playerLoadouts";
 import type { PlayerLoadout } from "../model/balanceLab";
 
 export function PlayerLoadouts({ players }: { players: PlayerLoadout[] }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   return (
     <section className="player-loadouts" aria-labelledby="player-loadouts-heading">
       <header>

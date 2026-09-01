@@ -153,10 +153,12 @@ pub(super) fn add_fields(
             } => ("HeatShielding", &resistance_descriptors),
         };
         for (tail, group, label, spec) in descriptors {
+            let comparison_key = format!("{variant}/{tail}");
             add_field(
                 fields,
                 passive_path(index, variant, tail),
-                EditorSection::Ultimates,
+                EditorSection::Passives,
+                &comparison_key,
                 &passive.key,
                 &passive.display_name,
                 group,

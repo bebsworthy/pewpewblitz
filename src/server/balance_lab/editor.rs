@@ -13,7 +13,7 @@ mod passives;
 mod ultimates;
 mod weapons;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 10;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 11;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +27,7 @@ pub(super) struct BalanceLabEditorManifest {
 struct EditorFieldDescriptor {
     path: Vec<EditorPathSegment>,
     section: EditorSection,
+    comparison_key: String,
     subject_key: String,
     subject_label: String,
     group: String,
@@ -62,13 +63,14 @@ impl From<usize> for EditorPathSegment {
     }
 }
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 enum EditorSection {
     Global,
     Fighters,
     Weapons,
     Ultimates,
+    Passives,
     WorldObjects,
     Modes,
 }
@@ -237,6 +239,8 @@ impl BalanceLabEditorManifest {
         passives::add_fields(&mut fields, snapshot);
         add_effect_tile_fields(&mut fields);
         add_world_fields(&mut fields);
+        validate_comparison_contract(&fields)
+            .expect("built-in editor comparison contract must be valid");
         Self {
             schema_version: EDITOR_SCHEMA_VERSION,
             fields,
@@ -278,6 +282,7 @@ fn add_effect_tile_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path!["effectTiles", field],
             EditorSection::WorldObjects,
+            field,
             "effect-tiles",
             "Effect tiles",
             "Movement",
@@ -289,6 +294,7 @@ fn add_effect_tile_fields(fields: &mut Vec<EditorFieldDescriptor>) {
         fields,
         path!["effectTiles", "damagePerPulse"],
         EditorSection::WorldObjects,
+        "damagePerPulse",
         "effect-tiles",
         "Effect tiles",
         "Damage",
@@ -303,6 +309,7 @@ fn add_effect_tile_fields(fields: &mut Vec<EditorFieldDescriptor>) {
         fields,
         path!["effectTiles", "intervalTicks"],
         EditorSection::WorldObjects,
+        "intervalTicks",
         "effect-tiles",
         "Effect tiles",
         "Damage",
@@ -341,6 +348,7 @@ fn add_global_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path!["conditionRules", field],
             EditorSection::Global,
+            field,
             "cold",
             "Cold & Freeze",
             "Lifecycle",
@@ -361,6 +369,7 @@ fn add_global_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path!["ultimateCharge", field],
             EditorSection::Global,
+            field,
             "ultimate-charge",
             "Ultimate charge",
             "Combat economy",
@@ -378,6 +387,7 @@ fn add_field(
     fields: &mut Vec<EditorFieldDescriptor>,
     path: Vec<EditorPathSegment>,
     section: EditorSection,
+    comparison_key: &str,
     subject_key: &str,
     subject_label: &str,
     group: &str,
@@ -387,6 +397,7 @@ fn add_field(
     fields.push(EditorFieldDescriptor {
         path,
         section,
+        comparison_key: comparison_key.to_string(),
         subject_key: subject_key.to_string(),
         subject_label: subject_label.to_string(),
         group: group.to_string(),
@@ -403,6 +414,56 @@ fn add_field(
     });
 }
 
+fn relative_comparison_key(path: &[EditorPathSegment]) -> String {
+    path.iter()
+        .map(|segment| match segment {
+            EditorPathSegment::Key(value) => value.clone(),
+            EditorPathSegment::Index(value) => value.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn validate_comparison_contract(fields: &[EditorFieldDescriptor]) -> Result<(), String> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut cells = HashSet::new();
+    let mut rows: HashMap<(EditorSection, &str), &EditorFieldDescriptor> = HashMap::new();
+    for field in fields {
+        if field.comparison_key.is_empty() {
+            return Err(format!("{} has an empty comparison key", field.label));
+        }
+        let cell = (
+            field.section,
+            field.subject_key.as_str(),
+            field.comparison_key.as_str(),
+        );
+        if !cells.insert(cell) {
+            return Err(format!(
+                "duplicate comparison cell {:?}/{}/{}",
+                field.section, field.subject_key, field.comparison_key
+            ));
+        }
+        let row = (field.section, field.comparison_key.as_str());
+        if let Some(existing) = rows.get(&row) {
+            if existing.group != field.group
+                || existing.label != field.label
+                || existing.unit != field.unit
+                || existing.storage_kind != field.storage_kind
+                || existing.storage_scale.to_bits() != field.storage_scale.to_bits()
+            {
+                return Err(format!(
+                    "incompatible comparison row {:?}/{}",
+                    field.section, field.comparison_key
+                ));
+            }
+        } else {
+            rows.insert(row, field);
+        }
+    }
+    Ok(())
+}
+
 fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
     for (key, label) in [
         ("default", "Default"),
@@ -413,6 +474,7 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path!["fighterProfiles", key, "maximum_health"],
             EditorSection::Fighters,
+            "maximum_health",
             key,
             label,
             "Core stats",
@@ -423,6 +485,7 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path!["fighterProfiles", key, "movement_speed"],
             EditorSection::Fighters,
+            "movement_speed",
             key,
             label,
             "Core stats",
@@ -439,6 +502,7 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path!["fighterProfiles", key, "health_recovery_rate"],
             EditorSection::Fighters,
+            "health_recovery_rate",
             key,
             label,
             "Recovery",
@@ -449,6 +513,7 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path!["fighterProfiles", key, "idle_attack_delay_ticks"],
             EditorSection::Fighters,
+            "idle_attack_delay_ticks",
             key,
             label,
             "Recovery",
@@ -459,6 +524,7 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path!["fighterProfiles", key, "reveal_proximity_radius"],
             EditorSection::Fighters,
+            "reveal_proximity_radius",
             key,
             label,
             "Concealment",
@@ -475,6 +541,7 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path!["fighterProfiles", key, "cold_capacity"],
             EditorSection::Fighters,
+            "cold_capacity",
             key,
             label,
             "Elemental baselines",
@@ -482,54 +549,84 @@ fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             NumberSpec::integer(1, u32::from(MAX_COLD_CAPACITY), "cold")
                 .help("Target-owned buildup required to trigger Freeze."),
         );
-        for (field, field_label) in [
-            ("cold_resistance_basis_points", "Cold resistance"),
-            ("poison_resistance_basis_points", "Poison resistance"),
-            ("fire_resistance_basis_points", "Fire resistance"),
-        ] {
-            add_field(
-                fields,
-                path!["fighterProfiles", key, field],
-                EditorSection::Fighters,
-                key,
-                label,
-                "Elemental baselines",
-                field_label,
-                NumberSpec::resistance_basis_points(),
-            );
-        }
+        add_fighter_resistance_fields(fields, key, label);
+    }
+}
+
+fn add_fighter_resistance_fields(
+    fields: &mut Vec<EditorFieldDescriptor>,
+    subject_key: &str,
+    subject_label: &str,
+) {
+    for (field, label) in [
+        ("cold_resistance_basis_points", "Cold resistance"),
+        ("poison_resistance_basis_points", "Poison resistance"),
+        ("fire_resistance_basis_points", "Fire resistance"),
+    ] {
+        add_field(
+            fields,
+            path!["fighterProfiles", subject_key, field],
+            EditorSection::Fighters,
+            field,
+            subject_key,
+            subject_label,
+            "Elemental baselines",
+            label,
+            NumberSpec::resistance_basis_points(),
+        );
     }
 }
 
 fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
+    add_barrel_fields(fields);
+    add_chest_fields(fields);
+    add_field(
+        fields,
+        path!["heist", "safeMaximumHealth"],
+        EditorSection::Modes,
+        "safeMaximumHealth",
+        "heist",
+        "Heist",
+        "Safe",
+        "Maximum health",
+        NumberSpec::integer(100, 20_000, "health"),
+    );
+}
+
+fn add_barrel_fields(fields: &mut Vec<EditorFieldDescriptor>) {
     add_field(
         fields,
         path!["barrel", "damageProfile", "maximum_health"],
         EditorSection::WorldObjects,
+        "maximum_health",
         "oil-barrel",
         "Oil barrel",
         "Durability",
         "Maximum health",
         NumberSpec::integer(1, 1_000, "health"),
     );
-    for (path, label, spec) in [
+    for (path, comparison_key, label, spec) in [
         (
             path!["barrel", "explosionProfile", "damage"],
+            "explosion_damage",
             "Explosion damage",
             NumberSpec::integer(1, u32::from(u16::MAX), "health"),
         ),
         (
             path!["barrel", "explosionProfile", "radius_world_units"],
+            "explosion_radius_world_units",
             "Explosion radius",
             NumberSpec::integer(1, 512, "world units"),
         ),
         (
             path!["barrel", "explosionProfile", "maximum_targets"],
+            "explosion_maximum_targets",
             "Maximum targets",
             NumberSpec::integer(1, 16, "targets"),
         ),
         (
             path!["barrel", "explosionProfile", "maximum_chain_reactions"],
+            "explosion_maximum_chain_reactions",
             "Maximum chain reactions",
             NumberSpec::integer(1, 16, "reactions"),
         ),
@@ -538,6 +635,7 @@ fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             fields,
             path,
             EditorSection::WorldObjects,
+            comparison_key,
             "oil-barrel",
             "Oil barrel",
             "Explosion",
@@ -545,13 +643,17 @@ fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
             spec,
         );
     }
+}
+
+fn add_chest_fields(fields: &mut Vec<EditorFieldDescriptor>) {
     add_field(
         fields,
         path!["chest", "damageProfile", "maximum_health"],
         EditorSection::WorldObjects,
+        "maximum_health",
         "treasure-chest",
         "Treasure chest & pickup",
-        "Chest",
+        "Durability",
         "Maximum health",
         NumberSpec::integer(1, 1_000, "health"),
     );
@@ -559,6 +661,7 @@ fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
         fields,
         path!["chest", "pickupDefinition", "restoration"],
         EditorSection::WorldObjects,
+        "restoration",
         "treasure-chest",
         "Treasure chest & pickup",
         "Pickup",
@@ -569,6 +672,7 @@ fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
         fields,
         path!["chest", "pickupDefinition", "collection_radius_world_units"],
         EditorSection::WorldObjects,
+        "collection_radius_world_units",
         "treasure-chest",
         "Treasure chest & pickup",
         "Pickup",
@@ -579,21 +683,12 @@ fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
         fields,
         path!["chest", "pickupDefinition", "lifetime_ticks"],
         EditorSection::WorldObjects,
+        "lifetime_ticks",
         "treasure-chest",
         "Treasure chest & pickup",
         "Pickup",
         "Lifetime",
         NumberSpec::ticks(60, 3_600),
-    );
-    add_field(
-        fields,
-        path!["heist", "safeMaximumHealth"],
-        EditorSection::Modes,
-        "heist",
-        "Heist",
-        "Safe",
-        "Maximum health",
-        NumberSpec::integer(100, 20_000, "health"),
     );
 }
 
@@ -748,9 +843,19 @@ mod tests {
         step: f64,
         help: &str,
     ) -> serde_json::Value {
+        let comparison_key = path.as_array().expect("literal path is an array")[3..]
+            .iter()
+            .map(|segment| match segment {
+                serde_json::Value::String(value) => value.clone(),
+                serde_json::Value::Number(value) => value.to_string(),
+                _ => panic!("literal path segment is not scalar"),
+            })
+            .collect::<Vec<_>>()
+            .join("/");
         serde_json::json!({
             "path": path,
             "section": "ultimates",
+            "comparisonKey": comparison_key,
             "subjectKey": subject_key,
             "subjectLabel": subject_label,
             "group": group,
@@ -802,6 +907,70 @@ mod tests {
                 "missing authored tuning path {expected}"
             );
         }
+    }
+
+    #[test]
+    fn fighter_comparison_rows_align_all_three_profiles() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let fighter_fields: Vec<_> = manifest
+            .fields
+            .iter()
+            .filter(|field| field.section == EditorSection::Fighters)
+            .collect();
+        let row_counts =
+            fighter_fields
+                .iter()
+                .fold(std::collections::BTreeMap::new(), |mut counts, field| {
+                    *counts.entry(field.comparison_key.as_str()).or_insert(0) += 1;
+                    counts
+                });
+
+        assert_eq!(fighter_fields.len(), 27);
+        assert_eq!(row_counts.len(), 9);
+        assert!(row_counts.values().all(|count| *count == 3));
+    }
+
+    #[test]
+    fn passives_have_their_own_editor_section() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let passive_fields: Vec<_> = manifest
+            .fields
+            .iter()
+            .filter(|field| {
+                matches!(
+                    field.path.first(),
+                    Some(EditorPathSegment::Key(root)) if root == "passives"
+                )
+            })
+            .collect();
+
+        assert_eq!(passive_fields.len(), 12);
+        assert!(
+            passive_fields
+                .iter()
+                .all(|field| field.section == EditorSection::Passives)
+        );
+    }
+
+    #[test]
+    fn comparison_contract_rejects_duplicate_and_incompatible_cells() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let original = manifest
+            .fields
+            .iter()
+            .find(|field| field.section == EditorSection::Fighters)
+            .expect("fixture has fighter fields")
+            .clone();
+
+        assert!(validate_comparison_contract(&[original.clone(), original.clone()]).is_err());
+
+        let mut incompatible = original.clone();
+        incompatible.subject_key = "another-profile".to_string();
+        incompatible.unit = "seconds".to_string();
+        assert!(validate_comparison_contract(&[original, incompatible]).is_err());
     }
 
     #[test]
@@ -876,7 +1045,7 @@ mod tests {
         let digest = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
             (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
         });
-        assert_eq!(digest, 0x7c9a_7aaa_e5ba_9969);
+        assert_eq!(digest, 0x9177_b9a7_ce27_b4cb);
     }
 
     #[test]
@@ -1049,7 +1218,7 @@ mod tests {
                 )
             })
             .collect();
-        let literal_descriptor = |path,
+        let literal_descriptor = |path: serde_json::Value,
                                   subject_key,
                                   subject_label,
                                   group,
@@ -1061,9 +1230,19 @@ mod tests {
                                   step,
                                   control,
                                   help| {
+            let comparison_key = path.as_array().expect("literal path is an array")[3..]
+                .iter()
+                .map(|segment| match segment {
+                    serde_json::Value::String(value) => value.clone(),
+                    serde_json::Value::Number(value) => value.to_string(),
+                    _ => panic!("literal path segment is not scalar"),
+                })
+                .collect::<Vec<_>>()
+                .join("/");
             serde_json::json!({
                 "path": path,
-                "section": "ultimates",
+                "section": "passives",
+                "comparisonKey": comparison_key,
                 "subjectKey": subject_key,
                 "subjectLabel": subject_label,
                 "group": group,
@@ -1477,6 +1656,7 @@ mod tests {
             serde_json::json!({
                 "path": ["weapons", 2, "recipe", "delivery", "Lobbed", "max_flight_ticks"],
                 "section": "weapons",
+                "comparisonKey": "delivery/Lobbed/max_flight_ticks",
                 "subjectKey": "arc-launcher",
                 "subjectLabel": "Arc Launcher",
                 "group": "Delivery",
@@ -1508,6 +1688,7 @@ mod tests {
             serde_json::json!({
                 "path": ["weapons", 6, "recipe", "delivery", "Splash", "max_flight_ticks"],
                 "section": "weapons",
+                "comparisonKey": "delivery/Splash/max_flight_ticks",
                 "subjectKey": "splash",
                 "subjectLabel": "Splash",
                 "group": "Splash",
@@ -1542,6 +1723,7 @@ mod tests {
                     "amount"
                 ],
                 "section": "weapons",
+                "comparisonKey": "payload_bundles/0/effects/1/Heal/amount",
                 "subjectKey": "splash",
                 "subjectLabel": "Splash",
                 "group": "Payload 1",

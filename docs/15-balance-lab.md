@@ -25,14 +25,16 @@ restoration-pickup evolution.
 3. Review **Players & loadouts** for the authoritative human and bot roster admitted to this
    Practice worker. Each card identifies the team, fighter profile, weapon base, ultimate, two
    passives, and effective weapon modifiers. Collapse the panel when more tuning space is useful.
-4. Choose a gameplay section and one global rule family, fighter, weapon, ultimate, passive, map
-   effect, world object, or mode. Edit the focused draft using the displayed gameplay units and
-   authoritative bounds.
-5. Review the changed marker plus applied/default comparison. Values that differ from the
-   canonical server defaults are highlighted in red independently of whether they are newly edited
-   or already applied. Use **Copy differences** to copy a readable list of every current draft value
-   that differs from those defaults, including its field path, default value, current value, and
-   gameplay unit.
+4. Choose a gameplay category. Subjects are columns and comparable properties are aligned rows;
+   unsupported subject/property intersections show an em dash. Edit exact draft values directly in
+   the matrix. Scroll horizontally for wide categories; the property and subject headers remain
+   visible. Passives have their own category rather than appearing among Ultimates.
+5. Focus a value to review its applied value, server default, authoritative range, help, slider
+   where applicable, and **Reset to applied** action. A cyan border and **Edited** marker identify
+   unapplied changes. A red border and **Default Δ** marker independently identify values that
+   differ from the canonical server default; a value may have both states. Use **Copy differences**
+   to copy every current draft value that differs from those defaults, including its field path,
+   default value, current value, and gameplay unit.
 6. Choose **Apply & reset match** when the draft is ready.
 7. Use a field's **Reset** action to restore its applied value, **Revert draft** to discard all
    unapplied edits, or **Restore canonical defaults** to remove the persisted override and reset to
@@ -48,13 +50,16 @@ persisted tuning makes any admitted loadout genuinely invalid, that tuning is ig
 worker rather than crashing or stranding the client during Match Loading.
 
 The current snapshot schema is version 19, the persistence envelope is version 13, and the
-non-persisted editor-manifest schema is version 10. The server manifest explicitly identifies every
-editable numeric path, gameplay unit, storage conversion, authoritative bound, step, and preferred
-control. The browser does not infer editability or limits from serialized field names. Its
+non-persisted editor-manifest schema is version 11. The server manifest explicitly identifies every
+editable numeric path, comparison-row identity, gameplay unit, storage conversion, authoritative
+bound, step, and preferred control. The browser does not infer editability, comparison semantics,
+or limits from serialized field names. Its
 **Global** tab currently contains a **Cold & Freeze** section for buildup decay delay/rate, Freeze
 duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, seven
 canonical weapon-base recipes, all 12 numeric parameters across the seven parameterized passives,
-and the bounded parameters of all eleven tunable ultimates. Lightweight Frame and Reinforced Frame
+and the bounded parameters of all eleven tunable ultimates. The comparison workspace presents each
+category as a server-ordered matrix, aligns only fields with the same declared comparison identity,
+and preserves every numeric field exactly once. Lightweight Frame and Reinforced Frame
 remain supported snapshot identities but have no numeric editor controls.
 Weapon coverage includes every Sticky Blomb delivery/fuse value and every Splash numeric delivery
 value; ultimate coverage includes every Big Blob parent/secondary value. The **World objects** tab

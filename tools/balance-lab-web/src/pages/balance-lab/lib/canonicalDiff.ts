@@ -21,6 +21,7 @@ const sectionLabels: Record<EditorSection, string> = {
   fighters: "Fighters",
   weapons: "Weapons",
   ultimates: "Ultimates",
+  passives: "Passives",
   "world-objects": "World objects",
   modes: "Modes",
 };

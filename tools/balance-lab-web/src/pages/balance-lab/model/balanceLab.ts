@@ -7,12 +7,14 @@ export type EditorSection =
   | "fighters"
   | "weapons"
   | "ultimates"
+  | "passives"
   | "world-objects"
   | "modes";
 
 export interface EditorFieldDescriptor {
   path: EditorPath;
   section: EditorSection;
+  comparisonKey: string;
   subjectKey: string;
   subjectLabel: string;
   group: string;
