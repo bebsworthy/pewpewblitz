@@ -144,6 +144,7 @@ pub(crate) struct Material3dAssets {
     pub(in crate::client) elemental_restoration_area: Handle<combat::ElementalSupportAreaMaterial>,
     pub(crate) sticky_blob: Handle<StandardMaterial>,
     pub(crate) sticky_warning: Handle<StandardMaterial>,
+    pub(crate) sticky_warning_fill: Handle<StandardMaterial>,
     pub(crate) scan_area: Handle<StandardMaterial>,
     pub(crate) demolition_area: Handle<StandardMaterial>,
     pub(crate) concealment_field_blue_fill: Handle<StandardMaterial>,
@@ -314,6 +315,7 @@ impl Plugin for WorldPresentationPlugin {
             combat::ElementalSupportAreaMaterialPlugin,
             combat::ConeSprayMaterialPlugin,
             combat::StraightProjectileTrailMaterialPlugin,
+            combat::StickyBlobMaterialPlugin,
         ));
         combat::add_retained_material_animation_systems(app, WorldPresentationSet::Animate);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
@@ -1276,6 +1278,13 @@ pub(in crate::client) fn setup_3d_foundation(
         sticky_warning: materials.add(StandardMaterial {
             base_color: Color::srgba(0.84, 0.2, 1.0, 0.42),
             emissive: LinearRgba::new(0.7, 0.03, 1.4, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        sticky_warning_fill: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.58, 0.08, 0.82, 0.10),
+            emissive: LinearRgba::new(0.12, 0.008, 0.28, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()

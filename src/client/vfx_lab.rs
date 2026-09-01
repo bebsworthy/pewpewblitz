@@ -183,19 +183,21 @@ enum VfxLabFixture {
     Transient,
     StraightProjectile,
     LobbedProjectile,
+    StickyPayload,
     ElementalField,
     ConeSpray,
     Status,
 }
 
 impl VfxLabFixture {
-    const COUNT: u8 = 6;
+    const COUNT: u8 = 7;
 
     fn next(self) -> Self {
         match self {
             Self::Transient => Self::StraightProjectile,
             Self::StraightProjectile => Self::LobbedProjectile,
-            Self::LobbedProjectile => Self::ElementalField,
+            Self::LobbedProjectile => Self::StickyPayload,
+            Self::StickyPayload => Self::ElementalField,
             Self::ElementalField => Self::ConeSpray,
             Self::ConeSpray => Self::Status,
             Self::Status => Self::Transient,
@@ -207,6 +209,7 @@ impl VfxLabFixture {
             Self::Transient => "transient recipe",
             Self::StraightProjectile => "straight projectile / line",
             Self::LobbedProjectile => "lobbed projectile / arc",
+            Self::StickyPayload => "armed sticky payload / fuse",
             Self::ElementalField => "elemental field / area",
             Self::ConeSpray => "cone spray / propagation",
             Self::Status => "fighter status / attached",
@@ -218,6 +221,7 @@ impl VfxLabFixture {
             "transient" => Some(Self::Transient),
             "straight" => Some(Self::StraightProjectile),
             "lobbed" => Some(Self::LobbedProjectile),
+            "sticky" => Some(Self::StickyPayload),
             "field" => Some(Self::ElementalField),
             "cone" => Some(Self::ConeSpray),
             "status" => Some(Self::Status),
@@ -602,7 +606,7 @@ fn update_lab_reference_positions(
 
 const fn lab_reference_positions(fixture: VfxLabFixture) -> [f32; 2] {
     match fixture {
-        VfxLabFixture::Transient => [-64.0, 96.0],
+        VfxLabFixture::Transient | VfxLabFixture::StickyPayload => [-64.0, 96.0],
         VfxLabFixture::LobbedProjectile => [-80.0, 80.0],
         VfxLabFixture::StraightProjectile
         | VfxLabFixture::ElementalField
@@ -645,6 +649,13 @@ fn spawn_lab_scenario(
         VfxLabFixture::Transient => unreachable!("transient scenario returned above"),
         VfxLabFixture::StraightProjectile => spawn_straight_fixture(commands, source, tick),
         VfxLabFixture::LobbedProjectile => spawn_lobbed_fixture(commands, source, tick),
+        VfxLabFixture::StickyPayload => spawn_sticky_fixture(
+            commands,
+            state.presentation_identity,
+            state.radius,
+            state.ultimate,
+            tick,
+        ),
         VfxLabFixture::ElementalField => {
             spawn_field_fixture(
                 commands,
@@ -659,6 +670,31 @@ fn spawn_lab_scenario(
             spawn_status_fixture(commands, state.presentation_identity, tick);
         }
     }
+}
+
+fn spawn_sticky_fixture(
+    commands: &mut Commands,
+    identity: u64,
+    radius: u16,
+    ultimate: bool,
+    tick: u64,
+) {
+    commands.spawn((
+        VfxLabFixtureOwner,
+        Position::from_xy(0.0, 0.0),
+        crate::combat::StickyBlobState {
+            kind: if ultimate {
+                crate::combat::StickyBlobKind::UltimateSecondary
+            } else {
+                crate::combat::StickyBlobKind::Primary
+            },
+            attached_to: None,
+            armed_at_tick: tick,
+            detonates_at_tick: tick.saturating_add(180),
+            explosion_radius: f32::from(radius),
+        },
+        Name::new(format!("VfxLab sticky payload fixture {identity}")),
+    ));
 }
 
 fn spawn_straight_fixture(
@@ -1385,6 +1421,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         },
         VfxLabFixture::StraightProjectile => "STRAIGHT PROJECTILE IN FLIGHT",
         VfxLabFixture::LobbedProjectile => "LOBBED PROJECTILE IN FLIGHT",
+        VfxLabFixture::StickyPayload => "ARMED STICKY PAYLOAD",
         VfxLabFixture::ElementalField => "PERSISTENT ELEMENTAL AREA",
         VfxLabFixture::ConeSpray => "PROPAGATING ATTACK CONE",
         VfxLabFixture::Status => "STATUS ATTACHED TO A FIGHTER",
@@ -1403,6 +1440,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::LobbedProjectile => {
             "The moving body follows the production launch/landing arc and rotates along its current tangent. The dark disc tracks its ground projection, the orange ring marks the fixed landing point, and emitted smoke remains behind to expand and fade."
         }
+        VfxLabFixture::StickyPayload => {
+            "The viscous body is the armed payload. Its bright crawling veins and orbiting droplets accelerate with the authoritative fuse; the exact ground boundary and subtle growing fill communicate the future explosion radius and fuse progression. Press U to compare the smaller Big Blob ultimate secondary."
+        }
         VfxLabFixture::ElementalField => {
             "The subtly treated center is the affected ground area. The thin bright ring is the exact gameplay boundary. Crystals, living flame, cellular contamination, or ordered vitality arcs identify the element without hiding fighters."
         }
@@ -1419,6 +1459,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         }
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::Transient => {
             "NEUTRAL straight shots use a cool-white energy language: a compressed launch flash and a layered impact that dissipates through a ground wave and deterministic sparks. Press C to compare each elemental identity."
+        }
+        VfxLabAccent::Neutral if state.fixture == VfxLabFixture::StickyPayload => {
+            "NEUTRAL sticky payloads use a volatile violet language shared by Sticky Blomb and Big Blob: a dark dimensional core, living emissive veins, detached viscous droplets, and an exact delayed-blast telegraph."
         }
         VfxLabAccent::Neutral => {
             "NEUTRAL is the safe fallback. Press C to compare each authored elemental identity."
@@ -1461,9 +1504,10 @@ const fn fixture_index(fixture: VfxLabFixture) -> u8 {
         VfxLabFixture::Transient => 1,
         VfxLabFixture::StraightProjectile => 2,
         VfxLabFixture::LobbedProjectile => 3,
-        VfxLabFixture::ElementalField => 4,
-        VfxLabFixture::ConeSpray => 5,
-        VfxLabFixture::Status => 6,
+        VfxLabFixture::StickyPayload => 4,
+        VfxLabFixture::ElementalField => 5,
+        VfxLabFixture::ConeSpray => 6,
+        VfxLabFixture::Status => 7,
     }
 }
 
@@ -1624,6 +1668,7 @@ mod tests {
             ("transient", VfxLabFixture::Transient),
             ("straight", VfxLabFixture::StraightProjectile),
             ("lobbed", VfxLabFixture::LobbedProjectile),
+            ("sticky", VfxLabFixture::StickyPayload),
             ("field", VfxLabFixture::ElementalField),
             ("cone", VfxLabFixture::ConeSpray),
             ("status", VfxLabFixture::Status),

@@ -92,7 +92,7 @@ fn unique_projectile_visual_roots(
     clippy::cast_precision_loss,
     reason = "validated fuse deadlines are bounded far below f32 integer precision"
 )]
-fn sticky_fuse_progress(state: crate::combat::StickyBlobState, tick: u64) -> f32 {
+pub(super) fn sticky_fuse_progress(state: crate::combat::StickyBlobState, tick: u64) -> f32 {
     let duration = state
         .detonates_at_tick
         .saturating_sub(state.armed_at_tick)
@@ -761,6 +761,7 @@ pub(in super::super) fn reconcile_sticky_blob_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
+    mut sticky_style: super::sticky_blob::StickyBlobStyleContext,
     vfx: CombatVfxContext,
     blobs: Query<(
         Entity,
@@ -828,6 +829,14 @@ pub(in super::super) fn reconcile_sticky_blob_visuals(
                 Transform::from_xyz(0.0, blob_scale, 0.0).with_scale(Vec3::splat(blob_scale)),
                 Name::new("Sticky Blomb armed body"),
             ));
+            sticky_style.spawn(
+                parent,
+                &primitives,
+                &materials,
+                owner,
+                signature,
+                blob_scale,
+            );
             parent.spawn((
                 Mesh3d(primitives.area_ring.clone()),
                 MeshMaterial3d(materials.sticky_warning.clone()),
@@ -840,7 +849,7 @@ pub(in super::super) fn reconcile_sticky_blob_visuals(
             ));
             parent.spawn((
                 Mesh3d(primitives.area_disc.clone()),
-                MeshMaterial3d(materials.sticky_warning.clone()),
+                MeshMaterial3d(materials.sticky_warning_fill.clone()),
                 NotShadowCaster,
                 NotShadowReceiver,
                 StickyFuseProgressVisual3d {
@@ -856,6 +865,7 @@ pub(in super::super) fn reconcile_sticky_blob_visuals(
     }
     for (root, owner) in &visuals {
         if blobs.get(owner.0).is_err() {
+            sticky_style.remove_owner(owner.0);
             commands.entity(root).despawn();
         }
     }

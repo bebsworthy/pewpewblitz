@@ -9,6 +9,7 @@ mod entities;
 mod fighter_feedback;
 mod fighter_ui;
 mod particles;
+mod sticky_blob;
 mod straight_projectile_style;
 
 use bevy::prelude::{App, IntoScheduleConfigs, Plugin, PostUpdate, SystemSet, Update};
@@ -48,6 +49,7 @@ pub(in crate::client) use particles::{
     MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, RetainedProjectileSmoke3d,
     VfxParticleAdapterPlugin, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
+pub(super) use sticky_blob::{StickyBlobMaterialPlugin, animate_sticky_blob_style};
 pub(super) use straight_projectile_style::{
     StraightProjectileTrailMaterial, StraightProjectileTrailMaterialPlugin, TrailQuality,
     animate_straight_projectile_trail_materials,
@@ -73,6 +75,7 @@ where
             animate_elemental_support_area_materials,
             animate_cone_spray_materials,
             animate_straight_projectile_trail_materials,
+            animate_sticky_blob_style,
         )
             .in_set(set),
     );
@@ -85,6 +88,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
             ElementalSupportAreaMaterialPlugin,
             ConeSprayMaterialPlugin,
             StraightProjectileTrailMaterialPlugin,
+            StickyBlobMaterialPlugin,
         ))
         .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
         .add_systems(
@@ -95,7 +99,9 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
                 reconcile_elemental_field_visuals,
                 reconcile_cone_spray_visuals,
                 reconcile_status_visuals,
+                reconcile_sticky_blob_visuals,
                 update_cone_spray_visuals,
+                update_sticky_blob_fuse_progress,
                 animate_elemental_motion_accents,
             )
                 .chain()
@@ -109,6 +115,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
                     write_projectile_visual_poses,
                     write_lobbed_projectile_body_poses,
                     write_lobbed_projectile_aid_poses,
+                    write_sticky_blob_visual_poses,
                 )
                     .chain(),
             ),

@@ -280,3 +280,43 @@ Verification passed:
 - Read-only VfxLab sampled the muzzle at tick 2 and impact at ticks 4 and 8, with paired PNG/JSON evidence under `target/brl-0104-neutral-muzzle-clear`, `target/brl-0104-neutral-impact-clear-t4`, and `target/brl-0104-neutral-impact-clear-t8`. The samples confirmed an unobstructed gameplay-scale launch flash, shell/ground-wave impact timing, and lingering deterministic spark dissipation.
 
 BRL-0104 remains `doing`; native gameplay feedback for this slice and the remaining ordered closeout work are still pending.
+
+## Phase 2 next slice — Sticky Blomb / Big Blob retained presentation — 2026-09-01
+
+Inventory after commit 5995974 identifies the armed sticky payload as the next largest player-visible neutral gap: production currently materializes one static purple sphere, an exact future-explosion ring, and a flat fuse-progress disc; VfxLab has no sticky lifecycle fixture.
+
+Implement one retained sticky presentation shared by primary Sticky Blomb and the Big Blob ultimate secondary through the existing StickyPayload carrier and context, without built-in preset branches:
+- Preserve the exact replicated position, explosion radius, armed/detonation timing, ring boundary, and gameplay/server/protocol ownership.
+- Add a bounded fuse-driven viscous surface for the blob body in normal quality, with a readable dimensional silhouette and deterministic authored motion.
+- Reduced keeps a lower-cost recognizable body and exact warning geometry; Primitive/ReducedPrimitive keep stable mesh fallbacks.
+- Keep fuse timing driven by AuthoritativeTick; no wall-clock randomness or gameplay coupling.
+- Add a read-only sticky VfxLab fixture that spawns the real StickyBlobState and invokes the production reconcile/update/pose systems. The existing U toggle selects the Big Blob ultimate-secondary context.
+- Verify production and VfxLab install the same material animation/update path and add focused lifecycle/selection regression coverage.
+
+No detonation gameplay, damage, collision, authority, protocol, ownership-color, or editable-workbench changes are in scope. BRL-0107 retains ownership-color integration. BRL-0104 remains doing.
+
+## Phase 2 Sticky Blomb / Big Blob implementation evidence — 2026-09-01
+
+Implemented the retained sticky-payload slice through the existing StickyPayload signature and production lifecycle owner.
+
+- Normal and Reduced add a deterministic procedural viscous shell with fuse-driven emissive veins and orbiting blob droplets; Normal uses four droplets and full detail, Reduced uses two droplets and a lower-cost shader path.
+- Primitive and ReducedPrimitive retain the stable original sphere body. All variants preserve the exact replicated delayed-blast ring and authoritative fuse progression.
+- Split the warning presentation into a bright exact boundary and a restrained translucent progress fill after the first native pass exposed the old broad opaque plate as a map-readability problem.
+- Each live sticky owns one custom material asset. Reconciliation removes it with the owner, avoiding retained asset growth.
+- Production and VfxLab install the same StickyBlobMaterial plugin, reconcile system, AuthoritativeTick animation/update path, and pose writer.
+- Added the read-only sticky VfxLab lifecycle fixture. U switches between the primary Sticky Blomb body and the smaller Big Blob ultimate-secondary context; normal, reduced, primitive, and ultimate captures all use production materialization.
+
+Native paired-capture evidence:
+- target/brl-0104-sticky-v2-normal/
+- target/brl-0104-sticky-v2-reduced/
+- target/brl-0104-sticky-v2-primitive/
+- target/brl-0104-sticky-v2-ultimate/
+
+Verification passed:
+- Focused combat presentation tests: 50/50.
+- cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings.
+- cargo test --locked --no-default-features --features client --all-targets: 608 library tests plus client binary targets passed.
+- just _check-server and just _server-features passed; the server graph excludes the new client presentation capability.
+- cargo fmt --all and git diff --check passed.
+
+The retained sticky implementation is complete. Native user visual feedback remains open, and the remaining Phase 2 families remain in scope; BRL-0104 stays doing.
