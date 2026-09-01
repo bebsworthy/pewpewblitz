@@ -39,6 +39,51 @@ fn canonical_fighter_fits_a_one_cell_passage_with_safety_margin() {
     );
 }
 
+fn assert_feature_yard_effect_tiles(resolved_wipeout: &ResolvedMap) {
+    assert_eq!(resolved_wipeout.effect_tiles.len(), 92);
+    for (definition_id, expected_count) in [
+        (EffectTileDefinitionId(1), 36),
+        (EffectTileDefinitionId(2), 36),
+        (EffectTileDefinitionId(3), 20),
+    ] {
+        assert_eq!(
+            resolved_wipeout
+                .effect_tiles
+                .iter()
+                .filter(|tile| tile.definition_id == definition_id)
+                .count(),
+            expected_count
+        );
+    }
+    for (definition_id, min_x, min_y) in [
+        (EffectTileDefinitionId(1), 17, 18),
+        (EffectTileDefinitionId(1), 44, 18),
+        (EffectTileDefinitionId(2), 26, 22),
+        (EffectTileDefinitionId(2), 35, 22),
+        (EffectTileDefinitionId(1), 4, 12),
+        (EffectTileDefinitionId(1), 57, 12),
+        (EffectTileDefinitionId(2), 4, 18),
+        (EffectTileDefinitionId(2), 57, 18),
+        (EffectTileDefinitionId(3), 4, 24),
+        (EffectTileDefinitionId(3), 57, 24),
+    ] {
+        for y in min_y..min_y + 3 {
+            for x in min_x..min_x + 3 {
+                assert!(resolved_wipeout.effect_tiles.iter().any(|tile| {
+                    tile.definition_id == definition_id && tile.cell == MapCell::new(x, y)
+                }));
+            }
+        }
+    }
+    for cell in [MapCell::new(31, 19), MapCell::new(32, 20)] {
+        assert!(
+            resolved_wipeout.effect_tiles.iter().any(|tile| {
+                tile.definition_id == EffectTileDefinitionId(3) && tile.cell == cell
+            })
+        );
+    }
+}
+
 #[test]
 fn feature_yard_variants_share_geometry_and_own_only_legal_mode_anchors() {
     let catalog = MapContentCatalog::embedded().unwrap();
@@ -60,7 +105,7 @@ fn feature_yard_variants_share_geometry_and_own_only_legal_mode_anchors() {
                 catalog
                     .asset(placement.asset_id)
                     .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
-                    .is_some_and(|profile| profile.effect_tile == MapEffectTileBehavior::None)
+                    .is_some_and(|profile| profile.effect_tile_definition_id.is_none())
             })
             .collect();
         assert_eq!(
@@ -74,46 +119,7 @@ fn feature_yard_variants_share_geometry_and_own_only_legal_mode_anchors() {
     let resolved_wipeout = catalog
         .resolve_preset(FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
         .unwrap();
-    assert_eq!(resolved_wipeout.effect_tiles.len(), 92);
-    for (kind, expected_count) in [
-        (EffectTileKind::Speed, 36),
-        (EffectTileKind::Slow, 36),
-        (EffectTileKind::Damage, 20),
-    ] {
-        assert_eq!(
-            resolved_wipeout
-                .effect_tiles
-                .iter()
-                .filter(|tile| tile.behavior.kind() == Some(kind))
-                .count(),
-            expected_count
-        );
-    }
-    for (kind, min_x, min_y) in [
-        (EffectTileKind::Speed, 17, 18),
-        (EffectTileKind::Speed, 44, 18),
-        (EffectTileKind::Slow, 26, 22),
-        (EffectTileKind::Slow, 35, 22),
-        (EffectTileKind::Speed, 4, 12),
-        (EffectTileKind::Speed, 57, 12),
-        (EffectTileKind::Slow, 4, 18),
-        (EffectTileKind::Slow, 57, 18),
-        (EffectTileKind::Damage, 4, 24),
-        (EffectTileKind::Damage, 57, 24),
-    ] {
-        for y in min_y..min_y + 3 {
-            for x in min_x..min_x + 3 {
-                assert!(resolved_wipeout.effect_tiles.iter().any(|tile| {
-                    tile.behavior.kind() == Some(kind) && tile.cell == MapCell::new(x, y)
-                }));
-            }
-        }
-    }
-    for cell in [MapCell::new(31, 19), MapCell::new(32, 20)] {
-        assert!(resolved_wipeout.effect_tiles.iter().any(|tile| {
-            tile.behavior.kind() == Some(EffectTileKind::Damage) && tile.cell == cell
-        }));
-    }
+    assert_feature_yard_effect_tiles(&resolved_wipeout);
     assert_eq!(hot_zone.mode_definition_id, HOT_ZONE_MODE_DEFINITION);
     assert_eq!(hot_zone.mode_anchors.len(), 1);
     assert!(matches!(
@@ -1008,7 +1014,7 @@ fn damageable_profiles_reject_invalid_bounds_references_and_incompatible_behavio
             durability: MapDurabilityBehavior::Indestructible,
             interaction: MapInteractionBehavior::None,
             concealment: MapConcealmentBehavior::None,
-            effect_tile: MapEffectTileBehavior::None,
+            effect_tile_definition_id: None,
         }
     );
 
@@ -1043,35 +1049,25 @@ fn damageable_profiles_reject_invalid_bounds_references_and_incompatible_behavio
 fn effect_tiles_accept_bounded_authored_values_and_reject_unsafe_values_and_spawns() {
     let embedded = MapContentCatalog::embedded().unwrap();
     assert_eq!(
-        embedded.gameplay_profiles[10].effect_tile,
-        MapEffectTileBehavior::Speed {
-            movement_multiplier_milli: 1_250,
-        }
+        embedded.gameplay_profiles[10].effect_tile_definition_id,
+        Some(EffectTileDefinitionId(1))
     );
     assert_eq!(
-        embedded.gameplay_profiles[11].effect_tile,
-        MapEffectTileBehavior::Slow {
-            movement_multiplier_milli: 700,
-        }
+        embedded.gameplay_profiles[11].effect_tile_definition_id,
+        Some(EffectTileDefinitionId(2))
     );
     assert_eq!(
-        embedded.gameplay_profiles[12].effect_tile,
-        MapEffectTileBehavior::Damage {
-            damage: 10,
-            interval_ticks: 30,
-        }
+        embedded.gameplay_profiles[12].effect_tile_definition_id,
+        Some(EffectTileDefinitionId(3))
     );
 
     let mut tuned = embedded;
-    tuned.gameplay_profiles[10].effect_tile = MapEffectTileBehavior::Speed {
-        movement_multiplier_milli: 1_249,
-    };
+    tuned.effect_tile_effect_definitions[0].parameters[0].value = 1_249;
     assert!(tuned.validate().is_ok());
 
     let mut invalid_value = tuned.clone();
-    invalid_value.gameplay_profiles[10].effect_tile = MapEffectTileBehavior::Speed {
-        movement_multiplier_milli: effect_tiles::MAX_EFFECT_TILE_MOVEMENT_MULTIPLIER_MILLI + 1,
-    };
+    invalid_value.effect_tile_effect_definitions[0].parameters[0].value =
+        effect_tiles::MAX_EFFECT_TILE_MOVEMENT_MULTIPLIER_MILLI + 1;
     assert!(invalid_value.validate().is_err());
 
     let mut unsafe_spawn = MapContentCatalog::embedded().unwrap();

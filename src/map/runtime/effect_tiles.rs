@@ -1,9 +1,11 @@
 use avian2d::prelude::Position;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
-use std::collections::BTreeMap;
 
-use super::super::{EffectTileOccupancy, MapCell, MapDynamicState, MapRoot, ResolvedMap};
+use super::super::{
+    EffectTileOccupancy, MapCell, MapDynamicState, MapRoot, ResolvedMap,
+    effect_tiles::EffectTilePulseState,
+};
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct EffectTileOccupancySet;
@@ -29,6 +31,9 @@ pub(super) fn register(app: &mut App) {
     reason = "validated finite in-bounds world coordinates are quantized to bounded map cells"
 )]
 fn map_cell_at(map: &ResolvedMap, position: Vec2) -> Option<MapCell> {
+    if !position.is_finite() {
+        return None;
+    }
     let dimensions = map.snapshot.dimensions;
     let local = position - dimensions.bounds().min;
     if local.x < 0.0 || local.y < 0.0 {
@@ -66,41 +71,44 @@ fn resolve_effect_tile_occupancy(
         return;
     };
     let generation = map_state.generation_id();
-    let by_cell: BTreeMap<_, _> = map
-        .effect_tiles
-        .iter()
-        .map(|tile| (tile.cell, tile))
-        .collect();
-
     for (entity, position, current, defeated, active) in &fighters {
         let tile = (!defeated && active)
             .then(|| map_cell_at(&map, position.0))
             .flatten()
-            .and_then(|cell| by_cell.get(&cell).copied());
+            .and_then(|cell| map.effect_tiles_by_cell.get(&cell));
         let Some(tile) = tile else {
             if current.is_some() {
-                commands.entity(entity).remove::<EffectTileOccupancy>();
+                commands
+                    .entity(entity)
+                    .remove::<(EffectTileOccupancy, EffectTilePulseState)>();
             }
             continue;
         };
         if current.is_some_and(|occupancy| {
             occupancy.generation == generation
                 && occupancy.placement_id == tile.placement_id
-                && occupancy.behavior == tile.behavior
+                && occupancy.definition_id == tile.definition_id
+                && occupancy.visual_profile_id == tile.visual_profile_id
+                && occupancy.capabilities == tile.capabilities
         }) {
             continue;
         }
-        let next_pulse_at_tick = tile
-            .capabilities()
-            .periodic_damage
-            .map(|effect| tick.0.saturating_add(u64::from(effect.interval_ticks)));
-        commands.entity(entity).insert(EffectTileOccupancy {
+        let mut fighter = commands.entity(entity);
+        fighter.insert(EffectTileOccupancy {
             generation,
             placement_id: tile.placement_id,
-            behavior: tile.behavior,
+            definition_id: tile.definition_id,
+            visual_profile_id: tile.visual_profile_id,
+            capabilities: tile.capabilities,
             entered_at_tick: tick.0,
-            next_pulse_at_tick,
         });
+        if let Some(effect) = tile.capabilities.periodic_damage {
+            fighter.insert(EffectTilePulseState {
+                next_pulse_at_tick: tick.0.saturating_add(u64::from(effect.interval_ticks)),
+            });
+        } else {
+            fighter.remove::<EffectTilePulseState>();
+        }
     }
 }
 
@@ -129,31 +137,56 @@ pub(crate) fn apply_damage_tile_pulses(world: &mut World) {
     };
     let tick = world.resource::<crate::timing::SimulationTick>().0;
     let mut due: Vec<_> = world
-        .query_filtered::<(Entity, &EffectTileOccupancy), (
+        .query_filtered::<(
+            Entity,
+            &crate::protocol::NetworkEntityId,
+            &EffectTileOccupancy,
+            &EffectTilePulseState,
+        ), (
             With<crate::protocol::Fighter>,
             With<crate::matchplay::ActiveCombatant>,
             Without<crate::combat::Defeated>,
         )>()
         .iter(world)
-        .filter_map(|(entity, occupancy)| {
+        .filter_map(|(entity, network_id, occupancy, pulse)| {
             if occupancy.generation != active_generation {
                 return None;
             }
-            let deadline = occupancy.next_pulse_at_tick?;
-            (tick >= deadline).then_some((entity, *occupancy))
+            (tick >= pulse.next_pulse_at_tick).then_some((entity, *network_id, *occupancy))
         })
         .collect();
-    due.sort_by_key(|(_, occupancy)| occupancy.placement_id);
-    for (entity, occupancy) in due {
-        let Some(effect) = occupancy.capabilities().periodic_damage else {
+    due.sort_by_key(|(_, network_id, occupancy)| {
+        let effect = occupancy
+            .capabilities
+            .periodic_damage
+            .expect("only periodic-damage occupancies have deadlines");
+        (
+            occupancy.placement_id,
+            effect.damage,
+            effect.interval_ticks,
+            *network_id,
+        )
+    });
+    let mut first = 0;
+    while first < due.len() {
+        let occupancy = due[first].2;
+        let Some(effect) = occupancy.capabilities.periodic_damage else {
+            first += 1;
             continue;
         };
-        if let Some(mut current) = world.get_mut::<EffectTileOccupancy>(entity) {
-            current.next_pulse_at_tick =
-                Some(tick.saturating_add(u64::from(effect.interval_ticks)));
+        let mut end = first + 1;
+        while end < due.len()
+            && due[end].2.generation == occupancy.generation
+            && due[end].2.placement_id == occupancy.placement_id
+            && due[end].2.capabilities.periodic_damage == Some(effect)
+        {
+            end += 1;
         }
-        let targets = [entity];
-        if let Err(error) = crate::combat::environment::apply_environment_damage_batch(
+        let targets: Vec<_> = due[first..end]
+            .iter()
+            .map(|(entity, _, _)| *entity)
+            .collect();
+        match crate::combat::environment::apply_environment_damage_batch(
             world,
             crate::combat::environment::EnvironmentDamageBatch {
                 targets: &targets,
@@ -167,14 +200,24 @@ pub(crate) fn apply_damage_tile_pulses(world: &mut World) {
                     crate::combat::environment::EnvironmentProtection::RespectSpawnProtection,
             },
         ) {
-            error!(?error, "damage-tile combat transaction failed");
+            Ok(_) => {
+                for entity in targets {
+                    if let Some(mut current) = world.get_mut::<EffectTilePulseState>(entity) {
+                        current.next_pulse_at_tick =
+                            tick.saturating_add(u64::from(effect.interval_ticks));
+                    }
+                }
+            }
+            Err(error) => error!(?error, "damage-tile combat transaction failed"),
         }
+        first = end;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn occupancy_retains_tuned_behavior_and_schedules_its_full_first_interval() {
@@ -187,16 +230,16 @@ mod tests {
                 crate::map::MapInstanceId(3),
             )
             .unwrap();
-        let behavior = crate::map::MapEffectTileBehavior::Damage {
-            damage: 7,
-            interval_ticks: 45,
-        };
         let tile = map
             .effect_tiles
             .iter_mut()
-            .find(|tile| tile.behavior.kind() == Some(crate::map::EffectTileKind::Damage))
+            .find(|tile| tile.definition_id == crate::map::EffectTileDefinitionId(3))
             .unwrap();
-        tile.behavior = behavior;
+        tile.capabilities.periodic_damage = Some(crate::map::PeriodicDamageTileEffect {
+            damage: 7,
+            interval_ticks: 45,
+        });
+        map.effect_tiles_by_cell.insert(tile.cell, *tile);
         let position = map.snapshot.dimensions.cell_center(tile.cell);
         app.insert_resource(map);
         app.world_mut().spawn((
@@ -224,9 +267,20 @@ mod tests {
         app.update();
 
         let occupancy = app.world().get::<EffectTileOccupancy>(fighter).unwrap();
-        assert_eq!(occupancy.behavior, behavior);
+        assert_eq!(
+            occupancy.capabilities.periodic_damage,
+            Some(crate::map::PeriodicDamageTileEffect {
+                damage: 7,
+                interval_ticks: 45,
+            })
+        );
         assert_eq!(occupancy.entered_at_tick, 30);
-        assert_eq!(occupancy.next_pulse_at_tick, Some(75));
+        assert_eq!(
+            app.world()
+                .get::<EffectTilePulseState>(fighter)
+                .map(|pulse| pulse.next_pulse_at_tick),
+            Some(75)
+        );
     }
 
     #[test]
@@ -244,7 +298,7 @@ mod tests {
                     recipe_revision: 1,
                     recipe_fingerprint: crate::map::MapRecipeFingerprint(1),
                 },
-                catalog_schema_version: 7,
+                catalog_schema_version: 8,
                 recipe_schema_version: 5,
                 presentation_theme_id: crate::map::MapPresentationThemeId(1),
                 mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
@@ -260,12 +314,14 @@ mod tests {
             objective_zone: None,
             heist_safes: Vec::new(),
             effect_tiles: Vec::new(),
+            effect_tiles_by_cell: BTreeMap::new(),
         };
         assert_eq!(
             map_cell_at(&map, dimensions.cell_center(MapCell::new(0, 0))),
             Some(MapCell::new(0, 0))
         );
         assert_eq!(map_cell_at(&map, dimensions.bounds().max), None);
+        assert_eq!(map_cell_at(&map, Vec2::new(f32::NAN, 1.0)), None);
     }
 
     fn damage_pulse_fixture() -> (App, Entity, Entity) {
@@ -285,17 +341,17 @@ mod tests {
                 crate::map::MapInstanceId(3),
             )
             .unwrap();
-        let tuned_behavior = crate::map::MapEffectTileBehavior::Damage {
-            damage: 7,
-            interval_ticks: 45,
-        };
         let tile = map
             .effect_tiles
             .iter_mut()
-            .find(|tile| tile.behavior.kind() == Some(crate::map::EffectTileKind::Damage))
+            .find(|tile| tile.definition_id == crate::map::EffectTileDefinitionId(3))
             .unwrap();
-        tile.behavior = tuned_behavior;
+        tile.capabilities.periodic_damage = Some(crate::map::PeriodicDamageTileEffect {
+            damage: 7,
+            interval_ticks: 45,
+        });
         let tile = *tile;
+        map.effect_tiles_by_cell.insert(tile.cell, tile);
         let position = map.snapshot.dimensions.cell_center(tile.cell);
         app.insert_resource(map);
         let map_root = app
@@ -331,9 +387,13 @@ mod tests {
                         generation: 1,
                     },
                     placement_id: tile.placement_id,
-                    behavior: tile.behavior,
+                    definition_id: tile.definition_id,
+                    visual_profile_id: tile.visual_profile_id,
+                    capabilities: tile.capabilities,
                     entered_at_tick: 30,
-                    next_pulse_at_tick: Some(75),
+                },
+                EffectTilePulseState {
+                    next_pulse_at_tick: 75,
                 },
             ))
             .id();
@@ -351,8 +411,8 @@ mod tests {
         );
         assert_eq!(
             app.world()
-                .get::<EffectTileOccupancy>(fighter)
-                .and_then(|occupancy| occupancy.next_pulse_at_tick),
+                .get::<EffectTilePulseState>(fighter)
+                .map(|pulse| pulse.next_pulse_at_tick),
             Some(120)
         );
 
@@ -367,8 +427,8 @@ mod tests {
         );
         assert_eq!(
             app.world()
-                .get::<EffectTileOccupancy>(fighter)
-                .and_then(|occupancy| occupancy.next_pulse_at_tick),
+                .get::<EffectTilePulseState>(fighter)
+                .map(|pulse| pulse.next_pulse_at_tick),
             Some(245)
         );
 
@@ -389,6 +449,46 @@ mod tests {
             app.world().get::<crate::combat::CurrentHealth>(fighter),
             Some(&crate::combat::CurrentHealth(36)),
             "occupancy cannot apply damage without a live map root"
+        );
+    }
+
+    #[test]
+    fn fighters_due_on_one_tile_share_one_atomic_environment_attack() {
+        let (mut app, _, first) = damage_pulse_fixture();
+        let occupancy = *app.world().get::<EffectTileOccupancy>(first).unwrap();
+        let position = *app.world().get::<Position>(first).unwrap();
+        let second = app
+            .world_mut()
+            .spawn((
+                crate::protocol::Fighter,
+                crate::matchplay::ActiveCombatant,
+                position,
+                crate::combat::CurrentHealth(50),
+                crate::combat::TeamId(1),
+                crate::protocol::NetworkEntityId(11),
+                occupancy,
+                EffectTilePulseState {
+                    next_pulse_at_tick: 75,
+                },
+            ))
+            .id();
+
+        apply_damage_tile_pulses(app.world_mut());
+
+        assert_eq!(
+            app.world().get::<crate::combat::CurrentHealth>(first),
+            Some(&crate::combat::CurrentHealth(43))
+        );
+        assert_eq!(
+            app.world().get::<crate::combat::CurrentHealth>(second),
+            Some(&crate::combat::CurrentHealth(43))
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::combat::NextCombatIds>()
+                .next_attack_id,
+            2,
+            "one placement pulse owns one shared combat transaction"
         );
     }
 }

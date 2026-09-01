@@ -49,8 +49,8 @@ recomputes runtime recipe identities for equipped weapon modifiers whose base re
 persisted tuning makes any admitted loadout genuinely invalid, that tuning is ignored for the new
 worker rather than crashing or stranding the client during Match Loading.
 
-The current snapshot schema is version 19, the persistence envelope is version 13, and the
-non-persisted editor-manifest schema is version 12. The server manifest explicitly identifies every
+The current snapshot schema is version 20, the persistence envelope is version 14, and the
+non-persisted editor-manifest schema is version 13. The server manifest explicitly identifies every
 editable numeric path, comparison-row identity, gameplay unit, storage conversion, authoritative
 bound, step, and preferred control. The browser does not infer editability, comparison semantics,
 or limits from serialized field names. Semantic rows align equivalent authored axes even when
@@ -66,12 +66,14 @@ and preserves every numeric field exactly once. Lightweight Frame and Reinforced
 remain supported snapshot identities but have no numeric editor controls.
 Weapon coverage includes every Sticky Blomb delivery/fuse value and every Splash numeric delivery
 value; ultimate coverage includes every Big Blob parent/secondary value. The **World objects** tab
-exposes an **Effect tiles** subject with
-Speed and Slow multipliers, Damage per pulse, and pulse interval. These controls tune the three
-supported authored identities; there is no Heal tile control or runtime tile behavior. Damage
-amount and interval are consumed from the rebuilt map catalog by authoritative damage pulses.
-Speed/Slow edits validate, persist, appear in canonical differences, enter the development map
-catalog, and drive authoritative movement through the resolved effect-tile occupancy. Oil-barrel
+exposes one comparison column per authored effect-tile definition and discovers each registered
+family's numeric parameters from the catalog. The built-ins currently expose Speed and Slow
+movement multipliers plus Damage pulse amount, pulse interval, and its separate positive-health
+blocking effect. Adding another tile from registered families is content-only and automatically
+enters the snapshot/editor matrix; stable IDs, family references, and parameter topology remain
+locked during a tuning transaction. Damage values are consumed from the rebuilt map catalog by
+authoritative grouped pulses, while movement edits drive authoritative locomotion through resolved
+occupancy. Oil-barrel
 health/explosion tuning, Heist safe health, and
 treasure-chest/restoration-pickup health,
 restoration, radius, and lifetime are also editable. Structural IDs, terminal

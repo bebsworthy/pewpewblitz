@@ -18,7 +18,16 @@ pub(in crate::client::presentation_3d) enum MapVisualKind {
     GeneratedBarrier,
     GeneratedRubble,
     GeneratedDecoration,
+    GeneratedEffectTile { status: EffectTileStatusVisual },
     HiddenMarker,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::client::presentation_3d) enum EffectTileStatusVisual {
+    Speed,
+    Slow,
+    Damage,
+    None,
 }
 
 #[derive(Deserialize, Clone)]
@@ -37,6 +46,7 @@ enum MapVisualFallback {
     Rubble,
     Hidden,
     Barrel,
+    EffectTile,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -173,6 +183,10 @@ fn visual_kind_matches_fallback(profile: &MapVisualProfile) -> bool {
                 MapVisualKind::GeneratedDecoration,
                 MapVisualFallback::Decoration
             )
+            | (
+                MapVisualKind::GeneratedEffectTile { .. },
+                MapVisualFallback::EffectTile
+            )
             | (MapVisualKind::HiddenMarker, MapVisualFallback::Hidden)
     )
 }
@@ -260,7 +274,7 @@ fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), S
         .map_err(|error| format!("client map visual catalog parse failed: {error}"))?;
     let themes: MapThemeSource = ron::from_str(MAP_THEME_CATALOG)
         .map_err(|error| format!("client map theme catalog parse failed: {error}"))?;
-    if source.schema_version != 4 || themes.schema_version != 3 {
+    if source.schema_version != 5 || themes.schema_version != 3 {
         return Err("unsupported client map catalog schema".to_string());
     }
     let expected = expected_visual_profiles(catalog);

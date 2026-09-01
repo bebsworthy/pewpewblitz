@@ -79,8 +79,8 @@ impl BotNavigationSnapshot {
             .iter()
             .map(|tile| {
                 let cost = tile
-                    .capabilities()
-                    .traversal_cost_milli(damage_tile_cost_milli);
+                    .bot_traversal_cost_milli
+                    .unwrap_or(damage_tile_cost_milli);
                 (index(dimensions, tile.cell.x, tile.cell.y), cost)
             })
             .filter(|(_, cost)| *cost != 1_000)

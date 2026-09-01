@@ -39,14 +39,20 @@ pub(super) enum StatusKind {
     TileDamage,
 }
 
-fn effect_tile_status(tile: &crate::map::EffectTileOccupancy) -> Option<StatusKind> {
-    tile.capabilities()
-        .presentation
-        .map(|presentation| match presentation {
-            crate::map::EffectTilePresentation::Speed => StatusKind::TileSpeed,
-            crate::map::EffectTilePresentation::Slow => StatusKind::TileSlow,
-            crate::map::EffectTilePresentation::Damage => StatusKind::TileDamage,
-        })
+fn effect_tile_status(
+    tile: &crate::map::EffectTileOccupancy,
+    visuals: Option<&environment_assets::MapVisualCatalog>,
+) -> Option<StatusKind> {
+    let profile = visuals?.profile(tile.visual_profile_id)?;
+    let environment_assets::MapVisualKind::GeneratedEffectTile { status } = &profile.kind else {
+        return None;
+    };
+    match *status {
+        environment_assets::EffectTileStatusVisual::Speed => Some(StatusKind::TileSpeed),
+        environment_assets::EffectTileStatusVisual::Slow => Some(StatusKind::TileSlow),
+        environment_assets::EffectTileStatusVisual::Damage => Some(StatusKind::TileDamage),
+        environment_assets::EffectTileStatusVisual::None => None,
+    }
 }
 
 #[derive(Component)]
@@ -241,6 +247,7 @@ pub(in super::super) fn reconcile_status_visuals(
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     vfx: CombatVfxContext,
+    visual_catalog: Option<Res<environment_assets::MapVisualCatalog>>,
     fighters: StatusFighterQuery,
     statuses: Query<(Entity, &CombatVisualOwner, &StatusVisual3d)>,
 ) {
@@ -424,7 +431,7 @@ pub(in super::super) fn reconcile_status_visuals(
             );
         }
         if let Some(tile) = tile
-            && let Some(kind) = effect_tile_status(tile)
+            && let Some(kind) = effect_tile_status(tile, visual_catalog.as_deref())
         {
             desired_status.insert(
                 (entity, kind),
@@ -953,46 +960,28 @@ mod tests {
         }
     }
 
-    fn tile_occupancy(
-        behavior: crate::map::MapEffectTileBehavior,
-    ) -> crate::map::EffectTileOccupancy {
-        crate::map::EffectTileOccupancy {
-            generation: crate::map::MapDynamicGeneration {
-                map_instance_id: crate::map::MapInstanceId(1),
-                generation: 1,
-            },
-            placement_id: crate::map::MapPlacementId(1),
-            behavior,
-            entered_at_tick: 0,
-            next_pulse_at_tick: None,
-        }
-    }
-
     #[test]
-    fn effect_tile_feedback_uses_the_focused_presentation_capability() {
+    fn effect_tile_feedback_is_owned_by_the_visual_profile() {
+        use environment_assets::EffectTileStatusVisual;
+        let status = |visual| match visual {
+            EffectTileStatusVisual::Speed => Some(StatusKind::TileSpeed),
+            EffectTileStatusVisual::Slow => Some(StatusKind::TileSlow),
+            EffectTileStatusVisual::Damage => Some(StatusKind::TileDamage),
+            EffectTileStatusVisual::None => None,
+        };
         assert_eq!(
-            effect_tile_status(&tile_occupancy(crate::map::MapEffectTileBehavior::Speed {
-                movement_multiplier_milli: 1_250,
-            })),
+            status(EffectTileStatusVisual::Speed),
             Some(StatusKind::TileSpeed)
         );
         assert_eq!(
-            effect_tile_status(&tile_occupancy(crate::map::MapEffectTileBehavior::Slow {
-                movement_multiplier_milli: 700,
-            })),
+            status(EffectTileStatusVisual::Slow),
             Some(StatusKind::TileSlow)
         );
         assert_eq!(
-            effect_tile_status(&tile_occupancy(crate::map::MapEffectTileBehavior::Damage {
-                damage: 10,
-                interval_ticks: 30,
-            })),
+            status(EffectTileStatusVisual::Damage),
             Some(StatusKind::TileDamage)
         );
-        assert_eq!(
-            effect_tile_status(&tile_occupancy(crate::map::MapEffectTileBehavior::None)),
-            None
-        );
+        assert_eq!(status(EffectTileStatusVisual::None), None);
     }
 
     #[test]

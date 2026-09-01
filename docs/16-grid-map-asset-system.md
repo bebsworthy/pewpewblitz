@@ -327,8 +327,9 @@ PlayerSpawn
 
 ### Authored effect tiles
 
-An effect tile is a one-cell, non-colliding `Feature` asset. Its shared gameplay profile—not the
-recipe or client visual—selects exactly one supported behavior:
+An effect tile is a one-cell, non-colliding `Feature` asset. Its shared gameplay profile references
+one stable `EffectTileDefinitionId`; the definition composes stable effect-definition references,
+bot traversal cost, and spawn clearance. The built-in content currently resolves to:
 
 ```text
 Speed:  movement multiplier 1250 milli
@@ -336,27 +337,34 @@ Slow:   movement multiplier 700 milli
 Damage: 10 neutral damage every 30 simulation ticks after a full first interval
 ```
 
-There is no `Heal` effect-tile behavior or Heal Tile asset. Restoration Field and restoration
-pickups are separate combat/map systems. A future healing tile requires its own authored behavior,
-authority rule, validation, replication evidence, and presentation rather than reusing one of the
-three current identities by convention.
+The damage tile composes periodic neutral damage with a separate zero positive-health multiplier;
+healing suppression is not an implicit property of damage. Restoration Field and restoration
+pickups remain separate combat/map systems.
 
 The resolver derives a bounded `ResolvedEffectTile` index from ordinary placements. Each entry
-retains the stable placement ID, grid cell, and complete authored behavior. During an active match,
+retains the stable placement ID, grid cell, definition ID, visual-profile ID, typed built-in
+capability projection, traversal cost, and spawn clearance. A cell-indexed lookup is built once at
+resolution. During an active match,
 the server converts each living active fighter's center position to one half-open grid cell after
 input processing and before simulation. It inserts or removes one replicated
-`EffectTileOccupancy` carrying the current map generation, placement, complete resolved behavior,
-entry tick, and optional damage-pulse deadline. Consequently, crossing a tile boundary becomes
+`EffectTileOccupancy` carrying the current map generation, placement, definition and visual-profile
+IDs, resolved capabilities, entry tick, and optional damage-pulse deadline. Consequently, crossing a tile boundary becomes
 authoritative on the next fixed-tick occupancy pass; presentation never decides whether a fighter
 is inside.
 
-The authored behavior enum is the closed catalog and serialization vocabulary. One central,
-headless-safe projection resolves it into orthogonal runtime capabilities: ordinary-movement
-scaling, periodic neutral damage, healing blocking, bot traversal cost, spawn clearance, and a
-presentation semantic. Runtime systems consume only the capability they own, so a composite or
-new authored behavior does not require them to branch on unrelated tile identities. The projection
-is deliberately separate from future plugin registration; it changes no map schema, fingerprint,
-replicated occupancy shape, or Balance Lab persistence contract.
+There is no tile-kind behavior enum. `EffectTileFamilyRegistration` is a bounded, duplicate-checked
+plugin-composition seam installed before `MapContentPlugin`. Each registration validates its own
+fixed-point parameter vocabulary and may project the typed capabilities used by existing systems;
+the stable family/effect references remain available to an owning plugin for a genuinely new
+mechanic. A new tile composed from registered families changes only authored content. A new
+fundamental family adds one focused plugin registration and its owned runtime system, without
+adding cases to existing movement, health, damage, bot, or presentation consumers. Arbitrary
+callbacks, scripting, and unvalidated runtime parameter maps remain unsupported.
+
+Client presentation is independently selected by `MapVisualProfileId`. Generated effect-tile
+profiles choose their surface material and optional fighter status style; changing a tile's visual
+profile does not change authority, and adding a gameplay definition does not require an asset-ID
+branch in the renderer.
 
 Speed and Slow multiply only ordinary player-driven movement. The composition is:
 

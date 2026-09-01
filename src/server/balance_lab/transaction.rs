@@ -893,7 +893,9 @@ mod tests {
         let mut tuned = baseline.clone();
         tuned.fighter_profiles.lightweight.maximum_health = 321;
         tuned.condition_rules.freeze_duration_ticks += 1;
-        tuned.effect_tiles.speed_multiplier_milli = 1_600;
+        tuned
+            .effect_tiles
+            .set_parameter(1, "multiplier-milli", 1_600);
         persistence::save(&persistence_path, &tuned, BalanceLabRevision(3)).unwrap();
         let mut fixture = TransactionFixture::create(
             persistence_path.clone(),

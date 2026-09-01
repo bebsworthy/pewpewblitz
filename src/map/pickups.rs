@@ -644,12 +644,17 @@ mod tests {
                     generation: 1,
                 },
                 placement_id: MapPlacementId(1),
-                behavior: crate::map::MapEffectTileBehavior::Damage {
-                    damage: 10,
-                    interval_ticks: 30,
+                definition_id: crate::map::EffectTileDefinitionId(3),
+                visual_profile_id: crate::map::MapVisualProfileId(52),
+                capabilities: crate::map::EffectTileCapabilities {
+                    movement: None,
+                    periodic_damage: Some(crate::map::PeriodicDamageTileEffect {
+                        damage: 10,
+                        interval_ticks: 30,
+                    }),
+                    positive_health_multiplier_milli: 0,
                 },
                 entered_at_tick: 1,
-                next_pulse_at_tick: Some(30),
             });
         let pickup = spawn_pickup_entity(&mut world, 20);
 

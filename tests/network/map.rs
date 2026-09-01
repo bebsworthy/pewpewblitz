@@ -564,7 +564,7 @@ fn damage_tile_capabilities_drive_authority_and_replicate_to_both_clients() {
         let tile = map
             .effect_tiles
             .iter()
-            .find(|tile| tile.behavior.kind() == Some(brawler::map::EffectTileKind::Damage))
+            .find(|tile| tile.definition_id == brawler::map::EffectTileDefinitionId(3))
             .expect("Feature Yard damage tile");
         map.snapshot.dimensions.cell_center(tile.cell)
     };
@@ -589,16 +589,6 @@ fn damage_tile_capabilities_drive_authority_and_replicate_to_both_clients() {
     harness.step_until(|harness| {
         (0..2).all(|index| client_fighter_tile(harness, index, target_network_id).is_some())
     });
-    let server_occupancy = *harness
-        .server
-        .world()
-        .get::<brawler::map::EffectTileOccupancy>(target_entity)
-        .expect("authoritative damage-tile occupancy");
-    assert_eq!(
-        server_occupancy.next_pulse_at_tick,
-        Some(server_occupancy.entered_at_tick + 30)
-    );
-
     let expected_health = target_health.saturating_sub(10);
     harness.step_until(|harness| {
         (0..2).all(|index| {

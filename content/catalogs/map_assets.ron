@@ -1,5 +1,5 @@
 (
-    schema_version: 7,
+    schema_version: 8,
     assets: [
         (
             id: MapAssetId(1), key: "ground", display_name: "Ground", slot: Surface,

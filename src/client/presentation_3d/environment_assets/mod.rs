@@ -9,7 +9,7 @@ mod runtime;
 #[cfg(test)]
 pub(crate) use catalog::environment_asset_paths;
 pub(in crate::client::presentation_3d) use catalog::{
-    MapVisualCatalog, MapVisualFitting, MapVisualKind, MapVisualProfile,
+    EffectTileStatusVisual, MapVisualCatalog, MapVisualFitting, MapVisualKind, MapVisualProfile,
 };
 pub(in crate::client::presentation_3d) use runtime::{
     EnvironmentAssetReadiness, EnvironmentImportedScenes, EnvironmentMaterialTint,

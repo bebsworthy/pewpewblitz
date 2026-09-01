@@ -233,11 +233,9 @@ fn authored_tile_multipliers_drive_costs_and_the_admissible_heuristic() {
     let speed = map
         .effect_tiles
         .iter_mut()
-        .find(|tile| tile.behavior.kind() == Some(crate::map::EffectTileKind::Speed))
+        .find(|tile| tile.definition_id == crate::map::EffectTileDefinitionId(1))
         .unwrap();
-    speed.behavior = crate::map::MapEffectTileBehavior::Speed {
-        movement_multiplier_milli: 2_000,
-    };
+    speed.bot_traversal_cost_milli = Some(500);
     let speed_cell = speed.cell;
     let navigation = BotNavigationSnapshot::from_map(&map, 15.0, 2_000).unwrap();
     let speed_index = u32::from(speed_cell.y) * u32::from(map.snapshot.dimensions.width)

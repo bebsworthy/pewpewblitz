@@ -6,8 +6,9 @@
 
 use super::resolution::resolve_grid_recipe;
 use super::{
-    MapEffectTileBehavior, MapInstanceId, MapPlacementId, MapPlacementOutcome,
-    MapPresentationThemeId, MapPresetId, MapRecipeId, ModeAnchorId, ModeDefinitionId, ResolvedMap,
+    EffectTileDefinition, EffectTileDefinitionId, EffectTileEffectDefinition, MapInstanceId,
+    MapPlacementId, MapPlacementOutcome, MapPresentationThemeId, MapPresetId, MapRecipeId,
+    ModeAnchorId, ModeDefinitionId, ResolvedMap,
 };
 use bevy::prelude::{App, Component, Plugin, Resource};
 use serde::{Deserialize, Serialize};
@@ -16,9 +17,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const MAP_CELL_SIZE_WORLD: f32 = 32.0;
 pub const MAX_MAP_OBJECT_HEALTH: u16 = 1_000;
 pub const MAX_RESOLVED_MAP_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
-pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 7;
+pub const MAP_CATALOG_SCHEMA_VERSION: u16 = 8;
 pub const MAP_RECIPE_SCHEMA_VERSION: u16 = 5;
-pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 9;
+pub const MAP_FINGERPRINT_FORMAT_VERSION: u16 = 10;
 #[cfg(test)]
 pub(super) const CROSSROADS_PRESET: MapPresetId = MapPresetId(1);
 pub const ASHEN_COURT_PRESET: MapPresetId = MapPresetId(3);
@@ -371,7 +372,7 @@ pub struct MapGameplayProfile {
     pub durability: MapDurabilityBehavior,
     pub interaction: MapInteractionBehavior,
     pub concealment: MapConcealmentBehavior,
-    pub effect_tile: MapEffectTileBehavior,
+    pub effect_tile_definition_id: Option<EffectTileDefinitionId>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -493,6 +494,10 @@ pub struct MapPresentationTheme {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct MapContentCatalog {
     pub schema_version: u16,
+    #[serde(skip, default)]
+    pub(crate) effect_tile_family_registry: super::effect_tiles::EffectTileFamilyRegistry,
+    pub effect_tile_definitions: Vec<EffectTileDefinition>,
+    pub effect_tile_effect_definitions: Vec<EffectTileEffectDefinition>,
     pub gameplay_profiles: Vec<MapGameplayProfile>,
     pub damage_profiles: Vec<MapDamageProfile>,
     pub explosion_profiles: Vec<EnvironmentExplosionProfile>,
@@ -506,8 +511,15 @@ pub struct MapContentCatalog {
 pub struct MapCatalogResource(pub MapContentCatalog);
 
 impl bevy::prelude::FromWorld for MapCatalogResource {
-    fn from_world(_: &mut bevy::prelude::World) -> Self {
-        Self(MapContentCatalog::embedded().expect("embedded grid map catalog is valid"))
+    fn from_world(world: &mut bevy::prelude::World) -> Self {
+        let registry = world
+            .get_resource::<super::effect_tiles::EffectTileFamilyRegistry>()
+            .cloned()
+            .unwrap_or_default();
+        Self(
+            MapContentCatalog::embedded_with_registry(registry)
+                .expect("embedded grid map catalog is valid"),
+        )
     }
 }
 
@@ -518,6 +530,7 @@ const FINGERPRINT_DOMAIN_SCHEMA_VERSION: u16 = 1;
 
 impl Plugin for MapContentPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<super::effect_tiles::EffectTileFamilyRegistry>();
         app.init_resource::<MapCatalogResource>();
         crate::content::register_gameplay_fingerprint_contributor(
             app,
@@ -540,6 +553,8 @@ fn map_fingerprint_material(world: &bevy::prelude::World) -> Result<Vec<u8>, Str
 #[serde(deny_unknown_fields)]
 struct GameplayProfileSource {
     schema_version: u16,
+    effect_tile_definitions: Vec<EffectTileDefinition>,
+    effect_tile_effect_definitions: Vec<EffectTileEffectDefinition>,
     gameplay_profiles: Vec<MapGameplayProfile>,
     damage_profiles: Vec<MapDamageProfile>,
     explosion_profiles: Vec<EnvironmentExplosionProfile>,
@@ -581,6 +596,12 @@ include!(concat!(env!("OUT_DIR"), "/embedded_builtin_maps.rs"));
 
 impl MapContentCatalog {
     pub fn embedded() -> Result<Self, String> {
+        Self::embedded_with_registry(super::effect_tiles::EffectTileFamilyRegistry::default())
+    }
+
+    fn embedded_with_registry(
+        effect_tile_family_registry: super::effect_tiles::EffectTileFamilyRegistry,
+    ) -> Result<Self, String> {
         let profiles: GameplayProfileSource = ron::from_str(include_str!(
             "../../content/catalogs/map_gameplay_profiles.ron"
         ))
@@ -629,6 +650,9 @@ impl MapContentCatalog {
         presets.sort_by_key(|preset| preset.id);
         let catalog = Self {
             schema_version: MAP_CATALOG_SCHEMA_VERSION,
+            effect_tile_family_registry,
+            effect_tile_definitions: profiles.effect_tile_definitions,
+            effect_tile_effect_definitions: profiles.effect_tile_effect_definitions,
             gameplay_profiles: profiles.gameplay_profiles,
             damage_profiles: profiles.damage_profiles,
             explosion_profiles: profiles.explosion_profiles,
@@ -646,6 +670,8 @@ impl MapContentCatalog {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != MAP_CATALOG_SCHEMA_VERSION
+            || self.effect_tile_definitions.is_empty()
+            || self.effect_tile_effect_definitions.is_empty()
             || self.gameplay_profiles.is_empty()
             || self.damage_profiles.is_empty()
             || self.explosion_profiles.is_empty()
@@ -656,6 +682,11 @@ impl MapContentCatalog {
         {
             return Err("invalid or empty grid map catalog".to_string());
         }
+        super::effect_tiles::validate_effect_tile_catalog_with_registry(
+            &self.effect_tile_definitions,
+            &self.effect_tile_effect_definitions,
+            &self.effect_tile_family_registry,
+        )?;
         validate_sorted_ids(
             self.gameplay_profiles.iter().map(|profile| profile.id.0),
             "gameplay profiles",
@@ -693,6 +724,15 @@ impl MapContentCatalog {
                     .all(|pair| pair[0] < pair[1])
             {
                 return Err(format!("invalid map asset: {}", asset.key));
+            }
+            if profile
+                .effect_tile_definition_id
+                .is_some_and(|id| self.effect_tile_definition(id).is_none())
+            {
+                return Err(format!(
+                    "asset {} references an unknown effect-tile definition",
+                    asset.key
+                ));
             }
             validate_asset_profile(asset, **profile)?;
         }
@@ -737,6 +777,27 @@ impl MapContentCatalog {
         self.gameplay_profiles
             .iter()
             .find(|profile| profile.id == id)
+    }
+
+    #[must_use]
+    pub fn effect_tile_definition(
+        &self,
+        id: EffectTileDefinitionId,
+    ) -> Option<&EffectTileDefinition> {
+        self.effect_tile_definitions
+            .iter()
+            .find(|definition| definition.id == id)
+    }
+
+    pub(crate) fn resolve_effect_tile_capabilities(
+        &self,
+        definition: &EffectTileDefinition,
+    ) -> Result<super::EffectTileCapabilities, String> {
+        super::effect_tiles::resolve_effect_tile_capabilities_with_registry(
+            definition,
+            &self.effect_tile_effect_definitions,
+            &self.effect_tile_family_registry,
+        )
     }
 
     #[must_use]
@@ -900,7 +961,6 @@ fn validate_asset_profile(
     asset: &MapAssetDefinition,
     profile: MapGameplayProfile,
 ) -> Result<(), String> {
-    profile.effect_tile.validate()?;
     let inert = profile_is_inert(profile);
     let blocks = profile_blocks(profile);
     let concealment_is_consistent = concealment_matches_asset(asset, profile);
@@ -1037,7 +1097,7 @@ fn effect_tile_matches_asset(
     profile: MapGameplayProfile,
     inert: bool,
 ) -> bool {
-    profile.effect_tile == MapEffectTileBehavior::None
+    profile.effect_tile_definition_id.is_none()
         || (asset.slot == MapAssetSlot::Feature
             && inert
             && profile.interaction == MapInteractionBehavior::None

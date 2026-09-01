@@ -91,10 +91,35 @@ export interface ChestTuning extends JsonObject {
 }
 
 export interface EffectTileTuning extends JsonObject {
-  speedMultiplierMilli: number;
-  slowMultiplierMilli: number;
-  damagePerPulse: number;
-  intervalTicks: number;
+  definitions: EffectTileDefinition[];
+  effectDefinitions: EffectTileEffectDefinition[];
+}
+
+export interface EffectTileDefinition extends JsonObject {
+  id: number;
+  key: string;
+  displayName: string;
+  effects: EffectTileEffectReference[];
+  botTraversalCostMilli: number | null;
+  spawnClearance: "None" | "OccupiedCell" | "AdjacentCells";
+}
+
+export interface EffectTileEffectReference extends JsonObject {
+  familyId: number;
+  definitionId: number;
+}
+
+export interface EffectTileEffectDefinition extends JsonObject {
+  id: number;
+  familyId: number;
+  key: string;
+  displayName: string;
+  parameters: EffectTileParameter[];
+}
+
+export interface EffectTileParameter extends JsonObject {
+  key: string;
+  value: number;
 }
 
 export interface BalanceLabSnapshot extends JsonObject {

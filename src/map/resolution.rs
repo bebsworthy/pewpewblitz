@@ -8,12 +8,11 @@ use super::geometry::{
 use super::{
     HEIST_SAFE_VISUAL_PROFILE, MAP_CELL_SIZE_WORLD, MAP_RECIPE_SCHEMA_VERSION, MapAssetId,
     MapAssetPlacement, MapAssetSlot, MapCell, MapColliderShape, MapConcealmentBehavior,
-    MapContentCatalog, MapDestructionBehavior, MapDimensions, MapDurabilityBehavior,
-    MapEffectTileBehavior, MapInstanceId, MapModeAnchorKind, MapModeAnchorPlacement,
-    MapPlacementId, MapPlacementParameterKind, MapPlacementParameters, MapPresetId, MapRecipe,
-    MapRecipeFingerprint, MapShape, MapVisualProfileId, ModeAnchorId, PlayerCollision,
-    ProjectileCollision, ResolvedEffectTile, ResolvedMapIdentity, ResolvedMapSnapshot,
-    SpawnPointId, TeamSpawnPoint,
+    MapContentCatalog, MapDestructionBehavior, MapDimensions, MapDurabilityBehavior, MapInstanceId,
+    MapModeAnchorKind, MapModeAnchorPlacement, MapPlacementId, MapPlacementParameterKind,
+    MapPlacementParameters, MapPresetId, MapRecipe, MapRecipeFingerprint, MapShape,
+    MapVisualProfileId, ModeAnchorId, PlayerCollision, ProjectileCollision, ResolvedEffectTile,
+    ResolvedMapIdentity, ResolvedMapSnapshot, SpawnPointId, TeamSpawnPoint,
 };
 use crate::modes::ModeTopologyPolicy;
 use bevy::prelude::{Resource, Vec2};
@@ -29,6 +28,7 @@ pub struct ResolvedMap {
     pub objective_zone: Option<ResolvedMapObjective>,
     pub heist_safes: Vec<ResolvedHeistSafeAnchor>,
     pub effect_tiles: Vec<ResolvedEffectTile>,
+    pub effect_tiles_by_cell: BTreeMap<MapCell, ResolvedEffectTile>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -94,6 +94,11 @@ pub(super) fn resolve_grid_recipe(
     let runtime = derive_runtime_facts(&snapshot, catalog)?;
     let dynamic = derive_dynamic_facts(recipe.dimensions, &placements, catalog);
 
+    let effect_tiles_by_cell = dynamic
+        .effect_tiles
+        .iter()
+        .map(|tile| (tile.cell, *tile))
+        .collect();
     Ok(ResolvedMap {
         snapshot,
         spawn_points_by_team: runtime.spawn_points_by_team,
@@ -103,6 +108,7 @@ pub(super) fn resolve_grid_recipe(
         objective_zone,
         heist_safes,
         effect_tiles: dynamic.effect_tiles,
+        effect_tiles_by_cell,
     })
 }
 
@@ -180,9 +186,8 @@ fn validate_recipe_capacity(
             usize::from(profile.is_some_and(|profile| {
                 profile.concealment == MapConcealmentBehavior::HideOccupants
             }));
-        effect_tile_count += usize::from(
-            profile.is_some_and(|profile| profile.effect_tile.capabilities().is_effect_tile()),
-        );
+        effect_tile_count +=
+            usize::from(profile.is_some_and(|profile| profile.effect_tile_definition_id.is_some()));
     }
     if effect_tile_count > super::MAX_EFFECT_TILE_PLACEMENTS {
         return Err("map recipe exceeds the effect-tile ceiling".to_string());
@@ -449,14 +454,23 @@ fn derive_dynamic_facts(
     let effect_tiles = placements
         .iter()
         .filter_map(|placement| {
-            let behavior = catalog
-                .asset(placement.asset_id)
-                .and_then(|asset| catalog.profile(asset.gameplay_profile_id))?
-                .effect_tile;
-            behavior.kind().map(|_| ResolvedEffectTile {
+            let asset = catalog.asset(placement.asset_id)?;
+            let definition = catalog.effect_tile_definition(
+                catalog
+                    .profile(asset.gameplay_profile_id)?
+                    .effect_tile_definition_id?,
+            )?;
+            let capabilities = catalog
+                .resolve_effect_tile_capabilities(definition)
+                .expect("validated effect-tile definition remains resolvable");
+            Some(ResolvedEffectTile {
                 placement_id: placement.placement_id,
                 cell: placement.cell,
-                behavior,
+                definition_id: definition.id,
+                visual_profile_id: asset.visual_profile_id,
+                capabilities,
+                bot_traversal_cost_milli: definition.bot_traversal_cost_milli,
+                spawn_clearance: definition.spawn_clearance,
             })
         })
         .collect();
@@ -495,16 +509,30 @@ fn validate_effect_tile_spawn_safety(
         .map(|placement| placement.cell)
         .collect();
     for placement in placements {
-        let behavior = catalog
+        let Some(tile) = catalog
             .asset(placement.asset_id)
             .and_then(|asset| catalog.profile(asset.gameplay_profile_id))
-            .map_or(MapEffectTileBehavior::None, |profile| profile.effect_tile);
-        let capabilities = behavior.capabilities();
-        if !capabilities.is_effect_tile() {
+            .and_then(|profile| profile.effect_tile_definition_id)
+            .and_then(|definition_id| catalog.effect_tile_definition(definition_id))
+            .map(|definition| ResolvedEffectTile {
+                placement_id: placement.placement_id,
+                cell: placement.cell,
+                definition_id: definition.id,
+                visual_profile_id: catalog
+                    .asset(placement.asset_id)
+                    .expect("resolved placement asset exists")
+                    .visual_profile_id,
+                capabilities: catalog
+                    .resolve_effect_tile_capabilities(definition)
+                    .expect("validated effect-tile definition remains resolvable"),
+                bot_traversal_cost_milli: definition.bot_traversal_cost_milli,
+                spawn_clearance: definition.spawn_clearance,
+            })
+        else {
             continue;
-        }
+        };
         for spawn in &spawn_cells {
-            if capabilities.violates_spawn_clearance(placement.cell, *spawn) {
+            if tile.violates_spawn_clearance(*spawn) {
                 return Err("effect tile violates spawn safety clearance".to_string());
             }
         }

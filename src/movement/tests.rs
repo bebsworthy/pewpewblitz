@@ -340,11 +340,16 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
             generation: 1,
         },
         placement_id: crate::map::MapPlacementId(1),
-        behavior: crate::map::MapEffectTileBehavior::Speed {
-            movement_multiplier_milli: 1_500,
+        definition_id: crate::map::EffectTileDefinitionId(1),
+        visual_profile_id: crate::map::MapVisualProfileId(50),
+        capabilities: crate::map::EffectTileCapabilities {
+            movement: Some(crate::map::MovementTileEffect {
+                multiplier_milli: 1_500,
+            }),
+            periodic_damage: None,
+            positive_health_multiplier_milli: 1_000,
         },
         entered_at_tick: 1,
-        next_pulse_at_tick: None,
     };
     let velocity = resolved_movement_velocity(
         5,

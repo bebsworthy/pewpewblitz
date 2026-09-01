@@ -56,8 +56,8 @@ The supported recipe model expresses:
 - profile-derived player/projectile collision, including footprint rectangles and bounded circles;
 - explicit whole-cell destructible placements and optional replacement assets;
 - parameterized player-spawn marker assets and team slots;
-- one-cell non-colliding effect-tile features whose approved profiles supply Speed, Slow, or
-  periodic neutral Damage behavior;
+- one-cell non-colliding effect-tile features whose gameplay profiles reference stable tile
+  definitions composed from registered effect families;
 - the compatible mode definition;
 - typed mode-required anchors, currently the half-cell-precision Hot Zone circle and two
   cell-aligned team-owned Heist objective anchors.
@@ -157,8 +157,8 @@ The authoritative map runtime owns:
 - terminal destruction/replacement outcomes, colliders, revisions, and rebuild work;
 - live damageable environment-object identity, partial health, exact-once barrel/chest terminal
   behavior, and restoration-pickup lifecycle;
-- current effect-tile occupancy, full-interval periodic damage deadlines, and neutral environment
-  damage transactions through the ordinary combat outcome path;
+- current effect-tile occupancy, full-interval periodic damage deadlines, and grouped neutral
+  environment-damage transactions through the ordinary combat outcome path;
 - installation, reset, recovery, and teardown of those map-owned facts.
 
 The authoritative mode runtime owns:

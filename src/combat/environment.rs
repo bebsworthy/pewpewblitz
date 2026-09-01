@@ -321,7 +321,10 @@ pub(crate) fn apply_environment_damage_batch(
             .remove::<super::ExternalMotion>()
             .remove::<super::KnockbackFeedback>();
         if matches!(target.kind, CombatTargetKind::Fighter) {
-            entity.remove::<crate::map::EffectTileOccupancy>();
+            entity.remove::<(
+                crate::map::EffectTileOccupancy,
+                crate::map::effect_tiles::EffectTilePulseState,
+            )>();
         }
         world
             .resource_mut::<super::CombatOutcomeFacts>()

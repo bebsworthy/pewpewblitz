@@ -1763,7 +1763,7 @@ fn materialize_map_static_visuals(
                 commands, primitives, materials, marker, center, rotation, adjacency,
             );
         } else if let Some(material) =
-            effect_tile_material(placement.asset_id, presentation_materials)
+            profile.and_then(|profile| effect_tile_material(profile, presentation_materials))
         {
             spawn_effect_tile(commands, primitives, marker, center, material);
         } else if asset.slot == crate::map::MapAssetSlot::Feature {
@@ -1807,14 +1807,17 @@ fn materialize_map_static_visuals(
 }
 
 fn effect_tile_material(
-    asset_id: crate::map::MapAssetId,
+    profile: &environment_assets::MapVisualProfile,
     materials: &Material3dAssets,
 ) -> Option<Handle<StandardMaterial>> {
-    match asset_id {
-        crate::map::SPEED_TILE_ASSET => Some(materials.dash.clone()),
-        crate::map::SLOW_TILE_ASSET => Some(materials.status_slow.clone()),
-        crate::map::DAMAGE_TILE_ASSET => Some(materials.effect_damage.clone()),
-        _ => None,
+    let environment_assets::MapVisualKind::GeneratedEffectTile { status } = &profile.kind else {
+        return None;
+    };
+    match *status {
+        environment_assets::EffectTileStatusVisual::Speed => Some(materials.dash.clone()),
+        environment_assets::EffectTileStatusVisual::Slow => Some(materials.status_slow.clone()),
+        environment_assets::EffectTileStatusVisual::Damage => Some(materials.effect_damage.clone()),
+        environment_assets::EffectTileStatusVisual::None => None,
     }
 }
 

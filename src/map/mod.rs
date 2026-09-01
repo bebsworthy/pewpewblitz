@@ -5,7 +5,7 @@ mod catalog;
 mod client;
 #[cfg(test)]
 mod compatibility_tests;
-mod effect_tiles;
+pub(crate) mod effect_tiles;
 mod geometry;
 mod model;
 mod objects;
@@ -51,12 +51,15 @@ pub use client::{
     ClientMapPlugin, ClientMapReadiness, ClientWorldObjectReadiness, MapPresentationMember,
     MapPresentationPlugin, MapPresentationSet, PresentedMap, perimeter_visual_shapes,
 };
-#[cfg(feature = "client")]
-pub(crate) use effect_tiles::EffectTilePresentation;
 pub use effect_tiles::{
-    EffectTileKind, EffectTileOccupancy, MAX_EFFECT_TILE_PLACEMENTS, MapEffectTileBehavior,
-    ResolvedEffectTile,
+    EffectTileCapabilities, EffectTileDefinition, EffectTileDefinitionId,
+    EffectTileEffectDefinition, EffectTileEffectDefinitionId, EffectTileEffectRef,
+    EffectTileFamilyId, EffectTileOccupancy, EffectTileParameter, EffectTileSpawnClearance,
+    MAX_EFFECT_TILE_PLACEMENTS, MOVEMENT_EFFECT_TILE_FAMILY, MovementTileEffect,
+    PERIODIC_DAMAGE_EFFECT_TILE_FAMILY, POSITIVE_HEALTH_EFFECT_TILE_FAMILY,
+    PeriodicDamageTileEffect, ResolvedEffectTile,
 };
+pub use effect_tiles::{EffectTileFamilyRegistration, register_effect_tile_family};
 #[cfg(feature = "client")]
 pub(crate) use geometry::effective_projectile_collider;
 pub use geometry::{

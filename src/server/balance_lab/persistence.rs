@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 13;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 14;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -284,8 +284,9 @@ pub(super) fn load(
     {
         value["schemaVersion"] = serde_json::json!(12);
         value["snapshot"]["schemaVersion"] = serde_json::json!(17);
-        value["snapshot"]["effectTiles"] = serde_json::to_value(validator.baseline.effect_tiles)
-            .map_err(|error| format!("canonical effect-tile migration failed: {error}"))?;
+        value["snapshot"]["effectTiles"] =
+            serde_json::to_value(&validator.baseline.effect_tiles)
+                .map_err(|error| format!("canonical effect-tile migration failed: {error}"))?;
     }
     if value
         .get("schemaVersion")
@@ -321,6 +322,29 @@ pub(super) fn load(
             ultimates.push(entry);
         }
         ultimates.sort_by_key(|ultimate| ultimate["id"].as_u64().unwrap_or(u64::MAX));
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(13)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(19)
+    {
+        let old = &value["snapshot"]["effectTiles"];
+        let read = |field: &str| -> Result<u16, String> {
+            old[field]
+                .as_u64()
+                .and_then(|number| u16::try_from(number).ok())
+                .ok_or_else(|| format!("persisted effect-tile field {field} is invalid"))
+        };
+        let mut migrated = validator.baseline.effect_tiles.clone();
+        migrated.set_parameter(1, "multiplier-milli", read("speedMultiplierMilli")?);
+        migrated.set_parameter(2, "multiplier-milli", read("slowMultiplierMilli")?);
+        migrated.set_parameter(3, "damage", read("damagePerPulse")?);
+        migrated.set_parameter(3, "interval-ticks", read("intervalTicks")?);
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["snapshot"]["effectTiles"] = serde_json::to_value(migrated)
+            .map_err(|error| format!("effect-tile definition migration failed: {error}"))?;
     }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
@@ -433,7 +457,7 @@ mod tests {
         let (validator, mut snapshot) = fixture();
         snapshot.fighter_profiles.default.maximum_health += 7;
         snapshot.heist.safe_maximum_health = 2_750;
-        snapshot.effect_tiles.damage_per_pulse = 17;
+        snapshot.effect_tiles.set_parameter(3, "damage", 17);
         snapshot.ultimate_charge.dealt_damage_multiplier += 1;
         let crate::builds::UltimateParameters::Sentry {
             projectile_damage, ..
@@ -458,7 +482,7 @@ mod tests {
             loaded.builds.fighter_profiles.default.maximum_health,
             snapshot.fighter_profiles.default.maximum_health
         );
-        assert_eq!(loaded.snapshot.effect_tiles.damage_per_pulse, 17);
+        assert_eq!(loaded.snapshot.effect_tiles.parameter(3, "damage"), 17);
         assert_eq!(
             super::super::EffectTileTuning::from_catalog(&loaded.maps).unwrap(),
             snapshot.effect_tiles
@@ -612,6 +636,47 @@ mod tests {
         assert!(
             (loaded.snapshot.fighter_profiles.lightweight.movement_speed - 219.0).abs()
                 < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn version_thirteen_effect_tile_values_migrate_to_stable_definitions() {
+        let root = TestPath::create();
+        let path = root.0.join("session-v13.json");
+        let (validator, snapshot) = fixture();
+        save(&path, &snapshot, BalanceLabRevision(13)).unwrap();
+
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["schemaVersion"] = serde_json::json!(13);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(19);
+        value["snapshot"]["effectTiles"] = serde_json::json!({
+            "speedMultiplierMilli": 1600,
+            "slowMultiplierMilli": 450,
+            "damagePerPulse": 17,
+            "intervalTicks": 75
+        });
+        fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let loaded = load(&path, &validator).unwrap().unwrap();
+        assert_eq!(
+            loaded
+                .snapshot
+                .effect_tiles
+                .parameter(1, "multiplier-milli"),
+            1_600
+        );
+        assert_eq!(
+            loaded
+                .snapshot
+                .effect_tiles
+                .parameter(2, "multiplier-milli"),
+            450
+        );
+        assert_eq!(loaded.snapshot.effect_tiles.parameter(3, "damage"), 17);
+        assert_eq!(
+            loaded.snapshot.effect_tiles.parameter(3, "interval-ticks"),
+            75
         );
     }
 

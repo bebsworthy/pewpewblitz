@@ -13,7 +13,7 @@ mod passives;
 mod ultimates;
 mod weapons;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 12;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 13;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -237,7 +237,7 @@ impl BalanceLabEditorManifest {
         }
         ultimates::add_fields(&mut fields, snapshot);
         passives::add_fields(&mut fields, snapshot);
-        add_effect_tile_fields(&mut fields);
+        add_effect_tile_fields(&mut fields, snapshot);
         add_world_fields(&mut fields);
         validate_comparison_contract(&fields)
             .expect("built-in editor comparison contract must be valid");
@@ -248,8 +248,11 @@ impl BalanceLabEditorManifest {
     }
 }
 
-fn add_effect_tile_fields(fields: &mut Vec<EditorFieldDescriptor>) {
-    let multiplier = |minimum_milli: u16, maximum_milli: u16| NumberSpec {
+fn add_effect_tile_fields(
+    fields: &mut Vec<EditorFieldDescriptor>,
+    snapshot: &BalanceLabSnapshotV3,
+) {
+    let multiplier = |minimum_milli: u16, maximum_milli: u16, help| NumberSpec {
         storage_kind: EditorStorageKind::Integer,
         unit: "×",
         storage_scale: 1_000.0,
@@ -258,67 +261,80 @@ fn add_effect_tile_fields(fields: &mut Vec<EditorFieldDescriptor>) {
         minimum_exclusive: false,
         step: 0.001,
         control: EditorControl::RangeAndNumber,
-        help: Some("Multiplies ordinary player-driven movement; Dash and knockback are unchanged."),
+        help: Some(help),
     };
-    for (field, label, spec) in [
-        (
-            "speedMultiplierMilli",
-            "Speed multiplier",
-            multiplier(
-                super::EffectTileTuning::MIN_SPEED_MULTIPLIER_MILLI,
-                super::EffectTileTuning::MAX_SPEED_MULTIPLIER_MILLI,
-            ),
-        ),
-        (
-            "slowMultiplierMilli",
-            "Slow multiplier",
-            multiplier(
-                super::EffectTileTuning::MIN_SLOW_MULTIPLIER_MILLI,
-                super::EffectTileTuning::MAX_SLOW_MULTIPLIER_MILLI,
-            ),
-        ),
-    ] {
-        add_field(
-            fields,
-            path!["effectTiles", field],
-            EditorSection::WorldObjects,
-            field,
-            "effect-tiles",
-            "Effect tiles",
-            "Movement",
-            label,
-            spec,
-        );
+    for (effect_index, effect) in snapshot.effect_tiles.effect_definitions.iter().enumerate() {
+        let tile = snapshot.effect_tiles.definitions.iter().find(|tile| {
+            tile.effects
+                .iter()
+                .any(|reference| reference.definition_id == effect.id)
+        });
+        let subject_key = tile.map_or(effect.key.as_str(), |tile| tile.key.as_str());
+        let subject_label = tile.map_or(effect.display_name.as_str(), |tile| {
+            tile.display_name.as_str()
+        });
+        let group = match effect.family_id {
+            crate::map::MOVEMENT_EFFECT_TILE_FAMILY => "Movement",
+            crate::map::PERIODIC_DAMAGE_EFFECT_TILE_FAMILY => "Periodic damage",
+            crate::map::POSITIVE_HEALTH_EFFECT_TILE_FAMILY => "Positive health",
+            _ => "Registered effects",
+        };
+        for (parameter_index, parameter) in effect.parameters.iter().enumerate() {
+            let comparison_key = format!("{}-{}", effect.family_id.0, parameter.key);
+            let (label, spec) = match (effect.family_id, parameter.key.as_str()) {
+                (crate::map::MOVEMENT_EFFECT_TILE_FAMILY, "multiplier-milli") => (
+                    "Movement multiplier",
+                    multiplier(
+                        crate::map::effect_tiles::MIN_EFFECT_TILE_MOVEMENT_MULTIPLIER_MILLI,
+                        crate::map::effect_tiles::MAX_EFFECT_TILE_MOVEMENT_MULTIPLIER_MILLI,
+                        "Multiplies ordinary player-driven movement; Dash and knockback are unchanged.",
+                    ),
+                ),
+                (crate::map::PERIODIC_DAMAGE_EFFECT_TILE_FAMILY, "damage") => (
+                    "Damage per pulse",
+                    NumberSpec::integer(
+                        1,
+                        u32::from(crate::map::effect_tiles::MAX_EFFECT_TILE_DAMAGE),
+                        "health",
+                    ),
+                ),
+                (crate::map::PERIODIC_DAMAGE_EFFECT_TILE_FAMILY, "interval-ticks") => (
+                    "Pulse interval",
+                    NumberSpec::ticks(
+                        u32::from(crate::map::effect_tiles::MIN_EFFECT_TILE_INTERVAL_TICKS),
+                        u64::from(crate::map::effect_tiles::MAX_EFFECT_TILE_INTERVAL_TICKS),
+                    ),
+                ),
+                (crate::map::POSITIVE_HEALTH_EFFECT_TILE_FAMILY, "multiplier-milli") => (
+                    "Positive-health multiplier",
+                    multiplier(
+                        0,
+                        crate::map::effect_tiles::MAX_POSITIVE_HEALTH_MULTIPLIER_MILLI,
+                        "Scales positive-health effects; zero blocks them.",
+                    ),
+                ),
+                _ => continue,
+            };
+            add_field(
+                fields,
+                path![
+                    "effectTiles",
+                    "effectDefinitions",
+                    effect_index,
+                    "parameters",
+                    parameter_index,
+                    "value"
+                ],
+                EditorSection::WorldObjects,
+                &comparison_key,
+                subject_key,
+                subject_label,
+                group,
+                label,
+                spec,
+            );
+        }
     }
-    add_field(
-        fields,
-        path!["effectTiles", "damagePerPulse"],
-        EditorSection::WorldObjects,
-        "damagePerPulse",
-        "effect-tiles",
-        "Effect tiles",
-        "Damage",
-        "Damage per pulse",
-        NumberSpec::integer(
-            u32::from(super::EffectTileTuning::MIN_DAMAGE_PER_PULSE),
-            u32::from(super::EffectTileTuning::MAX_DAMAGE_PER_PULSE),
-            "health",
-        ),
-    );
-    add_field(
-        fields,
-        path!["effectTiles", "intervalTicks"],
-        EditorSection::WorldObjects,
-        "intervalTicks",
-        "effect-tiles",
-        "Effect tiles",
-        "Damage",
-        "Pulse interval",
-        NumberSpec::ticks(
-            u32::from(super::EffectTileTuning::MIN_INTERVAL_TICKS),
-            u64::from(super::EffectTileTuning::MAX_INTERVAL_TICKS),
-        ),
-    );
 }
 
 fn add_global_fields(fields: &mut Vec<EditorFieldDescriptor>) {
@@ -877,7 +893,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 215);
+        assert_eq!(manifest.fields.len(), 216);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()
@@ -958,7 +974,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
 
-        assert_eq!(EDITOR_SCHEMA_VERSION, 12);
+        assert_eq!(EDITOR_SCHEMA_VERSION, 13);
         assert_eq!(comparison_row_count(&manifest, EditorSection::Weapons), 29);
         for (key, expected_subjects) in [
             ("economy/ammo_capacity", 7),
@@ -2134,19 +2150,23 @@ mod tests {
         let speed = manifest
             .fields
             .iter()
-            .find(|field| path_key(&field.path) == "effectTiles/speedMultiplierMilli")
+            .find(|field| {
+                path_key(&field.path) == "effectTiles/effectDefinitions/0/parameters/0/value"
+            })
             .unwrap();
         assert_eq!(speed.section, EditorSection::WorldObjects);
-        assert_eq!(speed.subject_label, "Effect tiles");
+        assert_eq!(speed.subject_label, "Speed Tile");
         assert_eq!(speed.unit, "×");
         assert!((speed.storage_scale - 1_000.0).abs() < f64::EPSILON);
-        assert!((speed.minimum - 1.001).abs() < f64::EPSILON);
+        assert!((speed.minimum - 0.1).abs() < f64::EPSILON);
         assert!((speed.maximum - 2.0).abs() < f64::EPSILON);
 
         let interval = manifest
             .fields
             .iter()
-            .find(|field| path_key(&field.path) == "effectTiles/intervalTicks")
+            .find(|field| {
+                path_key(&field.path) == "effectTiles/effectDefinitions/2/parameters/1/value"
+            })
             .unwrap();
         assert_eq!(interval.unit, "s");
         assert!((interval.storage_scale - SIMULATION_TICK_HZ_F64).abs() < f64::EPSILON);
