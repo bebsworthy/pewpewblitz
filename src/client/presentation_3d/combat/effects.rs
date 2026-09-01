@@ -22,7 +22,15 @@ pub(in crate::client) struct CombatEffect3d {
     expires_at_tick: Option<u64>,
     order: u64,
     recipe_id: String,
+    mesh_layers: u8,
     particle_emitters: u8,
+}
+
+#[derive(Resource, Default, Clone, Copy)]
+pub(in crate::client) struct VfxTransientDiagnostics {
+    root_high_water: usize,
+    mesh_layer_high_water: usize,
+    evicted_roots: u64,
 }
 
 impl CombatEffect3d {
@@ -95,6 +103,8 @@ impl PendingCombatEffect {
                     expires_at_tick: self.expires_at_tick,
                     order,
                     recipe_id: self.recipe_id.clone(),
+                    mesh_layers: u8::try_from(self.layers.len())
+                        .expect("validated recipe mesh-layer count fits u8"),
                     particle_emitters: u8::try_from(particle_emitters)
                         .expect("bounded particle emitter count fits u8"),
                 },
@@ -454,15 +464,21 @@ fn ordered_vfx_requests(requests: impl IntoIterator<Item = VfxRequest>) -> Vec<V
     ordered
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the allocation system keeps global/per-recipe eviction, spawn ordering, and high-water accounting auditable in one schedule phase"
+)]
 pub(in crate::client) fn materialize_combat_effects(
     mut commands: Commands,
     mut pending_effects: MessageReader<PendingCombatEffect>,
     effects: Query<(Entity, &CombatEffect3d)>,
     retained_particle_emitters: Query<(), With<RetainedProjectileSmoke3d>>,
     mut sequence: Local<CombatEffectSequence>,
+    mut transient_diagnostics: Option<ResMut<VfxTransientDiagnostics>>,
     mut particle_diagnostics: Option<ResMut<VfxParticleDiagnostics>>,
 ) {
     let retained_particle_emitters = retained_particle_emitters.count();
+    let mut evicted_roots = 0_u64;
     let mut active = effects
         .iter()
         .map(|(entity, effect)| {
@@ -470,6 +486,7 @@ pub(in crate::client) fn materialize_combat_effects(
                 effect.order,
                 entity,
                 effect.recipe_id.clone(),
+                usize::from(effect.mesh_layers),
                 usize::from(effect.particle_emitters),
             )
         })
@@ -480,13 +497,19 @@ pub(in crate::client) fn materialize_combat_effects(
     if let Some((maximum_order, ..)) = active.back() {
         sequence.0 = sequence.0.max(*maximum_order);
     }
+    let mut active_mesh_layers = active
+        .iter()
+        .map(|(_, _, _, mesh_layers, _)| *mesh_layers)
+        .sum::<usize>();
     let mut active_particle_emitters = active
         .iter()
-        .map(|(_, _, _, emitters)| *emitters)
+        .map(|(_, _, _, _, emitters)| *emitters)
         .sum::<usize>();
     while active.len() > MAX_EFFECTS {
-        if let Some((_, oldest, _, emitters)) = active.pop_front() {
+        if let Some((_, oldest, _, mesh_layers, emitters)) = active.pop_front() {
+            active_mesh_layers = active_mesh_layers.saturating_sub(mesh_layers);
             active_particle_emitters = active_particle_emitters.saturating_sub(emitters);
+            evicted_roots = evicted_roots.saturating_add(1);
             commands.entity(oldest).try_despawn();
         }
     }
@@ -494,24 +517,28 @@ pub(in crate::client) fn materialize_combat_effects(
     for descriptor in pending_effects.read() {
         while active
             .iter()
-            .filter(|(_, _, recipe, _)| recipe == &descriptor.recipe_id)
+            .filter(|(_, _, recipe, _, _)| recipe == &descriptor.recipe_id)
             .count()
             >= descriptor.concurrency_cap
         {
             let Some(index) = active
                 .iter()
-                .position(|(_, _, recipe, _)| recipe == &descriptor.recipe_id)
+                .position(|(_, _, recipe, _, _)| recipe == &descriptor.recipe_id)
             else {
                 break;
             };
-            if let Some((_, oldest, _, emitters)) = active.remove(index) {
+            if let Some((_, oldest, _, mesh_layers, emitters)) = active.remove(index) {
+                active_mesh_layers = active_mesh_layers.saturating_sub(mesh_layers);
                 active_particle_emitters = active_particle_emitters.saturating_sub(emitters);
+                evicted_roots = evicted_roots.saturating_add(1);
                 commands.entity(oldest).try_despawn();
             }
         }
         while active.len() >= MAX_EFFECTS {
-            if let Some((_, oldest, _, emitters)) = active.pop_front() {
+            if let Some((_, oldest, _, mesh_layers, emitters)) = active.pop_front() {
+                active_mesh_layers = active_mesh_layers.saturating_sub(mesh_layers);
                 active_particle_emitters = active_particle_emitters.saturating_sub(emitters);
+                evicted_roots = evicted_roots.saturating_add(1);
                 commands.entity(oldest).try_despawn();
             }
         }
@@ -531,18 +558,52 @@ pub(in crate::client) fn materialize_combat_effects(
                 .expect("bounded particle emitter count fits u64"),
             );
         }
+        let mesh_layers = descriptor.layers.len();
+        active_mesh_layers = active_mesh_layers.saturating_add(mesh_layers);
         active_particle_emitters = active_particle_emitters.saturating_add(particle_emitters);
         active.push_back((
             sequence.0,
             entity,
             descriptor.recipe_id.clone(),
+            mesh_layers,
             particle_emitters,
         ));
     }
-    if let Some(diagnostics) = particle_diagnostics.as_deref_mut() {
-        diagnostics.active = active_particle_emitters.saturating_add(retained_particle_emitters);
-        diagnostics.high_water = diagnostics.high_water.max(diagnostics.active);
-    }
+    record_transient_diagnostics(
+        transient_diagnostics.as_deref_mut(),
+        active.len(),
+        active_mesh_layers,
+        evicted_roots,
+    );
+    record_particle_diagnostics(
+        particle_diagnostics.as_deref_mut(),
+        active_particle_emitters.saturating_add(retained_particle_emitters),
+    );
+}
+
+fn record_transient_diagnostics(
+    diagnostics: Option<&mut VfxTransientDiagnostics>,
+    active_roots: usize,
+    active_mesh_layers: usize,
+    evicted_roots: u64,
+) {
+    let Some(diagnostics) = diagnostics else {
+        return;
+    };
+    diagnostics.root_high_water = diagnostics.root_high_water.max(active_roots);
+    diagnostics.mesh_layer_high_water = diagnostics.mesh_layer_high_water.max(active_mesh_layers);
+    diagnostics.evicted_roots = diagnostics.evicted_roots.saturating_add(evicted_roots);
+}
+
+fn record_particle_diagnostics(
+    diagnostics: Option<&mut VfxParticleDiagnostics>,
+    active_emitters: usize,
+) {
+    let Some(diagnostics) = diagnostics else {
+        return;
+    };
+    diagnostics.active = active_emitters;
+    diagnostics.high_water = diagnostics.high_water.max(active_emitters);
 }
 
 fn reveal_ring_remaining_duration(
@@ -680,6 +741,13 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
     let signature_cache = world
         .get_resource::<VfxSignatureCache>()
         .map(VfxSignatureCache::diagnostics);
+    let catalog_diagnostics = world
+        .get_resource::<VfxRegistry>()
+        .map(VfxRegistry::catalog_diagnostics);
+    let transient_diagnostics = world
+        .get_resource::<VfxTransientDiagnostics>()
+        .copied()
+        .unwrap_or_default();
     let particle_diagnostics = world
         .get_resource::<VfxParticleDiagnostics>()
         .copied()
@@ -713,11 +781,17 @@ pub(in crate::client) fn collect_vfx_evidence_snapshot(world: &mut World) -> Val
 
     json!({
         "catalog_fingerprint": vfx::embedded_vfx_catalog_fingerprint(),
+        "catalog": catalog_diagnostics,
         "reduced_effects": reduced_effects,
         "primitive_world": primitive_world,
         "active": {
             "visual_roots": component_count::<CombatVisualOwner>(world),
             "transient_roots": transient_effects.len(),
+            "transient_root_capacity": MAX_EFFECTS,
+            "transient_root_high_water": transient_diagnostics.root_high_water,
+            "transient_mesh_layers": component_count::<CombatEffectLayer3d>(world),
+            "transient_mesh_layer_high_water": transient_diagnostics.mesh_layer_high_water,
+            "transient_roots_evicted": transient_diagnostics.evicted_roots,
             "projectile_roots": component_count::<V3ProjectileVisual>(world),
             "lobbed_projectile_aids": component_count::<super::entities::LobbedProjectileAid3d>(world),
             "sentry_roots": component_count::<super::entities::SentryVisual3d>(world),
@@ -908,12 +982,19 @@ mod tests {
             ..Default::default()
         });
         world.insert_resource(ImportedWorldFallbackPolicy::ForcePrimitive);
+        world.insert_resource(registry());
+        world.insert_resource(VfxTransientDiagnostics {
+            root_high_water: 7,
+            mesh_layer_high_water: 21,
+            evicted_roots: 2,
+        });
         world.spawn((
             CombatEffect3d {
                 timer: Timer::new(Duration::from_millis(180), TimerMode::Once),
                 expires_at_tick: None,
                 order: 7,
                 recipe_id: "impact".to_string(),
+                mesh_layers: 0,
                 particle_emitters: 0,
             },
             CombatVisualSignature::neutral_point(7, Vec2::ZERO)
@@ -944,7 +1025,20 @@ mod tests {
 
         assert_eq!(snapshot["reduced_effects"], true);
         assert_eq!(snapshot["primitive_world"], true);
+        assert_eq!(snapshot["catalog"]["request_mappings"], 17);
+        assert_eq!(snapshot["catalog"]["mapping_capacity"], 64);
+        assert!(snapshot["catalog"]["recipes"].as_u64().unwrap() > 17);
+        assert!(
+            snapshot["catalog"]["maximum_recipe_mesh_layers"]
+                .as_u64()
+                .unwrap()
+                <= 8
+        );
         assert_eq!(snapshot["active"]["transient_roots"], 1);
+        assert_eq!(snapshot["active"]["transient_root_capacity"], 96);
+        assert_eq!(snapshot["active"]["transient_root_high_water"], 7);
+        assert_eq!(snapshot["active"]["transient_mesh_layer_high_water"], 21);
+        assert_eq!(snapshot["active"]["transient_roots_evicted"], 2);
         assert_eq!(snapshot["active"]["elemental_field_roots"], 1);
         assert_eq!(snapshot["active"]["animated_fire_areas"], 1);
         assert_eq!(snapshot["active"]["fire_area_underlays"], 1);
@@ -960,6 +1054,7 @@ mod tests {
     fn effect_allocation_app() -> App {
         let mut app = App::new();
         app.add_message::<PendingCombatEffect>()
+            .init_resource::<VfxTransientDiagnostics>()
             .init_resource::<VfxParticleDiagnostics>()
             .add_systems(Update, materialize_combat_effects);
         app
@@ -976,6 +1071,7 @@ mod tests {
                         expires_at_tick: None,
                         order: u64::try_from(order).expect("bounded effect order fits u64"),
                         recipe_id: "existing".to_string(),
+                        mesh_layers: 0,
                         particle_emitters: 0,
                     })
                     .id()
@@ -1002,6 +1098,9 @@ mod tests {
         assert_eq!(orders.len(), MAX_EFFECTS);
         assert_eq!(orders.iter().copied().min(), Some(4));
         assert_eq!(orders.iter().copied().max(), Some(99));
+        let diagnostics = world.resource::<VfxTransientDiagnostics>();
+        assert_eq!(diagnostics.root_high_water, MAX_EFFECTS);
+        assert_eq!(diagnostics.evicted_roots, 4);
     }
 
     #[test]
@@ -1364,6 +1463,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<PendingCombatEffect>()
             .insert_resource(Time::<Real>::default())
+            .init_resource::<VfxTransientDiagnostics>()
             .add_systems(
                 Update,
                 (materialize_combat_effects, cleanup_combat_effects).chain(),
@@ -1380,6 +1480,10 @@ mod tests {
         assert_eq!(effects.iter(world).count(), 0);
         let mut layers = world.query_filtered::<Entity, With<CombatEffectLayer3d>>();
         assert_eq!(layers.iter(world).count(), 0);
+        let diagnostics = world.resource::<VfxTransientDiagnostics>();
+        assert_eq!(diagnostics.root_high_water, 1);
+        assert_eq!(diagnostics.mesh_layer_high_water, 1);
+        assert_eq!(diagnostics.evicted_roots, 0);
     }
 
     #[test]

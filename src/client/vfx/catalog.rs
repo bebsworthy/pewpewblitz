@@ -19,6 +19,21 @@ const MAX_VFX_FIXED_WORLD: f32 =
     crate::map::MAX_MAP_DIMENSION_CELLS as f32 * crate::map::MAP_CELL_SIZE_WORLD;
 const MAX_VFX_RADIUS_MULTIPLIER: f32 = 16.0;
 
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct VfxCatalogDiagnostics {
+    pub(crate) request_mappings: usize,
+    pub(crate) style_mappings: usize,
+    pub(crate) mapping_capacity: usize,
+    pub(crate) recipes: usize,
+    pub(crate) recipe_capacity: usize,
+    pub(crate) mesh_layers: usize,
+    pub(crate) mesh_layer_capacity: usize,
+    pub(crate) particle_layers: usize,
+    pub(crate) particle_layer_capacity: usize,
+    pub(crate) maximum_recipe_mesh_layers: usize,
+    pub(crate) maximum_recipe_particle_layers: usize,
+}
+
 /// Stable evidence identity for the exact embedded client-only presentation catalog.
 ///
 /// This deliberately does not contribute to the gameplay-content or protocol fingerprint. It
@@ -394,6 +409,32 @@ impl VfxCatalog {
 
     pub(super) fn particle_layers(&self) -> impl Iterator<Item = &VfxParticleLayer> {
         self.particle_layers.values()
+    }
+
+    pub(super) fn diagnostics(&self) -> VfxCatalogDiagnostics {
+        VfxCatalogDiagnostics {
+            request_mappings: self.mappings.len(),
+            style_mappings: self.style_mappings.len(),
+            mapping_capacity: MAX_VFX_MAPPINGS,
+            recipes: self.recipes.len(),
+            recipe_capacity: MAX_VFX_RECIPES,
+            mesh_layers: self.mesh_layers.len(),
+            mesh_layer_capacity: MAX_VFX_LAYERS,
+            particle_layers: self.particle_layers.len(),
+            particle_layer_capacity: MAX_VFX_PARTICLE_LAYERS,
+            maximum_recipe_mesh_layers: self
+                .recipes
+                .values()
+                .map(|recipe| recipe.layers.len())
+                .max()
+                .unwrap_or_default(),
+            maximum_recipe_particle_layers: self
+                .recipes
+                .values()
+                .map(|recipe| recipe.particle_layers.len())
+                .max()
+                .unwrap_or_default(),
+        }
     }
 
     pub(super) fn requirements(&self, key: &str) -> Option<VfxRecipeRequirements> {

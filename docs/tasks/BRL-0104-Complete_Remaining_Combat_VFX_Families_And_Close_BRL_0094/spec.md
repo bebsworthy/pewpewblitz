@@ -676,3 +676,45 @@ Verification:
 - Native VfxLab evidence reviewed in `target/brl-0104-cloak-v1-activation`, `target/brl-0104-cloak-v1-forced-reveal`, and the earlier, more readable interruption timing capture `target/brl-0104-cloak-v2-interruption`.
 
 This slice completes the known concealment lifecycle-cue omission. Retained fighter alpha/state presentation remains authoritative-state-driven, and broader ownership colors remain deferred to BRL-0107.
+
+## Phase 3 first slice — measurable catalog and transient resource budgets (2026-09-01)
+
+Phase 2 inventory result: every current non-legacy `CombatCue` now has an intentional production request or retained-state presentation. The legacy `Muzzle`, `Impact`, `Damage`, `Defeat`, and `Reset` compatibility variants remain deliberately omitted from the modern adapter because their authoritative counterparts already own presentation; adding a second path would duplicate effects. No further supported carrier family is being invented for closeout.
+
+The first Phase 3 slice makes the existing bounded contracts directly measurable in native/VfxLab evidence rather than relying on constants and point-in-time entity counts scattered across tests:
+
+- Add serializable catalog diagnostics for request mappings, semantic style mappings, recipes, mesh layers, particle layers, their hard capacities, and maximum expanded recipe width.
+- Add transient-runtime diagnostics for root and mesh-layer high-water, total capacity, and capacity/per-recipe evictions while preserving the current oldest-first bounded allocation policy.
+- Include current terminal counts and the new high-water/capacity values in the existing production/VfxLab VFX evidence snapshot; do not create a second profiler or an editable Lab feature.
+- Keep diagnostics client-only and observational. They must not alter request ordering, recipe selection, cleanup timing, particle policy, gameplay, protocol, or server composition.
+- Extend focused ECS/evidence tests to prove high-water accounting and the sealed catalog budget snapshot, then run strict client and role-isolation checks before commit.
+
+This instrumentation is prerequisite evidence for the representative overlap/recreation matrix. It is not itself a claim that the AAA visual-quality gate or routed playtest has passed.
+
+### Phase 3 catalog/runtime diagnostics implementation and evidence (2026-09-01)
+
+Added observational diagnostics to the existing sealed registry and transient allocator. Every production and VfxLab evidence snapshot now includes catalog occupancy/capacity, current transient roots and mesh layers, root/layer high-water, root capacity, eviction count, and the existing particle current/high-water/suppression data.
+
+The transient allocator still applies the same deterministic oldest-first global and per-recipe eviction. Each live root now retains only its validated mesh-layer count so the allocator can calculate aggregate mesh-layer high-water without traversing render descendants or allocating a second tracking graph. Natural/authoritative cleanup still despawns the root hierarchy; current snapshot counts therefore expose terminal recovery while high-water remains available for comparison.
+
+The first native VfxLab capture at `target/brl-0104-phase3-diagnostics` reports:
+
+- 17 request mappings and 37 semantic style mappings against the mapping capacity of 64;
+- 104/128 recipes, 211/256 reusable mesh layers, and 11/64 particle layers;
+- maximum expanded recipe width of six mesh layers and two particle layers;
+- for the sampled Forced Reveal cue, 1/96 transient roots, four current/peak transient mesh layers, zero evictions, and zero particle emitters.
+
+The catalog is within every frozen bound, though recipe and reusable mesh-layer occupancy are now visibly above 80%; future work should prefer reuse and must treat capacity expansion as an explicit reviewed engine change rather than silently exceeding the contract.
+
+Verification:
+
+- Focused renderer lifecycle/allocation/evidence suite: 15 passed, including global/per-recipe eviction, particle capacity, authoritative terminal cleanup, high-water persistence, ordering, and evidence serialization.
+- Focused catalog suite: 16 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: passed.
+- `just _test-client`: 635 library tests plus all client targets passed.
+- `./scripts/check-server-features.sh` and `./scripts/check-v3-world-presentation.sh`: passed.
+- `cargo fmt --all -- --check` and `git diff --check`: passed.
+
+A focused test initially panicked because it installed the allocator system without the new diagnostics resource. Making diagnostics an optional observer preserves the existing reusable system seam; production and VfxLab still initialize it explicitly. This prevents evidence instrumentation from becoming a hidden execution prerequisite.
+
+The next Phase 3 work is the representative normal/reduced/primitive overlap and recreation evidence matrix, followed by durable documentation reconciliation and required native/user acceptance. BRL-0104 remains `doing`.

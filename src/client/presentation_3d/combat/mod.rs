@@ -29,8 +29,9 @@ pub(super) use cone_spray::{
 pub(super) use dash_style::DashTrailMaterialPlugin;
 pub(super) use effects::animate_attack_acceptance;
 pub(in crate::client) use effects::{
-    CombatEffect3d, PendingCombatEffect, animate_combat_effect_layers, cleanup_combat_effects,
-    collect_vfx_evidence_snapshot, materialize_combat_effects, resolve_vfx_requests,
+    CombatEffect3d, PendingCombatEffect, VfxTransientDiagnostics, animate_combat_effect_layers,
+    cleanup_combat_effects, collect_vfx_evidence_snapshot, materialize_combat_effects,
+    resolve_vfx_requests,
 };
 pub(super) use elemental_style::{
     ElementalSupportAreaMaterial, ElementalSupportAreaMaterialPlugin, FireAreaMaterial,

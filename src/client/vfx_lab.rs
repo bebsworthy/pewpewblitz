@@ -10,9 +10,9 @@ use super::{
         CombatEffect3d, ImportedWorldFallbackPolicy, MAX_ACTIVE_PARTICLE_EMITTERS,
         Material3dAssets, PendingCombatEffect, Primitive3dAssets,
         VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, VfxParticleAdapterPlugin,
-        VfxParticleDiagnostics, VfxParticleEmitter3d, animate_combat_effect_layers,
-        collect_vfx_evidence_snapshot, materialize_combat_effects, resolve_vfx_requests,
-        setup_3d_foundation,
+        VfxParticleDiagnostics, VfxParticleEmitter3d, VfxTransientDiagnostics,
+        animate_combat_effect_layers, collect_vfx_evidence_snapshot, materialize_combat_effects,
+        resolve_vfx_requests, setup_3d_foundation,
     },
     settings::persistence::ClientShellSettings,
     vfx::{
@@ -472,6 +472,7 @@ impl Plugin for VfxLabPlugin {
             ..default()
         })
         .add_message::<PendingCombatEffect>()
+        .init_resource::<VfxTransientDiagnostics>()
         .add_systems(Startup, setup_3d_foundation)
         .add_systems(Startup, setup_lab_scene.after(setup_3d_foundation))
         .add_systems(

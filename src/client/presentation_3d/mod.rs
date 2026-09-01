@@ -38,8 +38,9 @@ pub(super) use combat::collect_vfx_evidence_snapshot;
 pub(in crate::client) use combat::{
     CombatEffect3d, MAX_ACTIVE_PARTICLE_EMITTERS, PendingCombatEffect,
     VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, VfxParticleAdapterPlugin,
-    VfxParticleDiagnostics, VfxParticleEmitter3d, animate_combat_effect_layers,
-    cleanup_combat_effects, materialize_combat_effects, resolve_vfx_requests,
+    VfxParticleDiagnostics, VfxParticleEmitter3d, VfxTransientDiagnostics,
+    animate_combat_effect_layers, cleanup_combat_effects, materialize_combat_effects,
+    resolve_vfx_requests,
 };
 use coordinates::{ground_point, ground_position, ground_rotation};
 use map::{GeneratedMapMesh, Presented3dMap};
@@ -326,6 +327,7 @@ impl Plugin for WorldPresentationPlugin {
         combat::add_retained_material_animation_systems(app, WorldPresentationSet::Animate);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .add_message::<PendingCombatEffect>()
+            .init_resource::<VfxTransientDiagnostics>()
             .init_resource::<combat::MeleeArcMeshCache>()
             .init_resource::<combat::ConcealedMaterialVariants>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()

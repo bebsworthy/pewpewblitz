@@ -233,6 +233,10 @@ impl VfxRegistry {
     pub(crate) fn particle_layers(&self) -> impl Iterator<Item = &VfxParticleLayer> {
         self.catalog.particle_layers()
     }
+
+    pub(crate) fn catalog_diagnostics(&self) -> super::catalog::VfxCatalogDiagnostics {
+        self.catalog.diagnostics()
+    }
 }
 
 pub(crate) trait VfxAppExt {
