@@ -816,3 +816,27 @@ Feedback/review disposition:
 - Preserved the read-only VfxLab boundary and recorded the native screenshot warm-up requirement; the paired JSON remains the authoritative semantic/resource evidence for a selected frame.
 
 Durable architecture/runbook reconciliation is complete. Routed overlap/recreation evidence, the learn-from-errors review, and explicit user AAA-quality acceptance remain open before BRL-0104/BRL-0094 closeout.
+
+## Phase 3 final automated evidence and learning review — 2026-09-01
+
+Final evidence:
+
+- Focused bounded-overlap contracts pass: `effect_allocation_evicts_oldest_and_settles_at_capacity`, `particle_emitters_settle_at_the_global_capacity`, and `effect_allocation_preserves_cross_family_message_order`. These prove deterministic oldest-root eviction at the 96-root ceiling, settlement at the 96-particle-emitter ceiling, diagnostic high-water accounting, and FIFO ordering across combat/world-object/pickup/Heist families.
+- Focused presentation reconstruction passes: `late_join_delivery_source_resolves_from_matching_replicated_loadout` reconstructs the retained attack signature from the replicated source/loadout rather than requiring an ephemeral spawn event.
+- Network reconstruction passes: `late_join_recovers_active_projectile_and_defeated_durable_state` and `late_join_and_map_root_replacement_converge_from_durable_state` each pass under the canonical `network-test` harness. This covers in-flight delivery, durable fighter outcome, and map-root replacement convergence for late clients.
+- `just e2e 2` passes through the routed supervisor, lobby worker, allocated match worker, two production clients, Active 1v1 match, and clean worker shutdown.
+- `just v3-render-evidence target/brl-0104-v3-render-evidence.txt` passes on Metal at 2560x1440 with p50 16.667 ms, p95 16.975 ms, p99 17.194 ms, maximum 19.826 ms, and zero frames above 25 ms across 1,801 samples. Paired PNG/JSON captures are under `target/brl-0104-v3-render-evidence.txt.captures/`.
+- The render JSON reports the complete 249/256 mesh-layer catalog, 11/64 particle layers, maximum two particle layers per recipe, 96-root and 96-emitter runtime capacities, and zero evictions/suppressions in the sampled production match. That match did not produce an attack during a capture sample, so transient/effect high-water remained zero; this run is valid baseline/performance and production-catalog evidence, not visual evidence of a live transient. Actual-effect evidence remains the native VfxLab PNG/JSON matrix recorded throughout BRL-0104, paired with the focused capacity and production-composition tests.
+- Previously completed canonical verification remains current for the committed tree: strict client Clippy passes; the full client suite passes with 641 library tests plus client targets/integration; server-feature and sole-world-presentation isolation checks pass.
+
+Learn-from-errors review:
+
+- The earliest implementation satisfied layering mechanically but remained visually cheap. Flat fills, isolated discs, static polygon bands, and synchronized decoration were repeatedly rejected. Prevention: evaluate silhouette, motion direction, foreground/background hierarchy, gameplay-scale readability, and reduced/primitive identity in native captures before calling a family complete; layer count is a constraint, not a quality metric.
+- VfxLab/production drift occurred when new retained custom materials were animated only in the Lab. Prevention: every retained material plugin now installs through the shared production/Lab animation installer, with production-composition tests advancing `AuthoritativeTick` and asserting material uniforms change.
+- Generic VfxLab default signatures obscured production meaning for outcomes and world feedback. Prevention: cue producers and Lab previews use explicit typed carrier/phase/context/accent/identity/timing signatures, and focused tests assert semantic parity.
+- A parent-attached smoke strip looked static and physically wrong for a moving lobbed projectile. Prevention: trail particles are emitted into world space, linger independently, and fade; retained bodies remain attached only where that ownership is visually correct.
+- Native screenshots captured too early could be blank even when JSON showed live entities. Prevention: the runbook now requires sufficient render warm-up (the accepted evidence uses `capture-after 12`) and treats paired JSON as the semantic/resource record.
+- The catalog now occupies 249 of 256 mesh-layer slots. Prevention: future effects should first reuse, consolidate, or retire authored layers; raising the fixed ceiling requires measured evidence and explicit scope rather than being the default response.
+- No new reusable Codex skill is warranted: the recurring prevention measures are encoded in shared installers, tests, the VfxLab runbook, durable presentation documentation, and this ticket's acceptance workflow.
+
+All implementation, documentation, focused/canonical automation, native isolated evidence, routed evidence, reconstruction evidence, and learning-review work in BRL-0104 is complete. The ticket remains `doing` because BRL-0094's explicit user AAA-quality acceptance gate is intentionally still open; passing automation does not satisfy that subjective gate.
