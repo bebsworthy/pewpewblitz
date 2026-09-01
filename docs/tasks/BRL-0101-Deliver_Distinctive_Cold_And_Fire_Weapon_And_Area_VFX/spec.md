@@ -134,3 +134,51 @@ BRL-0101 remains `doing` pending a corrected native capture and user acceptance.
 - Native 1490x890 capture at `target/brl-0101-fire-underlay` records playback tick 50, radius 72, one animated Fire area, and one ground underlay. The affected center is visibly ember-tinted while the fighter reference remains readable.
 
 Feedback disposition: implemented; visual acceptance remains with the user. BRL-0101 remains `doing`.
+
+
+# Playtest feedback disposition — production ownership and map-context parity, 2026-08-31
+
+The in-game Fire field uses the same procedural material as VfxLab, but production adds a dominant green self-ownership annulus, uses the authored radius 150 rather than the Lab default 72, and renders over a warm orange map surface rather than the neutral dark fixture. The result does not visually match the Lab preview, and the generic ownership overlay reads as a separate circle above the effect.
+
+Per user direction, this does not expand BRL-0101. It is deferred into two ordered follow-ups at the end of the BRL-0094 stack:
+
+- BRL-0107 integrates self/ally/enemy/neutral readability into each VFX composition instead of rendering the current generic overlay above it.
+- BRL-0108 adds selectable production-map contexts and matching scale/relationship inputs to the read-only VfxLab.
+
+BRL-0108 follows BRL-0107 so map-backed preview validates the final integrated ownership treatment.
+
+
+# Acceptance and closeout — 2026-08-31
+
+The user accepted the delivered Cold and Fire slice for BRL-0101 and authorized closing the ticket, with the explicit understanding that visual design can be revisited later.
+
+The production feedback is fully dispositioned:
+
+- The original flat/debug-like Fire field was replaced by the deterministic procedural circumference, exact boundary, and subtle retained ground underlay.
+- The dominant generic relationship annulus is accepted as a temporary limitation and deferred to BRL-0107, which will integrate ownership into the effect's visual language.
+- The mismatch between the neutral VfxLab fixture and actual map context is deferred to BRL-0108, which will preview effects on production maps with matching scale and relationship inputs.
+- Particle-backed decorative refinement remains owned by BRL-0102 and is not required for this mesh/shader vertical slice.
+
+The recorded automated verification, native captures, deterministic cross-tick evidence, reduced/primitive fallback evidence, server isolation checks, and user acceptance satisfy this ticket's closeout requirements.
+
+# Learn-from-errors review
+
+## What went wrong
+
+- The first Fire treatment proved architecture and lifecycle behavior but was visually judged too early from flat primitives rather than against the desired motion and silhouette quality.
+- The read-only Lab used a neutral relationship, radius 72, and dark diagnostic floor, while production used a self-owned relationship overlay, authored radius 150, and warm map surface. This made technically shared rendering appear materially different in gameplay.
+- A generic relationship overlay preserved semantic readability in isolation but visually competed with and obscured the elemental effect.
+
+## Causes
+
+- Initial verification emphasized geometry, determinism, cleanup, and degradation more than production-context composition.
+- Fixture inputs were not clearly separated into diagnostic defaults versus production-parity presets.
+- Relationship presentation was architecturally separate but not sufficiently integrated into the effect's visual hierarchy.
+
+## Prevention and reusable lessons
+
+- Validate the dominant visual language—silhouette, motion, depth bands, and center readability—at gameplay camera scale before treating primitive evidence as quality acceptance.
+- Pair isolated captures with production-context captures using matching geometry, relationship, authoritative tick, surface, and camera inputs.
+- Treat exact boundaries, elemental identity, and relationship identity as one composed readability hierarchy even when their data ownership remains separate.
+- Preserve neutral diagnostic fixtures, but label them as diagnostic and never treat them alone as production parity evidence.
+- Record presentation shortcomings as bounded follow-up tickets instead of destabilizing an otherwise accepted vertical slice.

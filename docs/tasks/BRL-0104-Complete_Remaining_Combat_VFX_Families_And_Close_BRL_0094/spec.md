@@ -840,3 +840,7 @@ Learn-from-errors review:
 - No new reusable Codex skill is warranted: the recurring prevention measures are encoded in shared installers, tests, the VfxLab runbook, durable presentation documentation, and this ticket's acceptance workflow.
 
 All implementation, documentation, focused/canonical automation, native isolated evidence, routed evidence, reconstruction evidence, and learning-review work in BRL-0104 is complete. The ticket remains `doing` because BRL-0094's explicit user AAA-quality acceptance gate is intentionally still open; passing automation does not satisfy that subjective gate.
+
+## Final user acceptance and closeout — 2026-09-01
+
+The user reviewed the completed effect work and explicitly directed: “good close it.” This satisfies BRL-0104's remaining subjective presentation-quality and feedback-disposition gate. All implementation, documentation, automated/native/routed evidence, and learning-review criteria were already complete. BRL-0104 may move to `done`.

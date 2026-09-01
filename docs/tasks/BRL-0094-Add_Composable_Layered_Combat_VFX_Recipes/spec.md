@@ -754,3 +754,42 @@ Implementation proceeds through blocker links in this order:
 8. BRL-0104 — remaining in-scope families, documentation, feedback, and BRL-0094 closeout.
 
 The read-only VfxLab is early so it captures baseline/parity evidence. Full VfxLab editing and automation remain under BRL-0096 and do not block BRL-0094.
+
+
+# Product quality gate — AAA-level effect finish
+
+The target for normal presentation is AAA-level visual quality for a stylized top-down arena shooter. This is a player-visible acceptance requirement, not optional polish and not a claim that effects must be photorealistic or use an unrestricted production budget.
+
+The implementations proposed and demonstrated so far have too often looked cheap: flat colored fills, bare geometric rings, sparse spheres or repeated primitives, uniformly synchronized motion, weak depth, and compositions that prove the renderer path without delivering a convincing finished effect. Technical correctness, composability, determinism, exact geometry, cleanup, and good performance are necessary but are not sufficient for visual acceptance.
+
+A shippable normal-quality effect must demonstrate:
+
+- a coherent authored silhouette and recognizable visual identity at the gameplay camera scale;
+- layered color, value, depth, and motion rather than a collection of visibly independent primitives;
+- intentional temporal composition, including anticipation or activation, sustained behavior, impact or pulse, and resolution where the lifecycle calls for them;
+- bounded organic variation and secondary motion that avoid obvious repetition or synchronized mechanical pulsing;
+- integration with the real map surface, production camera, fighters, objectives, lighting, relationship cues, and overlapping combat;
+- an exact readable gameplay boundary and counterplay information without making the presentation look like a debug overlay;
+- a strong element, weapon, or ultimate identity that remains readable without relying on bloom or hue alone;
+- production-context native captures and explicit user visual acceptance against the intended quality reference.
+
+Reuse must be invisible in the final composition: effects may share recipes, meshes, materials, shaders, particles, and lifecycle adapters internally, but they must not all look like recolored versions of the same ring, sphere, or pulse.
+
+Reduced-effects and primitive modes may be intentionally simpler, provided they preserve critical geometry and identity. Their limitations must not define or cap the visual quality of the normal presentation.
+
+When the bounded mesh vocabulary cannot meet this bar, the implementation should use an appropriate retained custom material, authored mesh/texture, or accepted particle adapter while preserving client-only ownership, deterministic semantic inputs, resource bounds, accessibility, and server isolation.
+
+BRL-0102, BRL-0103, BRL-0104, and later effect-design follow-ups inherit this quality gate. BRL-0094 must not close based only on architectural or automated evidence if the remaining normal effects still read as cheap or provisional in native gameplay.
+
+## Closeout audit after BRL-0104 acceptance — 2026-09-01
+
+The ordered core implementation chain is complete: BRL-0097, BRL-0098, BRL-0099, BRL-0100, BRL-0101, BRL-0102, BRL-0103, and BRL-0104 are all `done`. The user explicitly accepted BRL-0104's completed presentation matrix and directed that ticket to close.
+
+BRL-0094 remains `doing` for two deliberately deferred product-quality follow-ups, in order:
+
+1. BRL-0107 integrates ally/enemy ownership into each effect's own visual language and removes the unrelated green effect overlay. Its open user correction must be incorporated before implementation: self treatment belongs to the player's fighter-selection ring and is not required on weapon/ultimate effects. This ticket owns relationship readability, normal/reduced/primitive parity, contrasting surfaces, and dense overlap.
+2. BRL-0108 then previews the production resolver/materializers on real built-in maps and records paired VfxLab/game evidence. This ticket owns map-surface contrast, gameplay scale/camera/clutter parity, cleanup while switching contexts, and final production-context native feedback.
+
+After BRL-0108, BRL-0094 needs only a closeout audit confirming that BRL-0107/0108 evidence satisfies acceptance criterion 9 and the production-context AAA quality gate, followed by final feedback disposition, Ticket sync, and status transition. No additional core recipe, signature, lifecycle-adapter, particle, lobbed/explosive, or effect-family implementation is currently identified.
+
+BRL-0096, the editable VFX Workbench, remains a related `todo` but explicitly does not block BRL-0094; its read-only viewer foundation was delivered by BRL-0098.
