@@ -226,3 +226,27 @@ Verification:
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 
 The reported core/tail integration correction is implemented. Native user visual confirmation remains requested before this feedback item is accepted; BRL-0104 stays `doing`.
+
+## Neutral straight-projectile animation-direction feedback — 2026-09-01
+
+The user reports that the live comet pulse travels from the tail toward the nucleus, reversing the intended visual causality. Inspection confirms both shader filament phases use `along * frequency - time * speed`; because longitudinal UV increases from tail to front, constant-phase bands move toward increasing UV and therefore toward the nucleus.
+
+Accept this as a retained-material animation defect:
+
+- Reverse both fast and slow filament time terms so their constant-phase bands propagate from the leading nucleus toward decreasing longitudinal UV into the tail.
+- Preserve mesh orientation, projectile travel direction, authoritative-tick timing, deterministic replay, quality variants, and gameplay/server behavior.
+- Verify direction using separated paused authoritative-tick captures and the live VfxLab path.
+
+BRL-0104 remains `doing`.
+
+## Neutral comet animation-direction correction evidence — 2026-09-01
+
+Corrected both normal-quality filament phase equations from negative to positive time terms. With longitudinal UV increasing from tail (0) to nucleus (1), a constant phase now has negative longitudinal velocity (`d(along)/dt = -speed/frequency`), so bright energy bands propagate from the nucleus into the wake.
+
+- Mesh orientation, projectile facing, deterministic `AuthoritativeTick` time, reduced/primitive behavior, and gameplay/server state are unchanged.
+- The shader includes an explicit UV/direction comment to prevent a future sign reversal.
+- Runtime paused captures at separated ticks loaded successfully in `target/brl-0104-comet-direction-tick-0/` and `target/brl-0104-comet-direction-tick-6/`; the live inspection path remains `just vfx-lab '--fixture straight --accent neutral'`.
+- Focused straight-projectile tests: 3 passed.
+- `cargo fmt --all -- --check` and `git diff --check`: passed.
+
+The reported backwards-pulse defect is implemented. Native user confirmation remains requested; BRL-0104 stays `doing`.

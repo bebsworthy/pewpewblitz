@@ -20,8 +20,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var filament = 0.72;
     if quality < 0.5 {
-        let fast = sin(along * 27.0 - time * 16.0 + across * 5.0) * 0.5 + 0.5;
-        let slow = sin(along * 11.0 - time * 8.0 - across * 3.0) * 0.5 + 0.5;
+        // Longitudinal UV grows from tail to nucleus. Positive time phase moves each
+        // constant-phase band toward decreasing UV, shedding energy into the wake.
+        let fast = sin(along * 27.0 + time * 16.0 + across * 5.0) * 0.5 + 0.5;
+        let slow = sin(along * 11.0 + time * 8.0 - across * 3.0) * 0.5 + 0.5;
         filament = mix(0.56, 1.0, fast * 0.62 + slow * 0.38);
     }
 
