@@ -740,7 +740,13 @@ fn spawn_lab_scenario(
             spawn_sentry_transients(state, requests);
         }
         VfxLabFixture::Status => {
-            spawn_status_fixture(commands, state.presentation_identity, tick);
+            spawn_status_fixture(
+                commands,
+                state.presentation_identity,
+                state.accent,
+                state.ultimate,
+                tick,
+            );
         }
     }
 }
@@ -981,8 +987,24 @@ fn spawn_cone_fixture(commands: &mut Commands, identity: u64, tick: u64) {
     ));
 }
 
-fn spawn_status_fixture(commands: &mut Commands, identity: u64, tick: u64) {
-    commands.spawn((
+fn spawn_status_fixture(
+    commands: &mut Commands,
+    identity: u64,
+    accent: VfxLabAccent,
+    alternate: bool,
+    tick: u64,
+) {
+    let expires_at_tick = tick.saturating_add(300);
+    let source = crate::combat::ConditionSource {
+        action_id: crate::combat::AttackId(identity),
+        kind: crate::combat::CombatSourceKind::PrimaryWeapon,
+        player_id: crate::protocol::PlayerId(1),
+        network_entity_id: crate::protocol::NetworkEntityId(1),
+        team_id: crate::combat::TeamId(0),
+        source_preset_id: None,
+        recipe_fingerprint: None,
+    };
+    let mut fixture = commands.spawn((
         VfxLabFixtureOwner,
         VfxLabClock,
         crate::protocol::Fighter,
@@ -992,17 +1014,74 @@ fn spawn_status_fixture(commands: &mut Commands, identity: u64, tick: u64) {
         Position::from_xy(0.0, 0.0),
         Rotation::radians(0.0),
         AuthoritativeTick(tick),
-        crate::combat::ActiveEffects {
-            slow: Some(crate::combat::SlowEffect {
-                source_attack_id: crate::combat::AttackId(identity),
-                source_network_entity_id: crate::protocol::NetworkEntityId(1),
-                movement_multiplier_milli: 700,
-                expires_at_tick: tick.saturating_add(300),
-            }),
-            ..Default::default()
-        },
         Name::new("VfxLab attached status fixture"),
     ));
+    match (accent, alternate) {
+        (VfxLabAccent::Neutral, false) => {
+            fixture.insert(crate::combat::ActiveEffects {
+                slow: Some(crate::combat::SlowEffect {
+                    source_attack_id: crate::combat::AttackId(identity),
+                    source_network_entity_id: crate::protocol::NetworkEntityId(1),
+                    movement_multiplier_milli: 700,
+                    expires_at_tick,
+                }),
+                ..Default::default()
+            });
+        }
+        (VfxLabAccent::Neutral, true) => {
+            fixture.insert(crate::combat::KnockbackFeedback {
+                velocity: crate::combat::WorldPoint::from(Vec2::new(220.0, 0.0)),
+                expires_at_tick,
+            });
+        }
+        (VfxLabAccent::Cold, frozen) => {
+            fixture.insert(crate::combat::ActiveEffects {
+                cold: crate::combat::ColdState {
+                    meter: if frozen { 1_000 } else { 500 },
+                    last_contribution_tick: tick,
+                    frozen_until_tick: frozen.then_some(expires_at_tick),
+                    source: Some(source),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        }
+        (VfxLabAccent::Fire, _) => {
+            fixture.insert(crate::combat::ActiveEffects {
+                fire: Some(lab_damage_over_time(source, tick, expires_at_tick)),
+                ..Default::default()
+            });
+        }
+        (VfxLabAccent::Poison, _) => {
+            fixture.insert(crate::combat::ActiveEffects {
+                poison: Some(lab_damage_over_time(source, tick, expires_at_tick)),
+                ..Default::default()
+            });
+        }
+        (VfxLabAccent::Restoration, _) => {
+            fixture.insert(crate::concealment::ConcealmentPresentationState {
+                forced_reveals: vec![crate::concealment::TeamRevealDeadline {
+                    team: crate::combat::TeamId(0),
+                    expires_at_tick,
+                }],
+                ..Default::default()
+            });
+        }
+    }
+}
+
+const fn lab_damage_over_time(
+    source: crate::combat::ConditionSource,
+    tick: u64,
+    expires_at_tick: u64,
+) -> crate::combat::DamageOverTime {
+    crate::combat::DamageOverTime {
+        source,
+        damage_per_tick: 8,
+        tick_interval: 30,
+        next_tick: tick.saturating_add(30),
+        expires_at_tick,
+    }
 }
 
 fn spawn_dash_fixture(commands: &mut Commands, identity: u64, tick: u64) {
@@ -1737,6 +1816,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         }
         (VfxLabFixture::PersistentSplash, _) => "SPLASH DUAL".to_string(),
         (VfxLabFixture::Sentry, _) => "DEPLOYABLE NEUTRAL".to_string(),
+        (VfxLabFixture::Status, _) => status_fixture_label(state).to_string(),
         _ => state.accent.label().to_uppercase(),
     };
     let subject = match state.fixture {
@@ -1799,7 +1879,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             "The grounded turret is the real replicated Sentry presentation. The compact discharge at its muzzle is the fire cue; the separate effect to the right is cleanup. Press U to compare orderly natural expiry with interrupted electrical collapse. Projectile delivery and cleanup remain authoritative."
         }
         VfxLabFixture::Status => {
-            "The ring is attached presentation for the fighter's active status. It follows the fighter and disappears when the authoritative status ends."
+            "The exact boundary and compact motif are attached presentation for replicated fighter state. Slow/Cold orbit, Frozen locks into a shard crown, Poison bubbles, Fire flickers, Reveal scans, and Knockback pulses outward. The whole motif follows the fighter and disappears at the authoritative deadline."
         }
     };
     let style = lab_guide_style(state);
@@ -1840,13 +1920,53 @@ fn lab_mode_labels(state: &VfxLabState) -> (&'static str, &'static str) {
             "U cleanup mode",
         );
     }
+    if state.fixture == VfxLabFixture::Status {
+        return ("", "U alternate status");
+    }
     (
         if state.ultimate { " + ULTIMATE" } else { "" },
         "U ultimate",
     )
 }
 
+const fn status_fixture_label(state: &VfxLabState) -> &'static str {
+    match (state.accent, state.ultimate) {
+        (VfxLabAccent::Neutral, false) => "SLOW",
+        (VfxLabAccent::Neutral, true) => "KNOCKBACK",
+        (VfxLabAccent::Cold, false) => "COLD",
+        (VfxLabAccent::Cold, true) => "FROZEN",
+        (VfxLabAccent::Fire, _) => "FIRE",
+        (VfxLabAccent::Poison, _) => "POISON",
+        (VfxLabAccent::Restoration, _) => "REVEAL",
+    }
+}
+
 fn lab_guide_style(state: &VfxLabState) -> &'static str {
+    if state.fixture == VfxLabFixture::Status {
+        return match (state.accent, state.ultimate) {
+            (VfxLabAccent::Neutral, false) => {
+                "SLOW uses a restrained cyan drag boundary with orbiting snowflake motes. Press U for Knockback or C for Cold."
+            }
+            (VfxLabAccent::Neutral, true) => {
+                "KNOCKBACK uses orange impulse bars that repeatedly drive outward from the fighter. Press U for Slow or C for Cold."
+            }
+            (VfxLabAccent::Cold, false) => {
+                "COLD uses orbiting vertical ice splinters around its related cyan boundary. Press U to compare the locked Frozen state."
+            }
+            (VfxLabAccent::Cold, true) => {
+                "FROZEN intensifies Cold into a six-shard locking crown with a sharper deterministic shiver. Press U to return to Cold."
+            }
+            (VfxLabAccent::Fire, _) => {
+                "FIRE uses a hot red boundary and three independently flickering flame tongues. Press C to compare Poison."
+            }
+            (VfxLabAccent::Poison, _) => {
+                "POISON uses an acidic boundary with uneven bubbles that linger and bob without hiding the fighter. Press C to compare Reveal."
+            }
+            (VfxLabAccent::Restoration, _) => {
+                "REVEAL uses the magenta detection language: a wider boundary and four fast rotating sensor sparks. Press C to return to Slow."
+            }
+        };
+    }
     if state.fixture == VfxLabFixture::Transient
         && state.selected().key == crate::client::vfx::REVEAL_SCAN_VFX
     {

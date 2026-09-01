@@ -13,6 +13,7 @@ mod melee_style;
 mod particles;
 mod sentry_style;
 mod splash_style;
+mod status_style;
 mod sticky_blob;
 mod straight_projectile_style;
 
@@ -60,6 +61,7 @@ pub(super) use splash_style::{
     SplashAreaMaterial, SplashAreaMaterialPlugin, animate_splash_area_materials,
     animate_splash_motion_accents,
 };
+pub(super) use status_style::animate_status_style;
 pub(super) use sticky_blob::{StickyBlobMaterialPlugin, animate_sticky_blob_style};
 pub(super) use straight_projectile_style::{
     StraightProjectileTrailMaterial, StraightProjectileTrailMaterialPlugin, TrailQuality,
@@ -90,6 +92,7 @@ where
             animate_splash_area_materials,
             animate_splash_motion_accents,
             animate_sentry_style,
+            animate_status_style,
         )
             .in_set(set),
     );

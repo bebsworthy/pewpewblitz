@@ -26,7 +26,7 @@ pub(in super::super) struct ConcealedMaterialVariants {
 pub(in super::super) struct StatusVisual3d(StatusKind);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum StatusKind {
+pub(super) enum StatusKind {
     Slow,
     Knockback,
     Reveal,
@@ -460,26 +460,55 @@ pub(in super::super) fn reconcile_status_visuals(
         if existing_status.contains(&(owner, kind)) {
             continue;
         }
-        commands.spawn((
-            CombatVisualOwner(owner),
-            StatusVisual3d(kind),
-            signature,
-            Mesh3d(primitives.ground_ring.clone()),
-            MeshMaterial3d(status_material(kind, &materials)),
-            NotShadowCaster,
-            NotShadowReceiver,
-            Transform {
-                translation: ground_position(position)
-                    + Vec3::Y * if kind == StatusKind::Slow { 2.0 } else { 3.0 },
-                rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
-                scale: Vec3::splat(status_scale(kind)),
-            },
-            Name::new("V3 durable combat status"),
-        ));
+        if kind.is_effect_tile() {
+            commands.spawn((
+                CombatVisualOwner(owner),
+                StatusVisual3d(kind),
+                signature,
+                Mesh3d(primitives.ground_ring.clone()),
+                MeshMaterial3d(status_material(kind, &materials)),
+                NotShadowCaster,
+                NotShadowReceiver,
+                Transform {
+                    translation: ground_position(position) + Vec3::Y * 3.0,
+                    rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
+                    scale: Vec3::splat(status_scale(kind)),
+                },
+                Name::new("V3 durable effect-tile status"),
+            ));
+            continue;
+        }
+
+        let root = commands
+            .spawn((
+                CombatVisualOwner(owner),
+                StatusVisual3d(kind),
+                signature,
+                Transform::from_translation(
+                    ground_position(position)
+                        + Vec3::Y * if kind == StatusKind::Slow { 2.0 } else { 3.0 },
+                ),
+                Visibility::default(),
+                Name::new("V3 layered attached combat status"),
+            ))
+            .id();
+        commands.entity(root).with_children(|parent| {
+            super::status_style::spawn_status_style(
+                parent,
+                &primitives,
+                &materials,
+                owner,
+                kind,
+                signature,
+            );
+        });
     }
 }
 
-fn status_material(kind: StatusKind, materials: &Material3dAssets) -> Handle<StandardMaterial> {
+pub(super) fn status_material(
+    kind: StatusKind,
+    materials: &Material3dAssets,
+) -> Handle<StandardMaterial> {
     match kind {
         StatusKind::Slow | StatusKind::TileSlow => materials.status_slow.clone(),
         StatusKind::Knockback => materials.status_knockback.clone(),
@@ -492,7 +521,7 @@ fn status_material(kind: StatusKind, materials: &Material3dAssets) -> Handle<Sta
     }
 }
 
-const fn status_scale(kind: StatusKind) -> f32 {
+pub(super) const fn status_scale(kind: StatusKind) -> f32 {
     match kind {
         StatusKind::Slow => 1.15,
         StatusKind::Knockback => 0.8,
@@ -502,6 +531,12 @@ const fn status_scale(kind: StatusKind) -> f32 {
         StatusKind::Poison => 1.35,
         StatusKind::Fire => 1.55,
         StatusKind::TileSpeed | StatusKind::TileSlow | StatusKind::TileDamage => 1.45,
+    }
+}
+
+impl StatusKind {
+    const fn is_effect_tile(self) -> bool {
+        matches!(self, Self::TileSpeed | Self::TileSlow | Self::TileDamage)
     }
 }
 

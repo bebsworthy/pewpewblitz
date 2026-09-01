@@ -544,3 +544,52 @@ Verification:
 - Final visual evidence: natural expiry and primitive under `target/brl-0104-sentry-cues-v2-expiry` and `target/brl-0104-sentry-cues-v2-primitive`; refined normal interruption and reduced under `target/brl-0104-sentry-cues-v3-interrupted` and `target/brl-0104-sentry-cues-v3-reduced`.
 
 The Sentry transient slice is ready for native gameplay feedback. Remaining status/expiry cues, concealment coverage, the complete overlap/resource matrix, documentation reconciliation, and BRL-0094 closeout remain open; BRL-0104 stays `doing`.
+
+
+## Phase 2 next slice — retained attached combat status language (2026-09-01)
+
+Outcome: replace the current single static ring for combat-owned attached statuses with a bounded, deterministic layered visual language that remains readable around the fighter and is driven only by replicated authoritative state.
+
+Scope and decisions:
+
+- Cover Slow, Knockback, Reveal, Cold/Frozen, Poison, and Fire. Effect-tile occupancy remains on its existing simple marker path because the map tile is already the primary visual source.
+- Continue deriving existence, semantic accent, timing, and identity from `ActiveEffects`, `KnockbackFeedback`, `ConcealmentPresentationState`, `AuthoritativeTick`, and the existing `CombatVisualSignature`; no gameplay mutation or weapon-ID branching enters presentation.
+- Normal presentation may use a shared boundary plus a small status-specific motif. Reduced presentation keeps the boundary and at most one motif. Primitive presentation remains the current single-ring fallback.
+- Animation is deterministic from authoritative tick plus stable semantic phase. It must be installed through the shared retained-animation composition used by both production gameplay and VfxLab, not through a Lab-only path.
+- Keep all geometry bounded and fighter-readable: no opaque center fill, no per-frame spawning, no unbounded particles, and no more than eight render descendants per attached status in Normal quality.
+- VfxLab's status fixture must describe and exercise the production status materializer rather than duplicating a showcase-only construction.
+
+Acceptance and verification for this slice:
+
+- Each covered combat status has a distinguishable silhouette or motion cue in Normal quality; Cold and Frozen are recognizably related but not identical.
+- Status roots follow fighter pose, appear and disappear at the authoritative lifecycle boundary, and animate identically in production and VfxLab.
+- Reduced and primitive variants satisfy their layer budgets and remain semantically readable.
+- Focused ECS tests cover deterministic animation and bounded layer plans; strict client clippy, client tests, server-feature isolation, formatting, and native Normal/reduced/primitive VfxLab evidence pass before commit.
+
+
+### Attached status slice implementation and evidence (2026-09-01)
+
+Implemented the production retained-status renderer as a semantic layered style shared by gameplay and VfxLab:
+
+- Slow: cyan boundary plus slowly orbiting drag motes.
+- Knockback: orange boundary plus outward-pulsing impulse bars.
+- Cold: cyan boundary plus orbiting vertical ice splinters.
+- Frozen: related cyan boundary intensified into a six-shard locking crown with deterministic shiver.
+- Poison: acidic boundary plus independently bobbing bubbles.
+- Fire: hot boundary plus independently flickering flame tongues.
+- Reveal: wider magenta detection boundary plus fast rotating sensor sparks.
+
+All motion reads the owning fighter's replicated `AuthoritativeTick`; replaying the same tick produces the same transform. Normal is bounded to at most seven render layers, Reduced uses one boundary plus one motif, and Primitive/ReducedPrimitive use one static boundary. Effect-tile markers remain on their prior simple-ring path. The animation system is registered through `add_retained_material_animation_systems`, which is used by both `WorldPresentationPlugin` and `VfxLabLifecyclePresentationPlugin`.
+
+VfxLab's status fixture now builds the same authoritative component shapes used by production. C cycles Slow/Knockback, Cold/Frozen, Fire, Poison, and Reveal families; U selects the alternate Slow↔Knockback and Cold↔Frozen states. The guide names and explains the actual status rather than labeling the old fixed Slow fixture as Neutral.
+
+Verification:
+
+- `cargo test --locked --no-default-features --features client status_style --lib`: 3 passed, including bounded degradation and same-tick deterministic ECS replay.
+- `cargo test --features client vfx_lab --lib`: 8 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: passed.
+- `just _test-client`: 629 library tests plus all client targets passed.
+- `./scripts/check-server-features.sh`: passed; server feature graph excludes client presentation capabilities.
+- `./scripts/check-v3-world-presentation.sh`: passed.
+- `cargo fmt --all -- --check` and `git diff --check`: passed.
+- Native paired VfxLab captures reviewed: `target/brl-0104-status-v2-fire`, `target/brl-0104-status-v2-frozen`, `target/brl-0104-status-v2-reveal`, `target/brl-0104-status-v2-reduced`, and `target/brl-0104-status-v2-primitive`. No hierarchy warnings remained after adding visibility ownership to the layered root.
