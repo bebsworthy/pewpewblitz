@@ -1368,7 +1368,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             "The colored body is the projectile's exact collision footprint. Cold adds rigid crystal fins; Fire adds soft trailing lobes."
         }
         VfxLabFixture::LobbedProjectile => {
-            "The moving body follows the production launch/landing arc. The dark disc tracks its ground projection, the orange ring marks the fixed landing point, the hot tail follows the current tangent, and emitted smoke remains behind to expand and fade."
+            "The moving body follows the production launch/landing arc and rotates along its current tangent. The dark disc tracks its ground projection, the orange ring marks the fixed landing point, and emitted smoke remains behind to expand and fade."
         }
         VfxLabFixture::ElementalField => {
             "The subtly tinted center is the affected ground area. The thin bright ring is the exact gameplay boundary. Perimeter crystals or the living flame band identify the element without hiding fighters."

@@ -13,7 +13,6 @@ const GROUND_MARKER_HEIGHT: f32 = 1.0;
 const STRAIGHT_PROJECTILE_VISUAL_THICKNESS: f32 = 6.0;
 const LOBBED_PROJECTILE_SHADOW_RADIUS: f32 = 11.0;
 const LOBBED_PROJECTILE_LANDING_MARKER_RADIUS: f32 = 15.0;
-const LOBBED_PROJECTILE_TRAIL_PROGRESS: f32 = 0.14;
 
 #[derive(Component)]
 pub(in super::super) struct SentryVisual3d;
@@ -40,7 +39,6 @@ pub(in super::super) struct StickyFuseProgressVisual3d {
 enum LobbedProjectileAidKind {
     GroundShadow,
     LandingMarker,
-    ArcTrail,
 }
 
 #[derive(Component)]
@@ -1225,12 +1223,6 @@ fn spawn_lobbed_projectile_aids(
             materials.effect_impact.clone(),
             "Lobbed projectile landing-point marker",
         ),
-        (
-            LobbedProjectileAidKind::ArcTrail,
-            primitives.unit_cuboid.clone(),
-            materials.effect_muzzle.clone(),
-            "Lobbed projectile tangent trail",
-        ),
     ] {
         parent.spawn((
             LobbedProjectileAid3d { owner, kind },
@@ -1428,14 +1420,6 @@ pub(in super::super) fn write_lobbed_projectile_aid_poses(
                     .with_scale(Vec3::splat(LOBBED_PROJECTILE_LANDING_MARKER_RADIUS));
                 *visibility = Visibility::Inherited;
             }
-            LobbedProjectileAidKind::ArcTrail => {
-                if let Some(trail) = lobbed_arc_trail_transform(*flight, position.0, progress) {
-                    *transform = trail;
-                    *visibility = Visibility::Inherited;
-                } else {
-                    *visibility = Visibility::Hidden;
-                }
-            }
         }
     }
 }
@@ -1467,34 +1451,6 @@ fn lobbed_arc_tangent_rotation(flight: crate::combat::LobbedFlight, progress: f3
     Quat::from_rotation_arc(Vec3::X, lobbed_arc_tangent(flight, progress))
 }
 
-fn lobbed_arc_trail_transform(
-    flight: crate::combat::LobbedFlight,
-    current_position: Vec2,
-    progress: f32,
-) -> Option<Transform> {
-    let previous_progress = (progress - LOBBED_PROJECTILE_TRAIL_PROGRESS).max(0.0);
-    if previous_progress >= progress {
-        return None;
-    }
-    let previous_position = flight
-        .launch
-        .as_vec2()
-        .lerp(flight.landing.as_vec2(), previous_progress);
-    let current_height = lobbed_flight_height(flight, progress);
-    let previous_height = lobbed_flight_height(flight, previous_progress);
-    let to_previous = ground_position(previous_position - current_position)
-        + Vec3::Y * (previous_height - current_height);
-    let length = to_previous.length();
-    if !length.is_finite() || length <= f32::EPSILON {
-        return None;
-    }
-    Some(Transform {
-        translation: to_previous * 0.5,
-        rotation: lobbed_arc_tangent_rotation(flight, progress),
-        scale: Vec3::new(length, 2.4, 2.4),
-    })
-}
-
 pub(in super::super) fn write_sentry_visual_poses(
     sentry_owners: Query<(&Position, &Rotation), With<crate::abilities::Sentry>>,
     mut sentry_visuals: SentryVisualPoseQuery,
@@ -1523,7 +1479,7 @@ mod tests {
     }
 
     #[test]
-    fn lobbed_aids_follow_bounded_authoritative_progress_and_arc_tangent() {
+    fn lobbed_body_follows_bounded_authoritative_progress_and_arc_tangent() {
         let flight = crate::combat::LobbedFlight {
             launch: crate::combat::WorldPoint::from(Vec2::new(-100.0, 0.0)),
             landing: crate::combat::WorldPoint::from(Vec2::new(100.0, 0.0)),
@@ -1534,20 +1490,14 @@ mod tests {
         assert!(lobbed_flight_progress(flight, 0).abs() < f32::EPSILON);
         assert!((lobbed_flight_progress(flight, 60) - 0.5).abs() < f32::EPSILON);
         assert!((lobbed_flight_progress(flight, 200) - 1.0).abs() < f32::EPSILON);
-        assert!(lobbed_arc_trail_transform(flight, Vec2::ZERO, 0.0).is_none());
         let ascending = lobbed_arc_tangent(flight, 0.25);
         let apex = lobbed_arc_tangent(flight, 0.5);
         let descending = lobbed_arc_tangent(flight, 0.75);
         assert!(ascending.y > 0.0);
         assert!(apex.y.abs() < f32::EPSILON);
         assert!(descending.y < 0.0);
-
-        let trail = lobbed_arc_trail_transform(flight, Vec2::ZERO, 0.25).unwrap();
-        assert!(trail.scale.x.is_finite() && trail.scale.x > 0.0);
-        assert!(trail.translation.x < 0.0);
-        assert!(trail.translation.y.abs() > f32::EPSILON);
-        let trail_forward = trail.rotation * Vec3::X;
-        assert!(trail_forward.dot(ascending) > 0.999);
+        let body_forward = lobbed_arc_tangent_rotation(flight, 0.25) * Vec3::X;
+        assert!(body_forward.dot(ascending) > 0.999);
     }
 
     #[test]
@@ -1673,6 +1623,10 @@ mod tests {
                 world.query_filtered::<&vfx::CombatVisualSignature, With<V3ProjectileVisual>>();
             let signature = *visuals.single(world).unwrap();
             assert_eq!(signature.accents, [Some(vfx::VfxAccent::Neutral), None]);
+            assert_eq!(
+                world.query::<&LobbedProjectileAid3d>().iter(world).count(),
+                2
+            );
         }
 
         app.world_mut().entity_mut(projectile).insert((
@@ -1690,6 +1644,10 @@ mod tests {
         let signature = *visuals.single(world).unwrap();
         assert_eq!(signature.carrier, vfx::VfxCarrier::LobbedProjectile);
         assert!(signature.accents.contains(&Some(vfx::VfxAccent::Fire)));
+        assert_eq!(
+            world.query::<&LobbedProjectileAid3d>().iter(world).count(),
+            2
+        );
     }
 
     #[test]

@@ -135,3 +135,18 @@ Trajectory/shadow/timeline/cleanup tests, recipe validation, lifecycle and late-
 - Production routed evidence used an isolated persisted profile with Arc Launcher plus Incendiary Module in a real Practice match. `target/brl-0103-production-smoke-4y8HXn/captures/brawler-000400.{png,json}` visibly shows the emitted world-space smoke wake; its evidence records Fire `LobbedProjectile` signatures, three retained projectile-smoke emitters, seven total bounded particle emitters, and zero suppressed emitters. Adjacent captures repeatedly record one to three retained emitters with zero suppression.
 - The dense ten-update screenshot cadence deliberately prioritized temporal VFX evidence and caused the auxiliary render report to miss only its sample-count threshold; it is not performance acceptance evidence. The prior bounded performance gate remains unchanged.
 - Remaining acceptance: user confirmation in their normal game profile. BRL-0103 remains `doing` until that retest is accepted.
+
+# Playtest feedback — remove debug-like yellow trail — 2026-09-01
+
+- User confirmed the production smoke correction but rejected the normal yellow `ArcTrail` bar on the Arc Launcher projectile because it reads as a debug trajectory indicator rather than finished weapon VFX.
+- Remove that mesh aid from the production lobbed-projectile composition and VfxLab parity fixture. Preserve the authored parabolic body pose, ground-projected shadow, fixed landing marker, and optional Fire smoke emitter. Update evidence/count expectations so the yellow bar cannot regress.
+
+# Playtest correction implemented — remove debug-like yellow trail — 2026-09-01
+
+- Removed the retained `ArcTrail` cuboid, its sampled-chord pose helper, and the yellow muzzle material from the lobbed-projectile composition. Production and VfxLab now retain only the ground-projected shadow and fixed landing marker as flight aids.
+- Preserved the analytical tangent rotation for the authored projectile body and Fire lobes. The optional Fire particle emitter remains attached to the projectile source while emitted smoke particles stay in world space, linger, expand, and fade.
+- Updated VfxLab explanatory copy and the durable presentation contract. The thin fighter-to-target line visible while firing in the product client is the separate targeting indicator, not a projectile child, and is intentionally unchanged.
+- Regression coverage now asserts exactly two lobbed aids before and after late replicated Fire identity replaces the neutral visual, preventing the debug-like yellow bar from returning.
+- Verification: focused arc/body and late-replication production ECS tests passed; the full client library suite passed 596/596; strict client all-target Clippy passed; server all-target check and server feature-exclusion check passed; formatting and `git diff --check` passed.
+- Routed native Practice evidence with the isolated Arc Launcher plus Incendiary Module profile: `target/brl-0103-production-no-debug-tail/captures/brawler-000400.{png,json}`. The frame visibly shows the orange projectile and lingering smoke without the solid yellow projectile tail; JSON records one lobbed projectile root, exactly two lobbed aids, two retained projectile-smoke emitters, four total bounded emitters, and zero suppressed emitters.
+- BRL-0103 remains `doing` pending user visual confirmation of this final correction.
