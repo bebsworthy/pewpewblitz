@@ -84,3 +84,42 @@ Verification:
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 
 Phase 1 implementation is complete. Native user visual feedback remains open while Phase 2 proceeds with the neutral supported carrier families. BRL-0104 remains `doing`.
+
+## Phase 1 user feedback — 2026-09-01
+
+The user accepted the Poison/Restoration retained and transient Phase 1 slice with “ok.” No Phase 1 correction remains open. BRL-0104 stays `doing` and proceeds to Phase 2.
+
+## Phase 2 first slice — Cone Spray presentation — 2026-09-01
+
+Native baseline `target/brl-0104-cone-baseline/` confirms the authoritative clipped cone silhouette and blocker reconstruction are correct, but the current single translucent StandardMaterial exposes the repeated segment geometry as a static striped wedge.
+
+This slice preserves `cone_spray_primitives`, segment bounds, blocker clipping, lifecycle ownership, signature, and server authority. It replaces only the retained client material:
+- Normal uses one shared deterministic animated gas material sampled in world space so clipped segments read as one coherent cloud rather than independent stripes.
+- Reduced uses a lower-complexity gas variant.
+- Primitive and ReducedPrimitive use a simple stable translucent identity.
+- Animation derives from `AuthoritativeTick`; no wall-clock randomness, gameplay/protocol change, or server dependency is introduced.
+- VfxLab cone fixture is the isolated visual acceptance path; focused ECS/material tests plus canonical client/server verification remain required.
+
+## Phase 2 Cone Spray implementation evidence — 2026-09-01
+
+The initial custom-material capture still exposed every translucent radial segment and was rejected during implementation. The corrected presentation replaces the 33 overlapping render meshes with one bounded triangle-fan surface rebuilt from the same 17 blocker-clipped ray endpoints returned by `cone_spray_primitives`. Gameplay geometry generation, propagation, occlusion, authority, protocol facts, and lifecycle ownership are unchanged.
+
+- Normal and reduced variants use deterministic UV-space turbulent flow, broken curved wisps, and a restrained exact-frontier highlight animated from `AuthoritativeTick`.
+- Primitive and ReducedPrimitive use the same clipped surface with a stable low-cost translucent identity.
+- Each active cone owns one dynamic mesh asset; reconciliation explicitly removes that asset when the retained carrier disappears.
+- The VfxLab fixture and production renderer install the same material plugin and lifecycle systems.
+
+Native capture evidence:
+
+- `target/brl-0104-cone-gas-v4/`
+- `target/brl-0104-cone-reduced/`
+- `target/brl-0104-cone-primitive/`
+
+Verification:
+
+- `cargo test --locked --no-default-features --features client --lib`: 600 passed.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: passed.
+- `just _check-server` and `just _server-features`: passed.
+- `cargo fmt --all -- --check` and `git diff --check`: passed.
+
+The Cone Spray implementation slice is complete. Native user visual feedback remains open, and the remaining Phase 2 carrier families remain in scope; BRL-0104 stays `doing`.

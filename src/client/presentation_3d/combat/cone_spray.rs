@@ -4,15 +4,69 @@ use crate::combat::client::{
     AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, MAX_CONE_SPRAY_SEGMENTS,
     PreviewGeometry, cone_spray_primitives,
 };
+use bevy::{reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef};
 use std::collections::{HashMap, HashSet};
+
+const CONE_SPRAY_SHADER_PATH: &str = "shaders/cone_spray.wgsl";
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub(in crate::client) struct ConeSprayMaterial {
+    #[uniform(0)]
+    params: Vec4,
+}
+
+impl ConeSprayMaterial {
+    pub(in crate::client) const fn normal() -> Self {
+        Self {
+            params: Vec4::new(0.0, 0.0, 0.0, 0.0),
+        }
+    }
+
+    pub(in crate::client) const fn reduced() -> Self {
+        Self {
+            params: Vec4::new(0.0, 1.0, 0.0, 0.0),
+        }
+    }
+
+    pub(in crate::client) const fn primitive() -> Self {
+        Self {
+            params: Vec4::new(0.0, 2.0, 0.0, 0.0),
+        }
+    }
+}
+
+impl Material for ConeSprayMaterial {
+    fn fragment_shader() -> ShaderRef {
+        CONE_SPRAY_SHADER_PATH.into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+
+    fn depth_bias(&self) -> f32 {
+        10.0
+    }
+
+    fn enable_shadows() -> bool {
+        false
+    }
+}
+
+pub(in crate::client) struct ConeSprayMaterialPlugin;
+
+impl Plugin for ConeSprayMaterialPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(MaterialPlugin::<ConeSprayMaterial>::default());
+    }
+}
 
 #[derive(Component)]
 pub(in super::super) struct ConeSprayVisual3d;
 
 #[derive(Component)]
-pub(in super::super) struct ConeSpraySegmentVisual3d {
+pub(in super::super) struct ConeSpraySurfaceVisual3d {
     owner: Entity,
-    slot: u8,
 }
 
 #[allow(
@@ -22,7 +76,7 @@ pub(in super::super) struct ConeSpraySegmentVisual3d {
 )]
 pub(in super::super) fn reconcile_cone_spray_visuals(
     mut commands: Commands,
-    primitives: Res<Primitive3dAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
     materials: Res<Material3dAssets>,
     vfx: CombatVfxContext,
     sprays: Query<
@@ -35,6 +89,7 @@ pub(in super::super) fn reconcile_cone_spray_visuals(
         With<crate::combat::ConeSpray>,
     >,
     visuals: Query<(Entity, &CombatVisualOwner), With<ConeSprayVisual3d>>,
+    surface_meshes: Query<(&ConeSpraySurfaceVisual3d, &Mesh3d)>,
 ) {
     let roots = super::common::unique_roots(&mut commands, &visuals);
     for (owner, state, source, delivery) in &sprays {
@@ -86,25 +141,27 @@ pub(in super::super) fn reconcile_cone_spray_visuals(
                 Name::new("Spray gas visual root"),
             ))
             .id();
+        let spray_material = cone_spray_material(signature.variant, &materials);
         commands.entity(root).with_children(|parent| {
-            for slot in 0..u8::try_from(MAX_CONE_SPRAY_SEGMENTS)
-                .expect("spray visual segment bound fits u8")
-            {
-                parent.spawn((
-                    ConeSpraySegmentVisual3d { owner, slot },
-                    Mesh3d(primitives.unit_cuboid.clone()),
-                    MeshMaterial3d(materials.spray_gas.clone()),
-                    NotShadowCaster,
-                    NotShadowReceiver,
-                    Transform::default(),
-                    Visibility::Hidden,
-                    Name::new("Spray gas clipped segment"),
-                ));
-            }
+            parent.spawn((
+                ConeSpraySurfaceVisual3d { owner },
+                Mesh3d(meshes.add(cone_spray_surface_mesh(state.origin.as_vec2(), &[]))),
+                MeshMaterial3d(spray_material.clone()),
+                NotShadowCaster,
+                NotShadowReceiver,
+                Transform::default(),
+                Visibility::Hidden,
+                Name::new("Spray gas clipped surface"),
+            ));
         });
     }
     for (root, owner) in &visuals {
         if sprays.get(owner.0).is_err() {
+            for (surface, mesh) in &surface_meshes {
+                if surface.owner == owner.0 {
+                    meshes.remove(mesh.0.id());
+                }
+            }
             commands.entity(root).despawn();
         }
     }
@@ -117,8 +174,7 @@ pub(in super::super) fn reconcile_cone_spray_visuals(
     reason = "spray presentation reconstructs authoritative time against the current observed map and safe blockers"
 )]
 pub(in super::super) fn update_cone_spray_visuals(
-    primitives: Res<Primitive3dAssets>,
-    materials: Res<Material3dAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut index: ResMut<AimTraceBlockerIndex>,
     catalog: Res<crate::map::MapCatalogResource>,
     maps: Query<
@@ -136,13 +192,7 @@ pub(in super::super) fn update_cone_spray_visuals(
         &crate::matchplay::HeistSafe,
         &crate::combat::CurrentHealth,
     )>,
-    mut segments: Query<(
-        &ConeSpraySegmentVisual3d,
-        &mut Transform,
-        &mut Visibility,
-        &mut Mesh3d,
-        &mut MeshMaterial3d<StandardMaterial>,
-    )>,
+    mut surfaces: Query<(&ConeSpraySurfaceVisual3d, &mut Visibility, &Mesh3d)>,
 ) {
     if let Some((map, state)) = maps
         .iter()
@@ -165,51 +215,139 @@ pub(in super::super) fn update_cone_spray_visuals(
         .collect::<Vec<_>>();
     blockers.sort_by_key(|blocker| blocker.stable_id);
     let observed_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
-    let owners = segments
+    let owners = surfaces
         .iter()
-        .map(|(segment, ..)| segment.owner)
+        .map(|(surface, ..)| surface.owner)
         .collect::<HashSet<_>>();
     let primitives_by_owner = owners
         .into_iter()
         .filter_map(|owner| {
             sprays.get(owner).ok().map(|state| {
                 let tick = observed_tick.unwrap_or(state.emitted_at_tick);
-                (
-                    owner,
-                    cone_spray_primitives(*state, tick, &index, &blockers),
-                )
+                let primitives = cone_spray_primitives(*state, tick, &index, &blockers);
+                (owner, (state.origin.as_vec2(), primitives))
             })
         })
         .collect::<HashMap<_, _>>();
-    for (segment, mut transform, mut visibility, mut mesh, mut material) in &mut segments {
-        let Some(primitives_for_spray) = primitives_by_owner.get(&segment.owner) else {
+    for (surface, mut visibility, mesh) in &mut surfaces {
+        let Some((origin, primitives_for_spray)) = primitives_by_owner.get(&surface.owner) else {
             *visibility = Visibility::Hidden;
             continue;
         };
-        let Some(primitive) = primitives_for_spray.get(usize::from(segment.slot)) else {
+        let Some(mut surface_mesh) = meshes.get_mut(&mesh.0) else {
             *visibility = Visibility::Hidden;
             continue;
         };
+        *surface_mesh = cone_spray_surface_mesh(*origin, primitives_for_spray);
         *visibility = Visibility::Inherited;
-        material.0 = materials.spray_gas.clone();
-        match primitive.geometry {
-            PreviewGeometry::Corridor {
-                center,
-                angle,
-                length,
-                width,
-            } => {
-                mesh.0 = primitives.unit_cuboid.clone();
-                transform.translation = ground_position(center) + Vec3::Y * GROUND_EFFECT_HEIGHT;
-                transform.rotation = ground_rotation(Rotation::radians(angle));
-                transform.scale = Vec3::new(length, 2.4, width.max(0.001));
-            }
-            PreviewGeometry::Disc { center, radius } => {
-                mesh.0 = primitives.area_disc.clone();
-                transform.translation = ground_position(center) + Vec3::Y * GROUND_EFFECT_HEIGHT;
-                transform.rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
-                transform.scale = Vec3::splat(radius);
-            }
+    }
+}
+
+fn cone_spray_surface_mesh(
+    origin: Vec2,
+    primitives: &[crate::combat::client::PreviewPrimitive],
+) -> Mesh {
+    const RAY_COUNT: usize = MAX_CONE_SPRAY_SEGMENTS.div_ceil(2);
+
+    let mut positions = Vec::with_capacity(RAY_COUNT + 1);
+    positions.push(ground_position(origin).to_array());
+    for primitive in primitives.iter().take(RAY_COUNT) {
+        let PreviewGeometry::Corridor {
+            center,
+            angle,
+            length,
+            ..
+        } = primitive.geometry
+        else {
+            continue;
+        };
+        let endpoint = center + Vec2::from_angle(angle) * (length * 0.5);
+        positions.push(ground_position(endpoint).to_array());
+    }
+    for position in &mut positions {
+        position[1] = GROUND_EFFECT_HEIGHT;
+    }
+
+    let normals = vec![[0.0, 1.0, 0.0]; positions.len()];
+    let mut uvs = Vec::with_capacity(positions.len());
+    uvs.push([0.0, 0.5]);
+    let endpoint_count = positions.len().saturating_sub(1).max(1);
+    let endpoint_divisor = u16::try_from(endpoint_count.saturating_sub(1).max(1))
+        .map(f32::from)
+        .expect("cone surface endpoint count fits u16");
+    for endpoint in 0..positions.len().saturating_sub(1) {
+        let endpoint = u16::try_from(endpoint)
+            .map(f32::from)
+            .expect("cone surface endpoint index fits u16");
+        uvs.push([1.0, endpoint / endpoint_divisor]);
+    }
+    let triangle_count = positions.len().saturating_sub(2);
+    let mut indices = Vec::with_capacity(triangle_count * 3);
+    for segment in 0..triangle_count {
+        let first = u16::try_from(segment + 1).expect("cone surface vertex count fits u16");
+        indices.extend([0, first, first + 1]);
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U16(indices));
+    mesh
+}
+
+const fn cone_spray_material(
+    variant: vfx::VfxPresentationVariant,
+    materials: &Material3dAssets,
+) -> &Handle<ConeSprayMaterial> {
+    match variant {
+        vfx::VfxPresentationVariant::Normal => &materials.spray_gas,
+        vfx::VfxPresentationVariant::Reduced => &materials.spray_gas_reduced,
+        vfx::VfxPresentationVariant::Primitive | vfx::VfxPresentationVariant::ReducedPrimitive => {
+            &materials.spray_gas_primitive
         }
+    }
+}
+
+pub(in crate::client) fn animate_cone_spray_materials(
+    ticks: Query<&AuthoritativeTick>,
+    handles: Option<Res<Material3dAssets>>,
+    mut materials: ResMut<Assets<ConeSprayMaterial>>,
+) {
+    const VISUAL_CYCLE_SECONDS: u64 = 900;
+
+    let Some(handles) = handles else {
+        return;
+    };
+    let tick = ticks.iter().map(|tick| tick.0).max().unwrap_or_default();
+    let cycle_ticks = crate::timing::SIMULATION_TICK_HZ * VISUAL_CYCLE_SECONDS;
+    let visual_tick = u16::try_from(tick % cycle_ticks)
+        .expect("the fifteen-minute cone spray visual cycle fits u16");
+    let tick_hz = u16::try_from(crate::timing::SIMULATION_TICK_HZ)
+        .expect("the simulation tick rate fits u16");
+    let time = f32::from(visual_tick) / f32::from(tick_hz);
+    for handle in [
+        &handles.spray_gas,
+        &handles.spray_gas_reduced,
+        &handles.spray_gas_primitive,
+    ] {
+        if let Some(mut material) = materials.get_mut(handle) {
+            material.params.x = time;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cone_material_variants_encode_bounded_quality_levels() {
+        assert!(ConeSprayMaterial::normal().params.y.abs() < f32::EPSILON);
+        assert!((ConeSprayMaterial::reduced().params.y - 1.0).abs() < f32::EPSILON);
+        assert!((ConeSprayMaterial::primitive().params.y - 2.0).abs() < f32::EPSILON);
     }
 }

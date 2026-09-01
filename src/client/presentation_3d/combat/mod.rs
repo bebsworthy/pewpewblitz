@@ -13,7 +13,10 @@ mod particles;
 use bevy::prelude::{App, IntoScheduleConfigs, Plugin, PostUpdate, SystemSet, Update};
 
 pub(super) use aim_preview::{reconcile_aim_preview_visuals, update_aim_preview};
-pub(super) use cone_spray::{reconcile_cone_spray_visuals, update_cone_spray_visuals};
+pub(super) use cone_spray::{
+    ConeSprayMaterial, ConeSprayMaterialPlugin, animate_cone_spray_materials,
+    reconcile_cone_spray_visuals, update_cone_spray_visuals,
+};
 pub(super) use effects::animate_attack_acceptance;
 pub(in crate::client) use effects::{
     CombatEffect3d, PendingCombatEffect, animate_combat_effect_layers, cleanup_combat_effects,
@@ -56,36 +59,41 @@ pub(in crate::client) struct VfxLabLifecyclePresentationPlugin;
 
 impl Plugin for VfxLabLifecyclePresentationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((FireAreaMaterialPlugin, ElementalSupportAreaMaterialPlugin))
-            .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
-            .add_systems(
-                Update,
-                (
-                    reconcile_fighter_visuals,
-                    reconcile_projectile_visuals,
-                    reconcile_elemental_field_visuals,
-                    reconcile_cone_spray_visuals,
-                    reconcile_status_visuals,
-                    update_cone_spray_visuals,
-                    animate_elemental_motion_accents,
-                    animate_fire_area_material,
-                    animate_elemental_support_area_materials,
-                )
-                    .chain()
-                    .in_set(VfxLabLifecycleSet),
+        app.add_plugins((
+            FireAreaMaterialPlugin,
+            ElementalSupportAreaMaterialPlugin,
+            ConeSprayMaterialPlugin,
+        ))
+        .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
+        .add_systems(
+            Update,
+            (
+                reconcile_fighter_visuals,
+                reconcile_projectile_visuals,
+                reconcile_elemental_field_visuals,
+                reconcile_cone_spray_visuals,
+                reconcile_status_visuals,
+                update_cone_spray_visuals,
+                animate_elemental_motion_accents,
+                animate_fire_area_material,
+                animate_elemental_support_area_materials,
+                animate_cone_spray_materials,
             )
-            .add_systems(
-                PostUpdate,
+                .chain()
+                .in_set(VfxLabLifecycleSet),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                write_fighter_visual_poses,
                 (
-                    write_fighter_visual_poses,
-                    (
-                        write_projectile_visual_poses,
-                        write_lobbed_projectile_body_poses,
-                        write_lobbed_projectile_aid_poses,
-                    )
-                        .chain(),
-                ),
-            );
+                    write_projectile_visual_poses,
+                    write_lobbed_projectile_body_poses,
+                    write_lobbed_projectile_aid_poses,
+                )
+                    .chain(),
+            ),
+        );
     }
 }
 #[cfg(test)]

@@ -112,7 +112,9 @@ pub(crate) struct Material3dAssets {
     pub(crate) zone_boundary: Handle<StandardMaterial>,
     pub(crate) preview: Handle<StandardMaterial>,
     pub(crate) preview_blocked: Handle<StandardMaterial>,
-    pub(crate) spray_gas: Handle<StandardMaterial>,
+    pub(in crate::client) spray_gas: Handle<combat::ConeSprayMaterial>,
+    pub(in crate::client) spray_gas_reduced: Handle<combat::ConeSprayMaterial>,
+    pub(in crate::client) spray_gas_primitive: Handle<combat::ConeSprayMaterial>,
     pub(crate) status_slow: Handle<StandardMaterial>,
     pub(crate) status_knockback: Handle<StandardMaterial>,
     pub(crate) status_reveal: Handle<StandardMaterial>,
@@ -299,6 +301,7 @@ impl Plugin for WorldPresentationPlugin {
             VfxParticleAdapterPlugin,
             combat::FireAreaMaterialPlugin,
             combat::ElementalSupportAreaMaterialPlugin,
+            combat::ConeSprayMaterialPlugin,
         ));
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .add_message::<PendingCombatEffect>()
@@ -1036,6 +1039,7 @@ pub(in crate::client) fn setup_3d_foundation(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut fire_area_materials: ResMut<Assets<combat::FireAreaMaterial>>,
     mut elemental_support_area_materials: ResMut<Assets<combat::ElementalSupportAreaMaterial>>,
+    mut cone_spray_materials: ResMut<Assets<combat::ConeSprayMaterial>>,
 ) {
     let fighter_radius = builds.0.fighter_body.radius;
     let fighter_metrics = FighterPresentationMetrics {
@@ -1116,13 +1120,9 @@ pub(in crate::client) fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
-        spray_gas: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.72, 0.92, 0.82, 0.30),
-            emissive: LinearRgba::new(0.18, 0.42, 0.26, 1.0),
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
-            ..default()
-        }),
+        spray_gas: cone_spray_materials.add(combat::ConeSprayMaterial::normal()),
+        spray_gas_reduced: cone_spray_materials.add(combat::ConeSprayMaterial::reduced()),
+        spray_gas_primitive: cone_spray_materials.add(combat::ConeSprayMaterial::primitive()),
         status_slow: materials.add(StandardMaterial {
             base_color: Color::srgba(0.25, 0.75, 1.0, 0.82),
             alpha_mode: AlphaMode::Blend,
