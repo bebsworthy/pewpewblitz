@@ -50,10 +50,13 @@ persisted tuning makes any admitted loadout genuinely invalid, that tuning is ig
 worker rather than crashing or stranding the client during Match Loading.
 
 The current snapshot schema is version 19, the persistence envelope is version 13, and the
-non-persisted editor-manifest schema is version 11. The server manifest explicitly identifies every
+non-persisted editor-manifest schema is version 12. The server manifest explicitly identifies every
 editable numeric path, comparison-row identity, gameplay unit, storage conversion, authoritative
 bound, step, and preferred control. The browser does not infer editability, comparison semantics,
-or limits from serialized field names. Its
+or limits from serialized field names. Semantic rows align equivalent authored axes even when
+their persisted variants use different field names: examples include weapon range/economy/delivery,
+targeted-ultimate range/radius/duration, subordinate ultimate projectiles, and elemental-resistance
+passives. Their gameplay paths and values remain unchanged. Its
 **Global** tab currently contains a **Cold & Freeze** section for buildup decay delay/rate, Freeze
 duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, seven
 canonical weapon-base recipes, all 12 numeric parameters across the seven parameterized passives,

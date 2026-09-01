@@ -22,7 +22,7 @@ pub(super) fn add_fields(
         let resistance_descriptors = [(
             "resistance_basis_points",
             "Effect",
-            "Resistance",
+            "Elemental resistance",
             NumberSpec::basis_points(
                 u32::from(PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.minimum),
                 u32::from(PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.maximum),
@@ -97,7 +97,7 @@ pub(super) fn add_fields(
                     (
                         "near_damage_basis_points",
                         "Effect",
-                        "Near damage",
+                        "Near damage scale",
                         NumberSpec::basis_points(
                             u32::from(PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum),
                             u32::from(PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum),
@@ -106,7 +106,7 @@ pub(super) fn add_fields(
                     (
                         "far_damage_basis_points",
                         "Effect",
-                        "Far damage",
+                        "Far damage scale",
                         NumberSpec::basis_points(
                             u32::from(PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.minimum),
                             u32::from(PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS.maximum),
@@ -121,7 +121,7 @@ pub(super) fn add_fields(
                 &[(
                     "refill_duration_basis_points",
                     "Effect",
-                    "Refill duration",
+                    "Refill duration scale",
                     NumberSpec::basis_points(
                         u32::from(PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS.minimum),
                         u32::from(PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS.maximum),
@@ -135,7 +135,7 @@ pub(super) fn add_fields(
                 &[(
                     "slow_duration_basis_points",
                     "Effect",
-                    "Slow duration",
+                    "Slow duration scale",
                     NumberSpec::basis_points(
                         u32::from(PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS.minimum),
                         u32::from(PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS.maximum),
@@ -153,7 +153,12 @@ pub(super) fn add_fields(
             } => ("HeatShielding", &resistance_descriptors),
         };
         for (tail, group, label, spec) in descriptors {
-            let comparison_key = format!("{variant}/{tail}");
+            let comparison_key = match variant {
+                "CryogenicInsulation" | "FilteredCirculation" | "HeatShielding" => {
+                    "elemental_resistance_basis_points".to_string()
+                }
+                _ => format!("{variant}/{tail}"),
+            };
             add_field(
                 fields,
                 passive_path(index, variant, tail),

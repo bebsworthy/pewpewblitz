@@ -13,7 +13,7 @@ mod passives;
 mod ultimates;
 mod weapons;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 11;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 12;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -931,6 +931,145 @@ mod tests {
         assert!(row_counts.values().all(|count| *count == 3));
     }
 
+    fn comparison_row<'a>(
+        manifest: &'a BalanceLabEditorManifest,
+        section: EditorSection,
+        key: &str,
+    ) -> Vec<&'a EditorFieldDescriptor> {
+        manifest
+            .fields
+            .iter()
+            .filter(|field| field.section == section && field.comparison_key == key)
+            .collect()
+    }
+
+    fn comparison_row_count(manifest: &BalanceLabEditorManifest, section: EditorSection) -> usize {
+        manifest
+            .fields
+            .iter()
+            .filter(|field| field.section == section)
+            .map(|field| field.comparison_key.as_str())
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    }
+
+    #[test]
+    fn audited_semantic_rows_align_weapons_ultimates_and_passives() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+
+        assert_eq!(EDITOR_SCHEMA_VERSION, 12);
+        assert_eq!(comparison_row_count(&manifest, EditorSection::Weapons), 29);
+        for (key, expected_subjects) in [
+            ("economy/ammo_capacity", 7),
+            ("economy/ammo_recovery_ticks", 7),
+            ("delivery/maximum_range", 7),
+            ("delivery/attack_angle_degrees", 3),
+            ("delivery/travel_speed", 4),
+            ("delivery/projectile_radius", 3),
+            ("delivery/projectile_lifetime_ticks", 3),
+            ("delivery/muzzle_offset", 5),
+            ("delivery/lob_flight_ticks", 2),
+            ("delivery/visual_arc_height", 2),
+            ("delivery/landing_clearance", 2),
+            ("area/effect_radius", 3),
+            ("area/maximum_targets", 4),
+            ("area/pulse_interval_ticks", 2),
+            ("capacity/maximum_active_instances", 2),
+        ] {
+            assert_eq!(
+                comparison_row(&manifest, EditorSection::Weapons, key).len(),
+                expected_subjects,
+                "unexpected weapon coverage for {key}"
+            );
+        }
+
+        assert_eq!(
+            comparison_row_count(&manifest, EditorSection::Ultimates),
+            37
+        );
+        for (key, expected_subjects) in [
+            ("targeting/maximum_range_milliunits", 8),
+            ("area/primary_effect_radius_milliunits", 7),
+            ("timing/active_effect_duration_ticks", 7),
+            ("secondary_projectile/speed_milliunits", 2),
+            ("secondary_projectile/radius_milliunits", 2),
+            ("secondary_projectile/range_milliunits", 2),
+            ("secondary_projectile/lifetime_ticks", 2),
+            ("damage/direct_per_hit", 3),
+        ] {
+            assert_eq!(
+                comparison_row(&manifest, EditorSection::Ultimates, key).len(),
+                expected_subjects,
+                "unexpected ultimate coverage for {key}"
+            );
+        }
+
+        assert_eq!(comparison_row_count(&manifest, EditorSection::Passives), 10);
+        assert_eq!(
+            comparison_row(
+                &manifest,
+                EditorSection::Passives,
+                "elemental_resistance_basis_points"
+            )
+            .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn audited_units_and_scale_labels_match_runtime_meaning() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+
+        for path in [
+            "ultimates/0/parameters/Dash/knockback_speed_milliunits",
+            "ultimates/1/parameters/Sentry/projectile_speed_milliunits",
+            "ultimates/10/parameters/BigBlob/child_speed_milliunits",
+        ] {
+            assert_eq!(
+                manifest_field_by_path(&manifest, path).unit,
+                "world units/s"
+            );
+        }
+        assert_eq!(
+            manifest_field_by_path(
+                &manifest,
+                "ultimates/7/parameters/ElementalField/effect/DamageOverTime/damage_per_tick"
+            )
+            .unit,
+            "health/tick"
+        );
+        assert_eq!(
+            manifest_field_by_path(
+                &manifest,
+                "ultimates/9/parameters/ElementalField/effect/Heal/amount"
+            )
+            .unit,
+            "health/pulse"
+        );
+        for (path, label) in [
+            (
+                "passives/3/parameters/CloseQuarters/near_damage_basis_points",
+                "Near damage scale",
+            ),
+            (
+                "passives/3/parameters/CloseQuarters/far_damage_basis_points",
+                "Far damage scale",
+            ),
+            (
+                "passives/4/parameters/QuickCycle/refill_duration_basis_points",
+                "Refill duration scale",
+            ),
+            (
+                "passives/5/parameters/Tenacity/slow_duration_basis_points",
+                "Slow duration scale",
+            ),
+        ] {
+            assert_eq!(manifest_field_by_path(&manifest, path).label, label);
+        }
+    }
+
     #[test]
     fn passives_have_their_own_editor_section() {
         let (snapshot, weapons) = fixture();
@@ -1045,7 +1184,7 @@ mod tests {
         let digest = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
             (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
         });
-        assert_eq!(digest, 0x9177_b9a7_ce27_b4cb);
+        assert_eq!(digest, 0xd5a5_0464_71d9_6b2c);
     }
 
     #[test]
@@ -1131,7 +1270,7 @@ mod tests {
                 "Fire Field",
                 "Effect",
                 "Damage per tick",
-                "points",
+                "health/tick",
                 1.0,
                 1.0,
                 65_535.0,
@@ -1189,8 +1328,8 @@ mod tests {
                 "restoration-field",
                 "Restoration Field",
                 "Effect",
-                "Healing",
-                "points",
+                "Healing per pulse",
+                "health/pulse",
                 1.0,
                 1.0,
                 65_535.0,
@@ -1230,7 +1369,7 @@ mod tests {
                                   step,
                                   control,
                                   help| {
-            let comparison_key = path.as_array().expect("literal path is an array")[3..]
+            let relative_key = path.as_array().expect("literal path is an array")[3..]
                 .iter()
                 .map(|segment| match segment {
                     serde_json::Value::String(value) => value.clone(),
@@ -1239,6 +1378,12 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
                 .join("/");
+            let comparison_key = match relative_key.as_str() {
+                "CryogenicInsulation/resistance_basis_points"
+                | "FilteredCirculation/resistance_basis_points"
+                | "HeatShielding/resistance_basis_points" => "elemental_resistance_basis_points",
+                _ => relative_key.as_str(),
+            };
             serde_json::json!({
                 "path": path,
                 "section": "passives",
@@ -1370,7 +1515,7 @@ mod tests {
                 "close-quarters",
                 "Close Quarters",
                 "Effect",
-                "Near damage",
+                "Near damage scale",
                 "%",
                 100.0,
                 0.01,
@@ -1390,7 +1535,7 @@ mod tests {
                 "close-quarters",
                 "Close Quarters",
                 "Effect",
-                "Far damage",
+                "Far damage scale",
                 "%",
                 100.0,
                 0.01,
@@ -1410,7 +1555,7 @@ mod tests {
                 "quick-cycle",
                 "Quick Cycle",
                 "Effect",
-                "Refill duration",
+                "Refill duration scale",
                 "%",
                 100.0,
                 0.01,
@@ -1430,7 +1575,7 @@ mod tests {
                 "tenacity",
                 "Tenacity",
                 "Effect",
-                "Slow duration",
+                "Slow duration scale",
                 "%",
                 100.0,
                 0.01,
@@ -1450,7 +1595,7 @@ mod tests {
                 "cryogenic-insulation",
                 "Cryogenic Insulation",
                 "Effect",
-                "Resistance",
+                "Elemental resistance",
                 "%",
                 100.0,
                 0.01,
@@ -1470,7 +1615,7 @@ mod tests {
                 "filtered-circulation",
                 "Filtered Circulation",
                 "Effect",
-                "Resistance",
+                "Elemental resistance",
                 "%",
                 100.0,
                 0.01,
@@ -1490,7 +1635,7 @@ mod tests {
                 "heat-shielding",
                 "Heat Shielding",
                 "Effect",
-                "Resistance",
+                "Elemental resistance",
                 "%",
                 100.0,
                 0.01,
@@ -1656,7 +1801,7 @@ mod tests {
             serde_json::json!({
                 "path": ["weapons", 2, "recipe", "delivery", "Lobbed", "max_flight_ticks"],
                 "section": "weapons",
-                "comparisonKey": "delivery/Lobbed/max_flight_ticks",
+                "comparisonKey": "delivery/lob_flight_ticks",
                 "subjectKey": "arc-launcher",
                 "subjectLabel": "Arc Launcher",
                 "group": "Delivery",
@@ -1688,10 +1833,10 @@ mod tests {
             serde_json::json!({
                 "path": ["weapons", 6, "recipe", "delivery", "Splash", "max_flight_ticks"],
                 "section": "weapons",
-                "comparisonKey": "delivery/Splash/max_flight_ticks",
+                "comparisonKey": "delivery/lob_flight_ticks",
                 "subjectKey": "splash",
                 "subjectLabel": "Splash",
-                "group": "Splash",
+                "group": "Delivery",
                 "label": "Maximum flight time",
                 "storageKind": "integer",
                 "unit": "s",
@@ -2069,7 +2214,7 @@ mod tests {
     }
 
     #[test]
-    fn ultimate_milliunits_are_described_in_world_units() {
+    fn ultimate_distance_milliunits_are_described_in_world_units() {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         let range = manifest

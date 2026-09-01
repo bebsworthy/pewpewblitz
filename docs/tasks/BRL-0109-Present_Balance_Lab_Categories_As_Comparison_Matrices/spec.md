@@ -367,3 +367,27 @@ Straight/Sticky projectile lifetime and Lobbed/Splash maximum flight time are al
 ## Audit conclusion
 
 The matrix implementation is complete, but semantic alignment is not. The highest-value correction is explicit semantic keys for Weapons, Ultimates, and elemental-resistance Passives, plus the speed/effect unit fixes above. This can be done without changing gameplay values, persisted snapshot paths, authority, or storage schemas. BRL-0109 should remain doing until these findings are dispositioned and the corrected native matrix is accepted.
+
+## Audit implementation evidence — 2026-09-01
+
+The semantic audit is implemented in editor-manifest schema 12 without changing authored gameplay values or persisted JSON paths.
+
+- Weapons now align semantically equivalent economy, delivery, area, payload, timing, and capacity properties. This includes ammo capacity/recovery, maximum range, attack angle, projectile travel geometry, lob timing/arc/clearance, effect radius, target caps, pulse interval, and maximum-active limits.
+- Ultimates now align maximum range across 8 definitions, primary effect radius across 7, active effect duration across 7, secondary-projectile dimensions across Sentry and Big Blob, and direct damage across Dash, Sentry, and Big Blob.
+- Passives now align the three elemental resistances and use clearer scale labels for damage, refill, and slow-duration modifiers.
+- Unit text now distinguishes speed (`world units/s`), damage-over-time (`health/tick`), and restoration pulses (`health/pulse`).
+
+Implementation started from baseline commit `7985de0` (`feat(balance-lab): add comparison matrices`).
+
+Verification:
+
+- `cargo fmt --all -- --check` — passed.
+- `cargo test --locked --no-default-features --features balance-lab server::balance_lab::editor::tests --lib` — 25 passed.
+- `cargo clippy --locked --no-default-features --features balance-lab --all-targets -- -D warnings` — passed.
+- `cargo check --locked --no-default-features --features balance-lab --all-targets` — passed.
+- `cargo test --locked --no-default-features --features balance-lab --all-targets` — passed (552 library tests plus integration/binary targets).
+- `npm run --prefix tools/balance-lab-web test` — 15 passed.
+- `npm run --prefix tools/balance-lab-web build` — passed.
+- Production-build browser audit against a schema-12 mock server — one shared row with the expected editable cells for ultimate maximum range (8), primary radius (7), active duration (7), projectile speed (2), damage per hit (3), and passive elemental resistance (3); no browser warnings or errors.
+
+The required native `just balance-lab` operator playtest remains pending, so the ticket stays in `doing`.

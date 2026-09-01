@@ -26,6 +26,103 @@ macro_rules! ticks {
     };
 }
 
+#[derive(Clone, Copy)]
+struct ComparisonMetadata {
+    key: &'static str,
+    group: &'static str,
+    label: &'static str,
+    unit: Option<&'static str>,
+}
+
+fn semantic_comparison(path: &str) -> Option<ComparisonMetadata> {
+    let metadata = match path {
+        "RevealScan/maximum_range_milliunits"
+        | "ConcealmentField/maximum_range_milliunits"
+        | "DemolitionStrike/maximum_range_milliunits"
+        | "ElementalField/maximum_range_milliunits"
+        | "BigBlob/maximum_range_milliunits" => ComparisonMetadata {
+            key: "targeting/maximum_range_milliunits",
+            group: "Targeting",
+            label: "Maximum range",
+            unit: None,
+        },
+        "RevealScan/radius_milliunits"
+        | "ConcealmentField/radius_milliunits"
+        | "DemolitionStrike/radius_milliunits"
+        | "ElementalField/radius_milliunits" => ComparisonMetadata {
+            key: "area/primary_effect_radius_milliunits",
+            group: "Area",
+            label: "Primary effect radius",
+            unit: None,
+        },
+        "SelfCloak/duration_ticks"
+        | "RevealScan/reveal_ticks"
+        | "ConcealmentField/duration_ticks"
+        | "ElementalField/duration_ticks" => ComparisonMetadata {
+            key: "timing/active_effect_duration_ticks",
+            group: "Timing",
+            label: "Active effect duration",
+            unit: None,
+        },
+        "Sentry/projectile_speed_milliunits" | "BigBlob/child_speed_milliunits" => {
+            ComparisonMetadata {
+                key: "secondary_projectile/speed_milliunits",
+                group: "Secondary projectile",
+                label: "Projectile speed",
+                unit: Some("world units/s"),
+            }
+        }
+        "Sentry/projectile_radius_milliunits" | "BigBlob/child_radius_milliunits" => {
+            ComparisonMetadata {
+                key: "secondary_projectile/radius_milliunits",
+                group: "Secondary projectile",
+                label: "Projectile radius",
+                unit: None,
+            }
+        }
+        "Sentry/projectile_range_milliunits" | "BigBlob/child_range_milliunits" => {
+            ComparisonMetadata {
+                key: "secondary_projectile/range_milliunits",
+                group: "Secondary projectile",
+                label: "Projectile range",
+                unit: None,
+            }
+        }
+        "Sentry/projectile_lifetime_ticks" | "BigBlob/child_lifetime_ticks" => ComparisonMetadata {
+            key: "secondary_projectile/lifetime_ticks",
+            group: "Secondary projectile",
+            label: "Projectile lifetime",
+            unit: None,
+        },
+        "Dash/damage" | "Sentry/projectile_damage" | "BigBlob/child_damage" => ComparisonMetadata {
+            key: "damage/direct_per_hit",
+            group: "Damage",
+            label: "Damage per hit",
+            unit: None,
+        },
+        "Dash/knockback_speed_milliunits" => ComparisonMetadata {
+            key: "Dash/knockback_speed_milliunits",
+            group: "Impact",
+            label: "Knockback speed",
+            unit: Some("world units/s"),
+        },
+        "ElementalField/effect/DamageOverTime/damage_per_tick" => ComparisonMetadata {
+            key: "ElementalField/effect/DamageOverTime/damage_per_tick",
+            group: "Effect",
+            label: "Damage per tick",
+            unit: Some("health/tick"),
+        },
+        "ElementalField/effect/Heal/amount" => ComparisonMetadata {
+            key: "ElementalField/effect/Heal/amount",
+            group: "Effect",
+            label: "Healing per pulse",
+            unit: Some("health/pulse"),
+        },
+        _ => return None,
+    };
+    Some(metadata)
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "explicit descriptors keep the complete ultimate editor contract auditable"
@@ -37,18 +134,22 @@ pub(super) fn add_fields(
     let bounds = ULTIMATE_PARAMETER_BOUNDS;
     for (index, ultimate) in snapshot.ultimates.iter().enumerate() {
         let mut add = |tail: Vec<EditorPathSegment>, group: &str, label: &str, spec: NumberSpec| {
-            let comparison_key = relative_comparison_key(&tail);
+            let relative_key = relative_comparison_key(&tail);
+            let metadata = semantic_comparison(&relative_key);
+            let spec = metadata
+                .and_then(|metadata| metadata.unit)
+                .map_or(spec, |unit| NumberSpec { unit, ..spec });
             let mut descriptor_path = path!["ultimates", index, "parameters"];
             descriptor_path.extend(tail);
             add_field(
                 fields,
                 descriptor_path,
                 EditorSection::Ultimates,
-                &comparison_key,
+                metadata.map_or(relative_key.as_str(), |metadata| metadata.key),
                 &ultimate.key,
                 &ultimate.display_name,
-                group,
-                label,
+                metadata.map_or(group, |metadata| metadata.group),
+                metadata.map_or(label, |metadata| metadata.label),
                 spec,
             );
         };

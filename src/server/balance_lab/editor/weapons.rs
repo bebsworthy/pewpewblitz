@@ -17,6 +17,156 @@ macro_rules! path {
     };
 }
 
+#[derive(Clone, Copy)]
+struct ComparisonMetadata {
+    key: &'static str,
+    group: &'static str,
+    label: &'static str,
+    unit: Option<&'static str>,
+}
+
+fn semantic_comparison(path: &str) -> Option<ComparisonMetadata> {
+    semantic_economy_or_delivery(path).or_else(|| semantic_area_or_payload(path))
+}
+
+fn semantic_economy_or_delivery(path: &str) -> Option<ComparisonMetadata> {
+    let metadata = match path {
+        "economy/Magazine/capacity" | "economy/Charges/capacity" => ComparisonMetadata {
+            key: "economy/ammo_capacity",
+            group: "Economy",
+            label: "Ammo capacity",
+            unit: Some("uses"),
+        },
+        "economy/Magazine/refill_ticks" | "economy/Charges/recharge_ticks" => ComparisonMetadata {
+            key: "economy/ammo_recovery_ticks",
+            group: "Economy",
+            label: "Ammo recovery time",
+            unit: None,
+        },
+        "delivery/Straight/range"
+        | "delivery/StickyStraight/range"
+        | "delivery/Lobbed/distance"
+        | "delivery/MeleeArc/reach"
+        | "delivery/ConeSpray/reach"
+        | "delivery/Splash/distance" => ComparisonMetadata {
+            key: "delivery/maximum_range",
+            group: "Delivery",
+            label: "Maximum range",
+            unit: None,
+        },
+        "firing/Spread/total_angle_degrees"
+        | "delivery/MeleeArc/angle_degrees"
+        | "delivery/ConeSpray/angle_degrees" => ComparisonMetadata {
+            key: "delivery/attack_angle_degrees",
+            group: "Delivery",
+            label: "Attack angle",
+            unit: None,
+        },
+        "delivery/Straight/speed"
+        | "delivery/StickyStraight/speed"
+        | "delivery/ConeSpray/propagation_speed" => ComparisonMetadata {
+            key: "delivery/travel_speed",
+            group: "Delivery",
+            label: "Travel speed",
+            unit: None,
+        },
+        "delivery/Straight/radius" | "delivery/StickyStraight/radius" => ComparisonMetadata {
+            key: "delivery/projectile_radius",
+            group: "Delivery",
+            label: "Projectile radius",
+            unit: None,
+        },
+        "delivery/Straight/lifetime_ticks" | "delivery/StickyStraight/lifetime_ticks" => {
+            ComparisonMetadata {
+                key: "delivery/projectile_lifetime_ticks",
+                group: "Delivery",
+                label: "Projectile lifetime",
+                unit: None,
+            }
+        }
+        "delivery/Straight/muzzle_offset"
+        | "delivery/StickyStraight/muzzle_offset"
+        | "delivery/Lobbed/muzzle_offset"
+        | "delivery/Splash/muzzle_offset" => ComparisonMetadata {
+            key: "delivery/muzzle_offset",
+            group: "Delivery",
+            label: "Muzzle offset",
+            unit: None,
+        },
+        "delivery/Lobbed/max_flight_ticks" | "delivery/Splash/max_flight_ticks" => {
+            ComparisonMetadata {
+                key: "delivery/lob_flight_ticks",
+                group: "Delivery",
+                label: "Maximum flight time",
+                unit: None,
+            }
+        }
+        "delivery/Lobbed/visual_arc_height" | "delivery/Splash/visual_arc_height" => {
+            ComparisonMetadata {
+                key: "delivery/visual_arc_height",
+                group: "Delivery",
+                label: "Visual arc height",
+                unit: None,
+            }
+        }
+        "delivery/Lobbed/landing_clearance_radius" | "delivery/Splash/landing_clearance_radius" => {
+            ComparisonMetadata {
+                key: "delivery/landing_clearance",
+                group: "Delivery",
+                label: "Landing clearance",
+                unit: None,
+            }
+        }
+        _ => return None,
+    };
+    Some(metadata)
+}
+
+fn semantic_area_or_payload(path: &str) -> Option<ComparisonMetadata> {
+    let metadata = match path {
+        "payload_bundles/0/target/Area/radius" | "delivery/Splash/shape/Circle/radius" => {
+            ComparisonMetadata {
+                key: "area/effect_radius",
+                group: "Area",
+                label: "Effect radius",
+                unit: None,
+            }
+        }
+        "payload_bundles/0/target/Area/max_targets"
+        | "delivery/ConeSpray/max_targets"
+        | "delivery/Splash/max_targets" => ComparisonMetadata {
+            key: "area/maximum_targets",
+            group: "Area",
+            label: "Maximum targets per application",
+            unit: None,
+        },
+        "delivery/ConeSpray/pulse_interval_ticks" | "delivery/Splash/pulse_interval_ticks" => {
+            ComparisonMetadata {
+                key: "area/pulse_interval_ticks",
+                group: "Area",
+                label: "Pulse interval",
+                unit: None,
+            }
+        }
+        "delivery/StickyStraight/max_active_per_owner" | "delivery/Splash/max_active_per_owner" => {
+            ComparisonMetadata {
+                key: "capacity/maximum_active_instances",
+                group: "Capacity",
+                label: "Maximum active instances",
+                unit: Some("instances"),
+            }
+        }
+        "payload_bundles/0/effects/0/Damage/amount" => ComparisonMetadata {
+            key: "payload_bundles/0/effects/0/Damage/amount",
+            group: "Payload",
+            label: "Damage per application",
+            unit: None,
+        },
+        _ => return None,
+    };
+    Some(metadata)
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "explicit descriptors keep the complete weapon editor contract auditable"
@@ -35,16 +185,20 @@ pub(super) fn add_fields(
         path
     };
     let mut add = |tail: Vec<EditorPathSegment>, group: &str, label: &str, spec: NumberSpec| {
-        let comparison_key = relative_comparison_key(&tail);
+        let relative_key = relative_comparison_key(&tail);
+        let metadata = semantic_comparison(&relative_key);
+        let spec = metadata
+            .and_then(|metadata| metadata.unit)
+            .map_or(spec, |unit| NumberSpec { unit, ..spec });
         add_field(
             fields,
             root(tail),
             EditorSection::Weapons,
-            &comparison_key,
+            metadata.map_or(relative_key.as_str(), |metadata| metadata.key),
             &weapon.key,
             &weapon.display_name,
-            group,
-            label,
+            metadata.map_or(group, |metadata| metadata.group),
+            metadata.map_or(label, |metadata| metadata.label),
             spec,
         );
     };
