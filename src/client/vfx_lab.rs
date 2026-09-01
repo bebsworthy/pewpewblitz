@@ -189,6 +189,7 @@ enum VfxLabFixture {
     StickyPayload,
     PersistentSplash,
     ElementalField,
+    ConcealmentField,
     ConeSpray,
     Dash,
     Sentry,
@@ -196,7 +197,7 @@ enum VfxLabFixture {
 }
 
 impl VfxLabFixture {
-    const COUNT: u8 = 11;
+    const COUNT: u8 = 12;
 
     fn next(self) -> Self {
         match self {
@@ -206,7 +207,8 @@ impl VfxLabFixture {
             Self::LobbedProjectile => Self::StickyPayload,
             Self::StickyPayload => Self::PersistentSplash,
             Self::PersistentSplash => Self::ElementalField,
-            Self::ElementalField => Self::ConeSpray,
+            Self::ElementalField => Self::ConcealmentField,
+            Self::ConcealmentField => Self::ConeSpray,
             Self::ConeSpray => Self::Dash,
             Self::Dash => Self::Sentry,
             Self::Sentry => Self::Status,
@@ -223,6 +225,7 @@ impl VfxLabFixture {
             Self::StickyPayload => "armed sticky payload / fuse",
             Self::PersistentSplash => "persistent Splash / dual-purpose fluid area",
             Self::ElementalField => "elemental field / area",
+            Self::ConcealmentField => "concealment field / veil area",
             Self::ConeSpray => "cone spray / propagation",
             Self::Dash => "dash / retained wake",
             Self::Sentry => "sentry / retained deployable",
@@ -239,6 +242,7 @@ impl VfxLabFixture {
             "sticky" => Some(Self::StickyPayload),
             "splash" => Some(Self::PersistentSplash),
             "field" => Some(Self::ElementalField),
+            "concealment" => Some(Self::ConcealmentField),
             "cone" => Some(Self::ConeSpray),
             "dash" => Some(Self::Dash),
             "sentry" => Some(Self::Sentry),
@@ -251,7 +255,10 @@ impl VfxLabFixture {
 const fn fixture_has_fixed_accent(fixture: VfxLabFixture) -> bool {
     matches!(
         fixture,
-        VfxLabFixture::Melee | VfxLabFixture::PersistentSplash | VfxLabFixture::Sentry
+        VfxLabFixture::Melee
+            | VfxLabFixture::PersistentSplash
+            | VfxLabFixture::ConcealmentField
+            | VfxLabFixture::Sentry
     )
 }
 
@@ -667,6 +674,7 @@ const fn lab_reference_positions(fixture: VfxLabFixture) -> [f32; 2] {
         VfxLabFixture::Melee => [0.0, 108.0],
         VfxLabFixture::StraightProjectile
         | VfxLabFixture::ElementalField
+        | VfxLabFixture::ConcealmentField
         | VfxLabFixture::PersistentSplash
         | VfxLabFixture::ConeSpray
         | VfxLabFixture::Status => [0.0, 96.0],
@@ -732,6 +740,9 @@ fn spawn_lab_scenario(
                 state.accent,
                 tick,
             );
+        }
+        VfxLabFixture::ConcealmentField => {
+            spawn_concealment_fixture(commands, state.presentation_identity, state.radius, tick);
         }
         VfxLabFixture::ConeSpray => spawn_cone_fixture(commands, state.presentation_identity, tick),
         VfxLabFixture::Dash => spawn_dash_fixture(commands, state.presentation_identity, tick),
@@ -984,6 +995,23 @@ fn spawn_cone_fixture(commands: &mut Commands, identity: u64, tick: u64) {
             delivery_index: 0,
         },
         Name::new("VfxLab cone spray fixture"),
+    ));
+}
+
+fn spawn_concealment_fixture(commands: &mut Commands, identity: u64, radius: u16, tick: u64) {
+    commands.spawn((
+        VfxLabFixtureOwner,
+        VfxLabClock,
+        AuthoritativeTick(tick),
+        crate::concealment::ConcealmentFieldState {
+            id: crate::concealment::ConcealmentFieldId(identity),
+            team: crate::combat::TeamId(0),
+            center: crate::combat::WorldPoint::from(Vec2::ZERO),
+            radius_milliunits: u32::from(radius).saturating_mul(1_000),
+            activated_at_tick: tick,
+            expires_at_tick: tick.saturating_add(600),
+        },
+        Name::new("VfxLab replicated Concealment Field fixture"),
     ));
 }
 
@@ -1815,6 +1843,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
             "DEMOLITION".to_string()
         }
         (VfxLabFixture::PersistentSplash, _) => "SPLASH DUAL".to_string(),
+        (VfxLabFixture::ConcealmentField, _) => "CONCEALMENT".to_string(),
         (VfxLabFixture::Sentry, _) => "DEPLOYABLE NEUTRAL".to_string(),
         (VfxLabFixture::Status, _) => status_fixture_label(state).to_string(),
         _ => state.accent.label().to_uppercase(),
@@ -1834,12 +1863,42 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::StickyPayload => "ARMED STICKY PAYLOAD",
         VfxLabFixture::PersistentSplash => "PERSISTENT DUAL-PURPOSE SPLASH AREA",
         VfxLabFixture::ElementalField => "PERSISTENT ELEMENTAL AREA",
+        VfxLabFixture::ConcealmentField => "PERSISTENT CONCEALMENT VEIL",
         VfxLabFixture::ConeSpray => "PROPAGATING ATTACK CONE",
         VfxLabFixture::Dash => "FIGHTER DASH WAKE",
         VfxLabFixture::Sentry => "SENTRY DEPLOYABLE AND LIFECYCLE CUES",
         VfxLabFixture::Status => "STATUS ATTACHED TO A FIGHTER",
     };
-    let meaning = match state.fixture {
+    let meaning = lab_fixture_meaning(state, scenario);
+    let style = lab_guide_style(state);
+    let style_control = if state_has_fixed_accent(state) {
+        "C fixed style  "
+    } else {
+        "C compare style"
+    };
+    let (state_suffix, ultimate_control) = lab_mode_labels(state);
+    format!(
+        "VFXLAB - WHAT YOU ARE LOOKING AT\n\n\
+         {subject}\n\
+         Style: {}{}   Variant: {}{}\n\n\
+         {meaning}\n\n\
+         {style}\n\n\
+         GRAY SPHERES ARE FIGHTER-SIZE REFERENCES.\n\
+         They are not part of the effect.\n\n\
+         {style_control}    R reduced    P primitive\n\
+         Space restart      Enter pause  . next tick\n\
+         Tab fixture        <-/-> effect {ultimate_control}\n\
+         I technical details             Esc quit\n\n\
+        Window {dimensions}",
+        style_label,
+        state_suffix,
+        if state.reduced { "reduced" } else { "normal" },
+        if state.primitive { " + primitive" } else { "" },
+    )
+}
+
+fn lab_fixture_meaning(state: &VfxLabState, scenario: VfxLabScenario) -> &'static str {
+    match state.fixture {
         VfxLabFixture::Transient => {
             if scenario.key == crate::client::vfx::REVEAL_SCAN_VFX {
                 "The thin outer ring is the exact 192-unit scan radius and remains for the authoritative reveal deadline. The concentric waves are the one-time activation sweep. Fighters found by that scan retain separate attached Reveal markers; this area does not scan repeatedly."
@@ -1869,6 +1928,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::ElementalField => {
             "The subtly treated center is the affected ground area. The thin bright ring is the exact gameplay boundary. Crystals, living flame, cellular contamination, or ordered vitality arcs identify the element without hiding fighters."
         }
+        VfxLabFixture::ConcealmentField => {
+            "The subtle center is the allied concealment volume and the thin bright ring is its exact authoritative radius. Drifting veil wisps communicate concealment without turning the area into an opaque fog bank. Fighter visibility and membership remain server-authoritative."
+        }
         VfxLabFixture::ConeSpray => {
             "The wedge shows the currently reached portion of the authoritative cone. Its outer silhouette, not its opacity, communicates attack coverage."
         }
@@ -1881,32 +1943,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::Status => {
             "The exact boundary and compact motif are attached presentation for replicated fighter state. Slow/Cold orbit, Frozen locks into a shard crown, Poison bubbles, Fire flickers, Reveal scans, and Knockback pulses outward. The whole motif follows the fighter and disappears at the authoritative deadline."
         }
-    };
-    let style = lab_guide_style(state);
-    let style_control = if state_has_fixed_accent(state) {
-        "C fixed style  "
-    } else {
-        "C compare style"
-    };
-    let (state_suffix, ultimate_control) = lab_mode_labels(state);
-    format!(
-        "VFXLAB - WHAT YOU ARE LOOKING AT\n\n\
-         {subject}\n\
-         Style: {}{}   Variant: {}{}\n\n\
-         {meaning}\n\n\
-         {style}\n\n\
-         GRAY SPHERES ARE FIGHTER-SIZE REFERENCES.\n\
-         They are not part of the effect.\n\n\
-         {style_control}    R reduced    P primitive\n\
-         Space restart      Enter pause  . next tick\n\
-         Tab fixture        <-/-> effect {ultimate_control}\n\
-         I technical details             Esc quit\n\n\
-        Window {dimensions}",
-        style_label,
-        state_suffix,
-        if state.reduced { "reduced" } else { "normal" },
-        if state.primitive { " + primitive" } else { "" },
-    )
+    }
 }
 
 fn lab_mode_labels(state: &VfxLabState) -> (&'static str, &'static str) {
@@ -1942,6 +1979,9 @@ const fn status_fixture_label(state: &VfxLabState) -> &'static str {
 }
 
 fn lab_guide_style(state: &VfxLabState) -> &'static str {
+    if state.fixture == VfxLabFixture::ConcealmentField {
+        return "CONCEALMENT uses a low, breathing energy veil with sparse drifting wisps. It is intentionally distinct from elemental hazard motion and preserves map readability; broader ownership colors remain tracked by BRL-0107.";
+    }
     if state.fixture == VfxLabFixture::Status {
         return match (state.accent, state.ultimate) {
             (VfxLabAccent::Neutral, false) => {
@@ -2026,10 +2066,11 @@ const fn fixture_index(fixture: VfxLabFixture) -> u8 {
         VfxLabFixture::StickyPayload => 5,
         VfxLabFixture::PersistentSplash => 6,
         VfxLabFixture::ElementalField => 7,
-        VfxLabFixture::ConeSpray => 8,
-        VfxLabFixture::Dash => 9,
-        VfxLabFixture::Sentry => 10,
-        VfxLabFixture::Status => 11,
+        VfxLabFixture::ConcealmentField => 8,
+        VfxLabFixture::ConeSpray => 9,
+        VfxLabFixture::Dash => 10,
+        VfxLabFixture::Sentry => 11,
+        VfxLabFixture::Status => 12,
     }
 }
 
@@ -2253,6 +2294,7 @@ mod tests {
             ("sticky", VfxLabFixture::StickyPayload),
             ("splash", VfxLabFixture::PersistentSplash),
             ("field", VfxLabFixture::ElementalField),
+            ("concealment", VfxLabFixture::ConcealmentField),
             ("cone", VfxLabFixture::ConeSpray),
             ("dash", VfxLabFixture::Dash),
             ("sentry", VfxLabFixture::Sentry),

@@ -593,3 +593,39 @@ Verification:
 - `./scripts/check-v3-world-presentation.sh`: passed.
 - `cargo fmt --all -- --check` and `git diff --check`: passed.
 - Native paired VfxLab captures reviewed: `target/brl-0104-status-v2-fire`, `target/brl-0104-status-v2-frozen`, `target/brl-0104-status-v2-reveal`, `target/brl-0104-status-v2-reduced`, and `target/brl-0104-status-v2-primitive`. No hierarchy warnings remained after adding visibility ownership to the layered root.
+
+
+## Phase 2 next slice — retained concealment-field presentation (2026-09-01)
+
+Outcome: upgrade the replicated Concealment Field from a static disc-and-ring marker into a readable, deterministic retained VFX family and make that exact production materializer independently inspectable in VfxLab.
+
+Scope and decisions:
+
+- The authoritative `ConcealmentFieldState` remains the sole lifecycle, center, radius, team, and deadline source. Presentation does not decide visibility or field membership.
+- Preserve an exact boundary and a subtle readable center treatment. Add a bounded concealment-specific veil/wisp motif whose motion is deterministic from authoritative tick and field identity.
+- Keep current relationship colors for this slice. BRL-0107 separately owns the broader ownership-language redesign; this work must not pre-empt or duplicate it.
+- Normal, Reduced, and Primitive variants use progressively smaller layer plans. No per-frame spawning or unbounded particles.
+- Add a dedicated read-only VfxLab concealment fixture backed by a real `ConcealmentFieldState`; do not reconstruct the look in Lab-only code.
+
+Acceptance and verification:
+
+- The retained field is visually distinguishable from elemental damage/support areas while preserving map and fighter readability.
+- Field spawn/removal follows replicated entity lifecycle, and motion is deterministic from authoritative ticks.
+- The exact production style is visible in VfxLab in Normal, Reduced, and Primitive modes.
+- Focused tests cover semantic variant selection, bounded layer counts, and deterministic motion; strict client and isolation checks pass before commit.
+
+
+### Retained concealment-field implementation and evidence (2026-09-01)
+
+Implemented a production `ConcealmentFieldState` style with a thin exact boundary, a lower-opacity readable floor, a breathing inner veil, and sparse tangent-following veil streaks. Motion is deterministic from replicated `AuthoritativeTick` and stable field identity. Normal uses seven wisps, Reduced three, and Primitive only the floor and exact boundary; the maximum Normal plan is ten render layers with no per-frame entity spawning. Existing relationship colors are intentionally retained pending BRL-0107.
+
+Added `--fixture concealment` to VfxLab. The fixture spawns a real replicated `ConcealmentFieldState` and uses the production reconciler/style/animation systems. The first native capture exposed that `VfxLabLifecyclePresentationPlugin` had omitted `reconcile_concealment_field_visuals`; adding that production materializer fixed the parity gap. The second visual pass replaced placeholder-looking sphere dots with oriented veil streak geometry and reduced field-fill alpha from 0.22 to 0.12 for map readability.
+
+Verification:
+
+- `cargo test --locked --no-default-features --features client concealment_style --lib`: 3 passed, covering variant degradation, bounded layers, and same-tick deterministic ECS replay.
+- `cargo test --locked --no-default-features --features client vfx_lab --lib`: 8 passed, including the twelve-fixture bounded cycle.
+- `cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings`: passed.
+- `just _test-client`: 632 library tests plus all client targets passed.
+- `./scripts/check-server-features.sh`, `./scripts/check-v3-world-presentation.sh`, `cargo fmt --all -- --check`, and `git diff --check`: passed.
+- Native paired evidence reviewed in `target/brl-0104-concealment-v3-normal`, `target/brl-0104-concealment-v3-reduced`, and `target/brl-0104-concealment-v3-primitive`. The empty pre-fix evidence remains in `target/brl-0104-concealment-v1-normal` as the discovered parity failure.

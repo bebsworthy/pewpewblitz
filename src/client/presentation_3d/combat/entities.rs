@@ -1017,26 +1017,9 @@ fn spawn_concealment_field(
         ))
         .id();
     commands.entity(root).with_children(|parent| {
-        parent.spawn((
-            Mesh3d(primitives.area_disc.clone()),
-            MeshMaterial3d(fill),
-            NotShadowCaster,
-            NotShadowReceiver,
-            Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT, 0.0)
-                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
-                .with_scale(Vec3::splat(radius)),
-            Name::new("V9 Concealment Field fill"),
-        ));
-        parent.spawn((
-            Mesh3d(primitives.area_ring.clone()),
-            MeshMaterial3d(boundary),
-            NotShadowCaster,
-            NotShadowReceiver,
-            Transform::from_xyz(0.0, GROUND_EFFECT_HEIGHT + 0.5, 0.0)
-                .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2))
-                .with_scale(Vec3::splat(radius)),
-            Name::new("V9 Concealment Field boundary"),
-        ));
+        super::concealment_style::spawn_concealment_style(
+            parent, primitives, &fill, &boundary, radius, signature,
+        );
     });
 }
 

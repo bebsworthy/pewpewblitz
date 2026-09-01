@@ -1322,7 +1322,7 @@ pub(in crate::client) fn setup_3d_foundation(
             ..default()
         }),
         concealment_field_blue_fill: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.08, 0.62, 1.0, 0.22),
+            base_color: Color::srgba(0.08, 0.62, 1.0, 0.12),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
@@ -1334,7 +1334,7 @@ pub(in crate::client) fn setup_3d_foundation(
             ..default()
         }),
         concealment_field_red_fill: materials.add(StandardMaterial {
-            base_color: Color::srgba(1.0, 0.2, 0.16, 0.22),
+            base_color: Color::srgba(1.0, 0.2, 0.16, 0.12),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()

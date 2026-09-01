@@ -2,6 +2,7 @@
 
 mod aim_preview;
 mod common;
+mod concealment_style;
 mod cone_spray;
 mod dash_style;
 mod effects;
@@ -20,6 +21,7 @@ mod straight_projectile_style;
 use bevy::prelude::{App, IntoScheduleConfigs, Plugin, PostUpdate, SystemSet, Update};
 
 pub(super) use aim_preview::{reconcile_aim_preview_visuals, update_aim_preview};
+pub(super) use concealment_style::animate_concealment_style;
 pub(super) use cone_spray::{
     ConeSprayMaterial, ConeSprayMaterialPlugin, animate_cone_spray_materials,
     reconcile_cone_spray_visuals, update_cone_spray_visuals,
@@ -85,6 +87,7 @@ where
         Update,
         (
             animate_fire_area_material,
+            animate_concealment_style,
             animate_elemental_support_area_materials,
             animate_cone_spray_materials,
             animate_straight_projectile_trail_materials,
@@ -117,6 +120,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
                 reconcile_fighter_visuals,
                 reconcile_projectile_visuals,
                 reconcile_sentry_visuals,
+                reconcile_concealment_field_visuals,
                 reconcile_elemental_field_visuals,
                 reconcile_persistent_splash_visuals,
                 reconcile_cone_spray_visuals,
