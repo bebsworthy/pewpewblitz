@@ -158,6 +158,8 @@ pub(crate) struct Material3dAssets {
     pub(crate) effect_damage: Handle<StandardMaterial>,
     pub(crate) neutral_energy_bright: Handle<StandardMaterial>,
     pub(crate) neutral_energy_soft: Handle<StandardMaterial>,
+    pub(crate) sentry_armor: Handle<StandardMaterial>,
+    pub(crate) sentry_armor_dark: Handle<StandardMaterial>,
     pub(crate) lobbed_shadow: Handle<StandardMaterial>,
     pub(crate) dash: Handle<StandardMaterial>,
     pub(crate) barrel: Handle<StandardMaterial>,
@@ -1371,6 +1373,18 @@ pub(in crate::client) fn setup_3d_foundation(
             emissive: LinearRgba::new(0.08, 1.15, 1.8, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
+            ..default()
+        }),
+        sentry_armor: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.055, 0.15, 0.19),
+            metallic: 0.72,
+            perceptual_roughness: 0.3,
+            ..default()
+        }),
+        sentry_armor_dark: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.012, 0.035, 0.055),
+            metallic: 0.88,
+            perceptual_roughness: 0.24,
             ..default()
         }),
         lobbed_shadow: materials.add(StandardMaterial {

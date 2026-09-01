@@ -144,7 +144,7 @@ impl VfxLabConfig {
             .is_some_and(|fixture| VfxLabFixture::from_key(fixture).is_none())
         {
             return Err(
-                "VfxLab fixture must be transient, straight, lobbed, sticky, splash, field, cone, dash, or status"
+                "VfxLab fixture must be transient, straight, lobbed, sticky, splash, field, cone, dash, sentry, or status"
                     .to_string(),
             );
         }
@@ -190,11 +190,12 @@ enum VfxLabFixture {
     ElementalField,
     ConeSpray,
     Dash,
+    Sentry,
     Status,
 }
 
 impl VfxLabFixture {
-    const COUNT: u8 = 9;
+    const COUNT: u8 = 10;
 
     fn next(self) -> Self {
         match self {
@@ -205,7 +206,8 @@ impl VfxLabFixture {
             Self::PersistentSplash => Self::ElementalField,
             Self::ElementalField => Self::ConeSpray,
             Self::ConeSpray => Self::Dash,
-            Self::Dash => Self::Status,
+            Self::Dash => Self::Sentry,
+            Self::Sentry => Self::Status,
             Self::Status => Self::Transient,
         }
     }
@@ -220,6 +222,7 @@ impl VfxLabFixture {
             Self::ElementalField => "elemental field / area",
             Self::ConeSpray => "cone spray / propagation",
             Self::Dash => "dash / retained wake",
+            Self::Sentry => "sentry / retained deployable",
             Self::Status => "fighter status / attached",
         }
     }
@@ -234,10 +237,18 @@ impl VfxLabFixture {
             "field" => Some(Self::ElementalField),
             "cone" => Some(Self::ConeSpray),
             "dash" => Some(Self::Dash),
+            "sentry" => Some(Self::Sentry),
             "status" => Some(Self::Status),
             _ => None,
         }
     }
+}
+
+const fn fixture_has_fixed_accent(fixture: VfxLabFixture) -> bool {
+    matches!(
+        fixture,
+        VfxLabFixture::PersistentSplash | VfxLabFixture::Sentry
+    )
 }
 
 impl VfxLabScenario {
@@ -474,7 +485,7 @@ impl Plugin for VfxLabPlugin {
             selected,
             presentation_identity: self.config.presentation_identity.unwrap_or(1),
             radius: self.config.radius.unwrap_or(DEFAULT_RADIUS),
-            accent: if fixture == VfxLabFixture::PersistentSplash {
+            accent: if fixture_has_fixed_accent(fixture) {
                 VfxLabAccent::Neutral
             } else {
                 self.config.accent
@@ -635,6 +646,7 @@ const fn lab_reference_positions(fixture: VfxLabFixture) -> [f32; 2] {
         | VfxLabFixture::PersistentSplash
         | VfxLabFixture::ConeSpray
         | VfxLabFixture::Status => [0.0, 96.0],
+        VfxLabFixture::Sentry => [-92.0, 92.0],
         VfxLabFixture::Dash => [-250.0, 380.0],
     }
 }
@@ -694,6 +706,7 @@ fn spawn_lab_scenario(
         }
         VfxLabFixture::ConeSpray => spawn_cone_fixture(commands, state.presentation_identity, tick),
         VfxLabFixture::Dash => spawn_dash_fixture(commands, state.presentation_identity, tick),
+        VfxLabFixture::Sentry => spawn_sentry_fixture(commands, state.presentation_identity, tick),
         VfxLabFixture::Status => {
             spawn_status_fixture(commands, state.presentation_identity, tick);
         }
@@ -935,6 +948,30 @@ fn spawn_dash_fixture(commands: &mut Commands, identity: u64, tick: u64) {
     ));
 }
 
+fn spawn_sentry_fixture(commands: &mut Commands, identity: u64, tick: u64) {
+    commands.spawn((
+        VfxLabFixtureOwner,
+        VfxLabClock,
+        crate::abilities::Sentry,
+        crate::abilities::SentryIdentity {
+            deployable_id: crate::builds::DeployableId(identity),
+            owner_player_id: crate::protocol::PlayerId(1),
+            owner_network_id: crate::protocol::NetworkEntityId(1),
+            team_id: crate::combat::TeamId(0),
+            ultimate_id: crate::builds::UltimateDefinitionId(2),
+            match_id: crate::matchplay::MatchId(1),
+        },
+        crate::abilities::SentryDeadline {
+            expires_at_tick: tick.saturating_add(720),
+        },
+        crate::combat::TeamId(0),
+        Position::from_xy(0.0, 0.0),
+        Rotation::radians(0.0),
+        AuthoritativeTick(tick),
+        Name::new("VfxLab replicated Sentry fixture"),
+    ));
+}
+
 fn lab_attack_source(
     source: crate::combat::ProjectileSource,
     origin: Vec2,
@@ -1051,7 +1088,7 @@ fn handle_lab_input(
     }
     if keyboard.just_pressed(KeyCode::Tab) {
         state.fixture = state.fixture.next();
-        if state.fixture == VfxLabFixture::PersistentSplash {
+        if fixture_has_fixed_accent(state.fixture) {
             state.accent = VfxLabAccent::Neutral;
         }
         restart = true;
@@ -1059,7 +1096,7 @@ fn handle_lab_input(
     if keyboard.just_pressed(KeyCode::Space) {
         restart = true;
     }
-    if keyboard.just_pressed(KeyCode::KeyC) && state.fixture != VfxLabFixture::PersistentSplash {
+    if keyboard.just_pressed(KeyCode::KeyC) && !fixture_has_fixed_accent(state.fixture) {
         state.accent = state.accent.next();
         restart = true;
     }
@@ -1546,10 +1583,10 @@ fn update_lab_inspector(
 }
 
 fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &str) -> String {
-    let style_label = if state.fixture == VfxLabFixture::PersistentSplash {
-        "SPLASH DUAL".to_string()
-    } else {
-        state.accent.label().to_uppercase()
+    let style_label = match state.fixture {
+        VfxLabFixture::PersistentSplash => "SPLASH DUAL".to_string(),
+        VfxLabFixture::Sentry => "DEPLOYABLE NEUTRAL".to_string(),
+        _ => state.accent.label().to_uppercase(),
     };
     let subject = match state.fixture {
         VfxLabFixture::Transient => match scenario.key.as_str() {
@@ -1565,6 +1602,7 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         VfxLabFixture::ElementalField => "PERSISTENT ELEMENTAL AREA",
         VfxLabFixture::ConeSpray => "PROPAGATING ATTACK CONE",
         VfxLabFixture::Dash => "FIGHTER DASH WAKE",
+        VfxLabFixture::Sentry => "REPLICATED SENTRY DEPLOYABLE",
         VfxLabFixture::Status => "STATUS ATTACHED TO A FIGHTER",
     };
     let meaning = match state.fixture {
@@ -1595,6 +1633,9 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
         }
         VfxLabFixture::Dash => {
             "The colored fighter follows the built-in authoritative Dash duration. Its wake grows from the activation point to the current position, then lingers briefly and dissipates after movement ends. The wake is presentation only."
+        }
+        VfxLabFixture::Sentry => {
+            "The grounded turret is the real replicated Sentry lifecycle presentation. Its barrel points along the replicated Rotation; the vertical gimbal, power core, and orbiting charge nodes communicate an active deployable without changing targeting or fire cadence."
         }
         VfxLabFixture::Status => {
             "The ring is attached presentation for the fighter's active status. It follows the fighter and disappears when the authoritative status ends."
@@ -1638,6 +1679,9 @@ fn lab_guide_style(state: &VfxLabState) -> &'static str {
         VfxLabAccent::Neutral if state.fixture == VfxLabFixture::Dash => {
             "NEUTRAL Dash uses a cool-white high-velocity wake: a hot central lane, turbulent cyan filaments, and sparse speed cuts that dissipate after the authoritative movement ends."
         }
+        VfxLabAccent::Neutral if state.fixture == VfxLabFixture::Sentry => {
+            "SENTRY uses a compact arena-readable machine silhouette: planted armor, an aim-aligned barrel, and a contained energy mechanism. Team and ownership language remain separate from this neutral deployable identity."
+        }
         VfxLabAccent::Neutral => {
             "NEUTRAL is the safe fallback. Press C to compare each authored elemental identity."
         }
@@ -1666,7 +1710,8 @@ const fn fixture_index(fixture: VfxLabFixture) -> u8 {
         VfxLabFixture::ElementalField => 6,
         VfxLabFixture::ConeSpray => 7,
         VfxLabFixture::Dash => 8,
-        VfxLabFixture::Status => 9,
+        VfxLabFixture::Sentry => 9,
+        VfxLabFixture::Status => 10,
     }
 }
 
@@ -1832,6 +1877,7 @@ mod tests {
             ("field", VfxLabFixture::ElementalField),
             ("cone", VfxLabFixture::ConeSpray),
             ("dash", VfxLabFixture::Dash),
+            ("sentry", VfxLabFixture::Sentry),
             ("status", VfxLabFixture::Status),
         ];
         for (name, fixture) in expected {

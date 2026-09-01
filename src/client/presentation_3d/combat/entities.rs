@@ -4,6 +4,7 @@ use super::common::{
     ground_marker_relation, unique_roots,
 };
 use super::elemental_style::{spawn_elemental_area_style, spawn_elemental_projectile_style};
+use super::sentry_style::spawn_sentry_style;
 use super::splash_style::spawn_dual_purpose_splash_style;
 use super::{
     MAX_ACTIVE_PARTICLE_EMITTERS, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
@@ -1325,6 +1326,16 @@ fn spawn_sentry(
         ))
         .id();
     commands.entity(root).with_children(|parent| {
+        let team_material = team_material(team, materials);
+        if spawn_sentry_style(
+            parent,
+            primitives,
+            materials,
+            signature,
+            team_material.clone(),
+        ) {
+            return;
+        }
         parent.spawn((
             Mesh3d(primitives.sentry_base.clone()),
             MeshMaterial3d(materials.neutral.clone()),
@@ -1332,12 +1343,12 @@ fn spawn_sentry(
         ));
         parent.spawn((
             Mesh3d(primitives.sentry_body.clone()),
-            MeshMaterial3d(team_material(team, materials)),
+            MeshMaterial3d(team_material.clone()),
             Transform::from_xyz(0.0, 18.0, 0.0),
         ));
         parent.spawn((
             Mesh3d(primitives.sentry_direction.clone()),
-            MeshMaterial3d(team_material(team, materials)),
+            MeshMaterial3d(team_material),
             NotShadowCaster,
             Transform::from_xyz(25.0, 23.0, 0.0).with_scale(Vec3::new(0.8, 0.7, 0.7)),
         ));

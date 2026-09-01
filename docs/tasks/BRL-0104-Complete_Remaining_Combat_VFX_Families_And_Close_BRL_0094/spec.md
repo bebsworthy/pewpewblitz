@@ -382,3 +382,24 @@ No gameplay, server, payload, ownership-color, map-preview, protocol, or editabl
 - Server isolation: `cargo check --locked --no-default-features --features server --all-targets` and strict server Clippy — passed.
 - Native evidence captured at playback tick 60 for normal, reduced, and primitive at 1280x720. Each capture reports one persistent Splash root, one visual root, two bounded shared Splash materials, zero particle emitters, and the authored Damage(36 Hostiles) + Heal(24 AlliesAndOwner) facts. Visual inspection confirmed readable fighter silhouettes, exact outer boundary, distinct degradation tiers, and no ownership overlay.
 - Feedback gate remains open for subjective native review; BRL-0104 stays doing.
+
+## Phase 2 next slice — retained Sentry presentation — 2026-09-01
+
+- Scope is the existing replicated Sentry deployable lifecycle and an isolated `--fixture sentry`; no authoritative targeting, cadence, projectile, protocol, ownership-language, or Balance Lab changes.
+- Selection remains semantic: active `Deployable` + Neutral signature with deployable context. No ultimate-definition-ID branch is permitted.
+- Normal presentation will replace the three primitive cylinders/cuboid with a layered readable turret silhouette: grounded plinth, dimensional armored body, aim-aligned barrel, emissive power core, and bounded rotating energy/gimbal accents. Animation derives only from `AuthoritativeTick`; aim continues to derive from replicated `Rotation`.
+- Reduced presentation keeps the dimensional silhouette, exact aim direction, and core pulse with fewer motion accents. Primitive preserves the current base/body/direction fallback.
+- VfxLab will construct the real replicated `Sentry`, `SentryIdentity`, `SentryDeadline`, Position, and Rotation facts and run the production reconcile, pose, animation, and cleanup systems.
+- Verification will cover semantic style selection, deterministic bounded accents, production/VfxLab scheduling, lifecycle cleanup, normal/reduced/primitive native captures, strict client checks, and server feature isolation.
+- Sentry fire/removal transients remain part of the later Phase 2 cue sweep so the retained slice stays independently reviewable.
+
+### Phase 2 retained Sentry implementation evidence — 2026-09-01
+
+- Implemented semantic active Deployable + Neutral selection with no ultimate-definition-ID branch. Normal/reduced use the new retained Sentry style; primitive/reduced-primitive preserve the existing three-mesh fallback.
+- The production root still follows replicated Position and Rotation. New animation is presentation-only and AuthoritativeTick-driven: a bounded power-core pulse and four deterministic orbit nodes in normal, one node in reduced.
+- The first native capture was rejected during implementation because the bright existing materials flattened the chassis into a toy-like cyan/white primitive stack. It was corrected with dark metallic plinth/body materials, restrained team armor panels, a smaller hot core, vertical gimbal, and emissive muzzle rail.
+- Added `--fixture sentry`, backed by real Sentry, SentryIdentity, SentryDeadline, TeamId, Position, Rotation, and AuthoritativeTick facts. The Lab runs production reconcile, pose, animation, and cleanup systems.
+- Focused verification: 57 combat-presentation tests and 6 VfxLab tests passed. Strict client all-target Clippy passed.
+- Canonical client verification: 615 tests passed. Server all-target check and strict server Clippy passed.
+- Native normal/reduced/primitive captures at playback tick 60 each report exactly one Sentry visual root, the Deployable semantic signature, zero particle emitters, and bounded shared assets. Visual inspection confirmed aim direction, machine/energy contrast, readable fighter-scale silhouette, and distinct primitive degradation.
+- User visual feedback remains open. Sentry fire/removal transients and remaining Phase 2 families remain in scope; BRL-0104 stays doing.

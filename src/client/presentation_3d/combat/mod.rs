@@ -10,6 +10,7 @@ mod entities;
 mod fighter_feedback;
 mod fighter_ui;
 mod particles;
+mod sentry_style;
 mod splash_style;
 mod sticky_blob;
 mod straight_projectile_style;
@@ -52,6 +53,7 @@ pub(in crate::client) use particles::{
     MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, RetainedProjectileSmoke3d,
     VfxParticleAdapterPlugin, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
+pub(super) use sentry_style::animate_sentry_style;
 pub(super) use splash_style::{
     SplashAreaMaterial, SplashAreaMaterialPlugin, animate_splash_area_materials,
     animate_splash_motion_accents,
@@ -85,6 +87,7 @@ where
             animate_sticky_blob_style,
             animate_splash_area_materials,
             animate_splash_motion_accents,
+            animate_sentry_style,
         )
             .in_set(set),
     );
@@ -107,6 +110,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
             (
                 reconcile_fighter_visuals,
                 reconcile_projectile_visuals,
+                reconcile_sentry_visuals,
                 reconcile_elemental_field_visuals,
                 reconcile_persistent_splash_visuals,
                 reconcile_cone_spray_visuals,
@@ -128,6 +132,7 @@ impl Plugin for VfxLabLifecyclePresentationPlugin {
                     write_projectile_visual_poses,
                     write_lobbed_projectile_body_poses,
                     write_lobbed_projectile_aid_poses,
+                    write_sentry_visual_poses,
                     write_sticky_blob_visual_poses,
                 )
                     .chain(),
