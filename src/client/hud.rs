@@ -35,6 +35,8 @@ struct CachedRosterEntry {
     weapon_preset: Option<u16>,
     status: CachedRosterStatus,
     connected: bool,
+    health: Option<(u16, u16)>,
+    boost_stacks: u8,
 }
 
 /// Small presentation-only dispatch for the one shared top-right objective slot.
@@ -52,6 +54,11 @@ pub(crate) enum ModeScoreView {
         health: [u16; 2],
         maximum: [u16; 2],
         local_team: Option<TeamId>,
+    },
+    Zombie {
+        live_zombies: u8,
+        last_brawler_standing: bool,
+        local_boost_stacks: u8,
     },
     Syncing,
 }
@@ -80,6 +87,22 @@ struct PhasePresentationFacts {
     local_selected: bool,
     local_ready: bool,
     local_restart_ready: bool,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct ZombieHudFacts<'w, 's> {
+    states: Query<'w, 's, &'static crate::matchplay::ZombieModeState, With<MatchRoot>>,
+    fighters: Query<
+        'w,
+        's,
+        (
+            &'static PlayerId,
+            &'static crate::combat::CurrentHealth,
+            &'static crate::builds::ResolvedFighterStats,
+            Option<&'static crate::matchplay::BoostStacks>,
+        ),
+        With<Fighter>,
+    >,
 }
 
 pub struct ClientReadinessHudPlugin;
@@ -316,6 +339,7 @@ fn update_readiness_hud(
     participants: Query<&crate::matchplay::PublicParticipantState>,
     heist_readiness: Res<ClientHeistReadiness>,
     mut roster_presentation: ResMut<MatchRosterPresentation>,
+    zombie: ZombieHudFacts,
     mut readiness_text: Query<
         (&mut Text, &mut Visibility),
         (
@@ -386,7 +410,18 @@ fn update_readiness_hud(
             ),
             MatchPhase::Active { ends_at_tick } => now.map_or_else(
                 || "SYNCING".to_string(),
-                |now| format_match_time(ends_at_tick.saturating_sub(now)),
+                |now| {
+                    if state.mode_definition_id == crate::map::ZOMBIE_MODE_DEFINITION
+                        && now >= ends_at_tick
+                    {
+                        zombie.states.iter().next().map_or_else(
+                            || "REMAINING HORDE".to_string(),
+                            |mode| format!("REMAINING HORDE  {}", mode.live_zombies),
+                        )
+                    } else {
+                        format_match_time(ends_at_tick.saturating_sub(now))
+                    }
+                },
             ),
             MatchPhase::Waiting | MatchPhase::Completed { .. } => String::new(),
         });
@@ -412,6 +447,16 @@ fn update_readiness_hud(
         participants.iter(),
         &mut roster_presentation,
     );
+    for (player, health, stats, stacks) in &zombie.fighters {
+        if let Some(entry) = roster_presentation.entries.get_mut(&player.0) {
+            let stacks = stacks.copied().unwrap_or_default();
+            entry.health = Some((
+                health.0,
+                crate::matchplay::effective_maximum_health(stats.maximum_health, stacks),
+            ));
+            entry.boost_stacks = stacks.0;
+        }
+    }
     let final_line = match_state.and_then(|(state, _)| {
         if state.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
             final_heist_objective_line(
@@ -444,8 +489,29 @@ fn update_readiness_hud(
             *visibility = Visibility::Hidden;
         }
     }
+    let mut roster_rows = roster_presentation.entries.iter().collect::<Vec<_>>();
+    roster_rows.sort_by_key(|(player, entry)| (entry.team.0, **player));
+    let roster_text = roster_rows
+        .into_iter()
+        .map(|(player, entry)| {
+            roster_entry_text(entry, now.unwrap_or(0), local_player == Some(*player))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let score_view = match_state.and_then(|(state, _)| {
-        if state.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
+        if state.mode_definition_id == crate::map::ZOMBIE_MODE_DEFINITION {
+            zombie
+                .states
+                .iter()
+                .next()
+                .map(|mode| ModeScoreView::Zombie {
+                    live_zombies: mode.live_zombies,
+                    last_brawler_standing: mode.last_brawler_standing,
+                    local_boost_stacks: local_player
+                        .and_then(|player| roster_presentation.entries.get(&player))
+                        .map_or(0, |entry| entry.boost_stacks),
+                })
+        } else if state.mode_definition_id == crate::map::HEIST_MODE_DEFINITION {
             Some(build_heist_score_view(
                 state,
                 matches!(*heist_readiness, ClientHeistReadiness::Ready)
@@ -460,7 +526,14 @@ fn update_readiness_hud(
         }
     });
     for (mut text, mut visibility) in &mut match_text {
-        text.0 = score_view.map_or_else(String::new, mode_score_text);
+        text.0 = score_view.map_or_else(String::new, |view| {
+            let score = mode_score_text(view);
+            if matches!(view, ModeScoreView::Zombie { .. }) {
+                format!("{score}\n\nTEAM\n{roster_text}")
+            } else {
+                score
+            }
+        });
         *visibility = if match_state.is_some_and(|(state, _)| {
             matches!(
                 state.phase,
@@ -473,15 +546,6 @@ fn update_readiness_hud(
             Visibility::Hidden
         };
     }
-    let mut roster_rows = roster_presentation.entries.iter().collect::<Vec<_>>();
-    roster_rows.sort_by_key(|(player, entry)| (entry.team.0, **player));
-    let roster_text = roster_rows
-        .into_iter()
-        .map(|(player, entry)| {
-            roster_entry_text(entry, now.unwrap_or(0), local_player == Some(*player))
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     for mut text in &mut scoreboard_text {
         text.0 = format!("SCOREBOARD\n\n{roster_text}");
     }
@@ -582,6 +646,21 @@ pub(crate) fn mode_score_text(view: ModeScoreView) -> String {
                 health[1],
                 maximum[1],
                 percent(1),
+            )
+        }
+        ModeScoreView::Zombie {
+            live_zombies,
+            last_brawler_standing,
+            local_boost_stacks,
+        } => {
+            let warning = if last_brawler_standing {
+                "\nLAST BRAWLER STANDING"
+            } else {
+                ""
+            };
+            format!(
+                "ZOMBIES  {live_zombies}\nBOOSTS  {local_boost_stacks} / +{}%{warning}",
+                u16::from(local_boost_stacks) * 5
             )
         }
         ModeScoreView::Syncing => "SYNCING OBJECTIVE".to_string(),
@@ -694,6 +773,8 @@ fn sync_roster_and_collect_phase_facts<'a>(
                     }
                 },
                 connected: true,
+                health: None,
+                boost_stacks: 0,
             },
         );
     }
@@ -817,6 +898,8 @@ fn phase_overlay_label(
                     format!("TEAM {} WINS", team.0 + 1)
                 }
                 crate::matchplay::MatchResult::Draw => "DRAW".to_string(),
+                crate::matchplay::MatchResult::Cleared => "HORDE CLEARED".to_string(),
+                crate::matchplay::MatchResult::Overrun => "ALL PLAYERS DOWN".to_string(),
                 crate::matchplay::MatchResult::Forfeit {
                     winner,
                     departed_team,
@@ -882,10 +965,15 @@ fn roster_entry_text(entry: &CachedRosterEntry, now: u64, is_local: bool) -> Str
         .weapon_preset
         .map_or_else(|| "W?".to_string(), |preset| format!("W{preset}"));
     let local = if is_local { "YOU " } else { "" };
+    let health = entry.health.map_or_else(
+        || "HP ?".to_string(),
+        |(current, maximum)| format!("HP {current}/{maximum}"),
+    );
     format!(
-        "T{}  {local}{}  {weapon}  {status}",
+        "T{}  {local}{}  {weapon}  {health}  B{}  {status}",
         entry.team.0 + 1,
-        entry.display_name
+        entry.display_name,
+        entry.boost_stacks,
     )
 }
 
@@ -985,14 +1073,16 @@ mod tests {
             weapon_preset: Some(3),
             status: CachedRosterStatus::Ready,
             connected: false,
+            health: Some((80, 100)),
+            boost_stacks: 2,
         };
         assert_eq!(
             roster_entry_text(&entry, 100, false),
-            "T2  Player Seven  W3  disconnected"
+            "T2  Player Seven  W3  HP 80/100  B2  disconnected"
         );
         assert_eq!(
             roster_entry_text(&entry, 100, true),
-            "T2  YOU Player Seven  W3  disconnected"
+            "T2  YOU Player Seven  W3  HP 80/100  B2  disconnected"
         );
     }
 

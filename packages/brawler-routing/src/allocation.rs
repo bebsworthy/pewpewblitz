@@ -44,6 +44,7 @@ pub struct AllocationPolicy {
     pub wipeout: ModeAllocationPolicy,
     pub hot_zone: ModeAllocationPolicy,
     pub heist: ModeAllocationPolicy,
+    pub zombie: ModeAllocationPolicy,
     pub heartbeat_ms: u32,
     pub seed_policy: SeedPolicy,
 }
@@ -65,6 +66,7 @@ impl AllocationPolicy {
             ModeAllocationPolicy::new(7, 5, rules_profile),
             ModeAllocationPolicy::new(8, 2, rules_profile),
             ModeAllocationPolicy::new(9, 2, rules_profile),
+            ModeAllocationPolicy::new(13, 1, rules_profile),
             1_000,
             SeedPolicy::OsRandom,
         )
@@ -75,6 +77,7 @@ impl AllocationPolicy {
         wipeout: ModeAllocationPolicy,
         hot_zone: ModeAllocationPolicy,
         heist: ModeAllocationPolicy,
+        zombie: ModeAllocationPolicy,
         heartbeat_ms: u32,
         seed_policy: SeedPolicy,
     ) -> Self {
@@ -82,6 +85,7 @@ impl AllocationPolicy {
             wipeout,
             hot_zone,
             heist,
+            zombie,
             heartbeat_ms,
             seed_policy,
         }
@@ -91,6 +95,7 @@ impl AllocationPolicy {
         self.wipeout.validate()?;
         self.hot_zone.validate()?;
         self.heist.validate()?;
+        self.zombie.validate()?;
         if self.heartbeat_ms == 0 {
             return Err(CodecError::InvalidValue);
         }
@@ -103,6 +108,7 @@ impl AllocationPolicy {
             GameMode::Wipeout => self.wipeout,
             GameMode::HotZone => self.hot_zone,
             GameMode::Heist => self.heist,
+            GameMode::Zombie => self.zombie,
         }
     }
 }
@@ -167,6 +173,7 @@ mod tests {
         ModeAllocationPolicy::new(11, 12, 1),
         ModeAllocationPolicy::new(21, 22, 2),
         ModeAllocationPolicy::new(31, 32, 3),
+        ModeAllocationPolicy::new(41, 42, 4),
         1_000,
         SeedPolicy::OsRandom,
     );
@@ -184,6 +191,7 @@ mod tests {
             ModeAllocationPolicy::new(0, 12, 1),
             POLICY.hot_zone,
             POLICY.heist,
+            POLICY.zombie,
             POLICY.heartbeat_ms,
             POLICY.seed_policy,
         );
@@ -303,6 +311,50 @@ mod tests {
             players_per_team: 2,
             participants: vec![human],
             bots: vec![bot(2, 0, "Bot 1"), bot(3, 1, "Bot 2"), bot(4, 1, "Bot 3")],
+        };
+
+        assert_eq!(validate_product_request(&request), Ok(()));
+    }
+
+    #[test]
+    fn product_validation_accepts_one_human_and_friendly_bots_for_zombie() {
+        let human = crate::AllocateParticipant {
+            lobby_session_id: crate::LobbySessionId::new(1).unwrap(),
+            player_id: crate::PlayerId::new(1).unwrap(),
+            netcode_client_id: crate::NetcodeClientId::new(1).unwrap(),
+            team: 0,
+            display_name: crate::MatchDisplayName::new("Player").unwrap(),
+            recipe_fingerprint: 1,
+            build_revision: 1,
+            build_snapshot: crate::MatchBuildSnapshot::new(&[1]).unwrap(),
+        };
+        let bot = |identity, name| crate::AllocateBot {
+            player_id: crate::PlayerId::new(identity).unwrap(),
+            team: 0,
+            display_name: crate::MatchDisplayName::new(name).unwrap(),
+            recipe_fingerprint: identity,
+            build_revision: 1,
+            build_snapshot: crate::MatchBuildSnapshot::new(&[1]).unwrap(),
+        };
+        let request = AllocateRequestBody {
+            request_id: crate::RequestId::new(1).unwrap(),
+            lobby_session_id: human.lobby_session_id,
+            mode: GameMode::Zombie,
+            map_preset: 1,
+            map_revision: 1,
+            rules_profile: 1,
+            objective_target: 4,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 900,
+            spawn_protection_ticks: 90,
+            completed_input_lock_ticks: 60,
+            wipeout_recent_hostile_damage_credit_ticks: 300,
+            heist_critical_health_percent: 25,
+            team_count: 1,
+            players_per_team: 3,
+            participants: vec![human],
+            bots: vec![bot(2, "Bot 1"), bot(3, "Bot 2")],
         };
 
         assert_eq!(validate_product_request(&request), Ok(()));

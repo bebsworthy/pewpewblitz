@@ -587,6 +587,13 @@ pub(in crate::client::flow) fn dashboard_game_summary(
             "Destroy the {safe_maximum_health} HP enemy idol - {}s limit",
             crate::timing::simulation_whole_seconds(active_limit_ticks)
         ),
+        crate::lobby::AdvertisedRulesSummary::Zombie {
+            pressure_stage_count,
+            active_limit_ticks,
+        } => format!(
+            "Survive {pressure_stage_count} pressure stages - {}s timer",
+            crate::timing::simulation_whole_seconds(active_limit_ticks)
+        ),
     };
     format!("{rules}\nMap pool: {maps}")
 }

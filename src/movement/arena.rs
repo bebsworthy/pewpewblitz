@@ -20,6 +20,8 @@ pub const HAZARD_LAYER: LayerMask = LayerMask(1 << 7);
 pub const DEPLOYABLE_LAYER: LayerMask = LayerMask(1 << 8);
 /// Map surfaces such as deep water that block fighters and deployables while allowing shots.
 pub const PLAYER_ONLY_MAP_LAYER: LayerMask = LayerMask(1 << 9);
+/// Dedicated hostile-NPC bodies block the map and each other without trapping players.
+pub const HOSTILE_NPC_LAYER: LayerMask = LayerMask(1 << 10);
 
 #[must_use]
 pub fn fighter_collision_layers() -> CollisionLayers {
@@ -38,7 +40,7 @@ pub fn player_only_map_collision_layers() -> CollisionLayers {
 pub fn map_collision_layers() -> CollisionLayers {
     CollisionLayers::new(
         STATIC_MAP_LAYER,
-        FIGHTER_LAYER | PROJECTILE_LAYER | DEPLOYABLE_LAYER,
+        FIGHTER_LAYER | PROJECTILE_LAYER | DEPLOYABLE_LAYER | HOSTILE_NPC_LAYER,
     )
 }
 
@@ -49,7 +51,7 @@ pub fn map_collision_layers() -> CollisionLayers {
 pub fn destructible_map_collision_layers() -> CollisionLayers {
     CollisionLayers::new(
         DESTRUCTIBLE_MAP_LAYER,
-        FIGHTER_LAYER | PROJECTILE_LAYER | DEPLOYABLE_LAYER,
+        FIGHTER_LAYER | PROJECTILE_LAYER | DEPLOYABLE_LAYER | HOSTILE_NPC_LAYER,
     )
 }
 

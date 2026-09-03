@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 5;
+pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 6;
 pub const MAX_OPERATOR_CATALOG_BYTES: usize = 16 * 1024;
 const MAX_FORMATION_DEADLINE_SECONDS: u16 = 300;
 
@@ -171,6 +171,8 @@ struct OperatorGameType {
     capture_seconds: u16,
     #[serde(default)]
     safe_health: u16,
+    #[serde(default)]
+    pressure_stages: u8,
     match_duration_seconds: u16,
     countdown_seconds: u16,
     respawn_seconds: u16,
@@ -239,12 +241,13 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         if entry.revision == 0 {
             return Err(format!("game type {} has a zero revision", id.as_str()));
         }
-        if entry.teams != lifecycle.team_count
-            || entry.teams != 2
-            || !matches!(entry.players_per_team, 1..=3)
-        {
+        let zombie_topology =
+            entry.mode == "zombie" && entry.teams == 1 && matches!(entry.players_per_team, 2..=3);
+        let pvp_topology =
+            entry.mode != "zombie" && entry.teams == 2 && matches!(entry.players_per_team, 1..=3);
+        if !zombie_topology && !pvp_topology {
             return Err(format!(
-                "game type {} must use the supported exact 1v1, 2v2, or 3v3 topology",
+                "game type {} must use exact 1v1, 2v2, 3v3, or Zombie 2-3 player cooperative topology",
                 id.as_str()
             ));
         }
@@ -257,6 +260,9 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         let countdown_ticks = seconds_to_ticks(entry.countdown_seconds)?;
         let respawn_ticks = seconds_to_ticks(entry.respawn_seconds)?;
         let entry_lifecycle = MatchLifecycleRules {
+            team_count: entry.teams,
+            minimum_participants_per_team: entry.players_per_team,
+            maximum_participants_per_team: entry.players_per_team,
             active_limit_ticks: match_duration_ticks,
             countdown_ticks,
             respawn_delay_ticks: respawn_ticks,
@@ -284,6 +290,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 kills_to_win: entry.kills_to_win,
                 capture_seconds: entry.capture_seconds,
                 safe_health: entry.safe_health,
+                pressure_stages: entry.pressure_stages,
                 match_duration_ticks,
                 lifecycle: entry_lifecycle,
                 wipeout_recent_hostile_damage_credit_ticks: mode_policies
@@ -348,6 +355,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 })?;
             let capacity =
                 crate::matchplay::ResolvedMatchCapacity::from_rules(&MatchLifecycleRules {
+                    team_count: entry.teams,
                     minimum_participants_per_team: entry.players_per_team,
                     maximum_participants_per_team: entry.players_per_team,
                     ..entry_lifecycle
@@ -457,7 +465,7 @@ mod tests {
                 .deadlines_from(Duration::from_secs(5)),
             (Duration::from_secs(35), Duration::from_secs(15))
         );
-        assert_eq!(catalog.game_types.len(), 9);
+        assert_eq!(catalog.game_types.len(), 11);
         let wipeout_three_vs_three = &catalog.game_types[3];
         assert_eq!(
             wipeout_three_vs_three.display_name,
@@ -521,12 +529,27 @@ mod tests {
         assert_eq!(heist[2].players_per_team, 3);
         assert_eq!(heist[2].configuration_revision, 6);
         assert_eq!(heist[2].map_preset_ids, vec![MapPresetId(12)]);
+        let zombie_three_player = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id.as_str() == "zombie-3p")
+            .unwrap();
+        assert_eq!(zombie_three_player.players_per_team, 3);
+        assert_eq!(zombie_three_player.team_count, 1);
+        assert_eq!(zombie_three_player.map_preset_ids, vec![MapPresetId(13)]);
+        assert_eq!(
+            zombie_three_player.rules_summary,
+            AdvertisedRulesSummary::Zombie {
+                pressure_stage_count: 4,
+                active_limit_ticks: 10_800,
+            }
+        );
         assert_eq!(
             catalog.revision.0,
             [
-                0x4f, 0xe0, 0x8f, 0x5b, 0x69, 0xcb, 0x3d, 0x54, 0xac, 0x96, 0x0e, 0x68, 0x13, 0xac,
-                0x4a, 0x5c, 0x35, 0x18, 0xca, 0xfb, 0xe1, 0x44, 0x76, 0x72, 0xab, 0x55, 0xc3, 0x9c,
-                0xb4, 0x49, 0x88, 0x32,
+                0x85, 0x35, 0x68, 0x59, 0xe2, 0xa1, 0xaf, 0x99, 0xe2, 0xf0, 0xa5, 0x9b, 0x6e, 0x85,
+                0xa4, 0xd0, 0xc5, 0xf6, 0xb5, 0x22, 0xc3, 0x75, 0xe1, 0xa6, 0xc6, 0xa9, 0x05, 0x3c,
+                0x97, 0x25, 0x2b, 0x9e,
             ]
         );
     }
@@ -561,7 +584,7 @@ mod tests {
     #[test]
     fn catalog_rejects_unknown_fields_modes_maps_objectives_and_unsupported_topology() {
         for invalid in [
-            VALID.replace("schema_version: 5", "schema_version: 5, surprise: true"),
+            VALID.replace("schema_version: 6", "schema_version: 6, surprise: true"),
             VALID.replace(
                 "loading_deadline_seconds: 30",
                 "loading_deadline_seconds: 0",

@@ -347,6 +347,13 @@ knockback, fighter passives, charge, and defeat semantics do not transfer merely
 has health. The complete policy is owned by
 [Damageable world objects and Heist](./18-damageable-world-objects-and-heist.md).
 
+Zombie hostile NPCs are a distinct combat-target family rather than enemy fighters. Player-owned
+straight, lobbed, spray, splash, sticky, melee, sentry, field, and condition deliveries may target
+them; authored slow, cold/freeze, damage-over-time, and external motion remain authoritative.
+Fighter-only passives, healing, scoring, and build state do not transfer. Carried Zombie boost
+stacks scale player-owned outgoing damage exactly once at effect planning and scale maximum health
+through the shared effective-health helper; NPC and environment damage never inherit that bonus.
+
 Possible future delivery families include:
 
 - charged or delayed projectiles with warning telegraphs;

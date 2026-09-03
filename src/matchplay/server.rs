@@ -71,8 +71,8 @@ impl Default for MatchLifecycleRules {
 
 impl MatchLifecycleRules {
     pub fn validate(self) -> Result<Self, &'static str> {
-        if self.team_count != 2 {
-            return Err("match lifecycle requires exactly two teams");
+        if !(1..=2).contains(&self.team_count) {
+            return Err("match lifecycle requires one or two teams");
         }
         if self.minimum_participants_per_team == 0
             || self.minimum_participants_per_team > self.maximum_participants_per_team
@@ -587,6 +587,7 @@ fn refresh_match_roster(
     summaries.sort_by_key(|participant| participant.player_id);
     ready &= counts
         .into_iter()
+        .take(usize::from(rules.team_count))
         .all(|count| count >= rules.minimum_participants_per_team);
     let departed = known.match_id == Some(state.match_id)
         && known.players.difference(&players).next().is_some();
@@ -779,7 +780,9 @@ fn resolve_pregame_outcomes(
         }
         return;
     }
-    if let Some(result) = forfeit_result(roster.counts) {
+    if rules.team_count == 2
+        && let Some(result) = forfeit_result(roster.counts)
+    {
         // Forfeit has precedence and still takes/discards any same-tick deadline outcome.
         outcomes.clear();
         commit_match_result(
@@ -1195,11 +1198,13 @@ fn capture_match_summary(
             Option<&WipeoutState>,
             Option<&super::HotZoneState>,
             Option<&super::HeistState>,
+            Option<&super::ZombieModeState>,
         ),
         With<MatchRoot>,
     >,
     hot_zone_telemetry: Option<ResMut<super::hot_zone::HotZoneTelemetry>>,
     heist_telemetry: Option<Res<super::HeistTelemetry>>,
+    zombie_telemetry: Option<Res<super::ZombieTelemetry>>,
     heist_safes: Query<(
         &super::HeistSafe,
         &crate::combat::CurrentHealth,
@@ -1209,22 +1214,22 @@ fn capture_match_summary(
     weapons: Res<WeaponTelemetry>,
     abilities: Res<crate::abilities::AbilityTelemetry>,
 ) {
-    let Ok((state, wipeout, hot_zone, heist)) = roots.single() else {
+    let Ok((state, wipeout, hot_zone, heist, zombie)) = roots.single() else {
         return;
     };
     match state.phase {
         MatchPhase::Active { .. } => telemetry.begin(state.match_id, tick.0),
         MatchPhase::Completed { result, .. } => {
-            let mode_summary = match (wipeout, hot_zone, heist) {
-                (Some(wipeout), _, _) => ModeSummary::Wipeout(WipeoutSummary {
+            let mode_summary = match (wipeout, hot_zone, heist, zombie) {
+                (Some(wipeout), _, _, _) => ModeSummary::Wipeout(WipeoutSummary {
                     final_scores: wipeout.team_scores,
                     target_score: wipeout.target_score,
                     score_margin: wipeout.team_scores[0].abs_diff(wipeout.team_scores[1]),
                 }),
-                (None, Some(hot_zone), _) => hot_zone_telemetry
+                (None, Some(hot_zone), _, _) => hot_zone_telemetry
                     .map(|telemetry| ModeSummary::HotZone(telemetry.summary(hot_zone)))
                     .expect("an installed Hot Zone match carries its telemetry"),
-                (None, None, Some(heist)) => {
+                (None, None, Some(heist), _) => {
                     let mut final_health = [0; 2];
                     let mut maximum_health = [0; 2];
                     for (safe, health, maximum) in &heist_safes {
@@ -1252,7 +1257,17 @@ fn capture_match_summary(
                             .map_or([None; 2], |telemetry| telemetry.destroyed_at_tick),
                     })
                 }
-                (None, None, None) => panic!("an installed mode carries its state on the root"),
+                (None, None, None, Some(zombie)) => ModeSummary::Zombie(super::ZombieSummary {
+                    total_spawned: zombie.total_spawned,
+                    total_defeated: zombie.total_defeated,
+                    peak_live: zombie_telemetry
+                        .as_deref()
+                        .map_or(zombie.live_zombies, |telemetry| telemetry.peak_live),
+                    pressure_stage_reached: zombie.pressure_stage.saturating_add(1),
+                }),
+                (None, None, None, None) => {
+                    panic!("an installed mode carries its state on the root")
+                }
             };
             telemetry.complete_with_mode(
                 tick.0,

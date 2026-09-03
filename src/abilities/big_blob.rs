@@ -409,6 +409,7 @@ pub(crate) fn advance_big_blob_parents(
                 CollisionLayers::new(
                     crate::movement::PROJECTILE_LAYER,
                     crate::movement::FIGHTER_LAYER
+                        | crate::movement::HOSTILE_NPC_LAYER
                         | crate::movement::STATIC_MAP_LAYER
                         | crate::movement::DESTRUCTIBLE_MAP_LAYER,
                 ),

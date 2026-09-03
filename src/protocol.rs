@@ -32,8 +32,11 @@ use crate::map::{
     ResolvedMapSnapshot, SpawnAssignment,
 };
 use crate::matchplay::{
-    FighterDisplayName, HotZoneState, MatchClock, MatchParticipant, MatchRoot as MatchRootMarker,
+    BoostGrantScope, BoostPickup, BoostPickupAvailableAtTick, BoostPickupIdentity,
+    BoostPickupSource, BoostStacks, FighterDisplayName, HostileNpc, HostileNpcDefinitionId,
+    HostileNpcIdentity, HotZoneState, MatchClock, MatchParticipant, MatchRoot as MatchRootMarker,
     MatchState, PublicParticipantState, RespawnState, SpawnProtection, WipeoutState,
+    ZombieModeState, ZombiePhase,
 };
 use crate::timing::SIMULATION_TICK;
 
@@ -41,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 42;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 43;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -379,6 +382,7 @@ impl Serialize for MatchRouteGrant {
                 crate::config::GameMode::Wipeout => 1,
                 crate::config::GameMode::HotZone => 2,
                 crate::config::GameMode::Heist => 3,
+                crate::config::GameMode::Zombie => 4,
             },
             capability: self.capability.bytes(),
             activation_expiry_unix_ms: self.activation_expiry_unix_ms,
@@ -408,6 +412,7 @@ impl<'de> Deserialize<'de> for MatchRouteGrant {
             1 => crate::config::GameMode::Wipeout,
             2 => crate::config::GameMode::HotZone,
             3 => crate::config::GameMode::Heist,
+            4 => crate::config::GameMode::Zombie,
             _ => return Err(serde::de::Error::custom("unsupported game mode")),
         };
         let capability = RouteCapability::from_bytes(wire.capability)
@@ -583,6 +588,10 @@ fn register_queue_protocol(app: &mut App) {
     .add_direction(NetworkDirection::ServerToClient);
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the protocol registry intentionally keeps the complete replicated-component contract visible in one place"
+)]
 fn register_replicated_components(app: &mut App) {
     app.component::<Fighter>().replicate_once();
     app.component::<crate::concealment::ConcealmentPresentationState>()
@@ -632,6 +641,18 @@ fn register_replicated_components(app: &mut App) {
     app.component::<crate::map::PickupAvailableAtTick>()
         .replicate_once();
     app.component::<crate::map::PickupExpiresAtTick>()
+        .replicate_once();
+    app.component::<HostileNpc>().replicate_once();
+    app.component::<HostileNpcIdentity>().replicate_once();
+    app.component::<HostileNpcDefinitionId>().replicate_once();
+    app.component::<ZombiePhase>().replicate();
+    app.component::<ZombieModeState>().replicate();
+    app.component::<BoostStacks>().replicate();
+    app.component::<BoostPickup>().replicate_once();
+    app.component::<BoostPickupIdentity>().replicate_once();
+    app.component::<BoostPickupSource>().replicate_once();
+    app.component::<BoostGrantScope>().replicate_once();
+    app.component::<BoostPickupAvailableAtTick>()
         .replicate_once();
     app.component::<SpawnAssignment>().replicate();
     app.component::<PlayerId>().replicate_once();

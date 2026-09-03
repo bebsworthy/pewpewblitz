@@ -253,6 +253,7 @@ pub(crate) fn advance_sticky_attachments(
         (
             Without<Fighter>,
             Without<crate::abilities::Sentry>,
+            Without<crate::matchplay::HostileNpc>,
             Without<crate::map::DamageableWorldObject>,
             Without<crate::matchplay::HeistSafe>,
         ),
@@ -266,7 +267,11 @@ pub(crate) fn advance_sticky_attachments(
             Option<&Defeated>,
             Option<&lightyear::prelude::ControlledBy>,
         ),
-        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+        Or<(
+            With<Fighter>,
+            With<crate::abilities::Sentry>,
+            With<crate::matchplay::HostileNpc>,
+        )>,
     >,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
 ) {
@@ -321,7 +326,11 @@ pub(crate) fn detonate_sticky_blobs(
             Option<&Defeated>,
             Option<&lightyear::prelude::ControlledBy>,
         ),
-        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+        Or<(
+            With<Fighter>,
+            With<crate::abilities::Sentry>,
+            With<crate::matchplay::HostileNpc>,
+        )>,
     >,
     objects: Query<
         (

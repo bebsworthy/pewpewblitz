@@ -78,6 +78,17 @@ type SafeAimQuery<'w, 's> = Query<
     ),
 >;
 
+type HostileNpcAimQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Position,
+        &'static NetworkEntityId,
+        &'static crate::combat::CurrentHealth,
+    ),
+    With<crate::matchplay::HostileNpc>,
+>;
+
 #[derive(bevy::ecs::system::SystemParam)]
 pub(in super::super) struct AimPreviewInputs<'w, 's> {
     maps: Query<
@@ -94,6 +105,7 @@ pub(in super::super) struct AimPreviewInputs<'w, 's> {
     index: ResMut<'w, AimTraceBlockerIndex>,
     sentries: SentryAimQuery<'w, 's>,
     safes: SafeAimQuery<'w, 's>,
+    hostile_npcs: HostileNpcAimQuery<'w, 's>,
 }
 
 fn ensure_targeting_previews(
@@ -184,6 +196,7 @@ pub(in super::super) fn update_aim_preview(
     append_nonfighter_aim_blockers(
         &aim.sentries,
         &aim.safes,
+        &aim.hostile_npcs,
         &fighters,
         controlled_team,
         builds.0.fighter_body.radius,
@@ -243,11 +256,23 @@ pub(in super::super) fn update_aim_preview(
 fn append_nonfighter_aim_blockers(
     sentries: &SentryAimQuery,
     safes: &SafeAimQuery,
+    hostile_npcs: &HostileNpcAimQuery,
     fighters: &AimFighterQuery,
     controlled_team: Option<crate::combat::TeamId>,
     fighter_radius: f32,
     blockers: &mut Vec<AimTraceDynamicBlocker>,
 ) {
+    for (position, network_id, health) in hostile_npcs.iter() {
+        if health.0 > 0 {
+            blockers.push(AimTraceDynamicBlocker {
+                class: AimTraceBlockerClass::HostileNpc,
+                stable_id: u128::from(network_id.0),
+                position: position.0,
+                rotation: 0.0,
+                shape: crate::map::MapShape::Circle { radius: 18.0 },
+            });
+        }
+    }
     for (position, identity, health) in sentries.iter() {
         let body_radius = fighters
             .iter()

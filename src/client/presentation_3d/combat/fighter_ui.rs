@@ -71,6 +71,7 @@ type OverheadFighterQuery<'w, 's> = Query<
         &'static crate::combat::TeamId,
         Option<&'static crate::matchplay::FighterDisplayName>,
         Option<&'static crate::combat::WeaponState>,
+        Option<&'static crate::matchplay::BoostStacks>,
         Has<Controlled>,
     ),
     With<Fighter>,
@@ -543,9 +544,12 @@ pub(in super::super) fn update_fighter_overhead_state(
         ),
     >,
 ) {
-    let controlled_team = fighters
-        .iter()
-        .find_map(|(_, _, _, _, _, _, team, _, _, is_controlled)| is_controlled.then_some(*team));
+    let controlled_team =
+        fighters
+            .iter()
+            .find_map(|(_, _, _, _, _, _, team, _, _, _, is_controlled)| {
+                is_controlled.then_some(*team)
+            });
     for (owner, mut overhead, mut visibility) in &mut overhead_roots {
         let Ok((
             _,
@@ -557,6 +561,7 @@ pub(in super::super) fn update_fighter_overhead_state(
             team,
             display_name,
             weapon,
+            boost_stacks,
             is_controlled,
         )) = fighters.get(owner.0)
         else {
@@ -567,7 +572,10 @@ pub(in super::super) fn update_fighter_overhead_state(
             *visibility = Visibility::Hidden;
             continue;
         };
-        let maximum = loadout.fighter_stats.maximum_health;
+        let maximum = crate::matchplay::effective_maximum_health(
+            loadout.fighter_stats.maximum_health,
+            boost_stacks.copied().unwrap_or_default(),
+        );
         let observed_tick = authoritative_tick.map(|tick| tick.0);
         let current = health.0;
         let defeated = defeated.is_some();

@@ -40,9 +40,12 @@ pub const SWITCHBACK_BASIN_PRESET: MapPresetId = MapPresetId(11);
 pub const SWITCHBACK_BASIN_ADMISSION_REVISION: u16 = 2;
 pub const POWDERLINE_VAULT_PRESET: MapPresetId = MapPresetId(12);
 pub const POWDERLINE_VAULT_ADMISSION_REVISION: u16 = 3;
+pub const ZOMBIE_YARD_PRESET: MapPresetId = MapPresetId(13);
+pub const ZOMBIE_YARD_ADMISSION_REVISION: u16 = 1;
 pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
 pub const HEIST_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
+pub const ZOMBIE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(5);
 pub const HEIST_SAFE_VISUAL_PROFILE: MapVisualProfileId = MapVisualProfileId(39);
 
 pub const GROUND_ASSET: MapAssetId = MapAssetId(1);
@@ -449,6 +452,9 @@ pub enum MapModeAnchorKind {
         height_cells: u16,
         quarter_turns: u8,
         objective_visual_profile_id: MapVisualProfileId,
+    },
+    ZombieIngress {
+        center_half_cell: MapHalfCellPoint,
     },
 }
 

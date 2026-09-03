@@ -18,6 +18,7 @@ pub(super) struct ComposedBatch {
     pub(super) disconnected: HashSet<Entity>,
     pub(super) connected_owners: HashSet<u64>,
     pub(super) close_quarters_owners: HashMap<u64, crate::builds::ResolvedPassive>,
+    pub(super) boost_stacks_by_owner: HashMap<u64, u8>,
     pub(super) records: Vec<PendingPayload>,
     pub(super) deliveries: Vec<PendingDelivery>,
 }
@@ -27,6 +28,7 @@ pub(super) struct BatchView<'a> {
     pub(super) disconnected: &'a HashSet<Entity>,
     pub(super) connected_owners: &'a HashSet<u64>,
     pub(super) close_quarters_owners: &'a HashMap<u64, crate::builds::ResolvedPassive>,
+    pub(super) boost_stacks_by_owner: &'a HashMap<u64, u8>,
     pub(super) records: &'a [PendingPayload],
     pub(super) retained_delivery_keys: &'a HashSet<(AttackId, u8)>,
 }
@@ -58,6 +60,11 @@ pub(super) fn collect_composed_batch<'a>(
                 .map(|passive| (network_id.0, passive))
         })
         .collect();
+    let boost_stacks_by_owner = combat
+        .boost_stacks
+        .iter()
+        .map(|(_, network_id, stacks)| (network_id.0, stacks.0))
+        .collect();
     let mut records: Vec<_> = payloads.cloned().collect();
     records.sort_by(|left, right| {
         left.target_network_id
@@ -85,6 +92,7 @@ pub(super) fn collect_composed_batch<'a>(
         disconnected,
         connected_owners,
         close_quarters_owners,
+        boost_stacks_by_owner,
         records,
         deliveries,
     }
@@ -127,6 +135,8 @@ pub(super) fn plan_composed_events(
                         defeated.is_some(),
                         if combat.sentry_targets.contains(entity) {
                             CombatTargetKind::Deployable
+                        } else if combat.hostile_npc_targets.contains(entity) {
+                            CombatTargetKind::HostileNpc
                         } else {
                             CombatTargetKind::Fighter
                         },
@@ -141,6 +151,7 @@ pub(super) fn plan_composed_events(
         &batch.records,
         &batch.connected_owners,
         &batch.close_quarters_owners,
+        &batch.boost_stacks_by_owner,
         &mut planned_targets,
     ) else {
         telemetry.event_reservation_drops = telemetry.event_reservation_drops.saturating_add(1);

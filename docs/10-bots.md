@@ -115,8 +115,11 @@ focused Ticket specification before changing one of those contracts.
 - **One canonical saved brawler.** Manifest bots use one validated built-in saved-brawler recipe
   with Pulse primary and Dash. The human may practice with any legal build. Additional bot weapon
   and ability capabilities are evidence-gated.
-- **All current mode goals.** Wipeout supplies survival and pressure goals; Hot Zone supplies
-  contest and defend goals; Heist supplies attack-safe, defend-safe, and lane-pressure goals.
+- **All Practice-compatible mode goals.** Wipeout supplies survival and pressure goals; Hot Zone
+  supplies contest and defend goals; Heist supplies attack-safe, defend-safe, and lane-pressure
+  goals. Zombie supplies close-range hostile-NPC pressure: the human and friendly bots share team
+  zero, and bots consume live zombies through the same semantic enemy-contact policy used for
+  ordinary combat.
 - **Fair current-feature awareness.** Bots respect all concealment sources and reveal rules. They
   reason about public barrels, safes, chests, and restoration pickups under the completed V10
   contracts.

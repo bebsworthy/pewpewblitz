@@ -355,7 +355,7 @@ fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
             radius_half_cells: 7,
         },
     }];
-    let (objective, heist_safes) = validate_and_resolve_mode_anchors(
+    let (objective, heist_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
         crate::modes::ModeTopologyPolicy::HotZoneCircle,
         MapDimensions {
             width: 25,
@@ -367,6 +367,7 @@ fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
     .unwrap();
 
     assert!(heist_safes.is_empty());
+    assert!(zombie_ingress.is_empty());
     assert_eq!(
         objective.unwrap().area,
         NormalizedArea {
@@ -378,7 +379,7 @@ fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
 
 #[test]
 fn anchorless_topology_is_reusable_without_a_built_in_mode_branch() {
-    let (objective, heist_safes) = validate_and_resolve_mode_anchors(
+    let (objective, heist_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
         crate::modes::ModeTopologyPolicy::NoAnchors,
         MapDimensions {
             width: 25,
@@ -391,6 +392,7 @@ fn anchorless_topology_is_reusable_without_a_built_in_mode_branch() {
 
     assert!(objective.is_none());
     assert!(heist_safes.is_empty());
+    assert!(zombie_ingress.is_empty());
 }
 
 #[test]
@@ -481,6 +483,34 @@ fn proper_three_vs_three_maps_resolve_exact_mode_topology() {
             .unwrap()
             .gameplay_profile_id
     );
+}
+
+#[test]
+fn zombie_yard_resolves_cooperative_spawns_and_perimeter_ingress() {
+    let catalog = MapContentCatalog::embedded().unwrap();
+    let zombie = catalog
+        .resolve_preset(ZOMBIE_YARD_PRESET, MapInstanceId(13))
+        .unwrap();
+
+    assert_eq!(zombie.snapshot.mode_definition_id, ZOMBIE_MODE_DEFINITION);
+    assert_eq!(
+        zombie.snapshot.dimensions,
+        MapDimensions {
+            width: 32,
+            height: 24,
+        }
+    );
+    assert_eq!(zombie.spawn_points_by_team.len(), 1);
+    assert_eq!(zombie.spawn_points_by_team.get(&0).unwrap().len(), 3);
+    assert_eq!(zombie.zombie_ingress.len(), 8);
+    assert!(zombie.objective_zone.is_none());
+    assert!(zombie.heist_safes.is_empty());
+    assert!(zombie.zombie_ingress.iter().all(|anchor| {
+        let half_width = f32::from(zombie.snapshot.dimensions.width) * MAP_CELL_SIZE_WORLD * 0.5;
+        let half_height = f32::from(zombie.snapshot.dimensions.height) * MAP_CELL_SIZE_WORLD * 0.5;
+        half_width - anchor.position.x.abs() <= MAP_CELL_SIZE_WORLD * 2.0
+            || half_height - anchor.position.y.abs() <= MAP_CELL_SIZE_WORLD * 2.0
+    }));
 }
 
 #[test]

@@ -11,6 +11,7 @@ mod heist;
 mod hot_zone;
 mod registry;
 mod wipeout;
+mod zombie;
 
 #[cfg(feature = "client")]
 pub(crate) use registry::ModeRegistry;
@@ -32,6 +33,7 @@ pub(crate) enum ModeTopologyPolicy {
     NoAnchors,
     HotZoneCircle,
     MirroredHeistSafes,
+    ZombieIngress,
 }
 
 #[cfg(feature = "server")]
@@ -138,6 +140,7 @@ pub(crate) struct ModeRuleResolveInput {
     pub(crate) kills_to_win: u16,
     pub(crate) capture_seconds: u16,
     pub(crate) safe_health: u16,
+    pub(crate) pressure_stages: u8,
     pub(crate) match_duration_ticks: u64,
     pub(crate) lifecycle: MatchLifecycleRules,
     pub(crate) wipeout_recent_hostile_damage_credit_ticks: u64,
@@ -175,6 +178,7 @@ impl Plugin for BuiltInModeRegistrationsPlugin {
             wipeout::WipeoutModeRegistrationPlugin,
             hot_zone::HotZoneModeRegistrationPlugin,
             heist::HeistModeRegistrationPlugin,
+            zombie::ZombieModeRegistrationPlugin,
         ));
     }
 }
@@ -184,6 +188,7 @@ pub(crate) fn builtin_mode_catalog() -> &'static ModeCatalog {
         wipeout::REGISTRATION,
         hot_zone::REGISTRATION,
         heist::REGISTRATION,
+        zombie::REGISTRATION,
     ])
 }
 

@@ -289,6 +289,7 @@ pub(super) fn apply_restoration_pickups(world: &mut World) {
                 &Position,
                 &CurrentHealth,
                 &crate::builds::ResolvedFighterStats,
+                Option<&crate::matchplay::BoostStacks>,
                 &crate::matchplay::MatchMember,
                 &super::SpawnAssignment,
                 Option<&super::EffectTileOccupancy>,
@@ -306,11 +307,15 @@ pub(super) fn apply_restoration_pickups(world: &mut World) {
                     position,
                     health,
                     fighter_stats,
+                    boost_stacks,
                     member,
                     spawn,
                     effect_tile,
                 )| {
-                    let maximum = fighter_stats.maximum_health;
+                    let maximum = crate::matchplay::effective_maximum_health(
+                        fighter_stats.maximum_health,
+                        boost_stacks.copied().unwrap_or_default(),
+                    );
                     (member.0 == match_id
                         && health.0 > 0
                         && health.0 < maximum

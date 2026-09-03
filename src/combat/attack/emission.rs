@@ -361,7 +361,10 @@ fn spawn_straight_projectile(
         body.collider(),
         CollisionLayers::new(
             PROJECTILE_LAYER,
-            FIGHTER_LAYER | STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER,
+            FIGHTER_LAYER
+                | crate::movement::HOSTILE_NPC_LAYER
+                | STATIC_MAP_LAYER
+                | DESTRUCTIBLE_MAP_LAYER,
         ),
         Replicate::to_clients(NetworkTarget::All),
         InterpolationTarget::to_clients(NetworkTarget::All),

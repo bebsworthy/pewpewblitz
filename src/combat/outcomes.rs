@@ -70,6 +70,7 @@ pub enum CombatOutcomeKind {
 pub enum CombatTargetKind {
     Fighter,
     Deployable,
+    HostileNpc,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

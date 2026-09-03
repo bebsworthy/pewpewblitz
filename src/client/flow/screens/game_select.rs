@@ -115,16 +115,30 @@ pub(in crate::client::flow) fn spawn_game_type_select(
                         "{safe_maximum_health} HP idol; {}s limit",
                         crate::timing::simulation_whole_seconds(active_limit_ticks)
                     ),
+                    crate::lobby::AdvertisedRulesSummary::Zombie {
+                        pressure_stage_count,
+                        active_limit_ticks,
+                    } => format!(
+                        "{pressure_stage_count} pressure stages; {}s timer",
+                        crate::timing::simulation_whole_seconds(active_limit_ticks)
+                    ),
                 };
+                let team_size =
+                    if game_type.mode_definition_id == crate::map::ZOMBIE_MODE_DEFINITION {
+                        format!("{} PLAYERS CO-OP", game_type.players_per_team)
+                    } else {
+                        format!(
+                            "{}v{}",
+                            game_type.players_per_team, game_type.players_per_team
+                        )
+                    };
                 spawn_flow_button(
                     root,
                     index,
                     FlowUiAction::SelectGameTypeDraft(index),
                     &format!(
-                        "{} | {mode_name} | {}v{} | {map_names} | {rules}",
+                        "{} | {mode_name} | {team_size} | {map_names} | {rules}",
                         game_type.display_name,
-                        game_type.players_per_team,
-                        game_type.players_per_team,
                     ),
                 );
                 root.spawn((

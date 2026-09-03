@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-# Product path: form exact 1v1, 2v2, or 3v3 reservations, deliver every participant's grant,
-# connect each fresh match session, check in, and exit after authoritative Active. M06 may override
-# the client count to exercise several serial handoffs from one queue pool.
+# Product path: form exact 1v1, 2v2, 3v3, or two/three-player Zombie reservations, deliver every
+# participant's grant, connect each fresh match session, check in, and exit after authoritative
+# Active. M06 may override the client count to exercise several serial handoffs from one queue pool.
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
@@ -34,13 +34,30 @@ case "$practice_smoke" in
         exit 2
         ;;
 esac
-case "$players_per_team" in
-    1) roster_size=2; match_flag=--product-match-smoke-1v1 ;;
-    2) roster_size=4; match_flag=--product-match-smoke ;;
-    3) roster_size=6; match_flag=--product-match-smoke-3v3 ;;
+product_topology=pvp
+case "$game_type" in
+    zombie-2p)
+        product_topology=zombie
+        players_per_team=2
+        roster_size=2
+        match_flag=--product-match-smoke
+        ;;
+    zombie-3p)
+        product_topology=zombie
+        players_per_team=3
+        roster_size=3
+        match_flag=--product-match-smoke-3v3
+        ;;
     *)
-        echo "brawler product match: players per team must be 1, 2, or 3" >&2
-        exit 2
+        case "$players_per_team" in
+            1) roster_size=2; match_flag=--product-match-smoke-1v1 ;;
+            2) roster_size=4; match_flag=--product-match-smoke ;;
+            3) roster_size=6; match_flag=--product-match-smoke-3v3 ;;
+            *)
+                echo "brawler product match: players per team must be 1, 2, or 3" >&2
+                exit 2
+                ;;
+        esac
         ;;
 esac
 if [ "$practice_smoke" = 1 ]; then
@@ -58,8 +75,12 @@ case "$client_count" in
         exit 2
     } ;;
     2 | 4 | 6) ;;
+    3) [ "$product_topology" = zombie ] || {
+        echo "brawler product match: three clients are reserved for Zombie 3-player co-op" >&2
+        exit 2
+    } ;;
     *)
-        echo "brawler product match: client count must be 1 for Practice or 2, 4, or 6" >&2
+        echo "brawler product match: client count must be 1 for Practice, 2/4/6 for PvP, or 2/3 for Zombie" >&2
         exit 2
         ;;
 esac
@@ -229,8 +250,16 @@ if [ "$headless" = 1 ]; then
     elif [ "$requeue_smoke" = 1 ]; then
         echo "brawler product match: Results -> Queue Again received a fresh Joined outcome"
     else
-        echo "brawler product match: ${roster_count} exact ${players_per_team}v${players_per_team} roster(s) reached Active"
+        if [ "$product_topology" = zombie ]; then
+            echo "brawler product match: ${roster_count} exact Zombie ${players_per_team}-player cooperative roster(s) reached Active"
+        else
+            echo "brawler product match: ${roster_count} exact ${players_per_team}v${players_per_team} roster(s) reached Active"
+        fi
     fi
 else
-    echo "brawler product match: windowed ${players_per_team}v${players_per_team} session closed cleanly"
+    if [ "$product_topology" = zombie ]; then
+        echo "brawler product match: windowed Zombie ${players_per_team}-player cooperative session closed cleanly"
+    else
+        echo "brawler product match: windowed ${players_per_team}v${players_per_team} session closed cleanly"
+    fi
 fi

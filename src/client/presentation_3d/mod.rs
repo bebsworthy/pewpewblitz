@@ -29,6 +29,7 @@ mod diagnostics;
 pub(crate) mod environment_assets;
 mod map;
 mod object_health;
+mod zombie;
 
 pub(super) use camera::cursor_ground_point;
 use camera::{
@@ -100,6 +101,14 @@ pub(crate) struct Primitive3dAssets {
 struct FighterPresentationMetrics {
     radius: f32,
     imported_planar_scale: f32,
+}
+
+fn gameplay_character_scale(metrics: FighterPresentationMetrics) -> Vec3 {
+    Vec3::new(
+        metrics.imported_planar_scale,
+        KENNEY_CHARACTER_HEIGHT_WORLD_SCALE,
+        metrics.imported_planar_scale,
+    )
 }
 
 #[derive(Resource)]
@@ -344,6 +353,7 @@ impl Plugin for WorldPresentationPlugin {
                 Update,
                 (
                     prepare_imported_assets,
+                    zombie::prepare_zombie_assets,
                     environment_assets::prepare_environment_scenes,
                 )
                     .chain()
@@ -360,6 +370,7 @@ impl Plugin for WorldPresentationPlugin {
                 (
                     reconcile_dynamic_map_visuals,
                     reconcile_restoration_pickup_visuals,
+                    zombie::reconcile_zombie_mode_visuals,
                     reconcile_heist_safe_visuals,
                     combat::reconcile_projectile_visuals,
                     combat::reconcile_sentry_visuals,
@@ -403,6 +414,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::update_aim_preview,
                     animate_combat_effect_layers,
                     update_character_animation,
+                    zombie::update_zombie_animation,
                     tint_3d_zone,
                 )
                     .in_set(WorldPresentationSet::Animate),
@@ -440,6 +452,7 @@ impl Plugin for WorldPresentationPlugin {
                     .before(UiSystems::Prepare),
             )
             .add_observer(setup_imported_character)
+            .add_observer(zombie::setup_imported_zombie)
             .add_observer(environment_assets::tint_environment_instance);
     }
 }
@@ -2155,11 +2168,7 @@ fn upgrade_fighters_to_imported_models(
                 WorldAssetRoot(imported.character_scene.clone()),
                 Transform {
                     rotation: Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION),
-                    scale: Vec3::new(
-                        metrics.imported_planar_scale,
-                        KENNEY_CHARACTER_HEIGHT_WORLD_SCALE,
-                        metrics.imported_planar_scale,
-                    ),
+                    scale: gameplay_character_scale(*metrics),
                     ..default()
                 },
                 Name::new("V3 imported fighter"),

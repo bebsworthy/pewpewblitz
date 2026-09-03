@@ -111,8 +111,10 @@ pub(super) const fn combat_source_allows_target(
             | CombatSourceKind::Environment
             | CombatSourceKind::Ultimate { .. }
             | CombatSourceKind::Deployable { .. },
-            CombatTargetKind::Fighter | CombatTargetKind::Deployable,
-        ) => true,
+            CombatTargetKind::Fighter | CombatTargetKind::Deployable | CombatTargetKind::HostileNpc,
+        )
+        | (CombatSourceKind::HostileNpc, CombatTargetKind::Fighter) => true,
+        (CombatSourceKind::HostileNpc, _) => false,
     }
 }
 
@@ -206,6 +208,10 @@ pub(super) fn cue_damage_source(source: AttackSource) -> DamageSource {
             initiating_player: Some(source.player_id),
             initiating_fighter: Some(source.owner_network_entity_id),
         },
+        CombatSourceKind::HostileNpc => DamageSource::HostileNpc {
+            npc_id: source.owner_network_entity_id,
+            definition_id: crate::matchplay::ZOMBIE_DEFINITION.0,
+        },
         CombatSourceKind::Ultimate { ultimate_id } => DamageSource::Ultimate {
             player_id: source.player_id,
             fighter_id: source.owner_network_entity_id,
@@ -255,6 +261,7 @@ pub(super) fn plan_runtime_effects(
     poison_resistance_basis_points: u16,
     fire_resistance_basis_points: u16,
     allow_cold: bool,
+    owner_boost_stacks: u8,
     reserved_events: &mut impl Iterator<Item = CombatEventId>,
 ) -> RuntimeEffectPlan {
     let mut weapon_projections = Vec::new();
@@ -465,7 +472,10 @@ pub(super) fn plan_runtime_effects(
                     DamageOverTimeKind::Poison => poison_resistance_basis_points,
                     DamageOverTimeKind::Fire => fire_resistance_basis_points,
                 };
-                let damage_per_tick = apply_resistance(damage_per_tick, resistance);
+                let damage_per_tick = apply_resistance(
+                    crate::matchplay::scale_boosted_value(damage_per_tick, owner_boost_stacks),
+                    resistance,
+                );
                 let slot = match kind {
                     DamageOverTimeKind::Poison => &mut effects_state.poison,
                     DamageOverTimeKind::Fire => &mut effects_state.fire,

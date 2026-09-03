@@ -10,6 +10,7 @@ mod server;
 mod spawns;
 mod telemetry;
 mod wipeout;
+mod zombie;
 
 #[cfg(feature = "client")]
 pub use heist::ReceivedHeistObjectiveCue;
@@ -75,6 +76,21 @@ pub use wipeout::{
 };
 #[cfg(all(feature = "server", test))]
 pub(crate) use wipeout::{credited_defeat_team, credited_defeat_team_with_recent};
+#[allow(
+    unused_imports,
+    reason = "client-only role builds retain the shared HostileNpc source conversion contract"
+)]
+pub(crate) use zombie::ZOMBIE_DEFINITION;
+#[cfg(feature = "server")]
+pub use zombie::ZombieModePlugin;
+#[cfg(feature = "server")]
+pub(crate) use zombie::ZombieTelemetry;
+pub use zombie::{
+    BoostGrantScope, BoostPickup, BoostPickupAvailableAtTick, BoostPickupIdentity,
+    BoostPickupSource, BoostStacks, HostileNpc, HostileNpcDefinitionId, HostileNpcIdentity,
+    ZOMBIE_RULES_REVISION, ZombieModeState, ZombiePhase, ZombieRules, ZombieSummary,
+    effective_maximum_health, scale_boosted_value,
+};
 
 #[cfg(feature = "server")]
 #[derive(bevy::prelude::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

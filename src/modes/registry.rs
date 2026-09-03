@@ -260,7 +260,7 @@ pub(crate) fn install_configured_server_mode(
 mod tests {
     use super::*;
     use crate::modes::{
-        BuiltInModeRegistrationsPlugin, ModeTopologyPolicy, heist, hot_zone, wipeout,
+        BuiltInModeRegistrationsPlugin, ModeTopologyPolicy, heist, hot_zone, wipeout, zombie,
     };
 
     #[test]
@@ -272,6 +272,7 @@ mod tests {
         let mut reversed = App::new();
         reversed.add_plugins((
             ModeRegistryPlugin,
+            zombie::ZombieModeRegistrationPlugin,
             heist::HeistModeRegistrationPlugin,
             hot_zone::HotZoneModeRegistrationPlugin,
             wipeout::WipeoutModeRegistrationPlugin,
@@ -458,7 +459,7 @@ mod tests {
             map::ServerMapSelection,
             matchplay::{
                 HeistModePlugin, HeistRules, HotZoneModePlugin, HotZoneRules, MatchLifecycleRules,
-                MatchModeSetup, WipeoutModePlugin, WipeoutRules,
+                MatchModeSetup, WipeoutModePlugin, WipeoutRules, ZombieModePlugin, ZombieRules,
             },
         };
 
@@ -466,6 +467,7 @@ mod tests {
             (GameMode::Wipeout, 10, Some(300), None),
             (GameMode::HotZone, 1_800, None, None),
             (GameMode::Heist, 2_000, None, Some(25)),
+            (GameMode::Zombie, 4, None, None),
         ];
         for (mode, objective_target, wipeout_credit, heist_critical) in cases {
             let mut app = App::new();
@@ -504,6 +506,10 @@ mod tests {
                 app.is_plugin_added::<HeistModePlugin>(),
                 mode == GameMode::Heist
             );
+            assert_eq!(
+                app.is_plugin_added::<ZombieModePlugin>(),
+                mode == GameMode::Zombie
+            );
             match mode {
                 GameMode::Wipeout => assert_eq!(
                     *app.world().resource::<WipeoutRules>(),
@@ -522,6 +528,10 @@ mod tests {
                         safe_maximum_health: objective_target,
                         critical_health_percent: heist_critical.unwrap(),
                     }
+                ),
+                GameMode::Zombie => assert_eq!(
+                    app.world().resource::<ZombieRules>().pressure_stage_count,
+                    u8::try_from(objective_target).unwrap()
                 ),
             }
 

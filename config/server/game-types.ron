@@ -1,5 +1,5 @@
 (
-  schema_version: 5,
+  schema_version: 6,
   server_name: "Local PewPew Blitz",
   formation_timing: (
     loading_deadline_seconds: 30,
@@ -29,5 +29,7 @@
     (id: "heist-1v1", revision: 3, name: "Feature Yard Heist 1v1", mode: "heist", maps: ["feature-yard-heist"], teams: 2, players_per_team: 1, safe_health: 2000, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
     (id: "heist-2v2", revision: 3, name: "Feature Yard Heist 2v2", mode: "heist", maps: ["feature-yard-heist"], teams: 2, players_per_team: 2, safe_health: 2000, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
     (id: "heist-3v3", revision: 6, name: "Powderline Vault Heist 3v3", mode: "heist", maps: ["powderline-vault"], teams: 2, players_per_team: 3, safe_health: 2000, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
+    (id: "zombie-2p", revision: 1, name: "Zombie Yard Co-op (2 players)", mode: "zombie", maps: ["zombie-yard"], teams: 1, players_per_team: 2, pressure_stages: 4, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 15),
+    (id: "zombie-3p", revision: 1, name: "Zombie Yard Co-op (3 players)", mode: "zombie", maps: ["zombie-yard"], teams: 1, players_per_team: 3, pressure_stages: 4, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 15),
   ],
 )

@@ -237,7 +237,11 @@ pub(super) fn expire_runtime_effects(
             Option<&KnockbackFeedback>,
             Option<&Defeated>,
         ),
-        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+        Or<(
+            With<Fighter>,
+            With<crate::abilities::Sentry>,
+            With<crate::matchplay::HostileNpc>,
+        )>,
     >,
 ) {
     for (entity, mut effects, external_motion, knockback, defeated) in &mut fighters {
@@ -390,7 +394,11 @@ pub(super) fn queue_area_payloads(
             Option<&Defeated>,
             Option<&lightyear::prelude::ControlledBy>,
         ),
-        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+        Or<(
+            With<Fighter>,
+            With<crate::abilities::Sentry>,
+            With<crate::matchplay::HostileNpc>,
+        )>,
     >,
     objects: &Query<
         (
@@ -412,7 +420,7 @@ pub(super) fn queue_area_payloads(
     objective_pending: &mut ResMut<crate::matchplay::PendingModeObjectiveDamages>,
 ) -> usize {
     let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(
-        FIGHTER_LAYER | crate::movement::DEPLOYABLE_LAYER,
+        FIGHTER_LAYER | crate::movement::DEPLOYABLE_LAYER | crate::movement::HOSTILE_NPC_LAYER,
     );
     let candidates = delivery::collect_area_bundle_candidates(
         recipe,
@@ -626,6 +634,7 @@ fn damage_source_fighter(source: DamageSource) -> Option<NetworkEntityId> {
         DamageSource::Environment {
             initiating_fighter, ..
         } => initiating_fighter,
+        DamageSource::HostileNpc { .. } => None,
     }
 }
 

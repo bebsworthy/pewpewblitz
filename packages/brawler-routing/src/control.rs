@@ -360,10 +360,11 @@ impl AllocateRequestBody {
         let expected = usize::from(self.team_count)
             .checked_mul(usize::from(self.players_per_team))
             .ok_or(CodecError::InvalidValue)?;
-        if self.team_count != 2
-            || !matches!(self.players_per_team, 1..=3)
-            || self.participants.len().saturating_add(self.bots.len()) != expected
-        {
+        let topology_valid = match self.mode {
+            GameMode::Zombie => self.team_count == 1 && matches!(self.players_per_team, 2..=3),
+            _ => self.team_count == 2 && matches!(self.players_per_team, 1..=3),
+        };
+        if !topology_valid || self.participants.len().saturating_add(self.bots.len()) != expected {
             return Err(CodecError::InvalidValue);
         }
         Ok(())

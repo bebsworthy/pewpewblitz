@@ -27,6 +27,7 @@ pub enum ModeSummary {
     Wipeout(WipeoutSummary),
     HotZone(crate::matchplay::HotZoneSummary),
     Heist(crate::matchplay::HeistSummary),
+    Zombie(crate::matchplay::ZombieSummary),
 }
 
 /// Wipeout's terminal scores, preserving the pre-M09 report meaning.

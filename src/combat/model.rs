@@ -40,6 +40,7 @@ pub enum CombatSourceKind {
         ultimate_id: crate::builds::UltimateDefinitionId,
         deployable_id: crate::builds::DeployableId,
     },
+    HostileNpc,
 }
 
 /// Replicated attack identity carried by composed delivery entities. The server remains the

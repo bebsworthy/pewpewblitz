@@ -6,7 +6,9 @@ use crate::{
         ActiveEffects, AuthoritativeTick, HealthRecoveryState, SpawnState, resolved_fighter_runtime,
     },
     map::{MapInstanceId, SpawnAssignment},
-    matchplay::{FighterDisplayName, MatchId, MatchMember, MatchParticipant, SpawnCandidate},
+    matchplay::{
+        BoostStacks, FighterDisplayName, MatchId, MatchMember, MatchParticipant, SpawnCandidate,
+    },
     movement::InputFreshness,
     protocol::{Fighter, NetworkEntityId, PlaceholderState, PlayerId},
 };
@@ -92,6 +94,7 @@ pub(super) fn spawn_authoritative_fighter(
         InputFreshness::default(),
     ));
     commands.entity(entity).insert((
+        BoostStacks::default(),
         Replicate::to_clients(NetworkTarget::All),
         InterpolationTarget::to_clients(NetworkTarget::All),
     ));

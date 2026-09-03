@@ -112,6 +112,12 @@ new local-only modes to register without central dispatch edits while keeping ro
 values, protocol enums, and stable IDs intentionally closed: adding a new network-advertised mode
 still requires an explicit protocol/route compatibility migration.
 
+Zombie is such an explicit routed migration. It adds the closed Zombie route value plus stable
+replicated hostile-NPC identity/definition/phase, mode state, fighter boost stacks, and durable
+boost-pickup identity/source/scope/availability. Clients still send only ordinary fighter input;
+the match worker alone chooses ingress, movement, melee contact, drops, collection recipients,
+respawn, and Cleared/Overrun completion.
+
 Authored content/rule definitions may be serializable Rust data or Bevy assets/configuration loaded
 into the worlds that need them. Player-authored brawler builds and weapon recipes are separate from
 those definitions, and immutable resolved match loadouts are separate from mutable runtime state.
@@ -368,6 +374,12 @@ change exactly once. A chest additionally creates one generation-derived public 
 with replicated position, definition, availability, and expiry. Heist objectives use stable
 match/map/anchor/team identity and replicated public health but remain mode-owned rather than map
 placements. Clients never submit contact, damage, health, terminal, pickup, or objective outcomes.
+
+In Zombie, a chest terminal may also create a match-scoped boost pickup. Hostile defeats and player
+deaths create the same bounded replicated pickup family through server-owned rules. Unlike
+restoration pickups, uncollected boosts have no time expiry: they remain until authoritative
+collection, match completion, restart, or teardown, and late join/reconnect derives them from
+durable entity state rather than replayed drop cues.
 
 The map root replicates `ResolvedMapSnapshot` and the current `MapDynamicState` once for bootstrap
 and late join. Live ordered-reliable `MapMutationEvent`s carry an exact generation, revision, and

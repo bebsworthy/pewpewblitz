@@ -122,6 +122,7 @@ const fn mode_label(mode: GameMode) -> &'static str {
         GameMode::Wipeout => "wipeout",
         GameMode::HotZone => "hot-zone",
         GameMode::Heist => "heist",
+        GameMode::Zombie => "zombie",
     }
 }
 
@@ -443,6 +444,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
                 "wipeout" => GameMode::Wipeout,
                 "hot-zone" => GameMode::HotZone,
                 "heist" => GameMode::Heist,
+                "zombie" => GameMode::Zombie,
                 _ => return Err("--mode requires wipeout, hot-zone, or heist".into()),
             };
         } else if argument == "--automatic-transition-driver" {

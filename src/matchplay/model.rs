@@ -8,7 +8,18 @@ use std::{fmt, str::FromStr};
 /// Match workers receive this value from the routing layer as a nonzero `u128`. Keeping the
 /// gameplay identity at the same width avoids a second identity or lossy admission conversion.
 #[derive(
-    Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Reflect,
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Reflect,
 )]
 pub struct MatchId(pub u128);
 
@@ -36,6 +47,8 @@ pub enum MatchResult {
         winner: TeamId,
         departed_team: TeamId,
     },
+    Cleared,
+    Overrun,
 }
 
 impl MatchResult {
@@ -51,6 +64,8 @@ impl MatchResult {
                 winner,
                 departed_team,
             } => format!("forfeit:{}:{}", winner.0, departed_team.0),
+            Self::Cleared => "cleared".to_string(),
+            Self::Overrun => "overrun".to_string(),
         }
     }
 
@@ -60,6 +75,12 @@ impl MatchResult {
     pub fn parse_report_label(label: &str) -> Option<Self> {
         if label == "draw" {
             return Some(Self::Draw);
+        }
+        if label == "cleared" {
+            return Some(Self::Cleared);
+        }
+        if label == "overrun" {
+            return Some(Self::Overrun);
         }
         let (head, rest) = label.split_once(':')?;
         match head {

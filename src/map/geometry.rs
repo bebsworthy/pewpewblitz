@@ -483,6 +483,71 @@ pub(super) fn validate_fighter_navigation(
     }
 }
 
+pub(super) fn validate_zombie_ingress_access(
+    placements: &[MapAssetPlacement],
+    anchors: &[MapModeAnchorPlacement],
+    dimensions: MapDimensions,
+    catalog: &MapContentCatalog,
+    body_radius: f32,
+) -> Result<(), String> {
+    let blocked = blocking_shapes(placements, dimensions, catalog);
+    let point_is_clear = |point: Vec2| {
+        dimensions.bounds().contains_with_inset(point, body_radius)
+            && blocked
+                .iter()
+                .all(|shape| !circle_overlaps_derived_shape(point, body_radius, *shape))
+    };
+    let cell_is_clear = |cell: MapCell| point_is_clear(dimensions.cell_center(cell));
+    let Some(start) = placements.iter().find_map(|placement| {
+        matches!(
+            placement.parameters,
+            MapPlacementParameters::PlayerSpawn { team_slot: 0, .. }
+        )
+        .then_some(placement.cell)
+    }) else {
+        return Err("Zombie map has no cooperative navigation start".to_string());
+    };
+    let mut reached = BTreeSet::from([start]);
+    let mut frontier = std::collections::VecDeque::from([start]);
+    while let Some(cell) = frontier.pop_front() {
+        for candidate in [
+            cell.y.checked_add(1).map(|y| MapCell::new(cell.x, y)),
+            cell.x.checked_add(1).map(|x| MapCell::new(x, cell.y)),
+            cell.y.checked_sub(1).map(|y| MapCell::new(cell.x, y)),
+            cell.x.checked_sub(1).map(|x| MapCell::new(x, cell.y)),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if dimensions.contains(candidate)
+                && cell_is_clear(candidate)
+                && reached.insert(candidate)
+            {
+                frontier.push_back(candidate);
+            }
+        }
+    }
+    for anchor in anchors {
+        let MapModeAnchorKind::ZombieIngress { center_half_cell } = anchor.kind else {
+            continue;
+        };
+        let point = dimensions
+            .half_cell_world(center_half_cell)
+            .ok_or_else(|| "Zombie ingress is out of bounds".to_string())?;
+        if !point_is_clear(point) {
+            return Err("Zombie ingress lacks hostile-NPC body clearance".to_string());
+        }
+        let connected = reached.iter().any(|cell| {
+            dimensions.cell_center(*cell).distance_squared(point)
+                <= (MAP_CELL_SIZE_WORLD * 1.6).powi(2)
+        });
+        if !connected {
+            return Err("Zombie ingress is unreachable from cooperative player space".to_string());
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 struct HeistSafeAccessGeometry {
     team_slot: u8,

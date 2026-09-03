@@ -2451,6 +2451,17 @@ mod tests {
     }
 
     #[test]
+    fn zombie_practice_bot_rows_fill_only_the_friendly_team() {
+        let two_player = practice_bot_rows(1, 2).unwrap();
+        assert_eq!(two_player.len(), 1);
+        assert!(two_player.iter().all(|bot| bot.team == 0));
+
+        let three_player = practice_bot_rows(1, 3).unwrap();
+        assert_eq!(three_player.len(), 2);
+        assert!(three_player.iter().all(|bot| bot.team == 0));
+    }
+
+    #[test]
     fn despawned_lobby_client_cannot_leave_a_stale_allocation_participant() {
         let mut lobby = state();
         let session = lobby

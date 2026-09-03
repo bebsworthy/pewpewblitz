@@ -313,6 +313,7 @@ mod tests {
             player_only_surface_rects: Vec::new(),
             objective_zone: None,
             heist_safes: Vec::new(),
+            zombie_ingress: Vec::new(),
             effect_tiles: Vec::new(),
             effect_tiles_by_cell: BTreeMap::new(),
         };

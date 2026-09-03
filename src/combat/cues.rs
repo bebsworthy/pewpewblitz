@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DamageSource {
+    HostileNpc {
+        npc_id: NetworkEntityId,
+        definition_id: u16,
+    },
     PlayerWeapon {
         player_id: PlayerId,
         fighter_id: NetworkEntityId,

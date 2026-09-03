@@ -598,6 +598,16 @@ fn canonical_match_result(state: &MatchState) -> Option<Vec<u8>> {
             bytes.push(winner.0);
             bytes.push(departed_team.0);
         }
+        crate::matchplay::MatchResult::Cleared => {
+            bytes.push(4);
+            bytes.push(0);
+            bytes.push(0);
+        }
+        crate::matchplay::MatchResult::Overrun => {
+            bytes.push(5);
+            bytes.push(0);
+            bytes.push(0);
+        }
     }
     Some(bytes)
 }

@@ -563,7 +563,12 @@ pub fn validate_match_manifest(
         }
         teams[usize::from(bot.team)] += 1;
     }
-    if !matches!(teams, [1, 1] | [2, 2] | [3, 3]) {
+    let topology_valid = if manifest.mode == brawler_routing::GameMode::Zombie {
+        matches!(teams, [2 | 3, 0])
+    } else {
+        matches!(teams, [1, 1] | [2, 2] | [3, 3])
+    };
+    if !topology_valid {
         return Err(MatchWorkerManifestError::ParticipantCapacity);
     }
     validate_build_rows(manifest)?;
@@ -603,13 +608,15 @@ pub fn build_match_worker_app(
         Some(manifest.wipeout_recent_hostile_damage_credit_ticks);
     config.heist_critical_health_percent = Some(manifest.heist_critical_health_percent);
     validate_match_manifest(&config, &manifest)?;
-    let players_per_team = u8::try_from(
-        manifest
-            .participants
-            .len()
-            .saturating_add(manifest.bots.len())
-            / 2,
-    )
+    let participant_count = manifest
+        .participants
+        .len()
+        .saturating_add(manifest.bots.len());
+    let players_per_team = u8::try_from(if manifest.mode == brawler_routing::GameMode::Zombie {
+        participant_count
+    } else {
+        participant_count / 2
+    })
     .map_err(|_| MatchWorkerManifestError::ParticipantCapacity)?;
     let mut app = build_match_worker_graph(config, players_per_team);
     validate_runtime_identity(
@@ -1248,7 +1255,12 @@ mod tests {
         value.map_preset = map_preset.0;
         value.map_revision = map_revision;
         value.participants.truncate(1);
-        value.bots = [(100, 0, "Bot 1"), (101, 1, "Bot 2"), (102, 1, "Bot 3")]
+        let bot_rows = if game_mode == GameMode::Zombie {
+            vec![(100, 0, "Bot 1"), (101, 0, "Bot 2")]
+        } else {
+            vec![(100, 0, "Bot 1"), (101, 1, "Bot 2"), (102, 1, "Bot 3")]
+        };
+        value.bots = bot_rows
             .into_iter()
             .map(|(player_id, team, name)| MatchManifestBot {
                 player_id: brawler_routing::PlayerId::new(player_id).unwrap(),
@@ -1324,6 +1336,110 @@ mod tests {
             .collect()
     }
 
+    fn a_zombie_bot_aims_at_a_live_hostile(worker: &mut App) -> bool {
+        let world = worker.world_mut();
+        let hostile_positions = world
+            .query_filtered::<&avian2d::prelude::Position, (
+                With<crate::matchplay::HostileNpc>,
+                Without<crate::combat::Defeated>,
+            )>()
+            .iter(world)
+            .map(|position| position.0)
+            .collect::<Vec<_>>();
+        world
+            .query_filtered::<(
+                &avian2d::prelude::Position,
+                &lightyear::prelude::input::native::ActionState<crate::protocol::FighterInput>,
+            ), With<crate::bots::PracticeBotController>>()
+            .iter(world)
+            .any(|(position, input)| {
+                input.0.aim_update.is_some_and(|aim| {
+                    let aim = aim.to_vec2();
+                    hostile_positions.iter().any(|hostile| {
+                        (*hostile - position.0)
+                            .try_normalize()
+                            .is_some_and(|direction| aim.dot(direction) > 0.8)
+                    })
+                })
+            })
+    }
+
+    fn spawn_primary_projectile_at_live_zombie(worker: &mut App) -> (Entity, u16) {
+        let world = worker.world_mut();
+        let (owner_entity, player_id, owner_network_id, owner_team, loadout) = world
+            .query_filtered::<(
+                Entity,
+                &crate::protocol::PlayerId,
+                &crate::protocol::NetworkEntityId,
+                &crate::combat::TeamId,
+                &crate::builds::ResolvedMatchLoadout,
+            ), With<crate::bots::PracticeBotController>>()
+            .iter(world)
+            .next()
+            .map(|(entity, player_id, network_id, team, loadout)| {
+                (entity, *player_id, *network_id, *team, loadout.clone())
+            })
+            .expect("Zombie Practice worker has a projectile owner");
+        let (target, target_position) = world
+            .query_filtered::<(Entity, &avian2d::prelude::Position), (
+                With<crate::matchplay::HostileNpc>,
+                Without<crate::combat::Defeated>,
+            )>()
+            .iter(world)
+            .next()
+            .map(|(entity, position)| (entity, position.0))
+            .expect("Zombie director spawned a live hostile");
+        let health_before = 1_000;
+        world
+            .get_mut::<crate::combat::CurrentHealth>(target)
+            .expect("live zombie has authoritative health")
+            .0 = health_before;
+        let start = target_position - Vec2::new(25.0, 0.0);
+        let attack_id = crate::combat::AttackId(900_001);
+        let source = crate::combat::AttackSource {
+            kind: crate::combat::CombatSourceKind::PrimaryWeapon,
+            attack_id,
+            player_id,
+            owner_network_entity_id: owner_network_id,
+            team_id: owner_team,
+            recipe_fingerprint: loadout.primary_weapon.recipe_fingerprint,
+            legacy_compatibility: false,
+            source_preset_id: loadout.primary_weapon.source_preset_id,
+            origin: start.into(),
+            facing: 0.0,
+        };
+        let body = crate::combat::ProjectileBody::circle(2.0);
+        world.spawn((
+            crate::combat::Projectile,
+            crate::combat::AttackDelivery {
+                attack_id,
+                delivery_index: 0,
+            },
+            crate::combat::ReplicatedAttackSource { attack: source },
+            crate::combat::ComposedProjectileRuntime {
+                owner_entity,
+                source_entity: owner_entity,
+                source,
+                delivery_index: 0,
+                velocity: Vec2::new(600.0, 0.0),
+                travelled: 0.0,
+                expires_at_tick: u64::MAX,
+                maximum_range: 1_000.0,
+                landing: None,
+                recipe: loadout.primary_weapon.recipe,
+            },
+            body,
+            avian2d::prelude::Position(start),
+            avian2d::prelude::Rotation::IDENTITY,
+            body.collider(),
+            avian2d::prelude::CollisionLayers::new(
+                crate::movement::PROJECTILE_LAYER,
+                crate::movement::HOSTILE_NPC_LAYER,
+            ),
+        ));
+        (target, health_before)
+    }
+
     #[test]
     fn match_workers_control_manifest_bots_in_every_practice_mode() {
         let cases = [
@@ -1342,13 +1458,23 @@ mod tests {
                 crate::map::FEATURE_YARD_HEIST_PRESET,
                 crate::map::FEATURE_YARD_HEIST_ADMISSION_REVISION,
             ),
+            (
+                GameMode::Zombie,
+                crate::map::ZOMBIE_YARD_PRESET,
+                crate::map::ZOMBIE_YARD_ADMISSION_REVISION,
+            ),
         ];
         for (game_mode, map_preset, map_revision) in cases {
             let mut worker = practice_worker_for_mode(game_mode, map_preset, map_revision);
             activate_bot_worker(&mut worker);
-            drive_bot_schedules(&mut worker, 12);
+            drive_bot_schedules(&mut worker, 30);
             let rows = bot_worker_rows(&mut worker);
-            assert_eq!(rows.len(), 3, "unexpected {game_mode:?} bot count");
+            let expected_bot_count = if game_mode == GameMode::Zombie { 2 } else { 3 };
+            assert_eq!(
+                rows.len(),
+                expected_bot_count,
+                "unexpected {game_mode:?} bot count"
+            );
             assert!(rows.iter().all(|(_, health, _, _, _)| *health == 211));
             assert!(rows.iter().all(|(_, _, controlled, _, _)| !controlled));
             assert!(
@@ -1361,13 +1487,48 @@ mod tests {
                 rows.iter()
                     .all(|(_, _, _, _, has_controller)| *has_controller)
             );
+            if game_mode == GameMode::Zombie {
+                assert!(
+                    a_zombie_bot_aims_at_a_live_hostile(&mut worker),
+                    "Zombie bots did not acquire a live hostile NPC"
+                );
+            }
             let mut names = rows
                 .iter()
                 .map(|(name, _, _, _, _)| name.as_str())
                 .collect::<Vec<_>>();
             names.sort_unstable();
-            assert_eq!(names, vec!["Bot 1", "Bot 2", "Bot 3"]);
+            let expected_names = if game_mode == GameMode::Zombie {
+                vec!["Bot 1", "Bot 2"]
+            } else {
+                vec!["Bot 1", "Bot 2", "Bot 3"]
+            };
+            assert_eq!(names, expected_names);
         }
+    }
+
+    #[test]
+    fn ordinary_straight_projectile_damages_a_live_zombie() {
+        let mut worker = practice_worker_for_mode(
+            GameMode::Zombie,
+            crate::map::ZOMBIE_YARD_PRESET,
+            crate::map::ZOMBIE_YARD_ADMISSION_REVISION,
+        );
+        activate_bot_worker(&mut worker);
+        drive_bot_schedules(&mut worker, 30);
+        let (target, health_before) = spawn_primary_projectile_at_live_zombie(&mut worker);
+
+        worker.world_mut().run_schedule(FixedPostUpdate);
+
+        let health_after = worker
+            .world()
+            .get::<crate::combat::CurrentHealth>(target)
+            .expect("the first projectile hit is nonlethal")
+            .0;
+        assert!(
+            health_after < health_before,
+            "straight primary projectile must reduce zombie health"
+        );
     }
 
     fn bot_input_points_toward(worker: &mut App, network_id: u64, target: Vec2) -> bool {

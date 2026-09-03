@@ -278,6 +278,13 @@ server or incompatible game type is shown as unavailable rather than silently ch
 creating a practice wait list. [Bots](./10-bots.md) owns the distinction between the established
 practice roster and its implemented playable controller behavior.
 
+Zombie is co-op only. Ordinary Play requires an exact two- or three-human roster; Practice starts
+with one human and fills the selected two- or three-fighter roster with friendly server-hosted
+bots. During play, the persistent HUD exposes every teammate's health,
+boost count, alive/defeated/respawning state and countdown; it calls out Last Brawler while one
+fighter remains and presents the all-dead Overrun result immediately. Internal pressure stages and
+spawn cadence remain intentionally invisible.
+
 After reservation, Match Loading owns worker connection, selected-map and content synchronization,
 participant readiness, and the one authoritative countdown. Cancellation and formation races are
 resolved by the server before the UI changes membership state. A successful cancellation or

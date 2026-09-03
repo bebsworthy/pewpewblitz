@@ -22,7 +22,7 @@ pub use queue::{
     QueueRequestId, QueueTicketId, ReservationStarted,
 };
 
-pub const MAX_GAME_TYPES: usize = 10;
+pub const MAX_GAME_TYPES: usize = 12;
 pub const MAX_MAPS_PER_GAME_TYPE: usize = 8;
 pub const MAX_GAME_TYPE_ID_BYTES: usize = 32;
 pub const MAX_DISPLAY_NAME_GRAPHEMES: usize = 48;
@@ -136,6 +136,10 @@ pub enum AdvertisedRulesSummary {
     },
     Heist {
         safe_maximum_health: u16,
+        active_limit_ticks: u64,
+    },
+    Zombie {
+        pressure_stage_count: u8,
         active_limit_ticks: u64,
     },
 }
@@ -309,7 +313,13 @@ impl AdvertisedGameType {
         if maps.windows(2).any(|pair| pair[0] == pair[1]) {
             return Err(LobbyModelError::DuplicateMap);
         }
-        if self.team_count != 2 || !matches!(self.players_per_team, 1..=3) {
+        let topology_valid = match self.rules_summary {
+            AdvertisedRulesSummary::Zombie { .. } => {
+                self.team_count == 1 && matches!(self.players_per_team, 2..=3)
+            }
+            _ => self.team_count == 2 && matches!(self.players_per_team, 1..=3),
+        };
+        if !topology_valid {
             return Err(LobbyModelError::InvalidTopology);
         }
         match self.rules_summary {
@@ -325,6 +335,10 @@ impl AdvertisedGameType {
                 safe_maximum_health,
                 active_limit_ticks,
             } if safe_maximum_health > 0 && active_limit_ticks > 0 => {}
+            AdvertisedRulesSummary::Zombie {
+                pressure_stage_count,
+                active_limit_ticks,
+            } if pressure_stage_count > 0 && active_limit_ticks > 0 => {}
             _ => return Err(LobbyModelError::InvalidRules),
         }
         Ok(())
@@ -454,6 +468,14 @@ pub fn canonical_catalog_bytes(
             } => {
                 bytes.push(3);
                 bytes.extend_from_slice(&safe_maximum_health.to_be_bytes());
+                bytes.extend_from_slice(&active_limit_ticks.to_be_bytes());
+            }
+            AdvertisedRulesSummary::Zombie {
+                pressure_stage_count,
+                active_limit_ticks,
+            } => {
+                bytes.push(4);
+                bytes.push(pressure_stage_count);
                 bytes.extend_from_slice(&active_limit_ticks.to_be_bytes());
             }
         }

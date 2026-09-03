@@ -22,6 +22,7 @@ const RETAINED_AUDIO_ASSET_IDS: [&str; 5] = [
 pub(crate) struct ClientAssetHandles {
     audio: BTreeMap<String, Handle<AudioSource>>,
     pub character: Handle<Gltf>,
+    pub zombie_character: Handle<Gltf>,
     pub blaster: Handle<Gltf>,
     pub loading_logo: Handle<Image>,
     pub wordmark: Handle<Image>,
@@ -45,6 +46,8 @@ impl ClientAssetHandles {
             audio,
             character: asset_server
                 .load("brawler/models/kenney/mini-characters/character-male-a.glb"),
+            zombie_character: asset_server
+                .load("brawler/models/kenney/mini-characters/character-male-d.glb"),
             blaster: asset_server.load("brawler/models/kenney/blaster-kit/blaster-a.glb"),
             loading_logo: asset_server.load("brawler/ui/branding/pewpew-blitz-lockup.png"),
             wordmark: asset_server.load("brawler/ui/branding/pewpew-blitz-wordmark.png"),
@@ -58,7 +61,7 @@ impl ClientAssetHandles {
         }
     }
 
-    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 16] {
+    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 17] {
         [
             self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[0]),
             self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[1]),
@@ -69,6 +72,11 @@ impl ClientAssetHandles {
                 "model.character_male_a",
                 false,
                 dependency_aware_state(asset_server, &self.character),
+            ),
+            (
+                "model.character_male_d",
+                false,
+                dependency_aware_state(asset_server, &self.zombie_character),
             ),
             (
                 "model.blaster_a",
@@ -390,6 +398,25 @@ mod tests {
         ] {
             assert!(root.join(file).is_file(), "missing promoted asset: {file}");
         }
+    }
+
+    #[test]
+    fn zombie_character_asset_is_promoted_manifested_and_licensed() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let asset_path = "brawler/models/kenney/mini-characters/character-male-d.glb";
+        let manifest: AssetManifest = ron::from_str(CLIENT_ASSET_MANIFEST).unwrap();
+
+        assert!(root.join("assets").join(asset_path).is_file());
+        assert!(
+            manifest
+                .assets
+                .iter()
+                .any(|entry| { entry.id == "model.character_male_d" && entry.path == asset_path })
+        );
+        assert!(
+            root.join("assets/licenses/kenney-mini-characters.txt")
+                .is_file()
+        );
     }
 
     #[test]

@@ -129,6 +129,7 @@ pub(super) fn required_payload_event_count(
     records: &[PendingPayload],
     connected_owners: &HashSet<u64>,
     close_quarters_owners: &HashMap<u64, crate::builds::ResolvedPassive>,
+    boost_stacks_by_owner: &HashMap<u64, u8>,
     planned_targets: &mut HashMap<Entity, PlannedTarget>,
 ) -> Option<usize> {
     let retained_deliveries: HashSet<_> = delivery_records
@@ -179,6 +180,8 @@ pub(super) fn required_payload_event_count(
                 PayloadEffectDefinition::Damage {
                     amount, falloff, ..
                 } => {
+                    let amount =
+                        boost_scaled_immediate_damage(amount, record.source, boost_stacks_by_owner);
                     let requested = requested_damage(
                         amount,
                         falloff,

@@ -47,6 +47,19 @@ type AssistedSentryQuery<'w, 's> = Query<
     With<crate::abilities::Sentry>,
 >;
 
+type AssistedHostileNpcQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Position,
+        &'static crate::combat::TeamId,
+        &'static NetworkEntityId,
+        &'static crate::combat::CurrentHealth,
+        Has<crate::combat::Defeated>,
+    ),
+    With<crate::matchplay::HostileNpc>,
+>;
+
 type AssistedWorldTargetQuery<'w, 's> = Query<
     'w,
     's,
@@ -62,6 +75,7 @@ type AssistedWorldTargetQuery<'w, 's> = Query<
 #[derive(bevy::ecs::system::SystemParam)]
 pub(super) struct ViewportAutoAim<'w, 's> {
     fighters: AssistedFighterQuery<'w, 's>,
+    hostile_npcs: AssistedHostileNpcQuery<'w, 's>,
     sentries: AssistedSentryQuery<'w, 's>,
     world_targets: AssistedWorldTargetQuery<'w, 's>,
 }
@@ -81,8 +95,8 @@ impl ViewportAutoAim<'_, '_> {
         let viewport = camera.logical_viewport_size()?;
         let action = AssistedAction::for_loadout(loadout, targeted_ultimate);
 
-        if action.affects_hostile_fighters()
-            && let Some(candidate) = nearest_candidate(
+        if action.affects_hostile_combatants()
+            && let Some(candidate) = nearest_hostile_combatant(
                 origin,
                 self.fighters.iter().filter_map(
                     |(position, team, network_id, _, controlled, defeated)| {
@@ -91,6 +105,15 @@ impl ViewportAutoAim<'_, '_> {
                             && crate::combat::teams_are_hostile(source_team, *team)
                             && point_is_in_viewport(camera, camera_transform, viewport, position.0))
                         .then_some((position.0, network_id?.0))
+                    },
+                ),
+                self.hostile_npcs.iter().filter_map(
+                    |(position, team, network_id, health, defeated)| {
+                        (health.0 > 0
+                            && !defeated
+                            && crate::combat::teams_are_hostile(source_team, *team)
+                            && point_is_in_viewport(camera, camera_transform, viewport, position.0))
+                        .then_some((position.0, network_id.0))
                     },
                 ),
             )
@@ -157,7 +180,7 @@ impl<'a> AssistedAction<'a> {
         }
     }
 
-    fn affects_hostile_fighters(&self) -> bool {
+    fn affects_hostile_combatants(&self) -> bool {
         match self {
             Self::Primary(recipe) => recipe.payload_bundles.iter().any(|bundle| {
                 bundle.effects.iter().any(|effect| {
@@ -256,6 +279,14 @@ fn nearest_candidate<K: Ord>(
         })
 }
 
+fn nearest_hostile_combatant(
+    origin: Vec2,
+    fighters: impl IntoIterator<Item = (Vec2, u64)>,
+    hostile_npcs: impl IntoIterator<Item = (Vec2, u64)>,
+) -> Option<Candidate<u64>> {
+    nearest_candidate(origin, fighters.into_iter().chain(hostile_npcs))
+}
+
 fn aim_at(origin: Vec2, target: Vec2) -> Option<AssistedAim> {
     let delta = target - origin;
     (delta.is_finite() && delta.length_squared() > f32::EPSILON).then(|| AssistedAim {
@@ -281,6 +312,26 @@ mod tests {
         .unwrap();
         assert_eq!(selected.position, Vec2::new(0.0, 10.0));
         assert_eq!(selected.key, 3);
+    }
+
+    #[test]
+    fn nearest_hostile_combatant_includes_npcs_and_compares_across_actor_kinds() {
+        let npc_only = nearest_hostile_combatant(
+            Vec2::ZERO,
+            std::iter::empty(),
+            [(Vec2::new(12.0, 0.0), 400_u64)],
+        )
+        .expect("a live hostile NPC is a valid unaimed-fire target");
+        assert_eq!(npc_only.key, 400);
+
+        let nearest = nearest_hostile_combatant(
+            Vec2::ZERO,
+            [(Vec2::new(20.0, 0.0), 2_u64)],
+            [(Vec2::new(8.0, 0.0), 400_u64)],
+        )
+        .expect("fighters and hostile NPCs share nearest-distance selection");
+        assert_eq!(nearest.position, Vec2::new(8.0, 0.0));
+        assert_eq!(nearest.key, 400);
     }
 
     #[test]

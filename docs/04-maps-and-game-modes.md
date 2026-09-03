@@ -59,8 +59,8 @@ The supported recipe model expresses:
 - one-cell non-colliding effect-tile features whose gameplay profiles reference stable tile
   definitions composed from registered effect families;
 - the compatible mode definition;
-- typed mode-required anchors, currently the half-cell-precision Hot Zone circle and two
-  cell-aligned team-owned Heist objective anchors.
+- typed mode-required anchors: the half-cell-precision Hot Zone circle, two cell-aligned
+  team-owned Heist objective anchors, and bounded perimeter ingress points for Zombie.
 
 The schema may grow to support additional authored pickups, hazards, concealment regions, movement
 surfaces, and other environment primitives. V10's restoration pickup is instead a runtime entity
@@ -259,9 +259,14 @@ arrangements such as twelve solo fighters, two teams of five, or three teams of 
 mode, map, HUD, admission profile, and capacity evidence all allow it. No common subsystem may assume
 exactly two teams or use one advertised topology as an engine-wide ceiling.
 
+Zombie is the supported one-team exception: its separate **Zombie Yard** recipe admits exactly two
+or three allied fighters, supplies three cooperative spawns, and validates eight reachable
+perimeter ingress points. It has no enemy-player team. Matchmaking fills the roster with humans;
+Practice fills the human's remaining allied slots with server-hosted bots.
+
 ## Supported modes
 
-The checked-in `config/server/game-types.ron` schema 5 catalog owns operator policy at four levels.
+The checked-in `config/server/game-types.ron` schema 6 catalog owns operator policy at four levels.
 `formation_timing` declares loading and route-grant deadlines, `common_lifecycle` declares
 spawn-protection and completed-match input-lock durations once for every advertised game type,
 `mode_policies` declares Wipeout's recent-hostile defeat-credit window and Heist's critical-health
@@ -316,6 +321,31 @@ is a mode contract and never implies treasure-chest loot.
 
 Together these modes prove that combat, fighter lifecycle, map installation, and common match phases
 are not coupled to one scoring model.
+
+### Zombie
+
+Zombie is a two- or three-player cooperative survival mode with no enemy players. The server emits
+increasing melee-only hostile pressure from validated edge ingress points without presenting wave
+numbers or inter-wave countdowns. The active duration and number of internal pressure stages are
+authored per advertised game type so playtests can tune pacing without changing code. Zombies have
+authoritative health, status effects, knockback, map collision, and one another as solid crowd
+bodies; deterministic separation and approach slots keep numerical pressure readable without
+allowing a single stacked body to attack through the front rank.
+
+Each defeated player independently returns after the catalog-authored delay, currently fifteen
+seconds, with zero boosts. The match ends immediately as **Overrun** when no player remains alive.
+Clearing all scheduled hostiles after the active spawn duration yields **Cleared**; a bounded grace
+deadline prevents an unreachable survivor from keeping a worker alive indefinitely. HUD state
+shows teammate health, boost stacks, defeat/respawn state, a Last Brawler warning, remaining hostile
+count after spawning ends, and the all-dead result without exposing internal stage transitions.
+
+A boost stack permanently grants that life +5% maximum health and +5% outgoing damage, using
+integer round-half-up scaling. Individual pickups affect their collector; team pickups grant one
+stack to every living teammate. Chests and controlled hostile defeat drops can create either scope.
+On death, every carried stack becomes its own permanent individual pickup entity with no owner
+label, leaving the cooperative choice to recover it after respawn or let a teammate take it.
+Respawn, restart, and build lifecycle reset the fighter's carried count to zero. Pickup count, live
+hostiles, total spawns, stack count, and random-drop budget are all explicitly bounded.
 
 ## Envisioned mode families
 

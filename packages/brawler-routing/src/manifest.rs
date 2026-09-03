@@ -46,6 +46,7 @@ pub enum GameMode {
     Wipeout = 1,
     HotZone = 2,
     Heist = 3,
+    Zombie = 4,
 }
 
 impl TryFrom<u16> for GameMode {
@@ -56,6 +57,7 @@ impl TryFrom<u16> for GameMode {
             1 => Ok(Self::Wipeout),
             2 => Ok(Self::HotZone),
             3 => Ok(Self::Heist),
+            4 => Ok(Self::Zombie),
             _ => Err(CodecError::InvalidValue),
         }
     }

@@ -33,6 +33,28 @@ pub(crate) use planning::{
 pub(crate) use runtime::{
     apply_cold_contribution, apply_resistance, refresh_damage_over_time, requested_damage,
 };
+
+#[cfg(feature = "server")]
+fn boost_scaled_immediate_damage(
+    amount: u16,
+    source: AttackSource,
+    boost_stacks_by_owner: &HashMap<u64, u8>,
+) -> u16 {
+    if matches!(
+        source.kind,
+        CombatSourceKind::Environment | CombatSourceKind::HostileNpc
+    ) {
+        amount
+    } else {
+        boost_stacks_by_owner
+            .get(&source.owner_network_entity_id.0)
+            .copied()
+            .map_or(amount, |stacks| {
+                crate::matchplay::scale_boosted_value(amount, stacks)
+            })
+    }
+}
+
 /// The bounded authoritative transaction outputs produced by payload resolution, grouped
 /// to keep the scheduling system within the engine's system-parameter budget.
 #[cfg(feature = "server")]
@@ -73,7 +95,11 @@ pub(super) struct CombatTargetState<'w, 's> {
                     Option<&'static TestDummy>,
                     Option<&'static crate::map::EffectTileOccupancy>,
                 ),
-                Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+                Or<(
+                    With<Fighter>,
+                    With<crate::abilities::Sentry>,
+                    With<crate::matchplay::HostileNpc>,
+                )>,
             >,
             Query<
                 'w,
@@ -90,7 +116,11 @@ pub(super) struct CombatTargetState<'w, 's> {
                     Option<&'static TestDummy>,
                     Option<&'static crate::map::EffectTileOccupancy>,
                 ),
-                Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+                Or<(
+                    With<Fighter>,
+                    With<crate::abilities::Sentry>,
+                    With<crate::matchplay::HostileNpc>,
+                )>,
             >,
         ),
     >,
@@ -127,6 +157,17 @@ pub(super) struct CombatTargetState<'w, 's> {
         ),
     >,
     sentry_targets: Query<'w, 's, (), With<crate::abilities::Sentry>>,
+    hostile_npc_targets: Query<'w, 's, (), With<crate::matchplay::HostileNpc>>,
+    boost_stacks: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static NetworkEntityId,
+            &'static crate::matchplay::BoostStacks,
+        ),
+        With<Fighter>,
+    >,
     disconnected: Query<'w, 's, Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,
     match_access: ParamSet<
         'w,
@@ -186,6 +227,7 @@ pub(super) fn resolve_composed_payloads(
         disconnected,
         connected_owners,
         close_quarters_owners,
+        boost_stacks_by_owner,
         records,
         deliveries,
     } = batch;
@@ -204,6 +246,7 @@ pub(super) fn resolve_composed_payloads(
         disconnected: &disconnected,
         connected_owners: &connected_owners,
         close_quarters_owners: &close_quarters_owners,
+        boost_stacks_by_owner: &boost_stacks_by_owner,
         records: &records,
         retained_delivery_keys: &retained_delivery_keys,
     };

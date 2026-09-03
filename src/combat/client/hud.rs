@@ -39,6 +39,7 @@ pub(crate) fn update_combat_hud(
             Option<&crate::builds::ResolvedMatchLoadout>,
             Option<&crate::builds::AbilityState>,
             Option<&crate::builds::PassiveRuntimeState>,
+            Option<&crate::matchplay::BoostStacks>,
         ),
         (With<Fighter>, With<lightyear::prelude::Controlled>),
     >,
@@ -64,6 +65,7 @@ pub(crate) fn update_combat_hud(
         loadout,
         ability,
         passive_state,
+        boost_stacks,
     )) = fighter.iter().next()
     else {
         for (_, mut visibility) in &mut health_text {
@@ -132,7 +134,10 @@ pub(crate) fn update_combat_hud(
         },
     );
     let phase = defeated.map_or(phase, |_| "DEFEATED".to_string());
-    let maximum_health = loadout.fighter_stats.maximum_health;
+    let maximum_health = crate::matchplay::effective_maximum_health(
+        loadout.fighter_stats.maximum_health,
+        boost_stacks.copied().unwrap_or_default(),
+    );
     let ultimate = ability.map_or_else(
         || "ULT --".to_string(),
         |ability| {

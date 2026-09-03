@@ -44,7 +44,8 @@ pub use catalog::{
     SWITCHBACK_BASIN_PRESET, TALL_GRASS_ASSET, TREASURE_CHEST_ASSET, TerminalReactionId,
     VERDANT_CROSSFIRE_ADMISSION_REVISION, VERDANT_CROSSFIRE_PRESET, WALL_ARENA_ASSET,
     WALL_DUNGEON_ASSET, WATER_ASSET, WIPEOUT_MODE_DEFINITION, WOOD_WALL_ASSET,
-    YELLOW_STRIPED_COVER_ASSET,
+    YELLOW_STRIPED_COVER_ASSET, ZOMBIE_MODE_DEFINITION, ZOMBIE_YARD_ADMISSION_REVISION,
+    ZOMBIE_YARD_PRESET,
 };
 #[cfg(feature = "client")]
 pub use client::{
@@ -99,7 +100,7 @@ pub use pickups::{
 };
 #[cfg(feature = "server")]
 pub use pickups::{PickupOutbox, PickupTelemetry};
-pub use resolution::{ResolvedHeistSafeAnchor, ResolvedMap};
+pub use resolution::{ResolvedHeistSafeAnchor, ResolvedMap, ResolvedZombieIngressAnchor};
 #[cfg(feature = "server")]
 pub use runtime::{
     DestructibleMapCollider, MapDynamicTelemetry, MapRuntimeSet, install_resolved_map,

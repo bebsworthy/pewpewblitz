@@ -77,7 +77,7 @@ fn candidates(
             Has<crate::matchplay::MatchParticipant>,
             Has<crate::matchplay::ActiveCombatant>,
         ),
-        With<Fighter>,
+        Or<(With<Fighter>, With<crate::matchplay::HostileNpc>)>,
     >,
     spatial_query: &avian2d::prelude::SpatialQuery,
 ) -> Vec<(Entity, Vec2, TeamId, NetworkEntityId)> {
@@ -136,7 +136,7 @@ pub(super) fn advance_persistent_splashes(
             Has<crate::matchplay::MatchParticipant>,
             Has<crate::matchplay::ActiveCombatant>,
         ),
-        With<Fighter>,
+        Or<(With<Fighter>, With<crate::matchplay::HostileNpc>)>,
     >,
     mut splashes: Query<(
         Entity,

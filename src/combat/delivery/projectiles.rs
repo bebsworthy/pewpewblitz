@@ -15,7 +15,11 @@ type FighterSweepQuery<'w, 's> = Query<
         Option<&'static Defeated>,
         Option<&'static lightyear::prelude::ControlledBy>,
     ),
-    Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+    Or<(
+        With<Fighter>,
+        With<crate::abilities::Sentry>,
+        With<crate::matchplay::HostileNpc>,
+    )>,
 >;
 
 type ObjectSweepQuery<'w, 's> = Query<
@@ -543,7 +547,7 @@ fn plan_area_landing_outputs(
     spatial_query: &avian2d::prelude::SpatialQuery,
 ) -> PlannedAreaPayloads {
     let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(
-        FIGHTER_LAYER | crate::movement::DEPLOYABLE_LAYER,
+        FIGHTER_LAYER | crate::movement::DEPLOYABLE_LAYER | crate::movement::HOSTILE_NPC_LAYER,
     );
     let candidates =
         collect_area_bundle_candidates(
@@ -861,6 +865,7 @@ pub(in crate::combat) fn sweep_composed_projectiles(
                     let filter = avian2d::prelude::SpatialQueryFilter::from_mask(
                         FIGHTER_LAYER
                             | crate::movement::DEPLOYABLE_LAYER
+                            | crate::movement::HOSTILE_NPC_LAYER
                             | STATIC_MAP_LAYER
                             | DESTRUCTIBLE_MAP_LAYER,
                     )

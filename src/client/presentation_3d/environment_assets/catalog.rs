@@ -148,7 +148,8 @@ fn expected_visual_profiles(
                     objective_visual_profile_id,
                     ..
                 } => Some(objective_visual_profile_id),
-                crate::map::MapModeAnchorKind::HotZoneCircle { .. } => None,
+                crate::map::MapModeAnchorKind::HotZoneCircle { .. }
+                | crate::map::MapModeAnchorKind::ZombieIngress { .. } => None,
             })
     }));
     expected.extend(

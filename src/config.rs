@@ -110,10 +110,11 @@ pub enum GameMode {
     Wipeout,
     HotZone,
     Heist,
+    Zombie,
 }
 
 impl GameMode {
-    pub const ALL: [Self; 3] = [Self::Wipeout, Self::HotZone, Self::Heist];
+    pub const ALL: [Self; 4] = [Self::Wipeout, Self::HotZone, Self::Heist, Self::Zombie];
 
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
@@ -121,6 +122,7 @@ impl GameMode {
             "wipeout" | "default" => Some(Self::Wipeout),
             "hot-zone" | "hot_zone" | "hotzone" => Some(Self::HotZone),
             "heist" => Some(Self::Heist),
+            "zombie" => Some(Self::Zombie),
             _ => None,
         }
     }
@@ -131,6 +133,7 @@ impl GameMode {
             Self::Wipeout => "wipeout",
             Self::HotZone => "hot-zone",
             Self::Heist => "heist",
+            Self::Zombie => "zombie",
         }
     }
 }

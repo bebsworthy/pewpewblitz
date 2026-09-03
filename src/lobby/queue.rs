@@ -125,6 +125,7 @@ pub enum PracticeStartRejection {
     IncompatibleBuild,
     Busy,
     CapacityUnavailable,
+    UnsupportedGameMode,
     Internal,
 }
 

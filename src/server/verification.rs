@@ -366,6 +366,11 @@ pub(super) fn verify_process_match(
             heist.final_health[0],
             heist.final_health[1],
         ),
+        crate::matchplay::ModeSummary::Zombie(zombie) => (
+            summary.mode_definition_id.0,
+            zombie.total_defeated,
+            zombie.total_spawned,
+        ),
     };
     // Canonical map process evidence: exact authored identity and dynamic terminal state.
     let map_dynamic = maps.single().ok().map(|(snapshot, state)| {

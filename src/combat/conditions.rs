@@ -43,6 +43,10 @@ pub(crate) fn condition_damage_source(source: ConditionSource) -> DamageSource {
             initiating_player: Some(source.player_id),
             initiating_fighter: Some(source.network_entity_id),
         },
+        CombatSourceKind::HostileNpc => DamageSource::HostileNpc {
+            npc_id: source.network_entity_id,
+            definition_id: crate::matchplay::ZOMBIE_DEFINITION.0,
+        },
     }
 }
 
@@ -99,10 +103,14 @@ pub(crate) fn advance_conditions(
             &mut CurrentHealth,
             &mut ActiveEffects,
             Option<&crate::abilities::DashRuntime>,
-            &mut crate::builds::AbilityState,
+            Option<&mut crate::builds::AbilityState>,
             Option<&TestDummy>,
+            Has<crate::matchplay::HostileNpc>,
         ),
-        (With<Fighter>, Without<Defeated>),
+        (
+            Or<(With<Fighter>, With<crate::matchplay::HostileNpc>)>,
+            Without<Defeated>,
+        ),
     >,
 ) {
     let mut ordered: Vec<_> = fighters.iter_mut().collect();
@@ -115,10 +123,16 @@ pub(crate) fn advance_conditions(
         mut health,
         mut effects,
         dash,
-        mut ability,
+        ability,
         test_dummy,
+        hostile_npc,
     ) in ordered
     {
+        let target_kind = if hostile_npc {
+            CombatTargetKind::HostileNpc
+        } else {
+            CombatTargetKind::Fighter
+        };
         let mut defeated = false;
         for kind in [DamageOverTimeKind::Poison, DamageOverTimeKind::Fire] {
             let slot = match kind {
@@ -162,7 +176,7 @@ pub(crate) fn advance_conditions(
                     source_network_id: Some(source.network_entity_id),
                     source_team: Some(source.team_id),
                     target_network_id: *network_id,
-                    target_kind: CombatTargetKind::Fighter,
+                    target_kind,
                     target_team: *team,
                     preset_id: source.source_preset_id,
                     recipe_fingerprint: source.recipe_fingerprint,
@@ -204,13 +218,22 @@ pub(crate) fn advance_conditions(
                     let defeat_event = events[1];
                     defeated = true;
                     telemetry.defeats = telemetry.defeats.saturating_add(1);
-                    let cue = CombatCue::FighterDefeated {
-                        event_id: defeat_event,
-                        tick: tick.0,
-                        attack_id: source.action_id,
-                        source: Some(cue_source),
-                        target: *network_id,
-                        position: position.0.into(),
+                    let cue = if hostile_npc {
+                        CombatCue::Defeat {
+                            event_id: defeat_event,
+                            tick: tick.0,
+                            source: Some(cue_source),
+                            target: *network_id,
+                        }
+                    } else {
+                        CombatCue::FighterDefeated {
+                            event_id: defeat_event,
+                            tick: tick.0,
+                            attack_id: source.action_id,
+                            source: Some(cue_source),
+                            target: *network_id,
+                            position: position.0.into(),
+                        }
                     };
                     telemetry.record_cue(cue.clone());
                     outbox.0.push(cue);
@@ -223,7 +246,7 @@ pub(crate) fn advance_conditions(
                         source_network_id: Some(source.network_entity_id),
                         source_team: Some(source.team_id),
                         target_network_id: *network_id,
-                        target_kind: CombatTargetKind::Fighter,
+                        target_kind,
                         target_team: *team,
                         preset_id: source.source_preset_id,
                         recipe_fingerprint: source.recipe_fingerprint,
@@ -237,7 +260,14 @@ pub(crate) fn advance_conditions(
                             Defeated {
                                 event_id: defeat_event,
                             },
-                            CollisionLayers::new(FIGHTER_LAYER, avian2d::prelude::LayerMask::NONE),
+                            CollisionLayers::new(
+                                if hostile_npc {
+                                    crate::movement::HOSTILE_NPC_LAYER
+                                } else {
+                                    FIGHTER_LAYER
+                                },
+                                avian2d::prelude::LayerMask::NONE,
+                            ),
                             ActiveEffects::default(),
                         ))
                         .remove::<ExternalMotion>()
@@ -266,7 +296,8 @@ pub(crate) fn advance_conditions(
             continue;
         }
 
-        if effects.is_frozen(tick.0)
+        if let Some(mut ability) = ability
+            && effects.is_frozen(tick.0)
             && matches!(ability.phase, crate::builds::AbilityPhase::Dashing { .. })
         {
             ability.phase = crate::abilities::settled_ability_phase(

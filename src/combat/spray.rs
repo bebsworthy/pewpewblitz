@@ -78,7 +78,11 @@ fn spray_owner_is_valid(
             Has<crate::matchplay::MatchParticipant>,
             Has<crate::matchplay::ActiveCombatant>,
         ),
-        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+        Or<(
+            With<Fighter>,
+            With<crate::abilities::Sentry>,
+            With<crate::matchplay::HostileNpc>,
+        )>,
     >,
 ) -> bool {
     fighters.get(runtime.owner_entity).is_ok_and(
@@ -126,7 +130,11 @@ fn spray_candidates(
             Has<crate::matchplay::MatchParticipant>,
             Has<crate::matchplay::ActiveCombatant>,
         ),
-        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+        Or<(
+            With<Fighter>,
+            With<crate::abilities::Sentry>,
+            With<crate::matchplay::HostileNpc>,
+        )>,
     >,
     objects: &Query<
         (
@@ -326,7 +334,11 @@ pub(super) fn advance_cone_sprays(
             Has<crate::matchplay::MatchParticipant>,
             Has<crate::matchplay::ActiveCombatant>,
         ),
-        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+        Or<(
+            With<Fighter>,
+            With<crate::abilities::Sentry>,
+            With<crate::matchplay::HostileNpc>,
+        )>,
     >,
     objects: Query<
         (

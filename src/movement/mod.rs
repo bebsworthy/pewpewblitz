@@ -9,9 +9,10 @@ mod authority;
 mod input;
 pub use arena::{
     ArenaWall, CAMERA_VERTICAL_SPAN, DEPLOYABLE_LAYER, DESTRUCTIBLE_MAP_LAYER, FIGHTER_LAYER,
-    HAZARD_LAYER, OBJECTIVE_LAYER, PICKUP_LAYER, PLAYER_ONLY_MAP_LAYER, PROJECTILE_LAYER,
-    STATIC_MAP_LAYER, destructible_map_collision_layers, fighter_collision_layers,
-    map_collision_layers, player_only_map_collision_layers, pose_is_valid,
+    HAZARD_LAYER, HOSTILE_NPC_LAYER, OBJECTIVE_LAYER, PICKUP_LAYER, PLAYER_ONLY_MAP_LAYER,
+    PROJECTILE_LAYER, STATIC_MAP_LAYER, destructible_map_collision_layers,
+    fighter_collision_layers, map_collision_layers, player_only_map_collision_layers,
+    pose_is_valid,
 };
 #[cfg(feature = "server")]
 pub use input::InputValidationState;

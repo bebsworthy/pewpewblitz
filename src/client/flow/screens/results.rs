@@ -40,6 +40,8 @@ pub(in crate::client::flow) fn present_match_completion(
             format!("TEAM {} WINS", team.0 + 1)
         }
         crate::matchplay::MatchResult::Draw => "DRAW".to_string(),
+        crate::matchplay::MatchResult::Cleared => "HORDE CLEARED".to_string(),
+        crate::matchplay::MatchResult::Overrun => "TEAM OVERRUN".to_string(),
         crate::matchplay::MatchResult::Forfeit { winner, .. } => {
             format!("TEAM {} WINS BY FORFEIT", winner.0 + 1)
         }
@@ -101,6 +103,8 @@ pub(in crate::client::flow) fn spawn_results(
             }
         }
         crate::matchplay::MatchResult::Draw => "DRAW".to_string(),
+        crate::matchplay::MatchResult::Cleared => "HORDE CLEARED".to_string(),
+        crate::matchplay::MatchResult::Overrun => "TEAM OVERRUN".to_string(),
         crate::matchplay::MatchResult::Forfeit { winner, .. } => {
             if context.local_team == Some(winner) {
                 "VICTORY BY FORFEIT".to_string()

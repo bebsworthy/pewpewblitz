@@ -41,13 +41,14 @@ pub(super) fn restore_attack_idle_health(
             &mut CurrentHealth,
             &mut HealthRecoveryState,
             &ActiveEffects,
+            Option<&crate::matchplay::BoostStacks>,
             Option<&MatchParticipant>,
             Option<&crate::map::EffectTileOccupancy>,
         ),
         (With<Fighter>, Without<Defeated>),
     >,
 ) {
-    for (entity, stats, mut health, mut recovery, effects, participant, effect_tile) in
+    for (entity, stats, mut health, mut recovery, effects, boosts, participant, effect_tile) in
         &mut fighters
     {
         if participant.is_some() && !active.contains(entity) {
@@ -72,7 +73,10 @@ pub(super) fn restore_attack_idle_health(
         }
         let (next, remainder) = advance_recovery(
             health.0,
-            stats.maximum_health,
+            crate::matchplay::effective_maximum_health(
+                stats.maximum_health,
+                boosts.copied().unwrap_or_default(),
+            ),
             stats.health_recovery_rate,
             recovery.recovery_remainder,
         );

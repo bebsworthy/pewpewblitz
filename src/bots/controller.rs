@@ -20,7 +20,10 @@ use crate::{
         DefendedDamageableObjective, HazardousDamageableTarget, MapDynamicState, ResolvedMap,
         RestorationPickup, ValuableDamageableTarget,
     },
-    matchplay::{ActiveCombatant, BotObjectiveView, MatchPhase, MatchRoot, MatchState},
+    matchplay::{
+        ActiveCombatant, BotObjectiveView, HostileNpc, MatchPhase, MatchRoot, MatchState,
+        ZombieRules,
+    },
     movement::{InputFreshness, decoded_input_is_valid},
     protocol::{Fighter, FighterInput, NetworkEntityId},
     timing::SimulationTick,
@@ -122,6 +125,11 @@ fn capture_observations(
         Option<&DefendedDamageableObjective>,
     )>,
     pickups: Query<&Position, With<RestorationPickup>>,
+    hostile_npcs: Query<
+        (&NetworkEntityId, &TeamId, &Position, &CurrentHealth),
+        (With<HostileNpc>, Without<Defeated>),
+    >,
+    zombie_rules: Option<Res<ZombieRules>>,
     mut navigation: ResMut<BotNavigationRuntime>,
 ) {
     let Ok((match_state, objective)) = roots.single() else {
@@ -272,6 +280,26 @@ fn capture_observations(
                 visible_enemies.push(public_fighter_view(subject));
             }
         }
+        visible_enemies.extend(
+            hostile_npcs
+                .iter()
+                .map(|(network_id, team, position, health)| BotFighterView {
+                    network_id: *network_id,
+                    team: *team,
+                    position: position.0,
+                    velocity: Vec2::ZERO,
+                    current_health: health.0,
+                    maximum_health: zombie_rules
+                        .as_ref()
+                        .map_or(health.0, |rules| rules.zombie_health),
+                    active: health.0 > 0,
+                    cold_meter: 0,
+                    frozen: false,
+                    poisoned: false,
+                    burning: false,
+                }),
+        );
+        visible_enemies.sort_by_key(|enemy| enemy.network_id);
         let (weapon_range, projectile_speed) = weapon_capabilities(&observer.loadout);
         let ultimate_range = match observer.loadout.ultimate.parameters {
             crate::builds::UltimateParameters::DemolitionStrike {

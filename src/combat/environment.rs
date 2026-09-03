@@ -308,6 +308,7 @@ pub(crate) fn apply_environment_damage_batch(
         let collision_layer = match target.kind {
             CombatTargetKind::Fighter => crate::movement::FIGHTER_LAYER,
             CombatTargetKind::Deployable => crate::movement::DEPLOYABLE_LAYER,
+            CombatTargetKind::HostileNpc => crate::movement::HOSTILE_NPC_LAYER,
         };
         let mut entity = world.entity_mut(target.entity);
         entity
@@ -345,7 +346,9 @@ pub(crate) fn apply_environment_damage_batch(
                 position: WorldPoint::from(target.position),
                 engagement_distance,
                 kind: match target.kind {
-                    CombatTargetKind::Fighter => CombatOutcomeKind::Defeat,
+                    CombatTargetKind::Fighter | CombatTargetKind::HostileNpc => {
+                        CombatOutcomeKind::Defeat
+                    }
                     CombatTargetKind::Deployable => CombatOutcomeKind::DeployableDestroyed,
                 },
             });

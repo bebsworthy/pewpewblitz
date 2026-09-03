@@ -130,6 +130,10 @@ impl ComposedApplicationPlan<'_> {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the snapshot keeps one atomic view of every supported combat target capability"
+)]
 fn snapshot_target(
     combat: &mut CombatTargetState,
     batch: &BatchView<'_>,
@@ -176,6 +180,8 @@ fn snapshot_target(
     }
     let target_kind = if combat.sentry_targets.contains(entity) {
         CombatTargetKind::Deployable
+    } else if combat.hostile_npc_targets.contains(entity) {
+        CombatTargetKind::HostileNpc
     } else {
         CombatTargetKind::Fighter
     };
@@ -201,6 +207,14 @@ fn snapshot_target(
                 )
             })
     };
+    let authored_maximum_health = authored_maximum_health.map(|maximum| {
+        combat
+            .boost_stacks
+            .get(entity)
+            .map_or(maximum, |(_, _, stacks)| {
+                crate::matchplay::effective_maximum_health(maximum, *stacks)
+            })
+    });
     Some(PlannedTargetState {
         network_id,
         team,
@@ -356,10 +370,15 @@ pub(in crate::combat::effects) fn plan_composed_records<'a>(
                     } else {
                         None
                     };
+                let boosted_amount = boost_scaled_immediate_damage(
+                    amount,
+                    record.source,
+                    batch.boost_stacks_by_owner,
+                );
                 let Some(damage) = plan_damage_application(
                     target.health,
                     target.defeated,
-                    amount,
+                    boosted_amount,
                     falloff,
                     record.delivery_travel,
                     scale,
@@ -498,6 +517,18 @@ pub(in crate::combat::effects) fn plan_composed_records<'a>(
             target.fire_resistance,
             plan.cold_contacts
                 .insert((record.source.attack_id, target.network_id.0)),
+            if matches!(
+                record.source.kind,
+                CombatSourceKind::Environment | CombatSourceKind::HostileNpc
+            ) {
+                u8::default()
+            } else {
+                batch
+                    .boost_stacks_by_owner
+                    .get(&record.source.owner_network_entity_id.0)
+                    .copied()
+                    .unwrap_or_default()
+            },
             reserved_events,
         );
         plan.projections.extend(
@@ -555,10 +586,10 @@ pub(in crate::combat::effects) fn commit_composed_plan(
                         event_id: defeat.event_id,
                     },
                     CollisionLayers::new(
-                        if target.target_kind == CombatTargetKind::Deployable {
-                            crate::movement::DEPLOYABLE_LAYER
-                        } else {
-                            FIGHTER_LAYER
+                        match target.target_kind {
+                            CombatTargetKind::Deployable => crate::movement::DEPLOYABLE_LAYER,
+                            CombatTargetKind::HostileNpc => crate::movement::HOSTILE_NPC_LAYER,
+                            CombatTargetKind::Fighter => FIGHTER_LAYER,
                         },
                         avian2d::prelude::LayerMask::NONE,
                     ),

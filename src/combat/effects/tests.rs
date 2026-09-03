@@ -304,13 +304,109 @@ fn damage_tile_suppresses_composed_heal_event_reservation() {
         ),
     )]);
     assert_eq!(
-        required_payload_event_count(&[], &records, &connected, &HashMap::new(), &mut blocked),
+        required_payload_event_count(
+            &[],
+            &records,
+            &connected,
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut blocked,
+        ),
         Some(0),
     );
 
     blocked.get_mut(&target).expect("target exists").5 = false;
     assert_eq!(
-        required_payload_event_count(&[], &records, &connected, &HashMap::new(), &mut blocked),
+        required_payload_event_count(
+            &[],
+            &records,
+            &connected,
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut blocked,
+        ),
         Some(1),
+    );
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn boost_scaled_lethal_damage_reserves_damage_and_defeat_events() {
+    use crate::combat::effects::planning::required_payload_event_count;
+    use std::collections::{HashMap, HashSet};
+
+    let target = Entity::from_raw_u32(1).expect("valid target entity");
+    let source = AttackSource {
+        kind: CombatSourceKind::PrimaryWeapon,
+        attack_id: AttackId(1),
+        player_id: PlayerId(1),
+        owner_network_entity_id: NetworkEntityId(1),
+        team_id: TeamId(1),
+        recipe_fingerprint: WeaponRecipeFingerprint(1),
+        legacy_compatibility: false,
+        source_preset_id: Some(WeaponPresetId(7)),
+        origin: WorldPoint::from(Vec2::ZERO),
+        facing: 0.0,
+    };
+    let records = [PendingPayload {
+        source,
+        delivery_index: 0,
+        bundle_index: 0,
+        target,
+        target_network_id: NetworkEntityId(2),
+        position: Vec2::ZERO,
+        engagement_distance: 0.0,
+        delivery_travel: 0.0,
+        contact_fraction: 0.0,
+        bundle: PayloadBundleDefinition {
+            target: TargetSelection::Direct,
+            effects: vec![PayloadEffectDefinition::Damage {
+                amount: 100,
+                falloff: DamageFalloff::None,
+                recipients: RecipientPolicy::Hostiles,
+            }],
+        },
+    }];
+    let connected = HashSet::from([source.owner_network_entity_id.0]);
+    let target_state = || {
+        HashMap::from([(
+            target,
+            (
+                NetworkEntityId(2),
+                TeamId(2),
+                105,
+                false,
+                CombatTargetKind::HostileNpc,
+                false,
+            ),
+        )])
+    };
+
+    let mut unboosted_target = target_state();
+    assert_eq!(
+        required_payload_event_count(
+            &[],
+            &records,
+            &connected,
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut unboosted_target,
+        ),
+        Some(1),
+        "the authored 100 damage is nonlethal against 105 health",
+    );
+
+    let mut boosted_target = target_state();
+    assert_eq!(
+        required_payload_event_count(
+            &[],
+            &records,
+            &connected,
+            &HashMap::new(),
+            &HashMap::from([(source.owner_network_entity_id.0, 1)]),
+            &mut boosted_target,
+        ),
+        Some(2),
+        "one boost scales 100 damage to a lethal 105 and must reserve the defeat event",
     );
 }

@@ -601,6 +601,9 @@ const fn practice_rejection_copy(reason: crate::lobby::PracticeStartRejection) -
         crate::lobby::PracticeStartRejection::CapacityUnavailable => {
             "The server has no free match capacity right now."
         }
+        crate::lobby::PracticeStartRejection::UnsupportedGameMode => {
+            "That game mode is not available in Practice."
+        }
         crate::lobby::PracticeStartRejection::Internal => "The server could not start practice.",
     }
 }

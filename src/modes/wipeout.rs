@@ -49,7 +49,7 @@ fn validate_operator_policy(input: super::ModeOperatorPolicyInput) -> Result<(),
 fn resolve_operator_rules(
     input: super::ModeRuleResolveInput,
 ) -> Result<super::ResolvedModeRuleProjection, super::ModeRuleResolutionError> {
-    if input.capture_seconds != 0 || input.safe_health != 0 {
+    if input.capture_seconds != 0 || input.safe_health != 0 || input.pressure_stages != 0 {
         return Err(super::ModeRuleResolutionError::MismatchedObjective);
     }
     let target_score = input.kills_to_win;
@@ -132,6 +132,7 @@ mod tests {
             kills_to_win: 10,
             capture_seconds: 0,
             safe_health: 0,
+            pressure_stages: 0,
             match_duration_ticks: 10_800,
             lifecycle: crate::matchplay::MatchLifecycleRules::default(),
             wipeout_recent_hostile_damage_credit_ticks: 300,

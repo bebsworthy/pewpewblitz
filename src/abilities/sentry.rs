@@ -945,6 +945,33 @@ fn index_sentry_fighter_targets(
 }
 
 #[cfg(feature = "server")]
+fn index_sentry_hostile_npc_targets(
+    hostile_npcs: &Query<
+        (
+            &avian2d::prelude::Position,
+            &NetworkEntityId,
+            Option<&crate::combat::Defeated>,
+        ),
+        With<crate::matchplay::HostileNpc>,
+    >,
+) -> Vec<SentryFighterTargetView> {
+    hostile_npcs
+        .iter()
+        .map(|(position, network_id, defeated)| SentryFighterTargetView {
+            position: position.0,
+            network_id: *network_id,
+            team_id: crate::combat::NEUTRAL_TEAM,
+            targetable: defeated.is_none(),
+            base_concealment: crate::concealment::ConcealmentSources::NONE,
+            reveal_deadlines: None,
+            ability: crate::builds::AbilityState::default(),
+            forced_reveals: None,
+            objective_carrier: false,
+        })
+        .collect()
+}
+
+#[cfg(feature = "server")]
 #[allow(clippy::type_complexity)]
 fn index_sentry_objective_targets(
     objectives: &Query<
@@ -1253,6 +1280,7 @@ fn commit_sentry_fire(
             crate::movement::PROJECTILE_LAYER,
             crate::movement::FIGHTER_LAYER
                 | crate::movement::DEPLOYABLE_LAYER
+                | crate::movement::HOSTILE_NPC_LAYER
                 | crate::movement::STATIC_MAP_LAYER
                 | crate::movement::DESTRUCTIBLE_MAP_LAYER,
         ),
@@ -1303,6 +1331,14 @@ pub(crate) fn tick_sentries(
         ),
         With<crate::protocol::Fighter>,
     >,
+    hostile_npcs: Query<
+        (
+            &avian2d::prelude::Position,
+            &NetworkEntityId,
+            Option<&crate::combat::Defeated>,
+        ),
+        With<crate::matchplay::HostileNpc>,
+    >,
     objectives: Query<
         (
             Entity,
@@ -1325,7 +1361,9 @@ pub(crate) fn tick_sentries(
     >,
 ) {
     let owner_index = index_sentry_owners(&owners);
-    let fighter_targets = index_sentry_fighter_targets(&fighters);
+    let mut fighter_targets = index_sentry_fighter_targets(&fighters);
+    fighter_targets.extend(index_sentry_hostile_npc_targets(&hostile_npcs));
+    fighter_targets.sort_by_key(|target| target.network_id.0);
     let objective_targets = index_sentry_objective_targets(&objectives);
     for (entity, position, identity, mut runtime, sentry_tuning) in &mut sentries {
         let owner = owner_index.get(&identity.owner_network_id).copied();

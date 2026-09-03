@@ -291,7 +291,11 @@ pub(super) fn resolve_melee_attacks(
             Option<&Defeated>,
             Option<&lightyear::prelude::ControlledBy>,
         ),
-        Or<(With<Fighter>, With<crate::abilities::Sentry>)>,
+        Or<(
+            With<Fighter>,
+            With<crate::abilities::Sentry>,
+            With<crate::matchplay::HostileNpc>,
+        )>,
     >,
     objects: Query<
         (
@@ -330,7 +334,7 @@ pub(super) fn resolve_melee_attacks(
         };
         let mut queued_payloads = false;
         let fighter_filter = avian2d::prelude::SpatialQueryFilter::from_mask(
-            FIGHTER_LAYER | crate::movement::DEPLOYABLE_LAYER,
+            FIGHTER_LAYER | crate::movement::DEPLOYABLE_LAYER | crate::movement::HOSTILE_NPC_LAYER,
         );
         let mut candidates: Vec<_> = spatial_query
             .shape_intersections(
@@ -543,7 +547,10 @@ mod tests {
                 Collider::circle(2.0),
                 CollisionLayers::new(
                     PROJECTILE_LAYER,
-                    FIGHTER_LAYER | STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER,
+                    FIGHTER_LAYER
+                        | crate::movement::HOSTILE_NPC_LAYER
+                        | STATIC_MAP_LAYER
+                        | DESTRUCTIBLE_MAP_LAYER,
                 ),
                 ComposedProjectileRuntime {
                     owner_entity,

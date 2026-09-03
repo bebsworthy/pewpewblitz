@@ -71,5 +71,12 @@
             admission_revision: 3,
             document: "builtin/powderline-vault.ron",
         ),
+        (
+            id: MapPresetId(13),
+            key: "zombie-yard",
+            display_name: "Zombie Yard",
+            admission_revision: 1,
+            document: "builtin/zombie-yard.ron",
+        ),
     ],
 )

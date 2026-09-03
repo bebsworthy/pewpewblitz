@@ -682,7 +682,7 @@ pub(crate) const fn carrier_for_delivery(delivery: DeliveryMethod) -> VfxCarrier
 
 const fn context_for_source(source: CombatSourceKind) -> Option<VfxContextOverride> {
     match source {
-        CombatSourceKind::PrimaryWeapon => None,
+        CombatSourceKind::PrimaryWeapon | CombatSourceKind::HostileNpc => None,
         CombatSourceKind::Environment => Some(VfxContextOverride::Environment),
         CombatSourceKind::Ultimate { ultimate_id } => {
             Some(VfxContextOverride::Ultimate(ultimate_id))

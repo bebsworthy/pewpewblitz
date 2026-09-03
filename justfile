@@ -41,6 +41,10 @@ test: _test-routing _test-client _test-server _test-balance-lab _test-network _t
 e2e clients="2":
     ./scripts/e2e.sh {{clients}}
 
+# Run one exact two- or three-human Zombie cooperative roster through the routed product path.
+zombie-e2e players="2":
+    ./scripts/e2e-zombie.sh {{players}}
+
 # Run one exact real-process Practice game with one human and manifest bots.
 practice-e2e game_type="wipeout-1v1":
     ./scripts/e2e-practice.sh {{game_type}}

@@ -4,6 +4,7 @@ use super::catalog::{MAP_FINGERPRINT_FORMAT_VERSION, MAX_RESOLVED_MAP_SNAPSHOT_B
 use super::geometry::{
     MapCellRect, merge_cells_to_rectangles, placement_cells, placement_world_center,
     validate_fighter_navigation, validate_heist_map_access, validate_spawn_clearance,
+    validate_zombie_ingress_access,
 };
 use super::{
     HEIST_SAFE_VISUAL_PROFILE, MAP_CELL_SIZE_WORLD, MAP_RECIPE_SCHEMA_VERSION, MapAssetId,
@@ -27,6 +28,7 @@ pub struct ResolvedMap {
     pub player_only_surface_rects: Vec<MapCellRect>,
     pub objective_zone: Option<ResolvedMapObjective>,
     pub heist_safes: Vec<ResolvedHeistSafeAnchor>,
+    pub zombie_ingress: Vec<ResolvedZombieIngressAnchor>,
     pub effect_tiles: Vec<ResolvedEffectTile>,
     pub effect_tiles_by_cell: BTreeMap<MapCell, ResolvedEffectTile>,
 }
@@ -55,6 +57,13 @@ pub struct ResolvedHeistSafeAnchor {
     pub objective_visual_profile_id: MapVisualProfileId,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResolvedZombieIngressAnchor {
+    pub placement_id: MapPlacementId,
+    pub anchor_id: ModeAnchorId,
+    pub position: Vec2,
+}
+
 pub(super) fn resolve_grid_recipe(
     recipe: &MapRecipe,
     preset_id: MapPresetId,
@@ -74,7 +83,7 @@ pub(super) fn resolve_grid_recipe(
 
     let mut mode_anchors = recipe.mode_anchors.clone();
     mode_anchors.sort_by_key(|anchor| (anchor.placement_id, anchor.anchor_id));
-    let (objective_zone, heist_safes) = validate_and_resolve_mode_anchors(
+    let (objective_zone, heist_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
         topology,
         recipe.dimensions,
         &mode_anchors,
@@ -107,6 +116,7 @@ pub(super) fn resolve_grid_recipe(
         player_only_surface_rects: dynamic.player_only_surface_rects,
         objective_zone,
         heist_safes,
+        zombie_ingress,
         effect_tiles: dynamic.effect_tiles,
         effect_tiles_by_cell,
     })
@@ -316,8 +326,8 @@ fn validate_mode_topology(
     mode_anchors: &[MapModeAnchorPlacement],
     catalog: &MapContentCatalog,
 ) -> Result<(), String> {
-    for team in 0..=1 {
-        let spawn_count = placements
+    let spawn_count = |team| {
+        placements
             .iter()
             .filter(|placement| {
                 matches!(
@@ -325,9 +335,17 @@ fn validate_mode_topology(
                     MapPlacementParameters::PlayerSpawn { team_slot, .. } if team_slot == team
                 )
             })
-            .count();
-        if spawn_count < 3 {
-            return Err("grid map lacks spawn capacity".to_string());
+            .count()
+    };
+    if topology == ModeTopologyPolicy::ZombieIngress {
+        if spawn_count(0) < 3 || spawn_count(1) != 0 {
+            return Err("Zombie maps require one three-slot cooperative spawn family".to_string());
+        }
+    } else {
+        for team in 0..=1 {
+            if spawn_count(team) < 3 {
+                return Err("grid map lacks spawn capacity".to_string());
+            }
         }
     }
     validate_spawn_clearance(placements, recipe.dimensions, catalog)?;
@@ -335,6 +353,8 @@ fn validate_mode_topology(
     validate_fighter_navigation(placements, recipe.dimensions, catalog)?;
     if topology == ModeTopologyPolicy::MirroredHeistSafes {
         validate_heist_map_access(placements, mode_anchors, recipe.dimensions, catalog)?;
+    } else if topology == ModeTopologyPolicy::ZombieIngress {
+        validate_zombie_ingress_access(placements, mode_anchors, recipe.dimensions, catalog, 18.0)?;
     }
     Ok(())
 }
@@ -540,22 +560,32 @@ fn validate_effect_tile_spawn_safety(
     Ok(())
 }
 
+type ResolvedModeAnchors = (
+    Option<ResolvedMapObjective>,
+    Vec<ResolvedHeistSafeAnchor>,
+    Vec<ResolvedZombieIngressAnchor>,
+);
+
 pub(super) fn validate_and_resolve_mode_anchors(
     topology: ModeTopologyPolicy,
     dimensions: MapDimensions,
     anchors: &[MapModeAnchorPlacement],
     placement_ids: &mut BTreeSet<MapPlacementId>,
-) -> Result<(Option<ResolvedMapObjective>, Vec<ResolvedHeistSafeAnchor>), String> {
+) -> Result<ResolvedModeAnchors, String> {
     match topology {
         ModeTopologyPolicy::NoAnchors => {
             return anchors
                 .is_empty()
-                .then_some((None, Vec::new()))
+                .then_some((None, Vec::new(), Vec::new()))
                 .ok_or_else(|| "anchorless modes cannot contain mode anchors".to_string());
         }
         ModeTopologyPolicy::MirroredHeistSafes => {
             return resolve_heist_safe_anchors(dimensions, anchors, placement_ids)
-                .map(|resolved| (None, resolved));
+                .map(|resolved| (None, resolved, Vec::new()));
+        }
+        ModeTopologyPolicy::ZombieIngress => {
+            return resolve_zombie_ingress_anchors(dimensions, anchors, placement_ids)
+                .map(|resolved| (None, Vec::new(), resolved));
         }
         ModeTopologyPolicy::HotZoneCircle => {}
     }
@@ -600,7 +630,55 @@ pub(super) fn validate_and_resolve_mode_anchors(
             },
         }),
         Vec::new(),
+        Vec::new(),
     ))
+}
+
+fn resolve_zombie_ingress_anchors(
+    dimensions: MapDimensions,
+    anchors: &[MapModeAnchorPlacement],
+    placement_ids: &mut BTreeSet<MapPlacementId>,
+) -> Result<Vec<ResolvedZombieIngressAnchor>, String> {
+    if !(4..=16).contains(&anchors.len()) {
+        return Err("Zombie maps require 4..=16 ingress anchors".to_string());
+    }
+    let mut identities = BTreeSet::new();
+    let mut resolved = Vec::with_capacity(anchors.len());
+    for anchor in anchors {
+        if anchor.placement_id.0 == 0
+            || anchor.anchor_id.0 == 0
+            || !placement_ids.insert(anchor.placement_id)
+            || !identities.insert(anchor.anchor_id)
+        {
+            return Err("invalid or duplicate Zombie ingress identity".to_string());
+        }
+        let MapModeAnchorKind::ZombieIngress { center_half_cell } = anchor.kind else {
+            return Err("Zombie maps cannot contain non-ingress anchors".to_string());
+        };
+        let position = dimensions
+            .half_cell_world(center_half_cell)
+            .ok_or_else(|| "Zombie ingress is out of bounds".to_string())?;
+        let bounds = dimensions.bounds();
+        let edge_distance = (position.x - bounds.min.x)
+            .min(bounds.max.x - position.x)
+            .min(position.y - bounds.min.y)
+            .min(bounds.max.y - position.y);
+        if edge_distance > 2.0 * MAP_CELL_SIZE_WORLD {
+            return Err("Zombie ingress must be near the playable perimeter".to_string());
+        }
+        if resolved.iter().any(|other: &ResolvedZombieIngressAnchor| {
+            other.position.distance_squared(position) < MAP_CELL_SIZE_WORLD.powi(2)
+        }) {
+            return Err("Zombie ingress anchors overlap".to_string());
+        }
+        resolved.push(ResolvedZombieIngressAnchor {
+            placement_id: anchor.placement_id,
+            anchor_id: anchor.anchor_id,
+            position,
+        });
+    }
+    resolved.sort_by_key(|anchor| anchor.anchor_id);
+    Ok(resolved)
 }
 
 fn resolve_heist_safe_anchors(

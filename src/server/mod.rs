@@ -1326,6 +1326,9 @@ fn build_authoritative_app(
         config.heist_critical_health_percent = Some(rules.heist_critical_health_percent);
     }
     let mut lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
+    if config.game_mode == crate::config::GameMode::Zombie {
+        lifecycle.team_count = 1;
+    }
     if let Some(ticks) = config.match_duration_ticks {
         lifecycle.active_limit_ticks = ticks;
     }

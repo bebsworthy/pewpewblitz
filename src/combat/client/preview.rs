@@ -79,6 +79,7 @@ impl PreviewPrimitive {
 pub(crate) enum AimTraceBlockerClass {
     Fighter,
     Sentry,
+    HostileNpc,
     HeistSafe,
 }
 

@@ -5,7 +5,8 @@ game_type=${1:-wipeout-1v1}
 case "$game_type" in
     wipeout-1v1 | wipeout-2v2 | wipeout-3v3 | \
     hot-zone-1v1 | hot-zone-2v2 | hot-zone-3v3 | \
-    heist-1v1 | heist-2v2 | heist-3v3) ;;
+    heist-1v1 | heist-2v2 | heist-3v3 | \
+    zombie-2p | zombie-3p) ;;
     *)
         printf '%s\n' 'brawler Practice e2e: expected an advertised game-type ID' >&2
         exit 2
