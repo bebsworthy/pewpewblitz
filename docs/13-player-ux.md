@@ -126,7 +126,7 @@ remain explicit.
 | Brawler | Full-screen saved-brawler detail | Presents fighter identity, resolved statistics, live fighter preview, abilities, equipment, Select for Play, customization entry points, Delete, and Back |
 | Create Brawler | Full-screen creation destination | Selects permanent fighter profile and weapon base plus starting ultimate from the advertised catalog; accepted creation opens the new Brawler screen |
 | Customize Abilities | Full-screen Brawler child | Keeps permanent facts read-only and edits name, ultimate, and two distinct selectable passives; accepted save returns to the invoking Brawler screen |
-| Customize Weapon | Full-screen Brawler child | Separates four equipped slots from owned inventory and a live resolved preview; Save or Back returns to the invoking Brawler screen |
+| Customize Weapon | Full-screen Brawler child | Presents the weapon, resolved statistics and four slots; each slot opens a fullscreen responsive parts picker with automatic saving |
 | Queue | Accepted multiplayer admission | Shows the frozen accepted request and honest pool facts; Cancel awaits acknowledgement |
 | Match Loading | Reserved-match handoff and readiness | Shows server-owned progress and bounded cancellation or return behavior |
 | Match | Authoritative gameplay | Owns world presentation, HUD, non-pausing menu, and scoreboard presentation |
@@ -248,12 +248,21 @@ shows permanent fighter/weapon choices read-only while name, ultimate, and the t
 passives remain editable. Accepted save returns to the same Brawler; rejection retains the draft
 and inline reason.
 
-Customize Weapon owns four numbered slots, the bounded owned inventory, presentation-only type
-labels, signed effects, and a live resolved-weapon preview. Save sends one full revision-bound slot
-replacement and returns to the Brawler screen; Back discards the draft to that screen. Invalid
-combinations cannot be saved, and an instance equipped by another brawler is identified rather than
-silently moved. Pending mutations disable admission and later mutations until the authoritative
-whole-profile outcome arrives.
+Customize Weapon presents the native weapon preview, borderless resolved statistics and four
+numbered slot tiles. A slot opens a fullscreen owned-parts grid with six columns on wide screens, five at medium widths and fewer on compact windows. Nothing is the first
+selectable item and clears that slot. The accepted choice uses orange; keyboard/gamepad focus has
+an independent outline, without a duplicate Selected label. Part family illustrations are UI
+symbols, not claims that the physical weapon model changes with equipment.
+
+Choosing a part or Nothing sends one revision-bound slot replacement automatically. While it is
+pending, another choice or Back cannot race the mutation. Acceptance returns to the weapon view;
+rejection keeps the picker open with an inline reason and restores the last accepted equipment.
+Choosing the already equipped item returns without a write. Back from the picker returns to the
+weapon view; its single Back returns to the invoking Brawler. An instance used by another brawler
+is identified and cannot be silently moved. Queue and Practice admission retain their mutation
+locks. Match loading uses the shared abstract shell background, native fighter preview, mode
+badge and topology, factual phase, reduced-motion-aware activity and a single Cancel action.
+
 
 Responsive presentation does not change this semantic hierarchy. At an effective UI canvas of at
 least `1000x640`, Dashboard uses the Wide hierarchy with fighter/build presentation on the left

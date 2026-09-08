@@ -905,39 +905,53 @@ fn equipment_actions_preserve_slot_conflict_draft_and_overlay_contracts() {
             .inline_error
             .is_none()
     );
+    // A second choice and Back cannot outrun the in-flight server mutation.
     inject_action(&mut app, FlowUiAction::UnequipWeaponPart);
+    inject_action(&mut app, FlowUiAction::CancelWeaponEquipment);
     assert_eq!(
         app.world()
             .resource::<WeaponEquipmentDraft>()
             .equipped_part_ids[1],
-        None
+        Some(free_part)
     );
-    inject_action(&mut app, FlowUiAction::EquipWeaponPart(free_part));
-    inject_action(&mut app, FlowUiAction::ConfirmWeaponEquipment);
     assert_eq!(
         *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(target)
+        ClientOverlay::WeaponEquipment
     );
-    assert!(
-        app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .pending()
-    );
-
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_snapshot_for_test(membership.profile.clone());
-    inject_action(&mut app, FlowUiAction::OpenWeaponEquipment(target));
+    assert!(app.world().resource::<WeaponEquipmentDraft>().awaiting_save);
+    membership.profile.brawlers[0].equipped_part_ids[1] = Some(free_part);
+    {
+        let mut profile = app
+            .world_mut()
+            .resource_mut::<super::super::ClientProfileModel>();
+        profile.set_snapshot_for_test(membership.profile.clone());
+        profile.set_decision_for_test(crate::profiles::ProfileDecision::Accepted);
+    }
+    app.update();
+    assert!(!app.world().resource::<WeaponEquipmentDraft>().picker_open);
+    assert!(!app.world().resource::<WeaponEquipmentDraft>().awaiting_save);
+    assert!(app.world().resource::<DashboardNotice>().0.is_none());
+    inject_action(&mut app, FlowUiAction::SelectEquipmentSlot(1));
+    inject_action(&mut app, FlowUiAction::UnequipWeaponPart);
+    assert!(app.world().resource::<WeaponEquipmentDraft>().awaiting_save);
+    {
+        let mut profile = app
+            .world_mut()
+            .resource_mut::<super::super::ClientProfileModel>();
+        profile.set_snapshot_for_test(membership.profile.clone());
+        profile.set_decision_for_test(crate::profiles::ProfileDecision::StorageFault);
+    }
+    app.update();
+    let draft = app.world().resource::<WeaponEquipmentDraft>();
+    assert!(draft.picker_open);
+    assert!(draft.inline_error.is_some());
+    assert_eq!(draft.equipped_part_ids[1], Some(free_part));
+    inject_action(&mut app, FlowUiAction::CancelWeaponEquipment);
+    assert!(!app.world().resource::<WeaponEquipmentDraft>().picker_open);
     inject_action(&mut app, FlowUiAction::CancelWeaponEquipment);
     assert_eq!(
         *app.world().resource::<ClientOverlay>(),
         ClientOverlay::BrawlerDetails(target)
-    );
-    *app.world_mut().resource_mut::<WeaponEquipmentDraft>() = WeaponEquipmentDraft::default();
-    inject_action(&mut app, FlowUiAction::CancelWeaponEquipment);
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerList
     );
 }
 
@@ -1320,48 +1334,33 @@ fn selected_brawler_cards_open_list_details_and_reach_equipment() {
         ClientOverlay::WeaponEquipment
     );
     app.update();
-    let (scroll_area, save_parent, save_disabled) = {
+    {
         let world = app.world_mut();
-        let mut roots =
-            world.query_filtered::<(Entity, &Node, &BackgroundColor), With<WeaponEquipmentRoot>>();
-        let (_, node, background) = roots.single(world).unwrap();
+        let mut roots = world.query_filtered::<&Node, With<WeaponEquipmentRoot>>();
+        let node = roots.single(world).unwrap();
         assert_eq!(
             (node.left, node.right, node.top, node.bottom),
             (px(0), px(0), px(0), px(0))
         );
-        assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
-        let mut areas = world.query_filtered::<Entity, With<WeaponEquipmentScrollArea>>();
-        let area = areas.single(world).unwrap();
-        let mut buttons = world.query::<(&FlowButton, &ChildOf, Has<InteractionDisabled>)>();
-        let (parent, disabled) = buttons
-            .iter(world)
-            .find(|(button, _, _)| button.action == FlowUiAction::ConfirmWeaponEquipment)
-            .map(|(_, child_of, disabled)| (child_of.parent(), disabled))
-            .expect("equipment Save button is rendered");
-        (area, parent, disabled)
-    };
-    assert_ne!(save_parent, scroll_area, "Save remains in the fixed footer");
-    assert!(!save_disabled, "a valid equipment preview can be saved");
-
-    app.world_mut().write_message(MouseWheel {
-        unit: MouseScrollUnit::Line,
-        x: 0.0,
-        y: -2.0,
-        window: Entity::PLACEHOLDER,
-        phase: bevy::input::touch::TouchPhase::Moved,
-    });
+    }
+    press_flow_button(&mut app, &FlowUiAction::SelectEquipmentSlot(0));
     app.update();
+    {
+        let world = app.world_mut();
+        let mut areas = world.query_filtered::<&Node, With<WeaponEquipmentScrollArea>>();
+        let node = areas.single(world).unwrap();
+        assert_eq!(node.overflow, Overflow::scroll_y());
+        let mut buttons = world.query::<&FlowButton>();
+        assert!(
+            buttons
+                .iter(world)
+                .any(|b| b.index == 0 && b.action == FlowUiAction::UnequipWeaponPart)
+        );
+    }
+    press_flow_button(&mut app, &FlowUiAction::UnequipWeaponPart);
+    assert!(!app.world().resource::<WeaponEquipmentDraft>().picker_open);
     assert!(
-        (app.world().get::<ScrollPosition>(scroll_area).unwrap().0.y - 48.0).abs() <= f32::EPSILON
-    );
-
-    press_flow_button(&mut app, &FlowUiAction::ConfirmWeaponEquipment);
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(brawler_id)
-    );
-    assert!(
-        app.world()
+        !app.world()
             .resource::<super::super::ClientProfileModel>()
             .pending()
     );
@@ -2040,7 +2039,7 @@ fn queue_copy_uses_advertised_game_and_saved_brawler_recipe() {
         Some(crate::lobby::MatchLoadingPhase::Synchronizing),
     );
     assert!(loading_copy.contains("Synchronizing map"));
-    assert!(loading_copy.contains("Saved brawler accepted"));
+    assert!(!loading_copy.contains("Saved brawler accepted"));
     assert!(!loading_copy.contains("points"));
 }
 
@@ -2766,4 +2765,76 @@ fn practice_picker_gamepad_focus_does_not_select_and_overlay_blocks_activation()
             .1,
         crate::map::MapPresetId(7)
     );
+}
+
+#[test]
+fn connection_retry_and_saved_target_clear_obsolete_error_overlay() {
+    for action in [
+        FlowUiAction::Retry,
+        FlowUiAction::JoinSaved("127.0.0.1:5000".into()),
+    ] {
+        let mut app = flow_action_test_app();
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::ServerSelect);
+        app.update();
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Connection,
+            message: "The connection attempt timed out".into(),
+            return_flow: ClientFlow::ServerSelect,
+            actions: [
+                Some(FlowErrorAction::RetryConnection),
+                Some(FlowErrorAction::Back),
+            ],
+        });
+        inject_action(&mut app, action);
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::None
+        );
+        assert_eq!(
+            app.world().resource::<FlowCommit>().next_flow,
+            Some(ClientFlow::Connecting)
+        );
+    }
+}
+
+#[test]
+fn accepted_connection_retires_old_error_and_dashboard_accepts_input() {
+    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::Connecting);
+    app.update();
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+        kind: FlowErrorKind::Connection,
+        message: "Old timeout".into(),
+        return_flow: ClientFlow::ServerSelect,
+        actions: [Some(FlowErrorAction::RetryConnection), None],
+    });
+    inject_session_observation(&mut app, SessionObservation::Accepted);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::None
+    );
+    app.update();
+    press_flow_button(&mut app, &FlowUiAction::OpenDashboardMenu);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::DashboardMenu
+    );
+}
+
+#[test]
+fn accepted_connection_preserves_new_persistence_failure() {
+    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+    app.world_mut().resource_mut::<ClientConnectionsPath>().0 = std::env::temp_dir();
+    inject_session_observation(&mut app, SessionObservation::Accepted);
+    assert!(matches!(
+        app.world().resource::<ClientOverlay>(),
+        ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Persistence,
+            ..
+        })
+    ));
 }

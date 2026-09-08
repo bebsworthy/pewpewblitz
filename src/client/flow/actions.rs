@@ -54,7 +54,6 @@ pub(super) enum FlowUiAction {
     SelectEquipmentSlot(usize),
     EquipWeaponPart(crate::weapon_parts::WeaponPartInstanceId),
     UnequipWeaponPart,
-    ConfirmWeaponEquipment,
     CancelWeaponEquipment,
     DeleteBrawler(crate::profiles::SavedBrawlerId),
     CancelDeleteBrawler,

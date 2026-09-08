@@ -4,11 +4,10 @@ title: Restore focused routed smoke terminal result acceptance
 status: backlog
 theme: quality
 release:
-priority: none
 created: 2026-08-28T08:55:40Z
-modified: 2026-08-28T08:55:59Z
+modified: 2026-09-08T18:30:19Z
 closed:
-revision: 3cce8b49388608f7
+revision: 939d6a7ea51586c8
 blocks: []
 related: [BRL-0025, BRL-0026, BRL-0029]
 ---

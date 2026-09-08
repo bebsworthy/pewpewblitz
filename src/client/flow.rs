@@ -30,7 +30,7 @@ use screens::{
     },
     game_select::{
         GameTypeSelectionDraft, keep_game_type_focus_visible, scroll_game_type_select,
-        spawn_game_type_select, update_game_selection_chrome,
+        spawn_game_type_select,
     },
     match_loading::{spawn_match_loading, update_match_loading},
     overlays::{
@@ -43,7 +43,7 @@ use screens::{
     queue::{spawn_queue, update_queue_cancel_button, update_queue_status},
     results::{clear_results, present_match_completion, spawn_results},
     server_select::{refresh_server_select, spawn_server_select, update_server_select_copy},
-    shared::{FlowNavigation, update_flow_button_chrome},
+    shared::{FlowNavigation, update_flow_button_chrome, update_shell_image_button_chrome},
 };
 
 mod actions;
@@ -166,13 +166,14 @@ impl Plugin for ClientFlowPlugin {
                     present_leave_confirmation,
                     present_change_server_confirmation,
                     present_match_completion,
+                    spawn_match_loading.before(update_match_loading),
                     update_match_loading,
                     update_connecting_copy,
                     update_rate_limit_try_again.after(present_flow_error_overlay),
                     update_queue_cancel_button,
                     update_queue_status,
-                    spawn_game_type_select.before(update_game_selection_chrome),
-                    update_game_selection_chrome,
+                    spawn_game_type_select.before(update_shell_image_button_chrome),
+                    update_shell_image_button_chrome,
                     update_flow_button_chrome,
                 )
                     .in_set(ClientFlowSet::PresentFlow),
@@ -247,3 +248,5 @@ fn exit_match_input(mut context: ResMut<super::ClientInputContext>) {
 
 #[cfg(test)]
 mod tests;
+
+pub(in crate::client) use screens::equipment::WeaponPreviewHost;

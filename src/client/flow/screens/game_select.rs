@@ -1,13 +1,10 @@
 //! Mode cards and exact advertised variant selection; confirmation remains flow-owned.
 use super::dashboard::{CREAM, INK, dashboard_font};
 use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
-use super::shared::{FlowButton, FlowNavigation, FlowRoot};
+use super::shared::{FlowButton, FlowNavigation, FlowRoot, ShellImageButton};
 use crate::client::{
     ClientLobbyMembership,
-    flow::{
-        actions::FlowUiAction,
-        model::{ClientFlow, ClientOverlay},
-    },
+    flow::{actions::FlowUiAction, model::ClientFlow},
 };
 use crate::lobby::{AdvertisedGameType, AdvertisedRulesSummary};
 use bevy::{
@@ -33,11 +30,6 @@ pub(in crate::client::flow) struct RenderedSelection {
     games: Vec<AdvertisedGameType>,
     width: f32,
     height: f32,
-}
-#[derive(Component)]
-pub(in crate::client::flow) struct GameSelectButton {
-    normal: Handle<Image>,
-    focus: Handle<Image>,
 }
 
 fn mode_index(game: &AdvertisedGameType) -> usize {
@@ -318,7 +310,7 @@ fn choice(
                 action: choice.action.clone(),
                 error_action: false,
             },
-            GameSelectButton {
+            ShellImageButton {
                 normal: normal.clone(),
                 focus,
             },
@@ -570,41 +562,6 @@ fn spawn_size_choices(
     }
 }
 
-#[allow(clippy::needless_pass_by_value, reason = "Bevy presentation system")]
-pub(in crate::client::flow) fn update_game_selection_chrome(
-    navigation: Res<FlowNavigation>,
-    overlay: Res<ClientOverlay>,
-    mut buttons: Query<(
-        &FlowButton,
-        &GameSelectButton,
-        &Interaction,
-        Has<InteractionDisabled>,
-        &mut ImageNode,
-    )>,
-) {
-    for (button, art, interaction, disabled, mut image) in &mut buttons {
-        let active = crate::client::flow::input::overlay_allows_button(&overlay, button);
-        let interaction = if active {
-            *interaction
-        } else {
-            Interaction::None
-        };
-        image.image = if active && navigation.selected == button.index && !disabled {
-            art.focus.clone()
-        } else {
-            art.normal.clone()
-        };
-        image.color = if disabled {
-            Color::srgba(0.6, 0.6, 0.6, 0.7)
-        } else if interaction == Interaction::Pressed {
-            Color::srgb(0.8, 0.8, 0.8)
-        } else if interaction == Interaction::Hovered {
-            Color::srgb(1.08, 1.08, 1.08)
-        } else {
-            Color::WHITE
-        };
-    }
-}
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are runtime-owned"

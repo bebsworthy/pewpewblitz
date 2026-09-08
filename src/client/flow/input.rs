@@ -363,8 +363,9 @@ pub(super) fn collect_flow_input(
                 navigation.selected =
                     dashboard_focus_neighbor(class, navigation.selected, direction, &available);
             }
-        } else if *flow.get() == ClientFlow::GameTypeSelect
-            && matches!(*overlay, ClientOverlay::None)
+        } else if (*flow.get() == ClientFlow::GameTypeSelect
+            && matches!(*overlay, ClientOverlay::None))
+            || matches!(*overlay, ClientOverlay::WeaponEquipment)
         {
             if !available.contains(&navigation.selected) {
                 navigation.selected = available[0];
@@ -389,12 +390,12 @@ pub(super) fn collect_flow_input(
                 None
             };
             if let Some(direction) = direction {
-                navigation.selected = game_selection_neighbor(
-                    navigation.selected,
-                    direction,
-                    &available,
-                    game_columns.iter().next().map_or(4, |c| c.0),
-                );
+                let columns = game_columns.iter().next().map_or(4, |c| c.0);
+                navigation.selected = if matches!(*overlay, ClientOverlay::WeaponEquipment) {
+                    equipment_neighbor(navigation.selected, direction, &available, columns)
+                } else {
+                    game_selection_neighbor(navigation.selected, direction, &available, columns)
+                };
             }
         } else {
             let position = available
@@ -543,4 +544,71 @@ pub(super) fn insert_brawler_name_text(draft: &mut BrawlerEditDraft, text: &str)
     draft.name.insert_str(draft.name_caret, text);
     draft.name_caret += text.len();
     draft.inline_error = None;
+}
+
+fn equipment_neighbor(
+    current: usize,
+    direction: DashboardNavigationDirection,
+    available: &[usize],
+    columns: usize,
+) -> usize {
+    if current == 1000 {
+        return if direction == DashboardNavigationDirection::Down {
+            available
+                .iter()
+                .copied()
+                .find(|i| *i != 1000)
+                .unwrap_or(current)
+        } else {
+            current
+        };
+    }
+    let wanted = match direction {
+        DashboardNavigationDirection::Up => {
+            if current < columns {
+                1000
+            } else {
+                current - columns
+            }
+        }
+        DashboardNavigationDirection::Down => {
+            let next_row = (current / columns + 1) * columns;
+            available
+                .iter()
+                .copied()
+                .filter(|i| *i >= next_row && *i < next_row + columns && *i < 1000)
+                .min_by_key(|i| i.abs_diff(current + columns))
+                .unwrap_or(current)
+        }
+        DashboardNavigationDirection::Left => current.saturating_sub(1),
+        DashboardNavigationDirection::Right => current + 1,
+    };
+    if available.contains(&wanted) {
+        wanted
+    } else {
+        current
+    }
+}
+
+#[cfg(test)]
+mod equipment_navigation_tests {
+    use super::{DashboardNavigationDirection as D, equipment_neighbor};
+    #[test]
+    fn grid_columns_reach_back_and_inventory_beyond_one_hundred() {
+        let mut available = (0..129).collect::<Vec<_>>();
+        available.push(1000);
+        assert_eq!(equipment_neighbor(0, D::Down, &available, 3), 3);
+        assert_eq!(equipment_neighbor(1, D::Up, &available, 3), 1000);
+        assert_eq!(equipment_neighbor(1000, D::Down, &available, 3), 0);
+        assert_eq!(equipment_neighbor(99, D::Down, &available, 3), 102);
+        assert_eq!(equipment_neighbor(128, D::Right, &available, 3), 128);
+        assert_eq!(equipment_neighbor(128, D::Up, &available, 3), 125);
+        assert_eq!(equipment_neighbor(6, D::Down, &available, 6), 12);
+        assert_eq!(equipment_neighbor(9, D::Down, &available, 5), 14);
+        assert_eq!(equipment_neighbor(5, D::Up, &available, 6), 1000);
+        assert_eq!(
+            equipment_neighbor(11, D::Down, &(0..13).collect::<Vec<_>>(), 6),
+            12
+        );
+    }
 }

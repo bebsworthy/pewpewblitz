@@ -231,7 +231,7 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
             Option<&DashboardButtonStyle>,
             Option<&mut ImageNode>,
         ),
-        Without<super::game_select::GameSelectButton>,
+        Without<ShellImageButton>,
     >,
 ) {
     let selected_brawler_id = memberships
@@ -297,5 +297,47 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
                 Color::WHITE
             };
         }
+    }
+}
+
+#[derive(Component)]
+pub(in crate::client::flow) struct ShellImageButton {
+    pub(in crate::client::flow) normal: Handle<Image>,
+    pub(in crate::client::flow) focus: Handle<Image>,
+}
+
+#[allow(clippy::needless_pass_by_value, reason = "Bevy presentation system")]
+pub(in crate::client::flow) fn update_shell_image_button_chrome(
+    navigation: Res<FlowNavigation>,
+    overlay: Res<ClientOverlay>,
+    mut buttons: Query<(
+        &FlowButton,
+        &ShellImageButton,
+        &Interaction,
+        Has<InteractionDisabled>,
+        &mut ImageNode,
+    )>,
+) {
+    for (button, art, interaction, disabled, mut image) in &mut buttons {
+        let active = overlay_allows_button(&overlay, button);
+        let interaction = if active {
+            *interaction
+        } else {
+            Interaction::None
+        };
+        image.image = if active && navigation.selected == button.index && !disabled {
+            art.focus.clone()
+        } else {
+            art.normal.clone()
+        };
+        image.color = if disabled {
+            Color::srgba(0.6, 0.6, 0.6, 0.7)
+        } else if interaction == Interaction::Pressed {
+            Color::srgb(0.8, 0.8, 0.8)
+        } else if interaction == Interaction::Hovered {
+            Color::srgb(1.08, 1.08, 1.08)
+        } else {
+            Color::WHITE
+        };
     }
 }

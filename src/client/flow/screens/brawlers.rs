@@ -1,4 +1,12 @@
-//! Saved-brawler browsing, creation, editing, equipment, and deletion presentation.
+pub(in crate::client::flow) use super::equipment::{
+    WeaponEquipmentDraft, keep_weapon_equipment_focus_visible, present_weapon_equipment,
+    scroll_weapon_equipment,
+};
+#[cfg(test)]
+pub(in crate::client::flow) use super::equipment::{
+    WeaponEquipmentRoot, WeaponEquipmentScrollArea,
+};
+// Saved-brawler browsing, creation, editing and deletion presentation.
 use super::shared::{FlowButton, FlowNavigation, spawn_flow_error_button, spawn_heading};
 use super::{
     dashboard::{DashboardLayoutClass, dashboard_layout_class},
@@ -66,27 +74,6 @@ impl Default for BrawlerEditDraft {
     }
 }
 
-#[derive(Resource, Clone, Debug, PartialEq, Eq)]
-pub(in crate::client::flow) struct WeaponEquipmentDraft {
-    pub(in crate::client::flow) brawler_id: Option<crate::profiles::SavedBrawlerId>,
-    pub(in crate::client::flow) equipped_part_ids:
-        [Option<crate::weapon_parts::WeaponPartInstanceId>;
-            crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-    pub(in crate::client::flow) selected_slot: usize,
-    pub(in crate::client::flow) inline_error: Option<String>,
-}
-
-impl Default for WeaponEquipmentDraft {
-    fn default() -> Self {
-        Self {
-            brawler_id: None,
-            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-            selected_slot: 0,
-            inline_error: None,
-        }
-    }
-}
-
 #[derive(Component)]
 pub(in crate::client::flow) struct DeleteBrawlerConfirmationRoot;
 
@@ -131,15 +118,6 @@ pub(in crate::client::flow) struct BrawlerEditorRoot {
     draft: BrawlerEditDraft,
     layout: BrawlerDetailsLayout,
 }
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(in crate::client::flow) struct WeaponEquipmentRoot {
-    draft: WeaponEquipmentDraft,
-    layout: BrawlerDetailsLayout,
-}
-
-#[derive(Component)]
-pub(in crate::client::flow) struct WeaponEquipmentScrollArea;
 
 #[allow(clippy::needless_pass_by_value)]
 pub(in crate::client::flow) fn open_empty_profile_creation(
@@ -1504,434 +1482,60 @@ pub(in crate::client::flow) fn present_brawler_editor(
         });
 }
 
-pub(in crate::client::flow) fn scroll_weapon_equipment(
-    mut wheel: MessageReader<MouseWheel>,
-    mut areas: Query<(&ComputedNode, &mut ScrollPosition), With<WeaponEquipmentScrollArea>>,
-) {
-    let delta = normalized_wheel_delta(wheel.read(), 24.0);
-    if delta.abs() <= f32::EPSILON {
-        return;
-    }
-    for (node, mut position) in &mut areas {
-        position.0.y = clamp_scroll_offset(
-            position.0.y - delta,
-            node.content_size().y,
-            node.size().y,
-            node.inverse_scale_factor(),
-        );
-    }
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::needless_pass_by_value,
-    reason = "one cohesive Bevy overlay builder renders the four slots, bounded inventory, and live preview"
-)]
-pub(in crate::client::flow) fn present_weapon_equipment(
-    mut commands: Commands,
-    flow: Res<State<ClientFlow>>,
-    overlay: Res<ClientOverlay>,
-    draft: Res<WeaponEquipmentDraft>,
-    roots: Query<(Entity, &WeaponEquipmentRoot)>,
-    scroll_areas: Query<&ScrollPosition, With<WeaponEquipmentScrollArea>>,
-    profile: Res<crate::client::ClientProfileModel>,
-    parts: Res<crate::weapon_parts::WeaponPartCatalogResource>,
-    mut screen: BrawlerScreenUi,
-) {
-    if !matches!(overlay.as_ref(), ClientOverlay::WeaponEquipment)
-        || *flow.get() != ClientFlow::Dashboard
-    {
-        for (entity, _) in &roots {
-            commands.entity(entity).despawn();
+pub(super) fn weapon_part_effect_text(effect: crate::weapon_parts::WeaponPartEffect) -> String {
+    let modifier = |label: &str, flat: f64, percent: i16, unit: &str| {
+        let mut values = Vec::new();
+        if flat != 0.0 {
+            values.push(format!("{flat:+}{unit}"));
         }
-        return;
-    }
-    let layout = brawler_screen_layout(&screen);
-    let render_key = WeaponEquipmentRoot {
-        draft: draft.clone(),
-        layout,
+        if percent != 0 {
+            values.push(format!("{:+}%", f32::from(percent) / 100.0));
+        }
+        format!("{label} {}", values.join(" / "))
     };
-    let existing = roots.iter().next();
-    if existing.is_some_and(|(_, root)| *root == render_key) {
-        return;
-    }
-    let retained_scroll = scroll_areas.iter().next().cloned().unwrap_or_default();
-    let first_render = existing.is_none();
-    for (entity, _) in &roots {
-        commands.entity(entity).despawn();
-    }
-    if first_render {
-        screen.navigation.selected = draft.selected_slot;
-    }
-    let Some(snapshot) = profile.snapshot() else {
-        return;
-    };
-    let Some(catalog) = profile.catalog() else {
-        return;
-    };
-    let Some(brawler_id) = draft.brawler_id else {
-        return;
-    };
-    let Some(saved) = snapshot.brawlers.iter().find(|item| item.id == brawler_id) else {
-        return;
-    };
-    let mut candidate = snapshot.clone();
-    if let Some(candidate_brawler) = candidate
-        .brawlers
-        .iter_mut()
-        .find(|item| item.id == brawler_id)
-    {
-        candidate_brawler.equipped_part_ids = draft.equipped_part_ids;
-    } else {
-        return;
-    }
-    let Some(candidate_brawler) = candidate.brawlers.iter().find(|item| item.id == brawler_id)
-    else {
-        return;
-    };
-    let resolved_preview =
-        candidate
-            .weapon_modifiers(candidate_brawler)
-            .ok()
-            .and_then(|modifiers| {
-                let weapon = catalog.weapon(saved.weapon_base_id)?;
-                crate::weapon_parts::resolve_advertised_weapon_parts(
-                    &weapon.configuration,
-                    &catalog.weapon_policy,
-                    catalog.fighter_body,
-                    crate::combat::WeaponPresetId(saved.weapon_base_id.0),
-                    modifiers,
-                )
-                .ok()
-            });
-    let preview_valid = resolved_preview.is_some();
-    let preview = resolved_preview.map_or_else(
-        || "INVALID PART COMBINATION".into(),
-        |weapon| weapon_preview_text(&weapon),
-    );
-    let compact = layout == BrawlerDetailsLayout::Compact;
-    let save_index = 5 + snapshot.inventory.len();
-
-    commands
-        .spawn((
-            render_key,
-            DespawnOnExit(ClientFlow::Dashboard),
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(0),
-                bottom: px(0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Stretch,
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.018, 0.11, 0.24)),
-            GlobalZIndex(520),
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: percent(100),
-                    min_height: px(72),
-                    align_items: AlignItems::Center,
-                    column_gap: px(16),
-                    padding: UiRect::axes(px(18), px(10)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.015, 0.04, 0.085)),
-            ))
-            .with_children(|header| {
-                spawn_brawler_screen_button(
-                    header,
-                    save_index + 1,
-                    FlowUiAction::CancelWeaponEquipment,
-                    "‹ BRAWLER",
-                    px(170),
-                    false,
-                    Color::srgb(0.06, 0.22, 0.4),
-                );
-                header.spawn((
-                    Text::new("CUSTOMIZE WEAPON"),
-                    TextFont::from_font_size(if compact { 27.0 } else { 34.0 }),
-                    TextColor(Color::WHITE),
-                ));
-            });
-            root.spawn((
-                Node {
-                    width: percent(100),
-                    padding: UiRect::axes(px(24), px(12)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.025, 0.2, 0.42)),
-            ))
-            .with_children(|summary| {
-                summary.spawn((
-                    Text::new(format!(
-                        "{}  ·  {}",
-                        advertised_weapon_name(catalog, saved.weapon_base_id),
-                        preview
-                    )),
-                    TextFont::from_font_size(16.0),
-                    TextColor(Color::srgb(0.72, 0.9, 1.0)),
-                ));
-            });
-            root.spawn((Node {
-                width: percent(100),
-                min_height: px(0),
-                flex_grow: 1.0,
-                flex_direction: if compact {
-                    FlexDirection::Column
-                } else {
-                    FlexDirection::Row
-                },
-                align_items: AlignItems::Stretch,
-                justify_content: JustifyContent::Center,
-                row_gap: px(14),
-                column_gap: px(18),
-                padding: UiRect::all(if compact { px(12) } else { px(22) }),
-                ..default()
-            },))
-                .with_children(|body| {
-                    body.spawn((
-                        Node {
-                            width: if compact { percent(100) } else { percent(36) },
-                            flex_direction: FlexDirection::Column,
-                            align_items: AlignItems::Stretch,
-                            row_gap: px(9),
-                            padding: UiRect::all(px(18)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.03, 0.22, 0.46)),
-                    ))
-                    .with_children(|slots| {
-                        slots.spawn((
-                            Text::new("EQUIPPED SLOTS"),
-                            TextFont::from_font_size(18.0),
-                            TextColor(Color::srgb(0.38, 0.88, 1.0)),
-                        ));
-                        for slot in 0..crate::weapon_parts::WEAPON_PART_SLOT_COUNT {
-                            let label = draft.equipped_part_ids[slot]
-                                .and_then(|id| snapshot.inventory.iter().find(|part| part.id == id))
-                                .map_or_else(
-                                    || format!("SLOT {} · EMPTY", slot + 1),
-                                    |part| format!("SLOT {} · {}", slot + 1, part.display_name),
-                                );
-                            spawn_brawler_screen_button(
-                                slots,
-                                slot,
-                                FlowUiAction::SelectEquipmentSlot(slot),
-                                &if slot == draft.selected_slot {
-                                    format!("> {label}")
-                                } else {
-                                    label
-                                },
-                                percent(100),
-                                false,
-                                if slot == draft.selected_slot {
-                                    Color::srgb(0.04, 0.5, 0.66)
-                                } else {
-                                    Color::srgb(0.06, 0.27, 0.48)
-                                },
-                            );
-                        }
-                        spawn_brawler_screen_button(
-                            slots,
-                            4,
-                            FlowUiAction::UnequipWeaponPart,
-                            "UNEQUIP SELECTED SLOT",
-                            percent(100),
-                            false,
-                            Color::srgb(0.35, 0.18, 0.24),
-                        );
-                    });
-                    body.spawn((
-                        WeaponEquipmentScrollArea,
-                        retained_scroll,
-                        Node {
-                            width: if compact { percent(100) } else { percent(64) },
-                            min_height: px(0),
-                            flex_grow: 1.0,
-                            flex_shrink: 1.0,
-                            flex_direction: FlexDirection::Column,
-                            align_items: AlignItems::Stretch,
-                            row_gap: px(9),
-                            padding: UiRect::all(px(18)),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.025, 0.075, 0.15)),
-                    ))
-                    .with_children(|scroll| {
-                        scroll.spawn((
-                            Text::new("OWNED PARTS"),
-                            TextFont::from_font_size(18.0),
-                            TextColor(Color::srgb(1.0, 0.82, 0.38)),
-                        ));
-                        for (index, part) in snapshot.inventory.iter().enumerate() {
-                            let presentation = parts
-                                .0
-                                .definition(part.definition_id)
-                                .map_or("Part", |definition| definition.presentation_type.as_str());
-                            let equipped_elsewhere = snapshot.brawlers.iter().find(|brawler| {
-                                brawler.id != brawler_id
-                                    && brawler.equipped_part_ids.contains(&Some(part.id))
-                            });
-                            let availability = equipped_elsewhere
-                                .map(|brawler| format!(" · EQUIPPED BY {}", brawler.name))
-                                .unwrap_or_default();
-                            let effects = part
-                                .effects
-                                .iter()
-                                .map(|effect| weapon_part_effect_text(*effect))
-                                .collect::<Vec<_>>()
-                                .join(" · ");
-                            spawn_brawler_screen_button(
-                                scroll,
-                                5 + index,
-                                FlowUiAction::EquipWeaponPart(part.id),
-                                &format!(
-                                    "{} [{}] — {}{}",
-                                    part.display_name, presentation, effects, availability
-                                ),
-                                percent(100),
-                                false,
-                                Color::srgb(0.09, 0.18, 0.28),
-                            );
-                        }
-                        if let Some(error) = &draft.inline_error {
-                            scroll.spawn((
-                                Text::new(error),
-                                TextFont::from_font_size(14.0),
-                                TextColor(Color::srgb(1.0, 0.5, 0.45)),
-                            ));
-                        }
-                    });
-                });
-            root.spawn((
-                Node {
-                    width: percent(100),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    column_gap: px(16),
-                    padding: UiRect::axes(px(22), px(12)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.015, 0.055, 0.11)),
-            ))
-            .with_children(|footer| {
-                spawn_brawler_screen_button(
-                    footer,
-                    save_index,
-                    FlowUiAction::ConfirmWeaponEquipment,
-                    "SAVE EQUIPMENT",
-                    if compact { percent(100) } else { px(420) },
-                    !preview_valid || profile.pending(),
-                    Color::srgb(0.03, 0.58, 0.4),
-                );
-            });
-        });
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "computed UI bounds are available only after Bevy's layout pass"
-)]
-pub(in crate::client::flow) fn keep_weapon_equipment_focus_visible(
-    overlay: Res<ClientOverlay>,
-    navigation: Res<FlowNavigation>,
-    buttons: Query<(&FlowButton, &ChildOf, &ComputedNode, &UiGlobalTransform)>,
-    mut areas: Query<
-        (
-            Entity,
-            &ComputedNode,
-            &UiGlobalTransform,
-            &mut ScrollPosition,
-        ),
-        With<WeaponEquipmentScrollArea>,
-    >,
-    mut prior: Local<Option<(Entity, usize)>>,
-) {
-    if !matches!(overlay.as_ref(), ClientOverlay::WeaponEquipment) {
-        *prior = None;
-        return;
-    }
-    let Some((area_entity, area_node, area_transform, mut scroll)) = areas.iter_mut().next() else {
-        *prior = None;
-        return;
-    };
-    let focus_key = (area_entity, navigation.selected);
-    if prior.as_ref() == Some(&focus_key) {
-        return;
-    }
-    *prior = Some(focus_key);
-    let Some((_, _, button_node, button_transform)) =
-        buttons.iter().find(|(button, child_of, _, _)| {
-            child_of.parent() == area_entity && button.index == navigation.selected
-        })
-    else {
-        return;
-    };
-    if area_node.is_empty() || button_node.is_empty() {
-        return;
-    }
-    let (_, _, area_center) = area_transform.to_scale_angle_translation();
-    let (_, _, button_center) = button_transform.to_scale_angle_translation();
-    let visible_top = area_center.y - area_node.size().y * 0.5 + 8.0;
-    let visible_bottom = area_center.y + area_node.size().y * 0.5 - 8.0;
-    let button_top = button_center.y - button_node.size().y * 0.5;
-    let button_bottom = button_center.y + button_node.size().y * 0.5;
-    let offset = offset_keeping_interval_visible(
-        scroll.0.y,
-        visible_top..visible_bottom,
-        button_top..button_bottom,
-        area_node.inverse_scale_factor(),
-    );
-    scroll.0.y = clamp_scroll_offset(
-        offset,
-        area_node.content_size().y,
-        area_node.size().y,
-        area_node.inverse_scale_factor(),
-    );
-}
-
-fn weapon_part_effect_text(effect: crate::weapon_parts::WeaponPartEffect) -> String {
-    let percent = |value: i16| format!("{:+}%", f32::from(value) / 100.0);
     match effect {
         crate::weapon_parts::WeaponPartEffect::Capacity {
             flat,
             percent_basis_points,
-        } => format!("capacity {flat:+} {}", percent(percent_basis_points)),
+        } => modifier("Capacity", f64::from(flat), percent_basis_points, ""),
         crate::weapon_parts::WeaponPartEffect::Damage {
             flat,
             percent_basis_points,
-        } => format!("damage {flat:+} {}", percent(percent_basis_points)),
+        } => modifier("Damage", f64::from(flat), percent_basis_points, ""),
         crate::weapon_parts::WeaponPartEffect::FireInterval {
             flat_ticks,
             percent_basis_points,
-        } => format!(
-            "fire interval {flat_ticks:+}t {}",
-            percent(percent_basis_points)
+        } => modifier(
+            "Fire interval",
+            f64::from(flat_ticks) / crate::timing::SIMULATION_TICK_HZ_F64,
+            percent_basis_points,
+            "s",
         ),
         crate::weapon_parts::WeaponPartEffect::RefillInterval {
             flat_ticks,
             percent_basis_points,
-        } => format!("refill {flat_ticks:+}t {}", percent(percent_basis_points)),
+        } => modifier(
+            "Refill interval",
+            f64::from(flat_ticks) / crate::timing::SIMULATION_TICK_HZ_F64,
+            percent_basis_points,
+            "s",
+        ),
         crate::weapon_parts::WeaponPartEffect::Reach {
             flat_milliunits,
             percent_basis_points,
-        } => format!(
-            "reach {:+.1} {}",
+        } => modifier(
+            "Reach",
             f64::from(flat_milliunits) / 1_000.0,
-            percent(percent_basis_points)
+            percent_basis_points,
+            "",
         ),
         crate::weapon_parts::WeaponPartEffect::Slow {
             penalty_basis_points,
             duration_ticks,
         } => format!(
-            "Slow {:.0}%/{duration_ticks}t",
-            f32::from(penalty_basis_points) / 100.0
+            "Slow {:.0}% for {:.1}s",
+            f32::from(penalty_basis_points) / 100.0,
+            crate::timing::simulation_seconds_f64(u32::from(duration_ticks))
         ),
         crate::weapon_parts::WeaponPartEffect::Cold { amount } => {
             format!("Cold +{amount}")
@@ -1941,14 +1545,20 @@ fn weapon_part_effect_text(effect: crate::weapon_parts::WeaponPartEffect) -> Str
             damage_per_tick,
             tick_interval,
             duration_ticks,
-        } => format!("{kind:?} {damage_per_tick}/{tick_interval}t for {duration_ticks}t"),
+        } => format!(
+            "{kind:?} {damage_per_tick} every {:.1}s for {:.1}s",
+            crate::timing::simulation_seconds_f64(u32::from(tick_interval)),
+            crate::timing::simulation_seconds_f64(u32::from(duration_ticks))
+        ),
         crate::weapon_parts::WeaponPartEffect::Heal { amount } => {
             format!("Allied healing {amount}")
         }
     }
 }
 
-fn weapon_preview_text(weapon: &crate::combat::ResolvedWeapon) -> String {
+pub(super) fn weapon_stat_rows(
+    weapon: &crate::combat::ResolvedWeapon,
+) -> Vec<(&'static str, String)> {
     let damage = weapon
         .recipe
         .payload_bundles
@@ -1973,15 +1583,41 @@ fn weapon_preview_text(weapon: &crate::combat::ResolvedWeapon) -> String {
         crate::combat::DeliveryMethod::MeleeArc { reach, .. }
         | crate::combat::DeliveryMethod::ConeSpray { reach, .. } => reach,
     };
-    format!(
-        "Capacity {} · Damage {} · Fire {}t · Refill {}t · Reach {:.0}{}",
-        weapon.recipe.economy.capacity(),
-        damage,
-        weapon.recipe.fire_cooldown_ticks,
-        weapon.recipe.economy.refill_ticks(),
-        reach,
-        if slow { " · Slow" } else { "" }
-    )
+    let mut rows = vec![
+        ("DAMAGE", damage.to_string()),
+        ("CAPACITY", weapon.recipe.economy.capacity().to_string()),
+        (
+            "FIRE INTERVAL",
+            format!(
+                "{:.2}s",
+                crate::timing::simulation_seconds_f64(
+                    u32::try_from(weapon.recipe.fire_cooldown_ticks).unwrap_or(u32::MAX)
+                )
+            ),
+        ),
+        (
+            "REFILL INTERVAL",
+            format!(
+                "{:.2}s",
+                crate::timing::simulation_seconds_f64(
+                    u32::try_from(weapon.recipe.economy.refill_ticks()).unwrap_or(u32::MAX)
+                )
+            ),
+        ),
+        ("REACH", format!("{reach:.0}")),
+    ];
+    if slow {
+        rows.push(("SLOW", "YES".into()));
+    }
+    rows
+}
+
+pub(super) fn weapon_preview_text(weapon: &crate::combat::ResolvedWeapon) -> String {
+    weapon_stat_rows(weapon)
+        .iter()
+        .map(|(label, value)| format!("{label} {value}"))
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 #[allow(clippy::needless_pass_by_value)]

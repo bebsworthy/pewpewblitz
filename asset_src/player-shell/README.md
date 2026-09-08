@@ -18,3 +18,9 @@ BRL-0116 game selection: `generate-game-selection.cjs` exports the clean cream/t
 Run `python3 asset_src/player-shell/generate-map-overviews.py`, then `node asset_src/player-shell/render-map-overviews.cjs` with Sharp available. The seven original schematic overviews encode actual authored map dimensions, placements, filled rectangles, rotated footprints and spawn points. They are overview diagrams, not gameplay screenshots. Regenerate when map geometry changes. SVG sources live in `map-overviews/`; runtime PNGs live in `assets/brawler/ui/shell/`.
 
 Practice card frames: `node asset_src/player-shell/generate-practice-cards.cjs` (Sharp). Dedicated landscape proportions, orange choice fill, cream/navy focus frame and pointer; native text remains independent of the raster chrome.
+
+Weapon part family illustrations are original SVG UI assets, exported by
+`generate-parts.cjs` using Sharp. Magazine, ammunition, barrel, chamber and element
+shapes follow the catalog's presentation families. They are symbolic illustrations;
+the native weapon viewport uses the existing imported blaster and does not imply
+that modifiers attach physical meshes.

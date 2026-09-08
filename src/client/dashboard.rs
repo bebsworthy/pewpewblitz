@@ -17,6 +17,8 @@ use bevy::{
 };
 use core::time::Duration;
 
+mod weapon_preview;
+
 const DASHBOARD_RENDER_LAYER: usize = 29;
 
 #[derive(Resource)]
@@ -75,18 +77,29 @@ pub(super) struct ClientDashboardPlugin;
 
 impl Plugin for ClientDashboardPlugin {
     fn build(&self, app: &mut App) {
+        weapon_preview::install(app);
         app.add_plugins(UiMaterialPlugin::<DashboardBackgroundMaterial>::default())
             .add_systems(
                 Update,
+                (ensure_dashboard_background, update_dashboard_background)
+                    .chain()
+                    .run_if(in_state(ClientFlow::Dashboard)),
+            )
+            .add_systems(
+                Update,
                 (
-                    ensure_dashboard_background,
-                    update_dashboard_background,
                     spawn_dashboard_preview,
                     bind_dashboard_preview_host,
                     upgrade_dashboard_preview,
                 )
                     .chain()
-                    .run_if(in_state(ClientFlow::Dashboard)),
+                    .run_if(
+                        in_state(ClientFlow::Dashboard).or_else(in_state(ClientFlow::MatchLoading)),
+                    ),
+            )
+            .add_systems(
+                OnExit(ClientFlow::MatchLoading),
+                release_dashboard_preview_target,
             )
             .add_systems(
                 OnExit(ClientFlow::Dashboard),
@@ -186,6 +199,7 @@ fn dashboard_motion(time: f32, reduced_motion: bool, reduced_effects: bool) -> (
 )]
 fn spawn_dashboard_preview(
     mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
     hosts: Query<Entity, With<DashboardPreviewHost>>,
     mut images: ResMut<Assets<Image>>,
     primitives: Res<super::presentation_3d::Primitive3dAssets>,
@@ -213,7 +227,7 @@ fn spawn_dashboard_preview(
         .spawn((
             DashboardOwned,
             DashboardPreviewCamera,
-            DespawnOnExit(ClientFlow::Dashboard),
+            DespawnOnExit(*flow.get()),
             Camera3d::default(),
             Camera {
                 order: -2,
@@ -237,12 +251,12 @@ fn spawn_dashboard_preview(
         host,
     });
 
-    spawn_dashboard_preview_lights(&mut commands, &layer);
+    spawn_dashboard_preview_lights(&mut commands, &layer, *flow.get());
     let root = commands
         .spawn((
             DashboardOwned,
             DashboardPreviewRoot,
-            DespawnOnExit(ClientFlow::Dashboard),
+            DespawnOnExit(*flow.get()),
             Transform::default(),
             Visibility::default(),
             layer.clone(),
@@ -297,10 +311,10 @@ fn bind_dashboard_preview_host(
     target.host = desired_host;
 }
 
-fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers) {
+fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers, flow: ClientFlow) {
     commands.spawn((
         DashboardOwned,
-        DespawnOnExit(ClientFlow::Dashboard),
+        DespawnOnExit(flow),
         DirectionalLight {
             illuminance: 9_000.0,
             shadow_maps_enabled: true,
@@ -311,7 +325,7 @@ fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers)
     ));
     commands.spawn((
         DashboardOwned,
-        DespawnOnExit(ClientFlow::Dashboard),
+        DespawnOnExit(flow),
         PointLight {
             color: Color::srgb(1.0, 0.82, 0.68),
             intensity: 1_150_000.0,
@@ -324,7 +338,7 @@ fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers)
     ));
     commands.spawn((
         DashboardOwned,
-        DespawnOnExit(ClientFlow::Dashboard),
+        DespawnOnExit(flow),
         PointLight {
             color: Color::srgb(0.05, 0.72, 0.92),
             intensity: 1_800_000.0,

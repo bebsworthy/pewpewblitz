@@ -18,6 +18,7 @@ pub(in crate::client::flow) struct PendingEditedBrawler(
     pub(in crate::client::flow) Option<crate::profiles::SavedBrawlerId>,
 );
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_profile_decision(
     profile: &mut crate::client::ClientProfileModel,
     dashboard_notice: &mut DashboardNotice,
@@ -25,6 +26,7 @@ pub(super) fn resolve_profile_decision(
     pending_edited_brawler: &mut PendingEditedBrawler,
     creation_draft: &mut BrawlerCreationDraft,
     brawler_edit: &mut BrawlerEditDraft,
+    equipment: &mut crate::client::flow::screens::brawlers::WeaponEquipmentDraft,
     commit: &mut FlowCommit,
 ) {
     let Some(decision) = profile.take_decision() else {
@@ -67,6 +69,26 @@ pub(super) fn resolve_profile_decision(
             "Choose only one elemental resistance passive for this brawler.".to_string()
         }
     });
+    if equipment.awaiting_save {
+        equipment.awaiting_save = false;
+        if let Some(saved) = profile.snapshot().and_then(|s| {
+            s.brawlers
+                .iter()
+                .find(|b| Some(b.id) == equipment.brawler_id)
+        }) {
+            equipment.equipped_part_ids = saved.equipped_part_ids;
+        }
+        equipment.inline_error = if accepted {
+            None
+        } else {
+            dashboard_notice.0.take()
+        };
+        dashboard_notice.0 = None;
+        equipment.picker_open = !accepted;
+        commit.overlay = Some(OverlayCommit::WeaponEquipment);
+        commit.focus_index = Some(if accepted { equipment.selected_slot } else { 0 });
+        return;
+    }
     if accepted
         && let Some(ordinal) = pending_created_brawler.0.take()
         && let Some(created) = profile.snapshot().and_then(|snapshot| {

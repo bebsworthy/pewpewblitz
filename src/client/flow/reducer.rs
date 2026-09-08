@@ -160,6 +160,9 @@ fn resolve_connection_observation(
 ) {
     match observation {
         SessionObservation::Accepted => {
+            // A new accepted session retires prior connection errors. Any new
+            // persistence/content error below still takes precedence in commit_flow.
+            commit.overlay = Some(OverlayCommit::Clear);
             if let Some((membership, target, _)) = membership.iter().next() {
                 persistence.state.preferred_display_name = Some(model.committed_name.clone());
                 if let Some(target) = target {
@@ -365,6 +368,7 @@ fn start_saved_connection(address: &str, model: &mut ServerSelectModel, commit: 
             model.address = target.logical_address.canonical().to_string();
             commit.start_target = Some(target);
             commit.next_flow = Some(ClientFlow::Connecting);
+            commit.overlay = Some(OverlayCommit::Clear);
         }
         Err(error) => model.inline_error = Some(error),
     }
@@ -375,6 +379,7 @@ fn retry_connection(model: &mut ServerSelectModel, commit: &mut FlowCommit) {
         Ok(target) => {
             commit.start_target = Some(target);
             commit.next_flow = Some(ClientFlow::Connecting);
+            commit.overlay = Some(OverlayCommit::Clear);
         }
         Err(error) => model.inline_error = Some(error),
     }
@@ -452,6 +457,7 @@ pub(super) fn resolve_flow_action(
         &mut pending_edited_brawler,
         &mut creation_draft,
         &mut brawler_edit,
+        &mut equipment_draft,
         &mut commit,
     );
     if let Some(explicit) = actions.explicit.take() {
@@ -467,6 +473,14 @@ pub(super) fn resolve_flow_action(
         return;
     }
     if let Some(observation) = actions.session.take() {
+        if matches!(
+            observation,
+            SessionObservation::UnexpectedLoss
+                | SessionObservation::TimedOut
+                | SessionObservation::Rejected(_)
+        ) {
+            *equipment_draft = WeaponEquipmentDraft::default();
+        }
         resolve_session_observation(
             observation,
             *flow.get(),
@@ -588,7 +602,6 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::SelectEquipmentSlot(_)
         | FlowUiAction::EquipWeaponPart(_)
         | FlowUiAction::UnequipWeaponPart
-        | FlowUiAction::ConfirmWeaponEquipment
         | FlowUiAction::CancelWeaponEquipment) => {
             equipment::resolve_equipment_action(
                 &action,

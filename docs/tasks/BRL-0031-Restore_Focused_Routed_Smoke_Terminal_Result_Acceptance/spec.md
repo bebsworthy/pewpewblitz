@@ -28,3 +28,7 @@ Both clients authenticate the lobby, accept the same grant, connect to the match
 # Non-goals
 
 - No protocol version/schema change, timeout relaxation, hidden retry, or suppression of genuine worker-exit mismatches.
+
+
+## Related native review evidence, 2026-09-08
+During BRL-0119 review, the isolated 127.0.0.1:5134 supervisor (/tmp/brl117-preview-server.log) spawned worker 78084145296260721536696168547249502481 at ts_ms=1788891973378, reported ready, then reaped code 0 about 22 seconds later with WorkerExitMismatch. The GUI displayed Connecting and later returned to Dashboard; gameplay was not verified. Similar exits appear earlier in the same log before the loading UI change. This is related evidence, not a confirmed identical root cause; correlate client and worker readiness before assigning causality.
