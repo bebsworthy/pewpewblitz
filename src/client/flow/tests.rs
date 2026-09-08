@@ -2435,10 +2435,111 @@ fn dashboard_settings_is_menu_owned_and_mode_card_opens_selection() {
     assert!(buttons(&mut app).contains(&FlowUiAction::OpenSettings));
     press_flow_button(&mut app, &FlowUiAction::CloseDashboardMenu);
     app.update();
+    assert_eq!(
+        app.world().resource::<FlowNavigation>().selected,
+        DASHBOARD_MENU_INDEX
+    );
     press_flow_button(&mut app, &FlowUiAction::OpenGameTypeSelect);
     app.update();
     assert_eq!(
         *app.world().resource::<State<ClientFlow>>().get(),
         ClientFlow::GameTypeSelect
+    );
+}
+
+#[test]
+fn dashboard_menu_focus_is_visible_without_pointer_hover() {
+    let style = Some(DashboardButtonStyle::Header);
+    assert_ne!(
+        flow_button_background(false, Interaction::None, true, false, style),
+        flow_button_background(false, Interaction::None, false, false, style),
+    );
+    assert_eq!(
+        flow_button_background(true, Interaction::None, true, false, style),
+        flow_button_background(true, Interaction::None, false, false, style),
+    );
+    assert_eq!(
+        flow_button_border(
+            false,
+            Interaction::None,
+            true,
+            false,
+            Some(DashboardButtonStyle::Preview)
+        ),
+        Color::NONE,
+    );
+}
+
+#[test]
+fn dashboard_chrome_focus_belongs_only_to_the_active_surface() {
+    let mut app = App::new();
+    app.init_resource::<FlowNavigation>()
+        .init_resource::<ClientOverlay>()
+        .init_resource::<screens::game_select::GameTypeSelectionDraft>()
+        .add_systems(Update, screens::shared::update_flow_button_chrome);
+    let mut buttons = Vec::new();
+    for overlay_owned in [false, true] {
+        for index in 0..2 {
+            buttons.push(
+                app.world_mut()
+                    .spawn((
+                        FlowButton {
+                            index,
+                            action: FlowUiAction::OpenDashboardMenu,
+                            error_action: overlay_owned,
+                        },
+                        DashboardButtonStyle::Header,
+                        Interaction::Hovered,
+                        BackgroundColor::default(),
+                        BorderColor::default(),
+                    ))
+                    .id(),
+            );
+        }
+    }
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::DashboardMenu;
+    for selected in 0..2 {
+        app.world_mut().resource_mut::<FlowNavigation>().selected = selected;
+        app.update();
+        for (index, &entity) in buttons.iter().enumerate() {
+            let expected_focus = index == selected + 2;
+            let expected = flow_button_background(
+                false,
+                if index >= 2 {
+                    Interaction::Hovered
+                } else {
+                    Interaction::None
+                },
+                expected_focus,
+                false,
+                Some(DashboardButtonStyle::Header),
+            );
+            assert_eq!(
+                app.world().get::<BackgroundColor>(entity).unwrap().0,
+                expected
+            );
+        }
+    }
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
+    app.update();
+    assert_eq!(
+        app.world().get::<BackgroundColor>(buttons[1]).unwrap().0,
+        flow_button_background(
+            false,
+            Interaction::Hovered,
+            true,
+            false,
+            Some(DashboardButtonStyle::Header)
+        )
+    );
+    assert_eq!(
+        app.world().get::<BackgroundColor>(buttons[3]).unwrap().0,
+        flow_button_background(
+            false,
+            Interaction::None,
+            false,
+            false,
+            Some(DashboardButtonStyle::Header)
+        )
     );
 }

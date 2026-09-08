@@ -97,3 +97,22 @@ Deliver geometry/background first, typography/header second, icons/assets/action
 
 ## User acceptance and commit
 User accepted the correction pass with “good, commit” on 2026-09-08. Visual feedback is accepted and the Dashboard slice is complete. Physical gamepad and enlarged UI-scale hands-on coverage were not performed; this limitation was disclosed before acceptance. Automated navigation coverage, native wide/compact rendering, pointer navigation and Settings Escape return are recorded above. Commit includes only the player-shell implementation, artwork/design records and related Ticket mirrors; unrelated VFX, gameplay data and repository-guide changes remain uncommitted.
+
+
+## Gamepad focus feedback (2026-09-08)
+User reports the navigation-selected button is insufficiently visible. Reopen for a focused correction: replace the subtle teal edge with a bold cream/navy inset frame and directional focus marker, distinguish navigation focus from mouse hover, keep disabled controls unaccented, and retain the transparent hero preview. Focus must be legible without animation or device-specific button prompts. Verify generated chrome and existing navigation tests; user gamepad review remains the acceptance check.
+
+
+### Focus correction evidence
+Implemented bold navy/cream double framing and a left focus pointer in every Dashboard focus-panel export. Only the navigation-focused control uses that artwork; pointer hover retains a lighter tint so a parked cursor cannot create a second strong focus marker. Menu-overlay focused rows use cream fill, including when the pointer is absent. Disabled rows keep their disabled treatment; the preview stays transparent. No animation or controller-specific glyph is required.
+Native screenshot confirms the new Play focus treatment against unselected mode/Practice controls. Client build, client-library Clippy with -D warnings, all 10 targeted Dashboard tests (including a new pointer-independent menu-focus regression), formatting and diff whitespace checks pass. Physical gamepad subjective confirmation remains with the user; keep doing until this feedback is accepted. Changes are not committed yet.
+
+
+### Menu focus ownership regression
+User reports gamepad selection highlights Menu and Dashboard simultaneously. Shared navigation indices are intentionally reused, but Dashboard chrome must not show navigation focus while an overlay owns input. Scope: suppress background Dashboard focus during overlays while retaining active Menu focus, keep selection indices and actions unchanged, and add a focused ECS regression covering matching indices and focus restoration after closing Menu.
+
+The fix reuses overlay_allows_button, the production input-owner predicate, for focus and hover/press chrome. It applies consistently to Menu, Settings and other overlays instead of adding a Dashboard-only input path. Also replaced the obsolete Menu-return index 5 with DASHBOARD_MENU_INDEX (4). Regression coverage cycles matching Dashboard/Menu indices, checks background hover suppression, checks focus restoration when the overlay clears, and asserts the actual close-Menu action restores the Menu button.
+
+Verification after the final Menu-return correction: all 11 targeted Dashboard tests pass; canonical client binary build and client-library Clippy with warnings denied pass; diff whitespace check passes. Menu-only visual focus and return-to-Menu focus are covered by regression tests. Ready for the user's gamepad retry; changes remain uncommitted with the stronger-focus correction.
+
+User accepted both focus corrections with “ok commit” on 2026-09-08. Close the reopened feedback: stronger navigation focus, active-overlay-only highlights, and Menu-return focus are implemented and accepted. Lesson: input routing and visual focus must share the same ownership predicate; shared indices alone do not identify the active control.

@@ -19,7 +19,9 @@ use crate::client::{
         persistence::{ClientLocalLoadFailures, ConnectionPersistence, local_load_error},
         screens::{
             brawlers::{BrawlerCreationDraft, BrawlerEditDraft, WeaponEquipmentDraft},
-            dashboard::{DASHBOARD_PLAY_INDEX, DashboardNotice, DashboardReturnFocus},
+            dashboard::{
+                DASHBOARD_MENU_INDEX, DASHBOARD_PLAY_INDEX, DashboardNotice, DashboardReturnFocus,
+            },
             game_select::GameTypeSelectionDraft,
             server_select::{EditingField, ServerSelectModel},
             shared::FlowNavigation,
@@ -526,7 +528,7 @@ pub(super) fn resolve_flow_action(
         }
         FlowUiAction::CloseDashboardMenu | FlowUiAction::KeepServer => {
             commit.overlay = Some(OverlayCommit::Clear);
-            commit.focus_index = Some(5);
+            commit.focus_index = Some(DASHBOARD_MENU_INDEX);
         }
         FlowUiAction::RequestChangeServer => {
             commit.overlay = Some(OverlayCommit::ChangeServerConfirmation);

@@ -1,7 +1,10 @@
 //! Shared flow-screen roots, buttons, navigation, and interaction presentation.
 
 use super::{dashboard::DashboardButtonStyle, game_select::GameTypeSelectionDraft};
-use crate::client::{ClientLobbyMembership, flow::actions::FlowUiAction};
+use crate::client::{
+    ClientLobbyMembership,
+    flow::{actions::FlowUiAction, input::overlay_allows_button, model::ClientOverlay},
+};
 use bevy::{prelude::*, ui::InteractionDisabled};
 use lightyear::prelude::client::Client;
 
@@ -141,6 +144,13 @@ pub(in crate::client::flow) fn flow_button_background(
         if disabled {
             return Color::srgb(0.69, 0.71, 0.66);
         }
+        if focused && matches!(style, DashboardButtonStyle::Header) {
+            return if interaction == Interaction::Pressed {
+                CREAM.mix(&INK, 0.15)
+            } else {
+                CREAM
+            };
+        }
         let base = match style {
             DashboardButtonStyle::Play | DashboardButtonStyle::Header => ORANGE,
             DashboardButtonStyle::Build | DashboardButtonStyle::Practice => TEAL,
@@ -207,6 +217,7 @@ pub(in crate::client::flow) fn flow_button_border(
 )]
 pub(in crate::client::flow) fn update_flow_button_chrome(
     navigation: Res<FlowNavigation>,
+    overlay: Res<ClientOverlay>,
     assets: Option<Res<crate::client::ClientAssetHandles>>,
     game_draft: Res<GameTypeSelectionDraft>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
@@ -227,7 +238,14 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
     for (button, interaction, disabled, mut background, mut border, dashboard_style, image) in
         &mut buttons
     {
-        let focused = button.index == navigation.selected;
+        // Use the same owner gate as input collection: indices are local to each surface.
+        let active = overlay_allows_button(&overlay, button);
+        let focused = active && button.index == navigation.selected;
+        let interaction = if active {
+            *interaction
+        } else {
+            Interaction::None
+        };
         let selected_game = match button.action {
             FlowUiAction::SelectGameTypeDraft(index) => game_draft.selected_index == Some(index),
             _ => false,
@@ -239,10 +257,10 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
         let selected = selected_game || selected_brawler;
         let dashboard_style = dashboard_style.copied();
         background.0 =
-            flow_button_background(disabled, *interaction, focused, selected, dashboard_style);
+            flow_button_background(disabled, interaction, focused, selected, dashboard_style);
         border.set_all(flow_button_border(
             disabled,
-            *interaction,
+            interaction,
             focused,
             selected,
             dashboard_style,
@@ -259,7 +277,7 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
                     DashboardButtonStyle::Header => 4,
                     DashboardButtonStyle::Preview => continue,
                 };
-                image.image = if !disabled && (focused || *interaction == Interaction::Hovered) {
+                image.image = if !disabled && focused {
                     assets.dashboard_focus_panels[index].clone()
                 } else {
                     assets.dashboard_panels[index].clone()
@@ -268,9 +286,9 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
 
             image.color = if disabled {
                 Color::srgba(0.65, 0.65, 0.65, 0.7)
-            } else if *interaction == Interaction::Pressed {
+            } else if interaction == Interaction::Pressed {
                 Color::srgb(0.82, 0.86, 0.86)
-            } else if focused || *interaction == Interaction::Hovered {
+            } else if focused || interaction == Interaction::Hovered {
                 Color::srgb(1.08, 1.08, 1.08)
             } else {
                 Color::WHITE
