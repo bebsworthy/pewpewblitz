@@ -1,185 +1,610 @@
-//! Game-type catalog selection, scrolling, and focus visibility.
-
+//! Mode cards and exact advertised variant selection; confirmation remains flow-owned.
+use super::dashboard::{CREAM, INK, dashboard_font};
 use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
-use super::{
-    queue::queue_population,
-    shared::{
-        FlowButton, FlowNavigation, FlowRoot, flow_root_node, spawn_flow_button,
-        spawn_flow_button_disabled, spawn_heading,
+use super::shared::{FlowButton, FlowNavigation, FlowRoot};
+use crate::client::{
+    ClientLobbyMembership,
+    flow::{
+        actions::FlowUiAction,
+        model::{ClientFlow, ClientOverlay},
     },
 };
-use crate::client::{
-    ClientLobbyMembership, ClientQueueModel,
-    flow::{actions::FlowUiAction, model::ClientFlow},
+use crate::lobby::{AdvertisedGameType, AdvertisedRulesSummary};
+use bevy::{
+    input::mouse::MouseWheel,
+    prelude::*,
+    ui::{InteractionDisabled, ScrollPosition},
 };
-use bevy::{input::mouse::MouseWheel, prelude::*, ui::ScrollPosition};
 use lightyear::prelude::client::Client;
 
 pub(in crate::client::flow) const GAME_TYPE_CONFIRM_INDEX: usize = 1_000;
-pub(in crate::client::flow) const GAME_TYPE_BACK_INDEX: usize = 1_001;
-
 #[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
 pub(in crate::client::flow) struct GameTypeSelectionDraft {
     pub(in crate::client::flow) selected_index: Option<usize>,
     pub(in crate::client::flow) unavailable_previous: bool,
 }
-
-#[derive(Component)]
-pub(in crate::client::flow) struct GamePopulationLabel(usize);
-
 #[derive(Component)]
 pub(in crate::client::flow) struct GameTypeSelectRoot;
+#[derive(Component)]
+pub(in crate::client::flow) struct GameSelectionColumns(pub usize);
+#[derive(Component)]
+pub(in crate::client::flow) struct RenderedSelection {
+    draft: GameTypeSelectionDraft,
+    games: Vec<AdvertisedGameType>,
+    width: f32,
+    height: f32,
+}
+#[derive(Component)]
+pub(in crate::client::flow) struct GameSelectButton {
+    normal: Handle<Image>,
+    focus: Handle<Image>,
+}
+
+fn mode_index(game: &AdvertisedGameType) -> usize {
+    match game.rules_summary {
+        AdvertisedRulesSummary::Wipeout { .. } => 0,
+        AdvertisedRulesSummary::HotZone { .. } => 1,
+        AdvertisedRulesSummary::Heist { .. } => 2,
+        AdvertisedRulesSummary::Zombie { .. } => 3,
+    }
+}
+fn mode_candidate(
+    games: &[AdvertisedGameType],
+    mode: usize,
+    selected: Option<usize>,
+) -> Option<usize> {
+    let current = selected.and_then(|i| games.get(i));
+    if let Some(i) = selected.filter(|i| games.get(*i).is_some_and(|g| mode_index(g) == mode)) {
+        return Some(i);
+    }
+    games
+        .iter()
+        .position(|g| {
+            mode_index(g) == mode
+                && current.is_some_and(|c| c.players_per_team == g.players_per_team)
+        })
+        .or_else(|| games.iter().position(|g| mode_index(g) == mode))
+}
+fn rules_text(game: &AdvertisedGameType) -> String {
+    let (objective, ticks) = match game.rules_summary {
+        AdvertisedRulesSummary::Wipeout {
+            target_score,
+            active_limit_ticks,
+        } => (
+            format!("First to {target_score} eliminations"),
+            active_limit_ticks,
+        ),
+        AdvertisedRulesSummary::HotZone {
+            target_progress_ticks,
+            active_limit_ticks,
+        } => (
+            format!(
+                "Hold for {} sec",
+                crate::timing::simulation_whole_seconds(u64::from(target_progress_ticks))
+            ),
+            active_limit_ticks,
+        ),
+        AdvertisedRulesSummary::Heist {
+            safe_maximum_health,
+            active_limit_ticks,
+        } => (
+            format!("Enemy safe: {safe_maximum_health} HP"),
+            active_limit_ticks,
+        ),
+        AdvertisedRulesSummary::Zombie {
+            pressure_stage_count,
+            active_limit_ticks,
+        } => (
+            format!("{pressure_stage_count} pressure stages"),
+            active_limit_ticks,
+        ),
+    };
+    {
+        let seconds = crate::timing::simulation_whole_seconds(ticks);
+        let duration = if seconds.is_multiple_of(60) {
+            format!("{} min", seconds / 60)
+        } else {
+            format!("{seconds} sec")
+        };
+        format!("{objective} · {duration}")
+    }
+}
+fn map_text(game: &AdvertisedGameType) -> String {
+    let catalog = crate::map::MapContentCatalog::embedded().ok();
+    game.map_preset_ids
+        .iter()
+        .map(|id| {
+            catalog
+                .as_ref()
+                .and_then(|c| c.presets.iter().find(|p| p.id == *id))
+                .map_or_else(|| format!("Map {}", id.0), |p| p.display_name.clone())
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 #[allow(
-    clippy::too_many_lines,
+    clippy::too_many_arguments,
     clippy::needless_pass_by_value,
-    reason = "the bounded game-select root renders the complete catalog card contract"
+    reason = "screen snapshot reads assets and authenticated selection without mutating gameplay"
 )]
 pub(in crate::client::flow) fn spawn_game_type_select(
     mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut navigation: ResMut<FlowNavigation>,
     draft: Res<GameTypeSelectionDraft>,
-    queue: Res<ClientQueueModel>,
+    assets: Option<Res<crate::client::ClientAssetHandles>>,
     modes: Res<crate::modes::ModeRegistry>,
+    server: Option<Res<AssetServer>>,
+    windows: Query<&Window>,
+    scale: Option<Res<UiScale>>,
+    roots: Query<(Entity, &RenderedSelection), With<GameTypeSelectRoot>>,
 ) {
+    if *flow.get() != ClientFlow::GameTypeSelect {
+        return;
+    }
     let Some(membership) = memberships.iter().next() else {
         return;
     };
-    let selected_index = draft.selected_index.unwrap_or(0);
-    navigation.selected = selected_index;
-    let map_catalog = crate::map::MapContentCatalog::embedded().ok();
+    let height =
+        windows.iter().next().map_or(900.0, Window::height) / scale.as_ref().map_or(1.0, |s| s.0);
+    let width = windows.iter().next().map_or(1600.0, Window::width) / scale.map_or(1.0, |s| s.0);
+    if roots.iter().any(|(_, r)| {
+        r.draft == *draft
+            && r.games == membership.game_types
+            && (r.width - width).abs() < 0.5
+            && (r.height - height).abs() < 0.5
+    }) {
+        return;
+    }
+    let entering = roots.is_empty();
+    for (entity, _) in &roots {
+        commands.entity(entity).despawn();
+    }
+    let selected = draft
+        .selected_index
+        .and_then(|i| membership.game_types.get(i));
+    if entering {
+        navigation.selected = selected.map_or(0, mode_index);
+    }
+    let factor = (width / 1600.0).min(height / 900.0).clamp(0.6, 1.25);
     commands
         .spawn((
             FlowRoot,
             GameTypeSelectRoot,
+            GameSelectionColumns(if width < 1000.0 { 2 } else { 4 }),
+            RenderedSelection {
+                draft: draft.clone(),
+                games: membership.game_types.clone(),
+                width,
+                height,
+            },
             DespawnOnExit(ClientFlow::GameTypeSelect),
-            flow_root_node(),
+            Node {
+                width: percent(100),
+                height: percent(100),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(px(28.0 * factor)),
+                row_gap: px(20.0 * factor),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
             ScrollPosition::default(),
-            BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
+            BackgroundColor(CREAM),
             GlobalZIndex(410),
         ))
         .with_children(|root| {
-            spawn_heading(root, "SELECT GAME TYPE");
-            root.spawn(Text::new(format!(
-                "{} · {}",
-                membership.server_name, membership.accepted_display_name
-            )));
+            spawn_background(root, server.as_deref());
+            spawn_header(root, assets.as_deref(), factor);
             if draft.unavailable_previous {
-                root.spawn((
-                    Text::new("Your previous game is no longer available. Choose a replacement."),
-                    TextColor(Color::srgb(1.0, 0.72, 0.28)),
-                ));
-            }
-            for (index, game_type) in membership.game_types.iter().enumerate() {
-                let mode_name = modes
-                    .descriptor_for_definition(game_type.mode_definition_id)
-                    .and_then(|registration| registration.presentation)
-                    .map_or("Unknown mode", |projection| projection.selection_label);
-                let map_names = game_type
-                    .map_preset_ids
-                    .iter()
-                    .map(|id| {
-                        map_catalog
-                            .as_ref()
-                            .and_then(|catalog| {
-                                catalog.presets.iter().find(|preset| preset.id == *id)
-                            })
-                            .map_or_else(
-                                || format!("Map {}", id.0),
-                                |preset| preset.display_name.clone(),
-                            )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let rules = match game_type.rules_summary {
-                    crate::lobby::AdvertisedRulesSummary::Wipeout {
-                        target_score,
-                        active_limit_ticks,
-                    } => format!(
-                        "first to {target_score}; {}s limit",
-                        crate::timing::simulation_whole_seconds(active_limit_ticks)
-                    ),
-                    crate::lobby::AdvertisedRulesSummary::HotZone {
-                        target_progress_ticks,
-                        active_limit_ticks,
-                    } => format!(
-                        "hold {}s; {}s limit",
-                        crate::timing::simulation_whole_seconds(u64::from(target_progress_ticks)),
-                        crate::timing::simulation_whole_seconds(active_limit_ticks)
-                    ),
-                    crate::lobby::AdvertisedRulesSummary::Heist {
-                        safe_maximum_health,
-                        active_limit_ticks,
-                    } => format!(
-                        "{safe_maximum_health} HP idol; {}s limit",
-                        crate::timing::simulation_whole_seconds(active_limit_ticks)
-                    ),
-                    crate::lobby::AdvertisedRulesSummary::Zombie {
-                        pressure_stage_count,
-                        active_limit_ticks,
-                    } => format!(
-                        "{pressure_stage_count} pressure stages; {}s timer",
-                        crate::timing::simulation_whole_seconds(active_limit_ticks)
-                    ),
-                };
-                let team_size =
-                    if game_type.mode_definition_id == crate::map::ZOMBIE_MODE_DEFINITION {
-                        format!("{} PLAYERS CO-OP", game_type.players_per_team)
-                    } else {
-                        format!(
-                            "{}v{}",
-                            game_type.players_per_team, game_type.players_per_team
-                        )
-                    };
-                spawn_flow_button(
+                label(
                     root,
-                    index,
-                    FlowUiAction::SelectGameTypeDraft(index),
-                    &format!(
-                        "{} | {mode_name} | {team_size} | {map_names} | {rules}",
-                        game_type.display_name,
-                    ),
+                    assets.as_deref(),
+                    "Previous game unavailable. Choose another game.",
+                    20.0 * factor,
                 );
-                root.spawn((
-                    GamePopulationLabel(index),
-                    Text::new(queue_population(&queue, game_type)),
-                    TextFont::from_font_size(15.0),
-                    TextColor(Color::srgb(0.68, 0.78, 0.86)),
-                ));
             }
-            spawn_flow_button_disabled(
+            spawn_cards(
                 root,
-                GAME_TYPE_CONFIRM_INDEX,
-                FlowUiAction::ConfirmGameType,
-                "CONFIRM",
-                draft.selected_index.is_none(),
+                &membership.game_types,
+                draft.selected_index,
+                assets.as_deref(),
+                server.as_deref(),
+                &modes,
+                factor,
+                width < 1000.0,
             );
-            spawn_flow_button(
+            spawn_variants(
                 root,
-                GAME_TYPE_BACK_INDEX,
-                FlowUiAction::CancelGameType,
-                "BACK",
+                &membership.game_types,
+                draft.selected_index,
+                assets.as_deref(),
+                server.as_deref(),
+                factor,
             );
         });
 }
-
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::client::flow) fn update_game_population(
-    memberships: Query<&ClientLobbyMembership, With<Client>>,
-    queue: Res<ClientQueueModel>,
-    mut labels: Query<(&GamePopulationLabel, &mut Text)>,
-) {
-    let Some(membership) = memberships.iter().next() else {
-        return;
-    };
-    for (label, mut text) in &mut labels {
-        if let Some(game) = membership.game_types.get(label.0) {
-            text.0 = queue_population(&queue, game);
-        }
+fn spawn_background(root: &mut ChildSpawnerCommands, server: Option<&AssetServer>) {
+    if let Some(server) = server {
+        root.spawn((
+            ImageNode {
+                image_mode: NodeImageMode::Stretch,
+                ..ImageNode::new(server.load("brawler/ui/shell/game-selection-background.png"))
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                left: px(0),
+                top: px(0),
+                ..default()
+            },
+            ZIndex(-1),
+        ));
     }
 }
 
+fn spawn_header(
+    root: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    factor: f32,
+) {
+    root.spawn(Node {
+        width: percent(100),
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        ..default()
+    })
+    .with_children(|header| {
+        label(header, assets, "CHOOSE GAME", 64.0 * factor);
+        if let Some(a) = assets {
+            header.spawn((
+                ImageNode::new(a.dashboard_logo.clone()),
+                Node {
+                    width: px(200.0 * factor),
+                    ..default()
+                },
+            ));
+        }
+    });
+}
+
+fn label(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    text: &str,
+    size: f32,
+) {
+    parent.spawn((
+        Text::new(text),
+        dashboard_font(assets, size),
+        TextColor(INK),
+    ));
+}
+struct Choice<'a> {
+    index: usize,
+    action: FlowUiAction,
+    selected: bool,
+    card: bool,
+    label: &'a str,
+}
+fn choice(
+    parent: &mut ChildSpawnerCommands,
+    server: Option<&AssetServer>,
+    node: Node,
+    choice: &Choice<'_>,
+) -> Entity {
+    let base = if choice.card {
+        format!(
+            "game-card{}",
+            if choice.selected { "-selected" } else { "" }
+        )
+    } else {
+        format!("panel-{}", if choice.selected { "play" } else { "mode" })
+    };
+    let normal = server.map_or_else(Handle::default, |s| {
+        s.load(format!("brawler/ui/shell/{base}.png"))
+    });
+    let focus = server.map_or_else(Handle::default, |s| {
+        s.load(format!("brawler/ui/shell/{base}-focus.png"))
+    });
+    parent
+        .spawn((
+            Button,
+            AccessibleLabel::new(choice.label),
+            FlowButton {
+                index: choice.index,
+                action: choice.action.clone(),
+                error_action: false,
+            },
+            GameSelectButton {
+                normal: normal.clone(),
+                focus,
+            },
+            ImageNode {
+                image_mode: NodeImageMode::Stretch,
+                visual_box: VisualBox::BorderBox,
+                ..ImageNode::new(normal)
+            },
+            node,
+            BackgroundColor(Color::NONE),
+            BorderColor::all(Color::NONE),
+        ))
+        .id()
+}
+#[allow(
+    clippy::too_many_arguments,
+    reason = "card construction receives one screen snapshot"
+)]
+fn spawn_cards(
+    parent: &mut ChildSpawnerCommands,
+    games: &[AdvertisedGameType],
+    selected: Option<usize>,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    server: Option<&AssetServer>,
+    modes: &crate::modes::ModeRegistry,
+    factor: f32,
+    compact: bool,
+) {
+    let objectives = [
+        "Eliminate the enemy team",
+        "Hold the zone",
+        "Destroy the enemy safe",
+        "Survive together",
+    ];
+    parent
+        .spawn(Node {
+            width: percent(100),
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: percent(1),
+            row_gap: px(12),
+            ..default()
+        })
+        .with_children(|row| {
+            for (mode, objective) in objectives.iter().enumerate() {
+                let Some(index) = mode_candidate(games, mode, selected) else {
+                    continue;
+                };
+                let name = modes
+                    .descriptor_for_definition(games[index].mode_definition_id)
+                    .and_then(|m| m.presentation)
+                    .map_or("GAME", |p| p.selection_label)
+                    .split(" ·")
+                    .next()
+                    .unwrap_or("GAME")
+                    .to_uppercase();
+                let active = selected
+                    .and_then(|i| games.get(i))
+                    .is_some_and(|g| mode_index(g) == mode);
+                let id = choice(
+                    row,
+                    server,
+                    Node {
+                        width: percent(if compact { 49.0 } else { 24.0 }),
+                        min_height: px(if compact { 300.0 } else { 440.0 } * factor),
+                        padding: UiRect::axes(px(22.0 * factor), px(28.0 * factor)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(12.0 * factor),
+                        ..default()
+                    },
+                    &Choice {
+                        index: mode,
+                        action: FlowUiAction::SelectGameTypeDraft(index),
+                        selected: active,
+                        card: true,
+                        label: &name,
+                    },
+                );
+                row.commands().entity(id).with_children(|card| {
+                    if let Some(a) = assets {
+                        card.spawn((
+                            ImageNode::new(if mode == 0 {
+                                a.dashboard_badges[0].clone()
+                            } else {
+                                server.map_or_else(
+                                    || a.dashboard_badges[mode].clone(),
+                                    |s| {
+                                        s.load(format!(
+                                            "brawler/ui/shell/game-badge-{}.png",
+                                            ["wipeout", "hot-zone", "heist", "zombie"][mode]
+                                        ))
+                                    },
+                                )
+                            }),
+                            Node {
+                                width: px(140.0 * factor),
+                                height: px(174.0 * factor),
+                                ..default()
+                            },
+                        ));
+                    }
+                    label(card, assets, &name, 38.0 * factor);
+                    label(card, assets, objective, 19.0 * factor);
+                });
+            }
+        });
+}
+fn spawn_variants(
+    parent: &mut ChildSpawnerCommands,
+    games: &[AdvertisedGameType],
+    selected: Option<usize>,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    server: Option<&AssetServer>,
+    factor: f32,
+) {
+    parent
+        .spawn(Node {
+            width: percent(100),
+            flex_wrap: FlexWrap::Wrap,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            row_gap: px(12),
+            ..default()
+        })
+        .with_children(|footer| {
+            footer
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(12),
+                    max_width: percent(100),
+                    ..default()
+                })
+                .with_children(|details| {
+                    if let Some(game) = selected.and_then(|i| games.get(i)) {
+                        label(
+                            details,
+                            assets,
+                            if mode_index(game) == 3 {
+                                "PLAYERS · CO-OP"
+                            } else {
+                                "TEAM SIZE"
+                            },
+                            23.0 * factor,
+                        );
+                        details
+                            .spawn(Node {
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: px(10),
+                                row_gap: px(10),
+                                ..default()
+                            })
+                            .with_children(|sizes| {
+                                spawn_size_choices(
+                                    sizes, games, selected, assets, server, factor, game,
+                                );
+                            });
+                        label(details, assets, &rules_text(game), 20.0 * factor);
+                        label(
+                            details,
+                            assets,
+                            &format!("Map: {}", map_text(game)),
+                            20.0 * factor,
+                        );
+                    } else {
+                        label(details, assets, "Choose a mode", 26.0 * factor);
+                    }
+                });
+            let id = choice(
+                footer,
+                server,
+                Node {
+                    min_width: px(340.0 * factor),
+                    height: px(100.0 * factor),
+                    padding: UiRect::all(px(22)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                &Choice {
+                    index: GAME_TYPE_CONFIRM_INDEX,
+                    action: FlowUiAction::ConfirmGameType,
+                    selected: true,
+                    card: false,
+                    label: "SELECT GAME",
+                },
+            );
+            let mut commands = footer.commands();
+            let mut button = commands.entity(id);
+            if selected.and_then(|i| games.get(i)).is_none() {
+                button.insert(InteractionDisabled);
+            }
+            button.with_children(|c| label(c, assets, "SELECT GAME  ›", 34.0 * factor));
+        });
+}
+fn spawn_size_choices(
+    sizes: &mut ChildSpawnerCommands,
+    games: &[AdvertisedGameType],
+    selected: Option<usize>,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    server: Option<&AssetServer>,
+    factor: f32,
+    game: &AdvertisedGameType,
+) {
+    let mut variants = games
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| g.mode_definition_id == game.mode_definition_id)
+        .collect::<Vec<_>>();
+    variants.sort_by_key(|(i, g)| (g.players_per_team, *i));
+    for (position, (index, variant)) in variants.into_iter().enumerate() {
+        let duplicates = games
+            .iter()
+            .filter(|g| {
+                g.mode_definition_id == game.mode_definition_id
+                    && g.players_per_team == variant.players_per_team
+            })
+            .count()
+            > 1;
+        let text = if duplicates {
+            variant.display_name.clone()
+        } else if mode_index(game) == 3 {
+            format!("{}", variant.players_per_team)
+        } else {
+            format!("{0}v{0}", variant.players_per_team)
+        };
+        let id = choice(
+            sizes,
+            server,
+            Node {
+                min_width: px(112.0 * factor),
+                min_height: px(64.0 * factor),
+                padding: UiRect::all(px(14)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            &Choice {
+                index: 100 + position,
+                action: FlowUiAction::SelectGameTypeDraft(index),
+                selected: selected == Some(index),
+                card: false,
+                label: &text,
+            },
+        );
+        sizes.commands().entity(id).with_children(|c| {
+            label(c, assets, &text, 25.0 * factor);
+        });
+    }
+}
+
+#[allow(clippy::needless_pass_by_value, reason = "Bevy presentation system")]
+pub(in crate::client::flow) fn update_game_selection_chrome(
+    navigation: Res<FlowNavigation>,
+    overlay: Res<ClientOverlay>,
+    mut buttons: Query<(
+        &FlowButton,
+        &GameSelectButton,
+        &Interaction,
+        Has<InteractionDisabled>,
+        &mut ImageNode,
+    )>,
+) {
+    for (button, art, interaction, disabled, mut image) in &mut buttons {
+        let active = crate::client::flow::input::overlay_allows_button(&overlay, button);
+        let interaction = if active {
+            *interaction
+        } else {
+            Interaction::None
+        };
+        image.image = if active && navigation.selected == button.index && !disabled {
+            art.focus.clone()
+        } else {
+            art.normal.clone()
+        };
+        image.color = if disabled {
+            Color::srgba(0.6, 0.6, 0.6, 0.7)
+        } else if interaction == Interaction::Pressed {
+            Color::srgb(0.8, 0.8, 0.8)
+        } else if interaction == Interaction::Hovered {
+            Color::srgb(1.08, 1.08, 1.08)
+        } else {
+            Color::WHITE
+        };
+    }
+}
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are runtime-owned"
@@ -271,5 +696,48 @@ pub(in crate::client::flow) fn keep_game_type_focus_visible(
             root_node.size().y,
             root_node.inverse_scale_factor(),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn game(mode: usize, size: u8) -> AdvertisedGameType {
+        AdvertisedGameType {
+            id: crate::lobby::GameTypeId::new(format!("mode-{mode}-{size}")).unwrap(),
+            configuration_revision: 1,
+            display_name: format!("Mode {mode}"),
+            mode_definition_id: if mode == 0 {
+                crate::map::WIPEOUT_MODE_DEFINITION
+            } else {
+                crate::map::ZOMBIE_MODE_DEFINITION
+            },
+            map_preset_ids: vec![],
+            practice_map_preset_ids: vec![],
+            team_count: if mode == 0 { 2 } else { 1 },
+            players_per_team: size,
+            rules_summary: if mode == 0 {
+                AdvertisedRulesSummary::Wipeout {
+                    target_score: 10,
+                    active_limit_ticks: 10800,
+                }
+            } else {
+                AdvertisedRulesSummary::Zombie {
+                    pressure_stage_count: 4,
+                    active_limit_ticks: 10800,
+                }
+            },
+        }
+    }
+
+    #[test]
+    fn mode_change_preserves_size_and_exact_current_variant() {
+        let games = vec![game(0, 1), game(0, 2), game(0, 3), game(3, 2), game(3, 3)];
+        assert_eq!(mode_candidate(&games, 3, Some(2)), Some(4));
+        assert_eq!(mode_candidate(&games, 3, Some(0)), Some(3));
+        assert_eq!(mode_candidate(&games, 0, Some(1)), Some(1));
+        assert_eq!(mode_candidate(&games, 1, Some(0)), None);
+        assert_eq!(mode_candidate(&games, 0, Some(99)), Some(0));
     }
 }

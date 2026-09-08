@@ -24,6 +24,7 @@ pub use queue::{
 
 pub const MAX_GAME_TYPES: usize = 12;
 pub const MAX_MAPS_PER_GAME_TYPE: usize = 8;
+pub const MAX_PRACTICE_MAPS: usize = MAX_GAME_TYPES * MAX_MAPS_PER_GAME_TYPE;
 pub const MAX_GAME_TYPE_ID_BYTES: usize = 32;
 pub const MAX_DISPLAY_NAME_GRAPHEMES: usize = 48;
 pub const MAX_DISPLAY_NAME_BYTES: usize = 96;
@@ -153,6 +154,8 @@ pub struct AdvertisedGameType {
     pub mode_definition_id: ModeDefinitionId,
     #[serde(deserialize_with = "deserialize_map_ids")]
     pub map_preset_ids: Vec<MapPresetId>,
+    #[serde(deserialize_with = "deserialize_practice_map_ids")]
+    pub practice_map_preset_ids: Vec<MapPresetId>,
     pub team_count: u8,
     pub players_per_team: u8,
     pub rules_summary: AdvertisedRulesSummary,
@@ -240,6 +243,12 @@ where
     deserialize_bounded_vec::<D, MapPresetId, MAX_MAPS_PER_GAME_TYPE>(deserializer)
 }
 
+fn deserialize_practice_map_ids<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<MapPresetId>, D::Error> {
+    deserialize_bounded_vec::<D, MapPresetId, MAX_PRACTICE_MAPS>(deserializer)
+}
+
 pub(crate) fn deserialize_game_types<'de, D>(
     deserializer: D,
 ) -> Result<Vec<AdvertisedGameType>, D::Error>
@@ -312,6 +321,24 @@ impl AdvertisedGameType {
         maps.sort_unstable();
         if maps.windows(2).any(|pair| pair[0] == pair[1]) {
             return Err(LobbyModelError::DuplicateMap);
+        }
+        if self.practice_map_preset_ids.is_empty()
+            || self.practice_map_preset_ids.len() > MAX_PRACTICE_MAPS
+            || self.practice_map_preset_ids.iter().any(|id| id.0 == 0)
+        {
+            return Err(LobbyModelError::InvalidMapCount);
+        }
+        let mut practice_maps = self.practice_map_preset_ids.clone();
+        practice_maps.sort_unstable();
+        if practice_maps.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(LobbyModelError::DuplicateMap);
+        }
+        if self
+            .map_preset_ids
+            .iter()
+            .any(|id| !practice_maps.contains(id))
+        {
+            return Err(LobbyModelError::InvalidMapCount);
         }
         let topology_valid = match self.rules_summary {
             AdvertisedRulesSummary::Zombie { .. } => {
@@ -443,6 +470,13 @@ pub fn canonical_catalog_bytes(
         for map_id in &game_type.map_preset_ids {
             bytes.extend_from_slice(&map_id.0.to_be_bytes());
         }
+        bytes.push(
+            u8::try_from(game_type.practice_map_preset_ids.len())
+                .expect("validated Practice map count fits u8"),
+        );
+        for map_id in &game_type.practice_map_preset_ids {
+            bytes.extend_from_slice(&map_id.0.to_be_bytes());
+        }
         bytes.push(game_type.team_count);
         bytes.push(game_type.players_per_team);
         match game_type.rules_summary {
@@ -508,6 +542,7 @@ mod tests {
                 display_name: "Wipeout 2v2".to_string(),
                 mode_definition_id: ModeDefinitionId(2),
                 map_preset_ids: vec![MapPresetId(1)],
+                practice_map_preset_ids: vec![MapPresetId(1)],
                 team_count: 2,
                 players_per_team: 2,
                 rules_summary: AdvertisedRulesSummary::Wipeout {
@@ -521,6 +556,7 @@ mod tests {
                 display_name: "Hot Zone 2v2".to_string(),
                 mode_definition_id: ModeDefinitionId(3),
                 map_preset_ids: vec![MapPresetId(2)],
+                practice_map_preset_ids: vec![MapPresetId(2)],
                 team_count: 2,
                 players_per_team: 2,
                 rules_summary: AdvertisedRulesSummary::HotZone {
@@ -535,13 +571,13 @@ mod tests {
     fn canonical_catalog_matches_committed_golden_vector() {
         let catalog = golden_catalog();
         let bytes = canonical_catalog_bytes(&catalog).unwrap();
-        assert_eq!(bytes.len(), 121);
+        assert_eq!(bytes.len(), 127);
         assert_eq!(
             catalog_revision(&catalog).unwrap().0,
             [
-                0xd5, 0x4c, 0xc5, 0x84, 0x64, 0xa4, 0xe0, 0xbd, 0x2f, 0x06, 0x89, 0x5e, 0xfa, 0xd2,
-                0xfe, 0xe6, 0x67, 0x63, 0x23, 0x3d, 0xa7, 0x18, 0xa8, 0x6a, 0xf2, 0x56, 0xd6, 0x1c,
-                0x32, 0x26, 0x47, 0xec,
+                0xa4, 0xc9, 0x72, 0xb4, 0xd4, 0xd1, 0xe9, 0xe0, 0x8b, 0x0c, 0x91, 0x86, 0x25, 0x07,
+                0x5e, 0xf4, 0x23, 0x43, 0xe0, 0x5f, 0x0c, 0x38, 0x3d, 0xa8, 0x6d, 0x0a, 0x88, 0x52,
+                0x2c, 0x3e, 0xf7, 0xba,
             ]
         );
     }
@@ -600,6 +636,10 @@ mod tests {
         mutations.push(changed);
         let mut changed = original.clone();
         changed[0].map_preset_ids[0] = MapPresetId(2);
+        changed[0].practice_map_preset_ids.push(MapPresetId(2));
+        mutations.push(changed);
+        let mut changed = original.clone();
+        changed[0].practice_map_preset_ids.push(MapPresetId(3));
         mutations.push(changed);
         let mut changed = original.clone();
         changed[0].rules_summary = AdvertisedRulesSummary::Wipeout {

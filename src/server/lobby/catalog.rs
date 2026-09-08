@@ -394,12 +394,14 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             configuration_revision: entry.revision,
             display_name,
             mode_definition_id,
+            practice_map_preset_ids: map_ids.clone(),
             map_preset_ids: map_ids,
             team_count: entry.teams,
             players_per_team: entry.players_per_team,
             rules_summary,
         });
     }
+    populate_practice_maps(&mut advertised, &maps)?;
     validate_catalog(&advertised)
         .map_err(|error| format!("resolved game-type catalog is invalid: {error}"))?;
     let revision_material = canonical_catalog_bytes(&advertised)
@@ -447,11 +449,73 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     })
 }
 
+/// Practice can use server-approved maps outside the exact matchmaking pool.
+fn populate_practice_maps(
+    games: &mut [AdvertisedGameType],
+    maps: &crate::map::MapContentCatalog,
+) -> Result<(), String> {
+    let approved = games
+        .iter()
+        .flat_map(|g| {
+            g.map_preset_ids
+                .iter()
+                .map(move |id| (g.mode_definition_id, *id))
+        })
+        .collect::<BTreeSet<_>>();
+    for game in games {
+        let capacity = crate::matchplay::ResolvedMatchCapacity {
+            team_slots: (0..game.team_count)
+                .map(|team_slot| crate::matchplay::TeamSlotCapacity {
+                    team_slot,
+                    minimum_participants: game.players_per_team,
+                    maximum_participants: game.players_per_team,
+                })
+                .collect(),
+            maximum_active_fighters: game.team_count * game.players_per_team,
+        };
+        game.practice_map_preset_ids = approved
+            .iter()
+            .filter(|(mode, _)| *mode == game.mode_definition_id)
+            .filter_map(|(_, id)| {
+                let resolved = maps.resolve_preset(*id, MapInstanceId(1)).ok()?;
+                capacity
+                    .validate_against_spawn_catalog(&crate::map::SpawnPointCatalog(
+                        resolved.spawn_points_by_team,
+                    ))
+                    .ok()?;
+                Some(*id)
+            })
+            .collect();
+        if game.practice_map_preset_ids.is_empty() {
+            return Err(format!(
+                "{} has no compatible Practice map",
+                game.id.as_str()
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const VALID: &str = include_str!("../../../config/server/game-types.ron");
+
+    #[test]
+    fn practice_advertises_compatible_maps_beyond_exact_queue_pool() {
+        let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
+        let game = catalog
+            .game_types
+            .iter()
+            .find(|g| g.id.as_str() == "wipeout-3v3")
+            .unwrap();
+        assert_eq!(game.map_preset_ids, vec![MapPresetId(10)]);
+        assert_eq!(
+            game.practice_map_preset_ids,
+            vec![MapPresetId(7), MapPresetId(10)]
+        );
+    }
 
     #[test]
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
@@ -547,9 +611,9 @@ mod tests {
         assert_eq!(
             catalog.revision.0,
             [
-                0x85, 0x35, 0x68, 0x59, 0xe2, 0xa1, 0xaf, 0x99, 0xe2, 0xf0, 0xa5, 0x9b, 0x6e, 0x85,
-                0xa4, 0xd0, 0xc5, 0xf6, 0xb5, 0x22, 0xc3, 0x75, 0xe1, 0xa6, 0xc6, 0xa9, 0x05, 0x3c,
-                0x97, 0x25, 0x2b, 0x9e,
+                0x8b, 0xe5, 0xe6, 0x8e, 0xe9, 0x07, 0xb3, 0xd9, 0x03, 0x85, 0x09, 0x64, 0x7b, 0xa3,
+                0x76, 0x15, 0x99, 0xe5, 0x35, 0x7f, 0x57, 0xa1, 0xdd, 0x36, 0x5b, 0x56, 0x7c, 0x87,
+                0x29, 0x99, 0x29, 0x31,
             ]
         );
     }

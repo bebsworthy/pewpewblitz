@@ -296,6 +296,7 @@ fn lobby_membership() -> ClientLobbyMembership {
             display_name: "Wipeout 2v2".to_string(),
             mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
             map_preset_ids: vec![crate::map::MapPresetId(1)],
+            practice_map_preset_ids: vec![crate::map::MapPresetId(1)],
             team_count: 2,
             players_per_team: 2,
             rules_summary: crate::lobby::AdvertisedRulesSummary::Wipeout {
@@ -1814,6 +1815,10 @@ fn returning_to_game_select_preserves_a_still_advertised_game() {
     second.configuration_revision = 2;
     second.display_name = "Hot Zone 2v2".to_string();
     second.mode_definition_id = crate::map::HOT_ZONE_MODE_DEFINITION;
+    second.rules_summary = crate::lobby::AdvertisedRulesSummary::HotZone {
+        target_progress_ticks: 1800,
+        active_limit_ticks: 10800,
+    };
     lobby.game_types.push(second.clone());
     app.world_mut().spawn((Client, lobby.clone()));
     *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType {
@@ -2475,8 +2480,8 @@ fn dashboard_chrome_focus_belongs_only_to_the_active_surface() {
     let mut app = App::new();
     app.init_resource::<FlowNavigation>()
         .init_resource::<ClientOverlay>()
-        .init_resource::<screens::game_select::GameTypeSelectionDraft>()
-        .add_systems(Update, screens::shared::update_flow_button_chrome);
+        .init_resource::<GameTypeSelectionDraft>()
+        .add_systems(Update, update_flow_button_chrome);
     let mut buttons = Vec::new();
     for overlay_owned in [false, true] {
         for index in 0..2 {
@@ -2541,5 +2546,224 @@ fn dashboard_chrome_focus_belongs_only_to_the_active_surface() {
             false,
             Some(DashboardButtonStyle::Header)
         )
+    );
+}
+
+#[test]
+fn game_selection_groups_modes_preserves_variants_and_has_no_back_button() {
+    let mut app = flow_test_app();
+    let mut lobby = lobby_membership();
+    let mut second = lobby.game_types[0].clone();
+    second.id = crate::lobby::GameTypeId::new("alternate-wipeout").unwrap();
+    second.display_name = "Alternate Wipeout".into();
+    lobby.game_types.push(second);
+    app.world_mut().spawn((
+        Client,
+        lobby,
+        RoutedClientSession {
+            generation: 1,
+            kind: super::super::RoutedClientSessionKind::Lobby,
+        },
+    ));
+    app.world_mut()
+        .resource_mut::<GameTypeSelectionDraft>()
+        .selected_index = Some(0);
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::GameTypeSelect);
+    app.update();
+    let world = app.world_mut();
+    let mut query = world.query::<&FlowButton>();
+    let buttons = query.iter(world).collect::<Vec<_>>();
+    assert_eq!(buttons.iter().filter(|b| b.index < 100).count(), 1);
+    assert_eq!(
+        buttons
+            .iter()
+            .filter(|b| (100..1000).contains(&b.index))
+            .count(),
+        2
+    );
+    assert!(
+        !buttons
+            .iter()
+            .any(|b| b.action == FlowUiAction::CancelGameType)
+    );
+    assert!(
+        buttons
+            .iter()
+            .any(|b| b.index == 101 && b.action == FlowUiAction::SelectGameTypeDraft(1))
+    );
+    press_flow_button(&mut app, &FlowUiAction::SelectGameTypeDraft(1));
+    assert_eq!(
+        app.world()
+            .resource::<GameTypeSelectionDraft>()
+            .selected_index,
+        Some(1)
+    );
+    assert_eq!(
+        *app.world().resource::<State<ClientFlow>>().get(),
+        ClientFlow::GameTypeSelect
+    );
+    press_flow_button(&mut app, &FlowUiAction::ConfirmGameType);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<State<ClientFlow>>().get(),
+        ClientFlow::Dashboard
+    );
+    assert_eq!(
+        app.world()
+            .resource::<SelectedGameType>()
+            .game_type_id
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        "alternate-wipeout"
+    );
+}
+
+#[test]
+fn game_selection_navigation_moves_between_cards_sizes_and_confirmation() {
+    use super::input::game_selection_neighbor;
+    use super::screens::dashboard::DashboardNavigationDirection::{Down, Left, Right, Up};
+    let available = [0, 1, 2, 3, 100, 101, 102, 1000];
+    assert_eq!(game_selection_neighbor(0, Right, &available, 4), 1);
+    assert_eq!(game_selection_neighbor(1, Left, &available, 4), 0);
+    assert_eq!(game_selection_neighbor(2, Down, &available, 4), 102);
+    assert_eq!(game_selection_neighbor(102, Down, &available, 4), 1000);
+    assert_eq!(game_selection_neighbor(1000, Up, &available, 4), 100);
+    assert_eq!(game_selection_neighbor(3, Right, &available, 4), 3);
+    assert_eq!(game_selection_neighbor(0, Down, &available, 2), 2);
+    assert_eq!(game_selection_neighbor(3, Up, &available, 2), 1);
+}
+
+#[test]
+fn practice_picker_defers_start_and_passes_only_confirmed_map() {
+    let mut membership = lobby_membership_with_brawler();
+    membership.game_types[0]
+        .practice_map_preset_ids
+        .push(crate::map::MapPresetId(7));
+    let mut app = configured_lobby_flow_app(membership);
+    inject_action(&mut app, FlowUiAction::OpenPracticeMaps);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<State<ClientFlow>>().get(),
+        ClientFlow::PracticeMapSelect
+    );
+    assert!(
+        !app.world()
+            .resource::<super::super::ClientPracticeModel>()
+            .pending()
+    );
+    inject_action(
+        &mut app,
+        FlowUiAction::ChoosePracticeMap(crate::map::MapPresetId(99)),
+    );
+    assert_eq!(
+        app.world()
+            .resource::<super::super::ClientPracticeModel>()
+            .selected_map
+            .as_ref()
+            .unwrap()
+            .1,
+        crate::map::MapPresetId(1)
+    );
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::ArrowRight);
+    app.update();
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .clear();
+    assert_eq!(
+        app.world()
+            .resource::<super::super::ClientPracticeModel>()
+            .selected_map
+            .as_ref()
+            .unwrap()
+            .1,
+        crate::map::MapPresetId(1)
+    );
+    inject_action(
+        &mut app,
+        FlowUiAction::ChoosePracticeMap(crate::map::MapPresetId(7)),
+    );
+    inject_action(&mut app, FlowUiAction::StartPractice);
+    assert_eq!(
+        app.world()
+            .resource::<super::super::ClientPracticeModel>()
+            .pending_request_for_test()
+            .unwrap()
+            .map_preset_id,
+        Some(crate::map::MapPresetId(7))
+    );
+}
+
+#[test]
+fn practice_picker_cancel_returns_home_without_request() {
+    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+    inject_action(&mut app, FlowUiAction::OpenPracticeMaps);
+    app.update();
+    inject_action(&mut app, FlowUiAction::CancelPracticeMaps);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<State<ClientFlow>>().get(),
+        ClientFlow::Dashboard
+    );
+    assert!(
+        !app.world()
+            .resource::<super::super::ClientPracticeModel>()
+            .pending()
+    );
+}
+
+#[test]
+fn practice_picker_gamepad_focus_does_not_select_and_overlay_blocks_activation() {
+    let mut membership = lobby_membership_with_brawler();
+    membership.game_types[0]
+        .practice_map_preset_ids
+        .push(crate::map::MapPresetId(7));
+    let mut app = configured_lobby_flow_app(membership);
+    inject_action(&mut app, FlowUiAction::OpenPracticeMaps);
+    app.update();
+    let mut pad = Gamepad::default();
+    pad.digital_mut().press(GamepadButton::DPadLeft);
+    let pad_entity = app.world_mut().spawn(pad).id();
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<super::super::ClientPracticeModel>()
+            .selected_map
+            .as_ref()
+            .unwrap()
+            .1,
+        crate::map::MapPresetId(1)
+    );
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Settings;
+    {
+        let mut entity = app.world_mut().entity_mut(pad_entity);
+        let mut pad = entity.get_mut::<Gamepad>().unwrap();
+        pad.digital_mut().reset_all();
+        pad.digital_mut().press(GamepadButton::South);
+    }
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<super::super::ClientPracticeModel>()
+            .selected_map
+            .as_ref()
+            .unwrap()
+            .1,
+        crate::map::MapPresetId(1)
+    );
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<super::super::ClientPracticeModel>()
+            .selected_map
+            .as_ref()
+            .unwrap()
+            .1,
+        crate::map::MapPresetId(7)
     );
 }

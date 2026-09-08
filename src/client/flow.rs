@@ -30,12 +30,15 @@ use screens::{
     },
     game_select::{
         GameTypeSelectionDraft, keep_game_type_focus_visible, scroll_game_type_select,
-        spawn_game_type_select, update_game_population,
+        spawn_game_type_select, update_game_selection_chrome,
     },
     match_loading::{spawn_match_loading, update_match_loading},
     overlays::{
         present_cancel_confirmation, present_change_server_confirmation,
         present_flow_error_overlay, present_leave_confirmation, update_rate_limit_try_again,
+    },
+    practice_maps::{
+        PracticeCarousel, animate_practice_maps, practice_map_input, present_practice_maps,
     },
     queue::{spawn_queue, update_queue_cancel_button, update_queue_status},
     results::{clear_results, present_match_completion, spawn_results},
@@ -97,6 +100,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<crate::weapon_parts::WeaponPartCatalogResource>()
             .init_resource::<SelectedGameType>()
             .init_resource::<GameTypeSelectionDraft>()
+            .init_resource::<PracticeCarousel>()
             .init_resource::<DashboardReturnFocus>()
             .init_resource::<DashboardNotice>()
             .init_resource::<PendingCreatedBrawler>()
@@ -141,6 +145,9 @@ impl Plugin for ClientFlowPlugin {
                         .in_set(ClientFlowSet::ObserveSession)
                         .after(super::queue::observe_queue_messages),
                     collect_flow_input.in_set(ClientFlowSet::CollectFlowInput),
+                    practice_map_input
+                        .after(collect_flow_input)
+                        .in_set(ClientFlowSet::CollectFlowInput),
                     resolve_flow_action.in_set(ClientFlowSet::ResolveFlowAction),
                     teardown_session.in_set(ClientFlowSet::TeardownSession),
                     ApplyDeferred
@@ -164,7 +171,8 @@ impl Plugin for ClientFlowPlugin {
                     update_rate_limit_try_again.after(present_flow_error_overlay),
                     update_queue_cancel_button,
                     update_queue_status,
-                    update_game_population,
+                    spawn_game_type_select.before(update_game_selection_chrome),
+                    update_game_selection_chrome,
                     update_flow_button_chrome,
                 )
                     .in_set(ClientFlowSet::PresentFlow),
@@ -205,6 +213,12 @@ impl Plugin for ClientFlowPlugin {
             .add_systems(OnExit(ClientFlow::Match), exit_match_input)
             .add_systems(OnEnter(ClientFlow::Queue), spawn_queue)
             .add_systems(OnEnter(ClientFlow::MatchLoading), spawn_match_loading);
+        app.add_systems(
+            Update,
+            (present_practice_maps, animate_practice_maps)
+                .chain()
+                .in_set(ClientFlowSet::PresentFlow),
+        );
         app.add_systems(
             PostUpdate,
             (

@@ -8,6 +8,7 @@ use crate::client::Client;
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ClientPracticeModel {
+    pub(crate) selected_map: Option<(crate::lobby::GameTypeId, crate::map::MapPresetId)>,
     pub(super) generation: Option<u64>,
     pub(super) next_request_id: u64,
     pub(super) pending: Option<crate::lobby::PracticeStartRequest>,
@@ -20,6 +21,7 @@ impl ClientPracticeModel {
         if self.generation != Some(generation) {
             *self = Self {
                 generation: Some(generation),
+                selected_map: self.selected_map.clone(),
                 next_request_id: self.next_request_id,
                 ..Self::default()
             };
@@ -56,6 +58,11 @@ impl ClientPracticeModel {
         };
         self.next_request_id = request_id.get();
         let request = crate::lobby::PracticeStartRequest {
+            map_preset_id: self
+                .selected_map
+                .as_ref()
+                .filter(|(id, _)| *id == game_type_id)
+                .map(|(_, map)| *map),
             request_id,
             catalog_revision,
             game_type_id,

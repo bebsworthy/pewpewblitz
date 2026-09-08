@@ -84,7 +84,9 @@ flowchart TD
     GameTypeSelect -- "Confirm / Back" --> Dashboard
 
     Dashboard -- "Play + admission accepted" --> Queue
-    Dashboard -- "Practice + reservation accepted" --> MatchLoading[Match Loading]
+    Dashboard -- "Practice" --> PracticeMapSelect[Choose Practice Map]
+    PracticeMapSelect -- "Start Practice + reservation accepted" --> MatchLoading[Match Loading]
+    PracticeMapSelect -- "Cancel" --> Dashboard
     Queue -- reservation --> MatchLoading
     Queue -- "cancel acknowledged" --> Dashboard
     MatchLoading -- "cancel / start returned" --> Dashboard
@@ -276,6 +278,14 @@ tickets and forms only a complete roster; overflow remains queued. Queue present
 game type, the player's accepted build, and fresh privacy-safe population facts such as
 `N waiting · M players per match`. Stale population is labelled as updating rather than passed off
 as current, and no speculative wait time or waiting-player roster is exposed.
+
+Practice first opens a full-screen map picker with recipe-derived map overviews. The server
+advertises all approved maps for the selected mode that can host the selected roster, independently
+of that exact multiplayer pool. Orange marks the chosen map; the separate focus frame marks the
+current navigation target. Browsing never changes the choice until activation. Left/right navigation
+wraps continuously, with wheel/trackpad and arrow controls; one map needs no navigation. Start
+Practice submits the chosen map, while Escape/controller East returns to Dashboard. No popup or
+redundant selection label is used. Practice Again retains that map when the game type matches.
 
 Practice bypasses multiplayer pools. It asks the connected lobby to reserve ordinary server
 capacity for one authoritative match worker containing the player and manifest bot fighters. The

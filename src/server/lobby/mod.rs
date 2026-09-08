@@ -716,6 +716,10 @@ impl LobbyState {
         if game.configuration_revision != command.game_type_configuration_revision {
             return Err(Rejection::StaleGameConfiguration);
         }
+        let map = command.map_preset_id.unwrap_or(game.map_preset_ids[0]);
+        if !game.practice_map_preset_ids.contains(&map) {
+            return Err(Rejection::InvalidMap);
+        }
         if human_snapshot.brawler_id != command.brawler_id
             || human_snapshot.brawler_revision != command.brawler_revision
         {
@@ -757,9 +761,9 @@ impl LobbyState {
                 lobby_session_id: session.lobby_session_id,
                 mode: routing_mode_for_definition(game.mode_definition_id)
                     .ok_or(Rejection::Internal)?,
-                map_preset: game.map_preset_ids[0].0,
+                map_preset: map.0,
                 map_revision: catalog
-                    .map_admission_revision(game.map_preset_ids[0])
+                    .map_admission_revision(map)
                     .ok_or(Rejection::Internal)?,
                 rules_profile: crate::config::MatchRulesProfile::Production.routing_id(),
                 objective_target: rules.objective_target,
@@ -784,7 +788,7 @@ impl LobbyState {
             reservation_id,
             ticket_id: None,
             game_type_id: game.id.clone(),
-            map_preset_id: game.map_preset_ids[0],
+            map_preset_id: map,
             team_count: game.team_count,
             players_per_team: game.players_per_team,
             accepted_build,
@@ -2364,6 +2368,51 @@ mod tests {
             .unwrap();
     }
 
+    fn assert_practice_map_admission(
+        lobby: &mut LobbyState,
+        session: &LobbySession,
+        command: &crate::lobby::PracticeStartRequest,
+        catalog: &catalog::ResolvedLobbyCatalog,
+        snapshot: crate::profiles::MatchBuildSnapshotV3,
+        accepted: crate::builds::AcceptedBuildSummary,
+    ) {
+        // Unknown, wrong-mode and unadvertised maps cannot allocate server capacity.
+        for invalid in [
+            crate::map::MapPresetId(99),
+            crate::map::VERDANT_CROSSFIRE_PRESET,
+            crate::map::ASHEN_COURT_PRESET,
+        ] {
+            let mut invalid_command = command.clone();
+            invalid_command.map_preset_id = Some(invalid);
+            assert_eq!(
+                lobby.create_practice_request(
+                    session,
+                    &invalid_command,
+                    catalog,
+                    snapshot,
+                    accepted
+                ),
+                Err(crate::lobby::PracticeStartRejection::InvalidMap)
+            );
+            assert!(lobby.pending.is_none());
+        }
+        // Explicit Practice selection can leave this game's multiplayer pool.
+        let mut explicit = command.clone();
+        explicit.map_preset_id = Some(crate::map::FEATURE_YARD_HOT_ZONE_PRESET);
+        let started = lobby
+            .create_practice_request(session, &explicit, catalog, snapshot, accepted)
+            .unwrap();
+        assert_eq!(
+            started.map_preset_id,
+            crate::map::FEATURE_YARD_HOT_ZONE_PRESET
+        );
+        assert_eq!(
+            lobby.pending.as_ref().unwrap().body.map_preset,
+            crate::map::FEATURE_YARD_HOT_ZONE_PRESET.0
+        );
+        lobby.pending = None;
+    }
+
     #[test]
     fn practice_uses_one_human_and_fills_the_selected_roster_with_named_bots() {
         let mut lobby = state();
@@ -2387,6 +2436,7 @@ mod tests {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
         let command = crate::lobby::PracticeStartRequest {
+            map_preset_id: None,
             request_id: crate::lobby::PracticeRequestId::new(1).unwrap(),
             catalog_revision: catalog.revision,
             game_type_id: game.id.clone(),
@@ -2422,6 +2472,7 @@ mod tests {
             total_points: resolved.total_points,
         };
 
+        assert_practice_map_admission(&mut lobby, &session, &command, &catalog, snapshot, accepted);
         let started = lobby
             .create_practice_request(&session, &command, &catalog, snapshot, accepted)
             .unwrap();

@@ -603,6 +603,9 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::ConfirmGameType
         | FlowUiAction::CancelGameType
         | FlowUiAction::JoinQueue
+        | FlowUiAction::OpenPracticeMaps
+        | FlowUiAction::ChoosePracticeMap(_)
+        | FlowUiAction::CancelPracticeMaps
         | FlowUiAction::StartPractice
         | FlowUiAction::QueueAgain
         | FlowUiAction::OpenGameTypeSelect

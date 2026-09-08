@@ -57,29 +57,6 @@ pub(in crate::client::flow) fn spawn_queue(
         });
 }
 
-pub(in crate::client::flow) fn queue_population(
-    queue: &ClientQueueModel,
-    game: &crate::lobby::AdvertisedGameType,
-) -> String {
-    queue
-        .snapshot()
-        .and_then(|snapshot| {
-            snapshot
-                .pools
-                .iter()
-                .find(|row| row.game_type_id == game.id)
-        })
-        .map_or_else(
-            || "Updating queue".to_string(),
-            |row| {
-                format!(
-                    "{} waiting - {} players per match",
-                    row.queued, row.formation_size
-                )
-            },
-        )
-}
-
 pub(in crate::client::flow) fn queue_membership_text(
     queue: &ClientQueueModel,
     membership: &crate::lobby::QueueMembership,

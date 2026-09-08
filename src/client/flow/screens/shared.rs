@@ -221,15 +221,18 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
     assets: Option<Res<crate::client::ClientAssetHandles>>,
     game_draft: Res<GameTypeSelectionDraft>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
-    mut buttons: Query<(
-        &FlowButton,
-        &Interaction,
-        Has<InteractionDisabled>,
-        &mut BackgroundColor,
-        &mut BorderColor,
-        Option<&DashboardButtonStyle>,
-        Option<&mut ImageNode>,
-    )>,
+    mut buttons: Query<
+        (
+            &FlowButton,
+            &Interaction,
+            Has<InteractionDisabled>,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            Option<&DashboardButtonStyle>,
+            Option<&mut ImageNode>,
+        ),
+        Without<super::game_select::GameSelectButton>,
+    >,
 ) {
     let selected_brawler_id = memberships
         .iter()

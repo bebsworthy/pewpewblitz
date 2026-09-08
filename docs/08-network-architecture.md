@@ -519,3 +519,7 @@ Networking is validated incrementally rather than treated as one oversized miles
 9. **Future systemic-status milestone:** accumulating meters, threshold triggers, immunity, and duration remain server-owned and recover correctly.
 
 Prediction, lag compensation, advanced interpolation tuning, anti-cheat hardening, matchmaking, authentication, session services, and production hosting may be developed after the relevant early gates. The authority boundary, state recovery rules, and explicit connection lifecycle outcomes may not be postponed.
+
+### Practice map selection wire contract
+
+Protocol 44 adds the bounded `practice_map_preset_ids` list to each advertised game type and an optional map ID to `PracticeStartRequest`. The list is derived from server-approved pools for that mode and filtered by spawn capacity. The catalog fingerprint includes it. The lobby rejects IDs outside that list before allocation; an omitted ID preserves the existing automation default (first multiplayer-pool map). This uses the global compatibility handshake, with no per-message compatibility decoder.

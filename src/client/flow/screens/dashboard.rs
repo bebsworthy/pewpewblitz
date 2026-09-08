@@ -558,7 +558,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                 spawn_dashboard_button(
                     actions,
                     DASHBOARD_PRACTICE_INDEX,
-                    FlowUiAction::StartPractice,
+                    FlowUiAction::OpenPracticeMaps,
                     DashboardButtonPresentation {
                         label: if practice.pending() {
                             "STARTING..."
@@ -899,7 +899,10 @@ fn dashboard_root_node() -> Node {
     }
 }
 
-fn dashboard_font(assets: Option<&crate::client::ClientAssetHandles>, size: f32) -> TextFont {
+pub(in crate::client::flow) fn dashboard_font(
+    assets: Option<&crate::client::ClientAssetHandles>,
+    size: f32,
+) -> TextFont {
     assets.map_or_else(
         || TextFont::from_font_size(size),
         |assets| TextFont {
@@ -952,7 +955,7 @@ fn spawn_dashboard_button(
         icon,
     } = presentation;
     let is_play = matches!(action, FlowUiAction::JoinQueue);
-    let is_practice = matches!(action, FlowUiAction::StartPractice);
+    let is_practice = matches!(action, FlowUiAction::OpenPracticeMaps);
     let is_utility = matches!(
         action,
         FlowUiAction::OpenSettings | FlowUiAction::OpenDashboardMenu

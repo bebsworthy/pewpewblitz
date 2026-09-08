@@ -108,6 +108,7 @@ pub enum MatchmakingServerPhase {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PracticeStartRequest {
+    pub map_preset_id: Option<crate::map::MapPresetId>,
     pub request_id: PracticeRequestId,
     pub catalog_revision: CatalogRevision,
     pub game_type_id: GameTypeId,
@@ -118,6 +119,7 @@ pub struct PracticeStartRequest {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PracticeStartRejection {
+    InvalidMap,
     StaleCatalog,
     UnknownGameType,
     StaleGameConfiguration,

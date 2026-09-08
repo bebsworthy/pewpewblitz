@@ -83,6 +83,7 @@ fn observe_lobby_scope(
         flow,
         ClientFlow::Dashboard
             | ClientFlow::GameTypeSelect
+            | ClientFlow::PracticeMapSelect
             | ClientFlow::Queue
             | ClientFlow::Results
     ) {

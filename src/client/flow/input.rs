@@ -87,6 +87,59 @@ pub(super) fn dashboard_focus_neighbor(
     current
 }
 
+pub(super) fn game_selection_neighbor(
+    current: usize,
+    direction: DashboardNavigationDirection,
+    available: &[usize],
+    columns: usize,
+) -> usize {
+    let cards = available
+        .iter()
+        .copied()
+        .filter(|i| *i < 100)
+        .collect::<Vec<_>>();
+    let row = |i: usize| {
+        if i < 100 {
+            cards.iter().position(|c| *c == i).unwrap_or(0) / columns
+        } else if i < 1000 {
+            cards.len().div_ceil(columns)
+        } else {
+            cards.len().div_ceil(columns) + 1
+        }
+    };
+    let same = available
+        .iter()
+        .copied()
+        .filter(|i| row(*i) == row(current))
+        .collect::<Vec<_>>();
+    let position = same.iter().position(|i| *i == current).unwrap_or(0);
+    let target_row = match direction {
+        DashboardNavigationDirection::Left => {
+            return same
+                .get(position.saturating_sub(1))
+                .copied()
+                .unwrap_or(current);
+        }
+        DashboardNavigationDirection::Right => {
+            return same
+                .get((position + 1).min(same.len().saturating_sub(1)))
+                .copied()
+                .unwrap_or(current);
+        }
+        DashboardNavigationDirection::Up => row(current).checked_sub(1),
+        DashboardNavigationDirection::Down => Some(row(current) + 1),
+    };
+    let targets = available
+        .iter()
+        .copied()
+        .filter(|i| Some(row(*i)) == target_row)
+        .collect::<Vec<_>>();
+    targets
+        .get(position.min(targets.len().saturating_sub(1)))
+        .copied()
+        .unwrap_or(current)
+}
+
 pub(super) fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton) -> bool {
     match overlay {
         ClientOverlay::Error(_)
@@ -135,9 +188,13 @@ pub(super) fn collect_flow_input(
     mut navigation: ResMut<FlowNavigation>,
     buttons: Query<(&FlowButton, &Interaction, Has<InteractionDisabled>)>,
     dashboard_layout: Query<&DashboardLayoutClass, With<DashboardRoot>>,
+    game_columns: Query<&super::screens::game_select::GameSelectionColumns>,
     mut actions: ResMut<PendingFlowActions>,
     mut brawler_edit: ResMut<BrawlerEditDraft>,
 ) {
+    if *flow.get() == ClientFlow::PracticeMapSelect && matches!(*overlay, ClientOverlay::None) {
+        return;
+    }
     for (button, interaction, disabled) in &buttons {
         if !disabled
             && *interaction == Interaction::Pressed
@@ -306,6 +363,39 @@ pub(super) fn collect_flow_input(
                 navigation.selected =
                     dashboard_focus_neighbor(class, navigation.selected, direction, &available);
             }
+        } else if *flow.get() == ClientFlow::GameTypeSelect
+            && matches!(*overlay, ClientOverlay::None)
+        {
+            if !available.contains(&navigation.selected) {
+                navigation.selected = available[0];
+            }
+            let direction = if keyboard.any_just_pressed([KeyCode::ArrowLeft, KeyCode::KeyA])
+                || pad_pressed(GamepadButton::DPadLeft)
+            {
+                Some(DashboardNavigationDirection::Left)
+            } else if keyboard.any_just_pressed([KeyCode::ArrowRight, KeyCode::KeyD])
+                || pad_pressed(GamepadButton::DPadRight)
+            {
+                Some(DashboardNavigationDirection::Right)
+            } else if keyboard.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW])
+                || pad_pressed(GamepadButton::DPadUp)
+            {
+                Some(DashboardNavigationDirection::Up)
+            } else if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
+                || pad_pressed(GamepadButton::DPadDown)
+            {
+                Some(DashboardNavigationDirection::Down)
+            } else {
+                None
+            };
+            if let Some(direction) = direction {
+                navigation.selected = game_selection_neighbor(
+                    navigation.selected,
+                    direction,
+                    &available,
+                    game_columns.iter().next().map_or(4, |c| c.0),
+                );
+            }
         } else {
             let position = available
                 .iter()
@@ -362,6 +452,7 @@ pub(super) fn collect_flow_input(
             match *flow.get() {
                 ClientFlow::Connecting => FlowUiAction::Cancel,
                 ClientFlow::GameTypeSelect => FlowUiAction::CancelGameType,
+                ClientFlow::PracticeMapSelect => FlowUiAction::CancelPracticeMaps,
                 ClientFlow::Queue => FlowUiAction::CancelQueue,
                 ClientFlow::MatchLoading => FlowUiAction::RequestCancelMatchStart,
                 ClientFlow::Results => FlowUiAction::ReturnToDashboard,

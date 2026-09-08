@@ -11,6 +11,7 @@ fn game() -> crate::lobby::AdvertisedGameType {
         display_name: "Wipeout 2v2".to_string(),
         mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
         map_preset_ids: vec![crate::map::MapPresetId(1)],
+        practice_map_preset_ids: vec![crate::map::MapPresetId(1)],
         team_count: 2,
         players_per_team: 2,
         rules_summary: crate::lobby::AdvertisedRulesSummary::Wipeout {
@@ -419,4 +420,50 @@ fn joined_outcome_cannot_replace_membership_while_cancel_is_pending() {
     assert!(model.protocol_failure());
     assert_eq!(model.membership(), Some(&current));
     assert!(model.pending().is_some());
+}
+
+#[test]
+fn practice_selection_survives_replay_but_cannot_leak_to_another_game() {
+    let game = crate::lobby::GameTypeId::new("wipeout-2v2").unwrap();
+    let mut model = ClientPracticeModel::default();
+    model.bind_generation(1);
+    model.selected_map = Some((game.clone(), crate::map::MapPresetId(10)));
+    let mut selected = crate::client::flow::SelectedGameType {
+        catalog_revision: Some(crate::lobby::CatalogRevision([1; 32])),
+        game_type_id: Some(game),
+        configuration_revision: Some(1),
+    };
+    let brawler = crate::profiles::SavedBrawlerId::new(1).unwrap();
+    assert!(model.start(
+        &selected,
+        brawler,
+        crate::profiles::ProfileRevision::INITIAL
+    ));
+    assert_eq!(
+        model.pending.as_ref().unwrap().map_preset_id,
+        Some(crate::map::MapPresetId(10))
+    );
+    assert!(!model.start(
+        &selected,
+        brawler,
+        crate::profiles::ProfileRevision::INITIAL
+    ));
+    model.bind_generation(2);
+    assert!(model.start(
+        &selected,
+        brawler,
+        crate::profiles::ProfileRevision::INITIAL
+    ));
+    assert_eq!(
+        model.pending.as_ref().unwrap().map_preset_id,
+        Some(crate::map::MapPresetId(10))
+    );
+    model.bind_generation(3);
+    selected.game_type_id = Some(crate::lobby::GameTypeId::new("heist-2v2").unwrap());
+    assert!(model.start(
+        &selected,
+        brawler,
+        crate::profiles::ProfileRevision::INITIAL
+    ));
+    assert_eq!(model.pending.as_ref().unwrap().map_preset_id, None);
 }

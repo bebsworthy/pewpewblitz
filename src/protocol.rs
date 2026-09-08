@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 43;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 44;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -1002,6 +1002,7 @@ mod tests {
             display_name: "Wipeout 2v2".to_string(),
             mode_definition_id: crate::map::ModeDefinitionId(2),
             map_preset_ids: vec![crate::map::MapPresetId(1)],
+            practice_map_preset_ids: vec![crate::map::MapPresetId(1)],
             team_count: 2,
             players_per_team: 2,
             rules_summary: crate::lobby::AdvertisedRulesSummary::Wipeout {

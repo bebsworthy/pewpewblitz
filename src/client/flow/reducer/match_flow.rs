@@ -10,7 +10,10 @@ use crate::client::{
             SelectedGameType, SessionPurpose,
         },
         screens::{
-            dashboard::{DASHBOARD_GAME_INDEX, DASHBOARD_PLAY_INDEX, DashboardReturnFocus},
+            dashboard::{
+                DASHBOARD_GAME_INDEX, DASHBOARD_PLAY_INDEX, DASHBOARD_PRACTICE_INDEX,
+                DashboardReturnFocus,
+            },
             game_select::GameTypeSelectionDraft,
         },
     },
@@ -266,6 +269,12 @@ pub(super) fn resolve_action(
     purpose: &mut SessionPurpose,
     commit: &mut FlowCommit,
 ) {
+    if matches!(action, FlowUiAction::CancelPracticeMaps)
+        && flow == ClientFlow::PracticeMapSelect
+        && !practice.pending()
+    {
+        dashboard_focus.0 = Some(DASHBOARD_PRACTICE_INDEX);
+    }
     match action {
         FlowUiAction::SelectGameTypeDraft(_)
         | FlowUiAction::ConfirmGameType
@@ -281,6 +290,9 @@ pub(super) fn resolve_action(
             commit,
         ),
         FlowUiAction::JoinQueue
+        | FlowUiAction::OpenPracticeMaps
+        | FlowUiAction::ChoosePracticeMap(_)
+        | FlowUiAction::CancelPracticeMaps
         | FlowUiAction::StartPractice
         | FlowUiAction::KeepLoading
         | FlowUiAction::CancelQueue
@@ -389,8 +401,52 @@ fn resolve_matchmaking_loading_action(
                 let _ = queue.start_join(selection, brawler_id, brawler_revision, now);
             }
         }
+        FlowUiAction::OpenPracticeMaps => {
+            if flow != ClientFlow::Dashboard || queue.pending().is_some() || practice.pending() {
+                return;
+            }
+            if let Some((lobby, _, _)) = membership.iter().next()
+                && let Some(game) = lobby
+                    .game_types
+                    .iter()
+                    .find(|g| Some(&g.id) == selection.game_type_id.as_ref())
+            {
+                let previous = practice
+                    .selected_map
+                    .as_ref()
+                    .filter(|(id, map)| {
+                        *id == game.id && game.practice_map_preset_ids.contains(map)
+                    })
+                    .map(|(_, map)| *map);
+                practice.selected_map = previous
+                    .or_else(|| game.map_preset_ids.first().copied())
+                    .map(|map| (game.id.clone(), map));
+                commit.next_flow = Some(ClientFlow::PracticeMapSelect);
+            }
+        }
+        FlowUiAction::ChoosePracticeMap(map) => {
+            if flow != ClientFlow::PracticeMapSelect || practice.pending() {
+                return;
+            }
+            if let Some((lobby, _, _)) = membership.iter().next()
+                && let Some(game) = lobby
+                    .game_types
+                    .iter()
+                    .find(|g| Some(&g.id) == selection.game_type_id.as_ref())
+                && game.practice_map_preset_ids.contains(map)
+            {
+                practice.selected_map = Some((game.id.clone(), *map));
+            }
+        }
+        FlowUiAction::CancelPracticeMaps => {
+            if flow == ClientFlow::PracticeMapSelect && !practice.pending() {
+                commit.next_flow = Some(ClientFlow::Dashboard);
+            }
+        }
         FlowUiAction::StartPractice => {
-            if flow != ClientFlow::Dashboard || queue.pending().is_some() {
+            if !matches!(flow, ClientFlow::Dashboard | ClientFlow::PracticeMapSelect)
+                || queue.pending().is_some()
+            {
                 return;
             }
             *purpose = SessionPurpose::Practice;
@@ -603,6 +659,9 @@ const fn practice_rejection_copy(reason: crate::lobby::PracticeStartRejection) -
         }
         crate::lobby::PracticeStartRejection::UnsupportedGameMode => {
             "That game mode is not available in Practice."
+        }
+        crate::lobby::PracticeStartRejection::InvalidMap => {
+            "This map is no longer available for Practice. Choose another map."
         }
         crate::lobby::PracticeStartRejection::Internal => "The server could not start practice.",
     }

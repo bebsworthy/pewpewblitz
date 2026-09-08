@@ -6,6 +6,7 @@ Current specification, 2026-09-07. Design approvals: BRL-0112 and BRL-0113. Nati
 
 | Screen | Authoritative composition reference |
 |---|---|
+| Game selection | [Revision 01](../../../inspiration/player-shell/game-selection-revision-01/game-selection.png), with visible Back removed per approval |
 | Dashboard | [Revision 10](../../../inspiration/player-shell/style-variants-10/dashboard-clean.png) |
 | Weapon overview | [Revision 03](../../../inspiration/player-shell/weapon-revision-03/weapon-overview.png) |
 | Match loading | [Revision 02](../../../inspiration/player-shell/loading-revision-02/match-loading.png) |
@@ -22,7 +23,7 @@ Generated text, numerical values and robot details are illustrative. Runtime use
 | Teal | #52A39E | Secondary action, brawler region and background plane |
 | Orange | #FF6606 | Play, mode badge and bottom background plane |
 
-Large clean color planes, expressive asymmetry, strong hierarchy, substantial navy outlines and crisp offset backing layers. No random slashes, rays, halftone, dirt, busy textures or distressed lettering. No invented stage architecture. Use the refined cream/orange/navy logo while preserving original branding sources. Icons carry meaning: hanging pennant emblems distinguish game modes. Live headings use Lilita One; body copy stays readable at normal UI scale.
+Large clean color planes, expressive asymmetry, strong hierarchy, substantial navy outlines and crisp offset backing layers. Avoid redundant information: do not add Selected labels or checkmarks when the selection color already communicates the choice. No random slashes, rays, halftone, dirt, busy textures or distressed lettering. No invented stage architecture. Use the refined cream/orange/navy logo while preserving original branding sources. Icons carry meaning: hanging pennant emblems distinguish game modes. Live headings use Lilita One; body copy stays readable at normal UI scale.
 
 ## Dashboard implementation contract
 
@@ -31,6 +32,10 @@ Wide screens: logo upper left, player/server identity above center, Menu upper r
 Compact screens and larger UI scales use a scrollable layout with hero, brawler action, mode, Play and Practice in reading order. No action is hidden by clipping. Keyboard/gamepad focus follows the actual geometry and skips unavailable actions. Focus is transient; selected brawler/game remains server-owned. Menu contains Settings, Credits, the real server's Favorite toggle, Change Server, Quit and Back.
 
 Play/Practice keep existing authoritative admission checks and visible pending/capacity states. Empty profiles route to creation. Connection loss uses existing recovery and Offline wording where applicable; no offline gameplay is implied. Overlays retain input capture. Motion never delays navigation or network commits.
+
+## Game selection
+
+BRL-0116: four semantic mode cards group the advertised catalog. Team-size choices retain each exact advertised game identity; duplicate sizes display their advertised names. Selecting a mode prefers the current team size where available. Zombie uses co-op player counts. Orange indicates the current choice; the cream/navy frame and pointer indicate navigation focus. No redundant Selected label or checkmark. Select Game confirms and returns to Dashboard without admission; Escape/gamepad East discards the draft. No visible Back button. Compact widths wrap cards and scroll; rules and map names use server-advertised facts.
 
 ## Other approved screens
 
@@ -49,3 +54,7 @@ First slice is native Dashboard and Menu access. Subsequent slices cover game se
 ### Dashboard correction details
 
 Dashboard controls use slanted SVG-authored chrome with substantial navy outlines, crisp offset backing and a bold cream/navy focus frame and left pointer. Navigation focus uses this treatment; hover alone only changes tint, and disabled controls remain unaccented. Only the active screen or overlay shows focus and interaction feedback; opening Menu suppresses Dashboard highlights, and closing it returns focus to the Menu button. PNG exports are stretched across the native control's border box; only decoration is rasterized. Text and hit targets remain native. Header identity is one horizontal player/name/divider/arena/server strip. Play carries a right-hand lightning icon; Practice a right-hand crosshair; View Brawlers uses a cream skull and cream type. The brawler name and pointed underline are an independent visual anchor; long names wrap with a bounded type size. The summary presents live weapon/ultimate names and passive/slot counts. Routine successful-save notices are omitted from the Dashboard, while recovery feedback remains visible. Preview hover never draws a rectangular frame; the cyan pedestal is removed.
+
+### Practice map picker (BRL-0117)
+
+Approved reference: `inspiration/player-shell/practice-map-revision-02/practice-map-picker.png`. Fullscreen map overviews with fixed heading and Start Practice action, horizontally looping navigation, no popup, no Selected text/checkmarks. Orange is the choice; the cream/navy frame and pointer are focus. Overview assets come from authored map geometry, never invented scenery. One map omits navigation; two show both; additional maps reveal the next card.
