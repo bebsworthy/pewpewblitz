@@ -119,14 +119,14 @@ fn ensure_dashboard_background(
             bottom: px(0),
             ..default()
         },
-        BackgroundColor(Color::srgb(0.018, 0.035, 0.065)),
+        BackgroundColor(Color::srgb(0.98, 0.92, 0.81)),
         GlobalZIndex(408),
     ));
     let material = materials.add(DashboardBackgroundMaterial {
         time_motion: Vec4::new(0.0, 1.0, 0.0, 0.0),
-        palette_dark: Color::srgb(0.012, 0.025, 0.055).to_linear().to_vec4(),
-        palette_light: Color::srgb(0.035, 0.15, 0.22).to_linear().to_vec4(),
-        glow: Vec4::new(0.5, 0.41, 0.13, 0.2),
+        palette_dark: Color::srgb(0.98, 0.92, 0.81).to_linear().to_vec4(),
+        palette_light: Color::srgb(0.32, 0.64, 0.62).to_linear().to_vec4(),
+        glow: Color::srgb(1.0, 0.40, 0.025).to_linear().to_vec4(),
     });
     commands.spawn((
         DashboardOwned,
@@ -222,7 +222,7 @@ fn spawn_dashboard_preview(
             },
             RenderTarget::Image(target.clone().into()),
             Projection::Perspective(PerspectiveProjection {
-                fov: 0.48,
+                fov: 0.42,
                 ..default()
             }),
             Tonemapping::None,
@@ -248,18 +248,6 @@ fn spawn_dashboard_preview(
             layer.clone(),
         ))
         .with_children(|root| {
-            root.spawn((
-                Mesh3d(primitives.sentry_base.clone()),
-                MeshMaterial3d(materials.marker_ally.clone()),
-                Transform::from_xyz(0.0, -3.0, 0.0).with_scale(Vec3::new(1.78, 0.18, 1.78)),
-                layer.clone(),
-            ));
-            root.spawn((
-                Mesh3d(primitives.sentry_base.clone()),
-                MeshMaterial3d(materials.team_blue.clone()),
-                Transform::from_xyz(0.0, -1.0, 0.0).with_scale(Vec3::new(1.55, 0.14, 1.55)),
-                layer.clone(),
-            ));
             root.spawn((
                 DashboardPreviewFallback,
                 Mesh3d(primitives.fighter.clone()),

@@ -26,6 +26,11 @@ pub(crate) struct ClientAssetHandles {
     pub blaster: Handle<Gltf>,
     pub loading_logo: Handle<Image>,
     pub wordmark: Handle<Image>,
+    pub dashboard_logo: Handle<Image>,
+    pub dashboard_badges: [Handle<Image>; 4],
+    pub dashboard_panels: [Handle<Image>; 6],
+    pub dashboard_focus_panels: [Handle<Image>; 6],
+    pub dashboard_icons: [Handle<Image>; 8],
     pub dashboard_font: Handle<Font>,
     pub settings_icon: Handle<Image>,
     pub menu_icon: Handle<Image>,
@@ -51,6 +56,24 @@ impl ClientAssetHandles {
             blaster: asset_server.load("brawler/models/kenney/blaster-kit/blaster-a.glb"),
             loading_logo: asset_server.load("brawler/ui/branding/pewpew-blitz-lockup.png"),
             wordmark: asset_server.load("brawler/ui/branding/pewpew-blitz-wordmark.png"),
+            dashboard_logo: asset_server.load("brawler/ui/shell/logo.png"),
+            dashboard_badges: ["wipeout", "hot-zone", "heist", "zombie"]
+                .map(|name| asset_server.load(format!("brawler/ui/shell/{name}.png"))),
+            dashboard_panels: ["mode", "play", "practice", "build", "menu", "identity"]
+                .map(|name| asset_server.load(format!("brawler/ui/shell/panel-{name}.png"))),
+            dashboard_focus_panels: ["mode", "play", "practice", "build", "menu", "identity"]
+                .map(|name| asset_server.load(format!("brawler/ui/shell/panel-{name}-focus.png"))),
+            dashboard_icons: [
+                "icon-lightning",
+                "icon-crosshair",
+                "icon-menu",
+                "icon-player",
+                "icon-arena",
+                "icon-skull",
+                "icon-chevron",
+                "underline",
+            ]
+            .map(|name| asset_server.load(format!("brawler/ui/shell/{name}.png"))),
             dashboard_font: asset_server.load("brawler/ui/fonts/lilita-one-regular.ttf"),
             settings_icon: asset_server.load("brawler/ui/icons/settings.png"),
             menu_icon: asset_server.load("brawler/ui/icons/menu.png"),
@@ -61,13 +84,12 @@ impl ClientAssetHandles {
         }
     }
 
-    fn states(&self, asset_server: &AssetServer) -> [(&'static str, bool, LoadState); 17] {
-        [
-            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[0]),
-            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[1]),
-            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[2]),
-            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[3]),
-            self.audio_state(asset_server, RETAINED_AUDIO_ASSET_IDS[4]),
+    fn states(&self, asset_server: &AssetServer) -> Vec<(&'static str, bool, LoadState)> {
+        let mut states: Vec<_> = RETAINED_AUDIO_ASSET_IDS
+            .into_iter()
+            .map(|id| self.audio_state(asset_server, id))
+            .collect();
+        states.extend([
             (
                 "model.character_male_a",
                 false,
@@ -84,51 +106,45 @@ impl ClientAssetHandles {
                 dependency_aware_state(asset_server, &self.blaster),
             ),
             (
-                "ui.pewpew_blitz_loading_logo",
-                false,
-                asset_server.load_state(&self.loading_logo),
-            ),
-            (
-                "ui.pewpew_blitz_wordmark",
-                false,
-                asset_server.load_state(&self.wordmark),
-            ),
-            (
                 "font.dashboard_display",
                 false,
                 asset_server.load_state(&self.dashboard_font),
             ),
+        ]);
+        states.extend(
+            [
+                ("ui.shell_logo", &self.dashboard_logo),
+                ("ui.badge_wipeout", &self.dashboard_badges[0]),
+                ("ui.badge_hot_zone", &self.dashboard_badges[1]),
+                ("ui.badge_heist", &self.dashboard_badges[2]),
+                ("ui.badge_zombie", &self.dashboard_badges[3]),
+                ("ui.pewpew_blitz_loading_logo", &self.loading_logo),
+                ("ui.pewpew_blitz_wordmark", &self.wordmark),
+                ("ui.icon_settings", &self.settings_icon),
+                ("ui.icon_menu", &self.menu_icon),
+                ("ui.icon_build", &self.build_icon),
+                ("ui.icon_mode", &self.mode_icon),
+                ("ui.icon_practice", &self.practice_icon),
+                ("ui.icon_play", &self.play_icon),
+            ]
+            .into_iter()
+            .map(|(name, handle)| (name, false, asset_server.load_state(handle))),
+        );
+        for (prefix, handles) in [
+            ("ui.shell_panel", self.dashboard_panels.as_slice()),
             (
-                "ui.icon_settings",
-                false,
-                asset_server.load_state(&self.settings_icon),
+                "ui.shell_focus_panel",
+                self.dashboard_focus_panels.as_slice(),
             ),
-            (
-                "ui.icon_menu",
-                false,
-                asset_server.load_state(&self.menu_icon),
-            ),
-            (
-                "ui.icon_build",
-                false,
-                asset_server.load_state(&self.build_icon),
-            ),
-            (
-                "ui.icon_mode",
-                false,
-                asset_server.load_state(&self.mode_icon),
-            ),
-            (
-                "ui.icon_practice",
-                false,
-                asset_server.load_state(&self.practice_icon),
-            ),
-            (
-                "ui.icon_play",
-                false,
-                asset_server.load_state(&self.play_icon),
-            ),
-        ]
+            ("ui.shell_icon", self.dashboard_icons.as_slice()),
+        ] {
+            states.extend(
+                handles
+                    .iter()
+                    .map(|handle| (prefix, false, asset_server.load_state(handle))),
+            );
+        }
+        states
     }
 
     pub(crate) fn audio(&self, asset_id: &str) -> Option<&Handle<AudioSource>> {

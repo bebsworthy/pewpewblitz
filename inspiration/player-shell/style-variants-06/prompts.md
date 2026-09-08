@@ -1,0 +1,8 @@
+# Dashboard badge refinement — revision 06
+
+Built-in imagegen. User prefers orange hanging pennant with cream skull to target emblem. Visual inspection: hanging badge present, crosshair emblem removed, revision-05 header and footer cleanup preserved. Minor generative texture variation remains; this is a concept reference, not runtime art.
+
+## Exact prompt
+
+Edit image 1 (full Dashboard) with ONE focused change: replace the circular crosshair/skull/impact emblem in its Wipeout card with the badge treatment shown in image 2 (reference crop). Use an orange short hanging pennant badge, rectangular flat top and two diagonal bottom edges meeting at a downward point; cream stylized knockout skull centered; subtle worn paper grain and shallow offset shadow, exactly the warm tactile printed treatment of reference 2. Position badge attached to/overlapping the upper-left top edge of the game card, hanging down into it, with comfortable space next to WIPEOUT. Badge should be approximately 100-130 px wide at this screen scale, not a giant emblem. Remove the former crosshair circle, ticks and impact burst completely. Keep WIPEOUT readable to its right and preserve all game details below.
+Reference 2 supplies ONLY the orange badge design, not replacement layout, buttons or text formatting. Preserve full Dashboard image 1's refined logo, robot, cream/teal/orange background, layout, PLAY/PRACTICE, player/server strip, sole MENU upper right, no ONLINE status, no standalone SETTINGS, no controller hint. Do not add other features or alter other screen areas. One full-frame landscape revised Dashboard.

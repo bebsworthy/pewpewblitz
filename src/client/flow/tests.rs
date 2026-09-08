@@ -29,9 +29,8 @@ use screens::{
     },
     dashboard::{
         DASHBOARD_BUILD_INDEX, DASHBOARD_GAME_INDEX, DASHBOARD_MENU_INDEX, DASHBOARD_PLAY_INDEX,
-        DASHBOARD_PRACTICE_INDEX, DASHBOARD_SETTINGS_INDEX, DashboardButtonStyle,
-        DashboardLayoutClass, DashboardNavigationDirection, dashboard_game_summary,
-        dashboard_layout_class,
+        DASHBOARD_PRACTICE_INDEX, DashboardButtonStyle, DashboardLayoutClass,
+        DashboardNavigationDirection, dashboard_game_summary, dashboard_layout_class,
     },
     game_select::GameTypeSelectRoot,
     match_loading::match_loading_text,
@@ -179,45 +178,44 @@ fn dashboard_spatial_navigation_matches_wide_and_compact_layouts() {
         DASHBOARD_PRACTICE_INDEX,
         DASHBOARD_GAME_INDEX,
         DASHBOARD_BUILD_INDEX,
-        DASHBOARD_SETTINGS_INDEX,
         DASHBOARD_MENU_INDEX,
     ];
-    assert_eq!(
-        dashboard_focus_neighbor(
-            DashboardLayoutClass::Wide,
-            DASHBOARD_PLAY_INDEX,
-            DashboardNavigationDirection::Left,
-            &all,
-        ),
-        DASHBOARD_PRACTICE_INDEX
-    );
-    assert_eq!(
-        dashboard_focus_neighbor(
-            DashboardLayoutClass::Wide,
-            DASHBOARD_PRACTICE_INDEX,
-            DashboardNavigationDirection::Up,
-            &all,
-        ),
-        DASHBOARD_BUILD_INDEX
-    );
-    assert_eq!(
-        dashboard_focus_neighbor(
-            DashboardLayoutClass::Compact,
-            DASHBOARD_GAME_INDEX,
-            DashboardNavigationDirection::Down,
-            &all,
-        ),
-        DASHBOARD_PRACTICE_INDEX
-    );
-    assert_eq!(
-        dashboard_focus_neighbor(
-            DashboardLayoutClass::Compact,
-            DASHBOARD_PLAY_INDEX,
-            DashboardNavigationDirection::Up,
-            &all,
-        ),
-        DASHBOARD_PRACTICE_INDEX
-    );
+    for class in [DashboardLayoutClass::Wide, DashboardLayoutClass::Compact] {
+        for (from, direction, to) in [
+            (
+                DASHBOARD_GAME_INDEX,
+                DashboardNavigationDirection::Down,
+                DASHBOARD_PLAY_INDEX,
+            ),
+            (
+                DASHBOARD_PLAY_INDEX,
+                DashboardNavigationDirection::Down,
+                DASHBOARD_PRACTICE_INDEX,
+            ),
+            (
+                DASHBOARD_PRACTICE_INDEX,
+                DashboardNavigationDirection::Up,
+                DASHBOARD_PLAY_INDEX,
+            ),
+            (
+                DASHBOARD_PLAY_INDEX,
+                DashboardNavigationDirection::Up,
+                DASHBOARD_GAME_INDEX,
+            ),
+            (
+                DASHBOARD_PLAY_INDEX,
+                DashboardNavigationDirection::Left,
+                DASHBOARD_BUILD_INDEX,
+            ),
+            (
+                DASHBOARD_BUILD_INDEX,
+                DashboardNavigationDirection::Right,
+                DASHBOARD_PLAY_INDEX,
+            ),
+        ] {
+            assert_eq!(dashboard_focus_neighbor(class, from, direction, &all), to);
+        }
+    }
 }
 
 #[test]
@@ -225,15 +223,14 @@ fn dashboard_navigation_skips_disabled_targets_and_repairs_focus() {
     let available = [
         DASHBOARD_GAME_INDEX,
         DASHBOARD_BUILD_INDEX,
-        DASHBOARD_SETTINGS_INDEX,
         DASHBOARD_MENU_INDEX,
     ];
     assert_eq!(
         dashboard_focus_neighbor(
             DashboardLayoutClass::Wide,
-            DASHBOARD_PLAY_INDEX,
-            DashboardNavigationDirection::Left,
-            &available,
+            DASHBOARD_PRACTICE_INDEX,
+            DashboardNavigationDirection::Up,
+            &available
         ),
         DASHBOARD_GAME_INDEX
     );
@@ -244,11 +241,11 @@ fn dashboard_navigation_skips_disabled_targets_and_repairs_focus() {
     assert_eq!(
         dashboard_focus_neighbor(
             DashboardLayoutClass::Wide,
-            DASHBOARD_SETTINGS_INDEX,
-            DashboardNavigationDirection::Left,
-            &available,
+            DASHBOARD_GAME_INDEX,
+            DashboardNavigationDirection::Up,
+            &[DASHBOARD_MENU_INDEX]
         ),
-        DASHBOARD_SETTINGS_INDEX
+        DASHBOARD_MENU_INDEX
     );
 }
 
@@ -1142,12 +1139,12 @@ fn selected_brawler_cards_open_list_details_and_reach_equipment() {
     assert!(
         dashboard_copy
             .iter()
-            .any(|text| text.contains("Default · Pulse Sidearm"))
+            .any(|text| text.contains("Pulse Sidearm · Dash"))
     );
     assert!(
         dashboard_copy
             .iter()
-            .any(|text| text.contains("Dash · Adrenal Response + Close Quarters"))
+            .any(|text| text.contains("2 passives · 4 part slots"))
     );
     assert!(
         !dashboard_copy
@@ -1495,12 +1492,12 @@ fn dashboard_menu_omits_favorite_without_a_real_server_target() {
 }
 
 #[test]
-fn dashboard_mode_card_separates_title_and_pool_without_claiming_a_selected_map() {
+fn dashboard_mode_card_summary_contains_only_mode_and_team_size() {
     let game = lobby_membership().game_types.remove(0);
     let summary = dashboard_game_summary(&game);
     assert!(game.display_name.contains("Wipeout"));
-    assert!(summary.contains("First to"));
-    assert!(summary.contains("Map pool:"));
+    assert!(summary.contains("WIPEOUT"));
+    assert!(!summary.contains("Map pool:"));
     assert!(!summary.contains("Selected map"));
 }
 
@@ -1519,14 +1516,14 @@ fn dashboard_actions_have_explicit_fact_based_accessible_labels() {
         .iter(world)
         .map(|(style, label)| (*style, label.0.clone()))
         .collect::<Vec<_>>();
-    assert_eq!(labels.len(), 7);
+    assert_eq!(labels.len(), 6);
     assert!(labels.iter().all(|(_, label)| !label.trim().is_empty()));
     assert!(labels.iter().any(|(style, label)| {
         matches!(style, DashboardButtonStyle::Preview) && label == "Create your first brawler"
     }));
     assert!(labels.iter().any(|(style, label)| {
         matches!(style, DashboardButtonStyle::Mode)
-            && label.contains("Map pool:")
+            && !label.contains("Map pool:")
             && !label.contains("Selected map")
     }));
     assert!(
@@ -1554,7 +1551,7 @@ fn dashboard_fighter_preview_stays_transparent_during_every_interaction() {
             Color::NONE
         );
     }
-    assert_ne!(
+    assert_eq!(
         flow_button_border(
             false,
             Interaction::Hovered,
@@ -2396,4 +2393,52 @@ fn controller_can_enter_and_leave_text_editing_without_becoming_trapped() {
     }
     app.update();
     assert_eq!(app.world().resource::<ServerSelectModel>().editing, None);
+}
+
+#[test]
+fn dashboard_settings_is_menu_owned_and_mode_card_opens_selection() {
+    let mut app = flow_test_app();
+    app.world_mut().spawn((
+        Client,
+        lobby_membership(),
+        RoutedClientSession {
+            generation: 1,
+            kind: super::super::RoutedClientSessionKind::Lobby,
+        },
+    ));
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::Dashboard);
+    app.update();
+    let buttons = |app: &mut App| {
+        let world = app.world_mut();
+        let mut query = world.query::<&FlowButton>();
+        query
+            .iter(world)
+            .map(|b| b.action.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(!buttons(&mut app).contains(&FlowUiAction::OpenSettings));
+    let copy = visible_text(&mut app).join(" ");
+    assert!(!copy.contains("ONLINE"));
+    assert!(!copy.contains("Population"));
+    assert!(!copy.contains("Map pool"));
+    press_flow_button(&mut app, &FlowUiAction::OpenDashboardMenu);
+    for mut interaction in app
+        .world_mut()
+        .query::<&mut Interaction>()
+        .iter_mut(app.world_mut())
+    {
+        *interaction = Interaction::None;
+    }
+    app.update();
+    assert!(buttons(&mut app).contains(&FlowUiAction::OpenSettings));
+    press_flow_button(&mut app, &FlowUiAction::CloseDashboardMenu);
+    app.update();
+    press_flow_button(&mut app, &FlowUiAction::OpenGameTypeSelect);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<State<ClientFlow>>().get(),
+        ClientFlow::GameTypeSelect
+    );
 }

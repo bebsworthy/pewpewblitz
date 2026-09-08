@@ -1,0 +1,21 @@
+# Weapon overview and part popup — BRL-0113
+
+Built-in imagegen. User-authorized seven changes: popup-owned inventory/unequip, no instruction banner, decorative triangle, technical note, manual Save or duplicate Back. Automatic server-authoritative mutation on valid choice, pending/failure feedback only; see ticket for semantics. Images are concepts, not runtime implementation. Visually inspected all seven changes; stats remain unspecified placeholders, part artwork provisional. Popup has current equipped selection plus equipped-elsewhere context; actual uniqueness policy remains server validated.
+
+## Overview prompt
+
+Redesign supplied weapon customization screen according to specific user feedback, keeping its clean warm cream/teal/orange/navy game style, crisp outlines, subtle depth and minimal texture.
+This is the MAIN OVERVIEW with popup CLOSED. Remove entire OWNED PARTS center inventory column; selection will open in popup when a slot is clicked. Remove bottom instruction banner, bottom BACK, SAVE EQUIPMENT, UNEQUIP SELECTED SLOT, preview source note and top-right orange triangle completely. Do not add replacement instructional/autosave text or footer toolbar. Auto-save happens on actual part selection, no manual Save UI. Keep exactly ONE BACK TO BRAWLER top-left.
+Recompose the freed space into spacious two-column overview: left roughly 35% four large clickable generic slot rows with number, part thumbnail/name and small integrated chevron. Slot 1 Expanded Feed, Slot 2 Heavy Payload, Slot 3 Empty, Slot 4 Empty. No anatomy-specific slot labels. Right roughly 55% a generous clean matte orange/cream/cyan toy blaster preview on restrained teal backdrop and beneath it a tidy compact readable stats panel with Damage, Capacity, Fire interval, Refill interval, Reach; em dashes for unspecified values. No source note/warnings. Preserve header CUSTOMIZE WEAPON at a moderate size and identity SPARK / PULSE with Permanent weapon base. Plenty of breathing room between header/regions, consistent baseline/edge alignment. No inventory rows visible on main screen. No selected slot text in resting state. Bottom remains comfortably clear rather than giant empty footer void. Main focus is weapon appearance and four choices.
+Colors and materials match original, reduce density without making type huge or adding decoration. No random patterns, distress, glossy blue, invented currencies/rarities/buttons. Single landscape full-frame screen concept.
+
+## Popup prompt
+
+Edit supplied clean weapon overview into its POPUP OPEN state. Keep same overview visibly underneath a modest translucent navy dim layer; do not replace it with another screen. Place a centered generous cream popup approx 55% screen width, 78% height, crisp navy outline, restrained orange offset shadow, clean cream/teal/orange/navy approved style. Header 'SLOT 1 · CHOOSE PART', one small clearly visible X close control upper right. No extra Back, Save, Apply, instruction banner or autosave explanation. Selecting a valid row automatically commits; no separate confirm button.
+Popup body is a scrollable list of owned-part rows, each entire row clickable. Four example rows with thumbnail at left, part name and concise benefits/tradeoffs:
+Expanded Feed — 'More capacity' and 'Slower refill', checkmark and 'Equipped' on this CURRENT slot row.
+Quick Loader — 'Less capacity' and 'Faster refill'.
+Heavy Payload — 'More damage' and 'Slower firing', small 'Slot 2' marker (currently equipped elsewhere; do not claim unavailable).
+Long Assembly — 'More reach' and 'Slower firing'.
+Readable text and comfortable rows, small subtle scrollbar. Color alone does not convey tradeoffs: explicit words retained. Current equipped row lightly teal tinted; other rows cream. Small graphic part thumbnails are illustrative like underlying overview.
+Bottom a single clearly separate 'UNEQUIP' action, normal secondary treatment because reversible, NOT red danger. This popup targets filled Slot 1 so Unequip is enabled. No pending or error state in this idle concept, no technical note. Header close simply dismisses without choosing. Maintain balanced margins and enough background overview visible to establish context. No random patterns/texture dirt/new decorative icon. One full-frame landscape image, not isolated popup.

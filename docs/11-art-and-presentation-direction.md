@@ -26,7 +26,7 @@ match scale. Its visual identity favors:
 - shallow, restrained shadows that ground objects without hiding their footprints;
 - exact objective boundaries and unmistakable allowed or blocked previews;
 - short, bounded combat effects that communicate outcomes without obscuring actors;
-- a quiet product shell that gives the selected brawler and current action clear hierarchy.
+- an expressive, clean cream/teal/orange/navy product shell that gives the selected brawler and current action clear hierarchy; the approved non-gameplay compositions and restrained motion are specified in [player-shell design](design/player-shell/README.md).
 
 Curated third-party models, audio, fonts, icons, and source art provide the established production
 foundation. They are replaceable presentation, not Brawler's permanent identity. Future original

@@ -1,9 +1,8 @@
 //! Authenticated dashboard snapshot and product-action presentation.
 use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
 use super::{
-    brawlers::brawler_loadout_summary,
-    queue::queue_population,
-    shared::{FlowButton, FlowNavigation, FlowRoot, spawn_flow_error_button, spawn_heading},
+    brawlers::ultimate_name,
+    shared::{FlowButton, FlowNavigation, FlowRoot},
 };
 use crate::client::{
     ClientLobbyMembership, RuntimeLobbyTarget,
@@ -16,8 +15,7 @@ use crate::client::{
 use bevy::{
     input::mouse::MouseWheel,
     prelude::*,
-    ui::{InteractionDisabled, ScrollPosition, UiScale},
-    window::PrimaryWindow,
+    ui::{InteractionDisabled, ScrollPosition},
 };
 use lightyear::prelude::client::Client;
 
@@ -25,10 +23,13 @@ pub(in crate::client::flow) const DASHBOARD_PLAY_INDEX: usize = 0;
 pub(in crate::client::flow) const DASHBOARD_PRACTICE_INDEX: usize = 1;
 pub(in crate::client::flow) const DASHBOARD_GAME_INDEX: usize = 2;
 pub(in crate::client::flow) const DASHBOARD_BUILD_INDEX: usize = 3;
-pub(in crate::client::flow) const DASHBOARD_SETTINGS_INDEX: usize = 4;
-pub(in crate::client::flow) const DASHBOARD_MENU_INDEX: usize = 5;
-const DASHBOARD_COMPACT_WIDTH: f32 = 1_000.0;
-const DASHBOARD_COMPACT_HEIGHT: f32 = 640.0;
+pub(in crate::client::flow) const DASHBOARD_MENU_INDEX: usize = 4;
+mod layout;
+pub(in crate::client::flow) use layout::{apply_dashboard_layout, dashboard_layout_class};
+pub(in crate::client::flow) const INK: Color = Color::srgb(0.025, 0.10, 0.145);
+pub(in crate::client::flow) const CREAM: Color = Color::srgb(0.98, 0.92, 0.81);
+pub(in crate::client::flow) const TEAL: Color = Color::srgb(0.32, 0.64, 0.62);
+pub(in crate::client::flow) const ORANGE: Color = Color::srgb(1.0, 0.40, 0.025);
 
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::client::flow) struct DashboardReturnFocus(pub(in crate::client::flow) Option<usize>);
@@ -67,7 +68,9 @@ pub(in crate::client::flow) enum DashboardLayoutRole {
     ActionRow,
     Mode,
     UtilityButton { wide_width: f32 },
-    UtilityLabel { has_icon: bool },
+    UtilityLabel,
+    ActionButton,
+    Notice,
 }
 
 #[derive(Component)]
@@ -84,6 +87,9 @@ pub(in crate::client::flow) struct DashboardBrawlerNameLabel;
 
 #[derive(Component)]
 pub(in crate::client::flow) struct DashboardBrawlerSummaryLabel;
+
+#[derive(Component)]
+pub(in crate::client::flow) struct DashboardBrawlerActionLabel;
 
 #[derive(Component)]
 pub(in crate::client::flow) struct DashboardMenuRoot;
@@ -154,7 +160,10 @@ pub(in crate::client::flow) fn spawn_dashboard(
         ));
     }
     navigation.selected = return_focus.0.take().unwrap_or(DASHBOARD_PLAY_INDEX);
-    let dashboard_notice = notice.0.take();
+    let dashboard_notice = notice
+        .0
+        .take()
+        .filter(|message| message != "Profile saved.");
     let admission_pending = queue.pending().is_some() || practice.pending() || profile.pending();
     let selected_brawler = membership.profile.selected_brawler_id.and_then(|id| {
         membership
@@ -167,22 +176,14 @@ pub(in crate::client::flow) fn spawn_dashboard(
         selected_brawler.map_or("CREATE YOUR FIRST BRAWLER", |brawler| brawler.name.as_str());
     let build_summary = selected_brawler.map_or_else(
         || "Choose a permanent fighter profile and weapon base".to_string(),
-        |brawler| brawler_loadout_summary(brawler, &membership.brawler_catalog),
+        |brawler| dashboard_build_summary(brawler, &membership.brawler_catalog),
     );
-    let game_summary = dashboard_game_summary(game);
-    let population = if queue.required_snapshot_is_fresh() {
-        queue_population(&queue, game)
-    } else {
-        "Population updating".to_string()
-    };
+    let game_summary = dashboard_team_summary(game);
     let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
         snapshot.formation_availability == crate::lobby::FormationAvailability::ProductMatchOccupied
     });
     let build_accessible = format!("View brawlers: {build_name}, {build_summary}");
-    let game_accessible = format!(
-        "Change game type: {}, {game_summary}, {population}",
-        game.display_name
-    );
+    let game_accessible = format!("Change game type: {}, {game_summary}", game.display_name);
 
     commands
         .spawn((
@@ -212,7 +213,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                 if let Some(assets) = assets.as_deref() {
                     header.spawn((
                         DashboardLayoutRole::Wordmark,
-                        ImageNode::new(assets.wordmark.clone()),
+                        ImageNode::new(assets.dashboard_logo.clone()),
                         Node {
                             width: px(220),
                             height: auto(),
@@ -224,37 +225,52 @@ pub(in crate::client::flow) fn spawn_dashboard(
                         DashboardLayoutRole::Wordmark,
                         Text::new("PEWPEW BLITZ"),
                         dashboard_font(assets.as_deref(), 32.0),
-                        TextColor(Color::srgb(0.28, 0.92, 1.0)),
+                        TextColor(INK),
                     ));
                 }
                 header
                     .spawn((
                         DashboardLayoutRole::Identity,
                         AccessibleLabel::new(format!(
-                            "Player {}, server {}, online",
+                            "Player {}, server {}",
                             membership.accepted_display_name, membership.server_name
                         )),
                         Node {
                             min_width: px(240),
-                            flex_direction: FlexDirection::Column,
-                            padding: UiRect::axes(px(14), px(7)),
-                            border: UiRect::all(px(1)),
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: px(12),
+                            padding: UiRect::axes(px(20), px(12)),
+                            border: UiRect::ZERO,
                             border_radius: BorderRadius::all(px(11)),
                             ..default()
                         },
-                        BackgroundColor(Color::srgba(0.035, 0.12, 0.24, 0.92)),
-                        BorderColor::all(Color::srgba(0.15, 0.5, 0.8, 0.45)),
+                        BackgroundColor(Color::NONE),
+                        shell_panel(assets.as_deref(), 5),
                     ))
                     .with_children(|identity| {
+                        shell_icon(identity, assets.as_deref(), 3, 26.0, CREAM);
                         identity.spawn((
                             Text::new(&membership.accepted_display_name),
+                            TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
                             dashboard_font(assets.as_deref(), 22.0),
-                            TextColor(Color::WHITE),
+                            TextColor(CREAM),
                         ));
                         identity.spawn((
-                            Text::new(format!("SERVER: {}  ONLINE", membership.server_name)),
-                            TextFont::from_font_size(12.0),
-                            TextColor(Color::srgb(0.2, 0.9, 0.72)),
+                            Node {
+                                width: px(2),
+                                height: px(24),
+                                flex_shrink: 0.0,
+                                ..default()
+                            },
+                            BackgroundColor(CREAM),
+                        ));
+                        shell_icon(identity, assets.as_deref(), 4, 28.0, TEAL);
+                        identity.spawn((
+                            Text::new(membership.server_name.to_uppercase()),
+                            TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
+                            dashboard_font(assets.as_deref(), 22.0),
+                            TextColor(TEAL),
                         ));
                     });
                 header.spawn((
@@ -266,19 +282,6 @@ pub(in crate::client::flow) fn spawn_dashboard(
                 ));
                 spawn_dashboard_button(
                     header,
-                    DASHBOARD_SETTINGS_INDEX,
-                    FlowUiAction::OpenSettings,
-                    DashboardButtonPresentation {
-                        label: "SETTINGS",
-                        width: px(112),
-                        primary: false,
-                        disabled: false,
-                        assets: assets.as_deref(),
-                        icon: assets.as_deref().map(|assets| assets.settings_icon.clone()),
-                    },
-                );
-                spawn_dashboard_button(
-                    header,
                     DASHBOARD_MENU_INDEX,
                     FlowUiAction::OpenDashboardMenu,
                     DashboardButtonPresentation {
@@ -287,15 +290,18 @@ pub(in crate::client::flow) fn spawn_dashboard(
                         primary: false,
                         disabled: false,
                         assets: assets.as_deref(),
-                        icon: assets.as_deref().map(|assets| assets.menu_icon.clone()),
+                        icon: assets
+                            .as_deref()
+                            .map(|assets| assets.dashboard_icons[2].clone()),
                     },
                 );
             });
             if let Some(message) = dashboard_notice {
                 root.spawn((
+                    DashboardLayoutRole::Notice,
                     Text::new(message),
-                    TextFont::from_font_size(13.0),
-                    TextColor(Color::srgb(1.0, 0.86, 0.48)),
+                    dashboard_font(assets.as_deref(), 18.0),
+                    TextColor(INK),
                 ));
             }
             root.spawn((
@@ -334,7 +340,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                         flex_grow: 1.0,
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::End,
-                        border: UiRect::all(px(2)),
+                        border: UiRect::ZERO,
                         border_radius: BorderRadius::all(px(24)),
                         overflow: Overflow::clip(),
                         ..default()
@@ -345,83 +351,87 @@ pub(in crate::client::flow) fn spawn_dashboard(
                 if admission_pending {
                     preview_button.insert(InteractionDisabled);
                 }
-                let mut build_button = center.spawn((
-                    Button,
-                    DashboardBuildCard,
-                    DashboardLayoutRole::Build,
-                    DashboardButtonStyle::Build,
-                    AccessibleLabel::new(build_accessible.clone()),
-                    FlowButton {
-                        index: DASHBOARD_BUILD_INDEX,
-                        action: if selected_brawler.is_some() {
-                            FlowUiAction::OpenBrawlerList
-                        } else {
-                            FlowUiAction::CreateBrawler
+                center
+                    .spawn((
+                        DashboardLayoutRole::Build,
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: px(12),
+                            ..default()
                         },
-                        error_action: false,
-                    },
-                    Node {
-                        width: percent(30),
-                        max_width: px(365),
-                        min_height: px(104),
-                        column_gap: px(12),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        padding: UiRect::axes(px(12), px(8)),
-                        border: UiRect::all(px(2)),
-                        border_radius: BorderRadius::all(px(14)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.91, 0.95, 1.0)),
-                    BorderColor::all(Color::srgb(0.55, 0.7, 0.9)),
-                    BoxShadow::new(
-                        Color::srgba(0.0, 0.02, 0.08, 0.65),
-                        px(0),
-                        px(5),
-                        px(0),
-                        px(3),
-                    ),
-                ));
-                if admission_pending {
-                    build_button.insert(InteractionDisabled);
-                }
-                build_button.with_children(|card| {
-                    spawn_dashboard_icon_well(
-                        card,
-                        assets.as_deref().map(|assets| assets.build_icon.clone()),
-                        52.0,
-                        31.0,
-                        Color::srgb(0.05, 0.34, 0.82),
-                    );
-                    card.spawn((Node {
-                        flex_direction: FlexDirection::Column,
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    },))
-                        .with_children(|details| {
+                    ))
+                    .with_children(|details| {
+                        details.spawn((
+                            Text::new(build_name.to_uppercase()),
+                            TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
+                            DashboardBrawlerNameLabel,
+                            dashboard_font(assets.as_deref(), 64.0),
+                            TextColor(INK),
+                        ));
+                        if let Some(assets) = assets.as_deref() {
                             details.spawn((
-                                Text::new(build_name.to_uppercase()),
-                                DashboardBrawlerNameLabel,
-                                dashboard_font(assets.as_deref(), 24.0),
-                                TextColor(Color::srgb(0.035, 0.12, 0.32)),
+                                ImageNode::new(assets.dashboard_icons[7].clone())
+                                    .with_mode(NodeImageMode::Stretch),
+                                Node {
+                                    width: percent(94),
+                                    height: px(12),
+                                    ..default()
+                                },
                             ));
-                            details.spawn((
-                                Text::new(build_summary),
-                                DashboardBrawlerSummaryLabel,
-                                TextFont::from_font_size(12.0),
-                                TextColor(Color::srgb(0.08, 0.18, 0.35)),
-                            ));
-                            details.spawn((
+                        }
+                        details.spawn((
+                            Text::new(build_summary),
+                            DashboardBrawlerSummaryLabel,
+                            dashboard_font(assets.as_deref(), 20.0),
+                            TextColor(INK),
+                        ));
+                        let mut button = details.spawn((
+                            Button,
+                            DashboardBuildCard,
+                            DashboardButtonStyle::Build,
+                            AccessibleLabel::new(build_accessible.clone()),
+                            FlowButton {
+                                index: DASHBOARD_BUILD_INDEX,
+                                action: if selected_brawler.is_some() {
+                                    FlowUiAction::OpenBrawlerList
+                                } else {
+                                    FlowUiAction::CreateBrawler
+                                },
+                                error_action: false,
+                            },
+                            Node {
+                                width: percent(100),
+                                min_height: px(80),
+                                column_gap: px(10),
+                                margin: UiRect::top(px(12)),
+                                padding: UiRect::all(px(12)),
+                                border: UiRect::ZERO,
+                                border_radius: BorderRadius::all(px(5)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(TEAL),
+                            BorderColor::all(INK),
+                        ));
+                        if admission_pending {
+                            button.insert(InteractionDisabled);
+                        }
+                        button.insert(shell_panel(assets.as_deref(), 3));
+                        button.with_children(|button| {
+                            shell_icon(button, assets.as_deref(), 5, 38.0, CREAM);
+                            button.spawn((
+                                DashboardBrawlerActionLabel,
                                 Text::new(if selected_brawler.is_some() {
                                     "VIEW BRAWLERS"
                                 } else {
                                     "CREATE BRAWLER"
                                 }),
-                                dashboard_font(assets.as_deref(), 15.0),
-                                TextColor(Color::srgb(0.03, 0.36, 0.82)),
+                                dashboard_font(assets.as_deref(), 24.0),
+                                TextColor(CREAM),
                             ));
                         });
-                });
+                    });
             });
             root.spawn((
                 DashboardLayoutRole::ActionRow,
@@ -455,68 +465,73 @@ pub(in crate::client::flow) fn spawn_dashboard(
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::Center,
                         padding: UiRect::axes(px(18), px(10)),
-                        border: UiRect::all(px(3)),
+                        border: UiRect::ZERO,
                         border_radius: BorderRadius::all(px(16)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.92, 0.95, 1.0)),
-                    BorderColor::all(Color::srgb(0.55, 0.7, 0.9)),
-                    BoxShadow::new(
-                        Color::srgba(0.0, 0.02, 0.08, 0.65),
-                        px(0),
-                        px(5),
-                        px(0),
-                        px(3),
-                    ),
+                    BackgroundColor(CREAM),
+                    BorderColor::all(INK),
                 ));
                 if admission_pending {
                     mode_button.insert(InteractionDisabled);
                 }
+                mode_button.insert(shell_panel(assets.as_deref(), 0));
                 mode_button.with_children(|card| {
-                    spawn_dashboard_icon_well(
-                        card,
-                        assets.as_deref().map(|assets| assets.mode_icon.clone()),
-                        68.0,
-                        42.0,
-                        Color::srgb(0.05, 0.34, 0.82),
-                    );
+                    if let Some(assets) = assets.as_deref() {
+                        card.spawn((
+                            ImageNode::new(
+                                assets.dashboard_badges[dashboard_badge_index(game)].clone(),
+                            ),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: px(20),
+                                top: px(-8),
+                                width: px(64),
+                                height: px(80),
+                                ..default()
+                            },
+                        ));
+                    }
+                    if let Some(assets) = assets.as_deref() {
+                        card.spawn((
+                            ImageNode {
+                                color: INK,
+                                ..ImageNode::new(assets.dashboard_icons[6].clone())
+                            },
+                            Node {
+                                position_type: PositionType::Absolute,
+                                right: px(26),
+                                bottom: px(30),
+                                width: px(36),
+                                height: px(44),
+                                ..default()
+                            },
+                        ));
+                    }
                     card.spawn((Node {
                         flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
                         justify_content: JustifyContent::Center,
                         ..default()
                     },))
                         .with_children(|details| {
                             details.spawn((
-                                Text::new(game.display_name.to_uppercase()),
-                                dashboard_font(assets.as_deref(), 28.0),
-                                TextColor(Color::srgb(0.035, 0.12, 0.32)),
+                                Text::new(dashboard_mode_title(game)),
+                                TextFont {
+                                    font_size: FontSize::Vh(10.0),
+                                    ..dashboard_font(assets.as_deref(), 42.0)
+                                },
+                                TextColor(INK),
                             ));
                             details.spawn((
-                                Text::new(format!("{game_summary}\n{population}")),
+                                Text::new(game_summary),
                                 DashboardGameSummaryLabel,
-                                TextFont::from_font_size(12.0),
-                                TextColor(Color::srgb(0.08, 0.18, 0.35)),
+                                dashboard_font(assets.as_deref(), 32.0),
+                                TextColor(INK),
                                 TextLayout::new(Justify::Left, LineBreak::WordBoundary),
                             ));
                         });
                 });
-                spawn_dashboard_button(
-                    actions,
-                    DASHBOARD_PRACTICE_INDEX,
-                    FlowUiAction::StartPractice,
-                    DashboardButtonPresentation {
-                        label: if practice.pending() {
-                            "STARTING..."
-                        } else {
-                            "PRACTICE"
-                        },
-                        width: percent(21),
-                        primary: false,
-                        disabled: admission_pending || selected_brawler.is_none(),
-                        assets: assets.as_deref(),
-                        icon: assets.as_deref().map(|assets| assets.practice_icon.clone()),
-                    },
-                );
                 spawn_dashboard_button(
                     actions,
                     DASHBOARD_PLAY_INDEX,
@@ -535,7 +550,28 @@ pub(in crate::client::flow) fn spawn_dashboard(
                             || admission_pending
                             || selected_brawler.is_none(),
                         assets: assets.as_deref(),
-                        icon: assets.as_deref().map(|assets| assets.play_icon.clone()),
+                        icon: assets
+                            .as_deref()
+                            .map(|assets| assets.dashboard_icons[0].clone()),
+                    },
+                );
+                spawn_dashboard_button(
+                    actions,
+                    DASHBOARD_PRACTICE_INDEX,
+                    FlowUiAction::StartPractice,
+                    DashboardButtonPresentation {
+                        label: if practice.pending() {
+                            "STARTING..."
+                        } else {
+                            "PRACTICE"
+                        },
+                        width: percent(21),
+                        primary: false,
+                        disabled: admission_pending || selected_brawler.is_none(),
+                        assets: assets.as_deref(),
+                        icon: assets
+                            .as_deref()
+                            .map(|assets| assets.dashboard_icons[1].clone()),
                     },
                 );
             });
@@ -545,57 +581,42 @@ pub(in crate::client::flow) fn spawn_dashboard(
 pub(in crate::client::flow) fn dashboard_game_summary(
     game: &crate::lobby::AdvertisedGameType,
 ) -> String {
-    let maps = crate::map::MapContentCatalog::embedded().ok().map_or_else(
-        || "Map pool unavailable".to_string(),
-        |catalog| {
-            game.map_preset_ids
-                .iter()
-                .map(|id| {
-                    catalog
-                        .presets
-                        .iter()
-                        .find(|preset| preset.id == *id)
-                        .map_or_else(
-                            || format!("Map {}", id.0),
-                            |preset| preset.display_name.clone(),
-                        )
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        },
-    );
-    let rules = match game.rules_summary {
-        crate::lobby::AdvertisedRulesSummary::Wipeout {
-            target_score,
-            active_limit_ticks,
-        } => format!(
-            "First to {target_score} - {}s limit",
-            crate::timing::simulation_whole_seconds(active_limit_ticks)
-        ),
-        crate::lobby::AdvertisedRulesSummary::HotZone {
-            target_progress_ticks,
-            active_limit_ticks,
-        } => format!(
-            "Hold {}s - {}s limit",
-            crate::timing::simulation_whole_seconds(u64::from(target_progress_ticks)),
-            crate::timing::simulation_whole_seconds(active_limit_ticks)
-        ),
-        crate::lobby::AdvertisedRulesSummary::Heist {
-            safe_maximum_health,
-            active_limit_ticks,
-        } => format!(
-            "Destroy the {safe_maximum_health} HP enemy idol - {}s limit",
-            crate::timing::simulation_whole_seconds(active_limit_ticks)
-        ),
-        crate::lobby::AdvertisedRulesSummary::Zombie {
-            pressure_stage_count,
-            active_limit_ticks,
-        } => format!(
-            "Survive {pressure_stage_count} pressure stages - {}s timer",
-            crate::timing::simulation_whole_seconds(active_limit_ticks)
-        ),
-    };
-    format!("{rules}\nMap pool: {maps}")
+    format!(
+        "{}, {}",
+        dashboard_mode_title(game),
+        dashboard_team_summary(game)
+    )
+}
+
+fn dashboard_team_summary(game: &crate::lobby::AdvertisedGameType) -> String {
+    if game.team_count == 1 {
+        format!("{} PLAYERS · CO-OP", game.players_per_team)
+    } else {
+        std::iter::repeat_n(
+            game.players_per_team.to_string(),
+            usize::from(game.team_count),
+        )
+        .collect::<Vec<_>>()
+        .join("v")
+    }
+}
+
+fn dashboard_mode_title(game: &crate::lobby::AdvertisedGameType) -> &'static str {
+    match game.rules_summary {
+        crate::lobby::AdvertisedRulesSummary::Wipeout { .. } => "WIPEOUT",
+        crate::lobby::AdvertisedRulesSummary::HotZone { .. } => "HOT ZONE",
+        crate::lobby::AdvertisedRulesSummary::Heist { .. } => "HEIST",
+        crate::lobby::AdvertisedRulesSummary::Zombie { .. } => "ZOMBIE",
+    }
+}
+
+fn dashboard_badge_index(game: &crate::lobby::AdvertisedGameType) -> usize {
+    match game.rules_summary {
+        crate::lobby::AdvertisedRulesSummary::Wipeout { .. } => 0,
+        crate::lobby::AdvertisedRulesSummary::HotZone { .. } => 1,
+        crate::lobby::AdvertisedRulesSummary::Heist { .. } => 2,
+        crate::lobby::AdvertisedRulesSummary::Zombie { .. } => 3,
+    }
 }
 
 #[allow(
@@ -615,11 +636,13 @@ pub(in crate::client::flow) fn update_dashboard_live_facts(
     profile: Res<crate::client::ClientProfileModel>,
     mut texts: Query<(
         &mut Text,
+        &mut TextFont,
         Has<DashboardGameSummaryLabel>,
         Has<DashboardPlayLabel>,
         Has<DashboardPracticeLabel>,
         Has<DashboardBrawlerNameLabel>,
         Has<DashboardBrawlerSummaryLabel>,
+        Has<DashboardBrawlerActionLabel>,
     )>,
     mut action_buttons: Query<(
         Entity,
@@ -642,12 +665,7 @@ pub(in crate::client::flow) fn update_dashboard_live_facts(
     }) else {
         return;
     };
-    let population = if queue.required_snapshot_is_fresh() {
-        queue_population(&queue, game)
-    } else {
-        "Population updating".to_string()
-    };
-    let copy = format!("{}\n{population}", dashboard_game_summary(game));
+    let copy = dashboard_team_summary(game);
     let selected_brawler = membership.profile.selected_brawler_id.and_then(|id| {
         membership
             .profile
@@ -661,12 +679,21 @@ pub(in crate::client::flow) fn update_dashboard_live_facts(
             format!(
                 "View brawlers: {}, {}",
                 brawler.name,
-                brawler_loadout_summary(brawler, &membership.brawler_catalog)
+                dashboard_build_summary(brawler, &membership.brawler_catalog)
             )
         },
     );
-    for (mut text, is_summary, _, _, is_brawler_name, is_brawler_summary) in &mut texts {
-        if is_summary {
+    for (mut text, _, is_summary, _, _, is_brawler_name, is_brawler_summary, is_brawler_action) in
+        &mut texts
+    {
+        if is_brawler_action {
+            text.0 = if selected_brawler.is_some() {
+                "VIEW BRAWLERS"
+            } else {
+                "CREATE BRAWLER"
+            }
+            .to_string();
+        } else if is_summary {
             text.0.clone_from(&copy);
         } else if is_brawler_name {
             text.0 = selected_brawler.map_or_else(
@@ -676,7 +703,7 @@ pub(in crate::client::flow) fn update_dashboard_live_facts(
         } else if is_brawler_summary {
             text.0 = selected_brawler.map_or_else(
                 || "Choose a permanent fighter profile and weapon base".to_string(),
-                |brawler| brawler_loadout_summary(brawler, &membership.brawler_catalog),
+                |brawler| dashboard_build_summary(brawler, &membership.brawler_catalog),
             );
         }
     }
@@ -714,7 +741,7 @@ pub(in crate::client::flow) fn update_dashboard_live_facts(
         }
         let next_label = match style {
             DashboardButtonStyle::Mode => format!(
-                "Change game type: {}, {}, {population}{}",
+                "Change game type: {}, {}{}",
                 game.display_name,
                 dashboard_game_summary(game),
                 if admission_pending { busy_suffix } else { "" }
@@ -740,7 +767,7 @@ pub(in crate::client::flow) fn update_dashboard_live_facts(
                 .insert(AccessibleLabel::new(next_label));
         }
     }
-    for (mut text, _, is_play_label, is_practice_label, _, _) in &mut texts {
+    for (mut text, mut font, _, is_play_label, is_practice_label, _, _, _) in &mut texts {
         if is_play_label {
             text.0 = if queue.pending().is_some() {
                 "JOINING...".to_string()
@@ -749,6 +776,11 @@ pub(in crate::client::flow) fn update_dashboard_live_facts(
             } else {
                 "PLAY".to_string()
             };
+            font.font_size = if text.0 == "PLAY" {
+                FontSize::Vh(14.5)
+            } else {
+                FontSize::Px(22.0)
+            };
         } else if is_practice_label {
             text.0 = if practice.pending() {
                 "STARTING...".to_string()
@@ -756,171 +788,6 @@ pub(in crate::client::flow) fn update_dashboard_live_facts(
                 "PRACTICE".to_string()
             };
         }
-    }
-}
-
-pub(in crate::client::flow) fn dashboard_layout_class(
-    logical_width: f32,
-    logical_height: f32,
-    ui_scale: f32,
-) -> DashboardLayoutClass {
-    let scale = ui_scale.max(0.01);
-    let effective_width = logical_width / scale;
-    let effective_height = logical_height / scale;
-    if effective_width < DASHBOARD_COMPACT_WIDTH || effective_height < DASHBOARD_COMPACT_HEIGHT {
-        DashboardLayoutClass::Compact
-    } else {
-        DashboardLayoutClass::Wide
-    }
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "one change-driven pass applies the closed Wide/Compact dashboard node contract"
-)]
-pub(in crate::client::flow) fn apply_dashboard_layout(
-    windows: Query<&Window, With<PrimaryWindow>>,
-    scale: Option<Res<UiScale>>,
-    mut roots: Query<(&mut DashboardLayoutClass, &mut ScrollPosition), With<DashboardRoot>>,
-    mut nodes: Query<(
-        &mut Node,
-        &DashboardLayoutRole,
-        Option<&DashboardButtonStyle>,
-    )>,
-) {
-    let Some(window) = windows.iter().next() else {
-        return;
-    };
-    let next = dashboard_layout_class(
-        window.resolution.width(),
-        window.resolution.height(),
-        scale.as_deref().map_or(1.0, |scale| scale.0),
-    );
-    let Some((mut current, mut scroll)) = roots.iter_mut().next() else {
-        return;
-    };
-    if *current == next {
-        return;
-    }
-    *current = next;
-    if next == DashboardLayoutClass::Wide {
-        scroll.0 = Vec2::ZERO;
-    }
-    for (mut node, role, style) in &mut nodes {
-        apply_dashboard_layout_node(&mut node, *role, style.copied(), next);
-    }
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "the closed role match keeps the complete Wide/Compact layout contract reviewable"
-)]
-fn apply_dashboard_layout_node(
-    node: &mut Node,
-    role: DashboardLayoutRole,
-    style: Option<DashboardButtonStyle>,
-    class: DashboardLayoutClass,
-) {
-    let compact = class == DashboardLayoutClass::Compact;
-    match role {
-        DashboardLayoutRole::Root => {
-            node.row_gap = px(if compact { 8 } else { 5 });
-            node.padding = if compact {
-                UiRect::axes(px(8), px(6))
-            } else {
-                UiRect::axes(px(16), px(8))
-            };
-            node.overflow = if compact {
-                Overflow::scroll_y()
-            } else {
-                Overflow::clip()
-            };
-        }
-        DashboardLayoutRole::Header => {
-            node.column_gap = px(if compact { 6 } else { 10 });
-            node.padding = if compact {
-                UiRect::axes(px(4), px(4))
-            } else {
-                UiRect::axes(px(18), px(6))
-            };
-        }
-        DashboardLayoutRole::Wordmark => {
-            node.width = px(if compact { 105 } else { 220 });
-        }
-        DashboardLayoutRole::Identity => {
-            node.min_width = if compact { auto() } else { px(240) };
-            node.flex_grow = if compact { 1.0 } else { 0.0 };
-            node.flex_shrink = if compact { 1.0 } else { 0.0 };
-            node.padding = if compact {
-                UiRect::axes(px(8), px(5))
-            } else {
-                UiRect::axes(px(14), px(7))
-            };
-        }
-        DashboardLayoutRole::HeaderSpacer => {
-            node.display = if compact {
-                Display::None
-            } else {
-                Display::Flex
-            };
-        }
-        DashboardLayoutRole::Center => {
-            node.flex_grow = if compact { 0.0 } else { 1.0 };
-            node.justify_content = if compact {
-                JustifyContent::FlexStart
-            } else {
-                JustifyContent::Center
-            };
-            node.row_gap = px(if compact { 8 } else { 5 });
-        }
-        DashboardLayoutRole::Preview => {
-            node.width = percent(if compact { 90 } else { 54 });
-            node.max_width = px(if compact { 520 } else { 650 });
-            node.min_height = px(if compact { 180 } else { 280 });
-            node.max_height = px(if compact { 220 } else { 470 });
-            node.flex_grow = if compact { 0.0 } else { 1.0 };
-        }
-        DashboardLayoutRole::Build => {
-            node.width = percent(if compact { 94 } else { 30 });
-            node.max_width = px(if compact { 700 } else { 365 });
-            node.min_height = px(if compact { 88 } else { 104 });
-        }
-        DashboardLayoutRole::ActionRow => {
-            node.flex_direction = if compact {
-                FlexDirection::Column
-            } else {
-                FlexDirection::Row
-            };
-            node.column_gap = px(if compact { 0 } else { 12 });
-            node.row_gap = px(if compact { 8 } else { 0 });
-        }
-        DashboardLayoutRole::Mode => {
-            node.width = percent(if compact { 100 } else { 44 });
-            node.min_height = px(if compact { 94 } else { 104 });
-        }
-        DashboardLayoutRole::UtilityButton { wide_width } => {
-            node.width = px(if compact { 48.0 } else { wide_width });
-            node.min_height = px(42);
-            node.padding = UiRect::axes(px(if compact { 6 } else { 12 }), px(7));
-        }
-        DashboardLayoutRole::UtilityLabel { has_icon } => {
-            node.display = if compact && has_icon {
-                Display::None
-            } else {
-                Display::Flex
-            };
-        }
-    }
-    match style {
-        Some(DashboardButtonStyle::Practice) => {
-            node.width = percent(if compact { 100 } else { 21 });
-            node.min_height = px(if compact { 80 } else { 104 });
-        }
-        Some(DashboardButtonStyle::Play) => {
-            node.width = percent(if compact { 100 } else { 33 });
-            node.min_height = px(if compact { 88 } else { 104 });
-        }
-        _ => {}
     }
 }
 
@@ -953,7 +820,8 @@ pub(in crate::client::flow) fn scroll_dashboard(
 )]
 pub(in crate::client::flow) fn keep_dashboard_focus_visible(
     navigation: Res<FlowNavigation>,
-    buttons: Query<(&FlowButton, &ComputedNode, &UiGlobalTransform)>,
+    overlay: Res<ClientOverlay>,
+    buttons: Query<(&FlowButton, &ComputedNode, &UiGlobalTransform), Without<DashboardPreviewHost>>,
     mut roots: Query<
         (
             Entity,
@@ -966,6 +834,10 @@ pub(in crate::client::flow) fn keep_dashboard_focus_visible(
     >,
     mut prior: Local<Option<(Entity, DashboardLayoutClass, usize)>>,
 ) {
+    if !matches!(overlay.as_ref(), ClientOverlay::None) {
+        *prior = None;
+        return;
+    }
     let Some((root_entity, class, _, _, _)) = roots.iter_mut().next() else {
         *prior = None;
         return;
@@ -1038,40 +910,6 @@ fn dashboard_font(assets: Option<&crate::client::ClientAssetHandles>, size: f32)
     )
 }
 
-fn spawn_dashboard_icon_well(
-    parent: &mut ChildSpawnerCommands,
-    icon: Option<Handle<Image>>,
-    well_size: f32,
-    icon_size: f32,
-    color: Color,
-) {
-    parent
-        .spawn((
-            Node {
-                width: px(well_size),
-                height: px(well_size),
-                flex_shrink: 0.0,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border_radius: BorderRadius::all(px(well_size * 0.28)),
-                ..default()
-            },
-            BackgroundColor(color),
-        ))
-        .with_children(|well| {
-            if let Some(icon) = icon {
-                well.spawn((
-                    ImageNode::new(icon),
-                    Node {
-                        width: px(icon_size),
-                        height: px(icon_size),
-                        ..default()
-                    },
-                ));
-            }
-        });
-}
-
 struct DashboardButtonPresentation<'a> {
     label: &'a str,
     width: Val,
@@ -1085,17 +923,17 @@ struct DashboardButtonPresentation<'a> {
 enum DashboardButtonContentKind {
     Play,
     Practice,
-    Utility { has_icon: bool },
+    Utility,
     Other,
 }
 
 const fn dashboard_button_icon_size(is_play: bool, is_practice: bool) -> f32 {
     if is_play {
-        42.0
+        78.0
     } else if is_practice {
-        32.0
+        44.0
     } else {
-        21.0
+        28.0
     }
 }
 
@@ -1119,10 +957,7 @@ fn spawn_dashboard_button(
         action,
         FlowUiAction::OpenSettings | FlowUiAction::OpenDashboardMenu
     );
-    let has_icon = icon.is_some();
-    let utility_width = matches!(action, FlowUiAction::OpenSettings)
-        .then_some(112.0)
-        .or_else(|| matches!(action, FlowUiAction::OpenDashboardMenu).then_some(92.0));
+    let utility_width = is_utility.then_some(148.0);
     let icon_size = dashboard_button_icon_size(is_play, is_practice);
     let mut button = parent.spawn((
         Button,
@@ -1135,32 +970,37 @@ fn spawn_dashboard_button(
         Node {
             width,
             min_height: px(if is_play || is_practice { 104 } else { 42 }),
-            column_gap: px(if is_play || is_practice { 12 } else { 7 }),
+            column_gap: px(if is_play || is_practice { 24 } else { 10 }),
             padding: UiRect::axes(px(12), px(7)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            border: UiRect::all(px(if primary { 3 } else { 2 })),
-            border_radius: BorderRadius::all(px(if primary { 16 } else { 11 })),
+            border: UiRect::ZERO,
+            border_radius: BorderRadius::all(px(5)),
             ..default()
         },
-        BackgroundColor(if primary {
-            Color::srgb(0.95, 0.48, 0.08)
-        } else {
-            Color::srgb(0.09, 0.14, 0.2)
-        }),
+        BackgroundColor(if primary { ORANGE } else { TEAL }),
         BorderColor::all(Color::NONE),
-        BoxShadow::new(
-            Color::srgba(0.0, 0.02, 0.08, 0.65),
-            px(0),
-            px(if is_play { 7 } else { 4 }),
-            px(0),
-            px(3),
-        ),
+    ));
+    button.insert(shell_panel(
+        assets,
+        if is_play {
+            1
+        } else if is_practice {
+            2
+        } else {
+            4
+        },
     ));
     if is_play {
-        button.insert(DashboardButtonStyle::Play);
+        button.insert((
+            DashboardButtonStyle::Play,
+            DashboardLayoutRole::ActionButton,
+        ));
     } else if is_practice {
-        button.insert(DashboardButtonStyle::Practice);
+        button.insert((
+            DashboardButtonStyle::Practice,
+            DashboardLayoutRole::ActionButton,
+        ));
     } else {
         button.insert(DashboardButtonStyle::Header);
     }
@@ -1175,7 +1015,7 @@ fn spawn_dashboard_button(
     } else if is_practice {
         DashboardButtonContentKind::Practice
     } else if is_utility {
-        DashboardButtonContentKind::Utility { has_icon }
+        DashboardButtonContentKind::Utility
     } else {
         DashboardButtonContentKind::Other
     };
@@ -1192,28 +1032,31 @@ fn spawn_dashboard_button_contents(
     icon_size: f32,
     kind: DashboardButtonContentKind,
 ) {
-    if let Some(icon) = icon {
-        parent.spawn((
-            ImageNode::new(icon),
+    let icon_node = icon.map(|icon| {
+        (
+            ImageNode {
+                color: INK,
+                ..ImageNode::new(icon)
+            },
             Node {
                 width: px(icon_size),
                 height: px(icon_size),
+                flex_shrink: 0.0,
                 ..default()
             },
-        ));
+        )
+    });
+    if matches!(kind, DashboardButtonContentKind::Utility)
+        && let Some(icon) = icon_node.clone()
+    {
+        parent.spawn(icon);
     }
     let font_size = match kind {
-        DashboardButtonContentKind::Play => 38.0,
-        DashboardButtonContentKind::Practice => 24.0,
-        DashboardButtonContentKind::Utility { .. } | DashboardButtonContentKind::Other => 15.0,
+        DashboardButtonContentKind::Play => 64.0,
+        DashboardButtonContentKind::Practice => 40.0,
+        DashboardButtonContentKind::Utility | DashboardButtonContentKind::Other => 24.0,
     };
-    let color = match kind {
-        DashboardButtonContentKind::Play => Color::WHITE,
-        DashboardButtonContentKind::Practice => Color::srgb(0.04, 0.2, 0.55),
-        DashboardButtonContentKind::Utility { .. } | DashboardButtonContentKind::Other => {
-            Color::srgb(0.9, 0.95, 1.0)
-        }
-    };
+    let color = INK;
     let mut text = parent.spawn((
         Text::new(label),
         dashboard_font(assets, font_size),
@@ -1226,10 +1069,15 @@ fn spawn_dashboard_button_contents(
         DashboardButtonContentKind::Practice => {
             text.insert(DashboardPracticeLabel);
         }
-        DashboardButtonContentKind::Utility { has_icon } => {
-            text.insert(DashboardLayoutRole::UtilityLabel { has_icon });
+        DashboardButtonContentKind::Utility => {
+            text.insert(DashboardLayoutRole::UtilityLabel);
         }
         DashboardButtonContentKind::Other => {}
+    }
+    if !matches!(kind, DashboardButtonContentKind::Utility)
+        && let Some(icon) = icon_node
+    {
+        parent.spawn(icon);
     }
 }
 
@@ -1247,6 +1095,7 @@ pub(in crate::client::flow) fn present_dashboard_menu(
     mut navigation: ResMut<FlowNavigation>,
     memberships: Query<Option<&RuntimeLobbyTarget>, With<Client>>,
     persistence: Res<ConnectionPersistence>,
+    assets: Option<Res<crate::client::ClientAssetHandles>>,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::DashboardMenu) {
         for entity in &roots {
@@ -1300,32 +1149,145 @@ pub(in crate::client::flow) fn present_dashboard_menu(
                     border_radius: BorderRadius::all(px(14)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.035, 0.075, 0.14)),
-                BorderColor::all(Color::srgb(0.12, 0.42, 0.7)),
+                BackgroundColor(CREAM),
+                BorderColor::all(INK),
             ))
             .with_children(|panel| {
-                spawn_heading(panel, "MENU");
-                let mut index = 0;
-                spawn_flow_error_button(panel, index, FlowUiAction::OpenCredits, "CREDITS");
+                panel.spawn((
+                    Text::new("MENU"),
+                    dashboard_font(assets.as_deref(), 34.0),
+                    TextColor(INK),
+                ));
+                spawn_menu_button(
+                    panel,
+                    assets.as_deref(),
+                    0,
+                    FlowUiAction::OpenSettings,
+                    "SETTINGS",
+                );
+                let mut index = 1;
+                spawn_menu_button(
+                    panel,
+                    assets.as_deref(),
+                    index,
+                    FlowUiAction::OpenCredits,
+                    "CREDITS",
+                );
                 index += 1;
                 if let Some(favorite_label) = favorite_label {
-                    spawn_flow_error_button(
+                    spawn_menu_button(
                         panel,
+                        assets.as_deref(),
                         index,
                         FlowUiAction::ToggleFavoriteServer,
                         favorite_label,
                     );
                     index += 1;
                 }
-                spawn_flow_error_button(
+                spawn_menu_button(
                     panel,
+                    assets.as_deref(),
                     index,
                     FlowUiAction::RequestChangeServer,
                     "CHANGE SERVER",
                 );
                 index += 1;
-                spawn_flow_error_button(panel, index, FlowUiAction::Quit, "QUIT");
-                spawn_flow_error_button(panel, index + 1, FlowUiAction::CloseDashboardMenu, "BACK");
+                spawn_menu_button(panel, assets.as_deref(), index, FlowUiAction::Quit, "QUIT");
+                spawn_menu_button(
+                    panel,
+                    assets.as_deref(),
+                    index + 1,
+                    FlowUiAction::CloseDashboardMenu,
+                    "BACK",
+                );
             });
         });
+}
+
+fn spawn_menu_button(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    index: usize,
+    action: FlowUiAction,
+    label: &str,
+) {
+    parent
+        .spawn((
+            Button,
+            AccessibleLabel::new(label),
+            DashboardButtonStyle::Header,
+            FlowButton {
+                index,
+                action,
+                error_action: true,
+            },
+            Node {
+                width: percent(100),
+                min_height: px(48),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(px(2)),
+                border_radius: BorderRadius::all(px(5)),
+                ..default()
+            },
+            BackgroundColor(ORANGE),
+            BorderColor::all(INK),
+        ))
+        .with_child((
+            Text::new(label),
+            dashboard_font(assets, 22.0),
+            TextColor(INK),
+        ));
+}
+
+// Artwork contains only chrome; all text and actions remain live Bevy UI.
+fn shell_panel(assets: Option<&crate::client::ClientAssetHandles>, index: usize) -> ImageNode {
+    ImageNode {
+        image: assets.map_or_else(
+            || ImageNode::default().image,
+            |assets| assets.dashboard_panels[index].clone(),
+        ),
+        image_mode: NodeImageMode::Stretch,
+        visual_box: VisualBox::BorderBox,
+        ..default()
+    }
+}
+
+fn shell_icon(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    index: usize,
+    size: f32,
+    color: Color,
+) {
+    if let Some(assets) = assets {
+        parent.spawn((
+            ImageNode {
+                color,
+                ..ImageNode::new(assets.dashboard_icons[index].clone())
+            },
+            Node {
+                width: px(size),
+                height: px(size),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ));
+    }
+}
+
+fn dashboard_build_summary(
+    brawler: &crate::profiles::SavedBrawler,
+    catalog: &crate::profiles::AdvertisedBrawlerCatalog,
+) -> String {
+    let weapon = catalog
+        .weapon(brawler.weapon_base_id)
+        .map_or("Weapon", |weapon| weapon.display_name.as_str());
+    format!(
+        "{} · {}\n{} passives · {} part slots",
+        weapon,
+        ultimate_name(catalog, brawler.ultimate_id),
+        brawler.passive_ids.len(),
+        catalog.limits.weapon_part_slot_count
+    )
 }

@@ -10,8 +10,8 @@ use crate::client::{
             brawlers::BrawlerEditDraft,
             dashboard::{
                 DASHBOARD_BUILD_INDEX, DASHBOARD_GAME_INDEX, DASHBOARD_MENU_INDEX,
-                DASHBOARD_PLAY_INDEX, DASHBOARD_PRACTICE_INDEX, DASHBOARD_SETTINGS_INDEX,
-                DashboardLayoutClass, DashboardNavigationDirection, DashboardRoot,
+                DASHBOARD_PLAY_INDEX, DASHBOARD_PRACTICE_INDEX, DashboardLayoutClass,
+                DashboardNavigationDirection, DashboardRoot,
             },
             server_select::{EditingField, ServerSelectModel},
             shared::{FlowButton, FlowNavigation},
@@ -34,7 +34,6 @@ pub(super) fn repair_dashboard_focus(current: usize, available: &[usize]) -> usi
         DASHBOARD_PRACTICE_INDEX,
         DASHBOARD_GAME_INDEX,
         DASHBOARD_BUILD_INDEX,
-        DASHBOARD_SETTINGS_INDEX,
         DASHBOARD_MENU_INDEX,
     ]
     .into_iter()
@@ -50,31 +49,31 @@ pub(super) fn dashboard_focus_neighbor(
 ) -> usize {
     let raw_neighbor = |index| match direction {
         DashboardNavigationDirection::Left => match index {
-            DASHBOARD_PLAY_INDEX => Some(DASHBOARD_PRACTICE_INDEX),
-            DASHBOARD_PRACTICE_INDEX => Some(DASHBOARD_GAME_INDEX),
-            DASHBOARD_MENU_INDEX => Some(DASHBOARD_SETTINGS_INDEX),
+            DASHBOARD_GAME_INDEX | DASHBOARD_PLAY_INDEX | DASHBOARD_PRACTICE_INDEX => {
+                Some(DASHBOARD_BUILD_INDEX)
+            }
             _ => None,
         },
         DashboardNavigationDirection::Right => match index {
-            DASHBOARD_GAME_INDEX => Some(DASHBOARD_PRACTICE_INDEX),
-            DASHBOARD_PRACTICE_INDEX => Some(DASHBOARD_PLAY_INDEX),
-            DASHBOARD_SETTINGS_INDEX => Some(DASHBOARD_MENU_INDEX),
+            DASHBOARD_BUILD_INDEX => Some(DASHBOARD_PLAY_INDEX),
             _ => None,
         },
-        DashboardNavigationDirection::Up => match (class, index) {
-            (DashboardLayoutClass::Compact, DASHBOARD_PLAY_INDEX) => Some(DASHBOARD_PRACTICE_INDEX),
-            (DashboardLayoutClass::Compact, DASHBOARD_PRACTICE_INDEX) => Some(DASHBOARD_GAME_INDEX),
-            (_, DASHBOARD_PLAY_INDEX | DASHBOARD_PRACTICE_INDEX | DASHBOARD_GAME_INDEX) => {
+        DashboardNavigationDirection::Up => match index {
+            DASHBOARD_PRACTICE_INDEX => Some(DASHBOARD_PLAY_INDEX),
+            DASHBOARD_PLAY_INDEX => Some(DASHBOARD_GAME_INDEX),
+            DASHBOARD_GAME_INDEX if class == DashboardLayoutClass::Compact => {
                 Some(DASHBOARD_BUILD_INDEX)
             }
-            (_, DASHBOARD_BUILD_INDEX) => Some(DASHBOARD_SETTINGS_INDEX),
+            DASHBOARD_GAME_INDEX | DASHBOARD_BUILD_INDEX => Some(DASHBOARD_MENU_INDEX),
             _ => None,
         },
-        DashboardNavigationDirection::Down => match (class, index) {
-            (_, DASHBOARD_SETTINGS_INDEX | DASHBOARD_MENU_INDEX) => Some(DASHBOARD_BUILD_INDEX),
-            (_, DASHBOARD_BUILD_INDEX) => Some(DASHBOARD_GAME_INDEX),
-            (DashboardLayoutClass::Compact, DASHBOARD_GAME_INDEX) => Some(DASHBOARD_PRACTICE_INDEX),
-            (DashboardLayoutClass::Compact, DASHBOARD_PRACTICE_INDEX) => Some(DASHBOARD_PLAY_INDEX),
+        DashboardNavigationDirection::Down => match index {
+            DASHBOARD_MENU_INDEX if class == DashboardLayoutClass::Compact => {
+                Some(DASHBOARD_BUILD_INDEX)
+            }
+            DASHBOARD_MENU_INDEX | DASHBOARD_BUILD_INDEX => Some(DASHBOARD_GAME_INDEX),
+            DASHBOARD_GAME_INDEX => Some(DASHBOARD_PLAY_INDEX),
+            DASHBOARD_PLAY_INDEX => Some(DASHBOARD_PRACTICE_INDEX),
             _ => None,
         },
     };

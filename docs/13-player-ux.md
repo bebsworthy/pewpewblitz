@@ -80,7 +80,7 @@ flowchart TD
     BrawlerDetails -- Delete --> DeleteConfirm{Delete confirmation}
     DeleteConfirm -- Cancel --> BrawlerDetails
     DeleteConfirm -- "Confirm (mutation pending)" --> BrawlerList
-    Dashboard -- "Change Game" --> GameTypeSelect[Game Type Select child]
+    Dashboard -- "activate game card" --> GameTypeSelect[Game Type Select child]
     GameTypeSelect -- "Confirm / Back" --> Dashboard
 
     Dashboard -- "Play + admission accepted" --> Queue
@@ -130,7 +130,7 @@ remain explicit.
 | Match | Authoritative gameplay | Owns world presentation, HUD, non-pausing menu, and scoreboard presentation |
 | Match Complete | Transient result-preservation bridge | Accepts no navigation while lobby return and result capture converge |
 | Results | Completed-match decision | Keeps the authoritative outcome visible and offers exact replay or Dashboard |
-| Dashboard Menu | Connected utility overlay | Owns Credits, favorite-server action, Change Server, and Quit; saved-brawler navigation starts from the Dashboard card |
+| Dashboard Menu | Connected utility overlay | Owns Settings, Credits, favorite-server action, Change Server, and Quit; saved-brawler navigation starts from the Dashboard card |
 | Settings | Local settings surface | Returns to its explicit product-flow or match-menu origin |
 | Credits | Attribution surface | Reached from Dashboard Menu; required attribution derives from the asset manifest |
 | Confirmations | Small contextual overlays | Preserve their invoking screen visibly underneath and restore it deterministically |
@@ -205,6 +205,12 @@ not by itself solve internet reachability, trust, or moderation.
 Dashboard presents the selected saved brawler and selected advertised game type. It owns the only
 ordinary Play and Practice actions. The accepted lobby membership atomically provides the
 server-owned profile plus bounded brawler and game-type catalogs before Dashboard is enterable.
+The whole mode card opens Game Type Select; its visible copy is mode and team size, with a semantic
+badge and chevron. Population and map-pool detail belong to the relevant selection/queue surfaces.
+Connected identity shows player and server names without redundant Online text. Settings is inside
+Menu; no device-specific button footer is shown. The approved clean palette and composition are
+specified in [player-shell design](design/player-shell/README.md).
+
 Every brawler name, loadout summary, statistic, creation/edit choice, preview, and selection limit
 comes from that connection-scoped brawler advertisement. Disconnect, server change, rejected
 welcome, or lobby-generation replacement clears it; reconnect installs a fresh snapshot rather
@@ -213,7 +219,7 @@ than retaining client-local metadata.
 Saved-brawler creation/editing and Game Type Select are child flows, not alternate hubs: they
 contain no queue, practice, favorite, server-change, or disconnect controls.
 
-Tapping the Dashboard brawler card always opens Brawlers List. The list owns the complete saved
+The Dashboard brawler action opens Brawlers List when a profile is selected; an empty profile offers creation. The list owns the complete saved
 collection, its selected marker, human-readable loadouts, Create action, and Back to Dashboard.
 Tapping a row opens that Brawler screen; merely opening a row does not select it. `Select for Play`
 is always available, including for the already-selected brawler, and returns directly to Dashboard.
@@ -248,8 +254,8 @@ silently moved. Pending mutations disable admission and later mutations until th
 whole-profile outcome arrives.
 
 Responsive presentation does not change this semantic hierarchy. At an effective UI canvas of at
-least `1000x640`, Dashboard uses the Wide hierarchy with its fighter/build focus and horizontal
-game-type, Practice, and Play actions. Below either threshold, it uses the same targets in a
+least `1000x640`, Dashboard uses the Wide hierarchy with fighter/build presentation on the left
+and a vertical game-type, Play, and Practice stack on the right. Below either threshold, it uses the same targets in a
 vertically scrollable Compact hierarchy. Effective size is logical window size divided by the
 persisted UI scale.
 

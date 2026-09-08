@@ -1,0 +1,9 @@
+# Compact game-card refinement — revision 08
+
+Built-in imagegen edit. Visually checked map-pool/population lines removed, card compacted, right-side stack rebalanced. Preserve previous feedback. Generative texture/lettering varies slightly; native production assets and typography require deliberate implementation. No runtime changes.
+
+## Exact prompt
+
+Refine this supplied game Dashboard with focused removal and layout adjustment. DELETE both 'Map pool: Server maps' and 'Updating population' from upper-right Wipeout card. Do not replace them with any text, symbols, stats, map illustration or filler.
+Reflow the right-side controls into a compact balanced vertical stack: game card contains ONLY the small orange hanging skull badge beside WIPEOUT, quiet 3v3 below title, then full-inner-width CHANGE GAME button with arrow. Reduce game card height by about 80-100px by removing the deleted rows' space. Keep comfortable ~24px gap between header and Change Game, consistent panel padding. Position this shorter game card somewhat lower than before, roughly y210..440 on 1672x941 canvas, so the right column is balanced against the robot and not crowded against Menu. Keep large PLAY beneath with roughly 28px gap, and smaller PRACTICE another 20px below. Shift Play/Practice upwards modestly if needed to maintain this coherent spacing, but preserve their large sizes, width hierarchy, orange/teal colors and graphic angled frames. Card should feel compact and complete, no empty details section or cavernous void.
+Preserve all other artwork and content: refined cream/orange/navy logo upper left, player/server-only strip, sole MENU top right, large center-left robot, SPARK and build summary, VIEW BRAWLERS, cream textured paper background and teal/orange graphic fields. No ONLINE or SETTINGS or controller hint. Do not change robot, logo, font style or palette. Maintain original landscape aspect ratio. One final full-screen Dashboard concept.

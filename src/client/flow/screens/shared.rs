@@ -133,51 +133,35 @@ pub(in crate::client::flow) fn flow_button_background(
     selected: bool,
     dashboard_style: Option<DashboardButtonStyle>,
 ) -> Color {
-    if matches!(dashboard_style, Some(DashboardButtonStyle::Preview)) {
-        return Color::NONE;
+    if let Some(style) = dashboard_style {
+        use super::dashboard::{CREAM, INK, ORANGE, TEAL};
+        if matches!(style, DashboardButtonStyle::Preview) {
+            return Color::NONE;
+        }
+        if disabled {
+            return Color::srgb(0.69, 0.71, 0.66);
+        }
+        let base = match style {
+            DashboardButtonStyle::Play | DashboardButtonStyle::Header => ORANGE,
+            DashboardButtonStyle::Build | DashboardButtonStyle::Practice => TEAL,
+            DashboardButtonStyle::Mode => CREAM,
+            DashboardButtonStyle::Preview => unreachable!(),
+        };
+        return match interaction {
+            Interaction::Pressed => base.mix(&INK, 0.15),
+            Interaction::Hovered => base.mix(&Color::WHITE, 0.16),
+            Interaction::None => base,
+        };
     }
     if disabled {
         return Color::srgb(0.1, 0.1, 0.12);
     }
-    match (interaction, dashboard_style) {
-        (Interaction::Pressed, Some(DashboardButtonStyle::Play)) => Color::srgb(0.92, 0.48, 0.02),
-        (
-            Interaction::Pressed,
-            Some(
-                DashboardButtonStyle::Build
-                | DashboardButtonStyle::Mode
-                | DashboardButtonStyle::Practice,
-            ),
-        ) => Color::srgb(0.78, 0.87, 0.98),
-        (Interaction::Pressed, Some(DashboardButtonStyle::Header)) => {
-            Color::srgb(0.025, 0.22, 0.58)
-        }
-        (Interaction::Pressed, None) => Color::srgb(0.08, 0.48, 0.58),
-        (Interaction::Hovered, Some(DashboardButtonStyle::Play)) => Color::srgb(1.0, 0.7, 0.08),
-        (
-            Interaction::Hovered,
-            Some(
-                DashboardButtonStyle::Build
-                | DashboardButtonStyle::Mode
-                | DashboardButtonStyle::Practice,
-            ),
-        ) => Color::srgb(0.86, 0.93, 1.0),
-        (Interaction::Hovered, Some(DashboardButtonStyle::Header)) => Color::srgb(0.06, 0.4, 0.9),
-        (Interaction::Hovered, None) => Color::srgb(0.12, 0.32, 0.42),
-        (_, Some(DashboardButtonStyle::Play)) => Color::srgb(1.0, 0.62, 0.04),
-        (
-            _,
-            Some(
-                DashboardButtonStyle::Build
-                | DashboardButtonStyle::Mode
-                | DashboardButtonStyle::Practice,
-            ),
-        ) => Color::srgb(0.92, 0.95, 1.0),
-        (_, Some(DashboardButtonStyle::Header)) => Color::srgb(0.035, 0.3, 0.76),
-        (_, None) if focused => Color::srgb(0.12, 0.32, 0.42),
-        (_, None) if selected => Color::srgb(0.12, 0.24, 0.34),
-        (_, None) => Color::srgb(0.09, 0.14, 0.2),
-        (_, Some(DashboardButtonStyle::Preview)) => unreachable!("handled above"),
+    match interaction {
+        Interaction::Pressed => Color::srgb(0.08, 0.48, 0.58),
+        Interaction::Hovered => Color::srgb(0.12, 0.32, 0.42),
+        Interaction::None if focused => Color::srgb(0.12, 0.32, 0.42),
+        Interaction::None if selected => Color::srgb(0.12, 0.24, 0.34),
+        Interaction::None => Color::srgb(0.09, 0.14, 0.2),
     }
 }
 
@@ -188,27 +172,26 @@ pub(in crate::client::flow) fn flow_button_border(
     selected: bool,
     dashboard_style: Option<DashboardButtonStyle>,
 ) -> Color {
+    if matches!(dashboard_style, Some(DashboardButtonStyle::Preview)) {
+        return Color::NONE;
+    }
+    if dashboard_style.is_some() {
+        if disabled {
+            return Color::srgb(0.4, 0.45, 0.44);
+        }
+        if focused || interaction == Interaction::Hovered {
+            return Color::srgb(0.0, 0.37, 0.40);
+        }
+        return if matches!(dashboard_style, Some(DashboardButtonStyle::Preview)) {
+            Color::NONE
+        } else {
+            super::dashboard::INK
+        };
+    }
     if disabled {
         Color::NONE
-    } else if matches!(dashboard_style, Some(DashboardButtonStyle::Preview))
-        && (interaction == Interaction::Hovered || focused)
-    {
-        Color::srgb(0.25, 0.9, 1.0)
     } else if focused {
         Color::WHITE
-    } else if matches!(dashboard_style, Some(DashboardButtonStyle::Play)) {
-        Color::srgb(1.0, 0.86, 0.35)
-    } else if matches!(dashboard_style, Some(DashboardButtonStyle::Header)) {
-        Color::srgb(0.18, 0.58, 1.0)
-    } else if matches!(
-        dashboard_style,
-        Some(
-            DashboardButtonStyle::Build
-                | DashboardButtonStyle::Mode
-                | DashboardButtonStyle::Practice
-        )
-    ) {
-        Color::srgb(0.48, 0.66, 0.9)
     } else if selected {
         Color::srgb(0.25, 0.9, 1.0)
     } else {
@@ -224,6 +207,7 @@ pub(in crate::client::flow) fn flow_button_border(
 )]
 pub(in crate::client::flow) fn update_flow_button_chrome(
     navigation: Res<FlowNavigation>,
+    assets: Option<Res<crate::client::ClientAssetHandles>>,
     game_draft: Res<GameTypeSelectionDraft>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut buttons: Query<(
@@ -233,13 +217,15 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
         &mut BackgroundColor,
         &mut BorderColor,
         Option<&DashboardButtonStyle>,
+        Option<&mut ImageNode>,
     )>,
 ) {
     let selected_brawler_id = memberships
         .iter()
         .next()
         .and_then(|membership| membership.profile.selected_brawler_id);
-    for (button, interaction, disabled, mut background, mut border, dashboard_style) in &mut buttons
+    for (button, interaction, disabled, mut background, mut border, dashboard_style, image) in
+        &mut buttons
     {
         let focused = button.index == navigation.selected;
         let selected_game = match button.action {
@@ -261,5 +247,34 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
             selected,
             dashboard_style,
         ));
+        if let Some(mut image) = image.filter(|_| dashboard_style.is_some()) {
+            background.0 = Color::NONE;
+            border.set_all(Color::NONE);
+            if let (Some(assets), Some(style)) = (assets.as_deref(), dashboard_style) {
+                let index = match style {
+                    DashboardButtonStyle::Mode => 0,
+                    DashboardButtonStyle::Play => 1,
+                    DashboardButtonStyle::Practice => 2,
+                    DashboardButtonStyle::Build => 3,
+                    DashboardButtonStyle::Header => 4,
+                    DashboardButtonStyle::Preview => continue,
+                };
+                image.image = if !disabled && (focused || *interaction == Interaction::Hovered) {
+                    assets.dashboard_focus_panels[index].clone()
+                } else {
+                    assets.dashboard_panels[index].clone()
+                };
+            }
+
+            image.color = if disabled {
+                Color::srgba(0.65, 0.65, 0.65, 0.7)
+            } else if *interaction == Interaction::Pressed {
+                Color::srgb(0.82, 0.86, 0.86)
+            } else if focused || *interaction == Interaction::Hovered {
+                Color::srgb(1.08, 1.08, 1.08)
+            } else {
+                Color::WHITE
+            };
+        }
     }
 }
