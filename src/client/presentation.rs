@@ -10,33 +10,8 @@ pub(super) struct MatchMenuState {
     was_open: bool,
 }
 
-pub(super) fn spawn_pause_overlay(mut commands: Commands) {
-    commands
-        .spawn((
-            PauseOverlay,
-            Node {
-                position_type: PositionType::Absolute,
-                left: percent(25.0),
-                right: percent(25.0),
-                top: percent(40.0),
-                bottom: percent(40.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.88)),
-            GlobalZIndex(300),
-            Visibility::Hidden,
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                MatchMenuText,
-                Text::new(
-                    "MATCH MENU — MATCH CONTINUES\n\nRESUME\nSETTINGS\nSCOREBOARD\nLEAVE MATCH",
-                ),
-                TextFont::from_font_size(28.0),
-                TextColor(Color::WHITE),
-            ));
-        });
-}
+mod match_menu;
+use match_menu::{MatchMenuButton, update_match_menu_chrome};
 
 pub(super) fn spawn_client_hud(mut commands: Commands) {
     commands.spawn((
@@ -144,7 +119,7 @@ fn handle_match_menu_input(
     overlay: Option<ResMut<ClientOverlay>>,
     flow: Option<Res<State<ClientFlow>>>,
     settings_request: Option<ResMut<MatchSettingsRequest>>,
-    mut texts: Query<&mut Text, With<MatchMenuText>>,
+    buttons: Query<(&MatchMenuButton, &Interaction), Changed<Interaction>>,
 ) {
     if menu.scoreboard_latched && pending.cancel_pressed {
         menu.scoreboard_latched = false;
@@ -174,7 +149,15 @@ fn handle_match_menu_input(
     {
         menu.selected = menu.selected.saturating_sub(1);
     }
-    let activate = keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
+    let mut clicked = false;
+    for (button, interaction) in &buttons {
+        if matches!(interaction, Interaction::Hovered | Interaction::Pressed) {
+            menu.selected = button.0;
+            clicked |= *interaction == Interaction::Pressed;
+        }
+    }
+    let activate = clicked
+        || keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
         || pad_pressed(GamepadButton::South);
     if activate {
         match menu.selected {
@@ -194,22 +177,6 @@ fn handle_match_menu_input(
             }
             _ => {}
         }
-    }
-    let rows = ["RESUME", "SETTINGS", "SCOREBOARD", "LEAVE MATCH"];
-    let copy = rows
-        .iter()
-        .enumerate()
-        .map(|(index, label)| {
-            if index == menu.selected {
-                format!("> {label}")
-            } else {
-                format!("  {label}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    for mut text in &mut texts {
-        text.0 = format!("MATCH MENU — MATCH CONTINUES\n\n{copy}");
     }
 }
 
@@ -266,12 +233,17 @@ impl Plugin for ClientPresentationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClientPresentation>()
             .init_resource::<MatchMenuState>()
+            .add_systems(Startup, match_menu::spawn_pause_overlay)
             .add_systems(
                 Update,
                 (
                     exit_on_close_requested,
-                    handle_match_menu_input,
-                    update_pause_overlay,
+                    (
+                        handle_match_menu_input,
+                        update_match_menu_chrome,
+                        update_pause_overlay,
+                    )
+                        .chain(),
                     update_client_hud,
                 ),
             )
@@ -298,6 +270,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pointer_menu_actions_are_isolated_from_product_overlays() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ClientInputContext::Menu)
+            .insert_resource(ClientOverlay::LeaveConfirmation)
+            .init_resource::<PendingLocalActions>()
+            .init_resource::<MatchMenuState>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, handle_match_menu_input);
+        let button = app
+            .world_mut()
+            .spawn((MatchMenuButton(0), Interaction::Pressed))
+            .id();
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Menu
+        );
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
+        *app.world_mut().get_mut::<Interaction>(button).unwrap() = Interaction::Hovered;
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Menu
+        );
+        *app.world_mut().get_mut::<Interaction>(button).unwrap() = Interaction::Pressed;
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Gameplay
+        );
+    }
+
+    #[test]
     fn menu_scoreboard_is_latched_and_cancel_returns_to_the_continuing_menu() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -306,7 +312,6 @@ mod tests {
             .init_resource::<MatchMenuState>()
             .init_resource::<ButtonInput<KeyCode>>()
             .add_systems(Update, handle_match_menu_input);
-        app.world_mut().spawn((MatchMenuText, Text::new("")));
 
         for _ in 0..2 {
             let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();

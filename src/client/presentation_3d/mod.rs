@@ -1,7 +1,7 @@
 //! Default V3 world renderer over the unchanged planar simulation.
 #![allow(clippy::wildcard_imports)]
 
-use super::presentation::{spawn_client_hud, spawn_pause_overlay};
+use super::presentation::spawn_client_hud;
 use super::*;
 use crate::combat::client::CombatClientSet;
 use bevy::{
@@ -1468,7 +1468,6 @@ pub(in crate::client) fn setup_3d_foundation(
         Transform::from_xyz(-500.0, 900.0, 650.0).looking_at(Vec3::ZERO, Vec3::Y),
         V3WorldMember,
     ));
-    spawn_pause_overlay(commands.reborrow());
     spawn_client_hud(commands);
 }
 

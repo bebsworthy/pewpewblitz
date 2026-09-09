@@ -558,9 +558,6 @@ struct ControllerDemoGamepad;
 struct PauseOverlay;
 
 #[derive(Component)]
-struct MatchMenuText;
-
-#[derive(Component)]
 struct InputSettingsText;
 
 #[derive(Component)]

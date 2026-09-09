@@ -181,6 +181,10 @@ contextual overlay must never remove that invoking screen and expose an older sc
 Opening the in-match menu does not pause authoritative simulation. Local gameplay actions are
 suppressed and neutral intent is sent while the match continues and the fighter remains vulnerable.
 Leaving requires confirmation and follows the server-owned forfeit and lobby-return policy.
+The menu is a fullscreen shell surface with Resume, Settings, Scoreboard, and Leave Match buttons.
+Resume starts focused and uses the orange primary action; other actions use cream. Pointer,
+keyboard, and D-pad navigation share the same selected action. Settings and confirmation screens
+isolate the underlying menu; returning from the scoreboard restores the menu.
 
 The scoreboard is separately held during play or latched from the in-match menu. Presentation must
 not accidentally turn it into a pause, a second primary flow, or an authority source.
