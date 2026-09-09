@@ -10,7 +10,10 @@ fn server_wipeout(harness: &mut Harness) -> brawler::matchplay::WipeoutState {
     let world = harness.server.world_mut();
     let mut query =
         world.query_filtered::<&brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
-    *query.single(world).expect("one server wipeout state")
+    query
+        .single(world)
+        .expect("one server wipeout state")
+        .clone()
 }
 
 fn client_match(harness: &mut Harness, index: usize) -> Option<MatchState> {
@@ -1624,4 +1627,68 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
         matches!(server.phase, MatchPhase::Completed { .. })
             && (0..2).all(|index| client_match(harness, index) == Some(server))
     });
+}
+
+#[test]
+fn wipeout_final_player_statistics_replicate_atomically_and_reset_on_restart() {
+    let mut harness = Harness::new_match_with_lifecycle_rules(
+        2,
+        brawler::matchplay::MatchLifecycleRules {
+            completed_input_lock_ticks: 1,
+            ..Default::default()
+        },
+    );
+    activate_two_player_match(&mut harness, 88_100);
+    complete_wipeout_match(&mut harness, 88_101);
+    harness.step_until(|h| server_wipeout(h).completed_result.is_some());
+    let final_scores = server_wipeout(&mut harness);
+    assert_eq!(final_scores.team_scores, [1, 0]);
+    assert_eq!(
+        final_scores
+            .players
+            .iter()
+            .flatten()
+            .map(|p| p.kills)
+            .sum::<u16>(),
+        1
+    );
+    assert_eq!(
+        final_scores
+            .players
+            .iter()
+            .flatten()
+            .map(|p| p.deaths)
+            .sum::<u16>(),
+        1
+    );
+    assert_eq!(final_scores.players.iter().flatten().count(), 2);
+    harness.step_until(|h| {
+        (0..2).all(|i| {
+            let world = h.clients[i].world_mut();
+            let mut q = world.query::<&brawler::matchplay::WipeoutState>();
+            q.iter(world).any(|scores| scores == &final_scores)
+        })
+    });
+    let completed = server_match(&mut harness);
+    for i in 0..2 {
+        harness.send_match_command(
+            i,
+            MatchCommandRequest {
+                request_id: 88_102,
+                match_id: completed.match_id,
+                command: MatchCommand::ReadyForRestart,
+            },
+        );
+    }
+    harness.step_until(|h| server_match(h).match_id != completed.match_id);
+    let reset = server_wipeout(&mut harness);
+    assert_eq!(reset.completed_result, None);
+    assert_eq!(reset.team_scores, [0, 0]);
+    assert!(
+        reset
+            .players
+            .iter()
+            .flatten()
+            .all(|p| p.kills == 0 && p.deaths == 0)
+    );
 }

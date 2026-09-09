@@ -220,6 +220,8 @@ pub struct ClientMatchResultContext {
     pub game_type_id: Option<crate::lobby::GameTypeId>,
     pub game_name: Option<String>,
     pub(crate) final_score: Option<hud::ModeScoreView>,
+    pub(crate) wipeout: Option<crate::matchplay::WipeoutState>,
+    pub(crate) local_player: Option<PlayerId>,
 }
 
 #[derive(Resource, Debug, Default, PartialEq, Eq)]

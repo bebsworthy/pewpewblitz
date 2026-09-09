@@ -160,6 +160,7 @@ mod tests {
                 WipeoutState {
                     team_scores: [0, 0],
                     target_score: 10,
+                    ..default()
                 },
                 HotZoneState {
                     match_id: MatchId(1),

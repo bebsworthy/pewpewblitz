@@ -1,0 +1,4 @@
+# Results v1 — proposal, BRL-0132
+Generated with built-in image_gen using leave-match-confirmation-v1.png as style reference.
+Prompt direction: 16:9 clean cream/navy/teal/orange results; trophy and Victory headline; Wipeout 3v3 Feature Yard; paired Your Team 10/Opponents 6 panels; cream Dashboard and orange focused Play Again; slanted cut-corner actions. No redundant Results heading, Back/X, controller glyphs, roster, XP or invented combat statistics.
+Names/scores are illustrative. Practice uses Practice Again; outcome and objective adapt to actual mode. Final roster is not currently retained. Generated Dashboard inset border must NOT become a second focus state: implementation uses shared SurfaceState and only Play Again focused initially. Use actual shared tokens and geometry, not generated gradients.

@@ -41,7 +41,7 @@ use screens::{
         PracticeCarousel, animate_practice_maps, practice_map_input, present_practice_maps,
     },
     queue::{spawn_queue, update_queue_cancel_button, update_queue_status},
-    results::{clear_results, present_match_completion, spawn_results},
+    results::{clear_results, present_match_completion, scroll_results, spawn_results},
     server_select::{refresh_server_select, spawn_server_select, update_server_select_copy},
     shared::{FlowNavigation, update_flow_button_chrome},
 };
@@ -165,7 +165,9 @@ impl Plugin for ClientFlowPlugin {
                     present_flow_error_overlay,
                     present_cancel_confirmation,
                     scroll_confirmations,
+                    scroll_results,
                     present_match_completion,
+                    spawn_results.run_if(in_state(ClientFlow::Results)),
                     spawn_match_loading.before(update_match_loading),
                     update_match_loading,
                     update_connecting_copy,

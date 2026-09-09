@@ -1,12 +1,15 @@
 //! Server-authoritative Wipeout scoring rules, state, and mode plugin.
 
+mod statistics;
+pub use statistics::WipeoutPlayerStats;
+
 use super::MatchResult;
 use crate::combat::TeamId;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Composed revision of the validated common lifecycle plus Wipeout rules for this state shape.
-pub const WIPEOUT_RULES_REVISION: u16 = 3;
+pub const WIPEOUT_RULES_REVISION: u16 = 4;
 
 /// Wipeout-specific scoring rules layered on the common `MatchLifecycleRules`.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,8 +39,12 @@ impl WipeoutRules {
 }
 
 /// Durable replicated Wipeout scoring state, present on the match root only for Wipeout.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct WipeoutState {
+    pub match_id: Option<super::MatchId>,
+    pub players: [Option<WipeoutPlayerStats>; brawler_routing::MAX_PARTICIPANTS],
+    /// Completion marker in the same replicated value as the final scoring snapshot.
+    pub completed_result: Option<MatchResult>,
     pub team_scores: [u16; 2],
     pub target_score: u16,
 }
@@ -124,9 +131,16 @@ mod rules {
                 )
                 .add_systems(
                     FixedPostUpdate,
-                    resolve_wipeout_scoring
+                    (statistics::remember_roster, resolve_wipeout_scoring)
+                        .chain()
                         .in_set(MatchSet::ModeRules)
                         .after(prepare_mode_rule_facts),
+                )
+                .add_systems(
+                    FixedPostUpdate,
+                    statistics::publish_completion
+                        .after(MatchSet::Outcomes)
+                        .before(crate::combat::CombatSet::Finalize),
                 );
         }
     }
@@ -144,6 +158,7 @@ mod rules {
             WipeoutState {
                 team_scores: [0, 0],
                 target_score: rules.target_score,
+                ..default()
             },
             crate::matchplay::BotObjectiveView::Elimination,
         ));
@@ -198,6 +213,9 @@ mod rules {
             return;
         };
         wipeout.team_scores = [0, 0];
+        wipeout.players = Default::default();
+        wipeout.completed_result = None;
+        wipeout.match_id = None;
         scored_events.ids.clear();
         scored_events.recent_hostile_damage.clear();
         scored_events.match_id = None;
@@ -290,23 +308,19 @@ mod rules {
                     "credited neutral environment defeat to recent hostile damager"
                 );
             }
-            if let Some(source_team) = credited_team {
-                let index = usize::from(source_team.0);
-                wipeout.team_scores[index] = wipeout.team_scores[index].saturating_add(1);
-            } else if fact
-                .source_network_id
-                .is_some_and(|source| source != fact.target_network_id)
-                && fact.source_team == Some(*target_team)
-            {
-                diagnostics.friendly_invalid_defeat =
-                    diagnostics.friendly_invalid_defeat.saturating_add(1);
-                warn!(
-                    event_id = fact.event_id.0,
-                    target = fact.target_network_id.0,
-                    team = target_team.0,
-                    "ignored same-team defeat outcome"
-                );
-            }
+            let credited_source = if fact.source_team.is_some() {
+                fact.source_network_id
+            } else {
+                recent_credit.map(|credit| credit.source_network_id)
+            };
+            wipeout.record_defeat(fact.target_network_id, credited_source, credited_team);
+            apply_credited_score(
+                &mut wipeout,
+                fact,
+                *target_team,
+                credited_team,
+                &mut diagnostics,
+            );
         }
         if let Some(result) = score_result(wipeout.team_scores, wipeout.target_score) {
             offer_mode_rule_outcome(
@@ -318,6 +332,32 @@ mod rules {
                     cause: ModeOutcomeCause::Threshold,
                     result,
                 },
+            );
+        }
+    }
+
+    fn apply_credited_score(
+        wipeout: &mut WipeoutState,
+        fact: &crate::combat::CombatOutcomeFact,
+        target_team: TeamId,
+        credited_team: Option<TeamId>,
+        diagnostics: &mut MatchOutcomeDiagnostics,
+    ) {
+        if let Some(source_team) = credited_team {
+            let index = usize::from(source_team.0);
+            wipeout.team_scores[index] = wipeout.team_scores[index].saturating_add(1);
+        } else if fact
+            .source_network_id
+            .is_some_and(|source| source != fact.target_network_id)
+            && fact.source_team == Some(target_team)
+        {
+            diagnostics.friendly_invalid_defeat =
+                diagnostics.friendly_invalid_defeat.saturating_add(1);
+            warn!(
+                event_id = fact.event_id.0,
+                target = fact.target_network_id.0,
+                team = target_team.0,
+                "ignored same-team defeat outcome"
             );
         }
     }
@@ -388,6 +428,9 @@ mod rules {
 
     /// View alias avoiding a second import of the shared participant component.
     type MatchParticipantView = crate::matchplay::MatchParticipant;
+
+    #[cfg(test)]
+    mod tests;
 }
 
 #[cfg(feature = "server")]

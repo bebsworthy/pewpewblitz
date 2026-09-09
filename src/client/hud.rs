@@ -1117,6 +1117,7 @@ mod tests {
         let wipeout_state = crate::matchplay::WipeoutState {
             team_scores: [3, 2],
             target_score: 5,
+            ..default()
         };
         let mut state = MatchState {
             match_id: crate::matchplay::MatchId(7),
@@ -1181,6 +1182,7 @@ mod tests {
         let wipeout_state = crate::matchplay::WipeoutState {
             team_scores: [3, 1],
             target_score: 10,
+            ..default()
         };
         assert_eq!(
             phase_overlay_label(Some(state), None, Some(0), 4, 0, 0, false, false, false),

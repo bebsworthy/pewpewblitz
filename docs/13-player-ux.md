@@ -346,6 +346,13 @@ admission request. Multiplayer replay enters Queue; practice replay requests a n
 reservation. If exact replay is unavailable, Results keeps the outcome visible, disables replay
 with a factual reason, and leaves Dashboard available.
 
+Wipeout Results shows one score per team and a player breakdown of kills and deaths, with the local
+player highlighted. Counters come from the server's scoring transaction, including recent hostile
+damage credit for environmental defeats. Uncredited deaths still count as deaths. The bounded
+roster retains departed players; the final snapshot survives the routed return to the lobby.
+The results layout uses shared shell surfaces and preserves readable columns at compact sizes.
+The in-game HUD and live scoreboard remain separate from this post-match presentation.
+
 A recoverable capacity or rate rejection may remain on Results so the player can retry or return.
 A catalog, content, or protocol incompatibility follows the explicit reconnect recovery path.
 Results does not duplicate fighter editing, game-type editing, server selection, or disconnect.

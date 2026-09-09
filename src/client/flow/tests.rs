@@ -434,6 +434,8 @@ fn match_result_context(
         game_type_id: Some(game_type_id),
         game_name: None,
         final_score: None,
+        wipeout: None,
+        local_player: None,
     }
 }
 
@@ -1714,6 +1716,8 @@ fn results_replay_uses_the_exact_fresh_lobby_game() {
             game_type_id: Some(game_type_id.clone()),
             game_name: None,
             final_score: None,
+            wipeout: None,
+            local_player: None,
         });
     }
     *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType::default();
@@ -1909,6 +1913,8 @@ fn results_disable_replay_when_the_exact_game_disappears() {
         game_type_id: Some(crate::lobby::GameTypeId::new("retired-mode").unwrap()),
         game_name: Some("Retired Mode".to_string()),
         final_score: None,
+        wipeout: None,
+        local_player: None,
     });
     app.world_mut()
         .resource_mut::<NextState<ClientFlow>>()

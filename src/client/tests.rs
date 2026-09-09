@@ -1682,31 +1682,88 @@ fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
         .init_resource::<ClientMatchResultState>()
         .init_resource::<SelectedGameType>();
     app.add_systems(Update, observe_completed_match);
-    app.world_mut().spawn((
-        MatchRoot,
-        MatchState {
-            match_id: crate::matchplay::MatchId(9),
-            mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
-            phase: MatchPhase::Completed {
-                completed_at_tick: 12,
-                restart_unlocked_at_tick: 72,
-                result: crate::matchplay::MatchResult::Draw,
+    let root = app
+        .world_mut()
+        .spawn((
+            MatchRoot,
+            MatchState {
+                match_id: crate::matchplay::MatchId(9),
+                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                phase: MatchPhase::Completed {
+                    completed_at_tick: 12,
+                    restart_unlocked_at_tick: 72,
+                    result: crate::matchplay::MatchResult::Draw,
+                },
+                rules_revision: 1,
             },
-            rules_revision: 1,
+        ))
+        .id();
+    app.update();
+    assert_eq!(
+        app.world().resource::<RoutedClientLifecycle>().phase,
+        RoutedClientPhase::Match,
+        "wait for the scoring component"
+    );
+    app.world_mut()
+        .entity_mut(root)
+        .insert(crate::matchplay::WipeoutState {
+            match_id: Some(crate::matchplay::MatchId(9)),
+            ..default()
+        });
+    app.update();
+    assert_eq!(
+        app.world().resource::<RoutedClientLifecycle>().phase,
+        RoutedClientPhase::Match,
+        "wait for the final scoring snapshot"
+    );
+    app.world_mut()
+        .entity_mut(root)
+        .get_mut::<crate::matchplay::WipeoutState>()
+        .unwrap()
+        .completed_result = Some(crate::matchplay::MatchResult::Draw);
+    app.world_mut().spawn((
+        Client,
+        ClientJoinStatus {
+            phase: ClientJoinPhase::Active {
+                player_id: PlayerId(4),
+                network_entity_id: NetworkEntityId(40),
+            },
+            started_at: Duration::ZERO,
+            disconnect_requested: false,
         },
     ));
+    app.world_mut()
+        .get_mut::<crate::matchplay::WipeoutState>(root)
+        .unwrap()
+        .players[0] = Some(crate::matchplay::WipeoutPlayerStats {
+        player_id: PlayerId(4),
+        network_id: NetworkEntityId(40),
+        team: crate::combat::TeamId(1),
+        display_name: "Joe Joe".to_owned(),
+        kills: 3,
+        deaths: 3,
+    });
     app.update();
     assert_eq!(
         app.world().resource::<RoutedClientLifecycle>().phase,
         RoutedClientPhase::AwaitingMatchUnlink
     );
+    app.world_mut().despawn(root);
+    let context = app
+        .world()
+        .resource::<ClientMatchResultState>()
+        .context
+        .as_ref()
+        .unwrap();
+    assert_eq!(context.result, crate::matchplay::MatchResult::Draw);
+    assert_eq!(context.local_player, Some(PlayerId(4)));
+    assert_eq!(context.local_team, Some(crate::combat::TeamId(1)));
+    let player = context.wipeout.as_ref().unwrap().players[0]
+        .as_ref()
+        .unwrap();
     assert_eq!(
-        app.world()
-            .resource::<ClientMatchResultState>()
-            .context
-            .as_ref()
-            .map(|context| context.result),
-        Some(crate::matchplay::MatchResult::Draw)
+        (&*player.display_name, player.kills, player.deaths),
+        ("Joe Joe", 3, 3)
     );
 }
 

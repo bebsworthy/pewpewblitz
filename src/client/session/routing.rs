@@ -102,15 +102,24 @@ pub(in crate::client) fn observe_completed_match(
     {
         return;
     }
-    let Some((result, final_score)) =
+    let Some((result, final_score, wipeout)) =
         roots
             .iter()
             .find_map(|(state, wipeout, hot_zone, clock)| match state.phase {
-                MatchPhase::Completed { result, .. } => Some((
-                    result,
-                    hud::build_mode_score_view(Some((state, wipeout)), hot_zone, clock)
-                        .filter(|score| !matches!(score, hud::ModeScoreView::Syncing)),
-                )),
+                MatchPhase::Completed { result, .. }
+                    if state.mode_definition_id != crate::map::WIPEOUT_MODE_DEFINITION
+                        || wipeout.is_some_and(|scores| {
+                            scores.match_id == Some(state.match_id)
+                                && scores.completed_result == Some(result)
+                        }) =>
+                {
+                    Some((
+                        result,
+                        hud::build_mode_score_view(Some((state, wipeout)), hot_zone, clock)
+                            .filter(|score| !matches!(score, hud::ModeScoreView::Syncing)),
+                        wipeout.cloned(),
+                    ))
+                }
                 _ => None,
             })
     else {
@@ -124,9 +133,21 @@ pub(in crate::client) fn observe_completed_match(
             _ => None,
         });
         let local_team = local_player.and_then(|local_player| {
-            fighters
-                .iter()
-                .find_map(|(player_id, team)| (*player_id == local_player).then_some(*team))
+            wipeout
+                .as_ref()
+                .and_then(|scores| {
+                    scores
+                        .players
+                        .iter()
+                        .flatten()
+                        .find(|p| p.player_id == local_player)
+                        .map(|p| p.team)
+                })
+                .or_else(|| {
+                    fighters
+                        .iter()
+                        .find_map(|(player_id, team)| (*player_id == local_player).then_some(*team))
+                })
         });
         let game_type_id = selection
             .as_ref()
@@ -138,6 +159,8 @@ pub(in crate::client) fn observe_completed_match(
             game_type_id,
             game_name: None,
             final_score,
+            wipeout,
+            local_player,
         });
     }
     if lifecycle.request_return_to_lobby() {

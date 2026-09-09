@@ -523,3 +523,10 @@ Prediction, lag compensation, advanced interpolation tuning, anti-cheat hardenin
 ### Practice map selection wire contract
 
 Protocol 44 adds the bounded `practice_map_preset_ids` list to each advertised game type and an optional map ID to `PracticeStartRequest`. The list is derived from server-approved pools for that mode and filtered by spawn capacity. The catalog fingerprint includes it. The lobby rejects IDs outside that list before allocation; an omitted ID preserves the existing automation default (first multiplayer-pool map). This uses the global compatibility handshake, with no per-message compatibility decoder.
+
+Protocol 45 extends Wipeout's replicated scoring component with a match-tagged, fixed-capacity
+player breakdown (stable player/network identities, accepted display names, kills and deaths).
+Team scores and player counters are published together. A completion marker is committed after
+the authoritative outcome phase in that same component; routed clients wait for the matching
+completed snapshot before retaining results and returning to the lobby. Names and departed player
+rows remain available for final results. This does not change the in-game HUD or input protocol.

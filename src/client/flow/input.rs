@@ -400,12 +400,13 @@ pub(super) fn collect_flow_input(
                 .iter()
                 .position(|index| *index == navigation.selected)
                 .unwrap_or(0);
-            let confirmation = matches!(
-                *overlay,
-                ClientOverlay::DeleteBrawlerConfirmation(_)
-                    | ClientOverlay::LeaveConfirmation
-                    | ClientOverlay::ChangeServerConfirmation
-            );
+            let confirmation = *flow.get() == ClientFlow::Results
+                || matches!(
+                    *overlay,
+                    ClientOverlay::DeleteBrawlerConfirmation(_)
+                        | ClientOverlay::LeaveConfirmation
+                        | ClientOverlay::ChangeServerConfirmation
+                );
             if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
                 || pad_pressed(GamepadButton::DPadDown)
                 || (confirmation
