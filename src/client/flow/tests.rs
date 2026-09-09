@@ -1210,14 +1210,14 @@ fn selected_brawler_cards_open_list_details_and_reach_equipment() {
         assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
     }
     assert!(
-        visible_text(&mut app)
+        !visible_text(&mut app)
             .iter()
             .any(|text| text.contains("SELECTED FOR PLAY"))
     );
     assert!(
         visible_text(&mut app)
             .iter()
-            .any(|text| text.contains("Dash"))
+            .any(|text| text.contains("Pulse Sidearm"))
     );
 
     press_flow_button(&mut app, &FlowUiAction::OpenBrawlerDetails(brawler_id));

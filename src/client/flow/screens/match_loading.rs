@@ -1,8 +1,9 @@
 //! Approved loading composition; reservation state remains the sole source of progress.
 use super::{
-    dashboard::{CREAM, DashboardPreviewHost, INK, dashboard_font},
+    dashboard::DashboardPreviewHost,
     shared::{FlowButton, FlowNavigation, FlowRoot, ShellImageButton},
 };
+use crate::client::ui::theme::{CREAM, INK, font};
 use crate::client::{
     ClientMatchLoadingModel,
     flow::{ClientFlow, actions::FlowUiAction},
@@ -150,7 +151,7 @@ impl LoadingView<'_> {
         parent
             .spawn((
                 Text::new(text),
-                dashboard_font(self.assets, size * self.factor),
+                font(self.assets, size * self.factor),
                 TextColor(color),
                 TextLayout::new(Justify::Center, LineBreak::WordBoundary),
             ))

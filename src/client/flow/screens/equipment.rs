@@ -1,7 +1,6 @@
 //! Weapon overview and fullscreen inventory selection.
 use super::{
     brawlers::weapon_part_effect_text,
-    dashboard::{CREAM, INK, dashboard_font},
     scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible},
     shared::{FlowButton, FlowNavigation, ShellImageButton},
 };
@@ -9,6 +8,7 @@ use crate::client::flow::{
     actions::FlowUiAction,
     model::{ClientFlow, ClientOverlay},
 };
+use crate::client::ui::theme::{CREAM, INK, font};
 use bevy::{
     input::mouse::MouseWheel,
     prelude::*,
@@ -301,7 +301,7 @@ impl EquipmentView<'_> {
     fn label(&self, p: &mut ChildSpawnerCommands, text: &str, size: f32, color: Color) {
         p.spawn((
             Text::new(text),
-            dashboard_font(self.assets, size * self.factor),
+            font(self.assets, size * self.factor),
             TextColor(color),
             TextLayout::new(Justify::Center, LineBreak::WordBoundary),
         ));

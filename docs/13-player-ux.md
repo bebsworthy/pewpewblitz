@@ -387,6 +387,35 @@ The settings contract includes:
 - deterministic focus repeat, restoration, disabled-state repair, pointer interaction, and a clear
   visual and accessible focus indication.
 
+The current Settings preference pages use a fullscreen category/options/details layout with
+Display, Audio, Accessibility and Controls navigation. Display exposes borderless fullscreen and
+VSync; Audio exposes master volume and focus-loss mute; Accessibility exposes UI scale, reduced
+motion and reduced combat effects. These ordinary preferences apply and save on change. A failed
+save retains the active session value and presents an inline retry. Pointer sliders save when the
+interaction ends; keyboard/gamepad adjustments save directly. Fullscreen changes preview for 15
+seconds and require Keep display; timeout, Revert, or leaving Settings restores the previous mode.
+Each page has scoped Reset and Undo reset, preserving unrelated preferences.
+
+Controls contains Keyboard & Mouse and Gamepad pages, with child pages for stick calibration and
+advanced analog thresholds. Binding capture waits for the activating inputs to be released and
+then reads only the chosen device type (and selected gamepad). A conflicting binding stages an
+explicit atomic Swap; cancel keeps both original actions. Escape, the visible Cancel control, or
+pressing the existing binding cancels capture. Controller face buttons remain assignable. Losing
+the selected controller cancels capture and measurement without changing saved settings.
+
+Calibration displays raw and shaped movement/aim samples from the same input pipeline as play.
+Manual deadzone changes autosave. Guided neutral sampling rejects substantial stick movement,
+adds a small margin to observed rest drift, and previews recommendations until Use these values.
+Keep current discards the suggestion. Calibration is currently shared across controllers, rather
+than pretending a device name uniquely identifies each physical controller. Advanced controls
+expose facing and trigger press/release thresholds with the existing validation constraints.
+
+Tab switches category/content focus; gamepad bumpers explicitly move to category/content.
+Left/Right adjusts the focused slider; Up/Down navigates and reveals scrolled controls. During
+calibration, stick movement exercises the plots and D-pad navigation remains available. Selected
+categories and focused controls have separate visual states. At narrower effective widths,
+categories form a top strip to preserve space for options and contextual details.
+
 Reduced Motion or Reduced Effects freezes non-essential procedural Dashboard motion. It does not
 remove factual state, change navigation, or alter gameplay authority.
 

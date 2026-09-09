@@ -1,6 +1,6 @@
 //! Fullscreen Practice map browsing; focus is independent from the requested map.
-use super::dashboard::{CREAM, INK, dashboard_font};
 use super::shared::FlowRoot;
+use crate::client::ui::theme::{CREAM, INK, font};
 use crate::client::{
     ClientLobbyMembership, ClientPracticeModel,
     flow::{
@@ -425,11 +425,7 @@ fn label(
     text: &str,
     size: f32,
 ) {
-    parent.spawn((
-        Text::new(text),
-        dashboard_font(assets, size),
-        TextColor(INK),
-    ));
+    parent.spawn((Text::new(text), font(assets, size), TextColor(INK)));
 }
 fn control(
     parent: &mut ChildSpawnerCommands,

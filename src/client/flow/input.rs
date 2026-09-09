@@ -365,7 +365,10 @@ pub(super) fn collect_flow_input(
             }
         } else if (*flow.get() == ClientFlow::GameTypeSelect
             && matches!(*overlay, ClientOverlay::None))
-            || matches!(*overlay, ClientOverlay::WeaponEquipment)
+            || matches!(
+                *overlay,
+                ClientOverlay::WeaponEquipment | ClientOverlay::BrawlerList
+            )
         {
             if !available.contains(&navigation.selected) {
                 navigation.selected = available[0];
@@ -391,7 +394,10 @@ pub(super) fn collect_flow_input(
             };
             if let Some(direction) = direction {
                 let columns = game_columns.iter().next().map_or(4, |c| c.0);
-                navigation.selected = if matches!(*overlay, ClientOverlay::WeaponEquipment) {
+                navigation.selected = if matches!(
+                    *overlay,
+                    ClientOverlay::WeaponEquipment | ClientOverlay::BrawlerList
+                ) {
                     equipment_neighbor(navigation.selected, direction, &available, columns)
                 } else {
                     game_selection_neighbor(navigation.selected, direction, &available, columns)

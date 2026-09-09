@@ -136,6 +136,11 @@ path = "src/bin/vfx_lab.rs"
 required-features = ["client"]
 
 [[bin]]
+name = "brawler-ui-gallery"
+path = "src/bin/ui_gallery.rs"
+required-features = ["client"]
+
+[[bin]]
 name = "brawler-server"
 path = "src/bin/server.rs"
 required-features = ["server"]

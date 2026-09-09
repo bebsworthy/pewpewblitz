@@ -6,6 +6,8 @@
 //! movement and post-handler aim. The pause-overlay presentation of these settings lives in the
 //! `ui` submodule.
 
+pub(crate) mod binding_edit;
+pub(crate) mod calibration;
 pub mod persistence;
 pub mod ui;
 

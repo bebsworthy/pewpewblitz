@@ -257,6 +257,11 @@ pub(crate) fn adjust_input_settings_from_pause_keys(
     if let Some(consumed) = capture_consumed.as_deref_mut() {
         consumed.0 = false;
     }
+    // Fullscreen product Settings owns capture, conflicts and autosave. The legacy handler
+    // remains only for the direct diagnostic input-settings surface.
+    if draft.is_some() {
+        return;
+    }
     if !settings_context_owns_input(*context) {
         return;
     }

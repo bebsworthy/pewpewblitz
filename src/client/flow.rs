@@ -61,7 +61,7 @@ pub use model::{
 };
 pub(super) use persistence::{ClientLocalLoadFailures, ConnectionPersistence};
 pub(super) use screens::{
-    brawlers::BrawlerDetailsPreviewHost,
+    brawlers::{BrawlerCardPreview, BrawlerDetailsPreviewHost},
     dashboard::{DashboardPreviewHost, DashboardRoot},
 };
 
@@ -175,6 +175,7 @@ impl Plugin for ClientFlowPlugin {
                     spawn_game_type_select.before(update_shell_image_button_chrome),
                     update_shell_image_button_chrome,
                     update_flow_button_chrome,
+                    screens::brawlers::update_brawler_card_chrome,
                 )
                     .in_set(ClientFlowSet::PresentFlow),
             )

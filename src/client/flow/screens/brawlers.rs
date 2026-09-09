@@ -16,6 +16,7 @@ use crate::client::flow::{
     actions::FlowUiAction,
     model::{ClientFlow, ClientOverlay},
 };
+use crate::client::ui::theme::{CREAM, INK, ORANGE, TEAL, font};
 use bevy::{
     input::mouse::MouseWheel,
     prelude::*,
@@ -77,14 +78,19 @@ impl Default for BrawlerEditDraft {
 #[derive(Component)]
 pub(in crate::client::flow) struct DeleteBrawlerConfirmationRoot;
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub(in crate::client::flow) struct BrawlerListRoot {
+    width: f32,
+    height: f32,
     profile_revision: crate::profiles::ProfileRevision,
     pending: bool,
 }
 
 #[derive(Component)]
 pub(in crate::client::flow) struct BrawlerListScrollArea;
+
+#[derive(Component)]
+pub(in crate::client) struct BrawlerCardPreview;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::client::flow) struct BrawlerDetailsRoot {
@@ -207,74 +213,322 @@ fn fighter_profile_stats(
     catalog.fighter(id).map(|definition| definition.stats)
 }
 
+#[derive(Component)]
+pub(in crate::client::flow) struct BrawlerCardStyle {
+    selected: bool,
+}
+
+#[derive(Component)]
+pub(in crate::client::flow) struct BrawlerCardFocus;
+
+#[allow(
+    clippy::type_complexity,
+    clippy::needless_pass_by_value,
+    reason = "browser-owned visual state; navigation remains in shared flow"
+)]
+pub(in crate::client::flow) fn update_brawler_card_chrome(
+    overlay: Res<ClientOverlay>,
+    navigation: Res<FlowNavigation>,
+    mut buttons: Query<(
+        &FlowButton,
+        &BrawlerCardStyle,
+        &Interaction,
+        Has<InteractionDisabled>,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
+    owners: Query<(&FlowButton, Has<InteractionDisabled>)>,
+    mut markers: Query<(&ChildOf, &mut Visibility), With<BrawlerCardFocus>>,
+) {
+    let active = matches!(*overlay, ClientOverlay::BrawlerList);
+    for (button, style, interaction, disabled, mut background, mut border) in &mut buttons {
+        let focus = active && !disabled && navigation.selected == button.index;
+        background.0 = if style.selected { TEAL } else { CREAM };
+        if disabled {
+            background.0 = Color::srgb(0.78, 0.77, 0.70);
+        }
+        border.set_all(
+            if focus || (active && !disabled && *interaction == Interaction::Hovered) {
+                ORANGE
+            } else {
+                INK
+            },
+        );
+    }
+    for (parent, mut visibility) in &mut markers {
+        *visibility = if owners.get(parent.parent()).is_ok_and(|(button, disabled)| {
+            active && !disabled && button.index == navigation.selected
+        }) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+struct BrawlerBrowserArt<'a> {
+    card_height: f32,
+    server: Option<&'a AssetServer>,
+    assets: Option<&'a crate::client::ClientAssetHandles>,
+}
+
+impl BrawlerBrowserArt<'_> {
+    fn label(
+        &self,
+        parent: &mut ChildSpawnerCommands,
+        text: impl Into<String>,
+        size: f32,
+        color: Color,
+    ) {
+        parent.spawn((
+            Text::new(text),
+            font(self.assets, size),
+            TextColor(color),
+            TextLayout::justify(Justify::Center),
+            Node {
+                width: percent(100),
+                min_width: px(0),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ));
+    }
+
+    fn chrome(&self, root: &mut ChildSpawnerCommands, width: f32) {
+        if let Some(server) = self.server {
+            root.spawn((
+                ImageNode {
+                    image_mode: NodeImageMode::Stretch,
+                    ..ImageNode::new(server.load("brawler/ui/shell/game-selection-background.png"))
+                },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(0),
+                    top: px(0),
+                    width: percent(100),
+                    height: percent(100),
+                    ..default()
+                },
+                ZIndex(-1),
+            ));
+        }
+        root.spawn(Node {
+            width: percent(100),
+            height: px(72),
+            flex_shrink: 0.0,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
+        .with_children(|header| {
+            let back = self.button(
+                header,
+                1000,
+                FlowUiAction::CloseBrawlerList,
+                false,
+                false,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(0),
+                    top: px(4),
+                    width: px(130),
+                    height: px(54),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    padding: UiRect::axes(px(12), px(8)),
+                    ..default()
+                },
+            );
+            header
+                .commands()
+                .entity(back)
+                .with_children(|b| self.label(b, "‹ BACK", 22.0, INK));
+            header
+                .spawn(Node {
+                    width: px((width - 330.0).max(130.0)),
+                    ..default()
+                })
+                .with_children(|title| {
+                    self.label(
+                        title,
+                        "BRAWLERS",
+                        if width < 760.0 { 30.0 } else { 46.0 },
+                        INK,
+                    );
+                });
+        });
+    }
+
+    fn cards(
+        &self,
+        grid: &mut ChildSpawnerCommands,
+        snapshot: &crate::profiles::ProfileSnapshot,
+        catalog: &crate::profiles::AdvertisedBrawlerCatalog,
+        pending: bool,
+    ) {
+        let full = snapshot.brawlers.len() >= usize::from(catalog.limits.maximum_saved_brawlers);
+        let create = self.button(
+            grid,
+            0,
+            FlowUiAction::CreateBrawler,
+            false,
+            pending || full,
+            browser_card_node(self.card_height),
+        );
+        grid.commands().entity(create).with_children(|card| {
+            self.label(card, "+", 96.0, TEAL);
+            self.label(card, "CREATE\nBRAWLER", 32.0, INK);
+            if full {
+                self.label(card, "Brawler limit reached", 16.0, INK);
+            }
+        });
+        for (index, brawler) in snapshot.brawlers.iter().enumerate() {
+            spawn_brawler_list_row(
+                grid,
+                index + 1,
+                brawler,
+                snapshot.selected_brawler_id == Some(brawler.id),
+                catalog,
+                self,
+                pending,
+            );
+        }
+    }
+
+    fn button(
+        &self,
+        parent: &mut ChildSpawnerCommands,
+        index: usize,
+        action: FlowUiAction,
+        selected: bool,
+        disabled: bool,
+        node: Node,
+    ) -> Entity {
+        let mut node = node;
+        node.border = UiRect::all(px(4));
+        node.border_radius = BorderRadius::all(px(6));
+        let mut entity = parent.spawn((
+            Button,
+            FlowButton {
+                index,
+                action,
+                error_action: true,
+            },
+            BrawlerCardStyle { selected },
+            BackgroundColor(if selected { TEAL } else { CREAM }),
+            BorderColor::all(INK),
+            BoxShadow::new(
+                Color::srgba(0.025, 0.10, 0.145, 0.25),
+                px(3),
+                px(4),
+                px(0),
+                px(0),
+            ),
+            node,
+        ));
+        entity.with_children(|card| {
+            card.spawn((
+                BrawlerCardFocus,
+                Visibility::Hidden,
+                Text::new(">"),
+                font(self.assets, 32.0),
+                TextColor(ORANGE),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(-13),
+                    top: percent(43),
+                    ..default()
+                },
+            ));
+        });
+
+        if disabled {
+            entity.insert(InteractionDisabled);
+        }
+        entity.id()
+    }
+}
+
 fn spawn_brawler_list_row(
     parent: &mut ChildSpawnerCommands,
     index: usize,
     brawler: &crate::profiles::SavedBrawler,
     selected: bool,
     catalog: &crate::profiles::AdvertisedBrawlerCatalog,
+    art: &BrawlerBrowserArt,
     disabled: bool,
 ) {
     let summary = brawler_loadout_summary(brawler, catalog);
-    let status = if selected {
-        " · SELECTED FOR PLAY"
+    let id = art.button(
+        parent,
+        index,
+        FlowUiAction::OpenBrawlerDetails(brawler.id),
+        selected,
+        disabled,
+        browser_card_node(art.card_height),
+    );
+    parent
+        .commands()
+        .entity(id)
+        .insert(AccessibleLabel::new(format!(
+            "{}{}: {summary}",
+            brawler.name,
+            if selected { ", selected for play" } else { "" }
+        )))
+        .with_children(|card| {
+            card.spawn(Node {
+                width: percent(100),
+                height: px(art.card_height - 120.0),
+                flex_shrink: 0.0,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                overflow: Overflow::clip(),
+                ..default()
+            })
+            .with_children(|frame| {
+                frame.spawn((
+                    BrawlerCardPreview,
+                    Node {
+                        width: px(0),
+                        height: px(0),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                ));
+            });
+            art.label(card, brawler.name.to_uppercase(), 34.0, INK);
+            art.label(
+                card,
+                advertised_weapon_name(catalog, brawler.weapon_base_id),
+                20.0,
+                INK,
+            );
+        });
+}
+
+fn browser_columns(width: f32) -> usize {
+    if width >= 1350.0 {
+        5
+    } else if width >= 1050.0 {
+        4
+    } else if width >= 760.0 {
+        3
     } else {
-        ""
-    };
-    let mut row = parent.spawn((
-        Button,
-        AccessibleLabel::new(format!("{}{}: {summary}", brawler.name, status)),
-        FlowButton {
-            index,
-            action: FlowUiAction::OpenBrawlerDetails(brawler.id),
-            error_action: true,
-        },
-        Node {
-            width: percent(100),
-            min_height: px(92),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::FlexStart,
-            justify_content: JustifyContent::Center,
-            row_gap: px(4),
-            padding: UiRect::axes(px(18), px(11)),
-            border: UiRect::all(px(3)),
-            border_radius: BorderRadius::all(px(12)),
-            ..default()
-        },
-        BackgroundColor(Color::srgb(0.09, 0.14, 0.2)),
-        BorderColor::all(if selected {
-            Color::srgb(0.2, 0.9, 0.72)
-        } else {
-            Color::NONE
-        }),
-    ));
-    if disabled {
-        row.insert(InteractionDisabled);
+        2
     }
-    row.with_children(|row| {
-        row.spawn((
-            Text::new(format!(
-                "{}{}",
-                brawler.name.to_uppercase(),
-                if selected {
-                    "  ✓ SELECTED FOR PLAY"
-                } else {
-                    ""
-                }
-            )),
-            TextFont::from_font_size(21.0),
-            TextColor(if selected {
-                Color::srgb(0.2, 0.95, 0.75)
-            } else {
-                Color::WHITE
-            }),
-        ));
-        row.spawn((
-            Text::new(summary),
-            TextFont::from_font_size(15.0),
-            TextColor(Color::srgb(0.72, 0.84, 0.94)),
-        ));
-    });
+}
+
+fn browser_card_node(height: f32) -> Node {
+    Node {
+        min_width: px(0),
+        height: px(height),
+        padding: UiRect::axes(px(20), px(18)),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        row_gap: px(4),
+        ..default()
+    }
 }
 
 fn spawn_brawler_screen_button(
@@ -342,8 +596,7 @@ pub(in crate::client::flow) fn scroll_brawler_list(
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "one cohesive bounded list builder keeps touch layout, navigation indices, and snapshot reconciliation adjacent"
+    reason = "screen-owned snapshot reconciliation and responsive rendering"
 )]
 pub(in crate::client::flow) fn present_brawler_list(
     mut commands: Commands,
@@ -353,6 +606,10 @@ pub(in crate::client::flow) fn present_brawler_list(
     roots: Query<(Entity, &BrawlerListRoot)>,
     scroll_areas: Query<&ScrollPosition, With<BrawlerListScrollArea>>,
     mut navigation: ResMut<FlowNavigation>,
+    server: Option<Res<AssetServer>>,
+    assets: Option<Res<crate::client::ClientAssetHandles>>,
+    windows: Query<&Window>,
+    scale: Option<Res<UiScale>>,
 ) {
     if !matches!(overlay.as_ref(), ClientOverlay::BrawlerList)
         || *flow.get() != ClientFlow::Dashboard
@@ -362,39 +619,45 @@ pub(in crate::client::flow) fn present_brawler_list(
         }
         return;
     }
-    let Some(snapshot) = profile.snapshot() else {
+    let (Some(snapshot), Some(catalog)) = (profile.snapshot(), profile.catalog()) else {
         return;
     };
-    let Some(catalog) = profile.catalog() else {
-        return;
-    };
+    let scale = scale.map_or(1.0, |s| s.0);
+    let width = windows.iter().next().map_or(1600.0, Window::width) / scale;
+    let height = windows.iter().next().map_or(900.0, Window::height) / scale;
     let pending = profile.pending();
     let render_key = BrawlerListRoot {
         profile_revision: snapshot.revision,
         pending,
+        width,
+        height,
     };
     if roots.iter().any(|(_, root)| *root == render_key) {
         return;
     }
     let retained_scroll = scroll_areas.iter().next().cloned().unwrap_or_default();
-    let first_render = roots.is_empty();
+    if roots.is_empty() {
+        navigation.selected = snapshot
+            .selected_brawler_id
+            .and_then(|selected| snapshot.brawlers.iter().position(|b| b.id == selected))
+            .map_or(0, |i| i + 1);
+    }
     for (entity, _) in &roots {
         commands.entity(entity).despawn();
     }
-    if first_render {
-        navigation.selected = snapshot
-            .selected_brawler_id
-            .and_then(|selected| {
-                snapshot
-                    .brawlers
-                    .iter()
-                    .position(|brawler| brawler.id == selected)
-            })
-            .unwrap_or(0);
-    }
+    let columns = browser_columns(width);
+    let column_count = f32::from(u16::try_from(columns).unwrap_or(5));
+    let card_height =
+        (((width - 64.0 - 16.0 * (column_count - 1.0)) / column_count) * 1.15).clamp(240.0, 350.0);
+    let art = BrawlerBrowserArt {
+        card_height,
+        server: server.as_deref(),
+        assets: assets.as_deref(),
+    };
     commands
         .spawn((
             render_key,
+            super::game_select::GameSelectionColumns(columns),
             DespawnOnExit(ClientFlow::Dashboard),
             Node {
                 position_type: PositionType::Absolute,
@@ -403,149 +666,45 @@ pub(in crate::client::flow) fn present_brawler_list(
                 top: px(0),
                 bottom: px(0),
                 flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Stretch,
+                padding: UiRect::all(px(24)),
+                row_gap: px(20),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.018, 0.11, 0.24)),
+            BackgroundColor(CREAM),
             GlobalZIndex(510),
         ))
         .with_children(|root| {
+            art.chrome(root, width);
             root.spawn((
+                BrawlerListScrollArea,
+                retained_scroll,
                 Node {
                     width: percent(100),
-                    min_height: px(72),
-                    align_items: AlignItems::Center,
-                    column_gap: px(14),
-                    padding: UiRect::axes(px(18), px(10)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.015, 0.04, 0.085)),
-            ))
-            .with_children(|header| {
-                spawn_brawler_screen_button(
-                    header,
-                    snapshot.brawlers.len() + 1,
-                    FlowUiAction::CloseBrawlerList,
-                    "‹ DASHBOARD",
-                    px(170),
-                    false,
-                    Color::srgb(0.06, 0.22, 0.4),
-                );
-                header.spawn((
-                    Text::new("BRAWLERS"),
-                    TextFont::from_font_size(34.0),
-                    TextColor(Color::WHITE),
-                ));
-                header.spawn((Node {
+                    min_height: px(0),
                     flex_grow: 1.0,
-                    ..default()
-                },));
-                header.spawn((
-                    Text::new(format!(
-                        "{} / {} SAVED",
-                        snapshot.brawlers.len(),
-                        catalog.limits.maximum_saved_brawlers
-                    )),
-                    TextFont::from_font_size(16.0),
-                    TextColor(Color::srgb(0.42, 0.88, 1.0)),
-                ));
-            });
-            root.spawn((
-                Node {
-                    width: percent(100),
-                    padding: UiRect::axes(px(24), px(14)),
-                    align_items: AlignItems::Center,
-                    column_gap: px(16),
+                    flex_direction: FlexDirection::Column,
+                    overflow: Overflow::scroll_y(),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.025, 0.2, 0.42)),
             ))
-            .with_children(|intro| {
-                intro.spawn((
-                    Text::new("CHOOSE YOUR BRAWLER"),
-                    TextFont::from_font_size(22.0),
-                    TextColor(Color::WHITE),
-                ));
-                intro.spawn((
-                    Text::new("Tap any saved brawler to inspect its build."),
-                    TextFont::from_font_size(15.0),
-                    TextColor(Color::srgb(0.72, 0.88, 0.98)),
-                ));
-            });
-            root.spawn((Node {
-                width: percent(100),
-                min_height: px(0),
-                flex_grow: 1.0,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::axes(px(22), px(12)),
-                ..default()
-            },))
-                .with_children(|body| {
-                    body.spawn((
-                        BrawlerListScrollArea,
-                        retained_scroll,
-                        Node {
-                            width: percent(100),
-                            max_width: px(1040),
-                            min_height: px(0),
-                            flex_grow: 1.0,
-                            flex_shrink: 1.0,
-                            flex_direction: FlexDirection::Column,
-                            align_items: AlignItems::Stretch,
-                            row_gap: px(11),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|list| {
-                        if snapshot.brawlers.is_empty() {
-                            list.spawn((
-                                Text::new("NO BRAWLERS YET\nCreate one to enter Play or Practice."),
-                                TextFont::from_font_size(21.0),
-                                TextColor(Color::srgb(0.78, 0.86, 0.94)),
-                            ));
-                        }
-                        for (index, brawler) in snapshot.brawlers.iter().enumerate() {
-                            spawn_brawler_list_row(
-                                list,
-                                index,
-                                brawler,
-                                snapshot.selected_brawler_id == Some(brawler.id),
-                                catalog,
-                                pending,
-                            );
-                        }
-                    });
-                });
-            root.spawn((
-                Node {
-                    width: percent(100),
-                    justify_content: JustifyContent::Center,
-                    padding: UiRect::axes(px(22), px(12)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.015, 0.055, 0.11)),
-            ))
-            .with_children(|footer| {
-                footer
-                    .spawn((Node {
+            .with_children(|viewport| {
+                viewport
+                    .spawn(Node {
                         width: percent(100),
-                        max_width: px(1040),
+                        flex_shrink: 0.0,
+                        display: Display::Grid,
+                        grid_template_columns: RepeatedGridTrack::flex(
+                            u16::try_from(columns).unwrap_or(5),
+                            1.0,
+                        ),
+                        grid_auto_rows: vec![GridTrack::px(card_height)],
+                        column_gap: px(16),
+                        row_gap: px(16),
+                        padding: UiRect::all(px(8)),
                         ..default()
-                    },))
-                    .with_children(|actions| {
-                        let create_index = snapshot.brawlers.len();
-                        spawn_brawler_screen_button(
-                            actions,
-                            create_index,
-                            FlowUiAction::CreateBrawler,
-                            "+ CREATE BRAWLER",
-                            percent(100),
-                            pending
-                                || snapshot.brawlers.len()
-                                    >= usize::from(catalog.limits.maximum_saved_brawlers),
-                            Color::srgb(0.03, 0.5, 0.78),
-                        );
+                    })
+                    .with_children(|grid| {
+                        art.cards(grid, snapshot, catalog, pending);
                     });
             });
         });
@@ -556,6 +715,7 @@ pub(in crate::client::flow) fn keep_brawler_list_focus_visible(
     overlay: Res<ClientOverlay>,
     navigation: Res<FlowNavigation>,
     buttons: Query<(&FlowButton, &ChildOf, &ComputedNode, &UiGlobalTransform)>,
+    parents: Query<&ChildOf>,
     mut areas: Query<
         (
             Entity,
@@ -579,10 +739,13 @@ pub(in crate::client::flow) fn keep_brawler_list_focus_visible(
     if prior.as_ref() == Some(&focus_key) {
         return;
     }
-    *prior = Some(focus_key);
     let Some((_, _, button_node, button_transform)) =
         buttons.iter().find(|(button, child_of, _, _)| {
-            child_of.parent() == area_entity && button.index == navigation.selected
+            (child_of.parent() == area_entity
+                || parents
+                    .get(child_of.parent())
+                    .is_ok_and(|p| p.parent() == area_entity))
+                && button.index == navigation.selected
         })
     else {
         return;
@@ -590,6 +753,7 @@ pub(in crate::client::flow) fn keep_brawler_list_focus_visible(
     if area_node.is_empty() || button_node.is_empty() {
         return;
     }
+    *prior = Some(focus_key);
     let (_, _, area_center) = area_transform.to_scale_angle_translation();
     let (_, _, button_center) = button_transform.to_scale_angle_translation();
     let visible_top = area_center.y - area_node.size().y * 0.5 + 8.0;

@@ -1,7 +1,7 @@
 //! Mode cards and exact advertised variant selection; confirmation remains flow-owned.
-use super::dashboard::{CREAM, INK, dashboard_font};
 use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
 use super::shared::{FlowButton, FlowNavigation, FlowRoot, ShellImageButton};
+use crate::client::ui::theme::{CREAM, INK, font};
 use crate::client::{
     ClientLobbyMembership,
     flow::{actions::FlowUiAction, model::ClientFlow},
@@ -268,11 +268,7 @@ fn label(
     text: &str,
     size: f32,
 ) {
-    parent.spawn((
-        Text::new(text),
-        dashboard_font(assets, size),
-        TextColor(INK),
-    ));
+    parent.spawn((Text::new(text), font(assets, size), TextColor(INK)));
 }
 struct Choice<'a> {
     index: usize,

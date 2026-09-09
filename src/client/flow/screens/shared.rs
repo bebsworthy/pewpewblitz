@@ -1,6 +1,8 @@
 //! Shared flow-screen roots, buttons, navigation, and interaction presentation.
 
 use super::{dashboard::DashboardButtonStyle, game_select::GameTypeSelectionDraft};
+pub(in crate::client::flow) use crate::client::ui::image_button::ImageButtonArt as ShellImageButton;
+use crate::client::ui::image_button::ImageButtonState;
 use crate::client::{
     ClientLobbyMembership,
     flow::{actions::FlowUiAction, input::overlay_allows_button, model::ClientOverlay},
@@ -137,7 +139,7 @@ pub(in crate::client::flow) fn flow_button_background(
     dashboard_style: Option<DashboardButtonStyle>,
 ) -> Color {
     if let Some(style) = dashboard_style {
-        use super::dashboard::{CREAM, INK, ORANGE, TEAL};
+        use crate::client::ui::theme::{CREAM, INK, ORANGE, TEAL};
         if matches!(style, DashboardButtonStyle::Preview) {
             return Color::NONE;
         }
@@ -195,7 +197,7 @@ pub(in crate::client::flow) fn flow_button_border(
         return if matches!(dashboard_style, Some(DashboardButtonStyle::Preview)) {
             Color::NONE
         } else {
-            super::dashboard::INK
+            crate::client::ui::theme::INK
         };
     }
     if disabled {
@@ -231,7 +233,10 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
             Option<&DashboardButtonStyle>,
             Option<&mut ImageNode>,
         ),
-        Without<ShellImageButton>,
+        (
+            Without<ShellImageButton>,
+            Without<super::brawlers::BrawlerCardStyle>,
+        ),
     >,
 ) {
     let selected_brawler_id = memberships
@@ -271,6 +276,12 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
         if let Some(mut image) = image.filter(|_| dashboard_style.is_some()) {
             background.0 = Color::NONE;
             border.set_all(Color::NONE);
+            let state = ImageButtonState {
+                active,
+                disabled,
+                focused,
+                interaction,
+            };
             if let (Some(assets), Some(style)) = (assets.as_deref(), dashboard_style) {
                 let index = match style {
                     DashboardButtonStyle::Mode => 0,
@@ -280,30 +291,18 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
                     DashboardButtonStyle::Header => 4,
                     DashboardButtonStyle::Preview => continue,
                 };
-                image.image = if !disabled && focused {
-                    assets.dashboard_focus_panels[index].clone()
-                } else {
-                    assets.dashboard_panels[index].clone()
-                };
+                state.apply(
+                    &mut image,
+                    &ShellImageButton {
+                        normal: assets.dashboard_panels[index].clone(),
+                        focus: assets.dashboard_focus_panels[index].clone(),
+                    },
+                );
             }
 
-            image.color = if disabled {
-                Color::srgba(0.65, 0.65, 0.65, 0.7)
-            } else if interaction == Interaction::Pressed {
-                Color::srgb(0.82, 0.86, 0.86)
-            } else if focused || interaction == Interaction::Hovered {
-                Color::srgb(1.08, 1.08, 1.08)
-            } else {
-                Color::WHITE
-            };
+            image.color = state.tint();
         }
     }
-}
-
-#[derive(Component)]
-pub(in crate::client::flow) struct ShellImageButton {
-    pub(in crate::client::flow) normal: Handle<Image>,
-    pub(in crate::client::flow) focus: Handle<Image>,
 }
 
 #[allow(clippy::needless_pass_by_value, reason = "Bevy presentation system")]
@@ -325,19 +324,12 @@ pub(in crate::client::flow) fn update_shell_image_button_chrome(
         } else {
             Interaction::None
         };
-        image.image = if active && navigation.selected == button.index && !disabled {
-            art.focus.clone()
-        } else {
-            art.normal.clone()
-        };
-        image.color = if disabled {
-            Color::srgba(0.6, 0.6, 0.6, 0.7)
-        } else if interaction == Interaction::Pressed {
-            Color::srgb(0.8, 0.8, 0.8)
-        } else if interaction == Interaction::Hovered {
-            Color::srgb(1.08, 1.08, 1.08)
-        } else {
-            Color::WHITE
-        };
+        ImageButtonState {
+            active,
+            disabled,
+            focused: navigation.selected == button.index,
+            interaction,
+        }
+        .apply(&mut image, art);
     }
 }

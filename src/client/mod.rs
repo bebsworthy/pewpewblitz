@@ -72,6 +72,7 @@ mod session;
 mod settings;
 mod shell;
 mod targeting;
+mod ui;
 pub(crate) mod vfx;
 mod vfx_lab;
 pub(crate) use assets::ClientAssetHandles;
@@ -103,6 +104,7 @@ pub use settings::{
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
 pub use shell::ClientShellPlugin;
+pub use ui::gallery::build_ui_gallery_app;
 pub use vfx_lab::{VfxLabAccent, VfxLabConfig, build_vfx_lab_app};
 
 /// Installs client-side gameplay state reconstructed from authoritative replication and messages.

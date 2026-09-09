@@ -74,7 +74,7 @@ impl ClientAssetHandles {
                 "underline",
             ]
             .map(|name| asset_server.load(format!("brawler/ui/shell/{name}.png"))),
-            dashboard_font: asset_server.load("brawler/ui/fonts/lilita-one-regular.ttf"),
+            dashboard_font: asset_server.load(ui::theme::FONT_PATH),
             settings_icon: asset_server.load("brawler/ui/icons/settings.png"),
             menu_icon: asset_server.load("brawler/ui/icons/menu.png"),
             build_icon: asset_server.load("brawler/ui/icons/build.png"),

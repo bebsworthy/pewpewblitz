@@ -17,6 +17,10 @@ client:
     ./scripts/dev.sh client
 
 # Open the development-only read-only production VFX viewer.
+# Native production-control review surface (no server needed).
+ui-gallery:
+    cargo run --locked --no-default-features --features client --bin brawler-ui-gallery
+
 vfx-lab args="":
     cargo run --locked --no-default-features --features client --bin brawler-vfx-lab -- {{args}}
 
