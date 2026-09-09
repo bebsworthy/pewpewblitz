@@ -7,7 +7,7 @@ use crate::client::{
         model::{ClientFlow, ClientOverlay},
         persistence::ConnectionPersistence,
         screens::{
-            brawlers::BrawlerEditDraft,
+            brawlers::{BrawlerCreationDraft, BrawlerEditDraft},
             dashboard::{
                 DASHBOARD_BUILD_INDEX, DASHBOARD_GAME_INDEX, DASHBOARD_MENU_INDEX,
                 DASHBOARD_PLAY_INDEX, DASHBOARD_PRACTICE_INDEX, DashboardLayoutClass,
@@ -191,6 +191,7 @@ pub(super) fn collect_flow_input(
     game_columns: Query<&super::screens::game_select::GameSelectionColumns>,
     mut actions: ResMut<PendingFlowActions>,
     mut brawler_edit: ResMut<BrawlerEditDraft>,
+    mut creation: ResMut<BrawlerCreationDraft>,
 ) {
     if *flow.get() == ClientFlow::PracticeMapSelect && matches!(*overlay, ClientOverlay::None) {
         return;
@@ -210,66 +211,38 @@ pub(super) fn collect_flow_input(
         ClientOverlay::BrawlerEditor | ClientOverlay::BrawlerDetails(_)
     ) && brawler_edit.editing_name
     {
-        if keyboard.just_pressed(KeyCode::Home) {
-            brawler_edit.name_caret = 0;
-        } else if keyboard.just_pressed(KeyCode::End) {
-            brawler_edit.name_caret = brawler_edit.name.len();
-        } else if keyboard.just_pressed(KeyCode::ArrowLeft) {
-            brawler_edit.name_caret = previous_caret(
-                &brawler_edit.name,
-                brawler_edit.name_caret,
-                EditingField::Name,
-            );
-        } else if keyboard.just_pressed(KeyCode::ArrowRight) {
-            brawler_edit.name_caret = next_caret(
-                &brawler_edit.name,
-                brawler_edit.name_caret,
-                EditingField::Name,
-            );
-        }
-        for event in keyboard_events.read() {
-            if event.state != ButtonState::Pressed {
-                continue;
-            }
-            if event.key_code == KeyCode::Backspace {
-                let previous = previous_caret(
-                    &brawler_edit.name,
-                    brawler_edit.name_caret,
-                    EditingField::Name,
-                );
-                let caret = brawler_edit.name_caret;
-                brawler_edit.name.replace_range(previous..caret, "");
-                brawler_edit.name_caret = previous;
-            } else if event.key_code == KeyCode::Delete {
-                let next = next_caret(
-                    &brawler_edit.name,
-                    brawler_edit.name_caret,
-                    EditingField::Name,
-                );
-                let caret = brawler_edit.name_caret;
-                brawler_edit.name.replace_range(caret..next, "");
-            } else if let Some(text) = event.text.as_deref() {
-                insert_brawler_name_text(&mut brawler_edit, text);
+        let edit = &mut *brawler_edit;
+        edit_name_input(
+            &mut edit.name,
+            &mut edit.name_caret,
+            &mut edit.editing_name,
+            &mut edit.inline_error,
+            &keyboard,
+            &mut keyboard_events,
+            pad_pressed(GamepadButton::South),
+            pad_pressed(GamepadButton::East),
+        );
+        if !edit.editing_name && edit.inline_rename {
+            if keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East) {
+                edit.inline_rename = false;
+            } else {
+                queue_ui_action(&mut actions, FlowUiAction::ConfirmBrawlerEdit);
             }
         }
-        if keyboard.just_pressed(KeyCode::Enter) || pad_pressed(GamepadButton::South) {
-            match crate::lobby::normalize_proposed_display_name(&brawler_edit.name) {
-                Ok(name) => {
-                    brawler_edit.name = name;
-                    brawler_edit.editing_name = false;
-                    brawler_edit.inline_error = None;
-                    if brawler_edit.inline_rename {
-                        queue_ui_action(&mut actions, FlowUiAction::ConfirmBrawlerEdit);
-                    }
-                }
-                Err(error) => brawler_edit.inline_error = Some(format!("Invalid name: {error}")),
-            }
-        } else if keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East) {
-            brawler_edit.editing_name = false;
-            if brawler_edit.inline_rename {
-                brawler_edit.inline_rename = false;
-            }
-        }
+        return;
+    }
+    if matches!(*overlay, ClientOverlay::BrawlerCreation) && creation.editing_name {
+        let edit = &mut *creation;
+        edit_name_input(
+            &mut edit.name,
+            &mut edit.name_caret,
+            &mut edit.editing_name,
+            &mut edit.inline_error,
+            &keyboard,
+            &mut keyboard_events,
+            pad_pressed(GamepadButton::South),
+            pad_pressed(GamepadButton::East),
+        );
         return;
     }
     if let Some(field) = model.editing {
@@ -380,7 +353,9 @@ pub(super) fn collect_flow_input(
             && matches!(*overlay, ClientOverlay::None))
             || matches!(
                 *overlay,
-                ClientOverlay::WeaponEquipment | ClientOverlay::BrawlerList
+                ClientOverlay::WeaponEquipment
+                    | ClientOverlay::BrawlerList
+                    | ClientOverlay::BrawlerCreation
             )
         {
             if !available.contains(&navigation.selected) {
@@ -409,7 +384,9 @@ pub(super) fn collect_flow_input(
                 let columns = game_columns.iter().next().map_or(4, |c| c.0);
                 navigation.selected = if matches!(
                     *overlay,
-                    ClientOverlay::WeaponEquipment | ClientOverlay::BrawlerList
+                    ClientOverlay::WeaponEquipment
+                        | ClientOverlay::BrawlerList
+                        | ClientOverlay::BrawlerCreation
                 ) {
                     equipment_neighbor(navigation.selected, direction, &available, columns)
                 } else {
@@ -552,17 +529,18 @@ pub(super) fn insert_editor_text(model: &mut ServerSelectModel, field: EditingFi
     model.inline_error = None;
 }
 
-pub(super) fn insert_brawler_name_text(draft: &mut BrawlerEditDraft, text: &str) {
-    let allowed = !text
+fn insert_name_text(name: &mut String, caret: &mut usize, error: &mut Option<String>, text: &str) {
+    if text
         .chars()
-        .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'));
-    if !allowed || draft.name.len().saturating_add(text.len()) > 64 {
-        draft.inline_error = Some("Name exceeds this field's bounds".to_string());
+        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+        || name.len().saturating_add(text.len()) > 64
+    {
+        *error = Some("Name exceeds this field's bounds".into());
         return;
     }
-    draft.name.insert_str(draft.name_caret, text);
-    draft.name_caret += text.len();
-    draft.inline_error = None;
+    name.insert_str(*caret, text);
+    *caret += text.len();
+    *error = None;
 }
 
 fn equipment_neighbor(
@@ -629,5 +607,59 @@ mod equipment_navigation_tests {
             equipment_neighbor(11, D::Down, &(0..13).collect::<Vec<_>>(), 6),
             12
         );
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Shared bounded name-field input, borrowed by creation and editing"
+)]
+fn edit_name_input(
+    name: &mut String,
+    caret: &mut usize,
+    editing: &mut bool,
+    error: &mut Option<String>,
+    keyboard: &ButtonInput<KeyCode>,
+    keyboard_events: &mut MessageReader<KeyboardInput>,
+    confirm: bool,
+    cancel: bool,
+) {
+    if keyboard.just_pressed(KeyCode::Home) {
+        *caret = 0;
+    } else if keyboard.just_pressed(KeyCode::End) {
+        *caret = name.len();
+    } else if keyboard.just_pressed(KeyCode::ArrowLeft) {
+        *caret = previous_caret(&*name, *caret, EditingField::Name);
+    } else if keyboard.just_pressed(KeyCode::ArrowRight) {
+        *caret = next_caret(&*name, *caret, EditingField::Name);
+    }
+    for event in keyboard_events.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        if event.key_code == KeyCode::Backspace {
+            let previous = previous_caret(&*name, *caret, EditingField::Name);
+            let current_caret = *caret;
+            name.replace_range(previous..current_caret, "");
+            *caret = previous;
+        } else if event.key_code == KeyCode::Delete {
+            let next = next_caret(&*name, *caret, EditingField::Name);
+            let current_caret = *caret;
+            name.replace_range(current_caret..next, "");
+        } else if let Some(text) = event.text.as_deref() {
+            insert_name_text(name, caret, error, text);
+        }
+    }
+    if keyboard.just_pressed(KeyCode::Enter) || confirm {
+        match crate::lobby::normalize_proposed_display_name(&*name) {
+            Ok(normalized) => {
+                *name = normalized;
+                *editing = false;
+                *error = None;
+            }
+            Err(reason) => *error = Some(format!("Invalid name: {reason}")),
+        }
+    } else if keyboard.just_pressed(KeyCode::Escape) || cancel {
+        *editing = false;
     }
 }

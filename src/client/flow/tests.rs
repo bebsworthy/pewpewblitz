@@ -2842,3 +2842,83 @@ fn shell_back_actions_share_the_same_role_and_preview_has_no_chrome() {
     app.update();
     assert!(app.world().get::<Surface>(preview).is_none());
 }
+
+#[test]
+fn creation_pickers_preserve_named_draft_and_only_submit_from_overview() {
+    use super::screens::brawlers::CreationPicker;
+    let membership = lobby_membership_with_brawler();
+    let mut app = configured_customization_app(&membership);
+    inject_action(&mut app, FlowUiAction::CreateBrawler);
+    app.world_mut().resource_mut::<BrawlerCreationDraft>().name = "New Spark".into();
+    inject_action(&mut app, FlowUiAction::OpenCreationUltimate);
+    assert_eq!(
+        app.world().resource::<BrawlerCreationDraft>().picker,
+        Some(CreationPicker::Ultimate)
+    );
+    inject_action(&mut app, FlowUiAction::CancelCreateBrawler);
+    assert_eq!(
+        app.world().resource::<BrawlerCreationDraft>().name,
+        "New Spark"
+    );
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerCreation
+    );
+    inject_action(&mut app, FlowUiAction::OpenCreationWeapon);
+    let id = app
+        .world()
+        .resource::<super::super::ClientProfileModel>()
+        .catalog()
+        .unwrap()
+        .weapon_bases
+        .last()
+        .unwrap()
+        .id;
+    inject_action(&mut app, FlowUiAction::ChooseCreationWeapon(id));
+    let draft = app.world().resource::<BrawlerCreationDraft>();
+    assert_eq!(draft.weapon_base_id, id);
+    assert!(draft.picker.is_none());
+    assert!(
+        !app.world()
+            .resource::<super::super::ClientProfileModel>()
+            .pending()
+    );
+    app.world_mut().resource_mut::<BrawlerCreationDraft>().name = "".into();
+    inject_action(&mut app, FlowUiAction::ConfirmCreateBrawler);
+    assert!(
+        app.world()
+            .resource::<BrawlerCreationDraft>()
+            .inline_error
+            .is_some()
+    );
+    assert!(
+        !app.world()
+            .resource::<super::super::ClientProfileModel>()
+            .pending()
+    );
+    app.world_mut().resource_mut::<BrawlerCreationDraft>().name = "New Spark".into();
+    inject_action(&mut app, FlowUiAction::ConfirmCreateBrawler);
+    assert!(
+        app.world()
+            .resource::<super::super::ClientProfileModel>()
+            .pending()
+    );
+    let commands = app
+        .world()
+        .resource::<super::super::ClientProfileModel>()
+        .queued_commands_for_test();
+    assert_eq!(commands.len(), 1);
+    let crate::profiles::ProfileCommand::CreateBrawler { draft, .. } = commands.front().unwrap()
+    else {
+        panic!("expected one atomic creation");
+    };
+    assert_eq!(draft.name, "New Spark");
+    assert_eq!(draft.weapon_base_id, id);
+    inject_action(&mut app, FlowUiAction::OpenCreationFighter);
+    assert!(
+        app.world()
+            .resource::<BrawlerCreationDraft>()
+            .picker
+            .is_none()
+    );
+}

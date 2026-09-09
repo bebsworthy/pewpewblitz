@@ -151,9 +151,13 @@ pub(super) fn resolve_profile_action(
             commit.focus_index = Some(0);
         }
         action @ (FlowUiAction::CreateBrawler
-        | FlowUiAction::CycleCreationProfile
-        | FlowUiAction::CycleCreationWeapon
-        | FlowUiAction::CycleCreationUltimate
+        | FlowUiAction::OpenCreationFighter
+        | FlowUiAction::OpenCreationWeapon
+        | FlowUiAction::ChooseCreationFighter(_)
+        | FlowUiAction::ChooseCreationWeapon(_)
+        | FlowUiAction::ChooseCreationUltimate(_)
+        | FlowUiAction::EditCreationName
+        | FlowUiAction::OpenCreationUltimate
         | FlowUiAction::CancelCreateBrawler
         | FlowUiAction::ConfirmCreateBrawler) => resolve_brawler_creation_action(
             action,
@@ -237,6 +241,15 @@ fn resolve_brawler_creation_action(
     dashboard_notice: &mut DashboardNotice,
     commit: &mut FlowCommit,
 ) {
+    if !matches!(action, FlowUiAction::CreateBrawler)
+        && (!matches!(overlay, ClientOverlay::BrawlerCreation)
+            || profile_changes_blocked(queue, practice, profile))
+    {
+        return;
+    }
+    if !matches!(action, FlowUiAction::EditCreationName) {
+        creation_draft.editing_name = false;
+    }
     match action {
         FlowUiAction::CreateBrawler => open_brawler_creation(
             queue,
@@ -246,46 +259,44 @@ fn resolve_brawler_creation_action(
             dashboard_notice,
             commit,
         ),
-        FlowUiAction::CycleCreationProfile => {
-            creation_draft.inline_error = None;
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            let index = catalog
-                .fighter_profiles
-                .iter()
-                .position(|entry| entry.id == creation_draft.fighter_profile_id)
-                .unwrap_or(0);
-            creation_draft.fighter_profile_id =
-                catalog.fighter_profiles[(index + 1) % catalog.fighter_profiles.len()].id;
+        FlowUiAction::OpenCreationFighter => {
+            creation_draft.picker = Some(super::super::screens::brawlers::CreationPicker::Fighter);
         }
-        FlowUiAction::CycleCreationWeapon => {
-            creation_draft.inline_error = None;
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            let index = catalog
-                .weapon_bases
-                .iter()
-                .position(|entry| entry.id == creation_draft.weapon_base_id)
-                .unwrap_or(0);
-            creation_draft.weapon_base_id =
-                catalog.weapon_bases[(index + 1) % catalog.weapon_bases.len()].id;
+        FlowUiAction::OpenCreationWeapon => {
+            creation_draft.picker = Some(super::super::screens::brawlers::CreationPicker::Weapon);
         }
-        FlowUiAction::CycleCreationUltimate => {
-            creation_draft.inline_error = None;
-            let Some(catalog) = profile.catalog() else {
-                return;
-            };
-            let current = catalog
-                .ultimates
-                .iter()
-                .position(|definition| definition.id == creation_draft.ultimate)
-                .unwrap_or(0);
-            creation_draft.ultimate = catalog.ultimates[(current + 1) % catalog.ultimates.len()].id;
+        FlowUiAction::OpenCreationUltimate => {
+            creation_draft.picker = Some(super::super::screens::brawlers::CreationPicker::Ultimate);
+        }
+        FlowUiAction::EditCreationName => {
+            creation_draft.editing_name = true;
+            creation_draft.name_caret = creation_draft.name.len();
+        }
+        FlowUiAction::ChooseCreationFighter(id) => {
+            if profile.catalog().is_some_and(|c| c.fighter(*id).is_some()) {
+                creation_draft.fighter_profile_id = *id;
+                creation_draft.picker = None;
+                commit.focus_index = Some(0);
+            }
+        }
+        FlowUiAction::ChooseCreationWeapon(id) => {
+            if profile.catalog().is_some_and(|c| c.weapon(*id).is_some()) {
+                creation_draft.weapon_base_id = *id;
+                creation_draft.picker = None;
+                commit.focus_index = Some(1);
+            }
+        }
+        FlowUiAction::ChooseCreationUltimate(id) => {
+            if profile.catalog().is_some_and(|c| c.ultimate(*id).is_some()) {
+                creation_draft.ultimate = *id;
+                creation_draft.picker = None;
+                commit.focus_index = Some(2);
+            }
         }
         FlowUiAction::CancelCreateBrawler => {
-            commit.overlay = Some(OverlayCommit::BrawlerList);
+            if creation_draft.picker.take().is_none() {
+                commit.overlay = Some(OverlayCommit::BrawlerList);
+            }
         }
         FlowUiAction::ConfirmCreateBrawler => confirm_brawler_creation(
             overlay,
@@ -335,7 +346,8 @@ fn open_brawler_creation(
         fighter_profile_id: fighter.id,
         weapon_base_id: weapon.id,
         ultimate: ultimate.id,
-        inline_error: None,
+        name: format!("Brawler {}", snapshot.next_brawler_ordinal),
+        ..BrawlerCreationDraft::default()
     };
     commit.overlay = Some(OverlayCommit::BrawlerCreation);
 }
@@ -349,6 +361,7 @@ fn confirm_brawler_creation(
     pending: &mut PendingCreatedBrawler,
 ) {
     if !matches!(overlay, ClientOverlay::BrawlerCreation)
+        || draft.picker.is_some()
         || profile_changes_blocked(queue, practice, profile)
     {
         return;
@@ -356,6 +369,13 @@ fn confirm_brawler_creation(
     let Some(snapshot) = profile.snapshot() else {
         return;
     };
+    match crate::lobby::normalize_proposed_display_name(&draft.name) {
+        Ok(name) => draft.name = name,
+        Err(error) => {
+            draft.inline_error = Some(format!("Invalid name: {error}"));
+            return;
+        }
+    }
     let ordinal = snapshot.next_brawler_ordinal;
     draft.inline_error = None;
     let Some((passive_one, passive_two)) = profile.catalog().and_then(|catalog| {
@@ -365,7 +385,7 @@ fn confirm_brawler_creation(
         return;
     };
     if profile.create(crate::profiles::BrawlerDraft {
-        name: format!("Brawler {ordinal}"),
+        name: draft.name.clone(),
         fighter_profile_id: draft.fighter_profile_id,
         weapon_base_id: draft.weapon_base_id,
         ultimate_id: draft.ultimate,

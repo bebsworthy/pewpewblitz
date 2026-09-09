@@ -570,9 +570,13 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::CloseBrawlerList
         | FlowUiAction::OpenBrawlerDetails(_)
         | FlowUiAction::CreateBrawler
-        | FlowUiAction::CycleCreationProfile
-        | FlowUiAction::CycleCreationWeapon
-        | FlowUiAction::CycleCreationUltimate
+        | FlowUiAction::OpenCreationFighter
+        | FlowUiAction::OpenCreationWeapon
+        | FlowUiAction::ChooseCreationFighter(_)
+        | FlowUiAction::ChooseCreationWeapon(_)
+        | FlowUiAction::ChooseCreationUltimate(_)
+        | FlowUiAction::EditCreationName
+        | FlowUiAction::OpenCreationUltimate
         | FlowUiAction::CancelCreateBrawler
         | FlowUiAction::ConfirmCreateBrawler
         | FlowUiAction::CancelBrawlerEdit

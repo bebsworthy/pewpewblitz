@@ -23,10 +23,23 @@ struct Target {
 pub(super) fn install(app: &mut App) {
     app.add_systems(Update, update).add_observer(ready);
 }
-#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::needless_pass_by_value,
+    reason = "Bevy preview hosts and render target ownership"
+)]
 fn update(
     mut commands: Commands,
     hosts: Query<Entity, With<WeaponPreviewHost>>,
+    thumbnails: Query<
+        Entity,
+        (
+            With<WeaponPreviewHost>,
+            Without<ImageNode>,
+            Without<ViewportNode>,
+        ),
+    >,
     target: Option<Res<Target>>,
     owned: Query<Entity, With<WeaponOwned>>,
     mut images: ResMut<Assets<Image>>,
@@ -35,6 +48,11 @@ fn update(
     let host = hosts.iter().next();
     if let Some(target) = target {
         if let Some(host) = host {
+            for other in thumbnails.iter().filter(|e| *e != host) {
+                commands
+                    .entity(other)
+                    .insert(ImageNode::new(target.image.clone()));
+            }
             if host != target.host {
                 commands
                     .entity(host)

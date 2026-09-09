@@ -13,7 +13,7 @@ use crate::client::{
     ui::theme::{CREAM, INK, TEAL, font},
 };
 use bevy::{prelude::*, ui::ScrollPosition};
-mod art;
+pub(super) mod art;
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(in crate::client::flow) struct DetailsAssets<'w> {

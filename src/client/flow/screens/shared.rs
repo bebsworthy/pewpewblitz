@@ -132,12 +132,17 @@ pub(in crate::client::flow) fn spawn_flow_error_button_disabled(
     clippy::type_complexity,
     reason = "screen-owned state adapter"
 )]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Screen-owned selection resources feed shared visual states"
+)]
 pub(in crate::client::flow) fn update_flow_button_chrome(
     mut commands: Commands,
     navigation: Res<FlowNavigation>,
     overlay: Res<ClientOverlay>,
     game_draft: Res<GameTypeSelectionDraft>,
     equipment: Option<Res<super::equipment::WeaponEquipmentDraft>>,
+    creation: Option<Res<super::brawlers::BrawlerCreationDraft>>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut buttons: Query<(
         Entity,
@@ -168,6 +173,15 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
             FlowUiAction::UnequipWeaponPart => equipment
                 .as_deref()
                 .is_some_and(|d| d.equipped_part_ids[d.selected_slot].is_none()),
+            FlowUiAction::ChooseCreationFighter(id) => creation
+                .as_deref()
+                .is_some_and(|d| d.fighter_profile_id == id),
+            FlowUiAction::ChooseCreationWeapon(id) => {
+                creation.as_deref().is_some_and(|d| d.weapon_base_id == id)
+            }
+            FlowUiAction::ChooseCreationUltimate(id) => {
+                creation.as_deref().is_some_and(|d| d.ultimate == id)
+            }
             _ => false,
         };
         let next = SurfaceState {

@@ -1,6 +1,8 @@
 //! Icons are selected by advertised semantic family, never by built-in definition IDs.
 use crate::builds::{PassiveKind, UltimateKind};
-pub(super) fn ultimate_icon(kind: UltimateKind) -> &'static str {
+pub(in crate::client::flow::screens::brawlers) fn ultimate_icon(
+    kind: UltimateKind,
+) -> &'static str {
     match kind {
         UltimateKind::Dash => "dash",
         UltimateKind::Sentry => "sentry",

@@ -60,6 +60,11 @@ impl ClientProfileModel {
         self.last_decision = Some(decision);
     }
 
+    #[cfg(test)]
+    pub(crate) fn queued_commands_for_test(&self) -> &VecDeque<crate::profiles::ProfileCommand> {
+        &self.outbound
+    }
+
     pub fn create(&mut self, draft: crate::profiles::BrawlerDraft) -> bool {
         let Some(revision) = self.snapshot.as_ref().map(|snapshot| snapshot.revision) else {
             return false;

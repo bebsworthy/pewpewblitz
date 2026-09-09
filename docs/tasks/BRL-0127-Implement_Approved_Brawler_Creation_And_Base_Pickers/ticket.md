@@ -1,13 +1,13 @@
 ---
 id: BRL-0127
 title: Implement approved brawler creation and base pickers
-status: todo
+status: done
 theme:
 release:
 created: 2026-09-09T14:41:16Z
-modified: 2026-09-09T14:41:49Z
-closed:
-revision: f3d332d48b3522a7
+modified: 2026-09-09T20:44:38Z
+closed: 2026-09-09T20:44:38Z
+revision: 58315e924ca052fd
 blocks: []
 related: []
 ---

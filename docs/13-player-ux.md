@@ -124,7 +124,7 @@ remain explicit.
 | Game Type Select | Dashboard child | Edits one local advertised-game draft; Confirm commits and Back discards |
 | Brawlers List | Full-screen Dashboard child | Shows every saved brawler with a human-readable loadout and one clear selected marker; owns Create and row navigation |
 | Brawler | Full-screen saved-brawler detail | Presents the saved name with inline rename, fighter preview, whole Weapon and Abilities panels, four attachment summaries, Select for Play, Delete, and Back |
-| Create Brawler | Full-screen creation destination | Selects permanent fighter profile and weapon base plus starting ultimate from the advertised catalog; accepted creation opens the new Brawler screen |
+| Create Brawler | Full-screen creation destination | Three whole cards open fullscreen fighter, weapon and ultimate catalog pickers; choices return to the retained named draft, and one authoritative Create request opens the new Brawler screen on acceptance |
 | Customize Abilities | Full-screen Brawler child | Keeps permanent facts read-only and edits name, ultimate, and two distinct selectable passives; accepted save returns to the invoking Brawler screen |
 | Customize Weapon | Full-screen Brawler child | Presents the weapon, resolved statistics and four slots; each slot opens a fullscreen responsive parts picker with automatic saving |
 | Queue | Accepted multiplayer admission | Shows the frozen accepted request and honest pool facts; Cancel awaits acknowledgement |
