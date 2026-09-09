@@ -52,11 +52,9 @@ fn spawn_rate_limit_try_again_button(
                 padding: UiRect::axes(px(12), px(8)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                border: UiRect::all(px(2)),
+
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.1, 0.1, 0.12)),
-            BorderColor::all(Color::NONE),
         ))
         .with_child((
             RateLimitTryAgainLabel,

@@ -16,7 +16,7 @@ use crate::client::flow::{
     actions::FlowUiAction,
     model::{ClientFlow, ClientOverlay},
 };
-use crate::client::ui::theme::{CREAM, INK, ORANGE, TEAL, font};
+use crate::client::ui::theme::{CREAM, INK, TEAL, font};
 use bevy::{
     input::mouse::MouseWheel,
     prelude::*,
@@ -53,6 +53,7 @@ pub(in crate::client::flow) struct BrawlerEditDraft {
     pub(in crate::client::flow) passive_ids: [crate::builds::PassiveDefinitionId; 2],
     pub(in crate::client::flow) name_caret: usize,
     pub(in crate::client::flow) editing_name: bool,
+    pub(in crate::client::flow) inline_rename: bool,
     pub(in crate::client::flow) inline_error: Option<String>,
 }
 
@@ -70,6 +71,7 @@ impl Default for BrawlerEditDraft {
             ],
             name_caret: 0,
             editing_name: false,
+            inline_rename: false,
             inline_error: None,
         }
     }
@@ -92,13 +94,15 @@ pub(in crate::client::flow) struct BrawlerListScrollArea;
 #[derive(Component)]
 pub(in crate::client) struct BrawlerCardPreview;
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(in crate::client::flow) struct BrawlerDetailsRoot {
+    viewport: (u32, u32),
     brawler_id: crate::profiles::SavedBrawlerId,
     profile_revision: crate::profiles::ProfileRevision,
     pending: bool,
     pub(in crate::client::flow) contextual_confirmation: bool,
     layout: BrawlerDetailsLayout,
+    rename: Option<BrawlerEditDraft>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,66 +210,6 @@ pub(in crate::client::flow) fn brawler_loadout_summary(
     )
 }
 
-fn fighter_profile_stats(
-    catalog: &crate::profiles::AdvertisedBrawlerCatalog,
-    id: crate::profiles::FighterProfileId,
-) -> Option<crate::builds::ResolvedFighterStats> {
-    catalog.fighter(id).map(|definition| definition.stats)
-}
-
-#[derive(Component)]
-pub(in crate::client::flow) struct BrawlerCardStyle {
-    selected: bool,
-}
-
-#[derive(Component)]
-pub(in crate::client::flow) struct BrawlerCardFocus;
-
-#[allow(
-    clippy::type_complexity,
-    clippy::needless_pass_by_value,
-    reason = "browser-owned visual state; navigation remains in shared flow"
-)]
-pub(in crate::client::flow) fn update_brawler_card_chrome(
-    overlay: Res<ClientOverlay>,
-    navigation: Res<FlowNavigation>,
-    mut buttons: Query<(
-        &FlowButton,
-        &BrawlerCardStyle,
-        &Interaction,
-        Has<InteractionDisabled>,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
-    owners: Query<(&FlowButton, Has<InteractionDisabled>)>,
-    mut markers: Query<(&ChildOf, &mut Visibility), With<BrawlerCardFocus>>,
-) {
-    let active = matches!(*overlay, ClientOverlay::BrawlerList);
-    for (button, style, interaction, disabled, mut background, mut border) in &mut buttons {
-        let focus = active && !disabled && navigation.selected == button.index;
-        background.0 = if style.selected { TEAL } else { CREAM };
-        if disabled {
-            background.0 = Color::srgb(0.78, 0.77, 0.70);
-        }
-        border.set_all(
-            if focus || (active && !disabled && *interaction == Interaction::Hovered) {
-                ORANGE
-            } else {
-                INK
-            },
-        );
-    }
-    for (parent, mut visibility) in &mut markers {
-        *visibility = if owners.get(parent.parent()).is_ok_and(|(button, disabled)| {
-            active && !disabled && button.index == navigation.selected
-        }) {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-    }
-}
-
 struct BrawlerBrowserArt<'a> {
     card_height: f32,
     server: Option<&'a AssetServer>,
@@ -321,7 +265,7 @@ impl BrawlerBrowserArt<'_> {
             ..default()
         })
         .with_children(|header| {
-            let back = self.button(
+            let back = Self::button(
                 header,
                 1000,
                 FlowUiAction::CloseBrawlerList,
@@ -367,7 +311,7 @@ impl BrawlerBrowserArt<'_> {
         pending: bool,
     ) {
         let full = snapshot.brawlers.len() >= usize::from(catalog.limits.maximum_saved_brawlers);
-        let create = self.button(
+        let create = Self::button(
             grid,
             0,
             FlowUiAction::CreateBrawler,
@@ -396,7 +340,6 @@ impl BrawlerBrowserArt<'_> {
     }
 
     fn button(
-        &self,
         parent: &mut ChildSpawnerCommands,
         index: usize,
         action: FlowUiAction,
@@ -404,9 +347,6 @@ impl BrawlerBrowserArt<'_> {
         disabled: bool,
         node: Node,
     ) -> Entity {
-        let mut node = node;
-        node.border = UiRect::all(px(4));
-        node.border_radius = BorderRadius::all(px(6));
         let mut entity = parent.spawn((
             Button,
             FlowButton {
@@ -414,34 +354,12 @@ impl BrawlerBrowserArt<'_> {
                 action,
                 error_action: true,
             },
-            BrawlerCardStyle { selected },
-            BackgroundColor(if selected { TEAL } else { CREAM }),
-            BorderColor::all(INK),
-            BoxShadow::new(
-                Color::srgba(0.025, 0.10, 0.145, 0.25),
-                px(3),
-                px(4),
-                px(0),
-                px(0),
-            ),
+            crate::client::ui::surface::SurfaceState {
+                selected,
+                ..default()
+            },
             node,
         ));
-        entity.with_children(|card| {
-            card.spawn((
-                BrawlerCardFocus,
-                Visibility::Hidden,
-                Text::new(">"),
-                font(self.assets, 32.0),
-                TextColor(ORANGE),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: px(-13),
-                    top: percent(43),
-                    ..default()
-                },
-            ));
-        });
-
         if disabled {
             entity.insert(InteractionDisabled);
         }
@@ -459,7 +377,7 @@ fn spawn_brawler_list_row(
     disabled: bool,
 ) {
     let summary = brawler_loadout_summary(brawler, catalog);
-    let id = art.button(
+    let id = BrawlerBrowserArt::button(
         parent,
         index,
         FlowUiAction::OpenBrawlerDetails(brawler.id),
@@ -538,7 +456,6 @@ fn spawn_brawler_screen_button(
     label: &str,
     width: Val,
     disabled: bool,
-    color: Color,
 ) {
     let mut button = parent.spawn((
         Button,
@@ -553,12 +470,8 @@ fn spawn_brawler_screen_button(
             padding: UiRect::axes(px(16), px(10)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            border: UiRect::all(px(2)),
-            border_radius: BorderRadius::all(px(9)),
             ..default()
         },
-        BackgroundColor(color),
-        BorderColor::all(Color::srgb(0.38, 0.78, 1.0)),
     ));
     if disabled {
         button.insert(InteractionDisabled);
@@ -886,307 +799,8 @@ fn brawler_screen_layout(screen: &BrawlerScreenUi<'_, '_>) -> BrawlerDetailsLayo
         })
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "one cohesive bounded detail builder keeps resolved stats, touch actions, and navigation indices adjacent"
-)]
-pub(in crate::client::flow) fn present_brawler_details(
-    mut commands: Commands,
-    flow: Res<State<ClientFlow>>,
-    overlay: Res<ClientOverlay>,
-    profile: Res<crate::client::ClientProfileModel>,
-    mut screen: BrawlerScreenUi,
-    roots: Query<(Entity, &BrawlerDetailsRoot)>,
-) {
-    let (brawler_id, contextual_confirmation) = match overlay.as_ref() {
-        ClientOverlay::BrawlerDetails(brawler_id) => (brawler_id, false),
-        ClientOverlay::DeleteBrawlerConfirmation(brawler_id) => (brawler_id, true),
-        _ => {
-            for (entity, _) in &roots {
-                commands.entity(entity).despawn();
-            }
-            return;
-        }
-    };
-    if *flow.get() != ClientFlow::Dashboard {
-        return;
-    }
-    let Some(snapshot) = profile.snapshot() else {
-        return;
-    };
-    let Some(catalog) = profile.catalog() else {
-        return;
-    };
-    let Some(brawler) = snapshot
-        .brawlers
-        .iter()
-        .find(|brawler| brawler.id == *brawler_id)
-    else {
-        for (entity, _) in &roots {
-            commands.entity(entity).despawn();
-        }
-        return;
-    };
-    let layout = brawler_screen_layout(&screen);
-    let render_key = BrawlerDetailsRoot {
-        brawler_id: *brawler_id,
-        profile_revision: snapshot.revision,
-        pending: profile.pending(),
-        contextual_confirmation,
-        layout,
-    };
-    if roots.iter().any(|(_, root)| *root == render_key) {
-        return;
-    }
-    for (entity, _) in &roots {
-        commands.entity(entity).despawn();
-    }
-    screen.navigation.selected = 0;
-    let compact = layout == BrawlerDetailsLayout::Compact;
-    let selected = snapshot.selected_brawler_id == Some(brawler.id);
-    let stats = fighter_profile_stats(catalog, brawler.fighter_profile_id);
-    let fighter_copy = stats.map_or_else(
-        || "Fighter statistics unavailable".to_string(),
-        |stats| {
-            format!(
-                "Health {} · Speed {:.0} · Reveal distance {:.0}",
-                stats.maximum_health, stats.movement_speed, stats.reveal_proximity_radius
-            )
-        },
-    );
-    let resolved_weapon = snapshot
-        .weapon_modifiers(brawler)
-        .ok()
-        .and_then(|modifiers| {
-            let weapon = catalog.weapon(brawler.weapon_base_id)?;
-            crate::weapon_parts::resolve_advertised_weapon_parts(
-                &weapon.configuration,
-                &catalog.weapon_policy,
-                catalog.fighter_body,
-                crate::combat::WeaponPresetId(brawler.weapon_base_id.0),
-                modifiers,
-            )
-            .ok()
-        });
-    let weapon_copy = resolved_weapon.as_ref().map_or_else(
-        || "Weapon statistics unavailable".to_string(),
-        weapon_preview_text,
-    );
-    let equipped = brawler.equipped_part_ids.iter().flatten().count();
-    let pending = profile.pending();
-    let controls_disabled = pending || contextual_confirmation;
-    commands
-        .spawn((
-            render_key,
-            DespawnOnExit(ClientFlow::Dashboard),
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(0),
-                bottom: px(0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Stretch,
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.018, 0.13, 0.29)),
-            GlobalZIndex(510),
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: percent(100),
-                    min_height: px(72),
-                    align_items: AlignItems::Center,
-                    column_gap: px(16),
-                    padding: UiRect::axes(px(18), px(10)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.015, 0.04, 0.085)),
-            ))
-            .with_children(|header| {
-                spawn_brawler_screen_button(
-                    header,
-                    4,
-                    FlowUiAction::BackToBrawlerList,
-                    "‹ BRAWLERS",
-                    px(160),
-                    contextual_confirmation,
-                    Color::srgb(0.06, 0.22, 0.4),
-                );
-                header.spawn((
-                    Text::new(brawler.name.to_uppercase()),
-                    TextFont::from_font_size(if compact { 27.0 } else { 34.0 }),
-                    TextColor(Color::WHITE),
-                ));
-                header.spawn((
-                    Node {
-                        flex_grow: 1.0,
-                        ..default()
-                    },
-                ));
-                if selected {
-                    header.spawn((
-                        Text::new("✓ SELECTED FOR PLAY"),
-                        TextFont::from_font_size(16.0),
-                        TextColor(Color::srgb(0.2, 0.95, 0.75)),
-                    ));
-                }
-            });
-            root.spawn((
-                BrawlerDetailsScrollArea,
-                Node {
-                    width: percent(100),
-                    min_height: px(0),
-                    flex_grow: 1.0,
-                    flex_direction: if compact {
-                        FlexDirection::Column
-                    } else {
-                        FlexDirection::Row
-                    },
-                    align_items: AlignItems::Stretch,
-                    justify_content: JustifyContent::Center,
-                    row_gap: px(16),
-                    column_gap: px(20),
-                    padding: UiRect::all(if compact { px(14) } else { px(24) }),
-                    overflow: Overflow::scroll_y(),
-                    ..default()
-                },
-                ScrollPosition::default(),
-            ))
-            .with_children(|body| {
-                body.spawn((
-                    Node {
-                        width: if compact { percent(100) } else { percent(27) },
-                        max_width: if compact { Val::Auto } else { px(360) },
-                        flex_shrink: 0.0,
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Stretch,
-                        row_gap: px(12),
-                        padding: UiRect::all(px(18)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.03, 0.22, 0.46)),
-                ))
-                .with_children(|identity| {
-                    identity.spawn((
-                        Text::new("FIGHTER"),
-                        TextFont::from_font_size(15.0),
-                        TextColor(Color::srgb(0.38, 0.88, 1.0)),
-                    ));
-                    identity.spawn((
-                        Text::new(advertised_fighter_name(catalog, brawler.fighter_profile_id)),
-                        TextFont::from_font_size(28.0),
-                        TextColor(Color::WHITE),
-                    ));
-                    identity.spawn((
-                        Text::new("PERMANENT BASE"),
-                        TextFont::from_font_size(13.0),
-                        TextColor(Color::srgb(1.0, 0.78, 0.25)),
-                    ));
-                    identity.spawn((
-                        Text::new(fighter_copy),
-                        TextFont::from_font_size(17.0),
-                        TextColor(Color::srgb(0.82, 0.91, 0.98)),
-                    ));
-                });
-                body.spawn((
-                    BrawlerDetailsPreviewHost,
-                    AccessibleLabel::new(format!("3D preview of {}", brawler.name)),
-                    Node {
-                        width: if compact { percent(100) } else { percent(42) },
-                        max_width: if compact { Val::Auto } else { px(680) },
-                        height: if compact { px(360) } else { percent(100) },
-                        min_height: px(340),
-                        flex_grow: if compact { 0.0 } else { 1.0 },
-                        flex_shrink: 0.0,
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::End,
-                        overflow: Overflow::clip(),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.015, 0.3, 0.58)),
-                ));
-                body.spawn((
-                    Node {
-                        width: if compact { percent(100) } else { percent(31) },
-                        max_width: if compact { Val::Auto } else { px(420) },
-                        flex_shrink: 0.0,
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Stretch,
-                        row_gap: px(10),
-                        padding: UiRect::all(px(18)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.025, 0.075, 0.15)),
-                ))
-                .with_children(|loadout| {
-                    loadout.spawn((
-                        Text::new("LOADOUT"),
-                        TextFont::from_font_size(24.0),
-                        TextColor(Color::WHITE),
-                    ));
-                    loadout.spawn((
-                        Text::new(format!(
-                            "WEAPON\n{} · PERMANENT\n{}\n\nULTIMATE\n{}\n\nPASSIVES\n{}\n{}\n\nWEAPON PARTS\n{equipped}/{} EQUIPPED",
-                            advertised_weapon_name(catalog, brawler.weapon_base_id),
-                            weapon_copy,
-                            ultimate_name(catalog, brawler.ultimate_id),
-                            passive_name(catalog, brawler.passive_ids[0]),
-                            passive_name(catalog, brawler.passive_ids[1]),
-                            crate::weapon_parts::WEAPON_PART_SLOT_COUNT,
-                        )),
-                        TextFont::from_font_size(15.0),
-                        TextColor(Color::srgb(0.78, 0.88, 0.96)),
-                    ));
-                    spawn_brawler_screen_button(
-                        loadout,
-                        0,
-                        FlowUiAction::SelectBrawler(brawler.id),
-                        if selected {
-                            "SELECTED FOR PLAY"
-                        } else if profile.selection_pending(brawler.id) {
-                            "SELECTING..."
-                        } else {
-                            "SELECT FOR PLAY"
-                        },
-                        percent(100),
-                        controls_disabled,
-                        Color::srgb(0.04, 0.62, 0.38),
-                    );
-                    spawn_brawler_screen_button(
-                        loadout,
-                        1,
-                        FlowUiAction::OpenBrawlerEditor(brawler.id),
-                        "CUSTOMIZE ABILITIES",
-                        percent(100),
-                        controls_disabled,
-                        Color::srgb(0.04, 0.42, 0.72),
-                    );
-                    spawn_brawler_screen_button(
-                        loadout,
-                        2,
-                        FlowUiAction::OpenWeaponEquipment(brawler.id),
-                        "CUSTOMIZE WEAPON",
-                        percent(100),
-                        controls_disabled,
-                        Color::srgb(0.04, 0.42, 0.72),
-                    );
-                    spawn_brawler_screen_button(
-                        loadout,
-                        3,
-                        FlowUiAction::DeleteBrawler(brawler.id),
-                        "DELETE BRAWLER",
-                        percent(100),
-                        controls_disabled,
-                        Color::srgb(0.48, 0.08, 0.12),
-                    );
-                });
-            });
-        });
-}
+mod details;
+pub(in crate::client::flow) use details::present_brawler_details;
 
 #[allow(
     clippy::needless_pass_by_value,
@@ -1263,7 +877,6 @@ pub(in crate::client::flow) fn present_brawler_creation(
                     "‹ BRAWLERS",
                     px(170),
                     false,
-                    Color::srgb(0.06, 0.22, 0.4),
                 );
                 header.spawn((
                     Text::new("CREATE BRAWLER"),
@@ -1318,7 +931,6 @@ pub(in crate::client::flow) fn present_brawler_creation(
                         advertised_fighter_name(catalog, draft.fighter_profile_id),
                         percent(100),
                         false,
-                        Color::srgb(0.04, 0.42, 0.72),
                     );
                 });
                 body.spawn((
@@ -1350,7 +962,6 @@ pub(in crate::client::flow) fn present_brawler_creation(
                         advertised_weapon_name(catalog, draft.weapon_base_id),
                         percent(100),
                         false,
-                        Color::srgb(0.12, 0.35, 0.62),
                     );
                 });
                 body.spawn((
@@ -1382,7 +993,6 @@ pub(in crate::client::flow) fn present_brawler_creation(
                         ultimate_name(catalog, draft.ultimate),
                         percent(100),
                         false,
-                        Color::srgb(0.34, 0.18, 0.62),
                     );
                 });
             });
@@ -1412,7 +1022,6 @@ pub(in crate::client::flow) fn present_brawler_creation(
                     "CREATE BRAWLER",
                     if compact { percent(100) } else { px(420) },
                     profile.pending(),
-                    Color::srgb(0.03, 0.58, 0.4),
                 );
             });
         });
@@ -1499,7 +1108,6 @@ pub(in crate::client::flow) fn present_brawler_editor(
                     "‹ BRAWLER",
                     px(170),
                     false,
-                    Color::srgb(0.06, 0.22, 0.4),
                 );
                 header.spawn((
                     Text::new("CUSTOMIZE ABILITIES"),
@@ -1559,7 +1167,6 @@ pub(in crate::client::flow) fn present_brawler_editor(
                         &format!("NAME · {name}"),
                         percent(100),
                         false,
-                        Color::srgb(0.06, 0.35, 0.62),
                     );
                 });
                 body.spawn((
@@ -1592,7 +1199,6 @@ pub(in crate::client::flow) fn present_brawler_editor(
                         &format!("ULTIMATE\n{}", ultimate_name(catalog, draft.ultimate_id)),
                         percent(100),
                         false,
-                        Color::srgb(0.34, 0.18, 0.62),
                     );
                     spawn_brawler_screen_button(
                         abilities,
@@ -1601,7 +1207,6 @@ pub(in crate::client::flow) fn present_brawler_editor(
                         &format!("PASSIVE 1\n{}", passive_name(catalog, draft.passive_ids[0])),
                         percent(100),
                         false,
-                        Color::srgb(0.08, 0.34, 0.5),
                     );
                     spawn_brawler_screen_button(
                         abilities,
@@ -1610,7 +1215,6 @@ pub(in crate::client::flow) fn present_brawler_editor(
                         &format!("PASSIVE 2\n{}", passive_name(catalog, draft.passive_ids[1])),
                         percent(100),
                         false,
-                        Color::srgb(0.08, 0.34, 0.5),
                     );
                 });
             });
@@ -1640,7 +1244,6 @@ pub(in crate::client::flow) fn present_brawler_editor(
                     "SAVE CHANGES",
                     if compact { percent(100) } else { px(420) },
                     profile.pending(),
-                    Color::srgb(0.03, 0.58, 0.4),
                 );
             });
         });
@@ -1774,14 +1377,6 @@ pub(super) fn weapon_stat_rows(
         rows.push(("SLOW", "YES".into()));
     }
     rows
-}
-
-pub(super) fn weapon_preview_text(weapon: &crate::combat::ResolvedWeapon) -> String {
-    weapon_stat_rows(weapon)
-        .iter()
-        .map(|(label, value)| format!("{label} {value}"))
-        .collect::<Vec<_>>()
-        .join(" · ")
 }
 
 #[allow(clippy::needless_pass_by_value)]

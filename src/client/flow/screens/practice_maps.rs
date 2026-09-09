@@ -1,5 +1,6 @@
 //! Fullscreen Practice map browsing; focus is independent from the requested map.
 use super::shared::FlowRoot;
+use crate::client::ui::surface::{Surface, SurfaceState};
 use crate::client::ui::theme::{CREAM, INK, font};
 use crate::client::{
     ClientLobbyMembership, ClientPracticeModel,
@@ -72,14 +73,6 @@ pub(in crate::client::flow) enum PracticeControl {
     Next,
     Start,
 }
-#[derive(Component)]
-pub(in crate::client::flow) struct PracticeChrome {
-    normal: Handle<Image>,
-    selected: Handle<Image>,
-    focus: Handle<Image>,
-    selected_focus: Handle<Image>,
-}
-
 #[allow(
     clippy::too_many_arguments,
     clippy::needless_pass_by_value,
@@ -429,43 +422,22 @@ fn label(
 }
 fn control(
     parent: &mut ChildSpawnerCommands,
-    server: Option<&AssetServer>,
+    _server: Option<&AssetServer>,
     control: PracticeControl,
     node: Node,
     name: &str,
 ) -> Entity {
-    let load = |key: &str| {
-        server.map_or_else(Handle::default, |s| {
-            s.load(format!("brawler/ui/shell/{key}.png"))
-        })
-    };
-    let base = if matches!(control, PracticeControl::Map(_)) {
-        "practice-card"
-    } else {
-        "panel-mode"
-    };
-    let selected = if matches!(control, PracticeControl::Map(_)) {
-        "practice-card-selected"
-    } else {
-        "panel-play"
-    };
-    let chrome = PracticeChrome {
-        normal: load(base),
-        selected: load(selected),
-        focus: load(&format!("{base}-focus")),
-        selected_focus: load(&format!("{selected}-focus")),
-    };
     parent
         .spawn((
             Button,
             AccessibleLabel::new(name),
             control,
-            ImageNode {
-                image_mode: NodeImageMode::Stretch,
-                visual_box: VisualBox::BorderBox,
-                ..ImageNode::new(chrome.normal.clone())
+            match control {
+                PracticeControl::Map(_) => Surface::Card,
+                PracticeControl::Start => Surface::Primary,
+                _ => Surface::Action,
             },
-            chrome,
+            SurfaceState::default(),
             node,
         ))
         .id()
@@ -575,7 +547,7 @@ pub(in crate::client::flow) fn animate_practice_maps(
     overlay: Res<ClientOverlay>,
     mut carousel: ResMut<PracticeCarousel>,
     mut rows: Query<&mut Node, With<PracticeMapRow>>,
-    mut buttons: Query<(&PracticeControl, &PracticeChrome, &mut ImageNode)>,
+    mut buttons: Query<(&PracticeControl, &mut SurfaceState)>,
 ) {
     let target = carousel.target();
     if settings.is_some_and(|s| s.reduced_motion) {
@@ -593,7 +565,7 @@ pub(in crate::client::flow) fn animate_practice_maps(
     for mut node in &mut rows {
         node.left = px(-carousel.offset);
     }
-    for (control, chrome, mut image) in &mut buttons {
+    for (control, mut state) in &mut buttons {
         let selected = match *control {
             PracticeControl::Map(slot) => carousel
                 .maps
@@ -614,17 +586,11 @@ pub(in crate::client::flow) fn animate_practice_maps(
                 PracticeControl::Start => carousel.start,
                 _ => false,
             };
-        image.image = match (selected, focused) {
-            (true, true) => &chrome.selected_focus,
-            (true, false) => &chrome.selected,
-            (false, true) => &chrome.focus,
-            (false, false) => &chrome.normal,
-        }
-        .clone();
-        image.color = if practice.pending() {
-            Color::srgba(1.0, 1.0, 1.0, 0.5)
-        } else {
-            Color::WHITE
+        *state = SurfaceState {
+            selected: selected && matches!(control, PracticeControl::Map(_)),
+            focused,
+            inactive: *overlay != ClientOverlay::None,
+            disabled: practice.pending(),
         };
     }
 }

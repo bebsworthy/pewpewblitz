@@ -1,8 +1,7 @@
 //! Shared flow-screen roots, buttons, navigation, and interaction presentation.
 
 use super::{dashboard::DashboardButtonStyle, game_select::GameTypeSelectionDraft};
-pub(in crate::client::flow) use crate::client::ui::image_button::ImageButtonArt as ShellImageButton;
-use crate::client::ui::image_button::ImageButtonState;
+use crate::client::ui::surface::{Surface, SurfaceState};
 use crate::client::{
     ClientLobbyMembership,
     flow::{actions::FlowUiAction, input::overlay_allows_button, model::ClientOverlay},
@@ -78,11 +77,9 @@ pub(in crate::client::flow) fn spawn_flow_button_disabled(
             padding: UiRect::axes(px(12), px(8)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            border: UiRect::all(px(2)),
+
             ..default()
         },
-        BackgroundColor(Color::srgb(0.09, 0.14, 0.2)),
-        BorderColor::all(Color::NONE),
     ));
     if disabled {
         entity.insert(InteractionDisabled);
@@ -119,11 +116,9 @@ pub(in crate::client::flow) fn spawn_flow_error_button_disabled(
             padding: UiRect::axes(px(12), px(8)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            border: UiRect::all(px(2)),
+
             ..default()
         },
-        BackgroundColor(Color::srgb(0.16, 0.12, 0.15)),
-        BorderColor::all(Color::NONE),
     ));
     if disabled {
         entity.insert(InteractionDisabled);
@@ -131,205 +126,101 @@ pub(in crate::client::flow) fn spawn_flow_error_button_disabled(
     entity.with_child((Text::new(label), TextFont::from_font_size(18.0)));
 }
 
-pub(in crate::client::flow) fn flow_button_background(
-    disabled: bool,
-    interaction: Interaction,
-    focused: bool,
-    selected: bool,
-    dashboard_style: Option<DashboardButtonStyle>,
-) -> Color {
-    if let Some(style) = dashboard_style {
-        use crate::client::ui::theme::{CREAM, INK, ORANGE, TEAL};
-        if matches!(style, DashboardButtonStyle::Preview) {
-            return Color::NONE;
-        }
-        if disabled {
-            return Color::srgb(0.69, 0.71, 0.66);
-        }
-        if focused && matches!(style, DashboardButtonStyle::Header) {
-            return if interaction == Interaction::Pressed {
-                CREAM.mix(&INK, 0.15)
-            } else {
-                CREAM
-            };
-        }
-        let base = match style {
-            DashboardButtonStyle::Play | DashboardButtonStyle::Header => ORANGE,
-            DashboardButtonStyle::Build | DashboardButtonStyle::Practice => TEAL,
-            DashboardButtonStyle::Mode => CREAM,
-            DashboardButtonStyle::Preview => unreachable!(),
-        };
-        return match interaction {
-            Interaction::Pressed => base.mix(&INK, 0.15),
-            Interaction::Hovered => base.mix(&Color::WHITE, 0.16),
-            Interaction::None => base,
-        };
-    }
-    if disabled {
-        return Color::srgb(0.1, 0.1, 0.12);
-    }
-    match interaction {
-        Interaction::Pressed => Color::srgb(0.08, 0.48, 0.58),
-        Interaction::Hovered => Color::srgb(0.12, 0.32, 0.42),
-        Interaction::None if focused => Color::srgb(0.12, 0.32, 0.42),
-        Interaction::None if selected => Color::srgb(0.12, 0.24, 0.34),
-        Interaction::None => Color::srgb(0.09, 0.14, 0.2),
-    }
-}
-
-pub(in crate::client::flow) fn flow_button_border(
-    disabled: bool,
-    interaction: Interaction,
-    focused: bool,
-    selected: bool,
-    dashboard_style: Option<DashboardButtonStyle>,
-) -> Color {
-    if matches!(dashboard_style, Some(DashboardButtonStyle::Preview)) {
-        return Color::NONE;
-    }
-    if dashboard_style.is_some() {
-        if disabled {
-            return Color::srgb(0.4, 0.45, 0.44);
-        }
-        if focused || interaction == Interaction::Hovered {
-            return Color::srgb(0.0, 0.37, 0.40);
-        }
-        return if matches!(dashboard_style, Some(DashboardButtonStyle::Preview)) {
-            Color::NONE
-        } else {
-            crate::client::ui::theme::INK
-        };
-    }
-    if disabled {
-        Color::NONE
-    } else if focused {
-        Color::WHITE
-    } else if selected {
-        Color::srgb(0.25, 0.9, 1.0)
-    } else {
-        Color::NONE
-    }
-}
-
+// Flow owns action semantics and input scope; Surface owns all visual policy.
 #[allow(
-    clippy::too_many_arguments,
-    clippy::type_complexity,
     clippy::needless_pass_by_value,
-    reason = "shared button chrome reads selection state but owns no screen copy or layout"
+    clippy::type_complexity,
+    reason = "screen-owned state adapter"
 )]
 pub(in crate::client::flow) fn update_flow_button_chrome(
+    mut commands: Commands,
     navigation: Res<FlowNavigation>,
     overlay: Res<ClientOverlay>,
-    assets: Option<Res<crate::client::ClientAssetHandles>>,
     game_draft: Res<GameTypeSelectionDraft>,
+    equipment: Option<Res<super::equipment::WeaponEquipmentDraft>>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
-    mut buttons: Query<
-        (
-            &FlowButton,
-            &Interaction,
-            Has<InteractionDisabled>,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            Option<&DashboardButtonStyle>,
-            Option<&mut ImageNode>,
-        ),
-        (
-            Without<ShellImageButton>,
-            Without<super::brawlers::BrawlerCardStyle>,
-        ),
-    >,
+    mut buttons: Query<(
+        Entity,
+        &FlowButton,
+        Has<InteractionDisabled>,
+        Option<&DashboardButtonStyle>,
+        Option<&mut SurfaceState>,
+        Option<&Surface>,
+    )>,
 ) {
-    let selected_brawler_id = memberships
+    let selected_brawler = memberships
         .iter()
         .next()
-        .and_then(|membership| membership.profile.selected_brawler_id);
-    for (button, interaction, disabled, mut background, mut border, dashboard_style, image) in
-        &mut buttons
-    {
-        // Use the same owner gate as input collection: indices are local to each surface.
-        let active = overlay_allows_button(&overlay, button);
-        let focused = active && button.index == navigation.selected;
-        let interaction = if active {
-            *interaction
-        } else {
-            Interaction::None
-        };
-        let selected_game = match button.action {
+        .and_then(|m| m.profile.selected_brawler_id);
+    for (entity, button, disabled, dashboard, state, role) in &mut buttons {
+        if matches!(dashboard, Some(DashboardButtonStyle::Preview)) {
+            continue;
+        }
+        let selected = match button.action {
             FlowUiAction::SelectGameTypeDraft(index) => game_draft.selected_index == Some(index),
+            FlowUiAction::OpenBrawlerDetails(id) => selected_brawler == Some(id),
+            FlowUiAction::SelectEquipmentSlot(slot) => equipment
+                .as_deref()
+                .is_some_and(|d| d.selected_slot == slot),
+            FlowUiAction::EquipWeaponPart(id) => equipment
+                .as_deref()
+                .is_some_and(|d| d.equipped_part_ids[d.selected_slot] == Some(id)),
+            FlowUiAction::UnequipWeaponPart => equipment
+                .as_deref()
+                .is_some_and(|d| d.equipped_part_ids[d.selected_slot].is_none()),
             _ => false,
         };
-        let selected_brawler = matches!(
-            button.action,
-            FlowUiAction::OpenBrawlerDetails(id) if Some(id) == selected_brawler_id
-        );
-        let selected = selected_game || selected_brawler;
-        let dashboard_style = dashboard_style.copied();
-        background.0 =
-            flow_button_background(disabled, interaction, focused, selected, dashboard_style);
-        border.set_all(flow_button_border(
-            disabled,
-            interaction,
-            focused,
+        let next = SurfaceState {
+            focused: overlay_allows_button(&overlay, button) && navigation.selected == button.index,
             selected,
-            dashboard_style,
-        ));
-        if let Some(mut image) = image.filter(|_| dashboard_style.is_some()) {
-            background.0 = Color::NONE;
-            border.set_all(Color::NONE);
-            let state = ImageButtonState {
-                active,
-                disabled,
-                focused,
-                interaction,
-            };
-            if let (Some(assets), Some(style)) = (assets.as_deref(), dashboard_style) {
-                let index = match style {
-                    DashboardButtonStyle::Mode => 0,
-                    DashboardButtonStyle::Play => 1,
-                    DashboardButtonStyle::Practice => 2,
-                    DashboardButtonStyle::Build => 3,
-                    DashboardButtonStyle::Header => 4,
-                    DashboardButtonStyle::Preview => continue,
-                };
-                state.apply(
-                    &mut image,
-                    &ShellImageButton {
-                        normal: assets.dashboard_panels[index].clone(),
-                        focus: assets.dashboard_focus_panels[index].clone(),
-                    },
-                );
-            }
-
-            image.color = state.tint();
+            inactive: !overlay_allows_button(&overlay, button),
+            disabled,
+        };
+        if let Some(mut state) = state {
+            *state = next;
+        } else {
+            commands.entity(entity).insert(next);
+        }
+        if role.is_none() {
+            commands.entity(entity).insert(surface_role(&button.action));
         }
     }
 }
 
-#[allow(clippy::needless_pass_by_value, reason = "Bevy presentation system")]
-pub(in crate::client::flow) fn update_shell_image_button_chrome(
-    navigation: Res<FlowNavigation>,
-    overlay: Res<ClientOverlay>,
-    mut buttons: Query<(
-        &FlowButton,
-        &ShellImageButton,
-        &Interaction,
-        Has<InteractionDisabled>,
-        &mut ImageNode,
-    )>,
-) {
-    for (button, art, interaction, disabled, mut image) in &mut buttons {
-        let active = overlay_allows_button(&overlay, button);
-        let interaction = if active {
-            *interaction
-        } else {
-            Interaction::None
-        };
-        ImageButtonState {
-            active,
-            disabled,
-            focused: navigation.selected == button.index,
-            interaction,
+pub(in crate::client::flow) fn surface_role(action: &FlowUiAction) -> Surface {
+    use FlowUiAction as A;
+    match action {
+        A::Back
+        | A::CloseBrawlerList
+        | A::BackToBrawlerList
+        | A::CancelWeaponEquipment
+        | A::CancelBrawlerEdit
+        | A::CancelCreateBrawler
+        | A::CancelGameType
+        | A::CancelPracticeMaps
+        | A::ReturnToDashboard
+        | A::CloseDashboardMenu => Surface::Back,
+        A::JoinQueue
+        | A::StartPractice
+        | A::SelectBrawler(_)
+        | A::ConfirmGameType
+        | A::ConfirmCreateBrawler
+        | A::Connect
+        | A::QueueAgain
+        | A::OpenDashboardMenu => Surface::Primary,
+        A::OpenPracticeMaps | A::OpenBrawlerList => Surface::Secondary,
+        A::OpenBrawlerDetails(_)
+        | A::CreateBrawler
+        | A::SelectEquipmentSlot(_)
+        | A::EquipWeaponPart(_)
+        | A::UnequipWeaponPart
+        | A::SelectGameTypeDraft(_) => Surface::Card,
+        A::OpenWeaponEquipment(_) | A::OpenBrawlerEditor(_) | A::OpenGameTypeSelect => {
+            Surface::Panel
         }
-        .apply(&mut image, art);
+        A::EditAddress | A::EditName => Surface::Field,
+        A::JoinSaved(_) => Surface::Row,
+        A::BeginBrawlerNameEdit | A::ConfirmBrawlerEdit => Surface::Quiet,
+        _ => Surface::Action,
     }
 }

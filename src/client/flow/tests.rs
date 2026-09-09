@@ -38,7 +38,7 @@ use screens::{
     queue::{queue_cancel_presentation, queue_membership_text},
     results::MatchCompletionRoot,
     server_select::{EditingField, ServerSelectModel},
-    shared::{FlowButton, FlowRoot, flow_button_background, flow_button_border},
+    shared::{FlowButton, FlowRoot},
 };
 use std::time::Duration;
 
@@ -1217,7 +1217,7 @@ fn selected_brawler_cards_open_list_details_and_reach_equipment() {
     assert!(
         visible_text(&mut app)
             .iter()
-            .any(|text| text.contains("Pulse Sidearm"))
+            .any(|text| text.to_lowercase().contains("pulse sidearm"))
     );
 
     press_flow_button(&mut app, &FlowUiAction::OpenBrawlerDetails(brawler_id));
@@ -1236,13 +1236,13 @@ fn selected_brawler_cards_open_list_details_and_reach_equipment() {
         assert_eq!(node.top, px(0));
         assert_eq!(node.bottom, px(0));
         assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
-        let mut previews = world.query_filtered::<Entity, With<BrawlerDetailsPreviewHost>>();
+        let mut previews = world.query_filtered::<Entity, With<BrawlerCardPreview>>();
         assert_eq!(previews.iter(world).count(), 1);
     }
     assert!(
         visible_text(&mut app)
             .iter()
-            .any(|text| text.contains("Pulse Sidearm"))
+            .any(|text| text.to_lowercase().contains("pulse sidearm"))
     );
 
     let select_disabled = {
@@ -1531,53 +1531,6 @@ fn dashboard_actions_have_explicit_fact_based_accessible_labels() {
             matches!(style, DashboardButtonStyle::Play) && label == "Play"
         })
     );
-}
-
-#[test]
-fn dashboard_fighter_preview_stays_transparent_during_every_interaction() {
-    for interaction in [
-        Interaction::None,
-        Interaction::Hovered,
-        Interaction::Pressed,
-    ] {
-        assert_eq!(
-            flow_button_background(
-                false,
-                interaction,
-                false,
-                false,
-                Some(DashboardButtonStyle::Preview),
-            ),
-            Color::NONE
-        );
-    }
-    assert_eq!(
-        flow_button_border(
-            false,
-            Interaction::Hovered,
-            false,
-            false,
-            Some(DashboardButtonStyle::Preview),
-        ),
-        Color::NONE
-    );
-}
-
-#[test]
-fn dashboard_action_hover_colors_are_visibly_distinct_from_rest() {
-    for style in [
-        DashboardButtonStyle::Header,
-        DashboardButtonStyle::Build,
-        DashboardButtonStyle::Mode,
-        DashboardButtonStyle::Practice,
-        DashboardButtonStyle::Play,
-    ] {
-        assert_ne!(
-            flow_button_background(false, Interaction::None, false, false, Some(style)),
-            flow_button_background(false, Interaction::Hovered, false, false, Some(style)),
-            "{style:?} must have a visible hover fill"
-        );
-    }
 }
 
 #[test]
@@ -2452,29 +2405,6 @@ fn dashboard_settings_is_menu_owned_and_mode_card_opens_selection() {
 }
 
 #[test]
-fn dashboard_menu_focus_is_visible_without_pointer_hover() {
-    let style = Some(DashboardButtonStyle::Header);
-    assert_ne!(
-        flow_button_background(false, Interaction::None, true, false, style),
-        flow_button_background(false, Interaction::None, false, false, style),
-    );
-    assert_eq!(
-        flow_button_background(true, Interaction::None, true, false, style),
-        flow_button_background(true, Interaction::None, false, false, style),
-    );
-    assert_eq!(
-        flow_button_border(
-            false,
-            Interaction::None,
-            true,
-            false,
-            Some(DashboardButtonStyle::Preview)
-        ),
-        Color::NONE,
-    );
-}
-
-#[test]
 fn dashboard_chrome_focus_belongs_only_to_the_active_surface() {
     let mut app = App::new();
     app.init_resource::<FlowNavigation>()
@@ -2507,44 +2437,27 @@ fn dashboard_chrome_focus_belongs_only_to_the_active_surface() {
         app.update();
         for (index, &entity) in buttons.iter().enumerate() {
             let expected_focus = index == selected + 2;
-            let expected = flow_button_background(
-                false,
-                if index >= 2 {
-                    Interaction::Hovered
-                } else {
-                    Interaction::None
-                },
-                expected_focus,
-                false,
-                Some(DashboardButtonStyle::Header),
-            );
-            assert_eq!(
-                app.world().get::<BackgroundColor>(entity).unwrap().0,
-                expected
-            );
+            let state = app
+                .world()
+                .get::<crate::client::ui::surface::SurfaceState>(entity)
+                .unwrap();
+            assert_eq!(state.focused, expected_focus);
+            assert_eq!(state.inactive, index < 2);
         }
     }
     *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
     app.update();
-    assert_eq!(
-        app.world().get::<BackgroundColor>(buttons[1]).unwrap().0,
-        flow_button_background(
-            false,
-            Interaction::Hovered,
-            true,
-            false,
-            Some(DashboardButtonStyle::Header)
-        )
+    assert!(
+        app.world()
+            .get::<crate::client::ui::surface::SurfaceState>(buttons[1])
+            .unwrap()
+            .focused
     );
-    assert_eq!(
-        app.world().get::<BackgroundColor>(buttons[3]).unwrap().0,
-        flow_button_background(
-            false,
-            Interaction::None,
-            false,
-            false,
-            Some(DashboardButtonStyle::Header)
-        )
+    assert!(
+        app.world()
+            .get::<crate::client::ui::surface::SurfaceState>(buttons[3])
+            .unwrap()
+            .inactive
     );
 }
 
@@ -2837,4 +2750,95 @@ fn accepted_connection_preserves_new_persistence_failure() {
             ..
         })
     ));
+}
+
+#[test]
+fn inline_rename_preserves_rejected_text_and_returns_to_details_on_acceptance() {
+    let mut app = flow_action_test_app();
+    let snapshot = lobby_membership_with_brawler().profile;
+    let id = snapshot.brawlers[0].id;
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(snapshot.clone());
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BrawlerDetails(id);
+    inject_action(&mut app, FlowUiAction::BeginBrawlerNameEdit);
+    {
+        let mut draft = app.world_mut().resource_mut::<BrawlerEditDraft>();
+        assert!(draft.editing_name && draft.inline_rename);
+        draft.name = "Renamed build".into();
+    }
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerDetails(id)
+    );
+    inject_action(&mut app, FlowUiAction::ConfirmBrawlerEdit);
+    assert!(
+        app.world()
+            .resource::<super::super::ClientProfileModel>()
+            .pending()
+    );
+    {
+        let mut profile = app
+            .world_mut()
+            .resource_mut::<super::super::ClientProfileModel>();
+        profile.set_snapshot_for_test(snapshot.clone());
+        profile.set_decision_for_test(crate::profiles::ProfileDecision::StorageFault);
+    }
+    app.update();
+    let draft = app.world().resource::<BrawlerEditDraft>();
+    assert_eq!(draft.name, "Renamed build");
+    assert!(draft.editing_name && draft.inline_error.is_some());
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerDetails(id)
+    );
+    inject_action(&mut app, FlowUiAction::ConfirmBrawlerEdit);
+    let mut accepted = snapshot;
+    accepted.brawlers[0].name = "Renamed build".into();
+    {
+        let mut profile = app
+            .world_mut()
+            .resource_mut::<super::super::ClientProfileModel>();
+        profile.set_snapshot_for_test(accepted);
+        profile.set_decision_for_test(crate::profiles::ProfileDecision::Accepted);
+    }
+    app.update();
+    assert!(!app.world().resource::<BrawlerEditDraft>().inline_rename);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerDetails(id)
+    );
+}
+
+#[test]
+fn shell_back_actions_share_the_same_role_and_preview_has_no_chrome() {
+    use crate::client::ui::surface::Surface;
+    for action in [
+        FlowUiAction::Back,
+        FlowUiAction::CloseBrawlerList,
+        FlowUiAction::BackToBrawlerList,
+        FlowUiAction::CancelWeaponEquipment,
+        FlowUiAction::CancelBrawlerEdit,
+        FlowUiAction::CancelCreateBrawler,
+    ] {
+        assert_eq!(screens::shared::surface_role(&action), Surface::Back);
+    }
+    let mut app = App::new();
+    app.init_resource::<FlowNavigation>()
+        .init_resource::<ClientOverlay>()
+        .init_resource::<GameTypeSelectionDraft>()
+        .add_systems(Update, update_flow_button_chrome);
+    let preview = app
+        .world_mut()
+        .spawn((
+            FlowButton {
+                index: 0,
+                action: FlowUiAction::OpenBrawlerList,
+                error_action: false,
+            },
+            DashboardButtonStyle::Preview,
+        ))
+        .id();
+    app.update();
+    assert!(app.world().get::<Surface>(preview).is_none());
 }

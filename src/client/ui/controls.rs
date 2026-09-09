@@ -12,7 +12,13 @@ impl Plugin for UiControlsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             PostUpdate,
-            (present_controls, present_switches, present_indicators).before(UiSystems::Layout),
+            (
+                present_controls,
+                present_switches,
+                present_indicators,
+                sync_surface_states,
+            )
+                .before(UiSystems::Layout),
         );
     }
 }
@@ -58,7 +64,7 @@ struct SliderFill(Entity);
 struct SliderKnob(Entity);
 
 #[derive(Component)]
-struct FocusMarker(Entity);
+pub(super) struct FocusMarker(Entity);
 
 #[derive(Component)]
 struct SwitchTrack(Entity);
@@ -106,6 +112,8 @@ pub(crate) fn spawn_control(
     let mut entity = parent.spawn((
         Button,
         ControlState::default(),
+        super::surface::Surface::Row,
+        super::surface::SurfaceState::default(),
         value,
         Node {
             width: percent(100),
@@ -312,13 +320,16 @@ fn present_switches(
     reason = "Bevy control presentation queries"
 )]
 fn present_controls(
-    mut controls: Query<(
-        &ControlState,
-        &Interaction,
-        Has<InteractionDisabled>,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
+    mut controls: Query<
+        (
+            &ControlState,
+            &Interaction,
+            Has<InteractionDisabled>,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        Without<MaterialNode<super::surface::SurfaceMaterial>>,
+    >,
     values: Query<&ControlValue>,
     mut labels: Query<(&ValueLabel, &mut Text)>,
     mut fills: Query<(&SliderFill, &mut Node)>,
@@ -351,6 +362,31 @@ fn present_controls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn material_surface_does_not_receive_fallback_rectangle_colors() {
+        let mut app = App::new();
+        app.add_plugins(UiControlsPlugin);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Button,
+                ControlState {
+                    focused: true,
+                    selected: true,
+                    inactive: false,
+                },
+                MaterialNode::<super::super::surface::SurfaceMaterial>(Handle::default()),
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<BackgroundColor>(entity).unwrap().0,
+            Color::NONE
+        );
+    }
 
     #[test]
     fn slider_knob_tracks_endpoints_and_disabled_focus_is_hidden() {
@@ -469,5 +505,23 @@ mod tests {
             colors(&selected, Interaction::None, true),
             colors(&focused, Interaction::Pressed, true)
         );
+    }
+}
+
+#[allow(clippy::type_complexity, reason = "presentation state bridge")]
+fn sync_surface_states(
+    mut controls: Query<(
+        &ControlState,
+        Has<InteractionDisabled>,
+        &mut super::surface::SurfaceState,
+    )>,
+) {
+    for (state, disabled, mut surface) in &mut controls {
+        *surface = super::surface::SurfaceState {
+            focused: state.focused,
+            selected: state.selected,
+            inactive: state.inactive,
+            disabled,
+        };
     }
 }

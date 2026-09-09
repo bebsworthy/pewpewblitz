@@ -102,6 +102,8 @@ pub(super) fn resolve_profile_decision(
         commit.overlay = Some(OverlayCommit::BrawlerDetails(created.id));
         commit.focus_index = Some(0);
     } else if accepted && let Some(brawler_id) = pending_edited_brawler.0.take() {
+        brawler_edit.inline_rename = false;
+        brawler_edit.editing_name = false;
         commit.overlay = Some(OverlayCommit::BrawlerDetails(brawler_id));
         commit.focus_index = Some(1);
     } else if !accepted {
@@ -111,7 +113,12 @@ pub(super) fn resolve_profile_decision(
         }
         if pending_edited_brawler.0.take().is_some() {
             brawler_edit.inline_error.clone_from(&dashboard_notice.0);
-            commit.overlay = Some(OverlayCommit::BrawlerEditor);
+            commit.overlay = if brawler_edit.inline_rename {
+                brawler_edit.editing_name = true;
+                brawler_edit.brawler_id.map(OverlayCommit::BrawlerDetails)
+            } else {
+                Some(OverlayCommit::BrawlerEditor)
+            };
         }
     }
 }
@@ -180,6 +187,14 @@ pub(super) fn resolve_profile_action(
             open_brawler_editor(*brawler_id, queue, practice, profile, brawler_edit, commit);
         }
         FlowUiAction::BeginBrawlerNameEdit => {
+            if let ClientOverlay::BrawlerDetails(id) = overlay {
+                open_brawler_editor(*id, queue, practice, profile, brawler_edit, commit);
+                if commit.overlay.is_none() {
+                    return;
+                }
+                commit.overlay = Some(OverlayCommit::BrawlerDetails(*id));
+                brawler_edit.inline_rename = true;
+            }
             brawler_edit.editing_name = true;
             brawler_edit.name_caret = brawler_edit.name.len();
             brawler_edit.inline_error = None;
@@ -189,6 +204,9 @@ pub(super) fn resolve_profile_action(
         FlowUiAction::CycleBrawlerPassiveTwo => cycle_brawler_passive(profile, brawler_edit, 1),
         FlowUiAction::ConfirmBrawlerEdit => {
             confirm_brawler_edit(profile, brawler_edit, pending_edited_brawler);
+            if brawler_edit.inline_rename && profile.pending() {
+                brawler_edit.editing_name = false;
+            }
         }
         FlowUiAction::DeleteBrawler(brawler_id) => {
             if profile_changes_blocked(queue, practice, profile) {
@@ -417,6 +435,7 @@ fn open_brawler_editor(
             ultimate_id: brawler.ultimate_id,
             passive_ids: brawler.passive_ids,
             editing_name: false,
+            inline_rename: false,
             inline_error: None,
         };
         commit.overlay = Some(OverlayCommit::BrawlerEditor);

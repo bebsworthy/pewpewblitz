@@ -43,7 +43,7 @@ use screens::{
     queue::{spawn_queue, update_queue_cancel_button, update_queue_status},
     results::{clear_results, present_match_completion, spawn_results},
     server_select::{refresh_server_select, spawn_server_select, update_server_select_copy},
-    shared::{FlowNavigation, update_flow_button_chrome, update_shell_image_button_chrome},
+    shared::{FlowNavigation, update_flow_button_chrome},
 };
 
 mod actions;
@@ -172,10 +172,8 @@ impl Plugin for ClientFlowPlugin {
                     update_rate_limit_try_again.after(present_flow_error_overlay),
                     update_queue_cancel_button,
                     update_queue_status,
-                    spawn_game_type_select.before(update_shell_image_button_chrome),
-                    update_shell_image_button_chrome,
+                    spawn_game_type_select.before(update_flow_button_chrome),
                     update_flow_button_chrome,
-                    screens::brawlers::update_brawler_card_chrome,
                 )
                     .in_set(ClientFlowSet::PresentFlow),
             )

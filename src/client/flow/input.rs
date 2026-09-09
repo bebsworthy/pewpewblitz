@@ -205,7 +205,11 @@ pub(super) fn collect_flow_input(
         }
     }
     let pad_pressed = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
-    if matches!(overlay.as_ref(), ClientOverlay::BrawlerEditor) && brawler_edit.editing_name {
+    if matches!(
+        overlay.as_ref(),
+        ClientOverlay::BrawlerEditor | ClientOverlay::BrawlerDetails(_)
+    ) && brawler_edit.editing_name
+    {
         if keyboard.just_pressed(KeyCode::Home) {
             brawler_edit.name_caret = 0;
         } else if keyboard.just_pressed(KeyCode::End) {
@@ -254,11 +258,17 @@ pub(super) fn collect_flow_input(
                     brawler_edit.name = name;
                     brawler_edit.editing_name = false;
                     brawler_edit.inline_error = None;
+                    if brawler_edit.inline_rename {
+                        queue_ui_action(&mut actions, FlowUiAction::ConfirmBrawlerEdit);
+                    }
                 }
                 Err(error) => brawler_edit.inline_error = Some(format!("Invalid name: {error}")),
             }
         } else if keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East) {
             brawler_edit.editing_name = false;
+            if brawler_edit.inline_rename {
+                brawler_edit.inline_rename = false;
+            }
         }
         return;
     }
@@ -336,6 +346,9 @@ pub(super) fn collect_flow_input(
         .collect::<Vec<_>>();
     available.sort_unstable();
     available.dedup();
+    if matches!(*overlay, ClientOverlay::BrawlerDetails(_)) {
+        available.sort_by_key(|index| [4, 5, 3, 2, 1, 0].iter().position(|entry| entry == index));
+    }
     if !available.is_empty() {
         if *flow.get() == ClientFlow::Dashboard && matches!(*overlay, ClientOverlay::None) {
             navigation.selected = repair_dashboard_focus(navigation.selected, &available);

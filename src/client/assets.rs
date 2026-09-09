@@ -28,8 +28,7 @@ pub(crate) struct ClientAssetHandles {
     pub wordmark: Handle<Image>,
     pub dashboard_logo: Handle<Image>,
     pub dashboard_badges: [Handle<Image>; 4],
-    pub dashboard_panels: [Handle<Image>; 6],
-    pub dashboard_focus_panels: [Handle<Image>; 6],
+    pub dashboard_identity_panel: Handle<Image>,
     pub dashboard_icons: [Handle<Image>; 8],
     pub dashboard_font: Handle<Font>,
     pub settings_icon: Handle<Image>,
@@ -59,10 +58,7 @@ impl ClientAssetHandles {
             dashboard_logo: asset_server.load("brawler/ui/shell/logo.png"),
             dashboard_badges: ["wipeout", "hot-zone", "heist", "zombie"]
                 .map(|name| asset_server.load(format!("brawler/ui/shell/{name}.png"))),
-            dashboard_panels: ["mode", "play", "practice", "build", "menu", "identity"]
-                .map(|name| asset_server.load(format!("brawler/ui/shell/panel-{name}.png"))),
-            dashboard_focus_panels: ["mode", "play", "practice", "build", "menu", "identity"]
-                .map(|name| asset_server.load(format!("brawler/ui/shell/panel-{name}-focus.png"))),
+            dashboard_identity_panel: asset_server.load("brawler/ui/shell/panel-identity.png"),
             dashboard_icons: [
                 "icon-lightning",
                 "icon-crosshair",
@@ -119,6 +115,7 @@ impl ClientAssetHandles {
                 ("ui.badge_heist", &self.dashboard_badges[2]),
                 ("ui.badge_zombie", &self.dashboard_badges[3]),
                 ("ui.pewpew_blitz_loading_logo", &self.loading_logo),
+                ("ui.identity_panel", &self.dashboard_identity_panel),
                 ("ui.pewpew_blitz_wordmark", &self.wordmark),
                 ("ui.icon_settings", &self.settings_icon),
                 ("ui.icon_menu", &self.menu_icon),
@@ -130,20 +127,11 @@ impl ClientAssetHandles {
             .into_iter()
             .map(|(name, handle)| (name, false, asset_server.load_state(handle))),
         );
-        for (prefix, handles) in [
-            ("ui.shell_panel", self.dashboard_panels.as_slice()),
-            (
-                "ui.shell_focus_panel",
-                self.dashboard_focus_panels.as_slice(),
-            ),
-            ("ui.shell_icon", self.dashboard_icons.as_slice()),
-        ] {
-            states.extend(
-                handles
-                    .iter()
-                    .map(|handle| (prefix, false, asset_server.load_state(handle))),
-            );
-        }
+        states.extend(
+            self.dashboard_icons
+                .iter()
+                .map(|handle| ("ui.shell_icon", false, asset_server.load_state(handle))),
+        );
         states
     }
 

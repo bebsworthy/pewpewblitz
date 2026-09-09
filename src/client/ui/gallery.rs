@@ -3,6 +3,7 @@
 use super::{
     controls::{self, ControlState, ControlValue, SliderTrack, spawn_control},
     scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible},
+    surface::Surface,
     theme,
 };
 use bevy::input::mouse::MouseWheel;
@@ -14,17 +15,28 @@ use bevy::{
 /// Builds the native component review tool without gameplay, networking or settings persistence.
 pub fn build_ui_gallery_app() -> App {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "PewPew Blitz — UI Gallery".into(),
-            resolution: (1440, 900).into(),
-            ..default()
-        }),
-        ..default()
-    }))
+    app.add_plugins(
+        DefaultPlugins
+            .set(AssetPlugin {
+                file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+                ..default()
+            })
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "PewPew Blitz — UI Gallery".into(),
+                    resolution: if std::env::var_os("BRAWLER_UI_GALLERY_COMPACT").is_some() {
+                        (900, 600).into()
+                    } else {
+                        (1440, 900).into()
+                    },
+                    ..default()
+                }),
+                ..default()
+            }),
+    )
     .insert_resource(ClearColor(theme::CREAM))
     .init_resource::<GalleryFocus>()
-    .add_plugins(controls::UiControlsPlugin)
+    .add_plugins((controls::UiControlsPlugin, super::surface::SurfacePlugin))
     .add_systems(Startup, setup)
     .add_systems(Update, (interact, scroll_gallery, resize_gallery))
     .add_systems(PostUpdate, reveal_focus.after(UiSystems::Layout));
@@ -78,6 +90,18 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                     let entity = spawn_control(left, &font, label, value);
                     left.commands().entity(entity).insert(GalleryItem(index));
                 }
+                heading(left, &font, "SHELL COMPONENTS");
+                for (offset, (role, label, height)) in [
+                    (Surface::Back, "BACK TO BRAWLERS", 64.),
+                    (Surface::Primary, "SELECT FOR PLAY", 96.),
+                    (Surface::Secondary, "PRACTICE", 72.),
+                    (Surface::Card, "BRAWLER CARD\nPulse Sidearm", 220.),
+                    (Surface::Panel, "WEAPON OVERVIEW\nFour attachment slots", 150.),
+                    (Surface::Quiet, "RENAME", 64.),
+                ].into_iter().enumerate() {
+                    let entity=surface_example(left,&font,role,label,height);
+                    left.commands().entity(entity).insert((GalleryItem(offset+5),ControlValue::Action,ControlState::default()));
+                }
             });
             columns.spawn((GalleryColumn, column())).with_children(|right| {
                 heading(right, &font, "STATE REFERENCE");
@@ -90,6 +114,17 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                 right.commands().entity(disabled).insert(InteractionDisabled);
                 let inactive = spawn_control(right, &font, "Inactive surface", ControlValue::Tab);
                 right.commands().entity(inactive).insert(ControlState { selected: true, focused: true, inactive: true });
+                heading(right, &font, "SHARED SURFACE STATES");
+                for (label, state, disabled) in [
+                    ("Selected and focused", ControlState{selected:true,focused:true,..default()}, false),
+                    ("Focused orange action", ControlState{focused:true,..default()}, false),
+                    ("Disabled action", ControlState::default(), true),
+                    ("Inactive selected card", ControlState{selected:true,focused:true,inactive:true}, false),
+                ] {
+                    let entity=surface_example(right,&font,Surface::Primary,label,100.);
+                    right.commands().entity(entity).insert(state);
+                    if disabled { right.commands().entity(entity).insert(InteractionDisabled); }
+                }
             });
         });
     });
@@ -154,13 +189,14 @@ fn interact(
         || pressed(GamepadButton::DPadDown)
         || (new_stick && stick.y < -0.6)
     {
-        focus.index = (focus.index + 1) % 5;
+        focus.index = (focus.index + 1) % controls.iter().count().max(1);
     }
     if keys.just_pressed(KeyCode::ArrowUp)
         || pressed(GamepadButton::DPadUp)
         || (new_stick && stick.y > 0.6)
     {
-        focus.index = (focus.index + 4) % 5;
+        let count = controls.iter().count().max(1);
+        focus.index = (focus.index + count - 1) % count;
     }
     let direction =
         i8::from(keys.just_pressed(KeyCode::ArrowRight) || pressed(GamepadButton::DPadRight))
@@ -320,4 +356,39 @@ mod tests {
         assert_eq!(label, "110%");
         assert_eq!(app.world().resource::<GalleryFocus>().index, 3);
     }
+}
+
+fn surface_example(
+    parent: &mut ChildSpawnerCommands,
+    font: &TextFont,
+    role: Surface,
+    label: &str,
+    height: f32,
+) -> Entity {
+    parent
+        .spawn((
+            Button,
+            role,
+            super::surface::SurfaceState::default(),
+            Node {
+                width: percent(100),
+                height: px(height),
+                flex_shrink: 0.,
+                padding: UiRect::all(px(32)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
+        .with_child((
+            Text::new(label),
+            font.clone(),
+            TextColor(theme::INK),
+            TextLayout::justify(Justify::Center),
+            Node {
+                width: percent(100),
+                ..default()
+            },
+        ))
+        .id()
 }

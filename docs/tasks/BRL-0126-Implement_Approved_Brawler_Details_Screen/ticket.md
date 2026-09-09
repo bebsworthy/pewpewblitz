@@ -1,13 +1,13 @@
 ---
 id: BRL-0126
 title: Implement approved brawler details screen
-status: todo
+status: doing
 theme:
 release:
 created: 2026-09-09T14:41:16Z
-modified: 2026-09-09T14:41:49Z
+modified: 2026-09-09T17:09:12Z
 closed:
-revision: dc8f39764d245a8a
+revision: 3cb6985d67a9db31
 blocks: []
 related: []
 ---

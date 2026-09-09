@@ -416,6 +416,12 @@ pub(super) fn control(
         value
     };
     let entity = spawn_control(parent, font, label, value);
+    if action == ShellAction::Back {
+        parent
+            .commands()
+            .entity(entity)
+            .insert(crate::client::ui::surface::Surface::Back);
+    }
     parent.commands().entity(entity).insert(ShellButton {
         id,
         action: Some(action),

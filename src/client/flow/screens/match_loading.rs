@@ -1,7 +1,7 @@
 //! Approved loading composition; reservation state remains the sole source of progress.
 use super::{
     dashboard::DashboardPreviewHost,
-    shared::{FlowButton, FlowNavigation, FlowRoot, ShellImageButton},
+    shared::{FlowButton, FlowNavigation, FlowRoot},
 };
 use crate::client::ui::theme::{CREAM, INK, font};
 use crate::client::{
@@ -261,12 +261,6 @@ impl LoadingView<'_> {
         });
     }
     fn cancel(&self, root: &mut ChildSpawnerCommands) {
-        let load = |key: &str| {
-            self.server.map_or_else(Handle::default, |s| {
-                s.load(format!("brawler/ui/shell/{key}.png"))
-            })
-        };
-        let normal = load("panel-mode");
         root.spawn((
             Button,
             LoadingCancel,
@@ -275,15 +269,6 @@ impl LoadingView<'_> {
                 index: 0,
                 action: FlowUiAction::RequestCancelMatchStart,
                 error_action: false,
-            },
-            ShellImageButton {
-                normal: normal.clone(),
-                focus: load("panel-mode-focus"),
-            },
-            ImageNode {
-                image_mode: NodeImageMode::Stretch,
-                visual_box: VisualBox::BorderBox,
-                ..ImageNode::new(normal)
             },
             Node {
                 width: percent(100),

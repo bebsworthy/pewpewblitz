@@ -392,11 +392,9 @@ fn spawn_button(
                 padding: UiRect::axes(px(16), px(8)),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                border_radius: BorderRadius::all(px(6)),
+
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.09, 0.14, 0.2)),
-            Outline::new(px(2), px(2), Color::NONE),
         ))
         .with_child((
             Text::new(label),
@@ -835,31 +833,38 @@ fn stable_navigation_fallback(
     reason = "Bevy system parameters are runtime-owned"
 )]
 fn style_shell_buttons(
+    mut commands: Commands,
     focus: Res<InputFocus>,
+    overlay: Res<ClientOverlay>,
     mut buttons: Query<
         (
             Entity,
-            &Interaction,
             &ShellButton,
-            &mut BackgroundColor,
-            &mut Outline,
+            Option<&mut super::ui::surface::SurfaceState>,
         ),
         Without<super::ui::controls::ControlValue>,
     >,
 ) {
-    for (entity, interaction, button, mut background, mut outline) in &mut buttons {
-        let disabled = button.action.is_none();
-        let focused = focus.get() == Some(entity);
-        background.0 = if disabled {
-            Color::srgb(0.055, 0.07, 0.09)
-        } else if *interaction == Interaction::Pressed {
-            Color::srgb(0.08, 0.48, 0.58)
-        } else if focused || *interaction == Interaction::Hovered {
-            Color::srgb(0.12, 0.32, 0.42)
-        } else {
-            Color::srgb(0.09, 0.14, 0.2)
+    use super::ui::surface::{Surface, SurfaceState};
+    for (entity, button, state) in &mut buttons {
+        let next = SurfaceState {
+            focused: focus.get() == Some(entity),
+            inactive: button.layer != active_layer(&overlay),
+            disabled: button.action.is_none(),
+            ..default()
         };
-        outline.color = if focused { Color::WHITE } else { Color::NONE };
+        if let Some(mut state) = state {
+            *state = next;
+        } else {
+            commands.entity(entity).insert((
+                if button.action == Some(ShellAction::Back) {
+                    Surface::Back
+                } else {
+                    Surface::Action
+                },
+                next,
+            ));
+        }
     }
 }
 

@@ -4,7 +4,7 @@ use super::{
     brawlers::ultimate_name,
     shared::{FlowButton, FlowNavigation, FlowRoot},
 };
-use crate::client::ui::theme::{CREAM, INK, ORANGE, TEAL, font};
+use crate::client::ui::theme::{CREAM, INK, TEAL, font};
 use crate::client::{
     ClientLobbyMembership, RuntimeLobbyTarget,
     flow::{
@@ -243,7 +243,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                             ..default()
                         },
                         BackgroundColor(Color::NONE),
-                        shell_panel(assets.as_deref(), 5),
+                        identity_panel(assets.as_deref()),
                     ))
                     .with_children(|identity| {
                         shell_icon(identity, assets.as_deref(), 3, 26.0, CREAM);
@@ -414,7 +414,6 @@ pub(in crate::client::flow) fn spawn_dashboard(
                         if admission_pending {
                             button.insert(InteractionDisabled);
                         }
-                        button.insert(shell_panel(assets.as_deref(), 3));
                         button.with_children(|button| {
                             shell_icon(button, assets.as_deref(), 5, 38.0, CREAM);
                             button.spawn((
@@ -472,7 +471,6 @@ pub(in crate::client::flow) fn spawn_dashboard(
                 if admission_pending {
                     mode_button.insert(InteractionDisabled);
                 }
-                mode_button.insert(shell_panel(assets.as_deref(), 0));
                 mode_button.with_children(|card| {
                     if let Some(assets) = assets.as_deref() {
                         card.spawn((
@@ -947,6 +945,11 @@ fn spawn_dashboard_button(
     let icon_size = dashboard_button_icon_size(is_play, is_practice);
     let mut button = parent.spawn((
         Button,
+        if primary || is_utility {
+            crate::client::ui::surface::Surface::Primary
+        } else {
+            crate::client::ui::surface::Surface::Secondary
+        },
         AccessibleLabel::new(label),
         FlowButton {
             index,
@@ -960,21 +963,8 @@ fn spawn_dashboard_button(
             padding: UiRect::axes(px(12), px(7)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            border: UiRect::ZERO,
-            border_radius: BorderRadius::all(px(5)),
+
             ..default()
-        },
-        BackgroundColor(if primary { ORANGE } else { TEAL }),
-        BorderColor::all(Color::NONE),
-    ));
-    button.insert(shell_panel(
-        assets,
-        if is_play {
-            1
-        } else if is_practice {
-            2
-        } else {
-            4
         },
     ));
     if is_play {
@@ -1208,22 +1198,19 @@ fn spawn_menu_button(
                 min_height: px(48),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                border: UiRect::all(px(2)),
-                border_radius: BorderRadius::all(px(5)),
+
                 ..default()
             },
-            BackgroundColor(ORANGE),
-            BorderColor::all(INK),
         ))
         .with_child((Text::new(label), font(assets, 22.0), TextColor(INK)));
 }
 
 // Artwork contains only chrome; all text and actions remain live Bevy UI.
-fn shell_panel(assets: Option<&crate::client::ClientAssetHandles>, index: usize) -> ImageNode {
+fn identity_panel(assets: Option<&crate::client::ClientAssetHandles>) -> ImageNode {
     ImageNode {
         image: assets.map_or_else(
             || ImageNode::default().image,
-            |assets| assets.dashboard_panels[index].clone(),
+            |assets| assets.dashboard_identity_panel.clone(),
         ),
         image_mode: NodeImageMode::Stretch,
         visual_box: VisualBox::BorderBox,

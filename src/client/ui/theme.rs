@@ -4,7 +4,8 @@ use bevy::prelude::*;
 
 pub(crate) const FONT_PATH: &str = "brawler/ui/fonts/lilita-one-regular.ttf";
 
-pub(crate) const INK: Color = Color::srgb(0.025, 0.10, 0.145);
+// Representative dark navy sampled from the approved mockup (#081932).
+pub(crate) const INK: Color = Color::srgb(8.0 / 255.0, 25.0 / 255.0, 50.0 / 255.0);
 pub(crate) const CREAM: Color = Color::srgb(0.98, 0.92, 0.81);
 pub(crate) const TEAL: Color = Color::srgb(0.32, 0.64, 0.62);
 pub(crate) const ORANGE: Color = Color::srgb(1.0, 0.40, 0.025);

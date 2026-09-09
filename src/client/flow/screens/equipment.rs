@@ -2,7 +2,7 @@
 use super::{
     brawlers::weapon_part_effect_text,
     scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible},
-    shared::{FlowButton, FlowNavigation, ShellImageButton},
+    shared::{FlowButton, FlowNavigation},
 };
 use crate::client::flow::{
     actions::FlowUiAction,
@@ -369,45 +369,21 @@ impl EquipmentView<'_> {
         mut node: Node,
         content: impl FnOnce(&mut ChildSpawnerCommands),
     ) {
-        let load = |key: &str| {
-            self.server.map_or_else(Handle::default, |s| {
-                s.load(format!("brawler/ui/shell/{key}.png"))
-            })
-        };
-        let normal = load(if index == 1000 {
-            "panel-mode"
-        } else if selected {
-            "game-card-selected"
-        } else {
-            "game-card"
-        });
-        let focus = load(if index == 1000 {
-            "panel-mode-focus"
-        } else if selected {
-            "game-card-selected-focus"
-        } else {
-            "game-card-focus"
-        });
         node.flex_direction = FlexDirection::Column;
         node.align_items = AlignItems::Center;
         node.justify_content = JustifyContent::Center;
         node.padding = UiRect::axes(px(24.0 * self.factor), px(22.0 * self.factor));
         node.row_gap = px(8.0 * self.factor);
         let mut e = p.spawn((
+            crate::client::ui::surface::SurfaceState {
+                selected,
+                ..default()
+            },
             Button,
             FlowButton {
                 index,
                 action,
                 error_action: true,
-            },
-            ShellImageButton {
-                normal: normal.clone(),
-                focus,
-            },
-            ImageNode {
-                image_mode: NodeImageMode::Stretch,
-                visual_box: VisualBox::BorderBox,
-                ..ImageNode::new(normal)
             },
             node,
         ));

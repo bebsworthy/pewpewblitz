@@ -1,79 +1,69 @@
-# Player-shell UI
+# Player-shell components
 
-This client-only module owns shared presentation. Screen modules own actions, selected values,
-layout and lifecycle. It is a small Bevy-native toolkit, not another UI runtime.
+This client-only library owns visual presentation across the shell. Screens own content,
+layout, actions, navigation, persistence and active-surface boundaries. Components are native
+Bevy entities, not a separate widget runtime.
 
-## Current production primitives
+## Production components
 
-- `theme`: approved cream/ink/teal/orange palette and bundled font with asset-free fallback.
-  Dashboard, game selection, Practice maps, equipment and loading use the same source.
-- `controls`: native Settings rows, category selection, boolean switches, slider fill and binding display.
-  Consumers own values and actions; a private presentation plugin updates the shared visuals.
-- `image_button`: normal/focus art and visual state. Both Dashboard and other shell image
-  buttons use this policy. Disabled takes precedence over every interaction. An inactive
-  surface suppresses focus and pointer feedback. Focus is communicated by focus art; pointer
-  press/hover uses the same tint across screens.
+- `surface::Surface`: Back, primary, secondary, ordinary action, choice card, overview panel,
+  list row, field and quiet action. `SurfaceState` separates selection, focus, disabled and
+  inactive state. Owners attach these to native buttons; `SurfacePlugin` owns rendering.
+- `controls`: compact Settings action/category rows, switches with knobs, sliders and binding
+  capsules. These compose the same surface renderer and state policy. Value conversion,
+  binding capture and calibration remain screen-owned.
+- `theme`: palette and bundled Lilita One font.
+- `scroll`: viewport clamping and focus-reveal geometry, shared by screens and gallery.
 
-Existing screen assets retain their shape, spacing and selected-state treatment. Semantic
-selection (the equipped part or current category) is distinct from navigation focus (the control
-that will activate). Do not make one boolean stand for both.
+The procedural `shell_surface.wgsl` draws frames from final logical dimensions. Action sides
+have a pronounced slant; cards/panels use the gentler approved slant; compact rows use a subtle
+slant. Outlines and short shadows retain their thickness across sizes. Text and icons remain
+upright, and Bevy's rectangular button hit area remains generous around the visual corners.
+Back is always orange and gets shared label/arrow composition. Destination wording may vary.
 
-## Ownership rules
+Semantic selection keeps its teal fill. Focus uses an inset contrasting double outline and
+triangle marker on every fill, including orange. Disabled overrides interaction, and inactive
+owners suppress focus/hover/press. Screens must not choose frame images, focus palettes, border
+radii or shadow styles. The old image-button and brawler-card chrome systems are retired.
 
-Pass screen ownership into presentation; never infer it from a button index. Indices are local to
-screens and overlays. Keep action processing, overlay gates, persistence and network requests out
-of widgets. The existing flow navigation and scroll helpers remain the owners of those behaviors.
+Surface rendering is installed by the client presentation plugin, separately from headless
+Settings behavior. The same plugin runs in the native gallery. Settings controls retain
+asset-free native row presentation for isolated behavior tests.
 
-Use a shared component when there is an actual repeated use. Add Settings toggles, sliders,
-binding fields and category tabs as their production consumers are built. Do not add speculative
-variants or replace Bevy's entity/component model with a custom widget tree.
+## Consumers and ownership adapters
 
-Before adding a local color, font or interaction tint, check this module. Screen-specific layout
-measurements stay in their screen until a demonstrated repeated layout calls for shared tokens.
+| Consumers | Component adoption / state owner |
+| --- | --- |
+| Dashboard and menu | Actions, mode panel; flow action adapter |
+| Game selection | Choice cards and confirmation; flow draft adapter |
+| Practice maps | Cards, arrows, Start; Practice carousel adapter |
+| Brawler browser/details | Back, cards, overview panels, rename, Delete, Select; flow adapter |
+| Weapon and parts | Back, equipped-slot and part cards, Nothing; equipment draft adapter |
+| Creation / existing ability editor | Shared flow actions; subsequent layout work uses these components |
+| Settings and Controls | Back plus rows, categories, switches, sliders, bindings; Settings adapter |
+| Server entry, connecting, queue, loading, results and recovery | Shared flow fields/actions; existing screen layout retained |
+| Credits and shell overlays | Shared actions; shell focus/layer adapter |
 
-## Review path
+The non-interactive dashboard identity strip, logos, mode badges, map overviews, model renders
+and ability pictograms remain content artwork. They are not alternate control renderers.
+Historical frame images may remain as source/reference assets but are no longer loaded for
+interactive shell chrome. Details frame PNGs were removed; its generator now creates pictograms.
 
-BRL-0123 owns consolidation, the native component gallery and screen adoption.
-BRL-0122 owns approved Settings mockups. The gallery exercises the same components used in
-screens rather than reproducing them in HTML or screenshots. Native visual acceptance remains
-necessary for new controls and migrated layouts.
+## Native gallery and verification
 
-## Native gallery
+Run `just ui-gallery`. It needs no server and changes no saved settings. It instantiates
+production components, including shell Back/actions/cards/panels and selected+focused,
+disabled and inactive examples beside switches/sliders/bindings.
 
-Run `just ui-gallery` from the repository root. It needs no server and changes no saved settings.
-Use Up/Down, D-pad or the left stick to focus the interactive examples; Left/Right adjusts the
-slider; Enter/gamepad South toggles the boolean or selected tab. Pointer clicks toggle controls,
-and dragging on the slider track adjusts it. The action and binding examples demonstrate their
-presentation only; real actions and key capture remain screen-owned. Mouse wheel scrolls smaller
-windows, and navigation reveals focused controls using the same scroll geometry as flow screens.
+Up/Down, D-pad or left stick moves focus. Left/Right adjusts sliders; Enter/South toggles demo
+values. Pointer clicks and slider dragging work; wheel and focus reveal scroll smaller windows.
+Columns stack below 1000 logical pixels. Demo action labels do not perform product actions.
 
-`controls::UiControlsPlugin` updates row chrome, labels and slider fill before Bevy layout.
-`spawn_control` creates ordinary Bevy buttons. Consumers set `ControlValue` and `ControlState`
-and attach their own action components. `InteractionDisabled` uses the native Bevy disabled
-contract. Controls do not save values, capture bindings or send network commands.
+BRL-0123 owns adoption and visual acceptance. Verify actual native wide/compact screens against
+approved mockups, not only compilation or bounds. Review long labels, tall cards, focus on every
+fill, scroll endpoints and inactive overlay isolation. Physical controller checks are reported
+separately from synthetic input tests.
 
-The gallery is a component review surface:
-binding fields have outlined capsules; boolean controls use a pill with a moving knob; sliders have a larger hit area around their rail and a positioned knob.
-It exposes presentation regressions independently of screen behavior. Gallery and flow both reuse `ui::scroll`; focus
-ownership and ordering remain in their respective screen systems.
-
-Focused controls also display a marker independent of color. Disabled and inactive surfaces hide
-that marker; a selected category keeps its teal fill when focused. Slider fill and knob use the
-same normalized value, clamped at the endpoints. Below 1000 logical pixels the gallery stacks
-its columns; navigation rechecks visibility when the window size changes.
-
-## Settings consumer
-
-`client::shell::settings_screen` and its Controls pages use these controls throughout Settings.
-The screen owns category selection, contextual descriptions, normalized slider conversion and
-saving. Left/Right adjusts a focused slider; Up/Down moves focus. Save failures stay inline with
-Retry save. Controls owns release-armed binding capture, conflict swaps and selected-device
-sampling; `settings::binding_edit` and `settings::calibration` own pure validation and measurement.
-Neither behavior lives in shared widgets. Ordinary changes autosave, pointer slider saves are
-coalesced until release, fullscreen previews have timed rollback, and measured calibration values
-require explicit acceptance. Scoped resets expose Undo reset.
-
-Settings rebuilds restore focus by semantic control ID, never by an entity that was despawned.
-Scroll handling is limited to the hovered pane or the pane containing focused descendants.
-Narrow layouts move categories above options/details. Native review should include those layouts,
-capture cancellation, controller loss and long option lists in addition to the gallery.
+For a repeatable compact gallery launch, use
+`BRAWLER_UI_GALLERY_COMPACT=1 just ui-gallery` (900×600). The gallery resolves assets
+from the repository in the same way as the client, including when launched by a native app wrapper.

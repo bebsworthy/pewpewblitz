@@ -54,11 +54,9 @@ fn spawn_editor_button(
                 padding: UiRect::axes(px(12), px(8)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                border: UiRect::all(px(2)),
+
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.09, 0.14, 0.2)),
-            BorderColor::all(Color::NONE),
         ))
         .with_child((field, Text::new(""), TextFont::from_font_size(18.0)));
 }

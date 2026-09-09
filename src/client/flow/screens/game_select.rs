@@ -1,6 +1,6 @@
 //! Mode cards and exact advertised variant selection; confirmation remains flow-owned.
 use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
-use super::shared::{FlowButton, FlowNavigation, FlowRoot, ShellImageButton};
+use super::shared::{FlowButton, FlowNavigation, FlowRoot};
 use crate::client::ui::theme::{CREAM, INK, font};
 use crate::client::{
     ClientLobbyMembership,
@@ -279,41 +279,27 @@ struct Choice<'a> {
 }
 fn choice(
     parent: &mut ChildSpawnerCommands,
-    server: Option<&AssetServer>,
+    _server: Option<&AssetServer>,
     node: Node,
     choice: &Choice<'_>,
 ) -> Entity {
-    let base = if choice.card {
-        format!(
-            "game-card{}",
-            if choice.selected { "-selected" } else { "" }
-        )
-    } else {
-        format!("panel-{}", if choice.selected { "play" } else { "mode" })
-    };
-    let normal = server.map_or_else(Handle::default, |s| {
-        s.load(format!("brawler/ui/shell/{base}.png"))
-    });
-    let focus = server.map_or_else(Handle::default, |s| {
-        s.load(format!("brawler/ui/shell/{base}-focus.png"))
-    });
     parent
         .spawn((
             Button,
             AccessibleLabel::new(choice.label),
+            if choice.card {
+                crate::client::ui::surface::Surface::Card
+            } else {
+                super::shared::surface_role(&choice.action)
+            },
+            crate::client::ui::surface::SurfaceState {
+                selected: choice.selected,
+                ..default()
+            },
             FlowButton {
                 index: choice.index,
                 action: choice.action.clone(),
                 error_action: false,
-            },
-            ShellImageButton {
-                normal: normal.clone(),
-                focus,
-            },
-            ImageNode {
-                image_mode: NodeImageMode::Stretch,
-                visual_box: VisualBox::BorderBox,
-                ..ImageNode::new(normal)
             },
             node,
             BackgroundColor(Color::NONE),

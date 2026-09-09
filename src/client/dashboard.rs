@@ -78,6 +78,7 @@ pub(super) struct ClientDashboardPlugin;
 impl Plugin for ClientDashboardPlugin {
     fn build(&self, app: &mut App) {
         weapon_preview::install(app);
+        app.add_plugins(super::ui::surface::SurfacePlugin);
         app.add_plugins(UiMaterialPlugin::<DashboardBackgroundMaterial>::default())
             .add_systems(
                 Update,
@@ -341,8 +342,8 @@ fn ensure_brawler_card_target(
     }
     let mut image = Image::new_uninit(
         bevy::render::render_resource::Extent3d {
-            width: 384,
-            height: 384,
+            width: 768,
+            height: 768,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
