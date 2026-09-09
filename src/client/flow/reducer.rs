@@ -42,7 +42,9 @@ pub(in crate::client::flow) use match_flow::MatchFailureNotice;
     reason = "the reducer facade preserves the focused test and composition path"
 )]
 pub(super) use match_flow::accept_game_type_draft;
-pub(in crate::client::flow) use profile::{PendingCreatedBrawler, PendingEditedBrawler};
+pub(in crate::client::flow) use profile::{
+    PendingCreatedBrawler, PendingDeletedBrawler, PendingEditedBrawler,
+};
 use profile::{resolve_profile_action, resolve_profile_decision};
 
 type LobbyMembershipQuery<'w, 's> = Query<
@@ -410,6 +412,7 @@ pub(super) fn resolve_flow_action(
         ResMut<DashboardNotice>,
         ResMut<PendingCreatedBrawler>,
         ResMut<PendingEditedBrawler>,
+        ResMut<PendingDeletedBrawler>,
         ResMut<BrawlerCreationDraft>,
         ResMut<BrawlerEditDraft>,
         ResMut<WeaponEquipmentDraft>,
@@ -434,6 +437,7 @@ pub(super) fn resolve_flow_action(
         mut dashboard_notice,
         mut pending_created_brawler,
         mut pending_edited_brawler,
+        mut pending_deleted_brawler,
         mut creation_draft,
         mut brawler_edit,
         mut equipment_draft,
@@ -455,6 +459,7 @@ pub(super) fn resolve_flow_action(
         &mut dashboard_notice,
         &mut pending_created_brawler,
         &mut pending_edited_brawler,
+        &mut pending_deleted_brawler,
         &mut creation_draft,
         &mut brawler_edit,
         &mut equipment_draft,
@@ -600,6 +605,7 @@ pub(super) fn resolve_flow_action(
             &mut brawler_edit,
             &mut pending_created_brawler,
             &mut pending_edited_brawler,
+            &mut pending_deleted_brawler,
             &mut dashboard_notice,
             &mut commit,
         ),

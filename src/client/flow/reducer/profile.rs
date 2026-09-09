@@ -18,12 +18,19 @@ pub(in crate::client::flow) struct PendingEditedBrawler(
     pub(in crate::client::flow) Option<crate::profiles::SavedBrawlerId>,
 );
 
+#[derive(Resource, Default)]
+pub(in crate::client::flow) struct PendingDeletedBrawler {
+    pub(in crate::client::flow) id: Option<crate::profiles::SavedBrawlerId>,
+    pub(in crate::client::flow) error: Option<String>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_profile_decision(
     profile: &mut crate::client::ClientProfileModel,
     dashboard_notice: &mut DashboardNotice,
     pending_created_brawler: &mut PendingCreatedBrawler,
     pending_edited_brawler: &mut PendingEditedBrawler,
+    pending_deleted_brawler: &mut PendingDeletedBrawler,
     creation_draft: &mut BrawlerCreationDraft,
     brawler_edit: &mut BrawlerEditDraft,
     equipment: &mut crate::client::flow::screens::brawlers::WeaponEquipmentDraft,
@@ -33,42 +40,22 @@ pub(super) fn resolve_profile_decision(
         return;
     };
     let accepted = matches!(decision, crate::profiles::ProfileDecision::Accepted);
-    dashboard_notice.0 = Some(match decision {
-        crate::profiles::ProfileDecision::Accepted => "Profile saved.".to_string(),
-        crate::profiles::ProfileDecision::InvalidRequest => {
-            "That brawler change is not valid.".to_string()
-        }
-        crate::profiles::ProfileDecision::StaleRevision => {
-            "The profile changed; review it and try again.".to_string()
-        }
-        crate::profiles::ProfileDecision::MissingBrawler => {
-            "That brawler no longer exists.".to_string()
-        }
-        crate::profiles::ProfileDecision::CapacityReached => {
-            "Brawler limit reached (16).".to_string()
-        }
-        crate::profiles::ProfileDecision::QueueLocked => {
-            "Leave the queue before changing a brawler.".to_string()
-        }
-        crate::profiles::ProfileDecision::TemporarilyUnavailable => {
-            "Profile storage is temporarily unavailable; try again.".to_string()
-        }
-        crate::profiles::ProfileDecision::StorageFault => {
-            "The profile could not be saved safely; owned data was preserved.".to_string()
-        }
-        crate::profiles::ProfileDecision::MissingPart => {
-            "That weapon part is no longer in this inventory.".to_string()
-        }
-        crate::profiles::ProfileDecision::PartAlreadyEquipped => {
-            "That physical part is already equipped on a brawler.".to_string()
-        }
-        crate::profiles::ProfileDecision::IncompatibleWeapon => {
-            "Those parts do not form a valid weapon configuration.".to_string()
-        }
-        crate::profiles::ProfileDecision::IncompatibleBuild => {
-            "Choose only one elemental resistance passive for this brawler.".to_string()
-        }
-    });
+    dashboard_notice.0 = Some(profile_decision_message(&decision));
+    if let Some(id) = pending_deleted_brawler.id.take() {
+        pending_deleted_brawler.error = if accepted {
+            None
+        } else {
+            dashboard_notice.0.take()
+        };
+        dashboard_notice.0 = None;
+        commit.overlay = Some(if accepted {
+            OverlayCommit::BrawlerList
+        } else {
+            OverlayCommit::DeleteBrawlerConfirmation(id)
+        });
+        commit.focus_index = Some(0);
+        return;
+    }
     if equipment.awaiting_save {
         equipment.awaiting_save = false;
         if let Some(saved) = profile.snapshot().and_then(|s| {
@@ -131,6 +118,7 @@ pub(super) fn resolve_profile_action(
     brawler_edit: &mut BrawlerEditDraft,
     pending_created_brawler: &mut PendingCreatedBrawler,
     pending_edited_brawler: &mut PendingEditedBrawler,
+    pending_deleted_brawler: &mut PendingDeletedBrawler,
     dashboard_notice: &mut DashboardNotice,
     commit: &mut FlowCommit,
 ) {
@@ -169,11 +157,7 @@ pub(super) fn resolve_profile_action(
         ),
         FlowUiAction::CancelBrawlerEdit => cancel_brawler_edit(profile, brawler_edit, commit),
         FlowUiAction::CancelDeleteBrawler => {
-            let details = match overlay {
-                ClientOverlay::DeleteBrawlerConfirmation(id) => OverlayCommit::BrawlerDetails(*id),
-                _ => OverlayCommit::BrawlerList,
-            };
-            commit.overlay = Some(details);
+            cancel_brawler_deletion(overlay, profile, pending_deleted_brawler, commit);
         }
         FlowUiAction::SelectBrawler(brawler_id) => {
             select_brawler(*brawler_id, queue, practice, profile, commit);
@@ -221,14 +205,14 @@ pub(super) fn resolve_profile_action(
             if profile_changes_blocked(queue, practice, profile) {
                 return;
             }
+            pending_deleted_brawler.error = None;
             commit.overlay = Some(OverlayCommit::DeleteBrawlerConfirmation(*brawler_id));
+            commit.focus_index = Some(0);
         }
         FlowUiAction::ConfirmDeleteBrawler => {
-            let ClientOverlay::DeleteBrawlerConfirmation(brawler_id) = overlay else {
-                return;
-            };
-            let _ = profile.delete(*brawler_id);
-            commit.overlay = Some(OverlayCommit::BrawlerList);
+            if !profile_changes_blocked(queue, practice, profile) {
+                submit_brawler_deletion(overlay, profile, pending_deleted_brawler);
+            }
         }
         _ => unreachable!("flow action was routed to the wrong profile reducer"),
     }
@@ -616,4 +600,72 @@ fn cancel_brawler_edit(
         .map_or(Some(OverlayCommit::BrawlerList), |id| {
             Some(OverlayCommit::BrawlerDetails(id))
         });
+}
+
+fn profile_decision_message(decision: &crate::profiles::ProfileDecision) -> String {
+    match decision {
+        crate::profiles::ProfileDecision::Accepted => "Profile saved.".to_string(),
+        crate::profiles::ProfileDecision::InvalidRequest => {
+            "That brawler change is not valid.".to_string()
+        }
+        crate::profiles::ProfileDecision::StaleRevision => {
+            "The profile changed; review it and try again.".to_string()
+        }
+        crate::profiles::ProfileDecision::MissingBrawler => {
+            "That brawler no longer exists.".to_string()
+        }
+        crate::profiles::ProfileDecision::CapacityReached => {
+            "Brawler limit reached (16).".to_string()
+        }
+        crate::profiles::ProfileDecision::QueueLocked => {
+            "Leave the queue before changing a brawler.".to_string()
+        }
+        crate::profiles::ProfileDecision::TemporarilyUnavailable => {
+            "Profile storage is temporarily unavailable; try again.".to_string()
+        }
+        crate::profiles::ProfileDecision::StorageFault => {
+            "The profile could not be saved safely; owned data was preserved.".to_string()
+        }
+        crate::profiles::ProfileDecision::MissingPart => {
+            "That weapon part is no longer in this inventory.".to_string()
+        }
+        crate::profiles::ProfileDecision::PartAlreadyEquipped => {
+            "That physical part is already equipped on a brawler.".to_string()
+        }
+        crate::profiles::ProfileDecision::IncompatibleWeapon => {
+            "Those parts do not form a valid weapon configuration.".to_string()
+        }
+        crate::profiles::ProfileDecision::IncompatibleBuild => {
+            "Choose only one elemental resistance passive for this brawler.".to_string()
+        }
+    }
+}
+
+fn cancel_brawler_deletion(
+    overlay: &ClientOverlay,
+    profile: &crate::client::ClientProfileModel,
+    pending: &mut PendingDeletedBrawler,
+    commit: &mut FlowCommit,
+) {
+    if profile.pending() {
+        return;
+    }
+    pending.error = None;
+    commit.overlay = Some(match overlay {
+        ClientOverlay::DeleteBrawlerConfirmation(id) => OverlayCommit::BrawlerDetails(*id),
+        _ => OverlayCommit::BrawlerList,
+    });
+}
+
+fn submit_brawler_deletion(
+    overlay: &ClientOverlay,
+    profile: &mut crate::client::ClientProfileModel,
+    pending: &mut PendingDeletedBrawler,
+) {
+    if let ClientOverlay::DeleteBrawlerConfirmation(id) = overlay
+        && profile.delete(*id)
+    {
+        pending.id = Some(*id);
+        pending.error = None;
+    }
 }

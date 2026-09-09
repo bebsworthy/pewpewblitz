@@ -3061,3 +3061,111 @@ fn passive_picker_rejects_duplicates_and_fixed_frames_without_changing_other_slo
     assert_eq!(edit.ultimate_id, saved.ultimate_id);
     assert_eq!(edit.name, saved.name);
 }
+
+#[test]
+fn delete_confirmation_waits_for_authority_and_retains_rejected_brawler() {
+    let mut membership = lobby_membership_with_brawler();
+    let id = membership.profile.brawlers[0].id;
+    let mut app = configured_customization_app(&membership);
+    inject_action(&mut app, FlowUiAction::DeleteBrawler(id));
+    inject_action(&mut app, FlowUiAction::ConfirmDeleteBrawler);
+    inject_action(&mut app, FlowUiAction::ConfirmDeleteBrawler);
+    inject_action(&mut app, FlowUiAction::CancelDeleteBrawler);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::DeleteBrawlerConfirmation(id)
+    );
+    assert_eq!(
+        app.world()
+            .resource::<super::super::ClientProfileModel>()
+            .queued_commands_for_test()
+            .len(),
+        1
+    );
+    {
+        let mut p = app
+            .world_mut()
+            .resource_mut::<super::super::ClientProfileModel>();
+        p.set_snapshot_for_test(membership.profile.clone());
+        p.set_decision_for_test(crate::profiles::ProfileDecision::StorageFault);
+    }
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::DeleteBrawlerConfirmation(id)
+    );
+    assert!(
+        app.world()
+            .resource::<PendingDeletedBrawler>()
+            .error
+            .is_some()
+    );
+    assert_eq!(
+        app.world()
+            .resource::<super::super::ClientProfileModel>()
+            .snapshot()
+            .unwrap()
+            .brawlers[0]
+            .id,
+        id
+    );
+    inject_action(&mut app, FlowUiAction::ConfirmDeleteBrawler);
+    membership.profile.brawlers.clear();
+    membership.profile.selected_brawler_id = None;
+    {
+        let mut p = app
+            .world_mut()
+            .resource_mut::<super::super::ClientProfileModel>();
+        p.set_snapshot_for_test(membership.profile);
+        p.set_decision_for_test(crate::profiles::ProfileDecision::Accepted);
+    }
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerList
+    );
+    assert!(
+        app.world()
+            .resource::<PendingDeletedBrawler>()
+            .error
+            .is_none()
+    );
+}
+
+#[test]
+fn confirmation_navigation_starts_safe_and_supports_both_axes() {
+    let membership = lobby_membership_with_brawler();
+    let id = membership.profile.brawlers[0].id;
+    let mut app = configured_customization_app(&membership);
+    inject_action(&mut app, FlowUiAction::DeleteBrawler(id));
+    app.update();
+    assert_eq!(app.world().resource::<FlowNavigation>().selected, 0);
+    for (key, expected) in [
+        (KeyCode::ArrowRight, 1),
+        (KeyCode::ArrowLeft, 0),
+        (KeyCode::ArrowDown, 1),
+        (KeyCode::ArrowUp, 0),
+    ] {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        assert_eq!(app.world().resource::<FlowNavigation>().selected, expected);
+        assert!(
+            !app.world()
+                .resource::<super::super::ClientProfileModel>()
+                .pending()
+        );
+    }
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Escape);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerDetails(id)
+    );
+}

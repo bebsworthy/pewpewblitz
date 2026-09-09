@@ -229,12 +229,19 @@ Tapping a row opens that Brawler screen; merely opening a row does not select it
 is always available, including for the already-selected brawler, and returns directly to Dashboard.
 
 Every Brawler screen has Back to Brawlers. Customize Abilities and Customize Weapon are opaque
-full-screen children with Back to the same Brawler. Delete is the deliberate exception: it is a
-small confirmation layered over the still-visible Brawler screen, whose background actions remain
-disabled until Cancel or Delete is confirmed. Confirmation sends the authoritative intent and
-returns to Brawlers List while the mutation is pending. Accepted deletion removes the row; deleting
-the selected brawler selects the next creation ordinal with wraparound, while deleting the last
+full-screen children with Back to the same Brawler. Delete opens an opaque fullscreen confirmation
+with the saved name, an irreversible-action explanation, and Keep Brawler / Delete actions.
+Keep Brawler starts focused. Confirmation sends the authoritative intent, disables repeated
+submission and cancellation while pending, and returns to Brawlers List only after acceptance.
+Rejection retains the confirmation and explains the failure so the player can retry or cancel.
+Deleting the selected brawler selects the next creation ordinal with wraparound; deleting the last
 leaves the empty list with Create available.
+
+Delete Brawler, Leave Match, and Change Server share the same fullscreen confirmation composition,
+navy typography and slanted cut-corner actions. Safe actions use cream; confirming actions use
+orange. Wide windows place actions side by side; compact windows stack them with vertical scrolling
+and focus reveal. Arrow keys or gamepad navigation move between actions; cancel returns safely.
+The Leave Match confirmation does not pause simulation.
 
 Game Type Select edits a private draft from the current bounded server advertisement. Confirm
 commits an exact current `GameTypeId` and revision; Back discards the draft. The UI describes the

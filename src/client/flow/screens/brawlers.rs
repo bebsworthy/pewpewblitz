@@ -7,7 +7,7 @@ pub(in crate::client::flow) use super::equipment::{
     WeaponEquipmentRoot, WeaponEquipmentScrollArea,
 };
 // Saved-brawler browsing, creation, editing and deletion presentation.
-use super::shared::{FlowButton, FlowNavigation, spawn_flow_error_button, spawn_heading};
+use super::shared::{FlowButton, FlowNavigation};
 use super::{
     dashboard::{DashboardLayoutClass, dashboard_layout_class},
     scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible},
@@ -936,79 +936,4 @@ pub(super) fn weapon_stat_rows(
         rows.push(("SLOW", "YES".into()));
     }
     rows
-}
-
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::client::flow) fn present_delete_brawler_confirmation(
-    mut commands: Commands,
-    flow: Res<State<ClientFlow>>,
-    overlay: Res<ClientOverlay>,
-    roots: Query<Entity, With<DeleteBrawlerConfirmationRoot>>,
-    profile: Res<crate::client::ClientProfileModel>,
-    mut navigation: ResMut<FlowNavigation>,
-) {
-    let ClientOverlay::DeleteBrawlerConfirmation(brawler_id) = overlay.as_ref() else {
-        for entity in &roots {
-            commands.entity(entity).despawn();
-        }
-        return;
-    };
-    if !roots.is_empty() || *flow.get() != ClientFlow::Dashboard {
-        return;
-    }
-    let name = profile
-        .snapshot()
-        .and_then(|snapshot| {
-            snapshot
-                .brawlers
-                .iter()
-                .find(|brawler| brawler.id == *brawler_id)
-        })
-        .map_or("this brawler", |brawler| brawler.name.as_str());
-    navigation.selected = 0;
-    commands
-        .spawn((
-            DeleteBrawlerConfirmationRoot,
-            DespawnOnExit(ClientFlow::Dashboard),
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(0),
-                bottom: px(0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.78)),
-            GlobalZIndex(610),
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: percent(84),
-                    max_width: px(520),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: px(12),
-                    padding: UiRect::all(px(24)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.055, 0.08, 0.12)),
-            ))
-            .with_children(|panel| {
-                spawn_heading(panel, "DELETE BRAWLER?");
-                panel.spawn((
-                    Text::new(format!("Delete {name}? This cannot be undone.")),
-                    TextColor(Color::srgb(0.82, 0.88, 0.94)),
-                ));
-                spawn_flow_error_button(
-                    panel,
-                    0,
-                    FlowUiAction::CancelDeleteBrawler,
-                    "KEEP BRAWLER",
-                );
-                spawn_flow_error_button(panel, 1, FlowUiAction::ConfirmDeleteBrawler, "DELETE");
-            });
-        });
 }

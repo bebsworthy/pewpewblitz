@@ -1,0 +1,13 @@
+User approved proceeding with confirmation mockups first. Review existing destructive/navigation consequences. First proposal: fullscreen Delete Brawler with clean cream/navy (#081932)/teal/orange shared style, simple diagonal background fields, slanted cut-corner actions, concise irreversible consequence and saved name. No popup, backdrop duplication, controller hints, redundant Back or close controls. Keep Brawler is initially focused using shared inset contrasting outline/triangle; Delete is separate orange action. Subsequent Leave Match and Change Server reuse this layout with truthful consequence copy and two explicit actions. No invented penalties or loss claims. Preserve server authority, pending/rejection behavior and input isolation in eventual implementation. This ticket is design only: generate, inspect, save concept plus interaction notes, collect feedback; no runtime edits before approval.
+
+
+Delete proposal generated and inspected, saved as asset_src/player-shell/concepts/delete-confirmation-v1.png with interaction/provenance notes. First output had symmetric chamfers; corrected before handoff to slanted cut-corner buttons. Keep Brawler is the initial focus, no redundant Back/X. Awaiting user design review; no runtime changes.
+
+
+User feedback: option 2 approved; option 1 rejected because its button style is wrong. Accepted reference is the second generated image, saved as delete-confirmation-v1.png (exec-dbe0bdd1-2f14-47cd-9293-777b9335e365.png). Use right-leaning slanted surfaces with cuts at top-right/bottom-left, not symmetric chamfered rectangles. This approval establishes the Delete confirmation composition and shared confirmation style; Leave Match and Change Server variants remain to be presented under this design ticket.
+
+
+Completed both remaining mockups using approved option 2 as edit reference: leave-match-confirmation-v1.png and change-server-confirmation-v1.png under asset_src/player-shell/concepts, with provenance/interaction notes. Leave: Return to the dashboard; Keep Playing / Leave Match. Change server: Disconnect from the current lobby; Stay Connected / Change Server. Both visually inspected for correct slanted cut-corner geometry, full label containment, shared focus frame and concise copy. No runtime edits. Design set complete and presented; these two variants await review, while Delete is already approved. Learning: editing the accepted silhouette directly avoids the symmetric-chamfer drift seen in the first Delete proposal; runtime geometry remains shared code, not generated artwork.
+
+
+User approved both remaining variants and requested implementation. Design complete; continue runtime implementation in a separate ticket using this approved set.

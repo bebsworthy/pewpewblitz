@@ -400,13 +400,25 @@ pub(super) fn collect_flow_input(
                 .iter()
                 .position(|index| *index == navigation.selected)
                 .unwrap_or(0);
+            let confirmation = matches!(
+                *overlay,
+                ClientOverlay::DeleteBrawlerConfirmation(_)
+                    | ClientOverlay::LeaveConfirmation
+                    | ClientOverlay::ChangeServerConfirmation
+            );
             if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
                 || pad_pressed(GamepadButton::DPadDown)
+                || (confirmation
+                    && (keyboard.just_pressed(KeyCode::ArrowRight)
+                        || pad_pressed(GamepadButton::DPadRight)))
             {
                 navigation.selected = available[(position + 1).min(available.len() - 1)];
             }
             if keyboard.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW])
                 || pad_pressed(GamepadButton::DPadUp)
+                || (confirmation
+                    && (keyboard.just_pressed(KeyCode::ArrowLeft)
+                        || pad_pressed(GamepadButton::DPadLeft)))
             {
                 navigation.selected = available[position.saturating_sub(1)];
             }

@@ -10,8 +10,8 @@ use input::collect_flow_input;
 use observation::observe_session;
 use persistence::load_connection_state;
 use reducer::{
-    MatchFailureNotice, PendingCreatedBrawler, PendingEditedBrawler, commit_flow,
-    resolve_flow_action, teardown_session,
+    MatchFailureNotice, PendingCreatedBrawler, PendingDeletedBrawler, PendingEditedBrawler,
+    commit_flow, resolve_flow_action, teardown_session,
 };
 use screens::{
     brawlers::{
@@ -19,9 +19,10 @@ use screens::{
         keep_brawler_details_focus_visible, keep_brawler_list_focus_visible,
         keep_weapon_equipment_focus_visible, open_empty_profile_creation, present_brawler_creation,
         present_brawler_details, present_brawler_editor, present_brawler_list,
-        present_delete_brawler_confirmation, present_weapon_equipment, scroll_brawler_details,
-        scroll_brawler_list, scroll_weapon_equipment,
+        present_weapon_equipment, scroll_brawler_details, scroll_brawler_list,
+        scroll_weapon_equipment,
     },
+    confirmations::{present_confirmations, scroll_confirmations},
     connecting::{spawn_connecting, update_connecting_copy},
     dashboard::{
         DashboardNotice, DashboardReturnFocus, apply_dashboard_layout,
@@ -34,8 +35,7 @@ use screens::{
     },
     match_loading::{spawn_match_loading, update_match_loading},
     overlays::{
-        present_cancel_confirmation, present_change_server_confirmation,
-        present_flow_error_overlay, present_leave_confirmation, update_rate_limit_try_again,
+        present_cancel_confirmation, present_flow_error_overlay, update_rate_limit_try_again,
     },
     practice_maps::{
         PracticeCarousel, animate_practice_maps, practice_map_input, present_practice_maps,
@@ -105,6 +105,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<DashboardNotice>()
             .init_resource::<PendingCreatedBrawler>()
             .init_resource::<PendingEditedBrawler>()
+            .init_resource::<PendingDeletedBrawler>()
             .init_resource::<BrawlerCreationDraft>()
             .init_resource::<BrawlerEditDraft>()
             .init_resource::<WeaponEquipmentDraft>()
@@ -163,8 +164,7 @@ impl Plugin for ClientFlowPlugin {
                     update_server_select_copy,
                     present_flow_error_overlay,
                     present_cancel_confirmation,
-                    present_leave_confirmation,
-                    present_change_server_confirmation,
+                    scroll_confirmations,
                     present_match_completion,
                     spawn_match_loading.before(update_match_loading),
                     update_match_loading,
@@ -194,7 +194,7 @@ impl Plugin for ClientFlowPlugin {
                     present_brawler_editor,
                     scroll_weapon_equipment.before(present_weapon_equipment),
                     present_weapon_equipment,
-                    present_delete_brawler_confirmation,
+                    present_confirmations,
                     scroll_game_type_select,
                 )
                     .in_set(ClientFlowSet::PresentFlow)

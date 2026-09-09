@@ -79,7 +79,7 @@ pub(in crate::client::flow) fn present_brawler_details(
     if roots.iter().any(|(_, old)| *old == key) {
         return;
     }
-    if roots.is_empty() {
+    if roots.is_empty() && !confirmation {
         screen.navigation.selected = 2;
     }
     for (entity, _) in &roots {
