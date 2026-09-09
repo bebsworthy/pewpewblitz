@@ -39,7 +39,7 @@ asset-free native row presentation for isolated behavior tests.
 | Practice maps | Cards, arrows, Start; Practice carousel adapter |
 | Brawler browser/details | Back, cards, overview panels, rename, Delete, Select; flow adapter |
 | Weapon and parts | Back, equipped-slot and part cards, Nothing; equipment draft adapter |
-| Creation / existing ability editor | Shared flow actions; subsequent layout work uses these components |
+| Creation / ability overview and pickers | Shared catalog card composition, Back and fields; draft and authoritative profile adapters |
 | Settings and Controls | Back plus rows, categories, switches, sliders, bindings; Settings adapter |
 | Server entry, connecting, queue, loading, results and recovery | Shared flow fields/actions; existing screen layout retained |
 | Credits and shell overlays | Shared actions; shell focus/layer adapter |

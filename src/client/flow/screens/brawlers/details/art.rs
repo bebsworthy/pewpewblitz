@@ -17,7 +17,7 @@ pub(in crate::client::flow::screens::brawlers) fn ultimate_icon(
         UltimateKind::BigBlob => "blob",
     }
 }
-pub(super) fn passive_icon(kind: PassiveKind) -> &'static str {
+pub(in crate::client::flow::screens::brawlers) fn passive_icon(kind: PassiveKind) -> &'static str {
     match kind {
         PassiveKind::LightweightFrame => "feather",
         PassiveKind::ReinforcedFrame | PassiveKind::Tenacity => "shield",

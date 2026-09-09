@@ -58,6 +58,12 @@ impl Default for BrawlerCreationDraft {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::client::flow) enum AbilityPicker {
+    Ultimate,
+    Passive(usize),
+}
+
 #[derive(Resource, Clone, Debug, PartialEq, Eq)]
 pub(in crate::client::flow) struct BrawlerEditDraft {
     pub(in crate::client::flow) brawler_id: Option<crate::profiles::SavedBrawlerId>,
@@ -69,6 +75,7 @@ pub(in crate::client::flow) struct BrawlerEditDraft {
     pub(in crate::client::flow) name_caret: usize,
     pub(in crate::client::flow) editing_name: bool,
     pub(in crate::client::flow) inline_rename: bool,
+    pub(in crate::client::flow) picker: Option<AbilityPicker>,
     pub(in crate::client::flow) inline_error: Option<String>,
 }
 
@@ -87,6 +94,7 @@ impl Default for BrawlerEditDraft {
             name_caret: 0,
             editing_name: false,
             inline_rename: false,
+            picker: None,
             inline_error: None,
         }
     }
@@ -143,7 +151,8 @@ pub(in crate::client::flow) struct BrawlerCreationRoot {
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(in crate::client::flow) struct BrawlerEditorRoot {
     draft: BrawlerEditDraft,
-    layout: BrawlerDetailsLayout,
+    viewport: (u32, u32),
+    pending: bool,
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -467,40 +476,6 @@ fn browser_card_node(height: f32) -> Node {
     }
 }
 
-fn spawn_brawler_screen_button(
-    parent: &mut ChildSpawnerCommands,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    width: Val,
-    disabled: bool,
-) {
-    let mut button = parent.spawn((
-        Button,
-        FlowButton {
-            index,
-            action,
-            error_action: true,
-        },
-        Node {
-            width,
-            min_height: px(52),
-            padding: UiRect::axes(px(16), px(10)),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-    ));
-    if disabled {
-        button.insert(InteractionDisabled);
-    }
-    button.with_child((
-        Text::new(label),
-        TextFont::from_font_size(18.0),
-        TextColor(Color::WHITE),
-    ));
-}
-
 #[allow(clippy::needless_pass_by_value)]
 pub(in crate::client::flow) fn scroll_brawler_list(
     overlay: Res<ClientOverlay>,
@@ -509,7 +484,7 @@ pub(in crate::client::flow) fn scroll_brawler_list(
 ) {
     if !matches!(
         overlay.as_ref(),
-        ClientOverlay::BrawlerList | ClientOverlay::BrawlerCreation
+        ClientOverlay::BrawlerList | ClientOverlay::BrawlerCreation | ClientOverlay::BrawlerEditor
     ) {
         return;
     }
@@ -663,7 +638,7 @@ pub(in crate::client::flow) fn keep_brawler_list_focus_visible(
 ) {
     if !matches!(
         overlay.as_ref(),
-        ClientOverlay::BrawlerList | ClientOverlay::BrawlerCreation
+        ClientOverlay::BrawlerList | ClientOverlay::BrawlerCreation | ClientOverlay::BrawlerEditor
     ) {
         *prior = None;
         return;
@@ -829,227 +804,9 @@ pub(in crate::client::flow) use details::present_brawler_details;
 mod creation;
 pub(in crate::client::flow) use creation::present_brawler_creation;
 
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::too_many_lines,
-    reason = "one cohesive Bevy overlay builder keeps editor layout and navigation indices adjacent"
-)]
-pub(in crate::client::flow) fn present_brawler_editor(
-    mut commands: Commands,
-    flow: Res<State<ClientFlow>>,
-    overlay: Res<ClientOverlay>,
-    draft: Res<BrawlerEditDraft>,
-    profile: Res<crate::client::ClientProfileModel>,
-    mut screen: BrawlerScreenUi,
-    roots: Query<(Entity, &BrawlerEditorRoot)>,
-) {
-    if !matches!(overlay.as_ref(), ClientOverlay::BrawlerEditor)
-        || *flow.get() != ClientFlow::Dashboard
-    {
-        for (entity, _) in &roots {
-            commands.entity(entity).despawn();
-        }
-        return;
-    }
-    let Some(catalog) = profile.catalog() else {
-        return;
-    };
-    let layout = brawler_screen_layout(&screen);
-    let render_key = BrawlerEditorRoot {
-        draft: draft.clone(),
-        layout,
-    };
-    if roots.iter().any(|(_, root)| *root == render_key) {
-        return;
-    }
-    for (entity, _) in &roots {
-        commands.entity(entity).despawn();
-    }
-    screen.navigation.selected = 0;
-    let compact = layout == BrawlerDetailsLayout::Compact;
-    let name = if draft.editing_name {
-        let caret = draft.name_caret.min(draft.name.len());
-        format!("{}|{}", &draft.name[..caret], &draft.name[caret..])
-    } else {
-        draft.name.clone()
-    };
-    commands
-        .spawn((
-            render_key,
-            DespawnOnExit(ClientFlow::Dashboard),
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(0),
-                bottom: px(0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Stretch,
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.018, 0.11, 0.24)),
-            GlobalZIndex(510),
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: percent(100),
-                    min_height: px(72),
-                    align_items: AlignItems::Center,
-                    column_gap: px(16),
-                    padding: UiRect::axes(px(18), px(10)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.015, 0.04, 0.085)),
-            ))
-            .with_children(|header| {
-                spawn_brawler_screen_button(
-                    header,
-                    5,
-                    FlowUiAction::CancelBrawlerEdit,
-                    "‹ BRAWLER",
-                    px(170),
-                    false,
-                );
-                header.spawn((
-                    Text::new("CUSTOMIZE ABILITIES"),
-                    TextFont::from_font_size(if compact { 27.0 } else { 34.0 }),
-                    TextColor(Color::WHITE),
-                ));
-            });
-            root.spawn((Node {
-                width: percent(100),
-                min_height: px(0),
-                flex_grow: 1.0,
-                flex_direction: if compact {
-                    FlexDirection::Column
-                } else {
-                    FlexDirection::Row
-                },
-                align_items: AlignItems::Stretch,
-                justify_content: JustifyContent::Center,
-                row_gap: px(16),
-                column_gap: px(20),
-                padding: UiRect::all(if compact { px(14) } else { px(28) }),
-                overflow: Overflow::scroll_y(),
-                ..default()
-            },))
-            .with_children(|body| {
-                body.spawn((
-                    Node {
-                        width: if compact { percent(100) } else { percent(32) },
-                        max_width: if compact { Val::Auto } else { px(420) },
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Stretch,
-                        row_gap: px(12),
-                        padding: UiRect::all(px(22)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.03, 0.22, 0.46)),
-                ))
-                .with_children(|identity| {
-                    identity.spawn((
-                        Text::new("IDENTITY"),
-                        TextFont::from_font_size(18.0),
-                        TextColor(Color::srgb(0.38, 0.88, 1.0)),
-                    ));
-                    identity.spawn((
-                        Text::new(format!(
-                            "{}\n{}\n\nFighter profile and weapon base are permanent.",
-                            advertised_fighter_name(catalog, draft.fighter_profile_id),
-                            advertised_weapon_name(catalog, draft.weapon_base_id)
-                        )),
-                        TextFont::from_font_size(16.0),
-                        TextColor(Color::srgb(0.8, 0.9, 0.98)),
-                    ));
-                    spawn_brawler_screen_button(
-                        identity,
-                        0,
-                        FlowUiAction::BeginBrawlerNameEdit,
-                        &format!("NAME · {name}"),
-                        percent(100),
-                        false,
-                    );
-                });
-                body.spawn((
-                    Node {
-                        width: if compact { percent(100) } else { percent(68) },
-                        max_width: if compact { Val::Auto } else { px(760) },
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Stretch,
-                        row_gap: px(14),
-                        padding: UiRect::all(px(22)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.025, 0.075, 0.15)),
-                ))
-                .with_children(|abilities| {
-                    abilities.spawn((
-                        Text::new("ACTIVE LOADOUT"),
-                        TextFont::from_font_size(18.0),
-                        TextColor(Color::srgb(0.82, 0.62, 1.0)),
-                    ));
-                    abilities.spawn((
-                        Text::new("Tap a slot to cycle through the choices advertised by this server."),
-                        TextFont::from_font_size(14.0),
-                        TextColor(Color::srgb(0.72, 0.84, 0.94)),
-                    ));
-                    spawn_brawler_screen_button(
-                        abilities,
-                        1,
-                        FlowUiAction::CycleBrawlerUltimate,
-                        &format!("ULTIMATE\n{}", ultimate_name(catalog, draft.ultimate_id)),
-                        percent(100),
-                        false,
-                    );
-                    spawn_brawler_screen_button(
-                        abilities,
-                        2,
-                        FlowUiAction::CycleBrawlerPassiveOne,
-                        &format!("PASSIVE 1\n{}", passive_name(catalog, draft.passive_ids[0])),
-                        percent(100),
-                        false,
-                    );
-                    spawn_brawler_screen_button(
-                        abilities,
-                        3,
-                        FlowUiAction::CycleBrawlerPassiveTwo,
-                        &format!("PASSIVE 2\n{}", passive_name(catalog, draft.passive_ids[1])),
-                        percent(100),
-                        false,
-                    );
-                });
-            });
-            root.spawn((
-                Node {
-                    width: percent(100),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    column_gap: px(16),
-                    padding: UiRect::axes(px(22), px(12)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.015, 0.055, 0.11)),
-            ))
-            .with_children(|footer| {
-                if let Some(error) = &draft.inline_error {
-                    footer.spawn((
-                        Text::new(error),
-                        TextFont::from_font_size(14.0),
-                        TextColor(Color::srgb(1.0, 0.5, 0.45)),
-                    ));
-                }
-                spawn_brawler_screen_button(
-                    footer,
-                    4,
-                    FlowUiAction::ConfirmBrawlerEdit,
-                    "SAVE CHANGES",
-                    if compact { percent(100) } else { px(420) },
-                    profile.pending(),
-                );
-            });
-        });
-}
+mod abilities;
+mod choice_cards;
+pub(in crate::client::flow) use abilities::present_brawler_editor;
 
 pub(super) fn weapon_part_effect_text(effect: crate::weapon_parts::WeaponPartEffect) -> String {
     let modifier = |label: &str, flat: f64, percent: i16, unit: &str| {

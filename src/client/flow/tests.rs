@@ -2922,3 +2922,142 @@ fn creation_pickers_preserve_named_draft_and_only_submit_from_overview() {
             .is_none()
     );
 }
+
+#[test]
+fn ability_picker_waits_for_acceptance_and_keeps_loadout_on_rejection() {
+    use super::screens::brawlers::AbilityPicker;
+    let mut membership = lobby_membership_with_brawler();
+    let saved = membership.profile.brawlers[0].clone();
+    let mut app = configured_customization_app(&membership);
+    inject_action(&mut app, FlowUiAction::OpenBrawlerEditor(saved.id));
+    inject_action(&mut app, FlowUiAction::OpenBrawlerUltimate);
+    let replacement = app
+        .world()
+        .resource::<super::super::ClientProfileModel>()
+        .catalog()
+        .unwrap()
+        .ultimates
+        .iter()
+        .find(|u| u.id != saved.ultimate_id)
+        .unwrap()
+        .id;
+    inject_action(&mut app, FlowUiAction::ChooseBrawlerUltimate(replacement));
+    assert_eq!(
+        app.world().resource::<BrawlerEditDraft>().ultimate_id,
+        saved.ultimate_id
+    );
+    let profile = app.world().resource::<super::super::ClientProfileModel>();
+    assert!(profile.pending());
+    let crate::profiles::ProfileCommand::EditBrawler { edit, .. } =
+        profile.queued_commands_for_test().front().unwrap()
+    else {
+        panic!("expected edit")
+    };
+    assert_eq!(edit.name, saved.name);
+    assert_eq!(edit.passive_ids, saved.passive_ids);
+    assert_eq!(edit.ultimate_id, replacement);
+    inject_action(&mut app, FlowUiAction::CancelBrawlerEdit);
+    inject_action(
+        &mut app,
+        FlowUiAction::ChooseBrawlerUltimate(saved.ultimate_id),
+    );
+    assert_eq!(
+        app.world().resource::<BrawlerEditDraft>().picker,
+        Some(AbilityPicker::Ultimate)
+    );
+    assert_eq!(
+        app.world()
+            .resource::<super::super::ClientProfileModel>()
+            .queued_commands_for_test()
+            .len(),
+        1
+    );
+    membership.profile.brawlers[0].ultimate_id = replacement;
+    {
+        let mut p = app
+            .world_mut()
+            .resource_mut::<super::super::ClientProfileModel>();
+        p.set_snapshot_for_test(membership.profile.clone());
+        p.set_decision_for_test(crate::profiles::ProfileDecision::Accepted);
+    }
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::BrawlerEditor
+    );
+    assert!(app.world().resource::<BrawlerEditDraft>().picker.is_none());
+    assert_eq!(
+        app.world().resource::<BrawlerEditDraft>().ultimate_id,
+        replacement
+    );
+    inject_action(&mut app, FlowUiAction::OpenBrawlerUltimate);
+    inject_action(
+        &mut app,
+        FlowUiAction::ChooseBrawlerUltimate(saved.ultimate_id),
+    );
+    {
+        let mut p = app
+            .world_mut()
+            .resource_mut::<super::super::ClientProfileModel>();
+        p.set_snapshot_for_test(membership.profile.clone());
+        p.set_decision_for_test(crate::profiles::ProfileDecision::StorageFault);
+    }
+    app.update();
+    let draft = app.world().resource::<BrawlerEditDraft>();
+    assert_eq!(draft.ultimate_id, replacement);
+    assert_eq!(draft.picker, Some(AbilityPicker::Ultimate));
+    assert!(draft.inline_error.is_some());
+}
+
+#[test]
+fn passive_picker_rejects_duplicates_and_fixed_frames_without_changing_other_slot() {
+    let membership = lobby_membership_with_brawler();
+    let saved = membership.profile.brawlers[0].clone();
+    let mut app = configured_customization_app(&membership);
+    inject_action(&mut app, FlowUiAction::OpenBrawlerEditor(saved.id));
+    inject_action(&mut app, FlowUiAction::OpenBrawlerPassive(0));
+    let catalog = app
+        .world()
+        .resource::<super::super::ClientProfileModel>()
+        .catalog()
+        .unwrap();
+    let fixed = catalog
+        .passives
+        .iter()
+        .find(|p| !p.saved_brawler_selectable)
+        .unwrap()
+        .id;
+    let replacement = catalog
+        .selectable_passives()
+        .find(|p| !saved.passive_ids.contains(&p.id))
+        .unwrap()
+        .id;
+    for invalid in [fixed, saved.passive_ids[1]] {
+        inject_action(&mut app, FlowUiAction::ChooseBrawlerPassive(invalid));
+        assert!(
+            !app.world()
+                .resource::<super::super::ClientProfileModel>()
+                .pending()
+        );
+        assert!(
+            app.world()
+                .resource::<BrawlerEditDraft>()
+                .inline_error
+                .is_some()
+        );
+        assert_eq!(
+            app.world().resource::<BrawlerEditDraft>().passive_ids,
+            saved.passive_ids
+        );
+    }
+    inject_action(&mut app, FlowUiAction::ChooseBrawlerPassive(replacement));
+    let profile = app.world().resource::<super::super::ClientProfileModel>();
+    let crate::profiles::ProfileCommand::EditBrawler { edit, .. } =
+        profile.queued_commands_for_test().front().unwrap()
+    else {
+        panic!("expected edit")
+    };
+    assert_eq!(edit.passive_ids, [replacement, saved.passive_ids[1]]);
+    assert_eq!(edit.ultimate_id, saved.ultimate_id);
+    assert_eq!(edit.name, saved.name);
+}

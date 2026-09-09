@@ -143,6 +143,7 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
     game_draft: Res<GameTypeSelectionDraft>,
     equipment: Option<Res<super::equipment::WeaponEquipmentDraft>>,
     creation: Option<Res<super::brawlers::BrawlerCreationDraft>>,
+    abilities: Option<Res<super::brawlers::BrawlerEditDraft>>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut buttons: Query<(
         Entity,
@@ -182,6 +183,13 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
             FlowUiAction::ChooseCreationUltimate(id) => {
                 creation.as_deref().is_some_and(|d| d.ultimate == id)
             }
+            FlowUiAction::ChooseBrawlerUltimate(id) => {
+                abilities.as_deref().is_some_and(|d| d.ultimate_id == id)
+            }
+            FlowUiAction::ChooseBrawlerPassive(id) => abilities.as_deref().is_some_and(|d| {
+                matches!(d.picker,
+                Some(super::brawlers::AbilityPicker::Passive(slot)) if d.passive_ids[slot] == id)
+            }),
             _ => false,
         };
         let next = SurfaceState {

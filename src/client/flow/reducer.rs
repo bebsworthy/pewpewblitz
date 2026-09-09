@@ -584,9 +584,10 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::SelectBrawler(_)
         | FlowUiAction::OpenBrawlerEditor(_)
         | FlowUiAction::BeginBrawlerNameEdit
-        | FlowUiAction::CycleBrawlerUltimate
-        | FlowUiAction::CycleBrawlerPassiveOne
-        | FlowUiAction::CycleBrawlerPassiveTwo
+        | FlowUiAction::OpenBrawlerUltimate
+        | FlowUiAction::OpenBrawlerPassive(_)
+        | FlowUiAction::ChooseBrawlerUltimate(_)
+        | FlowUiAction::ChooseBrawlerPassive(_)
         | FlowUiAction::ConfirmBrawlerEdit
         | FlowUiAction::DeleteBrawler(_)
         | FlowUiAction::ConfirmDeleteBrawler) => resolve_profile_action(

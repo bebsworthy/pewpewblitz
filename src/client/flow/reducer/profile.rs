@@ -4,7 +4,7 @@ use crate::client::flow::{
     actions::{FlowCommit, FlowUiAction, OverlayCommit},
     model::ClientOverlay,
     screens::{
-        brawlers::{BrawlerCreationDraft, BrawlerEditDraft},
+        brawlers::{AbilityPicker, BrawlerCreationDraft, BrawlerEditDraft},
         dashboard::{DASHBOARD_BUILD_INDEX, DashboardNotice},
     },
 };
@@ -102,10 +102,7 @@ pub(super) fn resolve_profile_decision(
         commit.overlay = Some(OverlayCommit::BrawlerDetails(created.id));
         commit.focus_index = Some(0);
     } else if accepted && let Some(brawler_id) = pending_edited_brawler.0.take() {
-        brawler_edit.inline_rename = false;
-        brawler_edit.editing_name = false;
-        commit.overlay = Some(OverlayCommit::BrawlerDetails(brawler_id));
-        commit.focus_index = Some(1);
+        accept_brawler_edit(profile, brawler_edit, brawler_id, commit);
     } else if !accepted {
         if pending_created_brawler.0.take().is_some() {
             creation_draft.inline_error.clone_from(&dashboard_notice.0);
@@ -170,13 +167,7 @@ pub(super) fn resolve_profile_action(
             dashboard_notice,
             commit,
         ),
-        FlowUiAction::CancelBrawlerEdit => {
-            commit.overlay = brawler_edit
-                .brawler_id
-                .map_or(Some(OverlayCommit::BrawlerList), |id| {
-                    Some(OverlayCommit::BrawlerDetails(id))
-                });
-        }
+        FlowUiAction::CancelBrawlerEdit => cancel_brawler_edit(profile, brawler_edit, commit),
         FlowUiAction::CancelDeleteBrawler => {
             let details = match overlay {
                 ClientOverlay::DeleteBrawlerConfirmation(id) => OverlayCommit::BrawlerDetails(*id),
@@ -203,9 +194,23 @@ pub(super) fn resolve_profile_action(
             brawler_edit.name_caret = brawler_edit.name.len();
             brawler_edit.inline_error = None;
         }
-        FlowUiAction::CycleBrawlerUltimate => cycle_brawler_ultimate(profile, brawler_edit),
-        FlowUiAction::CycleBrawlerPassiveOne => cycle_brawler_passive(profile, brawler_edit, 0),
-        FlowUiAction::CycleBrawlerPassiveTwo => cycle_brawler_passive(profile, brawler_edit, 1),
+        action @ (FlowUiAction::OpenBrawlerUltimate
+        | FlowUiAction::OpenBrawlerPassive(_)
+        | FlowUiAction::ChooseBrawlerUltimate(_)
+        | FlowUiAction::ChooseBrawlerPassive(_)) => {
+            if !matches!(overlay, ClientOverlay::BrawlerEditor)
+                || profile_changes_blocked(queue, practice, profile)
+            {
+                return;
+            }
+            resolve_ability_action(
+                action,
+                profile,
+                brawler_edit,
+                pending_edited_brawler,
+                commit,
+            );
+        }
         FlowUiAction::ConfirmBrawlerEdit => {
             confirm_brawler_edit(profile, brawler_edit, pending_edited_brawler);
             if brawler_edit.inline_rename && profile.pending() {
@@ -456,47 +461,91 @@ fn open_brawler_editor(
             passive_ids: brawler.passive_ids,
             editing_name: false,
             inline_rename: false,
+            picker: None,
             inline_error: None,
         };
         commit.overlay = Some(OverlayCommit::BrawlerEditor);
     }
 }
 
-fn cycle_brawler_ultimate(
-    profile: &crate::client::ClientProfileModel,
-    draft: &mut BrawlerEditDraft,
-) {
-    let Some(catalog) = profile.catalog() else {
-        return;
-    };
-    let index = catalog
-        .ultimates
-        .iter()
-        .position(|definition| definition.id == draft.ultimate_id)
-        .unwrap_or(0);
-    draft.ultimate_id = catalog.ultimates[(index + 1) % catalog.ultimates.len()].id;
+fn ability_slot_index(picker: AbilityPicker) -> usize {
+    match picker {
+        AbilityPicker::Ultimate => 0,
+        AbilityPicker::Passive(slot) => slot + 1,
+    }
 }
 
-fn cycle_brawler_passive(
-    profile: &crate::client::ClientProfileModel,
+fn resolve_ability_action(
+    action: &FlowUiAction,
+    profile: &mut crate::client::ClientProfileModel,
     draft: &mut BrawlerEditDraft,
-    slot: usize,
+    pending: &mut PendingEditedBrawler,
+    commit: &mut FlowCommit,
 ) {
     let Some(catalog) = profile.catalog() else {
         return;
     };
-    let options: Vec<_> = catalog
-        .selectable_passives()
-        .map(|entry| entry.id)
-        .collect();
-    let other_slot = 1 - slot;
-    let index = options
-        .iter()
-        .position(|id| *id == draft.passive_ids[slot])
-        .unwrap_or(0);
-    draft.passive_ids[slot] = options[(index + 1) % options.len()];
-    if draft.passive_ids[slot] == draft.passive_ids[other_slot] {
-        draft.passive_ids[other_slot] = options[(index + 2) % options.len()];
+    let picker = match action {
+        FlowUiAction::OpenBrawlerUltimate => Some(AbilityPicker::Ultimate),
+        FlowUiAction::OpenBrawlerPassive(slot) if *slot < 2 => Some(AbilityPicker::Passive(*slot)),
+        _ => None,
+    };
+    if let Some(picker) = picker {
+        draft.picker = Some(picker);
+        draft.inline_error = None;
+        commit.focus_index = Some(
+            match picker {
+                AbilityPicker::Ultimate => catalog
+                    .ultimates
+                    .iter()
+                    .position(|u| u.id == draft.ultimate_id),
+                AbilityPicker::Passive(slot) => catalog
+                    .passives
+                    .iter()
+                    .position(|p| p.id == draft.passive_ids[slot]),
+            }
+            .unwrap_or(0),
+        );
+        return;
+    }
+    let mut edit = crate::profiles::BrawlerEdit {
+        name: draft.name.clone(),
+        ultimate_id: draft.ultimate_id,
+        passive_ids: draft.passive_ids,
+    };
+    match (action, draft.picker) {
+        (FlowUiAction::ChooseBrawlerUltimate(id), Some(AbilityPicker::Ultimate)) => {
+            edit.ultimate_id = *id;
+        }
+        (FlowUiAction::ChooseBrawlerPassive(id), Some(AbilityPicker::Passive(slot))) => {
+            edit.passive_ids[slot] = *id;
+        }
+        _ => return,
+    }
+    if let Err(error) = catalog.validate_edit(&edit) {
+        draft.inline_error = Some(
+            match error {
+                crate::profiles::ProfileModelError::DuplicatePassive => {
+                    "This passive is already used in the other slot."
+                }
+                _ => "This ability is unavailable for this brawler.",
+            }
+            .into(),
+        );
+        return;
+    }
+    if edit.ultimate_id == draft.ultimate_id && edit.passive_ids == draft.passive_ids {
+        if let Some(picker) = draft.picker.take() {
+            commit.focus_index = Some(ability_slot_index(picker));
+        }
+        draft.inline_error = None;
+        return;
+    }
+    if let Some(id) = draft.brawler_id
+        && profile.edit(id, edit)
+    {
+        pending.0 = Some(id);
+        draft.inline_error = None;
     }
 }
 
@@ -523,4 +572,48 @@ fn confirm_brawler_edit(
         pending.0 = Some(brawler_id);
         draft.inline_error = None;
     }
+}
+
+fn accept_brawler_edit(
+    profile: &crate::client::ClientProfileModel,
+    brawler_edit: &mut BrawlerEditDraft,
+    brawler_id: crate::profiles::SavedBrawlerId,
+    commit: &mut FlowCommit,
+) {
+    if let Some(picker) = brawler_edit.picker.take() {
+        if let Some(saved) = profile
+            .snapshot()
+            .and_then(|s| s.brawlers.iter().find(|b| b.id == brawler_id))
+        {
+            brawler_edit.ultimate_id = saved.ultimate_id;
+            brawler_edit.passive_ids = saved.passive_ids;
+        }
+        commit.overlay = Some(OverlayCommit::BrawlerEditor);
+        commit.focus_index = Some(ability_slot_index(picker));
+    } else {
+        brawler_edit.inline_rename = false;
+        brawler_edit.editing_name = false;
+        commit.overlay = Some(OverlayCommit::BrawlerDetails(brawler_id));
+        commit.focus_index = Some(1);
+    }
+}
+
+fn cancel_brawler_edit(
+    profile: &crate::client::ClientProfileModel,
+    brawler_edit: &mut BrawlerEditDraft,
+    commit: &mut FlowCommit,
+) {
+    if profile.pending() {
+        return;
+    }
+    if let Some(picker) = brawler_edit.picker.take() {
+        brawler_edit.inline_error = None;
+        commit.focus_index = Some(ability_slot_index(picker));
+        return;
+    }
+    commit.overlay = brawler_edit
+        .brawler_id
+        .map_or(Some(OverlayCommit::BrawlerList), |id| {
+            Some(OverlayCommit::BrawlerDetails(id))
+        });
 }

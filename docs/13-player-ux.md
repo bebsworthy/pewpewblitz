@@ -73,8 +73,10 @@ flowchart TD
     BrawlerDetails -- Back --> BrawlerList
     BrawlerDetails -- "Select for Play" --> Dashboard
     BrawlerDetails -- "Customize Abilities" --> AbilityCustomize[Customize Abilities screen]
-    AbilityCustomize -- "Back / accepted save" --> BrawlerDetails
-    AbilityCustomize -- "rejected save" --> AbilityCustomize
+    AbilityCustomize -- Back --> BrawlerDetails
+    AbilityCustomize -- "choose slot" --> AbilityPicker[Fullscreen ability picker]
+    AbilityPicker -- "Back / accepted change" --> AbilityCustomize
+    AbilityPicker -- "rejected change" --> AbilityPicker
     BrawlerDetails -- "Customize Weapon" --> WeaponCustomize[Customize Weapon screen]
     WeaponCustomize -- "Back / Save" --> BrawlerDetails
     BrawlerDetails -- Delete --> DeleteConfirm{Delete confirmation}
@@ -529,3 +531,15 @@ The following directions may extend this shell without changing its present auth
 Each extension requires a focused Ticket. It should attach to Dashboard or another
 demonstrated owner rather than creating a new top-level hub or generic navigation framework in
 advance.
+
+### Saved-brawler ability selection
+
+The ability overview has one ultimate and two passive cards. Each opens a fullscreen,
+responsive catalog grid (five columns on wide screens), with vertical wheel scrolling and
+keyboard/gamepad focus reveal. The current choice is teal; the shared contrasting focus
+frame identifies navigation separately. Choosing a valid replacement submits one authoritative
+profile edit while preserving the name and other slots. The picker returns only after server
+acceptance; rejection retains the prior accepted build and shows the error in the picker.
+There is no Save button. Selecting the current choice returns without a mutation.
+Frame passives remain fighter-profile-owned, and duplicate passives are unavailable with
+a concise reason. Name editing stays on brawler details.

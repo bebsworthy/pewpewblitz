@@ -1,8 +1,8 @@
 //! Creation draft and fullscreen catalog choices; profile reducer owns submission.
 use super::{
-    BrawlerBrowserArt, BrawlerCardPreview, BrawlerCreationDraft, BrawlerCreationRoot,
-    BrawlerListScrollArea, BrawlerScreenUi, CreationPicker, advertised_fighter_name,
-    advertised_weapon_name, brawler_screen_layout, browser_columns, details, ultimate_name,
+    BrawlerBrowserArt, BrawlerCreationDraft, BrawlerCreationRoot, BrawlerListScrollArea,
+    BrawlerScreenUi, CreationPicker, advertised_fighter_name, advertised_weapon_name,
+    brawler_screen_layout, browser_columns, details, ultimate_name,
 };
 use crate::client::flow::screens::game_select::GameSelectionColumns;
 use crate::client::flow::{
@@ -308,7 +308,7 @@ impl CreationView<'_> {
     }
     #[allow(
         clippy::too_many_arguments,
-        reason = "Choice card content and geometry"
+        reason = "Creation choice content and geometry"
     )]
     fn card(
         &self,
@@ -323,91 +323,31 @@ impl CreationView<'_> {
         columns: usize,
         height: f32,
     ) {
-        let width =
-            (self.width - 84. - 20. * (f32::from(u16::try_from(columns).unwrap_or(5)) - 1.))
-                / f32::from(u16::try_from(columns).unwrap_or(5));
-        let e = self.button(
+        use super::choice_cards::{ChoiceArt, ChoiceCards};
+        ChoiceCards {
+            server: self.server,
+            handles: self.handles,
+            width: self.width,
+            pending: self.pending,
+            overview: self.draft.picker.is_none(),
+        }
+        .card(
             p,
             index,
             action,
-            Surface::Card,
-            Node {
-                width: px(width),
-                height: px(height),
-                padding: UiRect::axes(px(28), px(22)),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::SpaceBetween,
-                flex_shrink: 0.,
-                row_gap: px(8),
-                ..default()
-            },
-        );
-        p.commands().entity(e).with_children(|card| {
-            if self.draft.picker.is_none() {
-                card.spawn((
-                    Text::new("›"),
-                    font(self.handles, 42.),
-                    TextColor(INK),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        right: px(16),
-                        top: percent(45),
-                        ..default()
-                    },
-                ));
-            }
-            if !category.is_empty() {
-                self.text(card, category, 28., INK);
-            }
-            card.spawn(Node {
-                width: percent(100),
-                height: px((height - 150.).max(90.)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                overflow: Overflow::clip(),
-                ..default()
-            })
-            .with_children(|art| match kind {
-                CreationPicker::Fighter => {
-                    art.spawn((
-                        BrawlerCardPreview,
-                        Node {
-                            width: px(0),
-                            height: px(0),
-                            ..default()
-                        },
-                    ));
-                }
-                CreationPicker::Weapon => {
-                    art.spawn((
-                        crate::client::flow::WeaponPreviewHost,
-                        Node {
-                            width: percent(85),
-                            height: percent(100),
-                            ..default()
-                        },
-                    ));
-                }
+            category,
+            name,
+            description,
+            match kind {
+                CreationPicker::Fighter => ChoiceArt::Fighter,
+                CreationPicker::Weapon => ChoiceArt::Weapon,
                 CreationPicker::Ultimate => {
-                    if let Some(server) = self.server {
-                        let icon = ultimate.map_or("pulse", details::art::ultimate_icon);
-                        art.spawn((
-                            ImageNode::new(server.load(format!("brawler/ui/details/{icon}.png"))),
-                            Node {
-                                width: px((height - 150.).clamp(72., 240.)),
-                                height: px((height - 150.).clamp(72., 240.)),
-                                ..default()
-                            },
-                        ));
-                    }
+                    ChoiceArt::Icon(ultimate.map_or("pulse", details::art::ultimate_icon))
                 }
-            });
-            self.text(card, name, if columns > 3 { 20. } else { 26. }, INK);
-            if !description.is_empty() {
-                self.text(card, description, 16., INK);
-            }
-        });
+            },
+            columns,
+            height,
+        );
     }
     fn choices(&self, p: &mut ChildSpawnerCommands, kind: CreationPicker, columns: usize) {
         match kind {
@@ -550,7 +490,7 @@ fn weapon_description(config: &crate::combat::WeaponConfiguration) -> &'static s
         D::Splash { .. } => "Lingering area effects.",
     }
 }
-fn ultimate_description(kind: crate::builds::UltimateKind) -> &'static str {
+pub(super) fn ultimate_description(kind: crate::builds::UltimateKind) -> &'static str {
     use crate::builds::UltimateKind as U;
     match kind {
         U::Dash => "Burst forward.",

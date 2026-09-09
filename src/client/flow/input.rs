@@ -356,6 +356,7 @@ pub(super) fn collect_flow_input(
                 ClientOverlay::WeaponEquipment
                     | ClientOverlay::BrawlerList
                     | ClientOverlay::BrawlerCreation
+                    | ClientOverlay::BrawlerEditor
             )
         {
             if !available.contains(&navigation.selected) {
@@ -387,6 +388,7 @@ pub(super) fn collect_flow_input(
                     ClientOverlay::WeaponEquipment
                         | ClientOverlay::BrawlerList
                         | ClientOverlay::BrawlerCreation
+                        | ClientOverlay::BrawlerEditor
                 ) {
                     equipment_neighbor(navigation.selected, direction, &available, columns)
                 } else {
