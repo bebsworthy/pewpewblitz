@@ -20,13 +20,14 @@ pub const PACKET_MAX_RECORD_BYTES: usize = 1_216;
 pub const PACKET_PREFIXED_MAX_BYTES: usize = 1_220;
 
 pub const CONTROL_HEADER_BYTES: usize = 52;
-pub const CONTROL_MAX_BODY_BYTES: usize = 65_484;
-pub const CONTROL_MAX_RECORD_BYTES: usize = 65_536;
-pub const CONTROL_PREFIXED_MAX_BYTES: usize = 65_540;
+pub const CONTROL_MAX_BODY_BYTES: usize = 320 * 1024;
+pub const CONTROL_MAX_RECORD_BYTES: usize = CONTROL_MAX_BODY_BYTES + 52;
+pub const CONTROL_PREFIXED_MAX_BYTES: usize = CONTROL_MAX_RECORD_BYTES + 4;
 
 pub const MAX_STRING_BYTES: usize = 255;
 /// Match manifests retain the original M01 semantic bound.
-pub const MAX_MANIFEST_BYTES: usize = 4_096;
+pub const MAX_CUSTOM_MAP_RECIPE_BYTES: usize = 256 * 1024;
+pub const MAX_MANIFEST_BYTES: usize = 320 * 1024;
 pub const MAX_LOBBY_CATALOG_BYTES: usize = 16 * 1_024;
 /// Fixed lobby fields, the bounded raw catalog, raw digest, and manifest digest.
 pub const MAX_LOBBY_MANIFEST_BYTES: usize = MAX_LOBBY_CATALOG_BYTES + 512;

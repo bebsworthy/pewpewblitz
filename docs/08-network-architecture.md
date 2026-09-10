@@ -535,3 +535,12 @@ Protocol 46 adds the bounded `ObjectiveResult` component for Hot Zone and Heist.
 server commits a terminal outcome, it publishes that outcome and the final capture progress or
 idol current/maximum health together. Clients wait for a matching match/result snapshot before
 returning to the lobby, then retain it for Results independently of live objective entities.
+
+Protocol 47 adds private authored-map Practice admission. Supported advertised game types include
+the finite authoring envelope; `PracticeStartRequest` may carry one bounded candidate recipe instead
+of a built-in preset. The lobby preflights source bytes, counts, dimensions and expanded work before
+using the shared resolver, checks the exact Practice roster, and binds the accepted recipe revision
+and fingerprint to the reservation. Match-manifest version 5 carries that immutable bounded recipe
+through the supervisor to the worker, which revalidates it and installs it through ordinary map
+runtime. A built-in preset and authored payload are mutually exclusive. Authored Practice remains
+private and never modifies advertised multiplayer or Practice pools.

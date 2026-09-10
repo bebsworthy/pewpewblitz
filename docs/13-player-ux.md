@@ -316,6 +316,16 @@ server or incompatible game type is shown as unavailable rather than silently ch
 creating a practice wait list. [Bots](./10-bots.md) owns the distinction between the established
 practice roster and its implemented playable controller behavior.
 
+Dashboard also opens the native **Map Maker** library. Local map documents have stable identities
+and recipe-derived summaries and can be reopened, duplicated, or deleted with confirmation. The
+editor supports the approved catalog assets, explicit spawn/objective tools, rotation, left/right,
+top/bottom, 180-degree and four-way placement symmetry, pointer strokes, grid cursor, erase,
+bounded undo/redo, Clear confirmation and explicit local Save. Safe incomplete drafts remain
+saveable; Test in Practice is enabled by resolving the exact current recipe against the connected
+server's advertised mode and roster, then submitting that saved revision for authoritative
+admission. Results and deliberate Practice exit retain a return path to the same document. Player
+drafts stay in app-owned local storage and are not published or added to server map pools.
+
 Zombie is co-op only. Ordinary Play requires an exact two- or three-human roster; Practice starts
 with one human and fills the selected two- or three-fighter roster with friendly server-hosted
 bots. During play, the persistent HUD exposes every teammate's health,

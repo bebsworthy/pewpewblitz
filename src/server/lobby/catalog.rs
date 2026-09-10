@@ -395,6 +395,13 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             display_name,
             mode_definition_id,
             practice_map_preset_ids: map_ids.clone(),
+            map_authoring_limits: matches!(
+                mode.definition_id,
+                crate::map::WIPEOUT_MODE_DEFINITION
+                    | crate::map::HOT_ZONE_MODE_DEFINITION
+                    | crate::map::HEIST_MODE_DEFINITION
+            )
+            .then_some(crate::map::AUTHORING_LIMITS),
             map_preset_ids: map_ids,
             team_count: entry.teams,
             players_per_team: entry.players_per_team,
@@ -611,9 +618,9 @@ mod tests {
         assert_eq!(
             catalog.revision.0,
             [
-                0x8b, 0xe5, 0xe6, 0x8e, 0xe9, 0x07, 0xb3, 0xd9, 0x03, 0x85, 0x09, 0x64, 0x7b, 0xa3,
-                0x76, 0x15, 0x99, 0xe5, 0x35, 0x7f, 0x57, 0xa1, 0xdd, 0x36, 0x5b, 0x56, 0x7c, 0x87,
-                0x29, 0x99, 0x29, 0x31,
+                0xae, 0x35, 0x4e, 0xab, 0x93, 0x55, 0x4b, 0x05, 0x01, 0x12, 0x8f, 0x9b, 0xf1, 0x2b,
+                0x70, 0x76, 0x68, 0x39, 0xaa, 0x91, 0x19, 0x35, 0x03, 0x87, 0xdd, 0xf5, 0x92, 0xa3,
+                0x39, 0x98, 0xdd, 0x0b,
             ]
         );
     }

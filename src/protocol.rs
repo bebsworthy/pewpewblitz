@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 46;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 47;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -1005,6 +1005,7 @@ mod tests {
             mode_definition_id: crate::map::ModeDefinitionId(2),
             map_preset_ids: vec![crate::map::MapPresetId(1)],
             practice_map_preset_ids: vec![crate::map::MapPresetId(1)],
+            map_authoring_limits: Some(crate::map::AUTHORING_LIMITS),
             team_count: 2,
             players_per_team: 2,
             rules_summary: crate::lobby::AdvertisedRulesSummary::Wipeout {

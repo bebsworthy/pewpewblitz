@@ -11,7 +11,7 @@ use super::{
     ModeAnchorId, ModeDefinitionId, ResolvedMap,
 };
 use bevy::prelude::{App, Component, Plugin, Resource};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::SeqAccess, de::Visitor};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAP_CELL_SIZE_WORLD: f32 = 32.0;
@@ -476,9 +476,49 @@ pub struct MapRecipe {
     pub presentation_theme_id: MapPresentationThemeId,
     pub dimensions: MapDimensions,
     pub default_surface_asset_id: MapAssetId,
+    #[serde(deserialize_with = "deserialize_recipe_items")]
     pub placements: Vec<MapAssetPlacement>,
+    #[serde(deserialize_with = "deserialize_recipe_items")]
     pub filled_rects: Vec<MapFilledRect>,
+    #[serde(deserialize_with = "deserialize_recipe_items")]
     pub mode_anchors: Vec<MapModeAnchorPlacement>,
+}
+
+fn deserialize_recipe_items<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct RecipeItems<T>(core::marker::PhantomData<T>);
+
+    impl<'de, T: Deserialize<'de>> Visitor<'de> for RecipeItems<T> {
+        type Value = Vec<T>;
+
+        fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(
+                formatter,
+                "at most {} map recipe items",
+                super::authoring::MAX_AUTHORED_SOURCE_ITEMS
+            )
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+            let limit = super::authoring::MAX_AUTHORED_SOURCE_ITEMS;
+            if sequence.size_hint().is_some_and(|length| length > limit) {
+                return Err(serde::de::Error::invalid_length(limit + 1, &self));
+            }
+            let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(limit));
+            while let Some(value) = sequence.next_element()? {
+                if values.len() == limit {
+                    return Err(serde::de::Error::invalid_length(limit + 1, &self));
+                }
+                values.push(value);
+            }
+            Ok(values)
+        }
+    }
+
+    deserializer.deserialize_seq(RecipeItems(core::marker::PhantomData))
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -873,7 +913,16 @@ impl MapContentCatalog {
         let preset = self
             .preset(preset_id)
             .ok_or_else(|| "unknown grid map preset".to_string())?;
-        resolve_grid_recipe(&preset.recipe, preset.id, instance_id, self)
+        resolve_grid_recipe(&preset.recipe, Some(preset.id), instance_id, self)
+    }
+
+    /// Resolve a player-authored recipe without inventing built-in preset provenance.
+    pub fn resolve_recipe(
+        &self,
+        recipe: &MapRecipe,
+        instance_id: MapInstanceId,
+    ) -> Result<ResolvedMap, String> {
+        resolve_grid_recipe(recipe, None, instance_id, self)
     }
 }
 

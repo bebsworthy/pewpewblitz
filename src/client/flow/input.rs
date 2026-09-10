@@ -193,7 +193,11 @@ pub(super) fn collect_flow_input(
     mut brawler_edit: ResMut<BrawlerEditDraft>,
     mut creation: ResMut<BrawlerCreationDraft>,
 ) {
-    if *flow.get() == ClientFlow::PracticeMapSelect && matches!(*overlay, ClientOverlay::None) {
+    if matches!(
+        *flow.get(),
+        ClientFlow::PracticeMapSelect | ClientFlow::MapLibrary | ClientFlow::MapEditor
+    ) && matches!(*overlay, ClientOverlay::None)
+    {
         return;
     }
     for (button, interaction, disabled) in &buttons {
@@ -465,6 +469,8 @@ pub(super) fn collect_flow_input(
                 ClientFlow::Connecting => FlowUiAction::Cancel,
                 ClientFlow::GameTypeSelect => FlowUiAction::CancelGameType,
                 ClientFlow::PracticeMapSelect => FlowUiAction::CancelPracticeMaps,
+                ClientFlow::MapLibrary => FlowUiAction::CloseMapMaker,
+                ClientFlow::MapEditor => FlowUiAction::BackToMapLibrary,
                 ClientFlow::Queue => FlowUiAction::CancelQueue,
                 ClientFlow::MatchLoading => FlowUiAction::RequestCancelMatchStart,
                 ClientFlow::Results => FlowUiAction::ReturnToDashboard,

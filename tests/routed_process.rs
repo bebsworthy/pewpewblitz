@@ -153,6 +153,8 @@ fn allocation_request(
         mode: GameMode::Wipeout,
         map_preset: 1,
         map_revision: 1,
+        map_recipe_fingerprint: 1,
+        map_recipe: Vec::new(),
         rules_profile: 1,
         objective_target: 10,
         match_duration_ticks: 10_800,

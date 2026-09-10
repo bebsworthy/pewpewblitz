@@ -240,6 +240,85 @@ struct PendingAllocation {
     sent: bool,
 }
 
+struct AcceptedPracticeMap {
+    routing_preset: u16,
+    routing_revision: u32,
+    routing_fingerprint: u64,
+    routing_recipe: Vec<u8>,
+    preset_id: Option<crate::map::MapPresetId>,
+    recipe_id: crate::map::MapRecipeId,
+    recipe_revision: u32,
+    recipe_fingerprint: crate::map::MapRecipeFingerprint,
+}
+
+fn resolve_practice_map(
+    command: &crate::lobby::PracticeStartRequest,
+    game: &crate::lobby::AdvertisedGameType,
+    maps: &crate::map::MapContentCatalog,
+    catalog: &catalog::ResolvedLobbyCatalog,
+) -> Result<AcceptedPracticeMap, crate::lobby::PracticeStartRejection> {
+    use crate::lobby::PracticeStartRejection as Rejection;
+    if let Some(candidate) = &command.authored_map {
+        if command.map_preset_id.is_some() || candidate.draft_id == 0 {
+            return Err(Rejection::InvalidMapRecipe);
+        }
+        let resolved = crate::map::validate_authored_recipe(
+            &candidate.recipe,
+            game.mode_definition_id,
+            maps,
+            crate::map::MapInstanceId(1),
+        )
+        .map_err(|_| Rejection::InvalidMapRecipe)?;
+        let capacity = crate::matchplay::ResolvedMatchCapacity {
+            team_slots: (0..game.team_count)
+                .map(|team_slot| crate::matchplay::TeamSlotCapacity {
+                    team_slot,
+                    minimum_participants: game.players_per_team,
+                    maximum_participants: game.players_per_team,
+                })
+                .collect(),
+            maximum_active_fighters: game.team_count * game.players_per_team,
+        };
+        capacity
+            .validate_against_spawn_catalog(&crate::map::SpawnPointCatalog(
+                resolved.spawn_points_by_team.clone(),
+            ))
+            .map_err(|_| Rejection::RosterMismatch)?;
+        return Ok(AcceptedPracticeMap {
+            routing_preset: 0,
+            routing_revision: candidate.recipe.revision,
+            routing_fingerprint: resolved.snapshot.identity.recipe_fingerprint.0,
+            routing_recipe: postcard::to_allocvec(&candidate.recipe)
+                .map_err(|_| Rejection::InvalidMapRecipe)?,
+            preset_id: None,
+            recipe_id: resolved.snapshot.identity.recipe_id,
+            recipe_revision: resolved.snapshot.identity.recipe_revision,
+            recipe_fingerprint: resolved.snapshot.identity.recipe_fingerprint,
+        });
+    }
+    let map = command.map_preset_id.unwrap_or(game.map_preset_ids[0]);
+    if !game.practice_map_preset_ids.contains(&map) {
+        return Err(Rejection::InvalidMap);
+    }
+    let resolved = maps
+        .resolve_preset(map, crate::map::MapInstanceId(1))
+        .map_err(|_| Rejection::InvalidMap)?;
+    Ok(AcceptedPracticeMap {
+        routing_preset: map.0,
+        routing_revision: u32::from(
+            catalog
+                .map_admission_revision(map)
+                .ok_or(Rejection::InvalidMap)?,
+        ),
+        routing_fingerprint: resolved.snapshot.identity.recipe_fingerprint.0,
+        routing_recipe: Vec::new(),
+        preset_id: Some(map),
+        recipe_id: resolved.snapshot.identity.recipe_id,
+        recipe_revision: resolved.snapshot.identity.recipe_revision,
+        recipe_fingerprint: resolved.snapshot.identity.recipe_fingerprint,
+    })
+}
+
 /// Source of fresh nonzero lobby-session identities. Production uses OS-backed capability
 /// entropy; tests inject a deterministic source without weakening the production path.
 pub trait LobbySessionIdSource: Send + Sync {
@@ -584,12 +663,23 @@ impl LobbyState {
                     .map(|preset| preset.admission_revision)
             })
             .ok_or(CodecError::InvalidValue)?;
+        let map_recipe_fingerprint = crate::map::MapContentCatalog::embedded()
+            .ok()
+            .and_then(|catalog| {
+                catalog
+                    .resolve_preset(map_preset, crate::map::MapInstanceId(1))
+                    .ok()
+            })
+            .map(|resolved| resolved.snapshot.identity.recipe_fingerprint.0)
+            .ok_or(CodecError::InvalidValue)?;
         let body = AllocateRequestBody {
             request_id,
             lobby_session_id: sessions[0].lobby_session_id,
             mode: server_mode.routing_mode,
             map_preset: map_preset.0,
-            map_revision,
+            map_revision: u32::from(map_revision),
+            map_recipe_fingerprint,
+            map_recipe: Vec::new(),
             rules_profile: 1,
             objective_target: rules.objective_target,
             match_duration_ticks: rules.match_duration_ticks,
@@ -658,6 +748,11 @@ impl LobbyState {
         let rules = catalog
             .rules(&reservation.game_type_id)
             .ok_or(CodecError::InvalidValue)?;
+        let maps =
+            crate::map::MapContentCatalog::embedded().map_err(|_| CodecError::InvalidValue)?;
+        let resolved_map = maps
+            .resolve_preset(reservation.map_preset_id, crate::map::MapInstanceId(1))
+            .map_err(|_| CodecError::InvalidValue)?;
         self.pending = Some(PendingAllocation {
             body: AllocateRequestBody {
                 request_id,
@@ -667,7 +762,10 @@ impl LobbyState {
                 map_preset: reservation.map_preset_id.0,
                 map_revision: catalog
                     .map_admission_revision(reservation.map_preset_id)
-                    .ok_or(CodecError::InvalidValue)?,
+                    .ok_or(CodecError::InvalidValue)?
+                    .into(),
+                map_recipe_fingerprint: resolved_map.snapshot.identity.recipe_fingerprint.0,
+                map_recipe: Vec::new(),
                 rules_profile: crate::config::MatchRulesProfile::Production.routing_id(),
                 objective_target: rules.objective_target,
                 match_duration_ticks: rules.match_duration_ticks,
@@ -716,10 +814,8 @@ impl LobbyState {
         if game.configuration_revision != command.game_type_configuration_revision {
             return Err(Rejection::StaleGameConfiguration);
         }
-        let map = command.map_preset_id.unwrap_or(game.map_preset_ids[0]);
-        if !game.practice_map_preset_ids.contains(&map) {
-            return Err(Rejection::InvalidMap);
-        }
+        let maps = crate::map::MapContentCatalog::embedded().map_err(|_| Rejection::Internal)?;
+        let accepted_map = resolve_practice_map(command, game, &maps, catalog)?;
         if human_snapshot.brawler_id != command.brawler_id
             || human_snapshot.brawler_revision != command.brawler_revision
         {
@@ -761,10 +857,10 @@ impl LobbyState {
                 lobby_session_id: session.lobby_session_id,
                 mode: routing_mode_for_definition(game.mode_definition_id)
                     .ok_or(Rejection::Internal)?,
-                map_preset: map.0,
-                map_revision: catalog
-                    .map_admission_revision(map)
-                    .ok_or(Rejection::Internal)?,
+                map_preset: accepted_map.routing_preset,
+                map_revision: accepted_map.routing_revision,
+                map_recipe_fingerprint: accepted_map.routing_fingerprint,
+                map_recipe: accepted_map.routing_recipe,
                 rules_profile: crate::config::MatchRulesProfile::Production.routing_id(),
                 objective_target: rules.objective_target,
                 match_duration_ticks: rules.match_duration_ticks,
@@ -788,7 +884,11 @@ impl LobbyState {
             reservation_id,
             ticket_id: None,
             game_type_id: game.id.clone(),
-            map_preset_id: map,
+            mode_definition_id: game.mode_definition_id,
+            map_preset_id: accepted_map.preset_id,
+            map_recipe_id: accepted_map.recipe_id,
+            map_recipe_revision: accepted_map.recipe_revision,
+            map_recipe_fingerprint: accepted_map.recipe_fingerprint,
             team_count: game.team_count,
             players_per_team: game.players_per_team,
             accepted_build,
@@ -1967,6 +2067,16 @@ fn form_product_reservation(
     formation.loading_deadline = Some(loading_deadline);
     formation.grant_deadline = Some(grant_deadline);
     frame.snapshot_changed = true;
+    let accepted_map = crate::map::MapContentCatalog::embedded()
+        .ok()
+        .and_then(|maps| {
+            maps.resolve_preset(reservation.map_preset_id, crate::map::MapInstanceId(1))
+                .ok()
+        });
+    let Some(accepted_map) = accepted_map else {
+        queue.complete_reservation(reservation_id);
+        return;
+    };
     for (client, mut sender, connected, disconnected) in &mut clients {
         if !connected || disconnected {
             continue;
@@ -1984,7 +2094,11 @@ fn form_product_reservation(
                     reservation_id,
                     ticket_id: Some(ticket.ticket_id),
                     game_type_id: reservation.game_type_id.clone(),
-                    map_preset_id: reservation.map_preset_id,
+                    mode_definition_id: accepted_map.snapshot.mode_definition_id,
+                    map_preset_id: Some(reservation.map_preset_id),
+                    map_recipe_id: accepted_map.snapshot.identity.recipe_id,
+                    map_recipe_revision: accepted_map.snapshot.identity.recipe_revision,
+                    map_recipe_fingerprint: accepted_map.snapshot.identity.recipe_fingerprint,
                     team_count: reservation.team_count,
                     players_per_team: reservation.players_per_team,
                     accepted_build: ticket.accepted_build,
@@ -2404,7 +2518,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             started.map_preset_id,
-            crate::map::FEATURE_YARD_HOT_ZONE_PRESET
+            Some(crate::map::FEATURE_YARD_HOT_ZONE_PRESET)
         );
         assert_eq!(
             lobby.pending.as_ref().unwrap().body.map_preset,
@@ -2436,6 +2550,7 @@ mod tests {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
         let command = crate::lobby::PracticeStartRequest {
+            authored_map: None,
             map_preset_id: None,
             request_id: crate::lobby::PracticeRequestId::new(1).unwrap(),
             catalog_revision: catalog.revision,
@@ -2479,7 +2594,10 @@ mod tests {
         let request = &lobby.pending.as_ref().unwrap().body;
         assert_eq!(started.ticket_id, None);
         assert_eq!(started.loading_deadline_millis, 30_000);
-        assert_eq!(started.map_preset_id, crate::map::SWITCHBACK_BASIN_PRESET);
+        assert_eq!(
+            started.map_preset_id,
+            Some(crate::map::SWITCHBACK_BASIN_PRESET)
+        );
         assert_eq!(request.map_preset, crate::map::SWITCHBACK_BASIN_PRESET.0);
         assert_eq!(request.participants.len(), 1);
         assert_eq!(request.bots.len(), 5);
@@ -2499,6 +2617,35 @@ mod tests {
                 && bot.build_revision == canonical.build_revision
                 && bot.build_snapshot == canonical.snapshot
         }));
+
+        lobby.pending = None;
+        let mut authored_recipe = crate::map::MapContentCatalog::embedded()
+            .unwrap()
+            .preset(crate::map::SWITCHBACK_BASIN_PRESET)
+            .unwrap()
+            .recipe
+            .clone();
+        authored_recipe.recipe_id = crate::map::MapRecipeId(9_001);
+        authored_recipe.revision = 7;
+        let mut authored_command = command;
+        authored_command.map_preset_id = None;
+        authored_command.authored_map = Some(crate::map::AuthoredMapCandidate {
+            draft_id: 44,
+            recipe: authored_recipe.clone(),
+        });
+        let started = lobby
+            .create_practice_request(&session, &authored_command, &catalog, snapshot, accepted)
+            .unwrap();
+        let request = &lobby.pending.as_ref().unwrap().body;
+        assert_eq!(started.map_preset_id, None);
+        assert_eq!(started.map_recipe_id, authored_recipe.recipe_id);
+        assert_eq!(started.map_recipe_revision, authored_recipe.revision);
+        assert_eq!(request.map_preset, 0);
+        assert_eq!(request.map_revision, authored_recipe.revision);
+        assert_eq!(
+            postcard::from_bytes::<crate::map::MapRecipe>(&request.map_recipe).unwrap(),
+            authored_recipe
+        );
     }
 
     #[test]

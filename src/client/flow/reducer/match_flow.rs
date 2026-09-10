@@ -663,6 +663,12 @@ const fn practice_rejection_copy(reason: crate::lobby::PracticeStartRejection) -
         crate::lobby::PracticeStartRejection::InvalidMap => {
             "This map is no longer available for Practice. Choose another map."
         }
+        crate::lobby::PracticeStartRejection::InvalidMapRecipe => {
+            "The server rejected this map revision. Return to Map Maker and review the highlighted problems."
+        }
+        crate::lobby::PracticeStartRejection::RosterMismatch => {
+            "This map does not have enough safe spawns for the selected Practice roster."
+        }
         crate::lobby::PracticeStartRejection::Internal => "The server could not start practice.",
     }
 }

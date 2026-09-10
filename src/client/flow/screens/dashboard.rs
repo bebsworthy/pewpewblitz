@@ -1142,6 +1142,14 @@ pub(in crate::client::flow) fn present_dashboard_menu(
                     panel,
                     assets.as_deref(),
                     index,
+                    FlowUiAction::OpenMapMaker,
+                    "MAP MAKER",
+                );
+                index += 1;
+                spawn_menu_button(
+                    panel,
+                    assets.as_deref(),
+                    index,
                     FlowUiAction::OpenCredits,
                     "CREDITS",
                 );

@@ -198,9 +198,9 @@ impl Harness {
         // authored coordinates they exercise. Product match constructors use Feature Yard.
         harness
             .server
-            .insert_resource(brawler::map::ServerMapSelection {
-                preset_id: brawler::map::MapPresetId(1),
-            });
+            .insert_resource(brawler::map::ServerMapSelection::preset(
+                brawler::map::MapPresetId(1),
+            ));
         harness
     }
 
@@ -208,9 +208,9 @@ impl Harness {
         let mut harness = Self::new(client_count);
         harness
             .server
-            .insert_resource(brawler::map::ServerMapSelection {
-                preset_id: brawler::map::FEATURE_YARD_WIPEOUT_PRESET,
-            });
+            .insert_resource(brawler::map::ServerMapSelection::preset(
+                brawler::map::FEATURE_YARD_WIPEOUT_PRESET,
+            ));
         harness
     }
 
@@ -218,9 +218,9 @@ impl Harness {
         let mut harness = Self::new(client_count);
         harness
             .server
-            .insert_resource(brawler::map::ServerMapSelection {
-                preset_id: brawler::map::ASHEN_COURT_PRESET,
-            });
+            .insert_resource(brawler::map::ServerMapSelection::preset(
+                brawler::map::ASHEN_COURT_PRESET,
+            ));
         harness
     }
 
@@ -228,9 +228,9 @@ impl Harness {
         let mut harness = Self::new_match(client_count);
         harness
             .server
-            .insert_resource(brawler::map::ServerMapSelection {
-                preset_id: brawler::map::FEATURE_YARD_WIPEOUT_PRESET,
-            });
+            .insert_resource(brawler::map::ServerMapSelection::preset(
+                brawler::map::FEATURE_YARD_WIPEOUT_PRESET,
+            ));
         harness
     }
 
@@ -430,9 +430,9 @@ impl Harness {
                     .insert_resource(brawler::matchplay::hot_zone_rules_for_profile(
                         brawler::config::MatchRulesProfile::ProcessVerification,
                     ))
-                    .insert_resource(brawler::map::ServerMapSelection {
-                        preset_id: brawler::map::FEATURE_YARD_HOT_ZONE_PRESET,
-                    });
+                    .insert_resource(brawler::map::ServerMapSelection::preset(
+                        brawler::map::FEATURE_YARD_HOT_ZONE_PRESET,
+                    ));
             }
             HarnessMode::Heist => {
                 server
@@ -441,9 +441,9 @@ impl Harness {
                         rules_revision: brawler::matchplay::HEIST_RULES_REVISION,
                     })
                     .insert_resource(verification_heist_rules())
-                    .insert_resource(brawler::map::ServerMapSelection {
-                        preset_id: brawler::map::FEATURE_YARD_HEIST_PRESET,
-                    });
+                    .insert_resource(brawler::map::ServerMapSelection::preset(
+                        brawler::map::FEATURE_YARD_HEIST_PRESET,
+                    ));
             }
         }
         server.add_plugins((

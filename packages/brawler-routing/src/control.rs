@@ -302,7 +302,9 @@ pub struct AllocateRequestBody {
     pub lobby_session_id: LobbySessionId,
     pub mode: GameMode,
     pub map_preset: u16,
-    pub map_revision: u16,
+    pub map_revision: u32,
+    pub map_recipe_fingerprint: u64,
+    pub map_recipe: Vec<u8>,
     pub rules_profile: u8,
     pub objective_target: u16,
     pub match_duration_ticks: u64,
@@ -334,8 +336,13 @@ impl fmt::Debug for AllocateRequestBody {
 
 impl AllocateRequestBody {
     pub fn validate(&self) -> Result<(), CodecError> {
-        if self.map_preset == 0
+        let built_in_map = self.map_preset != 0 && self.map_recipe.is_empty();
+        let authored_map = self.map_preset == 0
+            && !self.map_recipe.is_empty()
+            && self.map_recipe.len() <= crate::MAX_CUSTOM_MAP_RECIPE_BYTES;
+        if (!built_in_map && !authored_map)
             || self.map_revision == 0
+            || self.map_recipe_fingerprint == 0
             || self.rules_profile == 0
             || self.objective_target == 0
             || self.match_duration_ticks == 0
@@ -964,7 +971,12 @@ impl ControlBody {
                 encoder.put_u128(value.lobby_session_id.get());
                 encoder.put_u16(value.mode as u16);
                 encoder.put_u16(value.map_preset);
-                encoder.put_u16(value.map_revision);
+                encoder.put_u32(value.map_revision);
+                encoder.put_u64(value.map_recipe_fingerprint);
+                encoder.put_u32(
+                    u32::try_from(value.map_recipe.len()).map_err(|_| CodecError::Oversize)?,
+                );
+                encoder.put_bytes(&value.map_recipe);
                 encoder.put_u8(value.rules_profile);
                 encoder.put_u16(value.objective_target);
                 encoder.put_u64(value.match_duration_ticks);
@@ -1128,7 +1140,14 @@ impl ControlBody {
                     LobbySessionId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
                 let mode = GameMode::try_from(decoder.u16()?)?;
                 let map_preset = decoder.u16()?;
-                let map_revision = decoder.u16()?;
+                let map_revision = decoder.u32()?;
+                let map_recipe_fingerprint = decoder.u64()?;
+                let map_recipe_length =
+                    usize::try_from(decoder.u32()?).map_err(|_| CodecError::Oversize)?;
+                if map_recipe_length > crate::MAX_CUSTOM_MAP_RECIPE_BYTES {
+                    return Err(CodecError::Oversize);
+                }
+                let map_recipe = decoder.take(map_recipe_length)?.to_vec();
                 let rules_profile = decoder.u8()?;
                 let objective_target = decoder.u16()?;
                 let match_duration_ticks = decoder.u64()?;
@@ -1162,6 +1181,8 @@ impl ControlBody {
                     mode,
                     map_preset,
                     map_revision,
+                    map_recipe_fingerprint,
+                    map_recipe,
                     rules_profile,
                     objective_target,
                     match_duration_ticks,
@@ -1643,6 +1664,8 @@ mod tests {
                 mode: GameMode::Wipeout,
                 map_preset: 1,
                 map_revision: 1,
+                map_recipe_fingerprint: 1,
+                map_recipe: Vec::new(),
                 rules_profile: 1,
                 objective_target: 10,
                 match_duration_ticks: 10_800,
@@ -1745,6 +1768,8 @@ mod tests {
             mode: GameMode::HotZone,
             map_preset: 1,
             map_revision: 1,
+            map_recipe_fingerprint: 1,
+            map_recipe: Vec::new(),
             rules_profile: 1,
             objective_target: 10,
             match_duration_ticks: 10_800,
@@ -1764,7 +1789,7 @@ mod tests {
                 .encode()
                 .unwrap()
                 .len(),
-            52 + 518
+            52 + 532
         );
         let granted = AllocationGrantedBody {
             request_id: id64(1),
@@ -1836,6 +1861,8 @@ mod tests {
             mode: GameMode::Wipeout,
             map_preset: 1,
             map_revision: 1,
+            map_recipe_fingerprint: 1,
+            map_recipe: Vec::new(),
             rules_profile: 1,
             objective_target: 10,
             match_duration_ticks: 10_800,

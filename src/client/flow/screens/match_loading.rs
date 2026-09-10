@@ -60,11 +60,7 @@ pub(in crate::client::flow) fn spawn_match_loading(
     for (e, _) in &roots {
         commands.entity(e).despawn();
     }
-    let catalog = crate::map::MapContentCatalog::embedded().ok();
-    let mode = catalog
-        .as_ref()
-        .and_then(|c| c.preset(active.map_preset_id))
-        .and_then(|p| modes.descriptor_for_definition(p.recipe.mode_definition_id));
+    let mode = modes.descriptor_for_definition(active.mode_definition_id);
     let title = mode
         .and_then(|m| m.presentation)
         .map_or("MATCH", |p| p.selection_label)

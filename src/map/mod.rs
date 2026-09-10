@@ -1,5 +1,6 @@
 //! Typed map content, authoritative runtime state, and client reconstruction boundaries.
 
+pub(crate) mod authoring;
 mod catalog;
 #[cfg(feature = "client")]
 mod client;
@@ -19,6 +20,10 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+pub use authoring::{
+    AUTHORING_LIMITS, AuthoredMapCandidate, AuthoringRecipeError, MapAuthoringLimits, MapSymmetry,
+    SymmetryPlacement, authorable_assets, symmetry_placements, validate_authored_recipe,
+};
 pub use catalog::{
     ASHEN_COURT_ADMISSION_REVISION, ASHEN_COURT_PRESET, ASHEN_PINE_ASSET, ASHEN_ROCK_ASSET,
     ASHEN_WALL_ASSET, BARREL_WOOD_DEBRIS_ASSET, BREAKABLE_BARRIER_ASSET, CACTUS_ASSET,

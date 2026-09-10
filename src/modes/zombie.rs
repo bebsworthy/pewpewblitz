@@ -84,9 +84,7 @@ fn install_server(app: &mut App, registration: &ModeRegistration, input: super::
         .validate()
         .expect("validated Zombie rules"),
     )
-    .insert_resource(ServerMapSelection {
-        preset_id: server.default_map_preset,
-    })
+    .insert_resource(ServerMapSelection::preset(server.default_map_preset))
     .add_plugins(ZombieModePlugin);
 }
 

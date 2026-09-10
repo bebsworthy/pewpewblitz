@@ -138,7 +138,7 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
     };
     let manifest = MatchManifestV1 {
         common: ManifestCommon {
-            manifest_version: 4,
+            manifest_version: 5,
             role: WorkerRole::Match,
             logical_server_id: id128(LOGICAL_SERVER_ID),
             process_id: registration.process_id,
@@ -158,6 +158,8 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
         mode: GameMode::Wipeout,
         map_preset: 1,
         map_revision: 1,
+        map_recipe_fingerprint: 1,
+        map_recipe: Vec::new(),
         rules_profile: 1,
         objective_target: 10,
         match_duration_ticks: 10_800,

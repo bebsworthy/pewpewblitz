@@ -45,6 +45,35 @@ impl MapDimensions {
     pub fn cell_center(self, cell: MapCell) -> Vec2 {
         self.cell_min(cell) + Vec2::splat(MAP_CELL_SIZE_WORLD * 0.5)
     }
+
+    /// Convert a point on the canonical simulation plane to its containing map cell.
+    ///
+    /// The maximum map edges are exclusive so a cursor ray landing beyond the playable surface
+    /// cannot be clamped into a valid placement by presentation code.
+    #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "finite bounds checks prove the floored coordinates fit the u16 map dimensions"
+    )]
+    pub fn world_cell(self, point: Vec2) -> Option<MapCell> {
+        if !point.is_finite() {
+            return None;
+        }
+        let bounds = self.bounds();
+        if point.x < bounds.min.x
+            || point.y < bounds.min.y
+            || point.x >= bounds.max.x
+            || point.y >= bounds.max.y
+        {
+            return None;
+        }
+        let offset = (point - bounds.min) / MAP_CELL_SIZE_WORLD;
+        Some(MapCell::new(
+            offset.x.floor() as u16,
+            offset.y.floor() as u16,
+        ))
+    }
 }
 
 impl MapFootprint {

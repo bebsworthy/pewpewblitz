@@ -33,6 +33,11 @@ use screens::{
         GameTypeSelectionDraft, keep_game_type_focus_visible, scroll_game_type_select,
         spawn_game_type_select,
     },
+    map_maker::{
+        MapMakerRuntime, load_map_library, map_maker_input, present_map_editor,
+        present_map_library, resolve_map_maker_action, return_to_editor_after_practice,
+        sync_map_editor_preview, update_map_editor_cursor_copy,
+    },
     match_loading::{spawn_match_loading, update_match_loading},
     overlays::{
         present_cancel_confirmation, present_flow_error_overlay, update_rate_limit_try_again,
@@ -91,6 +96,9 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<ConnectionGeneration>()
             .init_resource::<ResolverState>()
             .init_resource::<ClientConnectionsPath>()
+            .init_resource::<super::map_maker::MapDraftStorage>()
+            .init_resource::<super::MapDraftLibrary>()
+            .init_resource::<MapMakerRuntime>()
             .init_resource::<ClientLocalLoadFailures>()
             .init_resource::<super::ClientQueueModel>()
             .init_resource::<super::ClientPracticeModel>()
@@ -119,6 +127,7 @@ impl Plugin for ClientFlowPlugin {
                 Startup,
                 (
                     load_connection_state,
+                    load_map_library,
                     ApplyDeferred,
                     start_initial_connection,
                 )
@@ -146,9 +155,19 @@ impl Plugin for ClientFlowPlugin {
                         .in_set(ClientFlowSet::ObserveSession)
                         .after(super::queue::observe_queue_messages),
                     collect_flow_input.in_set(ClientFlowSet::CollectFlowInput),
+                    map_maker_input
+                        .after(collect_flow_input)
+                        .run_if(
+                            in_state(ClientFlow::MapLibrary)
+                                .or_else(in_state(ClientFlow::MapEditor)),
+                        )
+                        .in_set(ClientFlowSet::CollectFlowInput),
                     practice_map_input
                         .after(collect_flow_input)
                         .in_set(ClientFlowSet::CollectFlowInput),
+                    resolve_map_maker_action
+                        .before(resolve_flow_action)
+                        .in_set(ClientFlowSet::ResolveFlowAction),
                     resolve_flow_action.in_set(ClientFlowSet::ResolveFlowAction),
                     teardown_session.in_set(ClientFlowSet::TeardownSession),
                     ApplyDeferred
@@ -175,6 +194,10 @@ impl Plugin for ClientFlowPlugin {
                     update_queue_cancel_button,
                     update_queue_status,
                     spawn_game_type_select.before(update_flow_button_chrome),
+                    present_map_library.run_if(in_state(ClientFlow::MapLibrary)),
+                    present_map_editor.run_if(in_state(ClientFlow::MapEditor)),
+                    sync_map_editor_preview,
+                    update_map_editor_cursor_copy.after(present_map_editor),
                     update_flow_button_chrome,
                 )
                     .in_set(ClientFlowSet::PresentFlow),
@@ -206,7 +229,12 @@ impl Plugin for ClientFlowPlugin {
             .add_systems(OnEnter(ClientFlow::Connecting), spawn_connecting)
             .add_systems(
                 OnEnter(ClientFlow::Dashboard),
-                (spawn_dashboard, open_empty_profile_creation).chain(),
+                (
+                    return_to_editor_after_practice,
+                    spawn_dashboard,
+                    open_empty_profile_creation,
+                )
+                    .chain(),
             )
             .add_systems(OnEnter(ClientFlow::GameTypeSelect), spawn_game_type_select)
             .add_systems(OnEnter(ClientFlow::Match), enter_match_input)

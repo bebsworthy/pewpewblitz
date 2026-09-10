@@ -156,6 +156,7 @@ pub struct AdvertisedGameType {
     pub map_preset_ids: Vec<MapPresetId>,
     #[serde(deserialize_with = "deserialize_practice_map_ids")]
     pub practice_map_preset_ids: Vec<MapPresetId>,
+    pub map_authoring_limits: Option<crate::map::MapAuthoringLimits>,
     pub team_count: u8,
     pub players_per_team: u8,
     pub rules_summary: AdvertisedRulesSummary,
@@ -340,6 +341,15 @@ impl AdvertisedGameType {
         {
             return Err(LobbyModelError::InvalidMapCount);
         }
+        let supports_authoring = matches!(
+            self.mode_definition_id,
+            crate::map::WIPEOUT_MODE_DEFINITION
+                | crate::map::HOT_ZONE_MODE_DEFINITION
+                | crate::map::HEIST_MODE_DEFINITION
+        );
+        if self.map_authoring_limits != supports_authoring.then_some(crate::map::AUTHORING_LIMITS) {
+            return Err(LobbyModelError::InvalidMapCount);
+        }
         let topology_valid = match self.rules_summary {
             AdvertisedRulesSummary::Zombie { .. } => {
                 self.team_count == 1 && matches!(self.players_per_team, 2..=3)
@@ -477,6 +487,17 @@ pub fn canonical_catalog_bytes(
         for map_id in &game_type.practice_map_preset_ids {
             bytes.extend_from_slice(&map_id.0.to_be_bytes());
         }
+        if let Some(limits) = game_type.map_authoring_limits {
+            bytes.push(1);
+            bytes.extend_from_slice(&limits.minimum_axis_cells.to_be_bytes());
+            bytes.extend_from_slice(&limits.maximum_axis_cells.to_be_bytes());
+            bytes.extend_from_slice(&limits.maximum_total_cells.to_be_bytes());
+            bytes.extend_from_slice(&limits.maximum_source_items.to_be_bytes());
+            bytes.extend_from_slice(&limits.maximum_expanded_placements.to_be_bytes());
+            bytes.extend_from_slice(&limits.maximum_recipe_bytes.to_be_bytes());
+        } else {
+            bytes.push(0);
+        }
         bytes.push(game_type.team_count);
         bytes.push(game_type.players_per_team);
         match game_type.rules_summary {
@@ -543,6 +564,7 @@ mod tests {
                 mode_definition_id: ModeDefinitionId(2),
                 map_preset_ids: vec![MapPresetId(1)],
                 practice_map_preset_ids: vec![MapPresetId(1)],
+                map_authoring_limits: Some(crate::map::AUTHORING_LIMITS),
                 team_count: 2,
                 players_per_team: 2,
                 rules_summary: AdvertisedRulesSummary::Wipeout {
@@ -557,6 +579,7 @@ mod tests {
                 mode_definition_id: ModeDefinitionId(3),
                 map_preset_ids: vec![MapPresetId(2)],
                 practice_map_preset_ids: vec![MapPresetId(2)],
+                map_authoring_limits: Some(crate::map::AUTHORING_LIMITS),
                 team_count: 2,
                 players_per_team: 2,
                 rules_summary: AdvertisedRulesSummary::HotZone {
@@ -571,13 +594,13 @@ mod tests {
     fn canonical_catalog_matches_committed_golden_vector() {
         let catalog = golden_catalog();
         let bytes = canonical_catalog_bytes(&catalog).unwrap();
-        assert_eq!(bytes.len(), 127);
+        assert_eq!(bytes.len(), 161);
         assert_eq!(
             catalog_revision(&catalog).unwrap().0,
             [
-                0xa4, 0xc9, 0x72, 0xb4, 0xd4, 0xd1, 0xe9, 0xe0, 0x8b, 0x0c, 0x91, 0x86, 0x25, 0x07,
-                0x5e, 0xf4, 0x23, 0x43, 0xe0, 0x5f, 0x0c, 0x38, 0x3d, 0xa8, 0x6d, 0x0a, 0x88, 0x52,
-                0x2c, 0x3e, 0xf7, 0xba,
+                0x0f, 0xb6, 0x65, 0x1d, 0xa3, 0x92, 0x54, 0x1b, 0x96, 0x0f, 0x58, 0xd7, 0x99, 0xcc,
+                0x99, 0xec, 0xbd, 0x0e, 0xfe, 0x93, 0x57, 0x4a, 0xa5, 0x36, 0x05, 0x4d, 0x27, 0x36,
+                0x63, 0x01, 0x28, 0xc3,
             ]
         );
     }

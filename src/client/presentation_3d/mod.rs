@@ -28,6 +28,7 @@ pub(crate) mod coordinates;
 mod diagnostics;
 pub(crate) mod environment_assets;
 mod map;
+mod map_editor;
 mod object_health;
 mod zombie;
 
@@ -45,6 +46,7 @@ pub(in crate::client) use combat::{
 };
 use coordinates::{ground_point, ground_position, ground_rotation};
 use map::{GeneratedMapMesh, Presented3dMap};
+pub(in crate::client) use map_editor::MapEditorPreview;
 use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_health_ui};
 
 const WALL_HEIGHT: f32 = 32.0;
@@ -361,7 +363,10 @@ impl Plugin for WorldPresentationPlugin {
             )
             .add_systems(
                 Update,
-                reconcile_3d_map
+                (
+                    reconcile_3d_map,
+                    map_editor::reconcile_map_editor_overlay.after(reconcile_3d_map),
+                )
                     .in_set(crate::map::MapPresentationSet::Materialize3d)
                     .in_set(WorldPresentationSet::MaterializeTopology),
             )
@@ -1629,6 +1634,7 @@ fn reconcile_3d_map(
     map_visuals: Option<Res<environment_assets::MapVisualCatalog>>,
     imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
     accepted: Option<Res<crate::map::PresentedMap>>,
+    editor_preview: Option<Res<MapEditorPreview>>,
     current: Option<Res<Presented3dMap>>,
     map_snapshots: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
     members: Query<(
@@ -1639,7 +1645,15 @@ fn reconcile_3d_map(
     mut ambient: ResMut<GlobalAmbientLight>,
     mut directional_lights: Query<&mut DirectionalLight, With<V3WorldMember>>,
 ) {
-    let Some(accepted) = accepted else {
+    let current_grid_snapshot = accepted
+        .as_deref()
+        .and_then(|accepted| map_snapshots.get(accepted.source_root).ok().cloned())
+        .or_else(|| {
+            editor_preview
+                .as_deref()
+                .map(|preview| preview.snapshot.clone())
+        });
+    let Some(grid_snapshot) = current_grid_snapshot.as_ref() else {
         for (entity, _, generated) in &members {
             if let Some(generated) = generated {
                 meshes.remove(generated.0.id());
@@ -1649,8 +1663,7 @@ fn reconcile_3d_map(
         commands.remove_resource::<Presented3dMap>();
         return;
     };
-    let current_grid_snapshot = map_snapshots.get(accepted.source_root).ok().cloned();
-    if let Some(grid_snapshot) = current_grid_snapshot.as_ref() {
+    {
         let presentation_key = Presented3dMap {
             instance_id: grid_snapshot.identity.instance_id,
             recipe_fingerprint: grid_snapshot.identity.recipe_fingerprint,
@@ -1710,7 +1723,20 @@ fn reconcile_3d_map(
             &grid_catalog.0,
             map_visuals.as_deref(),
             imported.as_deref(),
+            editor_preview.is_some() && accepted.is_none(),
         );
+        if editor_preview.is_some() && accepted.is_none() {
+            materialize_map_editor_markers(
+                &mut commands,
+                &primitives,
+                &presentation_materials,
+                marker,
+                grid_snapshot,
+                &grid_catalog.0,
+                map_visuals.as_deref(),
+                imported.as_deref(),
+            );
+        }
         commands.insert_resource(presentation_key);
     }
 }
@@ -1727,6 +1753,7 @@ fn materialize_map_static_visuals(
     catalog: &crate::map::MapContentCatalog,
     visual_catalog: Option<&environment_assets::MapVisualCatalog>,
     imported: Option<&environment_assets::EnvironmentImportedScenes>,
+    include_dynamic: bool,
 ) {
     for placement in &snapshot.placements {
         let Some(asset) = catalog.asset(placement.asset_id) else {
@@ -1735,7 +1762,7 @@ fn materialize_map_static_visuals(
         let dynamic = catalog
             .profile(asset.gameplay_profile_id)
             .is_some_and(map_profile_has_dynamic_runtime);
-        if asset.slot == crate::map::MapAssetSlot::Marker || dynamic {
+        if asset.slot == crate::map::MapAssetSlot::Marker || (dynamic && !include_dynamic) {
             continue;
         }
         if asset.slot == crate::map::MapAssetSlot::Surface
@@ -1816,6 +1843,109 @@ fn materialize_map_static_visuals(
         snapshot.dimensions.bounds(),
     );
     materialize_hot_zone_objective(commands, meshes, presentation_materials, marker, snapshot);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn materialize_map_editor_markers(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &Material3dAssets,
+    marker: crate::map::MapPresentationMember,
+    snapshot: &crate::map::ResolvedMapSnapshot,
+    catalog: &crate::map::MapContentCatalog,
+    visual_catalog: Option<&environment_assets::MapVisualCatalog>,
+    imported: Option<&environment_assets::EnvironmentImportedScenes>,
+) {
+    for placement in &snapshot.placements {
+        let Some(asset) = catalog.asset(placement.asset_id) else {
+            continue;
+        };
+        let crate::map::MapPlacementParameters::PlayerSpawn { team_slot, .. } =
+            placement.parameters
+        else {
+            continue;
+        };
+        let center = crate::map::placement_world_center(snapshot.dimensions, asset, placement);
+        commands.spawn((
+            marker,
+            Mesh3d(primitives.ground_ring.clone()),
+            MeshMaterial3d(if team_slot == 0 {
+                materials.team_blue.clone()
+            } else {
+                materials.team_red.clone()
+            }),
+            NotShadowCaster,
+            Transform {
+                translation: ground_position(center) + Vec3::Y * 2.0,
+                rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
+                scale: Vec3::splat(1.35),
+            },
+            Name::new("Map Maker team spawn"),
+        ));
+    }
+
+    for anchor in &snapshot.mode_anchors {
+        let crate::map::MapModeAnchorKind::HeistSafe {
+            team_slot,
+            origin_cell,
+            width_cells,
+            height_cells,
+            objective_visual_profile_id,
+            ..
+        } = anchor.kind
+        else {
+            continue;
+        };
+        let center = snapshot.dimensions.cell_min(origin_cell)
+            + Vec2::new(f32::from(width_cells), f32::from(height_cells))
+                * (crate::map::MAP_CELL_SIZE_WORLD * 0.5);
+        let footprint = Vec2::new(
+            f32::from(width_cells) * crate::map::MAP_CELL_SIZE_WORLD,
+            f32::from(height_cells) * crate::map::MAP_CELL_SIZE_WORLD,
+        );
+        let profile =
+            visual_catalog.and_then(|catalog| catalog.profile(objective_visual_profile_id));
+        let fitted = profile.and_then(|profile| {
+            imported
+                .and_then(|scenes| scenes.fitted(objective_visual_profile_id, profile, footprint))
+        });
+        let root = commands
+            .spawn((
+                marker,
+                Transform::from_translation(ground_position(center)),
+                Visibility::default(),
+                Name::new("Map Maker Heist safe"),
+            ))
+            .id();
+        commands.entity(root).with_children(|parent| {
+            parent.spawn((
+                Mesh3d(primitives.unit_cuboid.clone()),
+                MeshMaterial3d(if team_slot == 0 {
+                    materials.team_blue.clone()
+                } else {
+                    materials.team_red.clone()
+                }),
+                Transform::from_xyz(0.0, 5.0, 0.0).with_scale(Vec3::new(
+                    footprint.x,
+                    10.0,
+                    footprint.y,
+                )),
+                Name::new("Map Maker safe footprint"),
+            ));
+            if let (Some(profile), Some(fitted)) = (profile, fitted) {
+                parent.spawn((
+                    environment_assets::EnvironmentMaterialTint([
+                        profile.tint.0,
+                        profile.tint.1,
+                        profile.tint.2,
+                    ]),
+                    WorldAssetRoot(fitted.scene),
+                    fitted.transform,
+                    Name::new("Map Maker imported Heist safe"),
+                ));
+            }
+        });
+    }
 }
 
 fn effect_tile_material(

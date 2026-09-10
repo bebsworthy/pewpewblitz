@@ -1237,7 +1237,7 @@ mod tests {
         };
         brawler_routing::MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 4,
+                manifest_version: 5,
                 role: WorkerRole::Match,
                 logical_server_id: LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(2).unwrap(),
@@ -1257,6 +1257,8 @@ mod tests {
             mode: brawler_routing::GameMode::Wipeout,
             map_preset: 1,
             map_revision: 1,
+            map_recipe_fingerprint: 1,
+            map_recipe: Vec::new(),
             rules_profile: 1,
             objective_target: 10,
             match_duration_ticks: 10_800,

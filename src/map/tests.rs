@@ -346,6 +346,33 @@ fn half_cell_points_represent_odd_grid_centers_exactly() {
 }
 
 #[test]
+fn world_cell_round_trips_centers_and_keeps_max_edges_exclusive() {
+    let dimensions = MapDimensions {
+        width: 25,
+        height: 37,
+    };
+    for cell in [
+        MapCell::new(0, 0),
+        MapCell::new(24, 0),
+        MapCell::new(0, 36),
+        MapCell::new(24, 36),
+        MapCell::new(12, 18),
+    ] {
+        assert_eq!(
+            dimensions.world_cell(dimensions.cell_center(cell)),
+            Some(cell)
+        );
+    }
+
+    let bounds = dimensions.bounds();
+    assert_eq!(dimensions.world_cell(bounds.min), Some(MapCell::new(0, 0)));
+    assert_eq!(dimensions.world_cell(bounds.max), None);
+    assert_eq!(dimensions.world_cell(Vec2::new(bounds.max.x, 0.0)), None);
+    assert_eq!(dimensions.world_cell(Vec2::new(0.0, bounds.max.y)), None);
+    assert_eq!(dimensions.world_cell(Vec2::new(f32::NAN, 0.0)), None);
+}
+
+#[test]
 fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
     let anchors = [MapModeAnchorPlacement {
         placement_id: MapPlacementId(1),
@@ -836,7 +863,7 @@ fn feature_yard_rejects_safe_overlap_wrong_visual_and_sealed_access() {
     assert!(
         resolve_grid_recipe(
             &overlap,
-            FEATURE_YARD_HEIST_PRESET,
+            Some(FEATURE_YARD_HEIST_PRESET),
             MapInstanceId(1),
             &catalog
         )
@@ -856,7 +883,7 @@ fn feature_yard_rejects_safe_overlap_wrong_visual_and_sealed_access() {
     assert!(
         resolve_grid_recipe(
             &wrong_visual,
-            FEATURE_YARD_HEIST_PRESET,
+            Some(FEATURE_YARD_HEIST_PRESET),
             MapInstanceId(1),
             &catalog
         )
@@ -888,7 +915,7 @@ fn feature_yard_rejects_safe_overlap_wrong_visual_and_sealed_access() {
     assert!(
         resolve_grid_recipe(
             &sealed,
-            FEATURE_YARD_HEIST_PRESET,
+            Some(FEATURE_YARD_HEIST_PRESET),
             MapInstanceId(1),
             &catalog
         )
@@ -983,7 +1010,7 @@ fn catalog_rejects_false_collider_profiles_and_bad_mode_anchors() {
     assert!(
         resolve_grid_recipe(
             &missing,
-            FEATURE_YARD_HOT_ZONE_PRESET,
+            Some(FEATURE_YARD_HOT_ZONE_PRESET),
             MapInstanceId(1),
             &catalog
         )
@@ -997,7 +1024,7 @@ fn catalog_rejects_false_collider_profiles_and_bad_mode_anchors() {
     assert!(
         resolve_grid_recipe(
             &outside,
-            FEATURE_YARD_HOT_ZONE_PRESET,
+            Some(FEATURE_YARD_HOT_ZONE_PRESET),
             MapInstanceId(1),
             &catalog
         )
@@ -1387,7 +1414,8 @@ fn grid_recipe_rejects_invalid_references_bounds_rotation_and_slot_conflicts() {
 
     for recipe in cases {
         assert!(
-            resolve_grid_recipe(&recipe, CROSSROADS_PRESET, MapInstanceId(1), &catalog).is_err()
+            resolve_grid_recipe(&recipe, Some(CROSSROADS_PRESET), MapInstanceId(1), &catalog)
+                .is_err()
         );
     }
 }

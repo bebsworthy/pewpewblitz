@@ -26,10 +26,37 @@ pub(crate) fn cursor_ground_point(
 )]
 pub(super) fn follow_3d_camera(
     map: Option<Res<crate::map::PresentedMap>>,
+    editor: Option<Res<MapEditorPreview>>,
     fighters: Query<&Position, (With<Fighter>, With<Controlled>, Without<ArenaCamera>)>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cameras: Query<&mut Transform, With<ArenaCamera>>,
 ) {
+    let viewport = windows
+        .iter()
+        .next()
+        .map_or(DEFAULT_GAMEPLAY_VIEWPORT, |window| {
+            Vec2::new(window.width(), window.height())
+        });
+    if let Some(editor) = editor {
+        let bounds = editor.snapshot.dimensions.bounds();
+        let footprint = conservative_ground_footprint(viewport_aspect(viewport));
+        let fit_scale = (bounds.size().x / footprint.size().x)
+            .max(bounds.size().y / footprint.size().y)
+            .max(0.25)
+            * 1.12;
+        let distance = CAMERA_DISTANCE * fit_scale * editor.camera_zoom.clamp(0.5, 3.0);
+        let center = editor.camera_center;
+        let target = ground_position(center);
+        let offset = Vec3::new(
+            0.0,
+            CAMERA_ELEVATION_RADIANS.sin(),
+            CAMERA_ELEVATION_RADIANS.cos(),
+        ) * distance;
+        for mut transform in &mut cameras {
+            *transform = Transform::from_translation(target + offset).looking_at(target, Vec3::Y);
+        }
+        return;
+    }
     let (bounds, position) = map.as_ref().map_or_else(
         || {
             let neutral = crate::map::AxisAlignedMapRect {
@@ -46,12 +73,6 @@ pub(super) fn follow_3d_camera(
             (map.camera_bounds, position)
         },
     );
-    let viewport = windows
-        .iter()
-        .next()
-        .map_or(DEFAULT_GAMEPLAY_VIEWPORT, |window| {
-            Vec2::new(window.width(), window.height())
-        });
     let center = clamp_3d_camera_center(position, bounds, viewport);
     let target = ground_position(center);
     let offset = Vec3::new(

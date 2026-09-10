@@ -492,7 +492,7 @@ mod tests {
             assert_eq!(setup.rules_revision, registration.server().rules_revision);
             assert_eq!(
                 app.world().resource::<ServerMapSelection>().preset_id,
-                registration.server().default_map_preset
+                Some(registration.server().default_map_preset)
             );
             assert_eq!(
                 app.is_plugin_added::<WipeoutModePlugin>(),

@@ -9,6 +9,7 @@ use crate::client::Client;
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ClientPracticeModel {
     pub(crate) selected_map: Option<(crate::lobby::GameTypeId, crate::map::MapPresetId)>,
+    pub(crate) authored_map: Option<(crate::lobby::GameTypeId, crate::map::AuthoredMapCandidate)>,
     pub(super) generation: Option<u64>,
     pub(super) next_request_id: u64,
     pub(super) pending: Option<crate::lobby::PracticeStartRequest>,
@@ -22,6 +23,7 @@ impl ClientPracticeModel {
             *self = Self {
                 generation: Some(generation),
                 selected_map: self.selected_map.clone(),
+                authored_map: self.authored_map.clone(),
                 next_request_id: self.next_request_id,
                 ..Self::default()
             };
@@ -58,11 +60,21 @@ impl ClientPracticeModel {
         };
         self.next_request_id = request_id.get();
         let request = crate::lobby::PracticeStartRequest {
+            authored_map: self
+                .authored_map
+                .as_ref()
+                .filter(|(id, _)| *id == game_type_id)
+                .map(|(_, candidate)| candidate.clone()),
             map_preset_id: self
                 .selected_map
                 .as_ref()
                 .filter(|(id, _)| *id == game_type_id)
-                .map(|(_, map)| *map),
+                .map(|(_, map)| *map)
+                .filter(|_| {
+                    self.authored_map
+                        .as_ref()
+                        .is_none_or(|(id, _)| *id != game_type_id)
+                }),
             request_id,
             catalog_revision,
             game_type_id,
@@ -74,6 +86,15 @@ impl ClientPracticeModel {
         self.outbound.push_back(request);
         self.rejection = None;
         true
+    }
+
+    pub(crate) fn select_authored_map(
+        &mut self,
+        game_type_id: crate::lobby::GameTypeId,
+        candidate: crate::map::AuthoredMapCandidate,
+    ) {
+        self.selected_map = None;
+        self.authored_map = Some((game_type_id, candidate));
     }
 
     pub(super) fn accept_started(&mut self) {

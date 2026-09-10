@@ -657,7 +657,35 @@ pub(super) fn resolve_flow_action(
             &mut purpose,
             &mut commit,
         ),
-        FlowUiAction::Cancel | FlowUiAction::Disconnect | FlowUiAction::ConfirmChangeServer => {}
+        FlowUiAction::Cancel
+        | FlowUiAction::Disconnect
+        | FlowUiAction::ConfirmChangeServer
+        | FlowUiAction::OpenMapMaker
+        | FlowUiAction::CreateMap
+        | FlowUiAction::ConfirmCreateMap
+        | FlowUiAction::CancelCreateMap
+        | FlowUiAction::OpenMapDraft(_)
+        | FlowUiAction::BeginRenameMapDraft(_)
+        | FlowUiAction::ConfirmRenameMapDraft
+        | FlowUiAction::CancelRenameMapDraft
+        | FlowUiAction::DuplicateMapDraft(_)
+        | FlowUiAction::DeleteMapDraft(_)
+        | FlowUiAction::CloseMapMaker
+        | FlowUiAction::BackToMapLibrary
+        | FlowUiAction::SaveMapDraft
+        | FlowUiAction::TestAuthoredMap
+        | FlowUiAction::MapMakerUndo
+        | FlowUiAction::MapMakerRedo
+        | FlowUiAction::MapMakerClear
+        | FlowUiAction::MapMakerCycleAsset(_)
+        | FlowUiAction::MapMakerSelectAsset(_)
+        | FlowUiAction::MapMakerCycleSymmetry
+        | FlowUiAction::MapMakerRotate
+        | FlowUiAction::MapMakerPlace
+        | FlowUiAction::MapMakerPaintStroke(_)
+        | FlowUiAction::MapMakerErase
+        | FlowUiAction::MapMakerToggleGrid
+        | FlowUiAction::MapMakerFitView => {}
     }
     let _ = flow;
 }

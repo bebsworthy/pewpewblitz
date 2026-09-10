@@ -60,6 +60,7 @@ mod evidence_capture;
 mod flow;
 mod hud;
 mod input;
+mod map_maker;
 #[cfg(feature = "owner-prediction")]
 pub mod prediction;
 mod presentation;
@@ -82,6 +83,7 @@ pub use flow::{
 };
 #[allow(clippy::wildcard_imports)]
 use input::*;
+pub use map_maker::{MapDraftDocument, MapDraftId, MapDraftLibrary, MapEditorSession};
 pub use presentation::ClientPresentationPlugin;
 #[cfg(test)]
 use presentation::{clamp_camera_center, update_client_hud};

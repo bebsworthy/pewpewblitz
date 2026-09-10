@@ -85,7 +85,7 @@ impl ManifestCommon {
     fn validate(self, expected_role: WorkerRole) -> Result<(), CodecError> {
         let expected_version = match expected_role {
             WorkerRole::Lobby => 2,
-            WorkerRole::Match => 4,
+            WorkerRole::Match => 5,
         };
         if self.manifest_version != expected_version || self.role != expected_role {
             return Err(CodecError::InvalidValue);
@@ -514,7 +514,9 @@ pub struct MatchManifestV1 {
     pub allocation_id: crate::AllocationId,
     pub mode: GameMode,
     pub map_preset: u16,
-    pub map_revision: u16,
+    pub map_revision: u32,
+    pub map_recipe_fingerprint: u64,
+    pub map_recipe: Vec<u8>,
     pub rules_profile: u8,
     pub objective_target: u16,
     pub match_duration_ticks: u64,
@@ -543,6 +545,8 @@ impl fmt::Debug for MatchManifestV1 {
             .field("allocation_id", &self.allocation_id)
             .field("mode", &self.mode)
             .field("map_preset", &self.map_preset)
+            .field("map_recipe_fingerprint", &self.map_recipe_fingerprint)
+            .field("map_recipe_bytes", &self.map_recipe.len())
             .field("map_revision", &self.map_revision)
             .field("rules_profile", &self.rules_profile)
             .field("objective_target", &self.objective_target)
@@ -594,7 +598,10 @@ impl MatchManifestV1 {
         encoder.put_u128(self.allocation_id.get());
         encoder.put_u16(self.mode as u16);
         encoder.put_u16(self.map_preset);
-        encoder.put_u16(self.map_revision);
+        encoder.put_u32(self.map_revision);
+        encoder.put_u64(self.map_recipe_fingerprint);
+        encoder.put_u32(u32::try_from(self.map_recipe.len()).map_err(|_| CodecError::Oversize)?);
+        encoder.put_bytes(&self.map_recipe);
         encoder.put_u8(self.rules_profile);
         encoder.put_u16(self.objective_target);
         encoder.put_u64(self.match_duration_ticks);
@@ -650,7 +657,14 @@ impl MatchManifestV1 {
         let allocation_id = crate::AllocationId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
         let mode = GameMode::try_from(decoder.u16()?)?;
         let map_preset = decoder.u16()?;
-        let map_revision = decoder.u16()?;
+        let map_revision = decoder.u32()?;
+        let map_recipe_fingerprint = decoder.u64()?;
+        let map_recipe_length =
+            usize::try_from(decoder.u32()?).map_err(|_| CodecError::Oversize)?;
+        if map_recipe_length > crate::MAX_CUSTOM_MAP_RECIPE_BYTES {
+            return Err(CodecError::Oversize);
+        }
+        let map_recipe = decoder.take(map_recipe_length)?.to_vec();
         let rules_profile = decoder.u8()?;
         let objective_target = decoder.u16()?;
         let match_duration_ticks = decoder.u64()?;
@@ -686,6 +700,8 @@ impl MatchManifestV1 {
             mode,
             map_preset,
             map_revision,
+            map_recipe_fingerprint,
+            map_recipe,
             rules_profile,
             objective_target,
             match_duration_ticks,
@@ -711,8 +727,15 @@ impl MatchManifestV1 {
 
     pub fn validate(&self) -> Result<(), CodecError> {
         self.common.validate(Self::ROLE)?;
+        let built_in_map = self.map_preset != 0 && self.map_recipe.is_empty();
+        let authored_map = self.map_preset == 0
+            && !self.map_recipe.is_empty()
+            && self.map_recipe.len() <= crate::MAX_CUSTOM_MAP_RECIPE_BYTES;
         if self.match_id.get() == 0
             || self.allocation_id.get() == 0
+            || (!built_in_map && !authored_map)
+            || self.map_revision == 0
+            || self.map_recipe_fingerprint == 0
             || self.reserved != 0
             || self.objective_target == 0
             || self.match_duration_ticks == 0
@@ -771,7 +794,7 @@ mod tests {
     fn match_manifest(participant_count: usize) -> MatchManifestV1 {
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 4,
+                manifest_version: 5,
                 role: WorkerRole::Match,
                 logical_server_id: id128(1),
                 process_id: id128(2),
@@ -791,6 +814,8 @@ mod tests {
             mode: GameMode::HotZone,
             map_preset: 10,
             map_revision: 11,
+            map_recipe_fingerprint: 1,
+            map_recipe: Vec::new(),
             rules_profile: 12,
             objective_target: 10,
             match_duration_ticks: 10_800,
@@ -814,7 +839,7 @@ mod tests {
 
     // Common fields through seed, before the participant count byte.
     const PARTICIPANT_COUNT_OFFSET: usize =
-        87 + 8 + 16 + 16 + 2 + 2 + 2 + 1 + 2 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 8;
+        87 + 8 + 16 + 16 + 2 + 2 + 4 + 8 + 4 + 1 + 2 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 8;
     const ALLOCATION_ID_OFFSET: usize = 87 + 8 + 16;
 
     #[test]
@@ -825,7 +850,7 @@ mod tests {
             MatchManifestV1::decode(&encoded).unwrap(),
             manifest.clone().with_digest().unwrap()
         );
-        assert_eq!(encoded.len(), 388);
+        assert_eq!(encoded.len(), 402);
         assert_eq!(
             &encoded[encoded.len() - 32..],
             &manifest_digest(&encoded[..encoded.len() - 32])
@@ -834,6 +859,21 @@ mod tests {
             manifest.compute_digest().unwrap(),
             manifest_digest(&encoded[..encoded.len() - 32])
         );
+    }
+
+    #[test]
+    fn authored_map_payload_round_trips_without_a_preset_identity() {
+        let mut manifest = match_manifest(1);
+        manifest.map_preset = 0;
+        manifest.map_revision = 77;
+        manifest.map_recipe_fingerprint = 88;
+        manifest.map_recipe = vec![1, 2, 3, 4];
+        let encoded = manifest.encode().unwrap();
+        let decoded = MatchManifestV1::decode(&encoded).unwrap();
+        assert_eq!(decoded.map_preset, 0);
+        assert_eq!(decoded.map_revision, 77);
+        assert_eq!(decoded.map_recipe_fingerprint, 88);
+        assert_eq!(decoded.map_recipe, vec![1, 2, 3, 4]);
     }
 
     #[test]

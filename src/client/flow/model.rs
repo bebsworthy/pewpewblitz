@@ -10,6 +10,8 @@ pub enum ClientFlow {
     Dashboard,
     GameTypeSelect,
     PracticeMapSelect,
+    MapLibrary,
+    MapEditor,
     Queue,
     MatchLoading,
     Match,

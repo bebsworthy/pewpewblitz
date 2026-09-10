@@ -1,16 +1,15 @@
 ---
 id: BRL-0037
 title: Add a bounded player-facing map builder
-status: backlog
+status: doing
 theme: core
 release:
-priority: medium
 created: 2026-08-28T09:40:58Z
-modified: 2026-08-28T09:41:00Z
+modified: 2026-09-10T23:24:49Z
 closed:
-revision: 02cedb082b705205
+revision: e6a181d850959bd8
 blocks: []
-related: []
+related: [BRL-0036, BRL-0117, BRL-0121]
 ---
 
 # Description

@@ -523,4 +523,15 @@ mod grid_catalog_tests {
             assert_eq!(profile.fitting, super::MapVisualFitting::Exact);
         }
     }
+
+    #[test]
+    fn rectangular_kenney_walls_use_contained_fitting() {
+        let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
+
+        for id in [1, 16, 32] {
+            let profile = visuals.profile(crate::map::MapVisualProfileId(id)).unwrap();
+            assert_eq!(profile.fitting, super::MapVisualFitting::Contained);
+        }
+    }
 }

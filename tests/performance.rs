@@ -883,9 +883,9 @@ fn hot_zone_performance_app() -> App {
     app.insert_resource(brawler::matchplay::hot_zone_rules_for_profile(
         brawler::config::MatchRulesProfile::Production,
     ));
-    app.insert_resource(brawler::map::ServerMapSelection {
-        preset_id: brawler::map::FEATURE_YARD_HOT_ZONE_PRESET,
-    });
+    app.insert_resource(brawler::map::ServerMapSelection::preset(
+        brawler::map::FEATURE_YARD_HOT_ZONE_PRESET,
+    ));
     app.insert_resource(ServerNetworkConfig {
         transport: NetworkTransport::Crossbeam,
         ..default()
@@ -1017,9 +1017,9 @@ fn heist_performance_app() -> App {
         safe_maximum_health: 2_000,
         critical_health_percent: 25,
     });
-    app.insert_resource(brawler::map::ServerMapSelection {
-        preset_id: brawler::map::FEATURE_YARD_HEIST_PRESET,
-    });
+    app.insert_resource(brawler::map::ServerMapSelection::preset(
+        brawler::map::FEATURE_YARD_HEIST_PRESET,
+    ));
     app.insert_resource(ServerNetworkConfig {
         transport: NetworkTransport::Crossbeam,
         ..default()

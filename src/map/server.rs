@@ -14,15 +14,27 @@ pub enum MapStartupSet {
 /// Server-owned selection of which built-in map preset to install. Derived once from the
 /// validated game-mode configuration; the preset's mode definition picks the layout
 /// requirements, so a mode/map mismatch fails startup.
-#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
 pub struct ServerMapSelection {
-    pub preset_id: MapPresetId,
+    pub preset_id: Option<MapPresetId>,
+    pub authored_recipe: Option<MapRecipe>,
 }
 
 impl Default for ServerMapSelection {
     fn default() -> Self {
         Self {
-            preset_id: FEATURE_YARD_WIPEOUT_PRESET,
+            preset_id: Some(FEATURE_YARD_WIPEOUT_PRESET),
+            authored_recipe: None,
+        }
+    }
+}
+
+impl ServerMapSelection {
+    #[must_use]
+    pub const fn preset(preset_id: MapPresetId) -> Self {
+        Self {
+            preset_id: Some(preset_id),
+            authored_recipe: None,
         }
     }
 }
@@ -69,12 +81,14 @@ fn initialize_authoritative_map(world: &mut World) {
         .resource_mut::<NextMapInstanceId>()
         .allocate()
         .expect("map instance identifier space is available");
-    let selection = *world.resource::<ServerMapSelection>();
-    let resolved = world
-        .resource::<MapCatalogResource>()
-        .0
-        .resolve_preset(selection.preset_id, instance_id)
-        .expect("embedded grid map must resolve");
+    let selection = world.resource::<ServerMapSelection>().clone();
+    let catalog = &world.resource::<MapCatalogResource>().0;
+    let resolved = match (selection.preset_id, selection.authored_recipe.as_ref()) {
+        (Some(preset_id), None) => catalog.resolve_preset(preset_id, instance_id),
+        (None, Some(recipe)) => catalog.resolve_recipe(recipe, instance_id),
+        _ => Err("server map selection must contain exactly one source".to_string()),
+    }
+    .expect("admitted grid map must resolve");
     install_resolved_map(world, resolved).expect("resolved grid map must instantiate");
 }
 

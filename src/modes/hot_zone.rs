@@ -104,9 +104,7 @@ fn install_server(app: &mut App, registration: &ModeRegistration, input: super::
         rules_revision: server.rules_revision,
     })
     .insert_resource(rules)
-    .insert_resource(ServerMapSelection {
-        preset_id: server.default_map_preset,
-    })
+    .insert_resource(ServerMapSelection::preset(server.default_map_preset))
     .add_plugins(HotZoneModePlugin);
 }
 

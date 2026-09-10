@@ -436,23 +436,36 @@ fn validate_manifest_map_against_catalog(
     manifest: &MatchManifestV1,
     catalog: &MapContentCatalog,
 ) -> Result<(), MatchWorkerManifestError> {
-    let preset_id = MapPresetId(manifest.map_preset);
     let mode = crate::modes::builtin_mode_catalog()
         .descriptor_for_mode(config.game_mode)
         .expect("every configured game mode has a registered descriptor");
-    let preset = catalog
-        .preset(preset_id)
-        .ok_or(MatchWorkerManifestError::MapPresetMismatch)?;
-    if preset.admission_revision != manifest.map_revision {
-        return Err(MatchWorkerManifestError::MapRevisionMismatch);
+    let resolved = if manifest.map_recipe.is_empty() {
+        let preset_id = MapPresetId(manifest.map_preset);
+        let preset = catalog
+            .preset(preset_id)
+            .ok_or(MatchWorkerManifestError::MapPresetMismatch)?;
+        if u32::from(preset.admission_revision) != manifest.map_revision {
+            return Err(MatchWorkerManifestError::MapRevisionMismatch);
+        }
+        if !mode.accepts_map(preset.recipe.mode_definition_id) {
+            return Err(MatchWorkerManifestError::ModeMismatch);
+        }
+        catalog
+            .resolve_preset(preset.id, MapInstanceId(1))
+            .map_err(MatchWorkerManifestError::Configuration)?
+    } else {
+        let recipe: crate::map::MapRecipe = postcard::from_bytes(&manifest.map_recipe)
+            .map_err(|_| MatchWorkerManifestError::MapPresetMismatch)?;
+        if recipe.revision != manifest.map_revision || !mode.accepts_map(recipe.mode_definition_id)
+        {
+            return Err(MatchWorkerManifestError::ModeMismatch);
+        }
+        crate::map::validate_authored_recipe(&recipe, mode.definition_id, catalog, MapInstanceId(1))
+            .map_err(|error| MatchWorkerManifestError::Configuration(error.to_string()))?
+    };
+    if resolved.snapshot.identity.recipe_fingerprint.0 != manifest.map_recipe_fingerprint {
+        return Err(MatchWorkerManifestError::ContentMismatch);
     }
-    if !mode.accepts_map(preset.recipe.mode_definition_id) {
-        return Err(MatchWorkerManifestError::ModeMismatch);
-    }
-    catalog
-        .resolve_preset(preset.id, MapInstanceId(1))
-        .map(|_| ())
-        .map_err(MatchWorkerManifestError::Configuration)?;
     Ok(())
 }
 
@@ -624,9 +637,21 @@ pub fn build_match_worker_app(
         manifest.common.protocol_registry_fingerprint,
         manifest.common.content_fingerprint,
     )?;
-    app.insert_resource(ServerMapSelection {
-        preset_id: MapPresetId(manifest.map_preset),
-    });
+    let map_selection = if manifest.map_recipe.is_empty() {
+        ServerMapSelection {
+            preset_id: Some(MapPresetId(manifest.map_preset)),
+            authored_recipe: None,
+        }
+    } else {
+        ServerMapSelection {
+            preset_id: None,
+            authored_recipe: Some(
+                postcard::from_bytes(&manifest.map_recipe)
+                    .map_err(|_| MatchWorkerManifestError::MapPresetMismatch)?,
+            ),
+        }
+    };
+    app.insert_resource(map_selection);
     app.insert_resource(ServerRoleResource::match_worker(manifest));
     Ok(app)
 }
@@ -720,9 +745,17 @@ mod tests {
         let map = MapContentCatalog::embedded().unwrap().presets[0].clone();
         let map_preset = map.id.0;
         let map_revision = map.admission_revision;
+        let map_recipe_fingerprint = MapContentCatalog::embedded()
+            .unwrap()
+            .resolve_preset(map.id, MapInstanceId(1))
+            .unwrap()
+            .snapshot
+            .identity
+            .recipe_fingerprint
+            .0;
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 4,
+                manifest_version: 5,
                 role: WorkerRole::Match,
                 logical_server_id: LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(2).unwrap(),
@@ -741,7 +774,9 @@ mod tests {
             allocation_id: AllocationId::new(5).unwrap(),
             mode: brawler_routing::GameMode::Wipeout,
             map_preset,
-            map_revision,
+            map_revision: u32::from(map_revision),
+            map_recipe_fingerprint,
+            map_recipe: Vec::new(),
             rules_profile: 1,
             objective_target: 10,
             match_duration_ticks: 10_800,
@@ -1090,7 +1125,14 @@ mod tests {
         let catalog = MapContentCatalog::embedded().unwrap();
         let mut value = manifest();
         value.map_preset = crate::map::FEATURE_YARD_WIPEOUT_PRESET.0;
-        value.map_revision = crate::map::FEATURE_YARD_WIPEOUT_ADMISSION_REVISION;
+        value.map_revision = u32::from(crate::map::FEATURE_YARD_WIPEOUT_ADMISSION_REVISION);
+        value.map_recipe_fingerprint = catalog
+            .resolve_preset(crate::map::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+            .unwrap()
+            .snapshot
+            .identity
+            .recipe_fingerprint
+            .0;
         assert!(validate_manifest_map_against_catalog(&config, &value, &catalog).is_ok());
     }
 
@@ -1099,7 +1141,14 @@ mod tests {
         let catalog = MapContentCatalog::embedded().unwrap();
         let mut wipeout = manifest();
         wipeout.map_preset = crate::map::ASHEN_COURT_PRESET.0;
-        wipeout.map_revision = crate::map::ASHEN_COURT_ADMISSION_REVISION;
+        wipeout.map_revision = u32::from(crate::map::ASHEN_COURT_ADMISSION_REVISION);
+        wipeout.map_recipe_fingerprint = catalog
+            .resolve_preset(crate::map::ASHEN_COURT_PRESET, MapInstanceId(1))
+            .unwrap()
+            .snapshot
+            .identity
+            .recipe_fingerprint
+            .0;
         assert!(
             validate_manifest_map_against_catalog(
                 &ServerNetworkConfig::default(),
@@ -1112,7 +1161,14 @@ mod tests {
         let mut hot_zone = wipeout;
         hot_zone.mode = brawler_routing::GameMode::HotZone;
         hot_zone.map_preset = crate::map::FEATURE_YARD_HOT_ZONE_PRESET.0;
-        hot_zone.map_revision = crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION;
+        hot_zone.map_revision = u32::from(crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION);
+        hot_zone.map_recipe_fingerprint = catalog
+            .resolve_preset(crate::map::FEATURE_YARD_HOT_ZONE_PRESET, MapInstanceId(1))
+            .unwrap()
+            .snapshot
+            .identity
+            .recipe_fingerprint
+            .0;
         let config = ServerNetworkConfig {
             game_mode: GameMode::HotZone,
             ..default()
@@ -1146,13 +1202,64 @@ mod tests {
             let mut value = manifest();
             value.mode = routing_mode;
             value.map_preset = preset.0;
-            value.map_revision = revision;
+            value.map_revision = u32::from(revision);
+            value.map_recipe_fingerprint = catalog
+                .resolve_preset(preset, MapInstanceId(1))
+                .unwrap()
+                .snapshot
+                .identity
+                .recipe_fingerprint
+                .0;
             let config = ServerNetworkConfig {
                 game_mode,
                 ..default()
             };
             assert!(validate_manifest_map_against_catalog(&config, &value, &catalog).is_ok());
         }
+    }
+
+    #[test]
+    fn manifest_admission_revalidates_an_immutable_authored_recipe_without_preset_provenance() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let mut recipe = catalog
+            .preset(crate::map::FEATURE_YARD_WIPEOUT_PRESET)
+            .unwrap()
+            .recipe
+            .clone();
+        recipe.recipe_id = crate::map::MapRecipeId(7_700);
+        recipe.revision = 9;
+        let resolved = crate::map::validate_authored_recipe(
+            &recipe,
+            crate::map::WIPEOUT_MODE_DEFINITION,
+            &catalog,
+            MapInstanceId(1),
+        )
+        .unwrap();
+        assert_eq!(resolved.snapshot.identity.source_preset_id, None);
+
+        let mut value = manifest();
+        value.map_preset = 0;
+        value.map_revision = recipe.revision;
+        value.map_recipe_fingerprint = resolved.snapshot.identity.recipe_fingerprint.0;
+        value.map_recipe = postcard::to_allocvec(&recipe).unwrap();
+        assert!(
+            validate_manifest_map_against_catalog(
+                &ServerNetworkConfig::default(),
+                &value,
+                &catalog,
+            )
+            .is_ok()
+        );
+
+        value.map_recipe_fingerprint ^= 1;
+        assert_eq!(
+            validate_manifest_map_against_catalog(
+                &ServerNetworkConfig::default(),
+                &value,
+                &catalog,
+            ),
+            Err(MatchWorkerManifestError::ContentMismatch)
+        );
     }
 
     #[test]
@@ -1200,7 +1307,7 @@ mod tests {
         );
         assert_eq!(
             worker.world().resource::<ServerMapSelection>().preset_id,
-            MapPresetId(value.map_preset)
+            Some(MapPresetId(value.map_preset))
         );
         assert!(!worker.is_plugin_added::<TerminalCtrlCHandlerPlugin>());
         assert!(worker.is_plugin_added::<crate::server::ServerAuthoritativeGameplayPlugin>());
@@ -1253,7 +1360,15 @@ mod tests {
         let template = value.participants[0];
         value.mode = expected_routing_mode(game_mode);
         value.map_preset = map_preset.0;
-        value.map_revision = map_revision;
+        value.map_revision = u32::from(map_revision);
+        value.map_recipe_fingerprint = MapContentCatalog::embedded()
+            .unwrap()
+            .resolve_preset(map_preset, MapInstanceId(1))
+            .unwrap()
+            .snapshot
+            .identity
+            .recipe_fingerprint
+            .0;
         value.participants.truncate(1);
         let bot_rows = if game_mode == GameMode::Zombie {
             vec![(100, 0, "Bot 1"), (101, 0, "Bot 2")]

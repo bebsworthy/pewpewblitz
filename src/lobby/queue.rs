@@ -69,7 +69,11 @@ pub struct ReservationStarted {
     pub reservation_id: MatchReservationId,
     pub ticket_id: Option<QueueTicketId>,
     pub game_type_id: GameTypeId,
-    pub map_preset_id: crate::map::MapPresetId,
+    pub mode_definition_id: crate::map::ModeDefinitionId,
+    pub map_preset_id: Option<crate::map::MapPresetId>,
+    pub map_recipe_id: crate::map::MapRecipeId,
+    pub map_recipe_revision: u32,
+    pub map_recipe_fingerprint: crate::map::MapRecipeFingerprint,
     pub team_count: u8,
     pub players_per_team: u8,
     pub accepted_build: AcceptedBuildSummary,
@@ -109,6 +113,7 @@ pub enum MatchmakingServerPhase {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PracticeStartRequest {
     pub map_preset_id: Option<crate::map::MapPresetId>,
+    pub authored_map: Option<crate::map::AuthoredMapCandidate>,
     pub request_id: PracticeRequestId,
     pub catalog_revision: CatalogRevision,
     pub game_type_id: GameTypeId,
@@ -120,6 +125,8 @@ pub struct PracticeStartRequest {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PracticeStartRejection {
     InvalidMap,
+    InvalidMapRecipe,
+    RosterMismatch,
     StaleCatalog,
     UnknownGameType,
     StaleGameConfiguration,

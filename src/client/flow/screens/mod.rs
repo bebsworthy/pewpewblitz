@@ -6,6 +6,7 @@ pub(super) mod connecting;
 pub(super) mod dashboard;
 pub(super) mod equipment;
 pub(super) mod game_select;
+pub(super) mod map_maker;
 pub(super) mod match_loading;
 pub(super) mod overlays;
 pub(super) mod practice_maps;

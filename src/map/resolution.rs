@@ -66,7 +66,7 @@ pub struct ResolvedZombieIngressAnchor {
 
 pub(super) fn resolve_grid_recipe(
     recipe: &MapRecipe,
-    preset_id: MapPresetId,
+    preset_id: Option<MapPresetId>,
     instance_id: MapInstanceId,
     catalog: &MapContentCatalog,
 ) -> Result<ResolvedMap, String> {
@@ -361,7 +361,7 @@ fn validate_mode_topology(
 
 fn build_resolved_snapshot(
     recipe: &MapRecipe,
-    preset_id: MapPresetId,
+    preset_id: Option<MapPresetId>,
     instance_id: MapInstanceId,
     placements: Vec<MapAssetPlacement>,
     mode_anchors: Vec<MapModeAnchorPlacement>,
@@ -383,7 +383,7 @@ fn build_resolved_snapshot(
     let snapshot = ResolvedMapSnapshot {
         identity: ResolvedMapIdentity {
             instance_id,
-            source_preset_id: Some(preset_id),
+            source_preset_id: preset_id,
             recipe_id: recipe.recipe_id,
             recipe_revision: recipe.revision,
             recipe_fingerprint: MapRecipeFingerprint(crate::content::fnv1a64(

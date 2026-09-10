@@ -220,6 +220,8 @@ pub(in crate::client::flow) fn surface_role(action: &FlowUiAction) -> Surface {
         | A::CancelCreateBrawler
         | A::CancelGameType
         | A::CancelPracticeMaps
+        | A::CloseMapMaker
+        | A::BackToMapLibrary
         | A::ReturnToDashboard
         | A::CloseDashboardMenu => Surface::Back,
         A::JoinQueue
@@ -230,7 +232,7 @@ pub(in crate::client::flow) fn surface_role(action: &FlowUiAction) -> Surface {
         | A::Connect
         | A::QueueAgain
         | A::OpenDashboardMenu => Surface::Primary,
-        A::OpenPracticeMaps | A::OpenBrawlerList => Surface::Secondary,
+        A::OpenPracticeMaps | A::OpenBrawlerList | A::OpenMapMaker => Surface::Secondary,
         A::OpenBrawlerDetails(_)
         | A::CreateBrawler
         | A::SelectEquipmentSlot(_)

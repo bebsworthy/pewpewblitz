@@ -54,6 +54,7 @@ supervisor_pid=
 client_one_pid=
 client_two_pid=
 watchdog_pid=
+verification_catalog=
 
 cleanup() {
     trap - INT TERM EXIT
@@ -70,6 +71,9 @@ cleanup() {
             wait "$pid" 2>/dev/null || true
         fi
     done
+    if [ -n "$verification_catalog" ]; then
+        rm -f "$verification_catalog"
+    fi
 }
 trap cleanup INT TERM EXIT
 
@@ -96,12 +100,30 @@ fi
 if [ -n "$window_dir" ]; then
     mkdir -p "$window_dir"
 fi
+game_types="$project_dir/config/server/game-types.ron"
+if [ "$match_rules" = verification ]; then
+    # Allocations carry explicit authored rules; the old supervisor profile flag cannot
+    # override those values. Bound this diagnostic through the same catalog contract.
+    verification_catalog=$(mktemp "${TMPDIR:-/tmp}/brawler-routed-catalog.XXXXXX")
+    python3 - "$game_types" "$verification_catalog" <<'PY'
+import pathlib
+import re
+import sys
+
+source = pathlib.Path(sys.argv[1]).read_text()
+source, count = re.subn(r'match_duration_seconds:\s*\d+', 'match_duration_seconds: 60', source)
+if not count:
+    raise SystemExit('verification catalog has no match durations')
+pathlib.Path(sys.argv[2]).write_text(source)
+PY
+    game_types="$verification_catalog"
+fi
 target/debug/brawler-supervisor $metrics_args \
     --network-protocol "$network_protocol" \
     --protocol-registry-fingerprint "$registry_fingerprint" \
     --content-fingerprint "$content_fingerprint" \
     --worker-executable "$project_dir/target/debug/brawler-server" \
-    --game-types "$project_dir/config/server/game-types.ron" \
+    --game-types "$game_types" \
     --automatic-transition-driver \
     --mode "$game_mode" \
     --match-rules "$match_rules" \

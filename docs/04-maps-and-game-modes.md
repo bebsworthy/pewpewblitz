@@ -47,6 +47,13 @@ not attaching arbitrary rules to an unvalidated scene.
 Built-in and future player-authored recipes use the same parser, validator, resolver, and runtime
 installation path. Systems must not branch on a built-in map's identity.
 
+Map Maker admits private player-authored recipes for Wipeout, Hot Zone, and Heist Practice. A
+candidate has no fabricated preset identity: its resolved snapshot records `source_preset_id: None`.
+The connected lobby validates the exact mode and roster and accepts one immutable recipe revision
+and fingerprint before worker allocation. Runtime destruction, pickups, scoring, and other match
+state never write back to the local draft. Built-in recipes continue to carry their preset
+provenance and use their existing pools.
+
 ## Map recipe contract
 
 The supported recipe model expresses:

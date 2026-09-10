@@ -69,6 +69,8 @@ fn build_match_manifest(
         mode: request.mode,
         map_preset: request.map_preset,
         map_revision: request.map_revision,
+        map_recipe_fingerprint: request.map_recipe_fingerprint,
+        map_recipe: request.map_recipe.clone(),
         rules_profile: request.rules_profile,
         objective_target: request.objective_target,
         match_duration_ticks: request.match_duration_ticks,
@@ -230,7 +232,7 @@ impl SupervisorRuntime {
         };
         Ok(Some(AllocationLaunchContext {
             common: ManifestCommon {
-                manifest_version: 4,
+                manifest_version: 5,
                 role: WorkerRole::Match,
                 logical_server_id,
                 process_id: identities.process_id,
