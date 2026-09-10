@@ -530,3 +530,8 @@ Team scores and player counters are published together. A completion marker is c
 the authoritative outcome phase in that same component; routed clients wait for the matching
 completed snapshot before retaining results and returning to the lobby. Names and departed player
 rows remain available for final results. This does not change the in-game HUD or input protocol.
+
+Protocol 46 adds the bounded `ObjectiveResult` component for Hot Zone and Heist. After the
+server commits a terminal outcome, it publishes that outcome and the final capture progress or
+idol current/maximum health together. Clients wait for a matching match/result snapshot before
+returning to the lobby, then retain it for Results independently of live objective entities.

@@ -338,6 +338,12 @@ impl Plugin for AuthoritativeMatchPlugin {
         }
         app.insert_resource(capacity);
         configure_match_schedule(app);
+        app.add_systems(
+            FixedPostUpdate,
+            super::objective_results::publish
+                .after(MatchSet::Outcomes)
+                .before(crate::combat::CombatSet::Finalize),
+        );
         app.add_plugins(AuthoritativeFighterLifecyclePlugin)
             .insert_resource(rules)
             .insert_resource(FighterLifecycleConfig {

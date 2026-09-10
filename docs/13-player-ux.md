@@ -352,6 +352,10 @@ damage credit for environmental defeats. Uncredited deaths still count as deaths
 roster retains departed players; the final snapshot survives the routed return to the lobby.
 The results layout uses shared shell surfaces and preserves readable columns at compact sizes.
 The in-game HUD and live scoreboard remain separate from this post-match presentation.
+Hot Zone Results shows each team’s final capture progress. Heist Results shows each team’s
+remaining idol health as exact current/maximum values and a proportional bar. These objective
+values and the outcome are captured together by the authority before the routed lobby return;
+Results never reconstructs them from surviving live objective entities.
 
 A recoverable capacity or rate rejection may remain on Results so the player can retry or return.
 A catalog, content, or protocol incompatibility follows the explicit reconnect recovery path.

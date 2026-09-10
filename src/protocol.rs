@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 45;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 46;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -604,6 +604,8 @@ fn register_replicated_components(app: &mut App) {
     app.component::<MatchState>().replicate();
     app.component::<MatchClock>().replicate();
     app.component::<WipeoutState>().replicate();
+    app.component::<crate::matchplay::ObjectiveResult>()
+        .replicate();
     app.component::<HotZoneState>().replicate();
     app.component::<crate::matchplay::HeistState>().replicate();
     app.component::<crate::matchplay::HeistSafe>().replicate();

@@ -1,4 +1,6 @@
 //! Approved post-match presentation, driven entirely by the retained authority snapshot.
+#[path = "objective.rs"]
+mod objective;
 use crate::{
     client::{
         ClientAssetHandles, ClientLobbyMembership, ClientMatchResultContext,
@@ -156,6 +158,8 @@ impl ResultsPainter<'_> {
                     self.header(body);
                     if let Some(scores) = &self.context.wipeout {
                         self.teams(body, scores);
+                    } else if let Some(objective) = self.context.objective {
+                        self.objective(body, objective.totals);
                     } else if let Some(score) = self.context.final_score {
                         self.text(body, &mode_score_text(score), 32.);
                     }
@@ -233,7 +237,15 @@ impl ResultsPainter<'_> {
             if self.compact { 44. } else { 72. },
         );
         let title = self.context.wipeout.as_ref().map_or_else(
-            || self.context.game_name.clone().unwrap_or_default(),
+            || {
+                self.context.objective.map_or_else(
+                    || self.context.game_name.clone().unwrap_or_default(),
+                    |o| match o.totals {
+                        crate::matchplay::ObjectiveTotals::HotZone { .. } => "HOT ZONE".to_owned(),
+                        crate::matchplay::ObjectiveTotals::Heist { .. } => "HEIST".to_owned(),
+                    },
+                )
+            },
             |scores| {
                 let counts = [0, 1].map(|t| {
                     scores

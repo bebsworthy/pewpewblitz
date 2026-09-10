@@ -1815,3 +1815,89 @@ fn routed_lobby_generations_and_request_ids_are_fresh() {
     assert_eq!(lifecycle.current_request_id, None);
     assert_eq!(lifecycle.accepted_grant, None);
 }
+
+#[test]
+fn objective_results_wait_for_matching_snapshot_and_retain_totals() {
+    use crate::matchplay::{MatchId, MatchResult, ObjectiveResult, ObjectiveTotals};
+    for (mode, totals) in [
+        (
+            crate::map::HOT_ZONE_MODE_DEFINITION,
+            ObjectiveTotals::HotZone {
+                progress: [100, 43],
+                target: 100,
+            },
+        ),
+        (
+            crate::map::HEIST_MODE_DEFINITION,
+            ObjectiveTotals::Heist {
+                health: [731, 0],
+                maximum: [2000; 2],
+            },
+        ),
+    ] {
+        let mut config = ClientNetworkConfig::new(1);
+        config.transport = NetworkTransport::RoutedUdp;
+        let mut app = App::new();
+        app.insert_resource(config)
+            .insert_resource(RoutedClientLifecycle {
+                phase: RoutedClientPhase::Match,
+                ..default()
+            })
+            .init_resource::<ClientMatchResultState>()
+            .add_systems(Update, observe_completed_match);
+        let root = app
+            .world_mut()
+            .spawn((
+                MatchRoot,
+                MatchState {
+                    match_id: MatchId(9),
+                    mode_definition_id: mode,
+                    phase: MatchPhase::Completed {
+                        completed_at_tick: 10,
+                        restart_unlocked_at_tick: 20,
+                        result: MatchResult::Draw,
+                    },
+                    rules_revision: 2,
+                },
+            ))
+            .id();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<ClientMatchResultState>()
+                .context
+                .is_none()
+        );
+        app.world_mut().entity_mut(root).insert(ObjectiveResult {
+            match_id: MatchId(8),
+            result: MatchResult::Draw,
+            totals,
+        });
+        app.update();
+        assert_eq!(
+            app.world().resource::<RoutedClientLifecycle>().phase,
+            RoutedClientPhase::Match
+        );
+        app.world_mut()
+            .get_mut::<ObjectiveResult>(root)
+            .unwrap()
+            .match_id = MatchId(9);
+        app.update();
+        app.world_mut().despawn(root);
+        assert_eq!(
+            app.world()
+                .resource::<ClientMatchResultState>()
+                .context
+                .as_ref()
+                .unwrap()
+                .objective
+                .unwrap()
+                .totals,
+            totals
+        );
+        assert_eq!(
+            app.world().resource::<RoutedClientLifecycle>().phase,
+            RoutedClientPhase::AwaitingMatchUnlink
+        );
+    }
+}

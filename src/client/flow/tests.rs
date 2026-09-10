@@ -435,6 +435,7 @@ fn match_result_context(
         game_name: None,
         final_score: None,
         wipeout: None,
+        objective: None,
         local_player: None,
     }
 }
@@ -1717,6 +1718,7 @@ fn results_replay_uses_the_exact_fresh_lobby_game() {
             game_name: None,
             final_score: None,
             wipeout: None,
+            objective: None,
             local_player: None,
         });
     }
@@ -1914,6 +1916,7 @@ fn results_disable_replay_when_the_exact_game_disappears() {
         game_name: Some("Retired Mode".to_string()),
         final_score: None,
         wipeout: None,
+        objective: None,
         local_player: None,
     });
     app.world_mut()

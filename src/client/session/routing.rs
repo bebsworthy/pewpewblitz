@@ -89,6 +89,7 @@ pub(in crate::client) fn observe_completed_match(
             Option<&crate::matchplay::WipeoutState>,
             Option<&crate::matchplay::HotZoneState>,
             Option<&crate::matchplay::MatchClock>,
+            Option<&crate::matchplay::ObjectiveResult>,
         ),
         With<MatchRoot>,
     >,
@@ -102,27 +103,36 @@ pub(in crate::client) fn observe_completed_match(
     {
         return;
     }
-    let Some((result, final_score, wipeout)) =
-        roots
-            .iter()
-            .find_map(|(state, wipeout, hot_zone, clock)| match state.phase {
-                MatchPhase::Completed { result, .. }
-                    if state.mode_definition_id != crate::map::WIPEOUT_MODE_DEFINITION
-                        || wipeout.is_some_and(|scores| {
-                            scores.match_id == Some(state.match_id)
-                                && scores.completed_result == Some(result)
-                        }) =>
-                {
-                    Some((
-                        result,
-                        hud::build_mode_score_view(Some((state, wipeout)), hot_zone, clock)
-                            .filter(|score| !matches!(score, hud::ModeScoreView::Syncing)),
-                        wipeout.cloned(),
-                    ))
-                }
-                _ => None,
-            })
-    else {
+    let Some((result, final_score, wipeout, objective)) = roots.iter().find_map(
+        |(state, wipeout, hot_zone, clock, objective)| match state.phase {
+            MatchPhase::Completed { result, .. }
+                if matches!(
+                    state.mode_definition_id,
+                    crate::map::HOT_ZONE_MODE_DEFINITION | crate::map::HEIST_MODE_DEFINITION
+                ) =>
+            {
+                objective
+                    .filter(|o| o.match_id == state.match_id && o.result == result)
+                    .map(|o| (result, None, None, Some(*o)))
+            }
+            MatchPhase::Completed { result, .. }
+                if state.mode_definition_id != crate::map::WIPEOUT_MODE_DEFINITION
+                    || wipeout.is_some_and(|scores| {
+                        scores.match_id == Some(state.match_id)
+                            && scores.completed_result == Some(result)
+                    }) =>
+            {
+                Some((
+                    result,
+                    hud::build_mode_score_view(Some((state, wipeout)), hot_zone, clock)
+                        .filter(|score| !matches!(score, hud::ModeScoreView::Syncing)),
+                    wipeout.cloned(),
+                    None,
+                ))
+            }
+            _ => None,
+        },
+    ) else {
         return;
     };
     if let Some(mut result_state) = result_state
@@ -160,6 +170,7 @@ pub(in crate::client) fn observe_completed_match(
             game_name: None,
             final_score,
             wipeout,
+            objective,
             local_player,
         });
     }
