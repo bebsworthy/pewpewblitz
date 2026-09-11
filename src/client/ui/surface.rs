@@ -26,6 +26,7 @@ pub(crate) enum Surface {
     Row,
     Field,
     Quiet,
+    Danger,
 }
 #[derive(Component, Clone, Copy, Debug, Default)]
 #[allow(
@@ -171,6 +172,7 @@ pub(crate) fn fill(role: Surface, state: SurfaceState, interaction: Interaction)
         match role {
             Surface::Back | Surface::Primary => ORANGE,
             Surface::Secondary => TEAL,
+            Surface::Danger => Color::srgb(0.82, 0.18, 0.12),
             _ => CREAM,
         }
     };
@@ -266,6 +268,10 @@ mod tests {
         assert_eq!(
             fill(Surface::Back, SurfaceState::default(), Interaction::None),
             ORANGE
+        );
+        assert_eq!(
+            fill(Surface::Danger, SurfaceState::default(), Interaction::None),
+            Color::srgb(0.82, 0.18, 0.12)
         );
     }
 }

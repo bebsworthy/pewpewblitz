@@ -341,3 +341,153 @@ Verification:
 - Repository-wide all-target Clippy remains outside this remediation evidence because the shared dirty worktree currently contains pre-existing warnings in unrelated zombie, equipment, settings, controls, gallery, and flow-test edits; client-library Clippy is clean.
 
 The ticket remains `doing` pending the user's subjective acceptance of this feedback pass.
+
+## 2026-09-11 native editor design critique and remediation
+
+The latest native editor screenshot was reviewed as a player-facing creation tool. The implementation is functionally close but the visual hierarchy and editing-state communication remain below acceptance quality. This feedback is accepted for the current ticket.
+
+Remediation scope:
+
+- Make the active tool, selected asset, rotation, symmetry mode, and pointer validity immediately legible without contradictory `None` copy.
+- Give Place, Erase, and Move distinct map-space cursor treatments; Place shows the selected production asset ghost and footprint, Erase clearly marks the affected target, and Move exposes hover/selection intent.
+- Keep symmetry axes persistent while enabled and label the exact mode rather than presenting an ambiguous momentary `SYMMETRY` button.
+- Reduce minor-grid dominance while preserving useful cell alignment and stronger interval/center guides.
+- Rebalance the editor chrome so Test and Save are primary document actions, Maps is navigation, Clear is visually destructive and confirmed, and metadata/coordinates are secondary.
+- Make the bottom palette readable at native resolution: unclipped labels, larger consistently framed production thumbnails, unmistakable selection, conventional previous/next paging, and a clear page/item indicator.
+- Tighten alignment and spacing, remove debug-like cyan container outlines, and avoid covering useful canvas content unnecessarily.
+
+Affected verification: focused model/UI tests, client all-target check, strict client-library Clippy, and native screenshot/playtest evidence at the current desktop resolution. Keep BRL-0037 in `doing` until user acceptance.
+
+## Design-hierarchy remediation implementation and evidence (2026-09-11)
+
+Implemented the accepted critique as a focused player-facing presentation pass:
+
+- Map Maker controls now use the production shell `Surface` roles and resource-owned `SurfaceState`. Place/Erase/Move, the selected palette card, Grid, Symmetry, and armed Clear remain visibly selected across UI rebuilds instead of depending on transient border colors.
+- Test Map is the primary orange action, Save is secondary teal, Maps uses the shared back treatment, and Clear has a dedicated destructive red role. Metadata panels use quiet low-alpha borders rather than debug-like cyan frames.
+- The top state strip now leads with the exact tool and selected asset, followed by rotation, the explicit symmetry name, cell coordinates, and a discoverable pan hint. Rotate and Symmetry buttons echo their current values.
+- The palette now uses larger consistently framed production previews, readable ink labels, an unmistakable teal selected card, explicit PREV PAGE/NEXT PAGE actions, and page plus item counts. Page controls move between page starts and wrap coherently, including the partial last page.
+- Preview cameras were pulled back to keep one-cell meshes inside their cards. The tray remains compact enough to preserve the dominant arena.
+- Minor grid lines are substantially quieter while five-cell guides remain stronger. Place and Move use footprint outlines, while Erase and invalid placement use a semantic red X, avoiding the opaque colored-square cursor treatment.
+- Added the shared Danger surface role and focused regressions for editor-owned selection state, destructive fill, and palette page wrapping.
+
+Verification:
+
+- `cargo fmt --all -- --check` — passed.
+- `cargo check --features client --all-targets` — passed.
+- `cargo clippy --features client --lib -- -D warnings` — passed.
+- `cargo test --features client map_maker --lib` — 11 passed.
+- `cargo test --features client client::ui::surface::tests --lib` — passed.
+- Native routed `just run 1` with `RUST_BACKTRACE=1` — editor rendered production assets and thumbnails with readable labels, persistent tool/asset state, differentiated primary/secondary/destructive actions, quieter grid guides, and no Bevy panic during the review. The routed processes stopped cleanly after capture.
+
+Attached native evidence:
+
+![Native design remediation: production shell states, readable 3D palette cards, explicit paging, primary Test action, destructive Clear action, and quieter major/minor grid.](assets/design-hierarchy-remediation.png)
+
+BRL-0037 remains `doing` pending explicit user acceptance of the revised native design.
+
+## Best-of-breed foundational implementation plan (2026-09-11)
+
+This plan incorporates the latest native-screen critique and research into established level-editor workflows while keeping BRL-0037 bounded as a player-facing editor. Advanced line/shape/fill/picker/stamp workflows are deferred to BRL-0139 so this ticket can reach a coherent, testable acceptance point.
+
+### Product decisions
+
+- Keep the production 3D viewport dominant. Consolidate the current four floating control islands into a document bar, a contextual viewport toolbar, a bottom asset browser, and an optional contextual side panel.
+- Make Select, Place, and Erase the three primary modes. Selecting and moving are one coherent workflow: click or marquee to select, then drag the selection to move it. Do not make “Move” serve as the name for both selection and transformation.
+- Use stable semantics for chrome: orange primary action for Test, teal pressed/selected state, cream neutral actions, red destructive actions, and visibly disabled history/test actions. Include text/icon/shape state so color is never the only signal.
+- Standardize navigation on Space+left-drag or middle-drag to pan and wheel/trackpad to zoom. Reserve Shift for additive selection. Escape cancels the active gesture or selection before it navigates away.
+- Keep validation separate from persistence: safe incomplete drafts can be saved, while Test is enabled only for the currently validated revision.
+- Do not add a professional-engine outliner, arbitrary properties, new asset families, procedural generation, publishing, or collaboration in BRL-0037.
+
+### Delivery slices
+
+#### Slice 0 — preserve and baseline the current checkpoint
+
+- Commit the already verified design-hierarchy remediation independently before structural work.
+- Capture native baseline scenarios: empty and populated maps, each tool, valid/invalid ghost, every symmetry mode, selection/move, palette paging, Save/Test/Clear, and reduced window size.
+- Add a short interaction matrix to the ticket evidence so later changes can be compared against exact gestures and expected state.
+
+Exit: current focused tests/checks remain green and the checkpoint is recoverable.
+
+#### Slice 1 — explicit interaction state and input precedence
+
+- Replace the independent gesture flags in MapMakerRuntime with one bounded editor interaction state covering Idle, PaintStroke, EraseStroke, MarqueeSelect, and MoveSelection. Each gesture captures its start cell, current cell, selected asset/rotation/symmetry, and preview result.
+- Keep input sampling in the MapEditor state, but extract focused interaction helpers from the already large screen module. UI focus, modal focus, text entry, and pointer capture take precedence over world operations.
+- Rename the player-facing Move tool to Select. Preserve existing selection/move domain behavior.
+- Implement additive selection with Shift, clear/cancel with Escape, Delete for selected content, Space/middle pan, and wheel zoom. A pointer leaving the viewport cancels or completes capture deterministically.
+- Do not add another input dependency; use Bevy ButtonInput edge/held/released state and the existing settings conventions.
+
+Primary files: src/client/flow/screens/map_maker.rs plus a focused map_maker interaction submodule; src/client/map_maker/model.rs for pure selection/move operations.
+
+Exit: one gesture can never pan, activate UI, and edit the recipe in the same frame; every cancellation and no-op leaves revision/history unchanged.
+
+#### Slice 2 — direct manipulation and world-space feedback
+
+- Make hover and drag previews authoritative representations of the candidate operation: complete rotated footprint, affected existing placement, every deduplicated symmetry copy, and a plain-language validity reason.
+- Give Place, Erase, Marquee Select, Selected, and Move Destination distinct outlines/markers. Draw the active symmetry axis/center and distinguish primary from generated copies.
+- Add a selection bounding treatment and live marquee rectangle. Selected objects remain production-rendered; overlays communicate membership without replacing the real assets.
+- Show a compact cursor-adjacent cell/status label and subtle row/column guides. Add a top-down/angled view toggle only if native evidence shows the cursor remains ambiguous after these overlays; otherwise defer it.
+- Reconcile overlay entities from changed interaction state rather than rebuilding the UI or production map presentation on every cursor move.
+
+Primary files: src/client/presentation_3d/map_editor.rs and the editor preview adapter in src/client/flow/screens/map_maker.rs.
+
+Exit: the player can predict the exact result, including symmetry and conflicts, before release; visual preview and committed recipe match in focused tests.
+
+#### Slice 3 — unified shell and contextual inspector
+
+- Build a top document bar containing map identity/save state, Undo/Redo, Maps, and the primary Test action.
+- Put Select/Place/Erase, rotation, symmetry, grid, and Fit in one contextual viewport toolbar.
+- Replace permanent left/right button islands with a contextual side panel that appears for selection details or validation. Selection details include asset name, count, cell/footprint, rotation, symmetry relationship, and Rotate/Duplicate/Delete actions that are already legal for the selection.
+- Keep Clear behind a concise confirmation and away from routine editing controls.
+- Give Undo/Redo descriptive disabled states and, where cheaply available from the existing bounded history, the next operation label.
+- Preserve full controller focus traversal and prompts; validate at reduced window size and UI scale.
+
+Primary files: src/client/flow/screens/map_maker.rs, src/client/flow/screens/shared.rs, and src/client/ui/surface.rs. Extract editor UI builders into a focused submodule rather than growing the screen file further.
+
+Exit: the viewport remains largest, active mode and selection are unmistakable, and every control remains reachable without overlapping or clipping.
+
+#### Slice 4 — asset browser and discoverability
+
+- Replace page-only browsing with category tabs over existing catalog facts: Ground; Cover and Objects; Vegetation; Effect Tiles; Decorations; Spawns and Objectives.
+- Add horizontal wheel/trackpad scrolling and conventional previous/next fallback controls. Preserve an explicit item/category position for controller use.
+- Keep the selected item in view when category, picker, or controller navigation changes it.
+- Add bounded text filtering over readable asset names. Text input owns keyboard shortcuts while focused.
+- Show readable asset name, footprint, blocking/destructibility/concealment/effect facts, rotation support, and placement budget in a tooltip/focus detail. Add a small recently used row only if it can be derived in-session without new persistence.
+- Retain production render-to-texture thumbnails, reuse their targets while cards remain visible, and release them when cards leave the browser.
+
+Primary files: src/client/flow/screens/map_maker.rs, src/client/presentation_3d/map_palette_preview.rs, and catalog-query helpers local to the client.
+
+Exit: any of the current 34 items is reachable by category, search, pointer, and controller without stepping sequentially through every page; labels and selected state remain readable at target resolution.
+
+#### Slice 5 — actionable validation and playtest loop
+
+- Introduce a presentation-only Map Maker issue model containing severity, message, and an optional focus target such as cell, placement, anchor, or document field. Adapt existing local/headless validation findings; do not create a second gameplay validator.
+- Show a persistent summary: Saved/Unsaved and Needs validation/Ready to test are separate states.
+- Open validation details in the contextual panel. Activating an issue focuses the map cell or relevant control when the underlying validation result identifies one.
+- Disable Test with a visible reason until the current recipe revision and connected server context are valid. Edits, roster/catalog changes, reconnects, or stale responses invalidate readiness.
+- Preserve the existing save-before-submit and server-authoritative routed Practice handoff. Return from Practice with the editor camera, tool, browser selection, and draft intact where the existing lifecycle permits.
+
+Primary files: src/client/flow/screens/map_maker.rs, src/client/map_maker/model.rs for client-owned state only, and existing admission adapters. No protocol change unless current validation responses demonstrably cannot identify actionable failures.
+
+Exit: malformed/incomplete drafts save safely, Test cannot launch a stale or invalid revision, and every surfaced issue explains a recovery action.
+
+### Verification plan
+
+Automated:
+
+- Pure interaction tests for press/hold/release/cancel, pointer exit, UI ownership, modal ownership, text focus, pan/zoom, and additive marquee selection.
+- Model tests for single/multi-item movement, symmetry expansion/deduplication, atomic conflict rejection, Delete, history bounds, and preview/commit equivalence.
+- UI tests for stable selected/disabled/destructive states, category/filter behavior, selected-item visibility, validation focus, and reduced-size overflow.
+- Presentation tests for overlay lifecycle, real asset ghost/footprint parity, symmetry guides, and render-target cleanup.
+- Existing local persistence, validation/admission, and routed Practice tests remain mandatory.
+- Run cargo fmt --all -- --check, cargo check --features client --all-targets, cargo clippy --features client --lib -- -D warnings, focused Map Maker tests, then the repository’s canonical client/server/test recipes proportional to touched boundaries.
+
+Native gates:
+
+1. Mouse/trackpad: every tool, live drag, marquee add/remove, move, cancel, pan/zoom, UI-over-world precedence, palette search/category/scroll, validation focus, and repeated enter/exit with RUST_BACKTRACE=1.
+2. Controller: focus traversal, category/item selection, discrete grid cursor, selection/move, rotate/symmetry, history, Save, validation, Test, and cancel recovery.
+3. Visual: empty/populated, every symmetry mode, invalid multi-cell placement, selected group, validation panel, reduced window/UI scale, and primitive fallback.
+4. End-to-end: save/reopen/validate/Test/return for representative Wipeout, Hot Zone, and Heist drafts.
+
+### Completion and sequencing
+
+Execute slices in order and keep each slice independently reviewable. Do not start BRL-0139 until this ticket passes the native mouse/controller gates and explicit user acceptance. BRL-0037 remains doing throughout remediation and closes only after feedback disposition, learning review, durable documentation reconciliation, ticket sync, and explicit acceptance.

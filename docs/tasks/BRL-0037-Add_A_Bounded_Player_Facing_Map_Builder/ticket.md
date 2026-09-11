@@ -5,10 +5,10 @@ status: doing
 theme: core
 release:
 created: 2026-08-28T09:40:58Z
-modified: 2026-09-11T00:04:48Z
+modified: 2026-09-11T17:03:38Z
 closed:
-revision: 9ecb0cc81bf76556
-blocks: []
+revision: c731776c0f4cb59b
+blocks: [BRL-0139]
 related: [BRL-0036, BRL-0117, BRL-0121]
 ---
 

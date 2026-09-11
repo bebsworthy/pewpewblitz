@@ -1,6 +1,6 @@
 //! Native Map Maker library, editor presentation, and input ownership.
 
-use super::shared::{FlowButton, FlowRoot};
+use super::shared::{FlowButton, FlowRoot, surface_role};
 use crate::{
     client::{
         ArenaCamera, ClientLobbyMembership, ClientPracticeModel, MapDraftDocument, MapDraftId,
@@ -11,7 +11,10 @@ use crate::{
             input::queue_ui_action,
         },
         map_maker::{MapDraftStorage, delete_map_draft, load_map_drafts, save_map_draft},
-        ui::theme::{CREAM, INK, ORANGE, TEAL, font},
+        ui::{
+            surface::{Surface, SurfaceState},
+            theme::{CREAM, INK, ORANGE, TEAL, font},
+        },
     },
     map::{
         AuthoredMapCandidate, MapAssetId, MapAssetSlot, MapCatalogResource, MapCell, MapSymmetry,
@@ -31,6 +34,7 @@ use lightyear::prelude::client::Client;
 use std::collections::BTreeSet;
 
 const VISIBLE_PALETTE_ITEMS: usize = 7;
+const PALETTE_PAGE_DELTA: i8 = 7;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum EditorTool {
@@ -251,8 +255,18 @@ pub(in crate::client::flow) fn update_map_editor_cursor_copy(
     if !runtime.is_changed() {
         return;
     }
+    let symmetry = runtime
+        .session
+        .as_ref()
+        .map_or(MapSymmetry::None, |session| session.symmetry);
     for mut copy in &mut copies {
-        **copy = format!("CELL {},{}", runtime.cursor.x, runtime.cursor.y);
+        **copy = format!(
+            "{}°  ·  {}  ·  CELL {},{}",
+            rotation_degrees(runtime.quarter_turns),
+            symmetry_label(symmetry),
+            runtime.cursor.x,
+            runtime.cursor.y
+        );
     }
 }
 
@@ -761,6 +775,22 @@ impl MapMakerRuntime {
     fn bump_render(&mut self) {
         self.render_revision = self.render_revision.wrapping_add(1).max(1);
     }
+
+    pub(in crate::client::flow) fn action_selected(&self, action: &FlowUiAction) -> bool {
+        match action {
+            FlowUiAction::MapMakerSelectAsset(index) => self.palette_index == *index,
+            FlowUiAction::MapMakerUsePlaceTool => self.tool == EditorTool::Place,
+            FlowUiAction::MapMakerUseEraseTool => self.tool == EditorTool::Erase,
+            FlowUiAction::MapMakerUseMoveTool => self.tool == EditorTool::Move,
+            FlowUiAction::MapMakerCycleSymmetry => self
+                .session
+                .as_ref()
+                .is_some_and(|session| session.symmetry != MapSymmetry::None),
+            FlowUiAction::MapMakerToggleGrid => self.grid_visible,
+            FlowUiAction::MapMakerClear => self.clear_armed,
+            _ => false,
+        }
+    }
 }
 
 fn palette(
@@ -791,14 +821,31 @@ fn cycle_palette(
     };
     let count = palette(catalog, session.document.recipe.mode_definition_id).len();
     if count > 0 {
-        let amount = usize::from(delta.unsigned_abs()) % count;
-        runtime.palette_index = if delta.is_negative() {
-            (runtime.palette_index + count - amount) % count
-        } else {
-            (runtime.palette_index + amount) % count
-        };
+        runtime.palette_index = cycled_palette_index(runtime.palette_index, count, delta);
     }
     runtime.bump_render();
+}
+
+fn cycled_palette_index(current: usize, count: usize, delta: i8) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    if usize::from(delta.unsigned_abs()) == VISIBLE_PALETTE_ITEMS {
+        let page_count = count.div_ceil(VISIBLE_PALETTE_ITEMS);
+        let page = (current / VISIBLE_PALETTE_ITEMS).min(page_count - 1);
+        let next_page = if delta.is_negative() {
+            (page + page_count - 1) % page_count
+        } else {
+            (page + 1) % page_count
+        };
+        return next_page * VISIBLE_PALETTE_ITEMS;
+    }
+    let amount = usize::from(delta.unsigned_abs()) % count;
+    if delta.is_negative() {
+        (current + count - amount) % count
+    } else {
+        (current + amount) % count
+    }
 }
 
 fn place_current(catalog: &crate::map::MapContentCatalog, runtime: &mut MapMakerRuntime) {
@@ -1602,19 +1649,19 @@ fn editor_identity_panel(
             position_type: PositionType::Absolute,
             left: px(18),
             top: px(18),
-            min_width: px(230),
+            min_width: px(220),
             flex_direction: FlexDirection::Column,
             padding: UiRect::axes(px(15), px(10)),
-            border: UiRect::all(px(2)),
+            border: UiRect::all(px(1)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.93)),
-        BorderColor::all(TEAL),
+        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
     ))
     .with_children(|panel| {
         panel.spawn((
             Text::new(session.document.name.to_uppercase()),
-            font(assets, 22.0),
+            font(assets, 20.0),
             TextColor(CREAM),
         ));
         panel.spawn((
@@ -1625,7 +1672,7 @@ fn editor_identity_panel(
                 recipe.revision,
                 if session.dirty() { "UNSAVED" } else { "SAVED" }
             )),
-            font(assets, 13.0),
+            font(assets, 12.0),
             TextColor(if session.dirty() { ORANGE } else { TEAL }),
         ));
     });
@@ -1645,50 +1692,63 @@ fn editor_mode_panel(
     root.spawn((
         Node {
             position_type: PositionType::Absolute,
-            left: percent(29),
-            right: percent(29),
+            left: percent(26),
+            right: percent(24),
             top: px(18),
-            min_height: px(58),
+            min_height: px(66),
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
-            column_gap: px(14),
+            column_gap: px(10),
             padding: UiRect::axes(px(16), px(8)),
-            border: UiRect::all(px(2)),
+            border: UiRect::all(px(1)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.93)),
-        BorderColor::all(TEAL),
+        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
     ))
     .with_children(|panel| {
-        panel.spawn((
-            Text::new(format!(
-                "{:?}  •  {}  •  {}°  •  {:?}",
-                runtime.tool,
-                palette_label(selected, catalog),
-                rotation_degrees(runtime.quarter_turns),
-                symmetry
-            )),
-            font(assets, 15.0),
-            TextColor(CREAM),
-        ));
-        panel.spawn((
-            MapMakerCursorCopy,
-            Text::new(format!("CELL {},{}", runtime.cursor.x, runtime.cursor.y)),
-            font(assets, 14.0),
-            TextColor(ORANGE),
-        ));
-        panel.spawn((
-            Text::new("SHIFT+DRAG PAN"),
-            font(assets, 10.0),
-            TextColor(TEAL),
-        ));
+        panel
+            .spawn(Node {
+                flex_direction: FlexDirection::Column,
+                min_width: px(250),
+                row_gap: px(2),
+                ..default()
+            })
+            .with_children(|state| {
+                state.spawn((
+                    Text::new(format!(
+                        "{}  ·  {}",
+                        tool_label(runtime.tool),
+                        palette_label(selected, catalog)
+                    )),
+                    font(assets, 17.0),
+                    TextColor(CREAM),
+                ));
+                state.spawn((
+                    MapMakerCursorCopy,
+                    Text::new(format!(
+                        "{}°  ·  {}  ·  CELL {},{}",
+                        rotation_degrees(runtime.quarter_turns),
+                        symmetry_label(symmetry),
+                        runtime.cursor.x,
+                        runtime.cursor.y
+                    )),
+                    font(assets, 12.0),
+                    TextColor(TEAL),
+                ));
+                state.spawn((
+                    Text::new("SPACE / SHIFT + DRAG TO PAN"),
+                    font(assets, 10.0),
+                    TextColor(Color::srgba(0.98, 0.92, 0.81, 0.68)),
+                ));
+            });
         compact_action_button(
             panel,
             assets,
             3,
             FlowUiAction::MapMakerRotate,
-            "ROTATE",
+            &format!("ROTATE\n{}°", rotation_degrees(runtime.quarter_turns)),
             TEAL,
             false,
         );
@@ -1697,7 +1757,7 @@ fn editor_mode_panel(
             assets,
             4,
             FlowUiAction::MapMakerCycleSymmetry,
-            "SYMMETRY",
+            &format!("SYMMETRY\n{}", symmetry_label(symmetry)),
             TEAL,
             false,
         );
@@ -1713,10 +1773,10 @@ fn editor_left_rail(
         Node {
             position_type: PositionType::Absolute,
             left: px(18),
-            top: percent(34),
+            top: percent(31),
             flex_direction: FlexDirection::Column,
-            row_gap: px(8),
-            padding: UiRect::all(px(8)),
+            row_gap: px(6),
+            padding: UiRect::all(px(6)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.88)),
@@ -1799,8 +1859,8 @@ fn editor_right_rail(
             top: px(18),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Stretch,
-            row_gap: px(8),
-            padding: UiRect::all(px(8)),
+            row_gap: px(6),
+            padding: UiRect::all(px(6)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.88)),
@@ -1814,6 +1874,15 @@ fn editor_right_rail(
             "MAPS",
             TEAL,
             false,
+        );
+        compact_action_button(
+            rail,
+            assets,
+            22,
+            FlowUiAction::TestAuthoredMap,
+            "TEST MAP",
+            ORANGE,
+            true,
         );
         compact_action_button(
             rail,
@@ -1846,15 +1915,6 @@ fn editor_right_rail(
             TEAL,
             false,
         );
-        compact_action_button(
-            rail,
-            assets,
-            22,
-            FlowUiAction::TestAuthoredMap,
-            "TEST",
-            ORANGE,
-            true,
-        );
     });
 }
 
@@ -1874,29 +1934,29 @@ fn editor_palette(
     root.spawn((
         Node {
             position_type: PositionType::Absolute,
-            left: px(86),
-            right: px(86),
-            bottom: px(18),
-            min_height: px(82),
+            left: px(112),
+            right: px(112),
+            bottom: px(12),
+            min_height: px(118),
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
-            column_gap: px(7),
-            padding: UiRect::axes(px(12), px(9)),
-            border: UiRect::all(px(2)),
+            column_gap: px(8),
+            padding: UiRect::axes(px(14), px(10)),
+            border: UiRect::all(px(1)),
             overflow: Overflow::clip(),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.94)),
-        BorderColor::all(TEAL),
+        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
     ))
     .with_children(|tray| {
         compact_action_button(
             tray,
             assets,
             1,
-            FlowUiAction::MapMakerCycleAsset(-1),
-            "<",
+            FlowUiAction::MapMakerCycleAsset(-PALETTE_PAGE_DELTA),
+            "PREV PAGE",
             TEAL,
             false,
         );
@@ -1923,21 +1983,25 @@ fn editor_palette(
                 selected,
             );
         }
+        let page_count = items.len().div_ceil(VISIBLE_PALETTE_ITEMS).max(1);
         tray.spawn((
             Text::new(format!(
-                "{} / {}",
+                "PAGE {} / {}\nITEM {} / {}",
+                runtime.palette_index / VISIBLE_PALETTE_ITEMS + 1,
+                page_count,
                 runtime.palette_index.saturating_add(1),
                 items.len()
             )),
             font(assets, 11.0),
+            TextLayout::justify(Justify::Center),
             TextColor(ORANGE),
         ));
         compact_action_button(
             tray,
             assets,
             2,
-            FlowUiAction::MapMakerCycleAsset(1),
-            ">",
+            FlowUiAction::MapMakerCycleAsset(PALETTE_PAGE_DELTA),
+            "NEXT PAGE",
             TEAL,
             false,
         );
@@ -1963,32 +2027,35 @@ fn palette_item_button(
                 error_action: false,
             },
             Node {
-                width: px(108),
-                min_height: px(76),
+                width: px(116),
+                min_height: px(98),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                padding: UiRect::all(px(4)),
-                border: UiRect::all(px(if selected { 3 } else { 1 })),
+                padding: UiRect::axes(px(5), px(6)),
+                row_gap: px(3),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.07, 0.12, 0.13, 0.96)),
-            BorderColor::all(if selected { ORANGE } else { TEAL }),
+            Surface::Card,
+            SurfaceState {
+                selected,
+                ..default()
+            },
         ))
         .with_children(|button| {
             button.spawn((
                 preview,
                 Node {
-                    width: px(96),
-                    height: px(48),
+                    width: px(106),
+                    height: px(66),
                     ..default()
                 },
             ));
             button.spawn((
                 Text::new(label.replace('\n', " · ")),
-                font(assets, 9.0),
+                font(assets, 11.0),
                 TextLayout::justify(Justify::Center),
-                TextColor(if selected { ORANGE } else { CREAM }),
+                TextColor(INK),
             ));
         });
 }
@@ -2022,9 +2089,10 @@ fn compact_action_button(
     index: usize,
     action: FlowUiAction,
     label: &str,
-    color: Color,
+    _color: Color,
     selected: bool,
 ) {
+    let role = surface_role(&action);
     parent
         .spawn((
             Button,
@@ -2034,27 +2102,43 @@ fn compact_action_button(
                 error_action: false,
             },
             Node {
-                min_width: px(92),
-                min_height: px(58),
+                min_width: px(94),
+                min_height: px(50),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 padding: UiRect::axes(px(9), px(6)),
-                border: UiRect::all(px(if selected { 3 } else { 1 })),
                 ..default()
             },
-            BackgroundColor(if selected {
-                color
-            } else {
-                Color::srgba(0.07, 0.12, 0.13, 0.96)
-            }),
-            BorderColor::all(color),
+            role,
+            SurfaceState {
+                selected,
+                ..default()
+            },
         ))
         .with_child((
             Text::new(label),
-            font(assets, 10.0),
+            font(assets, 12.0),
             TextLayout::justify(Justify::Center),
             TextColor(INK),
         ));
+}
+
+const fn tool_label(tool: EditorTool) -> &'static str {
+    match tool {
+        EditorTool::Place => "PLACE",
+        EditorTool::Erase => "ERASE",
+        EditorTool::Move => "MOVE / SELECT",
+    }
+}
+
+const fn symmetry_label(symmetry: MapSymmetry) -> &'static str {
+    match symmetry {
+        MapSymmetry::None => "NONE",
+        MapSymmetry::LeftRight => "LEFT / RIGHT",
+        MapSymmetry::TopBottom => "TOP / BOTTOM",
+        MapSymmetry::Rotate180 => "ROTATE 180°",
+        MapSymmetry::FourWay => "FOUR-WAY",
+    }
 }
 
 fn palette_label(item: Option<PaletteItem>, catalog: &crate::map::MapContentCatalog) -> String {
@@ -2194,5 +2278,27 @@ mod tests {
     fn valid_three_quarter_turn_rotation_displays_without_u8_overflow() {
         assert_eq!(rotation_degrees(3), 270);
         assert_eq!(rotation_degrees(u8::MAX), 270);
+    }
+
+    #[test]
+    fn editor_control_selection_is_owned_by_runtime_state() {
+        let runtime = MapMakerRuntime::default();
+        assert!(runtime.action_selected(&FlowUiAction::MapMakerUsePlaceTool));
+        assert!(runtime.action_selected(&FlowUiAction::MapMakerSelectAsset(0)));
+        assert!(runtime.action_selected(&FlowUiAction::MapMakerToggleGrid));
+        assert!(!runtime.action_selected(&FlowUiAction::MapMakerUseEraseTool));
+        assert!(!runtime.action_selected(&FlowUiAction::MapMakerCycleSymmetry));
+        assert_eq!(
+            usize::from(PALETTE_PAGE_DELTA.unsigned_abs()),
+            VISIBLE_PALETTE_ITEMS
+        );
+    }
+
+    #[test]
+    fn palette_page_controls_wrap_between_page_starts() {
+        assert_eq!(cycled_palette_index(0, 34, -PALETTE_PAGE_DELTA), 28);
+        assert_eq!(cycled_palette_index(28, 34, PALETTE_PAGE_DELTA), 0);
+        assert_eq!(cycled_palette_index(7, 34, -PALETTE_PAGE_DELTA), 0);
+        assert_eq!(cycled_palette_index(0, 34, -1), 33);
     }
 }

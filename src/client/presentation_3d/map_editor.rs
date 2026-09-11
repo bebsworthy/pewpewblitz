@@ -100,7 +100,8 @@ pub(super) struct MapEditorCursor;
 
 #[derive(Resource)]
 pub(super) struct MapEditorOverlayMaterials {
-    grid: Handle<StandardMaterial>,
+    grid_minor: Handle<StandardMaterial>,
+    grid_major: Handle<StandardMaterial>,
     place: Handle<StandardMaterial>,
     erase: Handle<StandardMaterial>,
     move_selection: Handle<StandardMaterial>,
@@ -116,6 +117,7 @@ pub(super) struct PresentedMapEditorOverlay {
     symmetry: crate::map::MapSymmetry,
     pointer_mode: MapEditorPointerMode,
     pointer_valid: bool,
+    cursor: crate::map::MapCell,
     selection_hash: u64,
 }
 
@@ -133,7 +135,6 @@ pub(super) fn reconcile_map_editor_overlay(
     overlay_materials: Option<Res<MapEditorOverlayMaterials>>,
     presented: Option<Res<PresentedMapEditorOverlay>>,
     overlays: Query<Entity, With<MapEditorOverlay>>,
-    mut cursors: Query<&mut Transform, With<MapEditorCursor>>,
 ) {
     let Some(preview) = preview else {
         for entity in &overlays {
@@ -144,8 +145,14 @@ pub(super) fn reconcile_map_editor_overlay(
     };
     let Some(materials) = overlay_materials else {
         commands.insert_resource(MapEditorOverlayMaterials {
-            grid: standard_materials.add(StandardMaterial {
-                base_color: Color::srgba(1.0, 0.96, 0.80, 0.34),
+            grid_minor: standard_materials.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 0.96, 0.80, 0.12),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            }),
+            grid_major: standard_materials.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 0.96, 0.80, 0.30),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
@@ -196,6 +203,7 @@ pub(super) fn reconcile_map_editor_overlay(
         symmetry: preview.symmetry,
         pointer_mode: preview.pointer_mode,
         pointer_valid: preview.pointer_valid,
+        cursor: preview.cursor,
         selection_hash: selection_hash(&preview),
     };
     if presented.as_deref() != Some(&desired) {
@@ -207,7 +215,6 @@ pub(super) fn reconcile_map_editor_overlay(
         }
         spawn_symmetry_guides(&mut commands, &primitives, &materials, &preview);
         spawn_selection(&mut commands, &primitives, &materials, &preview);
-        let center = preview.snapshot.dimensions.cell_center(preview.cursor);
         let cursor_material = if preview.pointer_valid {
             match preview.pointer_mode {
                 MapEditorPointerMode::Place => materials.place.clone(),
@@ -217,30 +224,67 @@ pub(super) fn reconcile_map_editor_overlay(
         } else {
             materials.blocked.clone()
         };
+        spawn_pointer_marker(&mut commands, &primitives, &cursor_material, &preview);
+        commands.insert_resource(desired);
+    }
+}
+
+fn spawn_pointer_marker(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    material: &Handle<StandardMaterial>,
+    preview: &MapEditorPreview,
+) {
+    let center =
+        ground_position(preview.snapshot.dimensions.cell_center(preview.cursor)) + Vec3::Y * 1.7;
+    let cell = crate::map::MAP_CELL_SIZE_WORLD;
+    let cross = !preview.pointer_valid || preview.pointer_mode == MapEditorPointerMode::Erase;
+    if cross {
+        for angle in [core::f32::consts::FRAC_PI_4, -core::f32::consts::FRAC_PI_4] {
+            commands.spawn((
+                MapEditorOverlay,
+                MapEditorCursor,
+                Mesh3d(primitives.unit_cuboid.clone()),
+                MeshMaterial3d(material.clone()),
+                NotShadowCaster,
+                Transform {
+                    translation: center,
+                    rotation: Quat::from_rotation_y(angle),
+                    scale: Vec3::new(cell * 0.72, 0.9, 2.8),
+                },
+                Name::new(if preview.pointer_valid {
+                    "Map Maker erase marker"
+                } else {
+                    "Map Maker invalid placement marker"
+                }),
+            ));
+        }
+        return;
+    }
+    let half = cell * 0.43;
+    for (offset, scale) in [
+        (Vec3::new(0.0, 0.0, half), Vec3::new(cell * 0.86, 0.8, 2.2)),
+        (Vec3::new(0.0, 0.0, -half), Vec3::new(cell * 0.86, 0.8, 2.2)),
+        (Vec3::new(half, 0.0, 0.0), Vec3::new(2.2, 0.8, cell * 0.86)),
+        (Vec3::new(-half, 0.0, 0.0), Vec3::new(2.2, 0.8, cell * 0.86)),
+    ] {
         commands.spawn((
             MapEditorOverlay,
             MapEditorCursor,
             Mesh3d(primitives.unit_cuboid.clone()),
-            MeshMaterial3d(cursor_material),
+            MeshMaterial3d(material.clone()),
             NotShadowCaster,
             Transform {
-                translation: ground_position(center) + Vec3::Y * 1.4,
-                scale: Vec3::new(
-                    crate::map::MAP_CELL_SIZE_WORLD - 2.0,
-                    1.2,
-                    crate::map::MAP_CELL_SIZE_WORLD - 2.0,
-                ),
+                translation: center + offset,
+                scale,
                 ..default()
             },
-            Name::new("Map Maker hovered cell"),
+            Name::new(match preview.pointer_mode {
+                MapEditorPointerMode::Place => "Map Maker placement footprint",
+                MapEditorPointerMode::Move => "Map Maker move target",
+                MapEditorPointerMode::Erase => "Map Maker erase target",
+            }),
         ));
-        commands.insert_resource(desired);
-        return;
-    }
-
-    let center = preview.snapshot.dimensions.cell_center(preview.cursor);
-    for mut transform in &mut cursors {
-        transform.translation = ground_position(center) + Vec3::Y * 1.4;
     }
 }
 
@@ -254,14 +298,19 @@ fn spawn_grid(
     let size = bounds.size();
     for x in 0..=snapshot.dimensions.width {
         let world_x = bounds.min.x + f32::from(x) * crate::map::MAP_CELL_SIZE_WORLD;
+        let major = x.is_multiple_of(5);
         commands.spawn((
             MapEditorOverlay,
             Mesh3d(primitives.unit_cuboid.clone()),
-            MeshMaterial3d(materials.grid.clone()),
+            MeshMaterial3d(if major {
+                materials.grid_major.clone()
+            } else {
+                materials.grid_minor.clone()
+            }),
             NotShadowCaster,
             Transform {
                 translation: ground_position(Vec2::new(world_x, bounds.center().y)) + Vec3::Y * 1.1,
-                scale: Vec3::new(0.75, 0.5, size.y),
+                scale: Vec3::new(if major { 0.9 } else { 0.4 }, 0.4, size.y),
                 ..default()
             },
             Name::new("Map Maker grid column"),
@@ -269,14 +318,19 @@ fn spawn_grid(
     }
     for y in 0..=snapshot.dimensions.height {
         let world_y = bounds.min.y + f32::from(y) * crate::map::MAP_CELL_SIZE_WORLD;
+        let major = y.is_multiple_of(5);
         commands.spawn((
             MapEditorOverlay,
             Mesh3d(primitives.unit_cuboid.clone()),
-            MeshMaterial3d(materials.grid.clone()),
+            MeshMaterial3d(if major {
+                materials.grid_major.clone()
+            } else {
+                materials.grid_minor.clone()
+            }),
             NotShadowCaster,
             Transform {
                 translation: ground_position(Vec2::new(bounds.center().x, world_y)) + Vec3::Y * 1.1,
-                scale: Vec3::new(size.x, 0.5, 0.75),
+                scale: Vec3::new(size.x, 0.4, if major { 0.9 } else { 0.4 }),
                 ..default()
             },
             Name::new("Map Maker grid row"),

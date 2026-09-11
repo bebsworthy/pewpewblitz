@@ -104,6 +104,7 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
     equipment: Option<Res<super::equipment::WeaponEquipmentDraft>>,
     creation: Option<Res<super::brawlers::BrawlerCreationDraft>>,
     abilities: Option<Res<super::brawlers::BrawlerEditDraft>>,
+    map_maker: Option<Res<super::map_maker::MapMakerRuntime>>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut buttons: Query<(
         Entity,
@@ -150,6 +151,15 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
                 matches!(d.picker,
                 Some(super::brawlers::AbilityPicker::Passive(slot)) if d.passive_ids[slot] == id)
             }),
+            FlowUiAction::MapMakerSelectAsset(_)
+            | FlowUiAction::MapMakerUsePlaceTool
+            | FlowUiAction::MapMakerUseEraseTool
+            | FlowUiAction::MapMakerUseMoveTool
+            | FlowUiAction::MapMakerCycleSymmetry
+            | FlowUiAction::MapMakerToggleGrid
+            | FlowUiAction::MapMakerClear => map_maker
+                .as_deref()
+                .is_some_and(|runtime| runtime.action_selected(&button.action)),
             _ => false,
         };
         let next = SurfaceState {
@@ -191,20 +201,25 @@ pub(in crate::client::flow) fn surface_role(action: &FlowUiAction) -> Surface {
         | A::ConfirmCreateBrawler
         | A::Connect
         | A::QueueAgain
+        | A::TestAuthoredMap
         | A::OpenDashboardMenu => Surface::Primary,
-        A::OpenPracticeMaps | A::OpenBrawlerList | A::OpenMapMaker => Surface::Secondary,
+        A::OpenPracticeMaps | A::OpenBrawlerList | A::OpenMapMaker | A::SaveMapDraft => {
+            Surface::Secondary
+        }
         A::OpenBrawlerDetails(_)
         | A::CreateBrawler
         | A::SelectEquipmentSlot(_)
         | A::EquipWeaponPart(_)
         | A::UnequipWeaponPart
-        | A::SelectGameTypeDraft(_) => Surface::Card,
+        | A::SelectGameTypeDraft(_)
+        | A::MapMakerSelectAsset(_) => Surface::Card,
         A::OpenWeaponEquipment(_) | A::OpenBrawlerEditor(_) | A::OpenGameTypeSelect => {
             Surface::Panel
         }
         A::EditAddress | A::EditName => Surface::Field,
         A::JoinSaved(_) => Surface::Row,
         A::BeginBrawlerNameEdit | A::ConfirmBrawlerEdit => Surface::Quiet,
+        A::MapMakerClear => Surface::Danger,
         _ => Surface::Action,
     }
 }
