@@ -660,6 +660,60 @@ fn gamepad_neutral_has_no_target_and_small_lob_input_uses_inner_range() {
     assert_eq!(pending.aim_distance, None);
 }
 
+#[test]
+fn calibrated_arc_target_suppresses_rest_drift_and_preserves_near_range() {
+    let settings = ClientInputSettings {
+        aim_deadzone: 0.08,
+        ..default()
+    };
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .init_resource::<PendingLocalActions>()
+        .insert_resource(ClientPlayableGate(true))
+        .init_resource::<ClientInputContext>()
+        .init_resource::<InputDeviceActivity>()
+        .insert_resource(settings)
+        .add_systems(Update, sample_local_input);
+    let device = app.world_mut().spawn(Gamepad::default()).id();
+    app.world_mut().spawn((
+        Fighter,
+        Controlled,
+        Position::default(),
+        resolved_arc_launcher_loadout(),
+    ));
+    // Pin the device as a prior deliberate gamepad interaction would; rest drift must
+    // not need to exceed the device-switch threshold for this regression to be meaningful.
+    app.world_mut()
+        .resource_mut::<PendingLocalActions>()
+        .active_device = ActiveInputDevice::Gamepad(device);
+    for raw in [0.04, 0.082, 1.0, 0.04] {
+        app.world_mut()
+            .get_mut::<Gamepad>(device)
+            .unwrap()
+            .analog_mut()
+            .set(GamepadAxis::RightStickX, raw);
+        app.update();
+        let pending = app.world().resource::<PendingLocalActions>();
+        let shaped = settings.shape_targeting_axis(Vec2::X * raw);
+        assert_eq!(pending.aim_axis.is_some(), shaped.is_some());
+        if let Some(shaped) = shaped {
+            let distance = pending
+                .aim_distance
+                .expect("calibrated Arc Launcher has a distance");
+            assert!((distance - shaped.length() * 520.0).abs() < 0.001);
+            if raw < 0.1 {
+                assert!(distance > 0.0 && distance < 2.0);
+            }
+        } else {
+            // update_aim_preview gates both weapon segments and targeted-ultimate
+            // previews on this same aim_axis, without a separate visual deadzone.
+            assert_eq!(pending.aim_axis, None);
+            assert_eq!(pending.aim_distance, None);
+        }
+    }
+}
+
 /// Resolve the Arc Launcher loadout through the real build pipeline, so input shaping
 /// tests observe the same `ResolvedMatchLoadout` a joined client receives by replication.
 fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {

@@ -4,11 +4,10 @@ title: Expand Practice bots across current weapon and ability matchups
 status: backlog
 theme: core
 release:
-priority: high
 created: 2026-08-28T09:40:58Z
-modified: 2026-08-28T09:41:00Z
+modified: 2026-08-31T04:33:09Z
 closed:
-revision: c26c47d24cd06a10
+revision: fc931290c6afdb8b
 blocks: []
 related: [BRL-0003, BRL-0045]
 ---

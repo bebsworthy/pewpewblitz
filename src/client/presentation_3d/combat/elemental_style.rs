@@ -12,11 +12,34 @@ pub(in crate::client) struct FireAreaMaterial {
     params: Vec4,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::client) enum ElementalTeamAccent {
+    Neutral,
+    Ally,
+    Enemy,
+}
+
+impl ElementalTeamAccent {
+    const fn shader_value(self) -> f32 {
+        match self {
+            Self::Neutral => 0.0,
+            Self::Ally => 1.0,
+            Self::Enemy => 2.0,
+        }
+    }
+}
+
+impl FireAreaMaterial {
+    pub(in crate::client) const fn new(team_accent: ElementalTeamAccent) -> Self {
+        Self {
+            params: Vec4::new(0.0, 1.0 / 1.08, team_accent.shader_value(), 0.0),
+        }
+    }
+}
+
 impl Default for FireAreaMaterial {
     fn default() -> Self {
-        Self {
-            params: Vec4::new(0.0, 1.0 / 1.08, 0.0, 0.0),
-        }
+        Self::new(ElementalTeamAccent::Neutral)
     }
 }
 
@@ -53,15 +76,15 @@ pub(in crate::client) struct ElementalSupportAreaMaterial {
 }
 
 impl ElementalSupportAreaMaterial {
-    pub(in crate::client) const fn poison() -> Self {
+    pub(in crate::client) const fn poison(team_accent: ElementalTeamAccent) -> Self {
         Self {
-            params: Vec4::new(0.0, 0.0, 0.0, 0.0),
+            params: Vec4::new(0.0, 0.0, team_accent.shader_value(), 0.0),
         }
     }
 
-    pub(in crate::client) const fn restoration() -> Self {
+    pub(in crate::client) const fn restoration(team_accent: ElementalTeamAccent) -> Self {
         Self {
-            params: Vec4::new(0.0, 1.0, 0.0, 0.0),
+            params: Vec4::new(0.0, 1.0, team_accent.shader_value(), 0.0),
         }
     }
 }
@@ -427,7 +450,6 @@ impl ElementalAreaStyle<'_> {
     fn spawn(&self, parent: &mut ChildSpawnerCommands) {
         self.spawn_fill(parent);
         self.spawn_boundaries(parent);
-        self.spawn_relationship(parent);
         self.spawn_accents(parent);
     }
 
@@ -472,7 +494,11 @@ impl ElementalAreaStyle<'_> {
             parent.spawn((
                 AnimatedFireArea3d,
                 Mesh3d(self.primitives.area_disc.clone()),
-                MeshMaterial3d(self.materials.elemental_fire_area.clone()),
+                MeshMaterial3d(
+                    self.materials
+                        .elemental_fire_area
+                        .select(self.signature.relationship),
+                ),
                 NotShadowCaster,
                 NotShadowReceiver,
                 fill_transform,
@@ -482,9 +508,13 @@ impl ElementalAreaStyle<'_> {
         }
         if self.is_normal_support_area() {
             let material = if self.accent == vfx::VfxAccent::Poison {
-                self.materials.elemental_poison_area.clone()
+                self.materials
+                    .elemental_poison_area
+                    .select(self.signature.relationship)
             } else {
-                self.materials.elemental_restoration_area.clone()
+                self.materials
+                    .elemental_restoration_area
+                    .select(self.signature.relationship)
             };
             parent.spawn((
                 Mesh3d(self.primitives.area_disc.clone()),
@@ -548,26 +578,6 @@ impl ElementalAreaStyle<'_> {
                 Name::new("Fire area soft inner boundary"),
             ));
         }
-    }
-
-    fn spawn_relationship(&self, parent: &mut ChildSpawnerCommands) {
-        if self.signature.relationship == vfx::VfxRelationship::Neutral {
-            return;
-        }
-        parent.spawn((
-            Mesh3d(self.primitives.area_ring.clone()),
-            MeshMaterial3d(relationship_material(
-                self.signature.relationship,
-                self.materials,
-                self.materials.neutral.clone(),
-            )),
-            NotShadowCaster,
-            NotShadowReceiver,
-            Transform::from_xyz(0.0, super::common::GROUND_EFFECT_HEIGHT + 0.9, 0.0)
-                .with_rotation(Self::ground_rotation())
-                .with_scale(Vec3::splat(self.radius * 0.9)),
-            Name::new("Elemental area relationship inset"),
-        ));
     }
 
     fn spawn_accents(&self, parent: &mut ChildSpawnerCommands) {
@@ -670,6 +680,14 @@ impl ElementalAreaStyle<'_> {
     }
 
     fn accent_material(&self, slot: u8) -> Handle<StandardMaterial> {
+        if let Some(material) = relationship_accent_material(
+            self.accent,
+            self.signature.relationship,
+            slot,
+            self.materials,
+        ) {
+            return material;
+        }
         if matches!(
             self.accent,
             vfx::VfxAccent::Cold | vfx::VfxAccent::Poison | vfx::VfxAccent::Restoration
@@ -685,6 +703,42 @@ impl ElementalAreaStyle<'_> {
             1 => self.bright.clone(),
             _ => self.soft.clone(),
         }
+    }
+}
+
+fn relationship_accent_material(
+    accent: vfx::VfxAccent,
+    relationship: vfx::VfxRelationship,
+    slot: u8,
+    materials: &Material3dAssets,
+) -> Option<Handle<StandardMaterial>> {
+    match relationship_accent_slot(accent, relationship, slot) {
+        Some(ElementalTeamAccent::Ally) => Some(materials.effect_ally.clone()),
+        Some(ElementalTeamAccent::Enemy) => Some(materials.effect_enemy.clone()),
+        _ => None,
+    }
+}
+
+fn relationship_accent_slot(
+    accent: vfx::VfxAccent,
+    relationship: vfx::VfxRelationship,
+    slot: u8,
+) -> Option<ElementalTeamAccent> {
+    // Reduced and primitive variants reuse the effect's native accents. Fire has
+    // many more accents than the other families, so use a sparser cadence there:
+    // team color should read as heat moving through the flame band, not as a row
+    // of regularly spaced warning markers.
+    let cadence = if accent == vfx::VfxAccent::Fire { 4 } else { 2 };
+    match relationship {
+        vfx::VfxRelationship::SelfOwned | vfx::VfxRelationship::Ally
+            if slot.is_multiple_of(cadence) =>
+        {
+            Some(ElementalTeamAccent::Ally)
+        }
+        vfx::VfxRelationship::Enemy if slot.is_multiple_of(cadence) => {
+            Some(ElementalTeamAccent::Enemy)
+        }
+        _ => None,
     }
 }
 
@@ -766,12 +820,16 @@ pub(in crate::client) fn animate_fire_area_material(
     handles: Option<Res<Material3dAssets>>,
     mut materials: ResMut<Assets<FireAreaMaterial>>,
 ) {
+    const VISUAL_CYCLE_SECONDS: u64 = 900;
+
     let Some(handles) = handles else {
         return;
     };
     let tick = ticks.iter().map(|tick| tick.0).max().unwrap_or_default();
-    if let Some(mut material) = materials.get_mut(&handles.elemental_fire_area) {
-        const VISUAL_CYCLE_SECONDS: u64 = 900;
+    for handle in handles.elemental_fire_area.handles() {
+        let Some(mut material) = materials.get_mut(handle) else {
+            continue;
+        };
         let cycle_ticks = crate::timing::SIMULATION_TICK_HZ * VISUAL_CYCLE_SECONDS;
         let visual_tick = u16::try_from(tick % cycle_ticks)
             .expect("the fifteen-minute Fire visual cycle fits u16");
@@ -798,10 +856,12 @@ pub(in crate::client) fn animate_elemental_support_area_materials(
     let tick_hz = u16::try_from(crate::timing::SIMULATION_TICK_HZ)
         .expect("the simulation tick rate fits u16");
     let time = f32::from(visual_tick) / f32::from(tick_hz);
-    for handle in [
-        &handles.elemental_poison_area,
-        &handles.elemental_restoration_area,
-    ] {
+    for handle in handles
+        .elemental_poison_area
+        .handles()
+        .into_iter()
+        .chain(handles.elemental_restoration_area.handles())
+    {
         if let Some(mut material) = materials.get_mut(handle) {
             material.params.x = time;
         }
@@ -869,9 +929,10 @@ fn relationship_material(
     neutral_fallback: Handle<StandardMaterial>,
 ) -> Handle<StandardMaterial> {
     match relationship {
-        vfx::VfxRelationship::SelfOwned => materials.marker_local.clone(),
-        vfx::VfxRelationship::Ally => materials.marker_ally.clone(),
-        vfx::VfxRelationship::Enemy => materials.marker_enemy.clone(),
+        vfx::VfxRelationship::SelfOwned | vfx::VfxRelationship::Ally => {
+            materials.effect_ally.clone()
+        }
+        vfx::VfxRelationship::Enemy => materials.effect_enemy.clone(),
         vfx::VfxRelationship::Neutral => neutral_fallback,
     }
 }
@@ -905,8 +966,40 @@ mod tests {
 
     #[test]
     fn support_area_materials_select_distinct_shader_identities() {
-        assert!(ElementalSupportAreaMaterial::poison().params.y.abs() < f32::EPSILON);
-        assert!((ElementalSupportAreaMaterial::restoration().params.y - 1.0).abs() < f32::EPSILON);
+        assert!(
+            ElementalSupportAreaMaterial::poison(ElementalTeamAccent::Neutral)
+                .params
+                .y
+                .abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (ElementalSupportAreaMaterial::restoration(ElementalTeamAccent::Neutral)
+                .params
+                .y
+                - 1.0)
+                .abs()
+                < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn normal_area_materials_encode_the_same_bounded_team_accent_contract() {
+        for (accent, expected) in [
+            (ElementalTeamAccent::Neutral, 0.0),
+            (ElementalTeamAccent::Ally, 1.0),
+            (ElementalTeamAccent::Enemy, 2.0),
+        ] {
+            assert!((FireAreaMaterial::new(accent).params.z - expected).abs() < f32::EPSILON);
+            assert!(
+                (ElementalSupportAreaMaterial::poison(accent).params.z - expected).abs()
+                    < f32::EPSILON
+            );
+            assert!(
+                (ElementalSupportAreaMaterial::restoration(accent).params.z - expected).abs()
+                    < f32::EPSILON
+            );
+        }
     }
 
     #[test]
@@ -925,5 +1018,45 @@ mod tests {
         assert_eq!(area_accent_count(vfx::VfxAccent::Restoration, Normal), 8);
         assert_eq!(area_accent_count(vfx::VfxAccent::Restoration, Reduced), 4);
         assert_eq!(area_accent_count(vfx::VfxAccent::Neutral, Normal), 0);
+    }
+
+    #[test]
+    fn effect_relationship_changes_color_without_changing_pattern_cadence() {
+        assert_eq!(
+            relationship_accent_slot(vfx::VfxAccent::Cold, vfx::VfxRelationship::SelfOwned, 0,),
+            Some(ElementalTeamAccent::Ally)
+        );
+        assert_eq!(
+            relationship_accent_slot(vfx::VfxAccent::Cold, vfx::VfxRelationship::Ally, 2),
+            Some(ElementalTeamAccent::Ally)
+        );
+        assert_eq!(
+            relationship_accent_slot(vfx::VfxAccent::Cold, vfx::VfxRelationship::Enemy, 2),
+            Some(ElementalTeamAccent::Enemy)
+        );
+        assert_eq!(
+            relationship_accent_slot(vfx::VfxAccent::Cold, vfx::VfxRelationship::Neutral, 0,),
+            None
+        );
+        assert_eq!(
+            relationship_accent_slot(vfx::VfxAccent::Cold, vfx::VfxRelationship::Ally, 1),
+            None
+        );
+        assert_eq!(
+            relationship_accent_slot(vfx::VfxAccent::Cold, vfx::VfxRelationship::Enemy, 3),
+            None
+        );
+        assert_eq!(
+            relationship_accent_slot(vfx::VfxAccent::Fire, vfx::VfxRelationship::Ally, 4),
+            Some(ElementalTeamAccent::Ally)
+        );
+        assert_eq!(
+            relationship_accent_slot(vfx::VfxAccent::Fire, vfx::VfxRelationship::Enemy, 4),
+            Some(ElementalTeamAccent::Enemy)
+        );
+        assert_eq!(
+            relationship_accent_slot(vfx::VfxAccent::Fire, vfx::VfxRelationship::Enemy, 2),
+            None
+        );
     }
 }

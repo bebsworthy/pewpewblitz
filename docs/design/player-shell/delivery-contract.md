@@ -1,5 +1,9 @@
 # Output contract for implementation
 
+The [UI toolkit contract](ui-toolkit.md) owns the current native palette, surface roles, controls,
+interaction states, and extension rules. This document describes design-artifact handoff rather
+than an alternate component system.
+
 ## The practical answer
 
 Request **PNG screen references plus written layout/style/motion notes first**. After selecting the style, request separable assets. A PNG can communicate an excellent design; its flat pixels cannot tell the client which button is focused, how text wraps or where an editable field begins. SVG is useful for individual geometric assets, not as a replacement for the application. Blender is useful only for actual 3D content.
@@ -63,7 +67,7 @@ Ask for this only after approval to avoid manufacturing assets for discarded sty
 ```text
 assets/
   backgrounds/                 text-free base artwork and independent foreground accents
-  motifs/                      reusable slashes, halftone and stage-decoration sources
+  chrome/                      approved bounded icons or decorative accents with a named use
   icons/                       navigation/action/status SVGs and preview PNGs
   typography/                  actual font files and licenses, if newly selected
   models/                      optional .blend source and .glb exports
@@ -125,7 +129,10 @@ Record generation/editing provenance and any source-reference restrictions. Appr
 
 Buttons, panels, labels, statistics, text fields, toggles, sliders, selection/focus, scroll behavior and transient status remain native UI. Real brawlers use the existing 3D preview. Decorative images sit behind/alongside these elements. Motion reads actual flow state; save/network results are never inferred from an animation.
 
-At implementation, map the agreed roles to the smallest shared set of styling helpers and repeated components. Keep the existing owned screen modules and explicit draft/commit behavior. This brief does not authorize a custom UI framework, new renderer or UI dependency.
+At implementation, map the agreed roles to the existing native toolkit first. Add a focused shared
+primitive only when a real second use or concrete ownership problem demonstrates the boundary.
+Keep the existing owned screen modules and explicit draft/commit behavior. This brief does not
+authorize a custom UI framework, new renderer, or UI dependency.
 
 ## Acceptance when the generated style returns
 

@@ -238,6 +238,7 @@ pub(super) fn spawn_current_candidate(
     .ok();
 }
 
+#[cfg(test)]
 pub(super) fn connection_presentation(pending: &PendingConnection, now: Duration) -> String {
     let dots = "."
         .repeat(usize::try_from((now.as_millis() / 350) % 3 + 1).expect("pulse width is bounded"));

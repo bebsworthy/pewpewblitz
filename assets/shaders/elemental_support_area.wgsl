@@ -28,7 +28,19 @@ fn ring_mask(radius: f32, center: f32, width: f32) -> f32 {
     return 1.0 - smoothstep(width * 0.45, width, abs(radius - center));
 }
 
-fn poison(point: vec2<f32>, radius: f32, time: f32) -> vec4<f32> {
+fn team_tint(color: vec3<f32>, mask: f32, team_accent: f32) -> vec3<f32> {
+    if team_accent > 0.5 && team_accent < 1.5 {
+        let strength = smoothstep(0.08, 0.58, mask) * 0.86;
+        return mix(color, vec3<f32>(0.025, 0.62, 3.6), strength);
+    }
+    if team_accent > 1.5 {
+        let strength = smoothstep(0.06, 0.54, mask) * 0.92;
+        return mix(color, vec3<f32>(2.4, 0.004, 0.018), strength);
+    }
+    return color;
+}
+
+fn poison(point: vec2<f32>, radius: f32, time: f32, team_accent: f32) -> vec4<f32> {
     let warped = point * 3.2
         + vec2<f32>(
             value_noise(point * 2.1 + vec2<f32>(time * 0.13, -time * 0.09)),
@@ -56,10 +68,14 @@ fn poison(point: vec2<f32>, radius: f32, time: f32) -> vec4<f32> {
     let foam = vec3<f32>(1.05, 3.25, 0.11);
     var color = mix(murk, acid, veins * 0.72 + edge * 0.28);
     color = mix(color, foam, bubbles * edge * 0.58);
+    let team_wave = sin(angle * 6.0 - time * 0.72 + broad * 3.1) * 0.5 + 0.5;
+    let team_mask = smoothstep(0.48, 0.88, team_wave + bubbles * 0.22)
+        * clamp(veins * 0.62 + bubbles * edge * 0.82, 0.0, 1.0);
+    color = team_tint(color, team_mask, team_accent);
     return vec4<f32>(color, alpha);
 }
 
-fn restoration(point: vec2<f32>, radius: f32, time: f32) -> vec4<f32> {
+fn restoration(point: vec2<f32>, radius: f32, time: f32, team_accent: f32) -> vec4<f32> {
     let angle = atan2(point.y, point.x);
     let slow = time * 0.38;
     let breath = sin(time * 1.25) * 0.5 + 0.5;
@@ -71,17 +87,17 @@ fn restoration(point: vec2<f32>, radius: f32, time: f32) -> vec4<f32> {
         + ring_mask(radius, 0.58, 0.045) * middle_dash
         + ring_mask(radius, 0.36, 0.038) * inner_dash;
 
-    // Four restrained radial strokes form a vitality-cross motif without turning
-    // the affected area into a flat icon or hiding fighters standing over it.
-    let cross_x = (1.0 - smoothstep(0.018, 0.055, abs(point.x)))
-        * smoothstep(0.10, 0.22, abs(point.y))
-        * (1.0 - smoothstep(0.31, 0.43, abs(point.y)));
-    let cross_y = (1.0 - smoothstep(0.018, 0.055, abs(point.y)))
-        * smoothstep(0.10, 0.22, abs(point.x))
-        * (1.0 - smoothstep(0.31, 0.43, abs(point.x)));
-    let cross = max(cross_x, cross_y) * (0.72 + breath * 0.28);
+    // An offset curved vitality ripple keeps the center organic and asymmetric.
+    // There are deliberately no cardinal strokes or icon-like negative spaces.
+    let ripple_center = vec2<f32>(cos(slow * 0.73), sin(slow * 0.91)) * 0.045;
+    let ripple_radius = length(point - ripple_center);
+    let ripple_angle = atan2(point.y - ripple_center.y, point.x - ripple_center.x);
+    let ripple_flow = sin(ripple_angle * 5.0 + ripple_radius * 15.0 - slow * 2.4)
+        * 0.5 + 0.5;
+    let inner_ripple = ring_mask(ripple_radius, 0.24 + breath * 0.018, 0.052)
+        * smoothstep(0.24, 0.78, ripple_flow);
     let base = (1.0 - smoothstep(0.91, 1.0, radius)) * 0.045;
-    let alpha = (base + min(arcs, 1.0) * 0.30 + cross * 0.34)
+    let alpha = (base + min(arcs, 1.0) * 0.30 + inner_ripple * 0.28)
         * (1.0 - smoothstep(0.985, 1.0, radius));
     if alpha < 0.01 {
         discard;
@@ -90,8 +106,16 @@ fn restoration(point: vec2<f32>, radius: f32, time: f32) -> vec4<f32> {
     let calm = vec3<f32>(0.01, 0.22, 0.12);
     let life = vec3<f32>(0.06, 1.75, 0.72);
     let bright = vec3<f32>(0.48, 3.20, 1.62);
-    var color = mix(calm, life, clamp(arcs * 0.8 + cross * 0.55, 0.0, 1.0));
-    color = mix(color, bright, clamp(cross * 0.55 + arcs * breath * 0.18, 0.0, 0.7));
+    var color = mix(calm, life, clamp(arcs * 0.8 + inner_ripple * 0.62, 0.0, 1.0));
+    color = mix(
+        color,
+        bright,
+        clamp(inner_ripple * 0.48 + arcs * breath * 0.18, 0.0, 0.7)
+    );
+    let team_wave = sin(angle * 6.0 - slow * 1.4 + radius * 5.0) * 0.5 + 0.5;
+    let team_mask = smoothstep(0.48, 0.88, team_wave)
+        * clamp(arcs * 0.76 + inner_ripple * 0.82, 0.0, 1.0);
+    color = team_tint(color, team_mask, team_accent);
     return vec4<f32>(color, alpha);
 }
 
@@ -103,7 +127,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     if params.y < 0.5 {
-        return poison(point, radius, params.x);
+        return poison(point, radius, params.x, params.z);
     }
-    return restoration(point, radius, params.x);
+    return restoration(point, radius, params.x, params.z);
 }

@@ -259,10 +259,12 @@ pub(super) fn observe_routed_transition(
 pub(super) fn advance_routed_transition(
     mut commands: Commands,
     config: Res<ClientNetworkConfig>,
+    active: Option<Res<super::connection::ActiveRoutedConnection>>,
     time: Res<Time<Real>>,
     mut lifecycle: ResMut<RoutedClientLifecycle>,
     clients: Query<(), With<Client>>,
 ) -> Result {
+    let config = active.as_ref().map_or(&*config, |active| &active.config);
     if config.transport != NetworkTransport::RoutedUdp || clients.iter().next().is_some() {
         return Ok(());
     }
@@ -279,7 +281,7 @@ pub(super) fn advance_routed_transition(
             );
             spawn_client_entity(
                 &mut commands,
-                &config,
+                config,
                 time.elapsed(),
                 Some((
                     io,
@@ -298,9 +300,9 @@ pub(super) fn advance_routed_transition(
         RoutedClientPhase::AwaitingLobbyRetryUnlink | RoutedClientPhase::AwaitingMatchUnlink => {
             lifecycle.begin_lobby_after_match();
             let generation = lifecycle.generation;
-            spawn_client_entity(
+            let entity = spawn_client_entity(
                 &mut commands,
-                &config,
+                config,
                 time.elapsed(),
                 Some((
                     RoutedUdpIo::lobby(config.server_addr),
@@ -310,6 +312,12 @@ pub(super) fn advance_routed_transition(
                     },
                 )),
             )?;
+            if let Some(active) = active.as_ref() {
+                commands.entity(entity).insert(super::RuntimeLobbyTarget {
+                    logical_address: active.logical_address.clone(),
+                    proposed_display_name: active.proposed_display_name.clone(),
+                });
+            }
             info!(generation, "brawler client starting fresh lobby session");
         }
         RoutedClientPhase::Disabled | RoutedClientPhase::Lobby | RoutedClientPhase::Match => {}
@@ -407,6 +415,77 @@ pub(super) fn disconnect_rejected_client(
         if matches!(status.phase, ClientJoinPhase::Rejected(_)) && !status.disconnect_requested {
             status.disconnect_requested = true;
             commands.trigger(Disconnect { entity });
+        }
+    }
+}
+
+#[cfg(test)]
+mod transition_tests {
+    use super::*;
+    use bevy::{ecs::system::RunSystemOnce, prelude::*};
+    use brawler_routing::{AllocationId, MatchId, PeerId, RequestId, RouteId};
+    use lightyear::prelude::PeerAddr;
+
+    #[test]
+    fn product_handoff_and_return_keep_runtime_endpoint_and_identity() {
+        let startup = ClientNetworkConfig::new(0);
+        let mut runtime = startup.clone();
+        runtime.client_id = 42;
+        runtime.transport = NetworkTransport::RoutedUdp;
+        let address = "127.0.0.1:5134".parse().unwrap();
+        let mut world = World::new();
+        world.insert_resource(startup);
+        world.insert_resource(Time::<Real>::default());
+        let mut lifecycle = RoutedClientLifecycle::default();
+        let lobby = super::super::connection::spawn_product_lobby_connection(
+            &mut world.commands(),
+            &runtime,
+            &mut lifecycle,
+            super::super::connection::ProductLobbyAttempt {
+                started_at: core::time::Duration::ZERO,
+                server_addr: address,
+                logical_address: "example.test:5134".into(),
+                proposed_display_name: "Pilot".into(),
+                netcode_timeout: core::time::Duration::from_secs(5),
+            },
+        )
+        .unwrap();
+        world.flush();
+        world.despawn(lobby);
+        assert!(lifecycle.accept_grant(MatchRouteGrant {
+            request_id: RequestId::new(1).unwrap(),
+            allocation_id: AllocationId::new(2).unwrap(),
+            match_id: MatchId::new(3).unwrap(),
+            route_id: RouteId::new(4).unwrap(),
+            peer_id: PeerId::new(5).unwrap(),
+            game_mode: crate::config::GameMode::Wipeout,
+            capability: crate::protocol::RouteCapability::from_bytes([7; 32]).unwrap(),
+            activation_expiry_unix_ms: 10,
+            route_expiry_unix_ms: 20,
+        }));
+        world.insert_resource(lifecycle);
+        for returning in [false, true] {
+            world
+                .run_system_once::<_, Result, _>(advance_routed_transition)
+                .unwrap()
+                .unwrap();
+            let (entity, peer, name) = world
+                .query_filtered::<(Entity, &PeerAddr, &Name), With<Client>>()
+                .single(&world)
+                .unwrap();
+            assert_eq!(peer.0, address);
+            assert_eq!(name.as_str(), "Brawler routed client 42");
+            if returning {
+                let target = world
+                    .get::<super::super::RuntimeLobbyTarget>(entity)
+                    .unwrap();
+                assert_eq!(target.logical_address, "example.test:5134");
+                assert_eq!(target.proposed_display_name, "Pilot");
+            } else {
+                world.despawn(entity);
+                world.resource_mut::<RoutedClientLifecycle>().phase =
+                    RoutedClientPhase::AwaitingMatchUnlink;
+            }
         }
     }
 }

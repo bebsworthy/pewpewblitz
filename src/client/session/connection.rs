@@ -167,6 +167,14 @@ pub(in crate::client) struct ProductLobbyAttempt {
     pub netcode_timeout: Duration,
 }
 
+/// Runtime server choice and identity survive the lobby entity's handoff despawn.
+#[derive(bevy::prelude::Resource)]
+pub(super) struct ActiveRoutedConnection {
+    pub config: ClientNetworkConfig,
+    pub logical_address: String,
+    pub proposed_display_name: String,
+}
+
 pub(in crate::client) fn spawn_product_lobby_connection(
     commands: &mut Commands,
     config: &ClientNetworkConfig,
@@ -195,6 +203,11 @@ pub(in crate::client) fn spawn_product_lobby_connection(
         )),
     )?;
     commands.entity(entity).insert(RuntimeLobbyTarget {
+        logical_address: attempt.logical_address.clone(),
+        proposed_display_name: attempt.proposed_display_name.clone(),
+    });
+    commands.insert_resource(ActiveRoutedConnection {
+        config: attempt_config,
         logical_address: attempt.logical_address,
         proposed_display_name: attempt.proposed_display_name,
     });

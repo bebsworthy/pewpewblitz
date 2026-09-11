@@ -4,11 +4,10 @@ title: Add a second purpose-built Wipeout map
 status: backlog
 theme: core
 release:
-priority: high
 created: 2026-08-28T09:40:58Z
-modified: 2026-08-28T09:41:00Z
+modified: 2026-08-31T04:32:20Z
 closed:
-revision: f2079014ea159ebe
+revision: d14a7b72e95a8c4c
 blocks: []
 related: []
 ---

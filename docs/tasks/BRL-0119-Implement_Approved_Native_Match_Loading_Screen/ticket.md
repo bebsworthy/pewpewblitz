@@ -1,13 +1,13 @@
 ---
 id: BRL-0119
 title: Implement approved native match loading screen
-status: doing
+status: done
 theme:
 release:
 created: 2026-09-08T17:38:02Z
-modified: 2026-09-08T18:30:03Z
-closed:
-revision: f6ee1df482409fd3
+modified: 2026-09-09T09:49:21Z
+closed: 2026-09-09T09:49:21Z
+revision: 5b147c2808914d74
 blocks: []
 related: []
 ---

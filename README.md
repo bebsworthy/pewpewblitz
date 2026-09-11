@@ -97,7 +97,8 @@ Tab cycles twelve production-lifecycle fixtures: transient, straight, melee, lob
 persistent Splash, elemental field, concealment, cone, dash, sentry, and attached status. Space
 restarts with the same presentation identity, N advances to a new identity, C cycles
 neutral/Cold/Fire/Poison/Restoration styling where the selected effect permits it, and U selects the
-effect-specific alternate (ultimate escalation, lifecycle/outcome comparison, or status variant),
+effect-specific alternate (ultimate escalation, lifecycle/outcome comparison, or status variant), O
+cycles neutral/ally/enemy relationship context through the production signature resolver,
 Enter pauses both retained and GPU-particle timelines, and `.` advances one simulation tick. R
 toggles the production reduced-effects variant, P toggles the primitive variant, F12 writes paired
 PNG/JSON evidence under
@@ -113,7 +114,7 @@ the Lab's semantic carrier fixture; it does not introduce another renderer path.
 Use `--fixture transient|straight|melee|lobbed|sticky|splash|field|concealment|cone|dash|sentry|status`
 to start at a lifecycle fixture. Native
 automation may add `--identity N --radius WORLD_UNITS` and
-`--sample-ticks N --accent neutral|cold|fire|poison|restoration --ultimate --capture-dir PATH --capture-after UPDATES
+`--sample-ticks N --accent neutral|cold|fire|poison|restoration --relationship neutral|ally|enemy --ultimate --capture-dir PATH --capture-after UPDATES
 --exit-after-capture`; `--paused` captures a stable sample, with `--sample-ticks` advancing the
 retained production timeline before it freezes. Allow about 12 updates before an automated paused
 capture so native mesh and particle pipelines are ready. A running transient must be captured inside

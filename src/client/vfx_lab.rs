@@ -92,6 +92,50 @@ impl VfxLabAccent {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VfxLabRelationship {
+    #[default]
+    Neutral,
+    Ally,
+    Enemy,
+}
+
+impl VfxLabRelationship {
+    #[must_use]
+    pub fn from_key(value: &str) -> Option<Self> {
+        match value {
+            "neutral" => Some(Self::Neutral),
+            "ally" => Some(Self::Ally),
+            "enemy" => Some(Self::Enemy),
+            _ => None,
+        }
+    }
+
+    const fn next(self) -> Self {
+        match self {
+            Self::Neutral => Self::Ally,
+            Self::Ally => Self::Enemy,
+            Self::Enemy => Self::Neutral,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Neutral => "neutral",
+            Self::Ally => "ally",
+            Self::Enemy => "enemy",
+        }
+    }
+
+    const fn signature_relationship(self) -> crate::client::vfx::VfxRelationship {
+        match self {
+            Self::Neutral => crate::client::vfx::VfxRelationship::Neutral,
+            Self::Ally => crate::client::vfx::VfxRelationship::Ally,
+            Self::Enemy => crate::client::vfx::VfxRelationship::Enemy,
+        }
+    }
+}
+
 /// Command-line configuration for the read-only production VFX viewer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[allow(
@@ -105,6 +149,7 @@ pub struct VfxLabConfig {
     pub radius: Option<u16>,
     pub sample_ticks: Option<u16>,
     pub accent: VfxLabAccent,
+    pub relationship: VfxLabRelationship,
     pub lobbed_impact: bool,
     pub ultimate: bool,
     pub reduced: bool,
@@ -478,6 +523,7 @@ struct VfxLabState {
     presentation_identity: u64,
     radius: u16,
     accent: VfxLabAccent,
+    relationship: VfxLabRelationship,
     lobbed_impact: bool,
     ultimate: bool,
     reduced: bool,
@@ -505,13 +551,15 @@ impl VfxLabState {
 
     fn transient_request(&self) -> Option<VfxRequest> {
         matches!(self.fixture, VfxLabFixture::Transient).then(|| {
-            self.selected().request(
+            let mut request = self.selected().request(
                 self.presentation_identity,
                 self.radius,
                 self.accent,
                 self.lobbed_impact,
                 self.ultimate,
-            )
+            );
+            request.signature.relationship = self.relationship.signature_relationship();
+            request
         })
     }
 
@@ -639,6 +687,7 @@ impl Plugin for VfxLabPlugin {
             } else {
                 self.config.accent
             },
+            relationship: self.config.relationship,
             lobbed_impact: self.config.lobbed_impact,
             ultimate: self.config.ultimate,
             reduced: self.config.reduced,
@@ -816,13 +865,23 @@ fn spawn_lab_scenario(
         return;
     }
     let tick = state.playback_tick;
+    let (owner_network_entity_id, team_id) = lab_relationship_facts(state.relationship);
     let source = crate::combat::ProjectileSource {
         shot_id: crate::combat::ShotId(state.presentation_identity),
         player_id: crate::protocol::PlayerId(1),
-        owner_network_entity_id: crate::protocol::NetworkEntityId(1),
-        team_id: crate::combat::TeamId(0),
+        owner_network_entity_id,
+        team_id,
         weapon_definition_id: crate::combat::PULSE_SIDEARM_DEFINITION,
     };
+    if matches!(
+        state.fixture,
+        VfxLabFixture::StraightProjectile
+            | VfxLabFixture::LobbedProjectile
+            | VfxLabFixture::ConeSpray
+            | VfxLabFixture::ElementalField
+    ) {
+        spawn_lab_relationship_observer(commands, state.presentation_identity);
+    }
     if matches!(
         state.fixture,
         VfxLabFixture::StraightProjectile
@@ -834,6 +893,7 @@ fn spawn_lab_scenario(
             state.accent,
             state.presentation_identity,
             source.owner_network_entity_id,
+            source.team_id,
         );
     }
     match state.fixture {
@@ -857,13 +917,21 @@ fn spawn_lab_scenario(
                 state.presentation_identity,
                 state.radius,
                 state.accent,
+                owner_network_entity_id,
+                team_id,
                 tick,
             );
         }
         VfxLabFixture::ConcealmentField => {
             spawn_concealment_fixture(commands, state.presentation_identity, state.radius, tick);
         }
-        VfxLabFixture::ConeSpray => spawn_cone_fixture(commands, state.presentation_identity, tick),
+        VfxLabFixture::ConeSpray => spawn_cone_fixture(
+            commands,
+            state.presentation_identity,
+            owner_network_entity_id,
+            team_id,
+            tick,
+        ),
         VfxLabFixture::Dash => spawn_dash_fixture(commands, state.presentation_identity, tick),
         VfxLabFixture::Sentry => {
             spawn_sentry_fixture(commands, state.presentation_identity, tick);
@@ -1025,6 +1093,8 @@ fn spawn_field_fixture(
     identity: u64,
     radius: u16,
     accent: VfxLabAccent,
+    owner_network_entity_id: crate::protocol::NetworkEntityId,
+    team_id: crate::combat::TeamId,
     tick: u64,
 ) {
     commands.spawn((
@@ -1039,8 +1109,8 @@ fn spawn_field_fixture(
                     crate::combat::ElementalFieldKind::Fire
                 }
             },
-            owner_network_entity_id: crate::protocol::NetworkEntityId(1),
-            team_id: crate::combat::TeamId(0),
+            owner_network_entity_id,
+            team_id,
             center: crate::combat::WorldPoint::from(Vec2::ZERO),
             radius_milliunits: u32::from(radius) * 1_000,
             activated_at_tick: tick,
@@ -1083,12 +1153,18 @@ fn spawn_splash_fixture(commands: &mut Commands, identity: u64, radius: u16, tic
     ));
 }
 
-fn spawn_cone_fixture(commands: &mut Commands, identity: u64, tick: u64) {
+fn spawn_cone_fixture(
+    commands: &mut Commands,
+    identity: u64,
+    owner_network_entity_id: crate::protocol::NetworkEntityId,
+    team_id: crate::combat::TeamId,
+    tick: u64,
+) {
     let source = crate::combat::ProjectileSource {
         shot_id: crate::combat::ShotId(identity),
         player_id: crate::protocol::PlayerId(1),
-        owner_network_entity_id: crate::protocol::NetworkEntityId(1),
-        team_id: crate::combat::TeamId(0),
+        owner_network_entity_id,
+        team_id,
         weapon_definition_id: crate::combat::SPRAY_DEFINITION,
     };
     let attack = lab_attack_source(source, Vec2::new(-120.0, 0.0));
@@ -1359,15 +1435,47 @@ fn spawn_lab_style_owner(
     accent: VfxLabAccent,
     fingerprint: u64,
     network_id: crate::protocol::NetworkEntityId,
+    team_id: crate::combat::TeamId,
 ) {
     commands.spawn((
         VfxLabFixtureOwner,
         crate::protocol::Fighter,
         network_id,
-        crate::combat::TeamId(0),
+        team_id,
         lab_style_loadout(accent, fingerprint),
         Name::new("VfxLab signature-only loadout owner"),
     ));
+}
+
+fn spawn_lab_relationship_observer(commands: &mut Commands, identity: u64) {
+    commands.spawn((
+        VfxLabFixtureOwner,
+        crate::protocol::Fighter,
+        Controlled,
+        crate::protocol::NetworkEntityId(u64::MAX - 1),
+        crate::combat::TeamId(1),
+        lab_style_loadout(VfxLabAccent::Neutral, identity.saturating_add(1)),
+        Name::new("VfxLab signature-only relationship observer"),
+    ));
+}
+
+const fn lab_relationship_facts(
+    relationship: VfxLabRelationship,
+) -> (crate::protocol::NetworkEntityId, crate::combat::TeamId) {
+    match relationship {
+        VfxLabRelationship::Neutral => (
+            crate::protocol::NetworkEntityId(1),
+            crate::combat::TeamId(0),
+        ),
+        VfxLabRelationship::Ally => (
+            crate::protocol::NetworkEntityId(2),
+            crate::combat::TeamId(1),
+        ),
+        VfxLabRelationship::Enemy => (
+            crate::protocol::NetworkEntityId(2),
+            crate::combat::TeamId(2),
+        ),
+    }
 }
 
 fn lab_style_loadout(
@@ -1462,6 +1570,10 @@ fn handle_lab_input(
     }
     if keyboard.just_pressed(KeyCode::KeyC) && !state_has_fixed_accent(&state) {
         state.accent = state.accent.next();
+        restart = true;
+    }
+    if keyboard.just_pressed(KeyCode::KeyO) {
+        state.relationship = state.relationship.next();
         restart = true;
     }
     if keyboard.just_pressed(KeyCode::KeyU) {
@@ -1695,6 +1807,7 @@ fn request_lab_capture(world: &mut World) {
                 state.fixture,
                 state.presentation_identity,
                 state.accent,
+                state.relationship,
                 state.lobbed_impact,
                 state.ultimate,
                 state.reduced,
@@ -1711,6 +1824,7 @@ fn request_lab_capture(world: &mut World) {
         fixture,
         identity,
         accent,
+        relationship,
         lobbed_impact,
         ultimate,
         reduced,
@@ -1722,8 +1836,11 @@ fn request_lab_capture(world: &mut World) {
         return;
     };
     let radius = world.resource::<VfxLabState>().radius;
-    let request = matches!(fixture, VfxLabFixture::Transient)
-        .then(|| scenario.request(identity, radius, accent, lobbed_impact, ultimate));
+    let request = matches!(fixture, VfxLabFixture::Transient).then(|| {
+        let mut request = scenario.request(identity, radius, accent, lobbed_impact, ultimate);
+        request.signature.relationship = relationship.signature_relationship();
+        request
+    });
     let recipe = request.as_ref().map(|request| {
         world
             .resource::<VfxRegistry>()
@@ -1764,6 +1881,7 @@ fn request_lab_capture(world: &mut World) {
             "producer_rank": request.as_ref().map(|_| scenario.producer_rank),
             "presentation_identity": identity,
             "accent": accent.label(),
+            "relationship": relationship.label(),
             "lobbed_impact": lobbed_impact,
             "ultimate": ultimate,
             "radius": radius,
@@ -1913,6 +2031,7 @@ fn update_lab_inspector(
          {}\n\n\
          Variant  {}{}\n\
          Style    {}{}\n\
+         Relationship {}\n\
          Playback {} - identity {}\n\
          Sample   {} initial ticks\n\
          Radius   {} world units\n\
@@ -1922,12 +2041,13 @@ fn update_lab_inspector(
          Cache     {}/{} attacks - {} FIFO evictions\n\
          Active transient {} - particles {}/{} (high {}, suppressed {}) - fixture facts {} - cameras {} - {}\n\n\
          Tab fixture   <-/-> mapping   Space restart   Enter pause   . step\n\
-         N identity   C accent   U ultimate   R reduced   P primitive   I guide   F12 capture   Esc quit",
+         N identity   C accent   O relationship   U ultimate   R reduced   P primitive   I guide   F12 capture   Esc quit",
         scenario_details,
         if state.reduced { "reduced" } else { "normal" },
         if state.primitive { " + primitive" } else { "" },
         state.accent.label(),
         if state.ultimate { " + ultimate" } else { "" },
+        state.relationship.label(),
         if state.paused { "paused" } else { "running" },
         state.presentation_identity,
         state.initial_sample_ticks,
@@ -2088,18 +2208,19 @@ fn lab_guide_text(state: &VfxLabState, scenario: VfxLabScenario, dimensions: &st
     format!(
         "VFXLAB - WHAT YOU ARE LOOKING AT\n\n\
          {subject}\n\
-         Style: {}{}   Variant: {}{}\n\n\
+         Style: {}{}   Relationship: {}   Variant: {}{}\n\n\
          {meaning}\n\n\
          {style}\n\n\
          GRAY SPHERES ARE FIGHTER-SIZE REFERENCES.\n\
          They are not part of the effect.\n\n\
-         {style_control}    R reduced    P primitive\n\
+         {style_control}    O relationship  R reduced  P primitive\n\
          Space restart      Enter pause  . next tick\n\
          Tab fixture        <-/-> effect {ultimate_control}\n\
          I technical details             Esc quit\n\n\
         Window {dimensions}",
         style_label,
         state_suffix,
+        state.relationship.label().to_uppercase(),
         if state.reduced { "reduced" } else { "normal" },
         if state.primitive { " + primitive" } else { "" },
     )
@@ -2148,7 +2269,7 @@ fn lab_fixture_meaning(state: &VfxLabState, scenario: VfxLabScenario) -> &'stati
             "The animated fluid is the exact persistent Splash area. Cyan impact energy communicates hostile damage while teal vitality motion communicates allied healing; the thin outer ring remains the exact gameplay boundary."
         }
         VfxLabFixture::ElementalField => {
-            "The subtly treated center is the affected ground area. The thin bright ring is the exact gameplay boundary. Crystals, living flame, cellular contamination, or ordered vitality arcs identify the element without hiding fighters."
+            "The subtly treated center is the affected ground area. The thin bright ring is the exact gameplay boundary. Pattern and motion identify the type: crystals, living flame, cellular contamination, or curved vitality ripples. Team color is woven into that native pattern: ally blue or enemy red highlights selected filaments, crystals, bubbles, and petals. Neutral leaves the pattern untinted; no separate ownership ring or symbol is added."
         }
         VfxLabFixture::ConcealmentField => {
             "The subtle center is the allied concealment volume and the thin bright ring is its exact authoritative radius. Drifting veil wisps communicate concealment without turning the area into an opaque fog bank. Fighter visibility and membership remain server-authoritative."
@@ -2330,7 +2451,7 @@ fn lab_guide_style(state: &VfxLabState) -> &'static str {
             "POISON should feel unstable, bubbling, and contaminating without becoming an opaque green fill. Press C once to compare Restoration."
         }
         VfxLabAccent::Restoration => {
-            "RESTORATION should feel ordered, buoyant, and life-giving through a rotating vitality motif. Press C to return to Neutral."
+            "RESTORATION should feel ordered, buoyant, and life-giving through curved vitality ripples. Press C to return to Neutral."
         }
     }
 }
@@ -2425,6 +2546,38 @@ mod tests {
     }
 
     #[test]
+    fn relationship_fixture_facts_match_production_observer_inputs() {
+        for (lab, owner, team, expected) in [
+            (
+                VfxLabRelationship::Neutral,
+                crate::protocol::NetworkEntityId(1),
+                crate::combat::TeamId(0),
+                crate::client::vfx::VfxRelationship::Neutral,
+            ),
+            (
+                VfxLabRelationship::Ally,
+                crate::protocol::NetworkEntityId(2),
+                crate::combat::TeamId(1),
+                crate::client::vfx::VfxRelationship::Ally,
+            ),
+            (
+                VfxLabRelationship::Enemy,
+                crate::protocol::NetworkEntityId(2),
+                crate::combat::TeamId(2),
+                crate::client::vfx::VfxRelationship::Enemy,
+            ),
+        ] {
+            assert_eq!(lab_relationship_facts(lab), (owner, team));
+            assert_eq!(lab.signature_relationship(), expected);
+        }
+        assert_eq!(
+            VfxLabRelationship::from_key("ally"),
+            Some(VfxLabRelationship::Ally)
+        );
+        assert_eq!(VfxLabRelationship::from_key("self"), None);
+    }
+
+    #[test]
     fn scenario_selection_is_bounded_and_replay_identity_is_explicit() {
         let scenario = VfxLabScenario {
             key: VfxRequestKey::new("combat.muzzle"),
@@ -2437,6 +2590,7 @@ mod tests {
             presentation_identity: 7,
             radius: DEFAULT_RADIUS,
             accent: VfxLabAccent::Neutral,
+            relationship: VfxLabRelationship::Neutral,
             lobbed_impact: false,
             ultimate: false,
             reduced: false,

@@ -34,6 +34,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let time = params.x;
     let boundary = params.y;
+    let team_accent = params.z;
+    let angle = atan2(point.y, point.x);
     let direction = point / max(radius, 0.001);
     let broad_warp = value_noise(
         direction * 3.4 + vec2<f32>(time * 0.31, -time * 0.23)
@@ -87,5 +89,23 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let filament = smoothstep(0.67, 0.88, flow + fine * 0.24);
     color = mix(color, hot, filament * (1.0 - depth) * 0.46);
     color = mix(color, orange, select(0.0, 0.55, radius > boundary));
+
+    // Relationship color rides the existing flame filaments. Ally and enemy use
+    // exactly the same mask and motion: flame pattern communicates the effect
+    // family, while blue or red alone communicates team ownership.
+    if team_accent > 0.5 {
+        let rhythm = sin(angle * 6.0 - time * 0.82 + broad * 2.6 + fine * 0.7)
+            * 0.5 + 0.5;
+        let accent = smoothstep(0.46, 0.88, rhythm + filament * 0.25)
+            * body_alpha * (0.44 + filament * 0.46);
+        let strength = smoothstep(0.09, 0.60, accent)
+            * select(0.88, 0.94, team_accent > 1.5);
+        let team_color = select(
+            vec3<f32>(0.025, 0.62, 3.6),
+            vec3<f32>(2.4, 0.004, 0.018),
+            team_accent > 1.5
+        );
+        color = mix(color, team_color, strength);
+    }
     return vec4<f32>(color, alpha);
 }

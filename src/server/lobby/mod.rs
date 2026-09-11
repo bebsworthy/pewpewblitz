@@ -649,11 +649,10 @@ impl LobbyState {
             .descriptor_for_mode(self.mode)
             .ok_or(CodecError::InvalidValue)?;
         let server_mode = mode.server();
-        let rules =
-            resolve_operator_catalog(include_bytes!("../../../config/server/game-types.ron"))
-                .ok()
-                .and_then(|catalog| catalog.first_rules_for_mode(mode.definition_id))
-                .ok_or(CodecError::InvalidValue)?;
+        let rules = resolve_operator_catalog(&self.manifest.raw_catalog)
+            .ok()
+            .and_then(|catalog| catalog.first_rules_for_mode(mode.definition_id))
+            .ok_or(CodecError::InvalidValue)?;
         let map_preset = server_mode.default_map_preset;
         let map_revision = crate::map::MapContentCatalog::embedded()
             .ok()
@@ -2748,6 +2747,21 @@ mod tests {
         assert_eq!(body.request_id.get(), 1);
         assert_eq!(body.participants[0].lobby_session_id.get(), 1);
         assert_eq!(body.participants[1].lobby_session_id.get(), 2);
+    }
+
+    #[test]
+    fn automatic_allocation_uses_supervisor_catalog_duration() {
+        let mut state = state();
+        state.manifest.raw_catalog = String::from_utf8(state.manifest.raw_catalog.clone())
+            .unwrap()
+            .replace("match_duration_seconds: 180", "match_duration_seconds: 60")
+            .into_bytes();
+        admit_two(&mut state);
+        let request = state.pending_allocate_request().unwrap().unwrap();
+        assert_eq!(
+            request.match_duration_ticks,
+            crate::timing::simulation_ticks_from_seconds(60).unwrap()
+        );
     }
 
     #[test]

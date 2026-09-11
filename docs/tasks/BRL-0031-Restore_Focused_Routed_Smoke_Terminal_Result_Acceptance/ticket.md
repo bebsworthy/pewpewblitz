@@ -1,13 +1,13 @@
 ---
 id: BRL-0031
 title: Restore focused routed smoke terminal result acceptance
-status: backlog
+status: done
 theme: quality
 release:
 created: 2026-08-28T08:55:40Z
-modified: 2026-09-08T18:30:19Z
-closed:
-revision: 939d6a7ea51586c8
+modified: 2026-09-09T09:49:22Z
+closed: 2026-09-09T09:49:22Z
+revision: 663a00704b3e5408
 blocks: []
 related: [BRL-0025, BRL-0026, BRL-0029]
 ---

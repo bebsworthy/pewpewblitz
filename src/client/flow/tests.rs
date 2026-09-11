@@ -3,6 +3,7 @@ use crate::client::{
     ClientJoinPhase, ClientJoinStatus, ClientLobbyFailure, ClientLobbyMembership,
     ClientNetworkConfig, RoutedClientPhase, RoutedClientSession, RuntimeLobbyTarget,
     connection_persistence::ConnectionsFileV1, server_select::MAX_RESOLVED_CANDIDATES,
+    ui::surface::Surface,
 };
 use actions::{FlowUiAction, OverlayCommit, SessionObservation};
 use bevy::{
@@ -27,6 +28,7 @@ use screens::{
         DeleteBrawlerConfirmationRoot, WeaponEquipmentRoot, WeaponEquipmentScrollArea,
         ultimate_name,
     },
+    connecting::ConnectingProgressSegment,
     dashboard::{
         DASHBOARD_BUILD_INDEX, DASHBOARD_GAME_INDEX, DASHBOARD_MENU_INDEX, DASHBOARD_PLAY_INDEX,
         DASHBOARD_PRACTICE_INDEX, DashboardButtonStyle, DashboardLayoutClass,
@@ -2059,6 +2061,93 @@ fn state_scoped_flow_roots_replace_exactly_and_error_waits_for_destination() {
     *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
     app.update();
     assert_eq!(count_error_roots(&mut app), 0);
+}
+
+#[test]
+fn connection_screens_use_shared_surfaces_and_keep_transient_actions_bounded() {
+    let mut app = flow_test_app();
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    app.update();
+
+    let surface_for = |app: &mut App, wanted: FlowUiAction| {
+        let world = app.world_mut();
+        let mut query = world.query::<(&FlowButton, &Surface)>();
+        query
+            .iter(world)
+            .find(|(button, _)| button.action == wanted)
+            .map(|(_, surface)| *surface)
+    };
+    assert_eq!(
+        surface_for(&mut app, FlowUiAction::EditAddress),
+        Some(Surface::Field)
+    );
+    assert_eq!(
+        surface_for(&mut app, FlowUiAction::Connect),
+        Some(Surface::Primary)
+    );
+    assert_eq!(
+        surface_for(&mut app, FlowUiAction::OpenSettings),
+        Some(Surface::Quiet)
+    );
+
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::Connecting);
+    app.update();
+    let world = app.world_mut();
+    let mut button_query = world.query::<&FlowButton>();
+    let actions = button_query
+        .iter(world)
+        .map(|button| button.action.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(actions, vec![FlowUiAction::Cancel]);
+    let mut progress_query = world.query_filtered::<Entity, With<ConnectingProgressSegment>>();
+    assert_eq!(progress_query.iter(world).count(), 3);
+    let copy = visible_text(&mut app).join(" ");
+    assert!(copy.contains("CONNECTING"));
+    assert!(!copy.contains("SETTINGS"));
+    assert!(!copy.contains("ESC"));
+}
+
+#[test]
+fn connection_failure_is_full_screen_icon_free_recovery() {
+    let mut app = flow_test_app();
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    app.update();
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+        kind: FlowErrorKind::Connection,
+        message: "The connection attempt timed out".into(),
+        return_flow: ClientFlow::ServerSelect,
+        actions: [
+            Some(FlowErrorAction::RetryConnection),
+            Some(FlowErrorAction::Back),
+        ],
+    });
+    app.update();
+
+    let copy = visible_text(&mut app).join(" ");
+    assert!(copy.contains("CONNECTION LOST"));
+    assert!(copy.contains("CHANGE SERVER"));
+    assert!(!copy.to_ascii_lowercase().contains("chain"));
+    let world = app.world_mut();
+    let mut query = world.query::<&FlowButton>();
+    let recovery_actions = query
+        .iter(world)
+        .filter(|button| button.error_action)
+        .map(|button| button.action.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        recovery_actions,
+        vec![
+            FlowUiAction::Retry,
+            FlowUiAction::DismissError,
+            FlowUiAction::Quit,
+        ]
+    );
 }
 
 #[test]

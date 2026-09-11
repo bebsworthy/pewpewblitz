@@ -4,11 +4,10 @@ title: Add the Gem Grab team objective mode
 status: backlog
 theme: core
 release:
-priority: medium
 created: 2026-08-28T09:40:58Z
-modified: 2026-08-28T09:41:00Z
+modified: 2026-08-31T04:33:13Z
 closed:
-revision: d8a433cbfac427ae
+revision: 7b00d174e44d86c4
 blocks: []
 related: []
 ---

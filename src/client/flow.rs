@@ -68,6 +68,7 @@ pub(super) use persistence::{ClientLocalLoadFailures, ConnectionPersistence};
 pub(super) use screens::{
     brawlers::{BrawlerCardPreview, BrawlerDetailsPreviewHost},
     dashboard::{DashboardPreviewHost, DashboardRoot},
+    map_maker::{MapPalettePreviewHost, MapPaletteVisual},
 };
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

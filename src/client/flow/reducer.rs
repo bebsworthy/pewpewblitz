@@ -684,6 +684,11 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::MapMakerPlace
         | FlowUiAction::MapMakerPaintStroke(_)
         | FlowUiAction::MapMakerErase
+        | FlowUiAction::MapMakerUsePlaceTool
+        | FlowUiAction::MapMakerUseEraseTool
+        | FlowUiAction::MapMakerUseMoveTool
+        | FlowUiAction::MapMakerSelectRect(_, _)
+        | FlowUiAction::MapMakerMoveSelection(_, _)
         | FlowUiAction::MapMakerToggleGrid
         | FlowUiAction::MapMakerFitView => {}
     }

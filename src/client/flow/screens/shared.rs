@@ -47,46 +47,6 @@ pub(in crate::client::flow) fn spawn_heading(parent: &mut ChildSpawnerCommands, 
     ));
 }
 
-pub(in crate::client::flow) fn spawn_flow_button(
-    parent: &mut ChildSpawnerCommands,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-) {
-    spawn_flow_button_disabled(parent, index, action, label, false);
-}
-
-pub(in crate::client::flow) fn spawn_flow_button_disabled(
-    parent: &mut ChildSpawnerCommands,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    disabled: bool,
-) {
-    let mut entity = parent.spawn((
-        Button,
-        FlowButton {
-            index,
-            action,
-            error_action: false,
-        },
-        Node {
-            width: percent(88),
-            max_width: px(820),
-            min_height: px(42),
-            padding: UiRect::axes(px(12), px(8)),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-
-            ..default()
-        },
-    ));
-    if disabled {
-        entity.insert(InteractionDisabled);
-    }
-    entity.with_child((Text::new(label), TextFont::from_font_size(18.0)));
-}
-
 pub(in crate::client::flow) fn spawn_flow_error_button(
     parent: &mut ChildSpawnerCommands,
     index: usize,

@@ -239,6 +239,162 @@ impl MapEditorSession {
         self.change_placement(catalog, placement_id, |placement| placement.cell = cell)
     }
 
+    #[must_use]
+    pub fn placements_in_rect(
+        &self,
+        catalog: &MapContentCatalog,
+        first: MapCell,
+        second: MapCell,
+    ) -> BTreeSet<MapPlacementId> {
+        let min_x = first.x.min(second.x);
+        let max_x = first.x.max(second.x);
+        let min_y = first.y.min(second.y);
+        let max_y = first.y.max(second.y);
+        let mut selected = self
+            .document
+            .recipe
+            .placements
+            .iter()
+            .filter(|placement| {
+                catalog
+                    .asset(placement.asset_id)
+                    .and_then(|asset| {
+                        placement_cells(self.document.recipe.dimensions, asset, placement)
+                    })
+                    .is_some_and(|cells| {
+                        cells.iter().any(|cell| {
+                            cell.x >= min_x && cell.x <= max_x && cell.y >= min_y && cell.y <= max_y
+                        })
+                    })
+            })
+            .map(|placement| placement.placement_id)
+            .collect::<BTreeSet<_>>();
+        for anchor in &self.document.recipe.mode_anchors {
+            let intersects = (min_y..=max_y)
+                .any(|y| (min_x..=max_x).any(|x| anchor_contains_cell(anchor, MapCell::new(x, y))));
+            if intersects {
+                selected.insert(anchor.placement_id);
+            }
+        }
+        selected
+    }
+
+    #[must_use]
+    pub fn symmetry_selection(
+        &self,
+        catalog: &MapContentCatalog,
+        selected: &BTreeSet<MapPlacementId>,
+    ) -> BTreeSet<MapPlacementId> {
+        let mut expanded = selected.clone();
+        if self.symmetry == MapSymmetry::None {
+            return expanded;
+        }
+        for placement in self
+            .document
+            .recipe
+            .placements
+            .iter()
+            .filter(|placement| selected.contains(&placement.placement_id))
+        {
+            if !matches!(placement.parameters, MapPlacementParameters::None) {
+                continue;
+            }
+            let Some(asset) = authorable_assets(catalog)
+                .into_iter()
+                .find(|asset| asset.id == placement.asset_id)
+            else {
+                continue;
+            };
+            if let Ok(copies) = symmetry_placements(
+                self.document.recipe.dimensions,
+                asset,
+                placement,
+                self.symmetry,
+            ) {
+                for copy in copies {
+                    if let Some(existing) =
+                        self.document.recipe.placements.iter().find(|candidate| {
+                            candidate.asset_id == placement.asset_id
+                                && candidate.cell == copy.cell
+                                && candidate.quarter_turns == copy.quarter_turns
+                                && matches!(candidate.parameters, MapPlacementParameters::None)
+                        })
+                    {
+                        expanded.insert(existing.placement_id);
+                    }
+                }
+            }
+        }
+        expanded
+    }
+
+    pub fn move_placements_by(
+        &mut self,
+        catalog: &MapContentCatalog,
+        placement_ids: &BTreeSet<MapPlacementId>,
+        reference: MapCell,
+        delta_x: i32,
+        delta_y: i32,
+    ) -> Result<(), String> {
+        if placement_ids.is_empty() || (delta_x == 0 && delta_y == 0) {
+            return Ok(());
+        }
+        let before = self.document.recipe.clone();
+        let mut candidate = before.clone();
+        for placement in candidate
+            .placements
+            .iter_mut()
+            .filter(|placement| placement_ids.contains(&placement.placement_id))
+        {
+            let mirror_x =
+                matches!(
+                    self.symmetry,
+                    MapSymmetry::LeftRight | MapSymmetry::Rotate180 | MapSymmetry::FourWay
+                ) && opposite_half(placement.cell.x, reference.x, candidate.dimensions.width);
+            let mirror_y =
+                matches!(
+                    self.symmetry,
+                    MapSymmetry::TopBottom | MapSymmetry::Rotate180 | MapSymmetry::FourWay
+                ) && opposite_half(placement.cell.y, reference.y, candidate.dimensions.height);
+            let x = i32::from(placement.cell.x) + if mirror_x { -delta_x } else { delta_x };
+            let y = i32::from(placement.cell.y) + if mirror_y { -delta_y } else { delta_y };
+            placement.cell = MapCell::new(
+                u16::try_from(x).map_err(|_| "move falls outside the map".to_string())?,
+                u16::try_from(y).map_err(|_| "move falls outside the map".to_string())?,
+            );
+        }
+        for anchor in candidate
+            .mode_anchors
+            .iter_mut()
+            .filter(|anchor| placement_ids.contains(&anchor.placement_id))
+        {
+            match &mut anchor.kind {
+                crate::map::MapModeAnchorKind::HotZoneCircle {
+                    center_half_cell, ..
+                }
+                | crate::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
+                    center_half_cell.x = shift_u16(center_half_cell.x, delta_x * 2)?;
+                    center_half_cell.y = shift_u16(center_half_cell.y, delta_y * 2)?;
+                }
+                crate::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => {
+                    origin_cell.x = shift_u16(origin_cell.x, delta_x)?;
+                    origin_cell.y = shift_u16(origin_cell.y, delta_y)?;
+                }
+            }
+        }
+        validate_direct_edit(&candidate, catalog)?;
+        if candidate
+            .mode_anchors
+            .iter()
+            .any(|anchor| !anchor_fits(candidate.dimensions, anchor))
+        {
+            return Err("move falls outside the map".to_string());
+        }
+        bump_revision(&mut candidate)?;
+        self.commit(before, candidate);
+        Ok(())
+    }
+
     pub fn rotate_placement(
         &mut self,
         catalog: &MapContentCatalog,
@@ -573,6 +729,18 @@ fn bump_revision(recipe: &mut MapRecipe) -> Result<(), String> {
     Ok(())
 }
 
+fn opposite_half(value: u16, reference: u16, extent: u16) -> bool {
+    let value_side = i32::from(value) * 2 - i32::from(extent.saturating_sub(1));
+    let reference_side = i32::from(reference) * 2 - i32::from(extent.saturating_sub(1));
+    value_side.signum() != 0
+        && reference_side.signum() != 0
+        && value_side.signum() != reference_side.signum()
+}
+
+fn shift_u16(value: u16, delta: i32) -> Result<u16, String> {
+    u16::try_from(i32::from(value) + delta).map_err(|_| "move falls outside the map".to_string())
+}
+
 fn replace_slot_at_cell(
     recipe: &mut MapRecipe,
     catalog: &MapContentCatalog,
@@ -753,6 +921,56 @@ mod tests {
         assert!(session.undo());
         assert!(session.document.recipe.placements.is_empty());
         assert!(session.can_redo());
+    }
+
+    #[test]
+    fn box_selection_moves_mirrored_assets_as_one_symmetric_transaction() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let document = MapDraftDocument::blank(
+            MapDraftId(18),
+            "Move Arena",
+            crate::map::WIPEOUT_MODE_DEFINITION,
+            MapDimensions {
+                width: 32,
+                height: 24,
+            },
+            MapPresentationThemeId(1),
+            crate::map::GROUND_ASSET,
+        )
+        .unwrap();
+        let mut session = MapEditorSession::open(document);
+        session.symmetry = MapSymmetry::LeftRight;
+        session
+            .place(
+                &catalog,
+                crate::map::WALL_ARENA_ASSET,
+                MapCell::new(2, 3),
+                0,
+            )
+            .unwrap();
+        let selected = session.placements_in_rect(&catalog, MapCell::new(2, 3), MapCell::new(2, 3));
+        let selected = session.symmetry_selection(&catalog, &selected);
+        assert_eq!(selected.len(), 2);
+
+        session
+            .move_placements_by(&catalog, &selected, MapCell::new(2, 3), 1, 0)
+            .unwrap();
+        let cells = session
+            .document
+            .recipe
+            .placements
+            .iter()
+            .map(|placement| placement.cell)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            cells,
+            BTreeSet::from([MapCell::new(3, 3), MapCell::new(28, 3)])
+        );
+        assert!(session.undo());
+        assert_eq!(
+            session.document.recipe.placements[0].cell,
+            MapCell::new(2, 3)
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # PewPew Blitz player shell — approved design
 
-Current specification, 2026-09-07. Design approvals: BRL-0112 and BRL-0113. Native Dashboard implementation: BRL-0114. This document supersedes the exploration history in `archive/`; archived prompts are not implementation requirements. Gameplay HUD, scoreboard and operator tools are outside this work.
+Current specification, 2026-09-10. Design approvals: BRL-0112 and BRL-0113. Native Dashboard implementation: BRL-0114. The [UI toolkit contract](ui-toolkit.md) translates this direction into shared native components and interaction states. This document supersedes the exploration history in `archive/`; archived prompts are not implementation requirements. Gameplay HUD, scoreboard and operator tools are outside this work.
 
 ## Approved references
 
@@ -19,7 +19,7 @@ Generated text, numerical values and robot details are illustrative. Runtime use
 | Role | sRGB | Use |
 |---|---|---|
 | Cream | #FAEBCF | Quiet screen and card surfaces |
-| Navy | #061A25 | Text, outlines, identity strip |
+| Navy | #081932 | Text, outlines, identity strip |
 | Teal | #52A39E | Secondary action, brawler region and background plane |
 | Orange | #FF6606 | Play, mode badge and bottom background plane |
 
@@ -41,20 +41,31 @@ BRL-0116: four semantic mode cards group the advertised catalog. Team-size choic
 
 Weapon overview: unboxed hero weapon, four compact generic numbered equipment tiles, borderless stats. No table/grid lines around stats, duplicated Back, instruction banner, decorative unknown icon or technical catalog warning. One Back returns to brawler.
 
-Parts picker: fullscreen three-column grid of square cards, Nothing first. Nothing clears the slot. Selecting a valid part or Nothing submits immediately through server authority: one operation in flight, accepted snapshot updates overview and returns, rejection keeps picker and last accepted equipment. Show pending/failure only when necessary. Back without choice makes no change; Back does not undo accepted changes. No Save/Apply/Unequip button. This auto-save contract applies to weapon parts, not unrelated settings or ability editing.
+Parts picker: fullscreen three-column grid of square cards, Nothing first. Nothing clears the slot. Selecting a valid part or Nothing submits immediately through server authority: one operation in flight, accepted snapshot updates overview and returns, rejection keeps picker and last accepted equipment. Show pending/failure only when necessary. Back without choice makes no change; Back does not undo accepted changes. No Save/Apply/Unequip button. This weapon-parts auto-save contract does not redefine the separately specified Settings or ability-editing save behavior.
 
 Loading: same abstract Dashboard background, hero left, mode badge/title/team size right, real loading phase and indeterminate indicator, existing Cancel Match Start. No invented percentage, ETA, door or staircase.
 
 ## Delivery and sequencing
 
-See [screen map](screen-map.md), [motion](motion.md), [asset contract](delivery-contract.md) and [generation prompt](generation-brief.md). Ship native text, controls and shader/geometry surfaces; approved PNGs are comparison references. SVG sources are useful for icons; transparent PNG is runtime artwork; GLB is existing runtime model content. Blender is unnecessary for UI reconstruction.
+See [screen map](screen-map.md), [UI toolkit](ui-toolkit.md), [motion](motion.md), [asset contract](delivery-contract.md) and [generation prompt](generation-brief.md). Ship native text, controls and shader/geometry surfaces; approved PNGs are comparison references. SVG sources are useful for icons; transparent PNG is runtime artwork; GLB is existing runtime model content. Blender is unnecessary for UI reconstruction.
 
-First slice is native Dashboard and Menu access. Subsequent slices cover game selection/queue/loading, brawlers and weapon customization, then settings/recovery/results. Each uses Ticket-owned acceptance and native evidence; no blanket implementation approval is implied for unreviewed compositions.
+Each screen implementation uses Ticket-owned acceptance and native evidence. New compositions are
+reviewed against the screen map and this visual contract; approval of one screen does not imply
+approval of an unreviewed screen.
 
 ### Dashboard correction details
 
-Dashboard controls use slanted SVG-authored chrome with substantial navy outlines, crisp offset backing and a bold cream/navy focus frame and left pointer. Navigation focus uses this treatment; hover alone only changes tint, and disabled controls remain unaccented. Only the active screen or overlay shows focus and interaction feedback; opening Menu suppresses Dashboard highlights, and closing it returns focus to the Menu button. PNG exports are stretched across the native control's border box; only decoration is rasterized. Text and hit targets remain native. Header identity is one horizontal player/name/divider/arena/server strip. Play carries a right-hand lightning icon; Practice a right-hand crosshair; View Brawlers uses a cream skull and cream type. The brawler name and pointed underline are an independent visual anchor; long names wrap with a bounded type size. The summary presents live weapon/ultimate names and passive/slot counts. Routine successful-save notices are omitted from the Dashboard, while recovery feedback remains visible. Preview hover never draws a rectangular frame; the cyan pedestal is removed.
+Dashboard controls use the shared shader-backed surface chrome: cut top-right and bottom-left corners, slanted edges, substantial navy outlines, crisp offset backing, and a bold cream/navy focus frame with a left pointer. Navigation focus uses this treatment; hover alone only changes tint, and disabled controls remain unaccented. Only the active screen or overlay shows focus and interaction feedback; opening Menu suppresses Dashboard highlights, and closing it returns focus to the Menu button. The shader antialiases diagonal coverage while text and hit targets remain native Bevy UI. Header identity is one horizontal player/name/divider/arena/server strip. Play carries a right-hand lightning icon; Practice a right-hand crosshair; View Brawlers uses a cream skull and cream type. The brawler name and pointed underline are an independent visual anchor; long names wrap with a bounded type size. The summary presents live weapon/ultimate names and passive/slot counts. Routine successful-save notices are omitted from the Dashboard, while recovery feedback remains visible. Preview hover never draws a rectangular frame; the cyan pedestal is removed.
 
 ### Practice map picker (BRL-0117)
 
 Approved reference: `inspiration/player-shell/practice-map-revision-02/practice-map-picker.png`. Fullscreen map overviews with fixed heading and Start Practice action, horizontally looping navigation, no popup, no Selected text/checkmarks. Orange is the choice; the cream/navy frame and pointer are focus. Overview assets come from authored map geometry, never invented scenery. One map omits navigation; two show both; additional maps reveal the next card.
+
+### Connection and recovery (BRL-0136 and BRL-0137)
+
+Server Select uses the real retained logo, address and player identity fields, favorites/recents,
+Connect, Settings, and Quit. Connecting keeps the real logo, the active connection phase, and one
+Cancel action. Connection failure becomes a full-screen recovery destination with factual cause,
+Retry, Change Server, and Quit. It has no decorative chain-link or warning icon. Recovery uses the
+same shared background and surface roles as the rest of the shell; it never invents an offline
+mode or hides the loss of session authority behind an overlay.

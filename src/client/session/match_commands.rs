@@ -54,10 +54,7 @@ pub(super) fn drive_match_loading_check_in(
         With<Client>,
     >,
 ) {
-    if config.transport != NetworkTransport::RoutedUdp
-        || (!config.presents_product_shell() && !config.product_match_smoke)
-        || routed.phase != RoutedClientPhase::Match
-    {
+    if config.transport != NetworkTransport::RoutedUdp || routed.phase != RoutedClientPhase::Match {
         return;
     }
     let Some(grant) = routed.accepted_grant else {
@@ -196,7 +193,6 @@ fn match_loading_ready_to_send(
 pub(super) fn send_match_command(
     config: Res<ClientNetworkConfig>,
     routed: Res<RoutedClientLifecycle>,
-    playable: Res<ClientPlayableGate>,
     mut state: ResMut<MatchCommandState>,
     pending: Res<PendingLocalActions>,
     roots: Query<&MatchState, With<MatchRoot>>,
@@ -215,16 +211,12 @@ pub(super) fn send_match_command(
         return;
     };
     let pressed = pending.action_indicator & ACTION_INTERACT != 0;
-    let product_routed =
-        config.transport == NetworkTransport::RoutedUdp && config.presents_product_shell();
+    // Every routed allocation uses the correlated loading check-in, including diagnostics.
+    let product_routed = config.transport == NetworkTransport::RoutedUdp;
     if product_routed {
         return;
     }
-    let automatic = if product_routed {
-        playable.0
-    } else {
-        automatic_match_command_enabled(&config, roster.iter().count())
-    };
+    let automatic = automatic_match_command_enabled(&config, roster.iter().count());
     if should_rearm_headless_match_command(
         config.headless_simulation_ticks.is_some(),
         state.sent_for_phase,

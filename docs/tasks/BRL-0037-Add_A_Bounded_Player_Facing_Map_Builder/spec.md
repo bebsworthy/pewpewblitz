@@ -318,3 +318,26 @@ The user confirmed the remediated editor is better and requested the following c
 - Add Move mode: select an existing whole placement and move it with footprint validation and one undo transaction. Extend it with rectangular grid selection so multiple explicit placements can move atomically. The selection/move preview must respect the active symmetry mode, deduplicate copies, reject the whole operation on any conflict, and never move runtime-derived or default-surface state.
 
 Next verification must explicitly cover press-time paint preview versus release-time history commit, spawn/objective single-click dispatch, palette page/selection refresh, hover/delete ghosts, pan gestures and Fit recovery, symmetry overlays, single- and multi-item moves, atomic conflict rejection, and no button/world dual activation.
+
+
+## Feedback remediation implementation and evidence (2026-09-11)
+
+Implemented the accepted native feedback as a cohesive editor interaction pass:
+
+- Place strokes are rendered through a transient cloned editor recipe while the pointer is held, but commit to the real session only once on release, preserving one-step undo.
+- Place hover shows the selected production asset (including symmetry copies) with an orange valid or red invalid cell marker. Erase uses a distinct red marker. Move uses teal selection and destination markers.
+- Spawn and objective palette entries dispatch as point placement instead of asset drag painting, removing the reported spawn rejection.
+- The bottom palette renders production imported scenes and presentation materials in isolated render-to-texture viewports. The selected card has an orange border and the tray shows current/total position. Viewports wait for imported-scene readiness and release their image targets when paging/rebuilding.
+- Middle-drag, Space+left-drag, and Shift+left-drag pan the map; wheel zoom and Fit Map remain available.
+- Active symmetry is projected into the arena as bright axes.
+- Place, Erase, and Move/Select are explicit tools. Move supports rectangular selection, ordinary placements, spawns, and mode objectives. Matching symmetric asset counterparts are expanded into the selection and receive mirrored deltas. Selection and movement are one atomic undoable edit.
+
+Verification:
+
+- `cargo check --features client --all-targets` — passed.
+- `cargo clippy --features client --lib -- -D warnings` — passed.
+- `cargo test --features client client::map_maker::model::tests --lib` — 5 passed, including single-transaction stroke and symmetric box-move coverage.
+- Native routed client/server on `127.0.0.1:5150` — production 3D palette colors and models rendered, held-pointer painting was visible before release, selection/page state was visible, and the client ran without Bevy panics or renderer errors after setting the offscreen cameras to `Tonemapping::None`.
+- Repository-wide all-target Clippy remains outside this remediation evidence because the shared dirty worktree currently contains pre-existing warnings in unrelated zombie, equipment, settings, controls, gallery, and flow-test edits; client-library Clippy is clean.
+
+The ticket remains `doing` pending the user's subjective acceptance of this feedback pass.

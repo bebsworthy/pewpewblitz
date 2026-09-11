@@ -4,13 +4,12 @@ title: Add elemental weapon effects and ultimate fields
 status: done
 theme: core
 release:
-priority: none
 created: 2026-08-27T15:57:50Z
 modified: 2026-08-29T07:14:59Z
 closed: 2026-08-29T07:14:59Z
 revision: d84324ece5e153a7
 blocks: [BRL-0040]
-related: [BRL-0033, BRL-0043, BRL-0045, BRL-0048]
+related: [BRL-0033, BRL-0043, BRL-0045, BRL-0048, BRL-0094]
 ---
 
 # Description

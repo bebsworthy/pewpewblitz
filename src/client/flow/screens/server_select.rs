@@ -5,8 +5,19 @@ use crate::client::flow::{
     input::edited_value,
     model::ClientFlow,
     persistence::ConnectionPersistence,
-    screens::shared::{
-        FlowButton, FlowNavigation, FlowRoot, flow_root_node, spawn_flow_button, spawn_heading,
+    screens::{
+        connection_shell::{
+            action_node, root_background, root_node, spawn_action, spawn_background, spawn_logo,
+            spawn_text,
+        },
+        shared::{FlowButton, FlowNavigation, FlowRoot},
+    },
+};
+use crate::client::{
+    ClientAssetHandles,
+    ui::{
+        surface::{Surface, SurfaceState},
+        theme::{INK, ORANGE, font},
     },
 };
 use bevy::prelude::*;
@@ -35,30 +46,57 @@ pub(in crate::client::flow) enum FieldLabel {
 
 fn spawn_editor_button(
     parent: &mut ChildSpawnerCommands,
+    assets: Option<&ClientAssetHandles>,
     index: usize,
     action: FlowUiAction,
     field: FieldLabel,
+    label: &str,
 ) {
     parent
         .spawn((
             Button,
+            AccessibleLabel::new(label),
             FlowButton {
                 index,
                 action,
                 error_action: false,
             },
+            Surface::Field,
+            SurfaceState::default(),
             Node {
-                width: percent(88),
-                max_width: px(820),
-                min_height: px(42),
-                padding: UiRect::axes(px(12), px(8)),
-                justify_content: JustifyContent::Center,
+                width: percent(100),
+                min_height: px(72),
+                padding: UiRect::axes(px(30), px(14)),
+                justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
-
+                column_gap: px(24),
                 ..default()
             },
+            BackgroundColor(Color::NONE),
+            BorderColor::all(Color::NONE),
         ))
-        .with_child((field, Text::new(""), TextFont::from_font_size(18.0)));
+        .with_children(|row| {
+            row.spawn((
+                Text::new(label),
+                font(assets, 22.0),
+                TextColor(INK),
+                Node {
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ));
+            row.spawn((
+                field,
+                Text::new(""),
+                font(assets, 22.0),
+                TextColor(INK),
+                TextLayout::new(Justify::Right, LineBreak::AnyCharacter),
+                Node {
+                    min_width: px(0),
+                    ..default()
+                },
+            ));
+        });
 }
 
 #[allow(
@@ -70,8 +108,18 @@ pub(in crate::client::flow) fn spawn_server_select(
     model: Res<ServerSelectModel>,
     persistence: Res<ConnectionPersistence>,
     mut navigation: ResMut<FlowNavigation>,
+    assets: Option<Res<ClientAssetHandles>>,
+    server: Option<Res<AssetServer>>,
 ) {
-    spawn_server_select_root(&mut commands, &model, &persistence, &mut navigation, None);
+    spawn_server_select_root(
+        &mut commands,
+        &model,
+        &persistence,
+        &mut navigation,
+        None,
+        assets.as_deref(),
+        server.as_deref(),
+    );
 }
 
 pub(in crate::client::flow) fn spawn_server_select_root(
@@ -80,55 +128,158 @@ pub(in crate::client::flow) fn spawn_server_select_root(
     persistence: &ConnectionPersistence,
     navigation: &mut FlowNavigation,
     requested_selection: Option<usize>,
+    assets: Option<&ClientAssetHandles>,
+    server: Option<&AssetServer>,
 ) {
     navigation.selected = requested_selection.unwrap_or(2);
     commands
         .spawn((
             FlowRoot,
             DespawnOnExit(ClientFlow::ServerSelect),
-            flow_root_node(),
-            BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
+            root_node(),
+            root_background(),
             GlobalZIndex(410),
         ))
         .with_children(|root| {
-            spawn_heading(root, "SERVER SELECT");
-            spawn_editor_button(root, 0, FlowUiAction::EditAddress, FieldLabel::Address);
-            spawn_editor_button(root, 1, FlowUiAction::EditName, FieldLabel::Name);
-            spawn_flow_button(root, 2, FlowUiAction::Connect, "CONNECT");
+            spawn_background(root, server);
+            root.spawn(Node {
+                width: percent(100),
+                max_width: px(1120),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::SpaceBetween,
+                column_gap: px(24),
+                ..default()
+            })
+            .with_children(|header| {
+                spawn_text(header, assets, "SELECT SERVER", 54.0);
+                spawn_logo(header, assets, 220.0);
+            });
+            root.spawn(Node {
+                width: percent(100),
+                max_width: px(980),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(12),
+                ..default()
+            })
+            .with_children(|content| {
+                spawn_editor_button(
+                    content,
+                    assets,
+                    0,
+                    FlowUiAction::EditAddress,
+                    FieldLabel::Address,
+                    "SERVER ADDRESS",
+                );
+                spawn_editor_button(
+                    content,
+                    assets,
+                    1,
+                    FlowUiAction::EditName,
+                    FieldLabel::Name,
+                    "PLAYER NAME",
+                );
+                spawn_action(
+                    content,
+                    assets,
+                    2,
+                    FlowUiAction::Connect,
+                    "CONNECT",
+                    Some(Surface::Primary),
+                    false,
+                    action_node(percent(100), 72.0),
+                );
+                if let Some(error) = model.inline_error.as_ref() {
+                    content.spawn((
+                        Text::new(error.clone()),
+                        font(assets, 18.0),
+                        TextColor(ORANGE),
+                        TextLayout::new(Justify::Center, LineBreak::WordBoundary),
+                    ));
+                }
+                spawn_saved_servers(content, assets, persistence);
+            });
+        });
+}
+
+fn spawn_saved_servers(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&ClientAssetHandles>,
+    persistence: &ConnectionPersistence,
+) {
+    let has_saved =
+        !persistence.state.favorites.is_empty() || !persistence.state.recents.is_empty();
+    if has_saved {
+        spawn_text(parent, assets, "SAVED SERVERS", 24.0);
+    }
+    parent
+        .spawn(Node {
+            width: percent(100),
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: percent(2),
+            row_gap: px(10),
+            ..default()
+        })
+        .with_children(|cards| {
             let mut index = 3;
             for favorite in &persistence.state.favorites {
-                spawn_flow_button(
-                    root,
+                let join_label = format!("{}  ·  {}", favorite.name, favorite.address);
+                spawn_action(
+                    cards,
+                    assets,
                     index,
                     FlowUiAction::JoinSaved(favorite.address.clone()),
-                    &format!("JOIN {} - {}", favorite.name, favorite.address),
+                    &join_label,
+                    Some(Surface::Row),
+                    false,
+                    action_node(percent(74), 62.0),
                 );
                 index += 1;
-                spawn_flow_button(
-                    root,
+                spawn_action(
+                    cards,
+                    assets,
                     index,
                     FlowUiAction::RemoveFavorite(favorite.address.clone()),
-                    &format!("REMOVE {}", favorite.name),
+                    "REMOVE",
+                    Some(Surface::Quiet),
+                    false,
+                    action_node(percent(24), 62.0),
                 );
                 index += 1;
             }
             for recent in &persistence.state.recents {
-                spawn_flow_button(
-                    root,
+                let label = format!("{}  ·  {}", recent.server_name, recent.address);
+                spawn_action(
+                    cards,
+                    assets,
                     index,
                     FlowUiAction::JoinSaved(recent.address.clone()),
-                    &format!("RECENT {} - {}", recent.server_name, recent.address),
+                    &label,
+                    Some(Surface::Row),
+                    false,
+                    action_node(percent(49), 62.0),
                 );
                 index += 1;
             }
-            spawn_flow_button(root, index, FlowUiAction::OpenSettings, "SETTINGS");
-            spawn_flow_button(root, index + 1, FlowUiAction::Quit, "QUIT");
-            if let Some(error) = model.inline_error.as_ref() {
-                root.spawn((
-                    Text::new(error.clone()),
-                    TextColor(Color::srgb(1.0, 0.55, 0.45)),
-                ));
-            }
+            spawn_action(
+                cards,
+                assets,
+                index,
+                FlowUiAction::OpenSettings,
+                "SETTINGS",
+                Some(Surface::Quiet),
+                false,
+                action_node(auto(), 54.0),
+            );
+            spawn_action(
+                cards,
+                assets,
+                index + 1,
+                FlowUiAction::Quit,
+                "QUIT",
+                Some(Surface::Quiet),
+                false,
+                action_node(auto(), 54.0),
+            );
         });
 }
 
@@ -172,6 +323,8 @@ pub(in crate::client::flow) fn refresh_server_select(
     model: Res<ServerSelectModel>,
     persistence: Res<ConnectionPersistence>,
     mut navigation: ResMut<FlowNavigation>,
+    assets: Option<Res<ClientAssetHandles>>,
+    server: Option<Res<AssetServer>>,
 ) {
     let Some(selection) = commit.refresh_server_select else {
         return;
@@ -188,5 +341,7 @@ pub(in crate::client::flow) fn refresh_server_select(
         &persistence,
         &mut navigation,
         Some(selection),
+        assets.as_deref(),
+        server.as_deref(),
     );
 }

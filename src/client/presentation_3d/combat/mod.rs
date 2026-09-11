@@ -34,8 +34,8 @@ pub(in crate::client) use effects::{
     resolve_vfx_requests,
 };
 pub(super) use elemental_style::{
-    ElementalSupportAreaMaterial, ElementalSupportAreaMaterialPlugin, FireAreaMaterial,
-    FireAreaMaterialPlugin, animate_elemental_motion_accents,
+    ElementalSupportAreaMaterial, ElementalSupportAreaMaterialPlugin, ElementalTeamAccent,
+    FireAreaMaterial, FireAreaMaterialPlugin, animate_elemental_motion_accents,
     animate_elemental_support_area_materials, animate_fire_area_material,
 };
 pub(super) use entities::{

@@ -120,7 +120,7 @@ remain explicit.
 
 | Surface | Product role | Ownership contract |
 |---|---|---|
-| Connecting | Initial or manual lobby connection progress | May expose Cancel, Settings, and Quit; success enters Dashboard |
+| Connecting | Initial or manual lobby connection progress | Shows the real logo, live phase, and Cancel; success enters Dashboard and failure enters full-screen recovery |
 | Server Select | Recovery and manual connection | Owns address, display name, favorites, and recents; it does not pretend to be a connected home |
 | Player Dashboard | Sole authenticated home | Presents the selected brawler and entry to Brawlers List, selected game summary, Play, Practice, and connected utilities |
 | Game Type Select | Dashboard child | Edits one local advertised-game draft; Confirm commits and Back discards |
@@ -138,7 +138,7 @@ remain explicit.
 | Settings | Local settings surface | Returns to its explicit product-flow or match-menu origin |
 | Credits | Attribution surface | Reached from Dashboard Menu; required attribution derives from the asset manifest |
 | Confirmations | Small contextual overlays | Preserve their invoking screen visibly underneath and restore it deterministically |
-| Error | Contextual recovery surface | Presents a factual category and only actions valid for the underlying session state |
+| Error | Contextual or full-screen recovery surface | Presents a factual category and only actions valid for the underlying session state; connection loss uses Retry, Change Server, and Quit |
 
 Gameplay HUD elements such as countdown, phase messages, health, ammunition, cooldowns, objective
 state, and roster score are Match sublayers rather than navigation destinations. Developer
@@ -409,6 +409,13 @@ The ordinary flow must remain operable by controller and keyboard/mouse. Address
 editing may use keyboard and paste, but saved servers and generated names prevent controller users
 from requiring an on-screen keyboard.
 
+The [player-shell UI toolkit](design/player-shell/ui-toolkit.md) owns shared visual tokens, semantic
+surface roles, controls, scrolling, and focus presentation. Screen flow remains the owner of action
+meaning and product state. Focused, selected, inactive, and disabled are separate states; opening
+an overlay transfers the only active focus scope so one gamepad event cannot navigate both the
+overlay and the underlying screen. A boolean control uses a visible toggle track and knob. A
+selection color is not repeated with `Selected` text or a decorative checkmark.
+
 The settings contract includes:
 
 - action remapping, deadzones, aim threshold, sensitivity, Y inversion, conflict handling,
@@ -513,6 +520,11 @@ An overlay may explain an error, but loss of the underlying session changes the 
 transition clears stale ticket, match, map, terrain, result eligibility, focus, and presentation
 state exactly once.
 
+Initial/manual connection failure uses the full-screen recovery surface rather than leaving an
+inactive Server Select visible underneath. It presents the real logo, factual title/detail, Retry,
+Change Server, and Quit. Connecting itself presents only the live phase and Cancel. Neither screen
+adds a decorative connection-warning icon or suggests offline play.
+
 ## Authority and execution boundaries
 
 The client owns presentation state, local drafts, focus, local settings, and bounded requests. The
@@ -524,6 +536,8 @@ Moving between lobby and match authority uses the routed connection-handoff cont
 not introduce another gameplay protocol, process-local entity identity on the wire, or a second
 simulation path. Headless automation may bypass visual presentation, but it must exercise the same
 session, admission, handoff, match, and return protocols as the product flow.
+The selected server endpoint, connection identity, and logical server address survive each
+lobby/match entity replacement; handoff and return never fall back to startup defaults.
 
 ## Verification contract
 

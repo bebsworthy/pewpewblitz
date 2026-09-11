@@ -55,6 +55,9 @@ run `ticket list` and `ticket task <ID>` rather than inferring active work from 
   provenance, lifecycle, degradation, and future-art boundaries.
 - [Player experience specification](./13-player-ux.md) — canonical Dashboard-centered flow,
   admission, selection, settings, accessibility, recovery, and envisioned UX extensions.
+- [Player shell design and UI toolkit](./design/player-shell/README.md) — approved shell
+  compositions, visual language, reusable native components, interaction states, and delivery
+  guidance.
 
 ## Technical foundation
 

@@ -4,13 +4,12 @@ title: Architecture improvement
 status: done
 theme:
 release:
-priority: none
 created: 2026-08-30T08:01:29Z
 modified: 2026-08-30T18:21:12Z
 closed: 2026-08-30T18:21:12Z
 revision: e159c89d3c12b512
 blocks: []
-related: []
+related: [BRL-0105]
 ---
 
 # Description

@@ -121,6 +121,12 @@ UI branding, fonts, icons, and shaders are optional client assets with bounded f
 Navigation, focus, saving, networking, recovery, and shutdown must remain functional when a visual
 asset or custom shader is unavailable.
 
+The [player-shell UI toolkit](design/player-shell/ui-toolkit.md) owns the shared native palette,
+Lilita One display type, semantic surface roles, cut-corner shader geometry, controls, and visual
+interaction states. Screens select those roles and retain ownership of content and flow; they do
+not recreate local button, card, list-row, toggle, focus, or scroll styling. Focus and persistent
+selection remain distinct, and only the active screen or overlay presents focus feedback.
+
 ### Audio
 
 Client audio presents bounded gameplay and product cues. Missing or late audio degrades to silence
@@ -230,8 +236,8 @@ it does not replace these ownership and cleanup paths:
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
 | Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with up to eight combined children: ordered mesh layers plus zero to two optional decorative GPU-particle layers; every particle layer has an authored bounded profile and a shaped retained mesh | Root lifetime is the maximum mesh or particle lifetime, or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
-| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Neutral straight shots wrap a dimensional nucleus in one animated comet wake, Cold adds slow crystal fins, Fire adds fast trailing lobes, Poison leaves a bubbly wake, and Restoration carries a rotating vitality spark; lobbed flight also has a projected shadow and fixed landing marker, while Fire may emit lingering world-space smoke; a separate inset retains observer relationship | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
-| Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained ember ground underlay plus a procedural material for a coherent turbulent circumference and layered heat bands. Normal Poison uses animated cellular contamination with perimeter bubbles; Normal Restoration uses rotating vitality arcs with petal markers. Reduced/primitive variants use bounded mesh geometry | Recreated after late join from public state; owner removal is cleanup truth |
+| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Neutral straight shots wrap a dimensional nucleus in one animated comet wake, Cold adds slow crystal fins, Fire adds fast trailing lobes, Poison leaves a bubbly wake, and Restoration carries a rotating vitality spark; lobbed flight also has a projected shadow and fixed landing marker, while Fire may emit lingering world-space smoke; the nucleus carries a restrained ally/enemy relationship channel | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
+| Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained ember ground underlay plus a procedural material for a coherent turbulent circumference and layered heat bands. Normal Poison uses animated cellular contamination with perimeter bubbles; Normal Restoration uses curved, offset vitality ripples with petal markers and no cardinal-spoke icon. Pattern and motion identify type; selected native filaments, crystals, bubbles, petals, or ripple arcs carry a restrained ally-blue or enemy-red accent. Neutral leaves the pattern untinted. Reduced/primitive variants preserve the same type-pattern/team-accent separation with bounded mesh cues | Recreated after late join from public state; owner removal is cleanup truth |
 | Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary; circular Cold/Fire areas reuse the elemental area style | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
 | Sticky payload | Replicated position, fuse ticks, radius, role, and attack source | Volatile dimensional body, animated veins and droplets, exact warning ring, and authoritative fuse-progress fill | Recreated at the observed tick and removed with the owner |
 | Cone spray | Replicated origin, facing, propagation and deadline | One bounded triangle-fan surface rebuilt from blocker-clipped authoritative rays; normal/reduced use deterministic flowing gas and primitive uses the same exact silhouette | Reconstructed from authoritative tick; owner removal clears the retained mesh and dynamic mesh asset |
@@ -278,10 +284,15 @@ The first production signature is a typed value, not an unrestricted tag set. It
 - authoritative activation, observed, and expiry ticks where the lifecycle is persistent;
 - normal, reduced, or primitive presentation variant.
 
-Carrier, phase, accent, and relationship remain independent. Team relationship may add a rim,
-marker, or secondary channel but may not overwrite elemental identity. Contextual overrides are a
-closed owned enum and may replace only the documented recipe selection step; they do not create a
-general priority/tag engine.
+Carrier, phase, accent, and relationship remain independent. Pattern and motion communicate the
+semantic type; a restrained color accent inside that native pattern communicates team. Fire heat
+filaments, Cold crystals, Poison contamination/bubbles, and Restoration petals/ripples may carry
+ally blue or enemy red, but relationship may not add a freestanding icon, overlay, or second
+gameplay radius. `SelfOwned` uses the ally effect treatment because the controlled fighter's
+selection ring already identifies self; neutral leaves the type pattern untinted. Normal shader
+variants and degraded mesh variants preserve the same type pattern and cadence for ally and enemy;
+only the selected accent color changes. Contextual overrides are a closed owned enum and may replace
+only the documented recipe selection step; they do not create a general priority/tag engine.
 
 The client does not initially need a protocol change for exact weapon identity. Delivery entities
 already replicate `ReplicatedAttackSource`, whose `AttackSource` includes the immutable

@@ -1,11 +1,11 @@
 use bevy::app::AppExit;
-use brawler::client::{VfxLabAccent, VfxLabConfig, build_vfx_lab_app};
+use brawler::client::{VfxLabAccent, VfxLabConfig, VfxLabRelationship, build_vfx_lab_app};
 use std::{env, process};
 
 fn usage() {
     eprintln!(
-        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--sample-ticks N] [--accent neutral|cold|fire|poison|restoration] [--lobbed-impact] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
-         Controls: Left/Right select · Space restart · Enter pause · . step · N identity · C accent · U ultimate · R reduced · P primitive · I guide/details · F12 capture · Esc quit"
+        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--sample-ticks N] [--accent neutral|cold|fire|poison|restoration] [--relationship neutral|ally|enemy] [--lobbed-impact] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
+         Controls: Left/Right select · Space restart · Enter pause · . step · N identity · C accent · O relationship · U ultimate · R reduced · P primitive · I guide/details · F12 capture · Esc quit"
     );
 }
 
@@ -56,6 +56,13 @@ fn parse_args() -> Result<VfxLabConfig, String> {
                 })?;
                 config.accent = VfxLabAccent::from_key(&value)
                     .ok_or_else(|| "invalid --accent value".to_string())?;
+            }
+            "--relationship" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--relationship requires neutral, ally, or enemy".to_string())?;
+                config.relationship = VfxLabRelationship::from_key(&value)
+                    .ok_or_else(|| "invalid --relationship value".to_string())?;
             }
             "--fixture" => {
                 config.fixture = Some(

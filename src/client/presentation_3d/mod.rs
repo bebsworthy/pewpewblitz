@@ -29,6 +29,7 @@ mod diagnostics;
 pub(crate) mod environment_assets;
 mod map;
 mod map_editor;
+mod map_palette_preview;
 mod object_health;
 mod zombie;
 
@@ -46,7 +47,9 @@ pub(in crate::client) use combat::{
 };
 use coordinates::{ground_point, ground_position, ground_rotation};
 use map::{GeneratedMapMesh, Presented3dMap};
-pub(in crate::client) use map_editor::MapEditorPreview;
+pub(in crate::client) use map_editor::{
+    MapEditorPointerMode, MapEditorPreview, MapEditorPreviewOptions,
+};
 use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_health_ui};
 
 const WALL_HEIGHT: f32 = 32.0;
@@ -99,6 +102,34 @@ pub(crate) struct Primitive3dAssets {
     pub(crate) barrel_body: Handle<Mesh>,
 }
 
+pub(in crate::client) struct EffectRelationshipMaterials<M: Asset> {
+    neutral: Handle<M>,
+    ally: Handle<M>,
+    enemy: Handle<M>,
+}
+
+impl<M: Asset> EffectRelationshipMaterials<M> {
+    fn new(neutral: Handle<M>, ally: Handle<M>, enemy: Handle<M>) -> Self {
+        Self {
+            neutral,
+            ally,
+            enemy,
+        }
+    }
+
+    pub(in crate::client) fn select(&self, relationship: vfx::VfxRelationship) -> Handle<M> {
+        match relationship {
+            vfx::VfxRelationship::SelfOwned | vfx::VfxRelationship::Ally => self.ally.clone(),
+            vfx::VfxRelationship::Enemy => self.enemy.clone(),
+            vfx::VfxRelationship::Neutral => self.neutral.clone(),
+        }
+    }
+
+    pub(in crate::client) fn handles(&self) -> [&Handle<M>; 3] {
+        [&self.neutral, &self.ally, &self.enemy]
+    }
+}
+
 #[derive(Resource, Clone, Copy)]
 struct FighterPresentationMetrics {
     radius: f32,
@@ -120,6 +151,8 @@ pub(crate) struct Material3dAssets {
     pub(crate) marker_local: Handle<StandardMaterial>,
     pub(crate) marker_ally: Handle<StandardMaterial>,
     pub(crate) marker_enemy: Handle<StandardMaterial>,
+    pub(crate) effect_ally: Handle<StandardMaterial>,
+    pub(crate) effect_enemy: Handle<StandardMaterial>,
     pub(crate) neutral: Handle<StandardMaterial>,
     pub(crate) zone_fill: Handle<StandardMaterial>,
     pub(crate) zone_boundary: Handle<StandardMaterial>,
@@ -147,13 +180,16 @@ pub(crate) struct Material3dAssets {
     pub(crate) elemental_fire_bright: Handle<StandardMaterial>,
     pub(crate) elemental_fire_fill: Handle<StandardMaterial>,
     pub(crate) elemental_fire_hot: Handle<StandardMaterial>,
-    pub(in crate::client) elemental_fire_area: Handle<combat::FireAreaMaterial>,
+    pub(in crate::client) elemental_fire_area:
+        EffectRelationshipMaterials<combat::FireAreaMaterial>,
     pub(crate) elemental_poison: Handle<StandardMaterial>,
     pub(crate) elemental_poison_bright: Handle<StandardMaterial>,
-    pub(in crate::client) elemental_poison_area: Handle<combat::ElementalSupportAreaMaterial>,
+    pub(in crate::client) elemental_poison_area:
+        EffectRelationshipMaterials<combat::ElementalSupportAreaMaterial>,
     pub(crate) elemental_restoration: Handle<StandardMaterial>,
     pub(crate) elemental_restoration_bright: Handle<StandardMaterial>,
-    pub(in crate::client) elemental_restoration_area: Handle<combat::ElementalSupportAreaMaterial>,
+    pub(in crate::client) elemental_restoration_area:
+        EffectRelationshipMaterials<combat::ElementalSupportAreaMaterial>,
     pub(in crate::client) splash_area: Handle<combat::SplashAreaMaterial>,
     pub(in crate::client) splash_area_reduced: Handle<combat::SplashAreaMaterial>,
     pub(crate) sticky_blob: Handle<StandardMaterial>,
@@ -324,6 +360,7 @@ impl Plugin for WorldPresentationPlugin {
             app.add_plugins(diagnostics::RenderMeasurementPlugin(config));
         }
         configure_world_presentation_schedule(app);
+        map_palette_preview::install(app);
         app.add_plugins((
             vfx::ProductionVfxPlugin,
             VfxParticleAdapterPlugin,
@@ -1150,6 +1187,24 @@ pub(in crate::client) fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
+        effect_ally: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.04, 0.58, 1.0, 0.82),
+            emissive: LinearRgba::new(0.08, 0.9, 2.6, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            double_sided: true,
+            cull_mode: None,
+            unlit: true,
+            ..default()
+        }),
+        effect_enemy: materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.025, 0.055, 0.76),
+            emissive: LinearRgba::new(1.9, 0.008, 0.02, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            double_sided: true,
+            cull_mode: None,
+            unlit: true,
+            ..default()
+        }),
         neutral: materials.add(matte(Color::srgb(0.72, 0.76, 0.82))),
         zone_fill: materials.add(StandardMaterial {
             base_color: Color::srgba(0.2, 0.5, 0.95, 0.30),
@@ -1275,7 +1330,17 @@ pub(in crate::client) fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
-        elemental_fire_area: fire_area_materials.add(combat::FireAreaMaterial::default()),
+        elemental_fire_area: EffectRelationshipMaterials::new(
+            fire_area_materials.add(combat::FireAreaMaterial::new(
+                combat::ElementalTeamAccent::Neutral,
+            )),
+            fire_area_materials.add(combat::FireAreaMaterial::new(
+                combat::ElementalTeamAccent::Ally,
+            )),
+            fire_area_materials.add(combat::FireAreaMaterial::new(
+                combat::ElementalTeamAccent::Enemy,
+            )),
+        ),
         elemental_poison: materials.add(StandardMaterial {
             base_color: Color::srgba(0.22, 0.62, 0.055, 0.28),
             emissive: LinearRgba::new(0.12, 0.72, 0.018, 1.0),
@@ -1289,8 +1354,17 @@ pub(in crate::client) fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
-        elemental_poison_area: elemental_support_area_materials
-            .add(combat::ElementalSupportAreaMaterial::poison()),
+        elemental_poison_area: EffectRelationshipMaterials::new(
+            elemental_support_area_materials.add(combat::ElementalSupportAreaMaterial::poison(
+                combat::ElementalTeamAccent::Neutral,
+            )),
+            elemental_support_area_materials.add(combat::ElementalSupportAreaMaterial::poison(
+                combat::ElementalTeamAccent::Ally,
+            )),
+            elemental_support_area_materials.add(combat::ElementalSupportAreaMaterial::poison(
+                combat::ElementalTeamAccent::Enemy,
+            )),
+        ),
         elemental_restoration: materials.add(StandardMaterial {
             base_color: Color::srgba(0.04, 0.76, 0.48, 0.24),
             emissive: LinearRgba::new(0.018, 0.92, 0.42, 1.0),
@@ -1298,8 +1372,23 @@ pub(in crate::client) fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
-        elemental_restoration_area: elemental_support_area_materials
-            .add(combat::ElementalSupportAreaMaterial::restoration()),
+        elemental_restoration_area: EffectRelationshipMaterials::new(
+            elemental_support_area_materials.add(
+                combat::ElementalSupportAreaMaterial::restoration(
+                    combat::ElementalTeamAccent::Neutral,
+                ),
+            ),
+            elemental_support_area_materials.add(
+                combat::ElementalSupportAreaMaterial::restoration(
+                    combat::ElementalTeamAccent::Ally,
+                ),
+            ),
+            elemental_support_area_materials.add(
+                combat::ElementalSupportAreaMaterial::restoration(
+                    combat::ElementalTeamAccent::Enemy,
+                ),
+            ),
+        ),
         splash_area,
         splash_area_reduced,
         elemental_restoration_bright: materials.add(StandardMaterial {

@@ -107,7 +107,7 @@ pub use settings::{
 };
 pub use shell::ClientShellPlugin;
 pub use ui::gallery::build_ui_gallery_app;
-pub use vfx_lab::{VfxLabAccent, VfxLabConfig, build_vfx_lab_app};
+pub use vfx_lab::{VfxLabAccent, VfxLabConfig, VfxLabRelationship, build_vfx_lab_app};
 
 /// Installs client-side gameplay state reconstructed from authoritative replication and messages.
 /// Connection lifecycle and transport remain owned by [`ClientNetworkPlugin`].
