@@ -89,7 +89,7 @@ fn spawn_previews(
                     fov: 0.52,
                     ..default()
                 }),
-                Transform::from_xyz(96.0, 76.0, 96.0).looking_at(Vec3::new(0.0, 9.0, 0.0), Vec3::Y),
+                Transform::from_xyz(82.0, 64.0, 82.0).looking_at(Vec3::new(0.0, 9.0, 0.0), Vec3::Y),
                 layer.clone(),
             ))
             .id();

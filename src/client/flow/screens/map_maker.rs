@@ -18,7 +18,7 @@ use crate::{
     },
     map::{
         AuthoredMapCandidate, MapAssetId, MapAssetSlot, MapCatalogResource, MapCell, MapSymmetry,
-        authorable_assets,
+        authorable_assets, placement_cells,
     },
 };
 use bevy::{
@@ -28,20 +28,94 @@ use bevy::{
         mouse::{AccumulatedMouseMotion, MouseWheel},
     },
     prelude::*,
+    ui::InteractionDisabled,
     window::PrimaryWindow,
 };
 use lightyear::prelude::client::Client;
 use std::collections::BTreeSet;
 
-const VISIBLE_PALETTE_ITEMS: usize = 7;
-const PALETTE_PAGE_DELTA: i8 = 7;
+const VISIBLE_PALETTE_ITEMS: usize = 6;
+const PALETTE_PAGE_DELTA: i8 = 6;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum EditorTool {
     #[default]
     Place,
     Erase,
-    Move,
+    Select,
+}
+
+#[derive(Clone, Copy)]
+enum ToolGlyph {
+    Place,
+    Select,
+    Erase,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+enum EditorInteraction {
+    #[default]
+    Idle,
+    Paint {
+        cells: Vec<MapCell>,
+        asset: Option<MapAssetId>,
+    },
+    Erase {
+        cells: Vec<MapCell>,
+    },
+    MarqueeSelect {
+        anchor: MapCell,
+        additive: bool,
+    },
+    MoveSelection {
+        anchor: MapCell,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+enum PaletteCategory {
+    #[default]
+    Ground,
+    CoverObjects,
+    Vegetation,
+    EffectTiles,
+    Decorations,
+    SpawnsObjectives,
+}
+
+impl PaletteCategory {
+    const ALL: [Self; 6] = [
+        Self::Ground,
+        Self::CoverObjects,
+        Self::Vegetation,
+        Self::EffectTiles,
+        Self::Decorations,
+        Self::SpawnsObjectives,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Ground => "GROUND",
+            Self::CoverObjects => "COVER",
+            Self::Vegetation => "VEGETATION",
+            Self::EffectTiles => "EFFECTS",
+            Self::Decorations => "DECOR",
+            Self::SpawnsObjectives => "SPAWNS + GOALS",
+        }
+    }
+
+    const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Ground),
+            1 => Some(Self::CoverObjects),
+            2 => Some(Self::Vegetation),
+            3 => Some(Self::EffectTiles),
+            4 => Some(Self::Decorations),
+            5 => Some(Self::SpawnsObjectives),
+            _ => None,
+        }
+    }
 }
 
 #[allow(
@@ -61,11 +135,13 @@ pub(in crate::client::flow) struct MapMakerRuntime {
     clear_armed: bool,
     grid_visible: bool,
     tool: EditorTool,
-    paint_stroke: Vec<MapCell>,
-    stroke_asset: Option<MapAssetId>,
+    interaction: EditorInteraction,
     selection: BTreeSet<crate::map::MapPlacementId>,
-    selection_anchor: Option<MapCell>,
-    move_anchor: Option<MapCell>,
+    palette_category: PaletteCategory,
+    palette_query: String,
+    palette_search_active: bool,
+    assets_open: bool,
+    validation_open: bool,
     render_revision: u64,
     return_to_editor: bool,
     camera_center: Vec2,
@@ -87,11 +163,13 @@ impl Default for MapMakerRuntime {
             clear_armed: false,
             grid_visible: true,
             tool: EditorTool::Place,
-            paint_stroke: Vec::new(),
-            stroke_asset: None,
+            interaction: EditorInteraction::Idle,
             selection: BTreeSet::new(),
-            selection_anchor: None,
-            move_anchor: None,
+            palette_category: PaletteCategory::CoverObjects,
+            palette_query: String::new(),
+            palette_search_active: false,
+            assets_open: true,
+            validation_open: false,
             render_revision: 0,
             return_to_editor: false,
             camera_center: Vec2::ZERO,
@@ -169,19 +247,22 @@ pub(in crate::client::flow) fn sync_map_editor_preview(
     let mut preview_session = session.clone();
     let mut valid = true;
     if runtime.tool == EditorTool::Place {
-        let items = palette(&catalog.0, session.document.recipe.mode_definition_id);
-        let item = items
-            .get(runtime.palette_index % items.len().max(1))
-            .copied();
-        let result = if let Some(asset_id) = runtime.stroke_asset {
-            preview_session.paint_stroke(
+        let item = selected_palette_item(
+            &catalog.0,
+            &runtime,
+            session.document.recipe.mode_definition_id,
+        );
+        let result = match &runtime.interaction {
+            EditorInteraction::Paint {
+                cells,
+                asset: Some(asset_id),
+            } => preview_session.paint_stroke(
                 &catalog.0,
-                asset_id,
-                runtime.paint_stroke.iter().copied(),
+                *asset_id,
+                cells.iter().copied(),
                 runtime.quarter_turns,
-            )
-        } else {
-            item.map_or(Ok(()), |item| {
+            ),
+            _ => item.map_or(Ok(()), |item| {
                 preview_place_item(
                     &mut preview_session,
                     &catalog.0,
@@ -189,22 +270,36 @@ pub(in crate::client::flow) fn sync_map_editor_preview(
                     runtime.cursor,
                     runtime.quarter_turns,
                 )
-            })
+            }),
         };
         valid = result.is_ok();
-    } else if runtime.tool == EditorTool::Move
-        && let Some(anchor) = runtime.move_anchor
+    } else if runtime.tool == EditorTool::Erase {
+        if let EditorInteraction::Erase { cells } = &runtime.interaction {
+            valid = preview_session
+                .erase_cells(&catalog.0, cells.iter().copied())
+                .is_ok();
+        }
+    } else if runtime.tool == EditorTool::Select
+        && let EditorInteraction::MoveSelection { anchor } = &runtime.interaction
     {
         valid = preview_session
             .move_placements_by(
                 &catalog.0,
                 &runtime.selection,
-                anchor,
+                *anchor,
                 i32::from(runtime.cursor.x) - i32::from(anchor.x),
                 i32::from(runtime.cursor.y) - i32::from(anchor.y),
             )
             .is_ok();
     }
+    let hovered = (runtime.tool == EditorTool::Select)
+        .then(|| {
+            session
+                .placements_in_rect(&catalog.0, runtime.cursor, runtime.cursor)
+                .into_iter()
+                .find(|id| !runtime.selection.contains(id))
+        })
+        .flatten();
     let preview = crate::client::presentation_3d::MapEditorPreview::from_recipe(
         session.document.id,
         &preview_session.document.recipe,
@@ -218,13 +313,15 @@ pub(in crate::client::flow) fn sync_map_editor_preview(
             pointer_mode: match runtime.tool {
                 EditorTool::Place => crate::client::presentation_3d::MapEditorPointerMode::Place,
                 EditorTool::Erase => crate::client::presentation_3d::MapEditorPointerMode::Erase,
-                EditorTool::Move => crate::client::presentation_3d::MapEditorPointerMode::Move,
+                EditorTool::Select => crate::client::presentation_3d::MapEditorPointerMode::Move,
             },
             pointer_valid: valid,
             selected: runtime.selection.iter().copied().collect(),
-            selection_rect: runtime
-                .selection_anchor
-                .map(|anchor| (anchor, runtime.cursor)),
+            hovered,
+            selection_rect: match runtime.interaction {
+                EditorInteraction::MarqueeSelect { anchor, .. } => Some((anchor, runtime.cursor)),
+                _ => None,
+            },
         },
     );
     if current.as_deref() != Some(&preview) {
@@ -338,6 +435,7 @@ pub(in crate::client::flow) fn resolve_map_maker_action(
         FlowUiAction::OpenMapDraft(id) if *flow.get() == ClientFlow::MapLibrary => {
             if let Some(document) = library.drafts.get(&id).cloned() {
                 runtime.session = Some(MapEditorSession::open(document));
+                select_first_visible_palette_item(&catalog.0, &mut runtime);
                 runtime.status = None;
                 runtime.bump_render();
                 commit.next_flow = Some(ClientFlow::MapEditor);
@@ -485,7 +583,14 @@ pub(in crate::client::flow) fn resolve_map_maker_action(
             runtime.bump_render();
         }
         FlowUiAction::MapMakerRotate => {
-            runtime.quarter_turns = (runtime.quarter_turns + 1) % 4;
+            if runtime.tool == EditorTool::Select && !runtime.selection.is_empty() {
+                let selected = runtime.selection.clone();
+                if let Some(session) = runtime.session.as_mut() {
+                    runtime.status = session.rotate_placements(&catalog.0, &selected).err();
+                }
+            } else {
+                runtime.quarter_turns = (runtime.quarter_turns + 1) % 4;
+            }
             runtime.bump_render();
         }
         FlowUiAction::MapMakerPlace => {
@@ -501,25 +606,34 @@ pub(in crate::client::flow) fn resolve_map_maker_action(
             }
             runtime.bump_render();
         }
+        FlowUiAction::MapMakerEraseStroke(cells) => {
+            if let Some(session) = runtime.session.as_mut() {
+                runtime.status = session.erase_cells(&catalog.0, cells).err();
+            }
+            runtime.bump_render();
+        }
         FlowUiAction::MapMakerUsePlaceTool => {
-            runtime.tool = EditorTool::Place;
-            runtime.selection.clear();
+            activate_editor_tool(&mut runtime, EditorTool::Place);
             runtime.bump_render();
         }
         FlowUiAction::MapMakerUseEraseTool => {
-            runtime.tool = EditorTool::Erase;
-            runtime.selection.clear();
+            activate_editor_tool(&mut runtime, EditorTool::Erase);
             runtime.bump_render();
         }
         FlowUiAction::MapMakerUseMoveTool => {
-            runtime.tool = EditorTool::Move;
+            activate_editor_tool(&mut runtime, EditorTool::Select);
             runtime.bump_render();
         }
-        FlowUiAction::MapMakerSelectRect(first, second) => {
+        FlowUiAction::MapMakerSelectRect(first, second, additive) => {
             if let Some(session) = runtime.session.as_ref() {
                 let selected = session.placements_in_rect(&catalog.0, first, second);
-                runtime.selection = session.symmetry_selection(&catalog.0, &selected);
-                runtime.status = Some(format!("{} item(s) selected.", runtime.selection.len()));
+                let selected = session.symmetry_selection(&catalog.0, &selected);
+                if additive {
+                    runtime.selection.extend(selected);
+                } else {
+                    runtime.selection = selected;
+                }
+                runtime.status = None;
             }
             runtime.bump_render();
         }
@@ -536,6 +650,57 @@ pub(in crate::client::flow) fn resolve_map_maker_action(
                     )
                     .err();
             }
+            runtime.bump_render();
+        }
+        FlowUiAction::MapMakerDuplicateSelection => {
+            let selected = runtime.selection.clone();
+            if let Some(session) = runtime.session.as_mut() {
+                match session.duplicate_placements(&catalog.0, &selected) {
+                    Ok(duplicated) => {
+                        runtime.selection = duplicated;
+                        runtime.status = None;
+                    }
+                    Err(error) => runtime.status = Some(error),
+                }
+            }
+            runtime.bump_render();
+        }
+        FlowUiAction::MapMakerDeleteSelection => {
+            let selected = std::mem::take(&mut runtime.selection);
+            if let Some(session) = runtime.session.as_mut() {
+                runtime.status = session.delete_placements(&selected).err();
+            }
+            runtime.bump_render();
+        }
+        FlowUiAction::MapMakerClearSelection => {
+            runtime.interaction = EditorInteraction::Idle;
+            runtime.selection.clear();
+            runtime.status = None;
+            runtime.bump_render();
+        }
+        FlowUiAction::MapMakerSelectCategory(category) => {
+            if let Some(category) = PaletteCategory::from_u8(category) {
+                runtime.palette_category = category;
+                select_first_visible_palette_item(&catalog.0, &mut runtime);
+                runtime.bump_render();
+            }
+        }
+        FlowUiAction::MapMakerToggleSearch => {
+            runtime.palette_search_active = !runtime.palette_search_active;
+            runtime.bump_render();
+        }
+        FlowUiAction::MapMakerClearSearch => {
+            runtime.palette_query.clear();
+            runtime.palette_search_active = false;
+            select_first_visible_palette_item(&catalog.0, &mut runtime);
+            runtime.bump_render();
+        }
+        FlowUiAction::MapMakerToggleAssets => {
+            toggle_assets_drawer(&mut runtime);
+            runtime.bump_render();
+        }
+        FlowUiAction::MapMakerToggleValidation => {
+            runtime.validation_open = !runtime.validation_open;
             runtime.bump_render();
         }
         FlowUiAction::MapMakerToggleGrid => {
@@ -577,11 +742,20 @@ fn is_map_maker_action(action: &FlowUiAction) -> bool {
             | FlowUiAction::MapMakerPlace
             | FlowUiAction::MapMakerPaintStroke(_)
             | FlowUiAction::MapMakerErase
+            | FlowUiAction::MapMakerEraseStroke(_)
             | FlowUiAction::MapMakerUsePlaceTool
             | FlowUiAction::MapMakerUseEraseTool
             | FlowUiAction::MapMakerUseMoveTool
-            | FlowUiAction::MapMakerSelectRect(_, _)
+            | FlowUiAction::MapMakerSelectRect(_, _, _)
             | FlowUiAction::MapMakerMoveSelection(_, _)
+            | FlowUiAction::MapMakerDuplicateSelection
+            | FlowUiAction::MapMakerDeleteSelection
+            | FlowUiAction::MapMakerClearSelection
+            | FlowUiAction::MapMakerSelectCategory(_)
+            | FlowUiAction::MapMakerToggleSearch
+            | FlowUiAction::MapMakerClearSearch
+            | FlowUiAction::MapMakerToggleAssets
+            | FlowUiAction::MapMakerToggleValidation
             | FlowUiAction::MapMakerToggleGrid
             | FlowUiAction::MapMakerFitView
     )
@@ -645,7 +819,7 @@ fn create_default_document(
                 preset.recipe.dimensions.width / 2,
                 preset.recipe.dimensions.height / 2,
             );
-            runtime.palette_index = 0;
+            select_first_visible_palette_item(catalog, runtime);
             runtime.status = Some(
                 "Draft created. Add spawns and the selected mode objective before testing."
                     .to_string(),
@@ -781,7 +955,13 @@ impl MapMakerRuntime {
             FlowUiAction::MapMakerSelectAsset(index) => self.palette_index == *index,
             FlowUiAction::MapMakerUsePlaceTool => self.tool == EditorTool::Place,
             FlowUiAction::MapMakerUseEraseTool => self.tool == EditorTool::Erase,
-            FlowUiAction::MapMakerUseMoveTool => self.tool == EditorTool::Move,
+            FlowUiAction::MapMakerUseMoveTool => self.tool == EditorTool::Select,
+            FlowUiAction::MapMakerSelectCategory(category) => {
+                PaletteCategory::from_u8(*category) == Some(self.palette_category)
+            }
+            FlowUiAction::MapMakerToggleSearch => self.palette_search_active,
+            FlowUiAction::MapMakerToggleAssets => self.assets_open,
+            FlowUiAction::MapMakerToggleValidation => self.validation_open,
             FlowUiAction::MapMakerCycleSymmetry => self
                 .session
                 .as_ref()
@@ -790,6 +970,31 @@ impl MapMakerRuntime {
             FlowUiAction::MapMakerClear => self.clear_armed,
             _ => false,
         }
+    }
+}
+
+fn activate_editor_tool(runtime: &mut MapMakerRuntime, tool: EditorTool) {
+    runtime.tool = tool;
+    runtime.interaction = EditorInteraction::Idle;
+    runtime.validation_open = false;
+    runtime.assets_open = tool == EditorTool::Place;
+    if tool != EditorTool::Place {
+        runtime.palette_search_active = false;
+    }
+    if tool != EditorTool::Select {
+        runtime.selection.clear();
+    }
+}
+
+fn toggle_assets_drawer(runtime: &mut MapMakerRuntime) {
+    if runtime.tool == EditorTool::Place {
+        runtime.assets_open = !runtime.assets_open;
+        runtime.validation_open = false;
+        if !runtime.assets_open {
+            runtime.palette_search_active = false;
+        }
+    } else {
+        activate_editor_tool(runtime, EditorTool::Place);
     }
 }
 
@@ -819,11 +1024,88 @@ fn cycle_palette(
     let Some(session) = runtime.session.as_ref() else {
         return;
     };
-    let count = palette(catalog, session.document.recipe.mode_definition_id).len();
-    if count > 0 {
-        runtime.palette_index = cycled_palette_index(runtime.palette_index, count, delta);
+    let visible =
+        visible_palette_entries(catalog, runtime, session.document.recipe.mode_definition_id);
+    if !visible.is_empty() {
+        let current = visible
+            .iter()
+            .position(|(index, _)| *index == runtime.palette_index)
+            .unwrap_or(0);
+        let next = cycled_palette_index(current, visible.len(), delta);
+        runtime.palette_index = visible[next].0;
     }
     runtime.bump_render();
+}
+
+fn select_first_visible_palette_item(
+    catalog: &crate::map::MapContentCatalog,
+    runtime: &mut MapMakerRuntime,
+) {
+    let Some(session) = runtime.session.as_ref() else {
+        return;
+    };
+    if let Some((index, _)) =
+        visible_palette_entries(catalog, runtime, session.document.recipe.mode_definition_id)
+            .first()
+    {
+        runtime.palette_index = *index;
+    }
+}
+
+fn visible_palette_entries(
+    catalog: &crate::map::MapContentCatalog,
+    runtime: &MapMakerRuntime,
+    mode: crate::map::ModeDefinitionId,
+) -> Vec<(usize, PaletteItem)> {
+    let query = runtime.palette_query.trim().to_lowercase();
+    let mut entries = palette(catalog, mode)
+        .into_iter()
+        .enumerate()
+        .filter(|(_, item)| palette_category(*item, catalog) == runtime.palette_category)
+        .filter(|(_, item)| {
+            query.is_empty()
+                || palette_label(Some(*item), catalog)
+                    .to_lowercase()
+                    .contains(&query)
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(_, item)| palette_label(Some(*item), catalog).to_lowercase());
+    entries
+}
+
+fn selected_palette_item(
+    catalog: &crate::map::MapContentCatalog,
+    runtime: &MapMakerRuntime,
+    mode: crate::map::ModeDefinitionId,
+) -> Option<PaletteItem> {
+    visible_palette_entries(catalog, runtime, mode)
+        .into_iter()
+        .find_map(|(index, item)| (index == runtime.palette_index).then_some(item))
+}
+
+fn palette_category(item: PaletteItem, catalog: &crate::map::MapContentCatalog) -> PaletteCategory {
+    let PaletteItem::Asset(id) = item else {
+        return PaletteCategory::SpawnsObjectives;
+    };
+    let Some(asset) = catalog.asset(id) else {
+        return PaletteCategory::CoverObjects;
+    };
+    match asset.slot {
+        MapAssetSlot::Surface => PaletteCategory::Ground,
+        MapAssetSlot::Decoration | MapAssetSlot::Marker => PaletteCategory::Decorations,
+        MapAssetSlot::Feature => {
+            let Some(profile) = catalog.profile(asset.gameplay_profile_id) else {
+                return PaletteCategory::CoverObjects;
+            };
+            if profile.effect_tile_definition_id.is_some() {
+                PaletteCategory::EffectTiles
+            } else if profile.concealment == crate::map::MapConcealmentBehavior::HideOccupants {
+                PaletteCategory::Vegetation
+            } else {
+                PaletteCategory::CoverObjects
+            }
+        }
+    }
 }
 
 fn cycled_palette_index(current: usize, count: usize, delta: i8) -> usize {
@@ -834,9 +1116,9 @@ fn cycled_palette_index(current: usize, count: usize, delta: i8) -> usize {
         let page_count = count.div_ceil(VISIBLE_PALETTE_ITEMS);
         let page = (current / VISIBLE_PALETTE_ITEMS).min(page_count - 1);
         let next_page = if delta.is_negative() {
-            (page + page_count - 1) % page_count
+            page.saturating_sub(1)
         } else {
-            (page + 1) % page_count
+            (page + 1).min(page_count - 1)
         };
         return next_page * VISIBLE_PALETTE_ITEMS;
     }
@@ -851,14 +1133,19 @@ fn cycled_palette_index(current: usize, count: usize, delta: i8) -> usize {
 fn place_current(catalog: &crate::map::MapContentCatalog, runtime: &mut MapMakerRuntime) {
     let cursor = runtime.cursor;
     let rotation = runtime.quarter_turns;
-    let Some(session) = runtime.session.as_mut() else {
+    let Some(mode) = runtime
+        .session
+        .as_ref()
+        .map(|session| session.document.recipe.mode_definition_id)
+    else {
         return;
     };
-    let items = palette(catalog, session.document.recipe.mode_definition_id);
-    let Some(item) = items
-        .get(runtime.palette_index % items.len().max(1))
-        .copied()
-    else {
+    let Some(item) = selected_palette_item(catalog, runtime, mode) else {
+        runtime.status = Some("Choose an asset from the visible palette first.".to_string());
+        runtime.bump_render();
+        return;
+    };
+    let Some(session) = runtime.session.as_mut() else {
         return;
     };
     let result = match item {
@@ -878,16 +1165,20 @@ fn paint_current(
     cells: Vec<MapCell>,
 ) {
     let rotation = runtime.quarter_turns;
-    let Some(session) = runtime.session.as_mut() else {
+    let Some(mode) = runtime
+        .session
+        .as_ref()
+        .map(|session| session.document.recipe.mode_definition_id)
+    else {
         return;
     };
-    let items = palette(catalog, session.document.recipe.mode_definition_id);
-    let Some(PaletteItem::Asset(asset_id)) = items
-        .get(runtime.palette_index % items.len().max(1))
-        .copied()
-    else {
-        runtime.status = Some("Drag painting is available for map assets only.".to_string());
+    let Some(PaletteItem::Asset(asset_id)) = selected_palette_item(catalog, runtime, mode) else {
+        runtime.status =
+            Some("Drag painting is available for visible map assets only.".to_string());
         runtime.bump_render();
+        return;
+    };
+    let Some(session) = runtime.session.as_mut() else {
         return;
     };
     runtime.status = session
@@ -941,6 +1232,19 @@ pub(in crate::client::flow) fn map_maker_input(
             queue_ui_action(&mut actions, button.action.clone());
             ui_activated = true;
         }
+    }
+    let validation_trigger_owns_pointer = buttons.iter().any(|(button, interaction)| {
+        button.action == FlowUiAction::MapMakerToggleValidation
+            && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
+    });
+    if runtime.validation_open
+        && mouse
+            .as_deref()
+            .is_some_and(|mouse| mouse.just_pressed(MouseButton::Left))
+        && !validation_trigger_owns_pointer
+    {
+        runtime.validation_open = false;
+        runtime.bump_render();
     }
     if *flow.get() == ClientFlow::MapLibrary {
         if let Some(name) = runtime.creating.as_mut() {
@@ -998,6 +1302,44 @@ pub(in crate::client::flow) fn map_maker_input(
         {
             queue_ui_action(&mut actions, FlowUiAction::CloseMapMaker);
         }
+        return;
+    }
+    if runtime.palette_search_active {
+        let mut changed = false;
+        for event in keyboard_events.read() {
+            if event.state != ButtonState::Pressed {
+                continue;
+            }
+            if event.key_code == KeyCode::Slash && runtime.palette_query.is_empty() {
+                continue;
+            }
+            if event.key_code == KeyCode::Backspace {
+                changed |= runtime.palette_query.pop().is_some();
+            } else if let Some(text) = event.text.as_deref() {
+                for character in text.chars().filter(|character| !character.is_control()) {
+                    if runtime.palette_query.len() + character.len_utf8() <= 48 {
+                        runtime.palette_query.push(character);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Escape) {
+            runtime.palette_search_active = false;
+            changed = true;
+        }
+        if changed {
+            if let Some(catalog) = catalog.as_deref() {
+                select_first_visible_palette_item(&catalog.0, &mut runtime);
+            }
+            runtime.bump_render();
+        }
+        return;
+    }
+    if keyboard.just_pressed(KeyCode::Slash) {
+        activate_editor_tool(&mut runtime, EditorTool::Place);
+        runtime.palette_search_active = true;
+        runtime.bump_render();
         return;
     }
     let dimensions = runtime
@@ -1062,6 +1404,10 @@ pub(in crate::client::flow) fn map_maker_input(
         || buttons.iter().any(|(_, interaction)| {
             matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
         });
+    let palette_owns_pointer = buttons.iter().any(|(button, interaction)| {
+        is_palette_action(&button.action)
+            && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
+    });
     let pointer_over_world = world_cursor
         .zip(dimensions)
         .is_some_and(|(world, dimensions)| dimensions.world_cell(world).is_some());
@@ -1076,10 +1422,7 @@ pub(in crate::client::flow) fn map_maker_input(
         .is_some_and(|mouse| mouse.just_released(MouseButton::Left));
     let panning = mouse.as_deref().is_some_and(|mouse| {
         mouse.pressed(MouseButton::Middle)
-            || ((keyboard.pressed(KeyCode::Space)
-                || keyboard.pressed(KeyCode::ShiftLeft)
-                || keyboard.pressed(KeyCode::ShiftRight))
-                && mouse.pressed(MouseButton::Left))
+            || (keyboard.pressed(KeyCode::Space) && mouse.pressed(MouseButton::Left))
     });
     if panning {
         if let Some(motion) = mouse_motion.as_deref() {
@@ -1089,39 +1432,55 @@ pub(in crate::client::flow) fn map_maker_input(
                 let half = dimensions.world_size() * 0.5;
                 runtime.camera_center = runtime.camera_center.clamp(-half, half);
             }
+            if motion.delta != Vec2::ZERO {
+                runtime.bump_render();
+            }
         }
-        runtime.paint_stroke.clear();
+        runtime.interaction = EditorInteraction::Idle;
     }
     for event in mouse_wheel.read() {
-        if !ui_owns_pointer {
+        if palette_owns_pointer {
+            let direction = if event.y > 0.0 || event.x < 0.0 {
+                -1
+            } else {
+                1
+            };
+            queue_ui_action(&mut actions, FlowUiAction::MapMakerCycleAsset(direction));
+        } else if !ui_owns_pointer {
             runtime.camera_zoom = (runtime.camera_zoom * (-event.y * 0.10).exp()).clamp(0.5, 3.0);
+            runtime.bump_render();
         }
     }
     if mouse_just_pressed && pointer_over_world && !ui_owns_pointer && !panning {
         let cursor = runtime.cursor;
         match runtime.tool {
             EditorTool::Place => {
-                runtime.paint_stroke.clear();
-                runtime.paint_stroke.push(cursor);
-                runtime.stroke_asset = runtime
+                let asset = runtime
                     .session
                     .as_ref()
                     .zip(catalog.as_deref())
                     .and_then(|(session, catalog)| {
-                        palette(&catalog.0, session.document.recipe.mode_definition_id)
-                            .get(runtime.palette_index)
-                            .copied()
+                        selected_palette_item(
+                            &catalog.0,
+                            &runtime,
+                            session.document.recipe.mode_definition_id,
+                        )
                     })
                     .and_then(|item| match item {
                         PaletteItem::Asset(id) => Some(id),
                         _ => None,
                     });
+                runtime.interaction = EditorInteraction::Paint {
+                    cells: vec![cursor],
+                    asset,
+                };
             }
             EditorTool::Erase => {
-                runtime.paint_stroke.clear();
-                runtime.paint_stroke.push(cursor);
+                runtime.interaction = EditorInteraction::Erase {
+                    cells: vec![cursor],
+                };
             }
-            EditorTool::Move => {
+            EditorTool::Select => {
                 let clicked_selected = runtime
                     .session
                     .as_ref()
@@ -1133,51 +1492,49 @@ pub(in crate::client::flow) fn map_maker_input(
                             .any(|id| runtime.selection.contains(id))
                     });
                 if clicked_selected {
-                    runtime.move_anchor = Some(cursor);
-                    runtime.selection_anchor = None;
+                    runtime.interaction = EditorInteraction::MoveSelection { anchor: cursor };
                 } else {
-                    runtime.selection_anchor = Some(cursor);
-                    runtime.move_anchor = None;
+                    runtime.interaction = EditorInteraction::MarqueeSelect {
+                        anchor: cursor,
+                        additive: keyboard.pressed(KeyCode::ShiftLeft)
+                            || keyboard.pressed(KeyCode::ShiftRight),
+                    };
                 }
             }
         }
-    } else if mouse_pressed
-        && pointer_over_world
-        && !ui_owns_pointer
-        && !panning
-        && runtime.tool == EditorTool::Place
-        && runtime.stroke_asset.is_some()
-        && runtime.paint_stroke.last() != Some(&runtime.cursor)
-    {
+    } else if mouse_pressed && pointer_over_world && !ui_owns_pointer && !panning {
         let cursor = runtime.cursor;
-        runtime.paint_stroke.push(cursor);
+        match &mut runtime.interaction {
+            EditorInteraction::Paint {
+                cells,
+                asset: Some(_),
+            }
+            | EditorInteraction::Erase { cells } => append_interpolated_cells(cells, cursor),
+            _ => {}
+        }
     }
     if mouse_just_released && !panning {
-        match runtime.tool {
-            EditorTool::Place if !runtime.paint_stroke.is_empty() => {
-                let stroke = std::mem::take(&mut runtime.paint_stroke);
-                if runtime.stroke_asset.take().is_some() {
+        match std::mem::take(&mut runtime.interaction) {
+            EditorInteraction::Paint { cells, asset } if !cells.is_empty() => {
+                if asset.is_some() {
+                    let stroke = cells;
                     queue_ui_action(&mut actions, FlowUiAction::MapMakerPaintStroke(stroke));
                 } else {
                     queue_ui_action(&mut actions, FlowUiAction::MapMakerPlace);
                 }
             }
-            EditorTool::Erase if !runtime.paint_stroke.is_empty() => {
-                runtime.paint_stroke.clear();
-                queue_ui_action(&mut actions, FlowUiAction::MapMakerErase);
+            EditorInteraction::Erase { cells } if !cells.is_empty() => {
+                queue_ui_action(&mut actions, FlowUiAction::MapMakerEraseStroke(cells));
             }
-            EditorTool::Move => {
-                if let Some(anchor) = runtime.move_anchor.take() {
-                    queue_ui_action(
-                        &mut actions,
-                        FlowUiAction::MapMakerMoveSelection(anchor, runtime.cursor),
-                    );
-                } else if let Some(anchor) = runtime.selection_anchor.take() {
-                    queue_ui_action(
-                        &mut actions,
-                        FlowUiAction::MapMakerSelectRect(anchor, runtime.cursor),
-                    );
-                }
+            EditorInteraction::MoveSelection { anchor } => queue_ui_action(
+                &mut actions,
+                FlowUiAction::MapMakerMoveSelection(anchor, runtime.cursor),
+            ),
+            EditorInteraction::MarqueeSelect { anchor, additive } => {
+                queue_ui_action(
+                    &mut actions,
+                    FlowUiAction::MapMakerSelectRect(anchor, runtime.cursor, additive),
+                );
             }
             _ => {}
         }
@@ -1189,14 +1546,18 @@ pub(in crate::client::flow) fn map_maker_input(
         match runtime.tool {
             EditorTool::Place => queue_ui_action(&mut actions, FlowUiAction::MapMakerPlace),
             EditorTool::Erase => queue_ui_action(&mut actions, FlowUiAction::MapMakerErase),
-            EditorTool::Move => {}
+            EditorTool::Select => {}
         }
     }
     if keyboard.just_pressed(KeyCode::Delete)
         || keyboard.just_pressed(KeyCode::Backspace)
         || pad(GamepadButton::RightTrigger)
     {
-        queue_ui_action(&mut actions, FlowUiAction::MapMakerErase);
+        if runtime.tool == EditorTool::Select && !runtime.selection.is_empty() {
+            queue_ui_action(&mut actions, FlowUiAction::MapMakerDeleteSelection);
+        } else {
+            queue_ui_action(&mut actions, FlowUiAction::MapMakerErase);
+        }
     }
     if keyboard.just_pressed(KeyCode::KeyZ) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerUndo);
@@ -1213,11 +1574,76 @@ pub(in crate::client::flow) fn map_maker_input(
     if keyboard.just_pressed(KeyCode::KeyG) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerToggleGrid);
     }
+    if keyboard.just_pressed(KeyCode::KeyC) {
+        queue_ui_action(&mut actions, FlowUiAction::MapMakerClear);
+    }
     if keyboard.just_pressed(KeyCode::KeyF) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerFitView);
     }
     if keyboard.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) {
-        queue_ui_action(&mut actions, FlowUiAction::BackToMapLibrary);
+        if runtime.validation_open {
+            runtime.validation_open = false;
+            runtime.bump_render();
+        } else if runtime.interaction != EditorInteraction::Idle || !runtime.selection.is_empty() {
+            runtime.interaction = EditorInteraction::Idle;
+            runtime.selection.clear();
+            runtime.status = None;
+            runtime.bump_render();
+        } else {
+            queue_ui_action(&mut actions, FlowUiAction::BackToMapLibrary);
+        }
+    }
+}
+
+fn is_palette_action(action: &FlowUiAction) -> bool {
+    matches!(
+        action,
+        FlowUiAction::MapMakerCycleAsset(_)
+            | FlowUiAction::MapMakerSelectAsset(_)
+            | FlowUiAction::MapMakerSelectCategory(_)
+            | FlowUiAction::MapMakerToggleSearch
+            | FlowUiAction::MapMakerClearSearch
+            | FlowUiAction::MapMakerToggleAssets
+    )
+}
+
+fn append_interpolated_cells(cells: &mut Vec<MapCell>, destination: MapCell) {
+    let Some(start) = cells.last().copied() else {
+        cells.push(destination);
+        return;
+    };
+    if start == destination {
+        return;
+    }
+    let mut x = i32::from(start.x);
+    let mut y = i32::from(start.y);
+    let target_x = i32::from(destination.x);
+    let target_y = i32::from(destination.y);
+    let delta_x = (target_x - x).abs();
+    let step_x = (target_x - x).signum();
+    let delta_y = -(target_y - y).abs();
+    let step_y = (target_y - y).signum();
+    let mut error = delta_x + delta_y;
+    while x != target_x || y != target_y {
+        let doubled = error * 2;
+        if doubled >= delta_y {
+            error += delta_y;
+            x += step_x;
+        }
+        if doubled <= delta_x {
+            error += delta_x;
+            y += step_y;
+        }
+        let Ok(cell_x) = u16::try_from(x) else {
+            return;
+        };
+        let Ok(cell_y) = u16::try_from(y) else {
+            return;
+        };
+        let cell = MapCell::new(cell_x, cell_y);
+        if cells.last() != Some(&cell) {
+            cells.push(cell);
+        }
     }
 }
 
@@ -1566,7 +1992,11 @@ fn map_card(
         });
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
+    reason = "the editor shell consumes independent Bevy-owned resources and queries"
+)]
 pub(in crate::client::flow) fn present_map_editor(
     mut commands: Commands,
     flow: Res<State<ClientFlow>>,
@@ -1574,6 +2004,8 @@ pub(in crate::client::flow) fn present_map_editor(
     catalog: Option<Res<MapCatalogResource>>,
     roots: Query<(Entity, &MapMakerRoot)>,
     assets: Option<Res<crate::client::ClientAssetHandles>>,
+    asset_server: Res<AssetServer>,
+    cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
 ) {
     if *flow.get() != ClientFlow::MapEditor {
         return;
@@ -1590,11 +2022,13 @@ pub(in crate::client::flow) fn present_map_editor(
     let (Some(session), Some(catalog)) = (runtime.session.as_ref(), catalog.as_deref()) else {
         return;
     };
-    let recipe = &session.document.recipe;
-    let items = palette(&catalog.0, recipe.mode_definition_id);
-    let selected = items
-        .get(runtime.palette_index % items.len().max(1))
-        .copied();
+    let validation_error = local_validation_error(session, &catalog.0);
+    let selection_toolbar_position = selection_toolbar_position(
+        session,
+        &catalog.0,
+        &runtime.selection,
+        cameras.iter().next(),
+    );
     commands
         .spawn((
             FlowRoot,
@@ -1609,18 +2043,42 @@ pub(in crate::client::flow) fn present_map_editor(
             GlobalZIndex(420),
         ))
         .with_children(|root| {
-            editor_identity_panel(root, assets.as_deref(), session);
-            editor_mode_panel(root, assets.as_deref(), &runtime, selected, &catalog.0);
-            editor_left_rail(root, assets.as_deref(), &runtime);
-            editor_right_rail(root, assets.as_deref(), &runtime);
-            editor_palette(root, assets.as_deref(), &runtime, &items, &catalog.0);
+            editor_document_bar(
+                root,
+                assets.as_deref(),
+                session,
+                validation_error.as_deref(),
+                runtime.validation_open,
+            );
+            editor_tool_rail(root, assets.as_deref(), &runtime, &asset_server);
+            editor_canvas_controls(root, assets.as_deref(), &runtime);
+            editor_selection_toolbar(
+                root,
+                assets.as_deref(),
+                &runtime,
+                &asset_server,
+                selection_toolbar_position,
+            );
+            editor_validation_popover(
+                root,
+                assets.as_deref(),
+                &runtime,
+                validation_error.as_deref(),
+            );
+            editor_palette(root, assets.as_deref(), &runtime, &catalog.0);
             if let Some(status) = runtime.status.as_deref() {
                 root.spawn((
                     Node {
                         position_type: PositionType::Absolute,
                         left: percent(25),
                         right: percent(25),
-                        bottom: px(112),
+                        bottom: px(
+                            if runtime.tool == EditorTool::Place && runtime.assets_open {
+                                272
+                            } else {
+                                34
+                            },
+                        ),
                         padding: UiRect::axes(px(16), px(9)),
                         justify_content: JustifyContent::Center,
                         border: UiRect::all(px(2)),
@@ -1638,69 +2096,90 @@ pub(in crate::client::flow) fn present_map_editor(
         });
 }
 
-fn editor_identity_panel(
+fn local_validation_error(
+    session: &MapEditorSession,
+    catalog: &crate::map::MapContentCatalog,
+) -> Option<String> {
+    crate::map::validate_authored_recipe(
+        &session.document.recipe,
+        session.document.recipe.mode_definition_id,
+        catalog,
+        crate::map::MapInstanceId(1),
+    )
+    .err()
+    .map(|error| error.to_string())
+}
+
+fn selection_toolbar_position(
+    session: &MapEditorSession,
+    catalog: &crate::map::MapContentCatalog,
+    selection: &BTreeSet<crate::map::MapPlacementId>,
+    camera: Option<(&Camera, &GlobalTransform)>,
+) -> Option<Vec2> {
+    let (camera, camera_transform) = camera?;
+    let recipe = &session.document.recipe;
+    let mut cells = recipe
+        .placements
+        .iter()
+        .filter(|placement| selection.contains(&placement.placement_id))
+        .flat_map(|placement| {
+            catalog
+                .asset(placement.asset_id)
+                .and_then(|asset| placement_cells(recipe.dimensions, asset, placement))
+                .unwrap_or_else(|| vec![placement.cell])
+        })
+        .collect::<Vec<_>>();
+    cells.extend(
+        recipe
+            .mode_anchors
+            .iter()
+            .filter(|anchor| selection.contains(&anchor.placement_id))
+            .map(|anchor| match anchor.kind {
+                crate::map::MapModeAnchorKind::HotZoneCircle {
+                    center_half_cell, ..
+                }
+                | crate::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
+                    MapCell::new(center_half_cell.x / 2, center_half_cell.y / 2)
+                }
+                crate::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => origin_cell,
+            }),
+    );
+    let min_x = cells.iter().map(|cell| cell.x).min()?;
+    let max_x = cells.iter().map(|cell| cell.x).max()?;
+    let min_y = cells.iter().map(|cell| cell.y).min()?;
+    let max_y = cells.iter().map(|cell| cell.y).max()?;
+    let a = recipe.dimensions.cell_center(MapCell::new(min_x, min_y));
+    let b = recipe.dimensions.cell_center(MapCell::new(max_x, max_y));
+    let center = (a + b) * 0.5;
+    camera
+        .world_to_viewport(camera_transform, Vec3::new(center.x, 7.0, -center.y))
+        .ok()
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the document bar declares one cohesive Bevy UI row and its child controls"
+)]
+fn editor_document_bar(
     root: &mut ChildSpawnerCommands,
     assets: Option<&crate::client::ClientAssetHandles>,
     session: &MapEditorSession,
+    validation_error: Option<&str>,
+    validation_open: bool,
 ) {
     let recipe = &session.document.recipe;
+    let ready_to_test = validation_error.is_none();
     root.spawn((
         Node {
             position_type: PositionType::Absolute,
-            left: px(18),
-            top: px(18),
-            min_width: px(220),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::axes(px(15), px(10)),
-            border: UiRect::all(px(1)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.93)),
-        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
-    ))
-    .with_children(|panel| {
-        panel.spawn((
-            Text::new(session.document.name.to_uppercase()),
-            font(assets, 20.0),
-            TextColor(CREAM),
-        ));
-        panel.spawn((
-            Text::new(format!(
-                "{} × {}  •  r{}  •  {}",
-                recipe.dimensions.width,
-                recipe.dimensions.height,
-                recipe.revision,
-                if session.dirty() { "UNSAVED" } else { "SAVED" }
-            )),
-            font(assets, 12.0),
-            TextColor(if session.dirty() { ORANGE } else { TEAL }),
-        ));
-    });
-}
-
-fn editor_mode_panel(
-    root: &mut ChildSpawnerCommands,
-    assets: Option<&crate::client::ClientAssetHandles>,
-    runtime: &MapMakerRuntime,
-    selected: Option<PaletteItem>,
-    catalog: &crate::map::MapContentCatalog,
-) {
-    let symmetry = runtime
-        .session
-        .as_ref()
-        .map_or(MapSymmetry::None, |session| session.symmetry);
-    root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: percent(26),
-            right: percent(24),
-            top: px(18),
-            min_height: px(66),
+            left: px(14),
+            right: px(14),
+            top: px(12),
+            height: px(70),
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
             column_gap: px(10),
-            padding: UiRect::axes(px(16), px(8)),
+            padding: UiRect::axes(px(18), px(7)),
             border: UiRect::all(px(1)),
             ..default()
         },
@@ -1710,182 +2189,60 @@ fn editor_mode_panel(
     .with_children(|panel| {
         panel
             .spawn(Node {
+                width: px(330),
                 flex_direction: FlexDirection::Column,
-                min_width: px(250),
-                row_gap: px(2),
                 ..default()
             })
-            .with_children(|state| {
-                state.spawn((
-                    Text::new(format!(
-                        "{}  ·  {}",
-                        tool_label(runtime.tool),
-                        palette_label(selected, catalog)
-                    )),
-                    font(assets, 17.0),
+            .with_children(|identity| {
+                identity.spawn((
+                    Text::new(session.document.name.to_uppercase()),
+                    font(assets, 19.0),
                     TextColor(CREAM),
                 ));
-                state.spawn((
-                    MapMakerCursorCopy,
+                identity.spawn((
                     Text::new(format!(
-                        "{}°  ·  {}  ·  CELL {},{}",
-                        rotation_degrees(runtime.quarter_turns),
-                        symmetry_label(symmetry),
-                        runtime.cursor.x,
-                        runtime.cursor.y
+                        "{} × {}  •  r{}  •  {}",
+                        recipe.dimensions.width,
+                        recipe.dimensions.height,
+                        recipe.revision,
+                        if session.dirty() { "UNSAVED" } else { "SAVED" }
                     )),
-                    font(assets, 12.0),
-                    TextColor(TEAL),
-                ));
-                state.spawn((
-                    Text::new("SPACE / SHIFT + DRAG TO PAN"),
-                    font(assets, 10.0),
-                    TextColor(Color::srgba(0.98, 0.92, 0.81, 0.68)),
+                    font(assets, 11.0),
+                    TextColor(if ready_to_test && !session.dirty() {
+                        TEAL
+                    } else {
+                        ORANGE
+                    }),
                 ));
             });
-        compact_action_button(
-            panel,
-            assets,
-            3,
-            FlowUiAction::MapMakerRotate,
-            &format!("ROTATE\n{}°", rotation_degrees(runtime.quarter_turns)),
-            TEAL,
-            false,
-        );
-        compact_action_button(
-            panel,
-            assets,
-            4,
-            FlowUiAction::MapMakerCycleSymmetry,
-            &format!("SYMMETRY\n{}", symmetry_label(symmetry)),
-            TEAL,
-            false,
-        );
-    });
-}
-
-fn editor_left_rail(
-    root: &mut ChildSpawnerCommands,
-    assets: Option<&crate::client::ClientAssetHandles>,
-    runtime: &MapMakerRuntime,
-) {
-    root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(18),
-            top: percent(31),
-            flex_direction: FlexDirection::Column,
-            row_gap: px(6),
-            padding: UiRect::all(px(6)),
+        panel.spawn(Node {
+            flex_grow: 1.0,
             ..default()
-        },
-        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.88)),
-    ))
-    .with_children(|rail| {
-        compact_action_button(
-            rail,
-            assets,
-            30,
-            FlowUiAction::MapMakerUsePlaceTool,
-            "PLACE",
-            ORANGE,
-            runtime.tool == EditorTool::Place,
-        );
-        compact_action_button(
-            rail,
-            assets,
-            31,
-            FlowUiAction::MapMakerUseEraseTool,
-            "ERASE",
-            Color::srgb(0.75, 0.18, 0.15),
-            runtime.tool == EditorTool::Erase,
-        );
-        compact_action_button(
-            rail,
-            assets,
-            32,
-            FlowUiAction::MapMakerUseMoveTool,
-            if runtime.tool == EditorTool::Move {
-                "MOVE / SELECT"
-            } else {
-                "MOVE"
-            },
-            TEAL,
-            runtime.tool == EditorTool::Move,
-        );
-        compact_action_button(
-            rail,
+        });
+        compact_action_button_disabled(
+            panel,
             assets,
             7,
             FlowUiAction::MapMakerUndo,
             "UNDO",
-            TEAL,
             false,
+            !session.can_undo(),
         );
-        compact_action_button(
-            rail,
+        compact_action_button_disabled(
+            panel,
             assets,
             8,
             FlowUiAction::MapMakerRedo,
             "REDO",
-            TEAL,
             false,
+            !session.can_redo(),
         );
-        compact_action_button(
-            rail,
-            assets,
-            9,
-            FlowUiAction::MapMakerClear,
-            if runtime.clear_armed {
-                "! CLEAR?"
-            } else {
-                "CLEAR"
-            },
-            Color::srgb(0.75, 0.18, 0.15),
-            runtime.clear_armed,
-        );
-    });
-}
-
-fn editor_right_rail(
-    root: &mut ChildSpawnerCommands,
-    assets: Option<&crate::client::ClientAssetHandles>,
-    runtime: &MapMakerRuntime,
-) {
-    root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            right: px(18),
-            top: px(18),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Stretch,
-            row_gap: px(6),
-            padding: UiRect::all(px(6)),
+        panel.spawn(Node {
+            width: px(18),
             ..default()
-        },
-        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.88)),
-    ))
-    .with_children(|rail| {
+        });
         compact_action_button(
-            rail,
-            assets,
-            20,
-            FlowUiAction::BackToMapLibrary,
-            "MAPS",
-            TEAL,
-            false,
-        );
-        compact_action_button(
-            rail,
-            assets,
-            22,
-            FlowUiAction::TestAuthoredMap,
-            "TEST MAP",
-            ORANGE,
-            true,
-        );
-        compact_action_button(
-            rail,
+            panel,
             assets,
             21,
             FlowUiAction::SaveMapDraft,
@@ -1893,56 +2250,578 @@ fn editor_right_rail(
             TEAL,
             false,
         );
-        compact_action_button(
-            rail,
+        compact_action_button_disabled(
+            panel,
             assets,
-            10,
-            FlowUiAction::MapMakerToggleGrid,
-            if runtime.grid_visible {
-                "GRID ON"
+            22,
+            FlowUiAction::TestAuthoredMap,
+            "▶  TEST MAP",
+            true,
+            !ready_to_test,
+        );
+        compact_action_button_disabled(
+            panel,
+            assets,
+            23,
+            FlowUiAction::MapMakerToggleValidation,
+            if ready_to_test {
+                "✓  READY"
             } else {
-                "GRID OFF"
+                "⚠  1 ISSUE"
             },
-            TEAL,
-            runtime.grid_visible,
+            validation_open,
+            ready_to_test,
         );
         compact_action_button(
-            rail,
+            panel,
             assets,
-            11,
-            FlowUiAction::MapMakerFitView,
-            "FIT MAP",
+            20,
+            FlowUiAction::BackToMapLibrary,
+            "MAPS",
             TEAL,
             false,
         );
     });
 }
 
+fn editor_tool_rail(
+    root: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    runtime: &MapMakerRuntime,
+    _asset_server: &AssetServer,
+) {
+    root.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(14),
+            top: px(94),
+            width: px(102),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: px(8),
+            padding: UiRect::all(px(8)),
+            border: UiRect::all(px(1)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.93)),
+        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
+    ))
+    .with_children(|panel| {
+        tool_button(
+            panel,
+            assets,
+            30,
+            FlowUiAction::MapMakerUsePlaceTool,
+            "PLACE",
+            ToolGlyph::Place,
+            runtime.tool == EditorTool::Place,
+        );
+        tool_button(
+            panel,
+            assets,
+            32,
+            FlowUiAction::MapMakerUseMoveTool,
+            "SELECT",
+            ToolGlyph::Select,
+            runtime.tool == EditorTool::Select,
+        );
+        tool_button(
+            panel,
+            assets,
+            31,
+            FlowUiAction::MapMakerUseEraseTool,
+            "ERASE",
+            ToolGlyph::Erase,
+            runtime.tool == EditorTool::Erase,
+        );
+    });
+}
+
+fn tool_button(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    index: usize,
+    action: FlowUiAction,
+    label: &str,
+    glyph: ToolGlyph,
+    selected: bool,
+) {
+    parent
+        .spawn((
+            Button,
+            FlowButton {
+                index,
+                action,
+                error_action: false,
+            },
+            Node {
+                width: px(84),
+                height: px(82),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: px(3),
+                ..default()
+            },
+            Surface::Card,
+            SurfaceState {
+                selected,
+                ..default()
+            },
+        ))
+        .with_children(|button| {
+            spawn_tool_glyph(button, glyph);
+            button.spawn((
+                Text::new(label),
+                font(assets, 13.0),
+                TextColor(INK),
+                TextLayout::justify(Justify::Center),
+            ));
+        });
+}
+
+fn spawn_tool_glyph(parent: &mut ChildSpawnerCommands, glyph: ToolGlyph) {
+    let (width, height, rotation, round) = match glyph {
+        ToolGlyph::Place => (25.0, 25.0, 0.78, 2.0),
+        ToolGlyph::Select => (28.0, 28.0, 0.0, 14.0),
+        ToolGlyph::Erase => (29.0, 16.0, -0.55, 3.0),
+    };
+    parent
+        .spawn((Node {
+            width: px(34),
+            height: px(34),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },))
+        .with_children(|host| {
+            host.spawn((
+                Node {
+                    width: px(width),
+                    height: px(height),
+                    position_type: PositionType::Relative,
+                    border: UiRect::all(px(3)),
+                    border_radius: BorderRadius::all(px(round)),
+                    ..default()
+                },
+                BorderColor::all(INK),
+                UiTransform::from_rotation(Rot2::radians(rotation)),
+            ))
+            .with_children(|shape| match glyph {
+                ToolGlyph::Place => {
+                    shape.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(9),
+                            top: px(0),
+                            width: px(3),
+                            height: px(22),
+                            ..default()
+                        },
+                        BackgroundColor(INK),
+                    ));
+                }
+                ToolGlyph::Select => {
+                    shape.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(9),
+                            top: px(9),
+                            width: px(4),
+                            height: px(4),
+                            border_radius: BorderRadius::MAX,
+                            ..default()
+                        },
+                        BackgroundColor(INK),
+                    ));
+                }
+                ToolGlyph::Erase => {
+                    shape.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(10),
+                            top: px(0),
+                            width: px(3),
+                            height: px(13),
+                            ..default()
+                        },
+                        BackgroundColor(INK),
+                    ));
+                }
+            });
+        });
+}
+
+fn editor_canvas_controls(
+    root: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    runtime: &MapMakerRuntime,
+) {
+    let symmetry = runtime
+        .session
+        .as_ref()
+        .map_or(MapSymmetry::None, |session| session.symmetry);
+    root.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            right: px(20),
+            top: px(96),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: px(5),
+            padding: UiRect::all(px(5)),
+            border: UiRect::all(px(1)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.92)),
+        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
+    ))
+    .with_children(|panel| {
+        compact_action_button(
+            panel,
+            assets,
+            10,
+            FlowUiAction::MapMakerToggleGrid,
+            if runtime.grid_visible {
+                "▦  GRID\nON"
+            } else {
+                "▦  GRID\nOFF"
+            },
+            TEAL,
+            runtime.grid_visible,
+        );
+        compact_action_button(
+            panel,
+            assets,
+            4,
+            FlowUiAction::MapMakerCycleSymmetry,
+            &format!("◀▶  SYMMETRY\n{}", symmetry_label(symmetry)),
+            TEAL,
+            false,
+        );
+        compact_action_button(
+            panel,
+            assets,
+            11,
+            FlowUiAction::MapMakerFitView,
+            "⌗  FIT",
+            TEAL,
+            false,
+        );
+    });
+}
+
+fn editor_selection_toolbar(
+    root: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    runtime: &MapMakerRuntime,
+    asset_server: &AssetServer,
+    position: Option<Vec2>,
+) {
+    if runtime.tool != EditorTool::Select || runtime.selection.is_empty() {
+        return;
+    }
+    let position = position.unwrap_or(Vec2::new(700.0, 220.0));
+    root.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: px((position.x - 102.0).max(126.0)),
+            top: px((position.y - 88.0).max(92.0)),
+            flex_direction: FlexDirection::Row,
+            column_gap: px(5),
+            padding: UiRect::all(px(5)),
+            border: UiRect::all(px(1)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.94)),
+        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
+    ))
+    .with_children(|panel| {
+        icon_image_button(
+            panel,
+            40,
+            FlowUiAction::MapMakerRotate,
+            asset_server.load("brawler/ui/details/cycle.png"),
+            false,
+        );
+        duplicate_icon_button(panel, assets, 41);
+        icon_image_button(
+            panel,
+            42,
+            FlowUiAction::MapMakerDeleteSelection,
+            asset_server.load("brawler/ui/details/trash.png"),
+            true,
+        );
+        icon_text_button(
+            panel,
+            assets,
+            43,
+            FlowUiAction::MapMakerClearSelection,
+            "×",
+            false,
+        );
+    });
+}
+
+fn icon_image_button(
+    parent: &mut ChildSpawnerCommands,
+    index: usize,
+    action: FlowUiAction,
+    icon: Handle<Image>,
+    danger: bool,
+) {
+    let label = match &action {
+        FlowUiAction::MapMakerRotate => "Rotate selection 90 degrees",
+        FlowUiAction::MapMakerDeleteSelection => "Delete selection",
+        _ => "Selection action",
+    };
+    parent
+        .spawn((
+            Button,
+            AccessibleLabel::new(label),
+            FlowButton {
+                index,
+                action,
+                error_action: false,
+            },
+            Node {
+                width: px(46),
+                height: px(42),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            if danger {
+                Surface::Danger
+            } else {
+                Surface::Action
+            },
+            SurfaceState::default(),
+        ))
+        .with_child((
+            ImageNode::new(icon),
+            Node {
+                width: px(25),
+                height: px(25),
+                ..default()
+            },
+        ));
+}
+
+fn duplicate_icon_button(
+    parent: &mut ChildSpawnerCommands,
+    _assets: Option<&crate::client::ClientAssetHandles>,
+    index: usize,
+) {
+    parent
+        .spawn((
+            Button,
+            AccessibleLabel::new("Duplicate selection"),
+            FlowButton {
+                index,
+                action: FlowUiAction::MapMakerDuplicateSelection,
+                error_action: false,
+            },
+            Node {
+                width: px(46),
+                height: px(42),
+                position_type: PositionType::Relative,
+                ..default()
+            },
+            Surface::Action,
+            SurfaceState::default(),
+        ))
+        .with_children(|button| {
+            for (left, top) in [(11.0, 8.0), (17.0, 14.0)] {
+                button.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(left),
+                        top: px(top),
+                        width: px(18),
+                        height: px(18),
+                        border: UiRect::all(px(2)),
+                        ..default()
+                    },
+                    BorderColor::all(INK),
+                ));
+            }
+        });
+}
+
+fn icon_text_button(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    index: usize,
+    action: FlowUiAction,
+    glyph: &str,
+    danger: bool,
+) {
+    parent
+        .spawn((
+            Button,
+            AccessibleLabel::new(match &action {
+                FlowUiAction::MapMakerClearSelection => "Clear selection",
+                FlowUiAction::MapMakerClearSearch => "Clear asset search",
+                _ => "Selection action",
+            }),
+            FlowButton {
+                index,
+                action,
+                error_action: false,
+            },
+            Node {
+                width: px(46),
+                height: px(42),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            if danger {
+                Surface::Danger
+            } else {
+                Surface::Action
+            },
+            SurfaceState::default(),
+        ))
+        .with_child((
+            Text::new(glyph),
+            font(assets, 27.0),
+            TextColor(INK),
+            TextLayout::justify(Justify::Center),
+        ));
+}
+
+fn editor_validation_popover(
+    root: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    runtime: &MapMakerRuntime,
+    validation_error: Option<&str>,
+) {
+    let Some(error) = validation_popover_error(runtime, validation_error) else {
+        return;
+    };
+    root.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            right: px(146),
+            top: px(88),
+            width: px(310),
+            flex_direction: FlexDirection::Column,
+            row_gap: px(7),
+            padding: UiRect::all(px(14)),
+            border: UiRect::all(px(1)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.97)),
+        BorderColor::all(ORANGE),
+    ))
+    .with_children(|panel| {
+        panel.spawn((
+            Text::new("MAP CHECK"),
+            font(assets, 17.0),
+            TextColor(ORANGE),
+        ));
+        panel.spawn((
+            Text::new(error),
+            font(assets, 12.0),
+            TextColor(CREAM),
+            Node {
+                max_width: px(282),
+                ..default()
+            },
+        ));
+    });
+}
+
+fn validation_popover_error<'a>(
+    runtime: &MapMakerRuntime,
+    validation_error: Option<&'a str>,
+) -> Option<&'a str> {
+    runtime
+        .validation_open
+        .then_some(validation_error)
+        .flatten()
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the asset browser declares its category and visible-card rows together"
+)]
 fn editor_palette(
     root: &mut ChildSpawnerCommands,
     assets: Option<&crate::client::ClientAssetHandles>,
     runtime: &MapMakerRuntime,
-    items: &[PaletteItem],
     catalog: &crate::map::MapContentCatalog,
 ) {
-    let theme = runtime
-        .session
-        .as_ref()
-        .map_or(crate::map::MapPresentationThemeId(1), |session| {
-            session.document.recipe.presentation_theme_id
-        });
+    let Some(session) = runtime.session.as_ref() else {
+        return;
+    };
+    if runtime.tool != EditorTool::Place || !runtime.assets_open {
+        root.spawn((
+            Button,
+            FlowButton {
+                index: 60,
+                action: FlowUiAction::MapMakerToggleAssets,
+                error_action: false,
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(14),
+                bottom: px(8),
+                width: px(164),
+                height: px(54),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            Surface::Panel,
+            SurfaceState::default(),
+        ))
+        .with_child((Text::new("ASSETS  ^"), font(assets, 18.0), TextColor(INK)));
+        root.spawn((
+            Text::new(match runtime.tool {
+                EditorTool::Select => {
+                    "Drag empty space to select  •  Shift-click to add  •  Delete to remove  •  Space-drag to pan"
+                }
+                EditorTool::Erase => {
+                    "Click or drag to erase  •  Esc cancels  •  Space-drag to pan  •  Wheel to zoom"
+                }
+                EditorTool::Place => {
+                    "Click or drag to place  •  R rotates  •  Esc cancels  •  Space-drag to pan"
+                }
+            }),
+            font(assets, 11.0),
+            TextColor(Color::srgba(0.52, 0.85, 0.82, 0.78)),
+            Node {
+                position_type: PositionType::Absolute,
+                left: percent(28),
+                right: percent(20),
+                bottom: px(15),
+                ..default()
+            },
+            TextLayout::justify(Justify::Center),
+        ));
+        return;
+    }
+    let theme = session.document.recipe.presentation_theme_id;
+    let entries =
+        visible_palette_entries(catalog, runtime, session.document.recipe.mode_definition_id);
+    let selected_position = entries
+        .iter()
+        .position(|(index, _)| *index == runtime.palette_index)
+        .unwrap_or(0);
+    let (start, end) = palette_window(selected_position, entries.len());
     root.spawn((
         Node {
             position_type: PositionType::Absolute,
-            left: px(112),
-            right: px(112),
-            bottom: px(12),
-            min_height: px(118),
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            column_gap: px(8),
-            padding: UiRect::axes(px(14), px(10)),
+            left: px(14),
+            right: px(14),
+            bottom: px(8),
+            height: px(252),
+            flex_direction: FlexDirection::Column,
+            row_gap: px(8),
+            padding: UiRect::axes(px(12), px(9)),
             border: UiRect::all(px(1)),
             overflow: Overflow::clip(),
             ..default()
@@ -1951,61 +2830,314 @@ fn editor_palette(
         BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
     ))
     .with_children(|tray| {
-        compact_action_button(
-            tray,
-            assets,
-            1,
-            FlowUiAction::MapMakerCycleAsset(-PALETTE_PAGE_DELTA),
-            "PREV PAGE",
-            TEAL,
-            false,
-        );
-        let start = (runtime.palette_index / VISIBLE_PALETTE_ITEMS) * VISIBLE_PALETTE_ITEMS;
-        for (index, item) in items
-            .iter()
-            .copied()
-            .enumerate()
-            .skip(start)
-            .take(VISIBLE_PALETTE_ITEMS)
-        {
-            let selected = runtime.palette_index == index;
-            palette_item_button(
-                tray,
+        tray.spawn(Node {
+            width: percent(100),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: px(7),
+            ..default()
+        })
+        .with_children(|header| {
+            header
+                .spawn((
+                    Button,
+                    FlowButton {
+                        index: 60,
+                        action: FlowUiAction::MapMakerToggleAssets,
+                        error_action: false,
+                    },
+                    Node {
+                        width: px(150),
+                        height: px(42),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    Surface::Panel,
+                    SurfaceState::default(),
+                ))
+                .with_child((Text::new("ASSETS  v"), font(assets, 17.0), TextColor(INK)));
+            for (index, category) in PaletteCategory::ALL.into_iter().enumerate() {
+                palette_category_button(
+                    header,
+                    assets,
+                    50 + index,
+                    FlowUiAction::MapMakerSelectCategory(category as u8),
+                    category.label(),
+                    runtime.palette_category == category,
+                );
+            }
+            header.spawn(Node {
+                flex_grow: 1.0,
+                ..default()
+            });
+            let search = if runtime.palette_query.is_empty() {
+                if runtime.palette_search_active {
+                    "_".to_string()
+                } else {
+                    "SEARCH ASSETS".to_string()
+                }
+            } else {
+                format!(
+                    "{}{}",
+                    runtime.palette_query,
+                    if runtime.palette_search_active {
+                        "_"
+                    } else {
+                        ""
+                    }
+                )
+            };
+            search_button(
+                header,
                 assets,
-                100 + index,
-                FlowUiAction::MapMakerSelectAsset(index),
-                &palette_short_label(item, catalog),
-                MapPalettePreviewHost {
-                    slot: index - start,
-                    visual: item.into(),
-                    theme,
-                },
-                selected,
+                56,
+                FlowUiAction::MapMakerToggleSearch,
+                &search,
+                runtime.palette_search_active,
             );
-        }
-        let page_count = items.len().div_ceil(VISIBLE_PALETTE_ITEMS).max(1);
+            if !runtime.palette_query.is_empty() {
+                icon_text_button(
+                    header,
+                    assets,
+                    57,
+                    FlowUiAction::MapMakerClearSearch,
+                    "×",
+                    false,
+                );
+            }
+        });
+        tray.spawn(Node {
+            width: percent(100),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            column_gap: px(8),
+            ..default()
+        })
+        .with_children(|items| {
+            palette_arrow_button(
+                items,
+                assets,
+                1,
+                FlowUiAction::MapMakerCycleAsset(-PALETTE_PAGE_DELTA),
+                "‹",
+                start == 0,
+            );
+            for (slot, (index, item)) in entries
+                .iter()
+                .copied()
+                .enumerate()
+                .skip(start)
+                .take(VISIBLE_PALETTE_ITEMS)
+            {
+                palette_item_button(
+                    items,
+                    assets,
+                    100 + index,
+                    FlowUiAction::MapMakerSelectAsset(index),
+                    &palette_short_label(item, catalog),
+                    MapPalettePreviewHost {
+                        slot: slot - start,
+                        visual: item.into(),
+                        theme,
+                    },
+                    runtime.palette_index == index,
+                );
+            }
+            if entries.is_empty() {
+                items.spawn((
+                    Text::new("NO ASSETS MATCH THIS CATEGORY AND SEARCH"),
+                    font(assets, 13.0),
+                    TextColor(CREAM),
+                    Node {
+                        width: px(812),
+                        ..default()
+                    },
+                    TextLayout::justify(Justify::Center),
+                ));
+            }
+            palette_arrow_button(
+                items,
+                assets,
+                2,
+                FlowUiAction::MapMakerCycleAsset(PALETTE_PAGE_DELTA),
+                "›",
+                end >= entries.len(),
+            );
+            items.spawn((
+                Text::new(if entries.is_empty() {
+                    "0 OF 0".to_string()
+                } else {
+                    format!("{}–{} OF {}", start + 1, end, entries.len())
+                }),
+                font(assets, 12.0),
+                TextLayout::justify(Justify::Center),
+                TextColor(TEAL),
+                Node {
+                    width: px(82),
+                    ..default()
+                },
+            ));
+        });
         tray.spawn((
-            Text::new(format!(
-                "PAGE {} / {}\nITEM {} / {}",
-                runtime.palette_index / VISIBLE_PALETTE_ITEMS + 1,
-                page_count,
-                runtime.palette_index.saturating_add(1),
-                items.len()
-            )),
-            font(assets, 11.0),
+            Text::new("Click or drag to place  •  R rotates  •  Esc cancels  •  Space-drag to pan"),
+            font(assets, 10.0),
+            TextColor(Color::srgba(0.52, 0.85, 0.82, 0.78)),
+            Node {
+                width: percent(100),
+                ..default()
+            },
             TextLayout::justify(Justify::Center),
-            TextColor(ORANGE),
         ));
-        compact_action_button(
-            tray,
-            assets,
-            2,
-            FlowUiAction::MapMakerCycleAsset(PALETTE_PAGE_DELTA),
-            "NEXT PAGE",
-            TEAL,
-            false,
-        );
     });
+}
+
+fn palette_window(selected_position: usize, entry_count: usize) -> (usize, usize) {
+    let start = (selected_position / VISIBLE_PALETTE_ITEMS) * VISIBLE_PALETTE_ITEMS;
+    (start, (start + VISIBLE_PALETTE_ITEMS).min(entry_count))
+}
+
+fn search_button(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    index: usize,
+    action: FlowUiAction,
+    label: &str,
+    selected: bool,
+) {
+    parent
+        .spawn((
+            Button,
+            FlowButton {
+                index,
+                action,
+                error_action: false,
+            },
+            Node {
+                width: px(250),
+                height: px(40),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(9),
+                padding: UiRect::axes(px(14), px(6)),
+                ..default()
+            },
+            Surface::Field,
+            SurfaceState {
+                selected,
+                ..default()
+            },
+        ))
+        .with_children(|button| {
+            button
+                .spawn(Node {
+                    width: px(22),
+                    height: px(22),
+                    position_type: PositionType::Relative,
+                    ..default()
+                })
+                .with_children(|icon| {
+                    icon.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(1),
+                            top: px(1),
+                            width: px(14),
+                            height: px(14),
+                            border: UiRect::all(px(3)),
+                            border_radius: BorderRadius::MAX,
+                            ..default()
+                        },
+                        BorderColor::all(INK),
+                    ));
+                    icon.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(14),
+                            top: px(15),
+                            width: px(10),
+                            height: px(3),
+                            ..default()
+                        },
+                        BackgroundColor(INK),
+                        UiTransform::from_rotation(Rot2::radians(0.75)),
+                    ));
+                });
+            button.spawn((Text::new(label), font(assets, 13.0), TextColor(INK)));
+        });
+}
+
+fn palette_arrow_button(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    index: usize,
+    action: FlowUiAction,
+    glyph: &str,
+    disabled: bool,
+) {
+    let mut button = parent.spawn((
+        Button,
+        FlowButton {
+            index,
+            action,
+            error_action: false,
+        },
+        Node {
+            width: px(64),
+            height: px(76),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        Surface::Action,
+        SurfaceState {
+            disabled,
+            ..default()
+        },
+    ));
+    if disabled {
+        button.insert(InteractionDisabled);
+    }
+    button.with_child((Text::new(glyph), font(assets, 30.0), TextColor(INK)));
+}
+
+fn palette_category_button(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    index: usize,
+    action: FlowUiAction,
+    label: &str,
+    selected: bool,
+) {
+    parent
+        .spawn((
+            Button,
+            FlowButton {
+                index,
+                action,
+                error_action: false,
+            },
+            Node {
+                width: px(108),
+                height: px(40),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::axes(px(6), px(5)),
+                ..default()
+            },
+            Surface::Card,
+            SurfaceState {
+                selected,
+                ..default()
+            },
+        ))
+        .with_child((
+            Text::new(label),
+            font(assets, 10.0),
+            TextLayout::justify(Justify::Center),
+            TextColor(INK),
+        ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2027,8 +3159,9 @@ fn palette_item_button(
                 error_action: false,
             },
             Node {
-                width: px(116),
-                min_height: px(98),
+                width: px(166),
+                height: px(150),
+                position_type: PositionType::Relative,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -2043,11 +3176,68 @@ fn palette_item_button(
             },
         ))
         .with_children(|button| {
+            if selected {
+                button.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(0),
+                        right: px(0),
+                        top: px(0),
+                        bottom: px(0),
+                        border: UiRect::all(px(3)),
+                        ..default()
+                    },
+                    BorderColor::all(Color::srgb(0.02, 0.94, 0.90)),
+                ));
+                button
+                    .spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: px(7),
+                            top: px(7),
+                            width: px(30),
+                            height: px(30),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            border: UiRect::all(px(2)),
+                            border_radius: BorderRadius::MAX,
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.05, 0.92, 0.84)),
+                        BorderColor::all(INK),
+                    ))
+                    .with_children(|badge| {
+                        badge.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: px(7),
+                                top: px(15),
+                                width: px(9),
+                                height: px(3),
+                                ..default()
+                            },
+                            BackgroundColor(INK),
+                            UiTransform::from_rotation(Rot2::radians(0.72)),
+                        ));
+                        badge.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: px(12),
+                                top: px(12),
+                                width: px(13),
+                                height: px(3),
+                                ..default()
+                            },
+                            BackgroundColor(INK),
+                            UiTransform::from_rotation(Rot2::radians(-0.78)),
+                        ));
+                    });
+            }
             button.spawn((
                 preview,
                 Node {
-                    width: px(106),
-                    height: px(66),
+                    width: px(154),
+                    height: px(106),
                     ..default()
                 },
             ));
@@ -2063,22 +3253,14 @@ fn palette_item_button(
 fn palette_short_label(item: PaletteItem, catalog: &crate::map::MapContentCatalog) -> String {
     match item {
         PaletteItem::Asset(id) => catalog.asset(id).map_or_else(
-            || "? ASSET".to_string(),
-            |asset| {
-                let category = match asset.slot {
-                    MapAssetSlot::Surface => "SURFACE",
-                    MapAssetSlot::Feature => "WALL",
-                    MapAssetSlot::Decoration => "PROP",
-                    MapAssetSlot::Marker => "MARKER",
-                };
-                format!("{category}\n{}", asset.display_name)
-            },
+            || "UNAVAILABLE".to_string(),
+            |asset| asset.display_name.to_uppercase(),
         ),
-        PaletteItem::Spawn(0) => "SPAWN\nTEAM A".to_string(),
-        PaletteItem::Spawn(_) => "SPAWN\nTEAM B".to_string(),
-        PaletteItem::HotZone => "OBJECTIVE\nZONE".to_string(),
-        PaletteItem::HeistSafe(0) => "OBJECTIVE\nA SAFE".to_string(),
-        PaletteItem::HeistSafe(_) => "OBJECTIVE\nB SAFE".to_string(),
+        PaletteItem::Spawn(0) => "TEAM A SPAWN".to_string(),
+        PaletteItem::Spawn(_) => "TEAM B SPAWN".to_string(),
+        PaletteItem::HotZone => "CAPTURE ZONE".to_string(),
+        PaletteItem::HeistSafe(0) => "TEAM A SAFE".to_string(),
+        PaletteItem::HeistSafe(_) => "TEAM B SAFE".to_string(),
     }
 }
 
@@ -2092,43 +3274,51 @@ fn compact_action_button(
     _color: Color,
     selected: bool,
 ) {
-    let role = surface_role(&action);
-    parent
-        .spawn((
-            Button,
-            FlowButton {
-                index,
-                action,
-                error_action: false,
-            },
-            Node {
-                min_width: px(94),
-                min_height: px(50),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::axes(px(9), px(6)),
-                ..default()
-            },
-            role,
-            SurfaceState {
-                selected,
-                ..default()
-            },
-        ))
-        .with_child((
-            Text::new(label),
-            font(assets, 12.0),
-            TextLayout::justify(Justify::Center),
-            TextColor(INK),
-        ));
+    compact_action_button_disabled(parent, assets, index, action, label, selected, false);
 }
 
-const fn tool_label(tool: EditorTool) -> &'static str {
-    match tool {
-        EditorTool::Place => "PLACE",
-        EditorTool::Erase => "ERASE",
-        EditorTool::Move => "MOVE / SELECT",
+#[allow(clippy::too_many_arguments)]
+fn compact_action_button_disabled(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    index: usize,
+    action: FlowUiAction,
+    label: &str,
+    selected: bool,
+    disabled: bool,
+) {
+    let role = surface_role(&action);
+    let mut button = parent.spawn((
+        Button,
+        FlowButton {
+            index,
+            action,
+            error_action: false,
+        },
+        Node {
+            min_width: px(94),
+            min_height: px(50),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            padding: UiRect::axes(px(9), px(6)),
+            ..default()
+        },
+        role,
+        SurfaceState {
+            selected,
+            disabled,
+            ..default()
+        },
+    ));
+    if disabled {
+        button.insert(InteractionDisabled);
     }
+    button.with_child((
+        Text::new(label),
+        font(assets, 12.0),
+        TextLayout::justify(Justify::Center),
+        TextColor(INK),
+    ));
 }
 
 const fn symmetry_label(symmetry: MapSymmetry) -> &'static str {
@@ -2295,10 +3485,99 @@ mod tests {
     }
 
     #[test]
-    fn palette_page_controls_wrap_between_page_starts() {
-        assert_eq!(cycled_palette_index(0, 34, -PALETTE_PAGE_DELTA), 28);
-        assert_eq!(cycled_palette_index(28, 34, PALETTE_PAGE_DELTA), 0);
+    fn palette_page_controls_stop_at_horizontal_range_edges() {
+        assert_eq!(cycled_palette_index(0, 34, -PALETTE_PAGE_DELTA), 0);
+        assert_eq!(cycled_palette_index(30, 34, PALETTE_PAGE_DELTA), 30);
         assert_eq!(cycled_palette_index(7, 34, -PALETTE_PAGE_DELTA), 0);
         assert_eq!(cycled_palette_index(0, 34, -1), 33);
+    }
+
+    #[test]
+    fn approved_tool_states_drive_assets_visibility() {
+        let mut runtime = MapMakerRuntime::default();
+        assert!(runtime.assets_open);
+
+        activate_editor_tool(&mut runtime, EditorTool::Select);
+        assert!(!runtime.assets_open);
+        assert_eq!(runtime.tool, EditorTool::Select);
+
+        toggle_assets_drawer(&mut runtime);
+        assert!(runtime.assets_open);
+        assert_eq!(runtime.tool, EditorTool::Place);
+
+        toggle_assets_drawer(&mut runtime);
+        assert!(!runtime.assets_open);
+    }
+
+    #[test]
+    fn map_check_details_are_visible_only_while_requested() {
+        let mut runtime = MapMakerRuntime::default();
+        assert_eq!(
+            validation_popover_error(&runtime, Some("missing spawn")),
+            None
+        );
+        runtime.validation_open = true;
+        assert_eq!(
+            validation_popover_error(&runtime, Some("missing spawn")),
+            Some("missing spawn")
+        );
+        assert_eq!(validation_popover_error(&runtime, None), None);
+    }
+
+    #[test]
+    fn asset_range_uses_direct_item_windows() {
+        assert_eq!(palette_window(0, 18), (0, 6));
+        assert_eq!(palette_window(7, 18), (6, 12));
+        assert_eq!(palette_window(17, 18), (12, 18));
+        assert_eq!(palette_window(0, 3), (0, 3));
+    }
+
+    #[test]
+    fn fast_pointer_motion_interpolates_every_crossed_cell() {
+        let mut cells = vec![MapCell::new(2, 3)];
+        append_interpolated_cells(&mut cells, MapCell::new(6, 3));
+        assert_eq!(
+            cells,
+            vec![
+                MapCell::new(2, 3),
+                MapCell::new(3, 3),
+                MapCell::new(4, 3),
+                MapCell::new(5, 3),
+                MapCell::new(6, 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn palette_categories_are_derived_from_catalog_facts() {
+        let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+        assert_eq!(
+            palette_category(PaletteItem::Asset(crate::map::GROUND_ASSET), &catalog),
+            PaletteCategory::Ground
+        );
+        assert_eq!(
+            palette_category(PaletteItem::Asset(crate::map::TALL_GRASS_ASSET), &catalog),
+            PaletteCategory::Vegetation
+        );
+        assert_eq!(
+            palette_category(PaletteItem::Asset(crate::map::SPEED_TILE_ASSET), &catalog),
+            PaletteCategory::EffectTiles
+        );
+        assert_eq!(
+            palette_category(PaletteItem::Spawn(0), &catalog),
+            PaletteCategory::SpawnsObjectives
+        );
+    }
+
+    #[test]
+    fn hidden_palette_selection_cannot_be_placed() {
+        let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+        let mut runtime = MapMakerRuntime::default();
+        runtime.palette_query = "no asset has this name".to_string();
+
+        assert!(
+            selected_palette_item(&catalog, &runtime, crate::map::WIPEOUT_MODE_DEFINITION,)
+                .is_none()
+        );
     }
 }

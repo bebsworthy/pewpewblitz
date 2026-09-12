@@ -20,6 +20,7 @@ pub(in crate::client) struct MapEditorPreviewOptions {
     pub(in crate::client) pointer_mode: MapEditorPointerMode,
     pub(in crate::client) pointer_valid: bool,
     pub(in crate::client) selected: Vec<crate::map::MapPlacementId>,
+    pub(in crate::client) hovered: Option<crate::map::MapPlacementId>,
     pub(in crate::client) selection_rect: Option<(crate::map::MapCell, crate::map::MapCell)>,
 }
 
@@ -34,6 +35,7 @@ pub(in crate::client) struct MapEditorPreview {
     pub(in crate::client) pointer_mode: MapEditorPointerMode,
     pub(in crate::client) pointer_valid: bool,
     pub(in crate::client) selected: Vec<crate::map::MapPlacementId>,
+    pub(in crate::client) hovered: Option<crate::map::MapPlacementId>,
     pub(in crate::client) selection_rect: Option<(crate::map::MapCell, crate::map::MapCell)>,
 }
 
@@ -61,6 +63,7 @@ impl MapEditorPreview {
             pointer_mode: options.pointer_mode,
             pointer_valid: options.pointer_valid,
             selected: options.selected,
+            hovered: options.hovered,
             selection_rect: options.selection_rect,
         }
     }
@@ -105,6 +108,8 @@ pub(super) struct MapEditorOverlayMaterials {
     place: Handle<StandardMaterial>,
     erase: Handle<StandardMaterial>,
     move_selection: Handle<StandardMaterial>,
+    selection_fill: Handle<StandardMaterial>,
+    hover: Handle<StandardMaterial>,
     blocked: Handle<StandardMaterial>,
     symmetry: Handle<StandardMaterial>,
 }
@@ -119,6 +124,7 @@ pub(super) struct PresentedMapEditorOverlay {
     pointer_valid: bool,
     cursor: crate::map::MapCell,
     selection_hash: u64,
+    hovered: Option<crate::map::MapPlacementId>,
 }
 
 #[allow(
@@ -130,6 +136,7 @@ pub(super) struct PresentedMapEditorOverlay {
 pub(super) fn reconcile_map_editor_overlay(
     mut commands: Commands,
     preview: Option<Res<MapEditorPreview>>,
+    catalog: Res<crate::map::MapCatalogResource>,
     primitives: Res<Primitive3dAssets>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     overlay_materials: Option<Res<MapEditorOverlayMaterials>>,
@@ -172,8 +179,22 @@ pub(super) fn reconcile_map_editor_overlay(
                 ..default()
             }),
             move_selection: standard_materials.add(StandardMaterial {
-                base_color: Color::srgba(0.02, 0.82, 0.78, 0.34),
-                emissive: LinearRgba::new(0.01, 0.8, 0.7, 1.0),
+                base_color: Color::srgba(0.01, 0.96, 0.90, 0.82),
+                emissive: LinearRgba::new(0.01, 2.2, 1.9, 1.0),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            }),
+            selection_fill: standard_materials.add(StandardMaterial {
+                base_color: Color::srgba(0.02, 0.88, 0.82, 0.14),
+                emissive: LinearRgba::new(0.01, 0.22, 0.20, 1.0),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            }),
+            hover: standard_materials.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 0.58, 0.04, 0.42),
+                emissive: LinearRgba::new(1.1, 0.34, 0.01, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
@@ -205,6 +226,7 @@ pub(super) fn reconcile_map_editor_overlay(
         pointer_valid: preview.pointer_valid,
         cursor: preview.cursor,
         selection_hash: selection_hash(&preview),
+        hovered: preview.hovered,
     };
     if presented.as_deref() != Some(&desired) {
         for entity in &overlays {
@@ -214,7 +236,8 @@ pub(super) fn reconcile_map_editor_overlay(
             spawn_grid(&mut commands, &primitives, &materials, &preview.snapshot);
         }
         spawn_symmetry_guides(&mut commands, &primitives, &materials, &preview);
-        spawn_selection(&mut commands, &primitives, &materials, &preview);
+        spawn_selection(&mut commands, &primitives, &materials, &preview, &catalog.0);
+        spawn_hover(&mut commands, &primitives, &materials, &preview, &catalog.0);
         let cursor_material = if preview.pointer_valid {
             match preview.pointer_mode {
                 MapEditorPointerMode::Place => materials.place.clone(),
@@ -407,30 +430,38 @@ fn spawn_selection(
     primitives: &Primitive3dAssets,
     materials: &MapEditorOverlayMaterials,
     preview: &MapEditorPreview,
+    catalog: &crate::map::MapContentCatalog,
 ) {
+    let mut selected_cells = Vec::new();
     for placement in preview
         .snapshot
         .placements
         .iter()
         .filter(|placement| preview.selected.contains(&placement.placement_id))
     {
-        let center = preview.snapshot.dimensions.cell_center(placement.cell);
-        commands.spawn((
-            MapEditorOverlay,
-            Mesh3d(primitives.unit_cuboid.clone()),
-            MeshMaterial3d(materials.move_selection.clone()),
-            NotShadowCaster,
-            Transform {
-                translation: ground_position(center) + Vec3::Y * 2.4,
-                scale: Vec3::new(
-                    crate::map::MAP_CELL_SIZE_WORLD - 4.0,
-                    1.0,
-                    crate::map::MAP_CELL_SIZE_WORLD - 4.0,
-                ),
-                ..default()
-            },
-            Name::new("Map Maker selected placement"),
-        ));
+        let Some(asset) = catalog.asset(placement.asset_id) else {
+            continue;
+        };
+        let Some(cells) =
+            crate::map::placement_cells(preview.snapshot.dimensions, asset, placement)
+        else {
+            continue;
+        };
+        selected_cells.extend(cells.iter().copied());
+        let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
+        let center =
+            crate::map::placement_world_center(preview.snapshot.dimensions, asset, placement);
+        spawn_outline(
+            commands,
+            primitives,
+            &materials.move_selection,
+            center,
+            Vec2::new(f32::from(footprint.width), f32::from(footprint.height))
+                * crate::map::MAP_CELL_SIZE_WORLD
+                - Vec2::splat(4.0),
+            2.4,
+            "Map Maker selected placement",
+        );
     }
     for anchor in preview
         .snapshot
@@ -447,47 +478,222 @@ fn spawn_selection(
             }
             crate::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => origin_cell,
         };
+        selected_cells.push(cell);
         let center = preview.snapshot.dimensions.cell_center(cell);
+        spawn_outline(
+            commands,
+            primitives,
+            &materials.move_selection,
+            center,
+            Vec2::splat(crate::map::MAP_CELL_SIZE_WORLD - 4.0),
+            2.4,
+            "Map Maker selected objective",
+        );
+    }
+    spawn_selection_group(commands, primitives, materials, preview, &selected_cells);
+    if let Some((first, second)) = preview.selection_rect {
+        spawn_marquee(commands, primitives, materials, preview, first, second);
+    }
+}
+
+fn spawn_hover(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &MapEditorOverlayMaterials,
+    preview: &MapEditorPreview,
+    catalog: &crate::map::MapContentCatalog,
+) {
+    let Some(hovered) = preview.hovered else {
+        return;
+    };
+    if let Some(placement) = preview
+        .snapshot
+        .placements
+        .iter()
+        .find(|placement| placement.placement_id == hovered)
+        && let Some(asset) = catalog.asset(placement.asset_id)
+    {
+        let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
+        let center =
+            crate::map::placement_world_center(preview.snapshot.dimensions, asset, placement);
+        spawn_outline(
+            commands,
+            primitives,
+            &materials.hover,
+            center,
+            Vec2::new(f32::from(footprint.width), f32::from(footprint.height))
+                * crate::map::MAP_CELL_SIZE_WORLD
+                - Vec2::splat(2.0),
+            2.8,
+            "Map Maker hovered placement",
+        );
+        return;
+    }
+    let Some(anchor) = preview
+        .snapshot
+        .mode_anchors
+        .iter()
+        .find(|anchor| anchor.placement_id == hovered)
+    else {
+        return;
+    };
+    let cell = match anchor.kind {
+        crate::map::MapModeAnchorKind::HotZoneCircle {
+            center_half_cell, ..
+        }
+        | crate::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
+            crate::map::MapCell::new(center_half_cell.x / 2, center_half_cell.y / 2)
+        }
+        crate::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => origin_cell,
+    };
+    spawn_outline(
+        commands,
+        primitives,
+        &materials.hover,
+        preview.snapshot.dimensions.cell_center(cell),
+        Vec2::splat(crate::map::MAP_CELL_SIZE_WORLD - 2.0),
+        2.8,
+        "Map Maker hovered objective",
+    );
+}
+
+fn spawn_selection_group(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &MapEditorOverlayMaterials,
+    preview: &MapEditorPreview,
+    selected_cells: &[crate::map::MapCell],
+) {
+    let (Some(min_x), Some(max_x), Some(min_y), Some(max_y)) = (
+        selected_cells.iter().map(|cell| cell.x).min(),
+        selected_cells.iter().map(|cell| cell.x).max(),
+        selected_cells.iter().map(|cell| cell.y).min(),
+        selected_cells.iter().map(|cell| cell.y).max(),
+    ) else {
+        return;
+    };
+    let min = crate::map::MapCell::new(min_x, min_y);
+    let max = crate::map::MapCell::new(max_x, max_y);
+    let a = preview.snapshot.dimensions.cell_center(min);
+    let b = preview.snapshot.dimensions.cell_center(max);
+    let center = (a + b) * 0.5;
+    let size = Vec2::new(
+        (b.x - a.x).abs() + crate::map::MAP_CELL_SIZE_WORLD + 5.0,
+        (b.y - a.y).abs() + crate::map::MAP_CELL_SIZE_WORLD + 5.0,
+    );
+    commands.spawn((
+        MapEditorOverlay,
+        Mesh3d(primitives.unit_cuboid.clone()),
+        MeshMaterial3d(materials.selection_fill.clone()),
+        NotShadowCaster,
+        Transform {
+            translation: ground_position(center) + Vec3::Y * 1.8,
+            scale: Vec3::new(size.x, 0.35, size.y),
+            ..default()
+        },
+        Name::new("Map Maker selection group fill"),
+    ));
+    spawn_outline(
+        commands,
+        primitives,
+        &materials.move_selection,
+        center,
+        size,
+        3.0,
+        "Map Maker selection group",
+    );
+    let half = size * 0.5;
+    for offset in [
+        Vec2::new(-half.x, -half.y),
+        Vec2::new(half.x, -half.y),
+        Vec2::new(-half.x, half.y),
+        Vec2::new(half.x, half.y),
+    ] {
         commands.spawn((
             MapEditorOverlay,
             Mesh3d(primitives.unit_cuboid.clone()),
             MeshMaterial3d(materials.move_selection.clone()),
             NotShadowCaster,
             Transform {
-                translation: ground_position(center) + Vec3::Y * 2.4,
-                scale: Vec3::new(
-                    crate::map::MAP_CELL_SIZE_WORLD - 4.0,
-                    1.0,
-                    crate::map::MAP_CELL_SIZE_WORLD - 4.0,
-                ),
+                translation: ground_position(center + offset) + Vec3::Y * 3.2,
+                scale: Vec3::new(11.0, 1.8, 11.0),
                 ..default()
             },
-            Name::new("Map Maker selected objective"),
+            Name::new("Map Maker selection corner handle"),
         ));
     }
-    let Some((first, second)) = preview.selection_rect else {
-        return;
-    };
+    for scale in [Vec3::new(28.0, 1.4, 5.0), Vec3::new(5.0, 1.4, 28.0)] {
+        commands.spawn((
+            MapEditorOverlay,
+            Mesh3d(primitives.unit_cuboid.clone()),
+            MeshMaterial3d(materials.move_selection.clone()),
+            NotShadowCaster,
+            Transform {
+                translation: ground_position(center) + Vec3::Y * 3.5,
+                scale,
+                ..default()
+            },
+            Name::new("Map Maker selection move handle"),
+        ));
+    }
+}
+
+fn spawn_marquee(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    materials: &MapEditorOverlayMaterials,
+    preview: &MapEditorPreview,
+    first: crate::map::MapCell,
+    second: crate::map::MapCell,
+) {
     let min = crate::map::MapCell::new(first.x.min(second.x), first.y.min(second.y));
     let max = crate::map::MapCell::new(first.x.max(second.x), first.y.max(second.y));
     let a = preview.snapshot.dimensions.cell_center(min);
     let b = preview.snapshot.dimensions.cell_center(max);
-    commands.spawn((
-        MapEditorOverlay,
-        Mesh3d(primitives.unit_cuboid.clone()),
-        MeshMaterial3d(materials.move_selection.clone()),
-        NotShadowCaster,
-        Transform {
-            translation: ground_position((a + b) * 0.5) + Vec3::Y * 2.2,
-            scale: Vec3::new(
-                (b.x - a.x).abs() + crate::map::MAP_CELL_SIZE_WORLD - 3.0,
-                0.8,
-                (b.y - a.y).abs() + crate::map::MAP_CELL_SIZE_WORLD - 3.0,
-            ),
-            ..default()
-        },
-        Name::new("Map Maker box selection"),
-    ));
+    spawn_outline(
+        commands,
+        primitives,
+        &materials.move_selection,
+        (a + b) * 0.5,
+        Vec2::new(
+            (b.x - a.x).abs() + crate::map::MAP_CELL_SIZE_WORLD - 3.0,
+            (b.y - a.y).abs() + crate::map::MAP_CELL_SIZE_WORLD - 3.0,
+        ),
+        2.2,
+        "Map Maker box selection",
+    );
+}
+
+fn spawn_outline(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    material: &Handle<StandardMaterial>,
+    center: Vec2,
+    size: Vec2,
+    height: f32,
+    name: &'static str,
+) {
+    let thickness = 4.2;
+    let half = size * 0.5;
+    for (offset, scale) in [
+        (Vec2::new(0.0, half.y), Vec2::new(size.x, thickness)),
+        (Vec2::new(0.0, -half.y), Vec2::new(size.x, thickness)),
+        (Vec2::new(half.x, 0.0), Vec2::new(thickness, size.y)),
+        (Vec2::new(-half.x, 0.0), Vec2::new(thickness, size.y)),
+    ] {
+        commands.spawn((
+            MapEditorOverlay,
+            Mesh3d(primitives.unit_cuboid.clone()),
+            MeshMaterial3d(material.clone()),
+            NotShadowCaster,
+            Transform {
+                translation: ground_position(center + offset) + Vec3::Y * height,
+                scale: Vec3::new(scale.x, 0.9, scale.y),
+                ..default()
+            },
+            Name::new(name),
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -504,6 +710,7 @@ mod tests {
             pointer_mode: MapEditorPointerMode::Place,
             pointer_valid: true,
             selected: Vec::new(),
+            hovered: None,
             selection_rect: None,
         }
     }

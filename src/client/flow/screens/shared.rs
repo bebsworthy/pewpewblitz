@@ -152,6 +152,8 @@ pub(in crate::client::flow) fn update_flow_button_chrome(
                 Some(super::brawlers::AbilityPicker::Passive(slot)) if d.passive_ids[slot] == id)
             }),
             FlowUiAction::MapMakerSelectAsset(_)
+            | FlowUiAction::MapMakerSelectCategory(_)
+            | FlowUiAction::MapMakerToggleSearch
             | FlowUiAction::MapMakerUsePlaceTool
             | FlowUiAction::MapMakerUseEraseTool
             | FlowUiAction::MapMakerUseMoveTool
@@ -202,6 +204,7 @@ pub(in crate::client::flow) fn surface_role(action: &FlowUiAction) -> Surface {
         | A::Connect
         | A::QueueAgain
         | A::TestAuthoredMap
+        | A::MapMakerToggleValidation
         | A::OpenDashboardMenu => Surface::Primary,
         A::OpenPracticeMaps | A::OpenBrawlerList | A::OpenMapMaker | A::SaveMapDraft => {
             Surface::Secondary
@@ -212,14 +215,17 @@ pub(in crate::client::flow) fn surface_role(action: &FlowUiAction) -> Surface {
         | A::EquipWeaponPart(_)
         | A::UnequipWeaponPart
         | A::SelectGameTypeDraft(_)
-        | A::MapMakerSelectAsset(_) => Surface::Card,
+        | A::MapMakerSelectAsset(_)
+        | A::MapMakerSelectCategory(_)
+        | A::MapMakerToggleSearch
+        | A::MapMakerClearSearch => Surface::Card,
         A::OpenWeaponEquipment(_) | A::OpenBrawlerEditor(_) | A::OpenGameTypeSelect => {
             Surface::Panel
         }
         A::EditAddress | A::EditName => Surface::Field,
         A::JoinSaved(_) => Surface::Row,
         A::BeginBrawlerNameEdit | A::ConfirmBrawlerEdit => Surface::Quiet,
-        A::MapMakerClear => Surface::Danger,
+        A::MapMakerClear | A::MapMakerDeleteSelection => Surface::Danger,
         _ => Surface::Action,
     }
 }

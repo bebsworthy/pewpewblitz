@@ -684,11 +684,20 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::MapMakerPlace
         | FlowUiAction::MapMakerPaintStroke(_)
         | FlowUiAction::MapMakerErase
+        | FlowUiAction::MapMakerEraseStroke(_)
         | FlowUiAction::MapMakerUsePlaceTool
         | FlowUiAction::MapMakerUseEraseTool
         | FlowUiAction::MapMakerUseMoveTool
-        | FlowUiAction::MapMakerSelectRect(_, _)
+        | FlowUiAction::MapMakerSelectRect(_, _, _)
         | FlowUiAction::MapMakerMoveSelection(_, _)
+        | FlowUiAction::MapMakerDuplicateSelection
+        | FlowUiAction::MapMakerDeleteSelection
+        | FlowUiAction::MapMakerClearSelection
+        | FlowUiAction::MapMakerSelectCategory(_)
+        | FlowUiAction::MapMakerToggleSearch
+        | FlowUiAction::MapMakerClearSearch
+        | FlowUiAction::MapMakerToggleAssets
+        | FlowUiAction::MapMakerToggleValidation
         | FlowUiAction::MapMakerToggleGrid
         | FlowUiAction::MapMakerFitView => {}
     }

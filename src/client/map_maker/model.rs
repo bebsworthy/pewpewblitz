@@ -405,6 +405,97 @@ impl MapEditorSession {
         })
     }
 
+    pub fn rotate_placements(
+        &mut self,
+        catalog: &MapContentCatalog,
+        placement_ids: &BTreeSet<MapPlacementId>,
+    ) -> Result<(), String> {
+        if placement_ids.is_empty() {
+            return Ok(());
+        }
+        let before = self.document.recipe.clone();
+        let mut candidate = before.clone();
+        let mut rotated = 0_usize;
+        for placement in candidate
+            .placements
+            .iter_mut()
+            .filter(|placement| placement_ids.contains(&placement.placement_id))
+        {
+            let next = (placement.quarter_turns + 1) % 4;
+            let asset = catalog
+                .asset(placement.asset_id)
+                .ok_or_else(|| "selected asset is unavailable".to_string())?;
+            if asset.allowed_quarter_turns & (1 << next) == 0 {
+                return Err(format!(
+                    "{} cannot rotate to {} degrees",
+                    asset.display_name,
+                    next * 90
+                ));
+            }
+            placement.quarter_turns = next;
+            rotated += 1;
+        }
+        if rotated == 0 {
+            return Err("the selected objective has no editable rotation".to_string());
+        }
+        validate_direct_edit(&candidate, catalog)?;
+        bump_revision(&mut candidate)?;
+        self.commit(before, candidate);
+        Ok(())
+    }
+
+    pub fn duplicate_placements(
+        &mut self,
+        catalog: &MapContentCatalog,
+        placement_ids: &BTreeSet<MapPlacementId>,
+    ) -> Result<BTreeSet<MapPlacementId>, String> {
+        if placement_ids.is_empty() {
+            return Ok(BTreeSet::new());
+        }
+        let before = self.document.recipe.clone();
+        if before
+            .mode_anchors
+            .iter()
+            .any(|anchor| placement_ids.contains(&anchor.placement_id))
+        {
+            return Err("objectives cannot be duplicated".to_string());
+        }
+        let originals = before
+            .placements
+            .iter()
+            .filter(|placement| placement_ids.contains(&placement.placement_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        if originals.is_empty() {
+            return Err("the selected placements no longer exist".to_string());
+        }
+        let mut candidate = before.clone();
+        let mut next_id = next_placement_id(&candidate)?.0;
+        let mut duplicated = BTreeSet::new();
+        for mut placement in originals {
+            placement.placement_id = MapPlacementId(next_id);
+            placement.cell.x = placement
+                .cell
+                .x
+                .checked_add(1)
+                .ok_or_else(|| "duplicate falls outside the map".to_string())?;
+            placement.cell.y = placement
+                .cell
+                .y
+                .checked_add(1)
+                .ok_or_else(|| "duplicate falls outside the map".to_string())?;
+            duplicated.insert(placement.placement_id);
+            candidate.placements.push(placement);
+            next_id = next_id
+                .checked_add(1)
+                .ok_or_else(|| "map placement identity space is exhausted".to_string())?;
+        }
+        validate_direct_edit(&candidate, catalog)?;
+        bump_revision(&mut candidate)?;
+        self.commit(before, candidate);
+        Ok(duplicated)
+    }
+
     fn change_placement(
         &mut self,
         catalog: &MapContentCatalog,
@@ -626,6 +717,18 @@ impl MapEditorSession {
     }
 
     pub fn erase_at(&mut self, catalog: &MapContentCatalog, cell: MapCell) -> Result<(), String> {
+        self.erase_cells(catalog, [cell])
+    }
+
+    pub fn erase_cells(
+        &mut self,
+        catalog: &MapContentCatalog,
+        cells: impl IntoIterator<Item = MapCell>,
+    ) -> Result<(), String> {
+        let cells = cells.into_iter().collect::<BTreeSet<_>>();
+        if cells.is_empty() {
+            return Ok(());
+        }
         let before = self.document.recipe.clone();
         let mut candidate = before.clone();
         let original_count = candidate.placements.len() + candidate.mode_anchors.len();
@@ -633,12 +736,37 @@ impl MapEditorSession {
             catalog
                 .asset(placement.asset_id)
                 .and_then(|asset| placement_cells(candidate.dimensions, asset, placement))
-                .is_none_or(|cells| !cells.contains(&cell))
+                .is_none_or(|placement_cells| {
+                    placement_cells.iter().all(|cell| !cells.contains(cell))
+                })
         });
         candidate
             .mode_anchors
-            .retain(|anchor| !anchor_contains_cell(anchor, cell));
+            .retain(|anchor| !cells.iter().any(|cell| anchor_contains_cell(anchor, *cell)));
         if candidate.placements.len() + candidate.mode_anchors.len() == original_count {
+            return Ok(());
+        }
+        bump_revision(&mut candidate)?;
+        self.commit(before, candidate);
+        Ok(())
+    }
+
+    pub fn delete_placements(
+        &mut self,
+        placement_ids: &BTreeSet<MapPlacementId>,
+    ) -> Result<(), String> {
+        if placement_ids.is_empty() {
+            return Ok(());
+        }
+        let before = self.document.recipe.clone();
+        let mut candidate = before.clone();
+        candidate
+            .placements
+            .retain(|placement| !placement_ids.contains(&placement.placement_id));
+        candidate
+            .mode_anchors
+            .retain(|anchor| !placement_ids.contains(&anchor.placement_id));
+        if candidate == before {
             return Ok(());
         }
         bump_revision(&mut candidate)?;
@@ -924,6 +1052,44 @@ mod tests {
     }
 
     #[test]
+    fn erase_stroke_and_selection_delete_are_atomic() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let document = MapDraftDocument::blank(
+            MapDraftId(12),
+            "Erase Arena",
+            crate::map::WIPEOUT_MODE_DEFINITION,
+            MapDimensions {
+                width: 32,
+                height: 24,
+            },
+            MapPresentationThemeId(1),
+            crate::map::GROUND_ASSET,
+        )
+        .unwrap();
+        let mut session = MapEditorSession::open(document);
+        session
+            .paint_stroke(
+                &catalog,
+                crate::map::WALL_ARENA_ASSET,
+                [MapCell::new(2, 3), MapCell::new(3, 3), MapCell::new(4, 3)],
+                0,
+            )
+            .unwrap();
+        session
+            .erase_cells(&catalog, [MapCell::new(2, 3), MapCell::new(3, 3)])
+            .unwrap();
+        assert_eq!(session.document.recipe.placements.len(), 1);
+        assert!(session.undo());
+        assert_eq!(session.document.recipe.placements.len(), 3);
+
+        let selected = session.placements_in_rect(&catalog, MapCell::new(2, 3), MapCell::new(4, 3));
+        session.delete_placements(&selected).unwrap();
+        assert!(session.document.recipe.placements.is_empty());
+        assert!(session.undo());
+        assert_eq!(session.document.recipe.placements.len(), 3);
+    }
+
+    #[test]
     fn box_selection_moves_mirrored_assets_as_one_symmetric_transaction() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let document = MapDraftDocument::blank(
@@ -971,6 +1137,47 @@ mod tests {
             session.document.recipe.placements[0].cell,
             MapCell::new(2, 3)
         );
+    }
+
+    #[test]
+    fn duplicate_selection_offsets_atomically_and_selects_new_ids() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let document = MapDraftDocument::blank(
+            MapDraftId(19),
+            "Duplicate Arena",
+            crate::map::WIPEOUT_MODE_DEFINITION,
+            MapDimensions {
+                width: 32,
+                height: 24,
+            },
+            MapPresentationThemeId(1),
+            crate::map::GROUND_ASSET,
+        )
+        .unwrap();
+        let mut session = MapEditorSession::open(document);
+        session
+            .place(
+                &catalog,
+                crate::map::WALL_ARENA_ASSET,
+                MapCell::new(2, 3),
+                0,
+            )
+            .unwrap();
+        let selected = session.placements_in_rect(&catalog, MapCell::new(2, 3), MapCell::new(2, 3));
+        let duplicated = session.duplicate_placements(&catalog, &selected).unwrap();
+
+        assert_eq!(duplicated.len(), 1);
+        assert_eq!(session.document.recipe.placements.len(), 2);
+        let duplicate = session
+            .document
+            .recipe
+            .placements
+            .iter()
+            .find(|placement| duplicated.contains(&placement.placement_id))
+            .unwrap();
+        assert_eq!(duplicate.cell, MapCell::new(3, 4));
+        assert!(session.undo());
+        assert_eq!(session.document.recipe.placements.len(), 1);
     }
 
     #[test]

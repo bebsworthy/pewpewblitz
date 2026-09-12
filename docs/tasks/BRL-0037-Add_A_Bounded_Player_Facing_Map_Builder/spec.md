@@ -491,3 +491,146 @@ Native gates:
 ### Completion and sequencing
 
 Execute slices in order and keep each slice independently reviewable. Do not start BRL-0139 until this ticket passes the native mouse/controller gates and explicit user acceptance. BRL-0037 remains doing throughout remediation and closes only after feedback disposition, learning review, durable documentation reconciliation, ticket sync, and explicit acceptance.
+
+## 2026-09-11 implementation and verification evidence
+
+Implemented the approved best-of-breed remediation slice without changing the gameplay map schema or authority boundary:
+
+- Replaced independent drag flags with one explicit editor interaction state covering paint, erase, marquee selection, and selection movement.
+- Paint and erase now preview continuously while dragging, interpolate every crossed grid cell, and commit as one undo transaction on release.
+- Place mode retains a real-engine ghost before click; erase uses dedicated removal feedback; selection/marquee overlays are outlines so authored 3D assets remain visible.
+- Shift now adds to selection. Panning is Space+left-drag or middle-drag, with wheel zoom and palette-owned wheel paging.
+- Added Select mode with click/marquee selection, atomic multi-item movement, selection rotation/deletion, and existing symmetry-aware transaction behavior.
+- Added catalog-derived asset categories, inline search, explicit no-results behavior, working previous/next paging, and real 3D asset thumbnail cards. A filtered-out selection cannot be placed.
+- Consolidated map identity, saved state, validation readiness, Undo/Redo, Save, Clear, Test Map, and Maps into a top document bar. Added a focused mode toolbar and contextual selection/validation panel.
+- Test Map is disabled when the existing authored-recipe validator reports an error; validation and dirty/saved state are presented separately.
+- Spawn and objective palette items use click placement, while drag painting remains limited to map assets.
+
+Automated verification passed:
+
+- `cargo fmt --all`
+- `cargo check --features client --all-targets`
+- `cargo clippy --features client --lib -- -D warnings`
+- `cargo test --features client map_maker --lib` — 15 passed, 0 failed
+- `git diff --check`
+
+Native verification used `RUST_BACKTRACE=1 just run 1` against the routed local topology. The editor opened without panic; real world assets and thumbnail previews rendered; category switching and search worked; an impossible query showed the explicit no-results state; marquee selection exposed contextual rotate/delete actions; and the status toast remained clear of palette controls.
+
+Evidence:
+
+![Native Map Maker editor showing the unified document bar, mode toolbar, catalog categories, and real 3D asset thumbnails.](assets/map-maker-editor-shell.png)
+
+![Native Map Maker selection state showing marquee-selected assets, outline feedback, and contextual rotate/delete actions.](assets/map-maker-selection-tools.png)
+
+![Native Map Maker palette search showing category filters, clear search, and an explicit no-results state.](assets/map-maker-palette-search.png)
+
+BRL-0139 owns deferred advanced construction tools (line/shape/fill/picker/stamps). BRL-0037 remains `doing` pending user visual/playtest acceptance.
+
+Additional role-isolation verification passed: `just _check-server` (`cargo check --locked --no-default-features --features server --all-targets`). The routed native process shut down cleanly after the visual pass; the enclosing `just run` command reports exit 130 only because it was intentionally stopped with Ctrl-C.
+
+
+## Approved Map Maker shell and Assets visual contract (2026-09-12)
+
+The user approved these repository mockups as the current implementation target:
+
+- `inspiration/mockup/map_builder_shell.png`
+- `inspiration/mockup/map_builder_assets.png`
+
+This approval supersedes the previous persistent right-side selection inspector and persistent Map Check panel. The implementation must preserve the real 3D engine-rendered world and production asset previews while matching the approved information hierarchy and interaction states.
+
+### Required shell behavior
+
+- The map canvas remains dominant beneath one compact document header.
+- Place, Select, and Erase remain a left-side tool rail with an unmistakable active state.
+- Select mode communicates selection on the canvas through cyan object outlines, a subtle group boundary, and a move handle.
+- Selection actions are a compact one-row icon toolbar for rotate, duplicate, delete, and deselect; no persistent selection title, item count, coordinates, or rotation inspector is shown.
+- Grid, symmetry, and fit remain compact canvas controls independent of validation.
+- Map validation is summarized by the header issue button. The detailed issue list is hidden by default and opens only when the issue button is activated; it closes on reactivation, outside interaction, or Escape.
+- The persistent right-side Map Check panel is removed.
+
+### Required Assets behavior
+
+- The Assets drawer is collapsed in Select and Erase mode and expanded for Place mode.
+- The expanded drawer is a compact bottom dock with a header containing the Assets collapse control, category filters, and search.
+- Asset cards use real rendered 3D previews and short player-facing labels.
+- The current asset has an unmistakable cyan selected state and the corresponding live snapped placement ghost appears on the map before placement.
+- Assets use direct horizontal scrolling with edge arrows and a visible item range such as `1–6 of 18`; ambiguous page numbers are not used.
+- The drawer includes a compact Place-mode control hint and can be collapsed to reclaim canvas space.
+
+### Acceptance and evidence
+
+- Automated tests cover issue-popover visibility, tool-driven Assets drawer state, filtering/range behavior, and selection-toolbar actions where pure state permits.
+- Client and server role checks continue to pass.
+- A native client run demonstrates the approved shell and expanded Assets state without panic.
+- Native screenshots for both states are attached to BRL-0037 and compared against the approved repository mockups before the ticket may be called done.
+- BRL-0037 remains `doing` until the user accepts the verified native result.
+
+## Approved shell and Assets implementation evidence (2026-09-12)
+
+Implemented the approved `inspiration/mockup/map_builder_shell.png` and `inspiration/mockup/map_builder_assets.png` direction:
+
+- one compact document header with map identity, dirty state, Undo/Redo, Save, Test Map, issue summary, and Maps;
+- a left Place/Select/Erase rail and compact upper-right Symmetry/Grid/Fit controls;
+- Map Check removed from the persistent canvas and rendered only from the issue-summary action;
+- selection details removed in favor of an on-canvas group boundary, move handle, hover outline, and a compact rotate/duplicate/delete/deselect icon row;
+- Assets becomes an expandable bottom drawer, stays open for Place, collapses for Select/Erase, and exposes categories, search, direct horizontal ranges, a selected card, and real 3D asset previews;
+- duplicate offsets the selection atomically, assigns new placement identities, selects the duplicates, and participates in one-step undo;
+- tool changes, slash search, Escape, and outside-click behavior keep the drawer and validation popover contextual.
+
+Verification:
+
+- `cargo fmt --all` — passed.
+- `cargo clippy --features client --lib -- -D warnings` — passed.
+- `cargo test --features client map_maker --lib` — 19 passed, 0 failed. Coverage includes approved tool/drawer states, validation-only-on-request, direct asset ranges, page-edge behavior, duplicate atomicity/identity/undo, selection movement, paint interpolation, erase atomicity, persistence, and resize safety.
+- `cargo check --features client --all-targets` — passed.
+- `just _check-server` — passed, preserving the headless server boundary.
+- `git diff --check` — passed.
+- `RUST_BACKTRACE=1 just run 1` — routed native supervisor/lobby/client launch succeeded; the final shell and Assets drawer rendered through the production 3D presentation without panic.
+
+Native proof:
+
+![Native Map Maker selection shell: compact header, left tool rail, collapsed Assets control, selected group bounds, and contextual icon actions.](assets/approved-map-maker-selection-shell.png)
+
+![Native Map Maker Assets drawer: canvas-first shell, category rail, actual 3D asset previews, selected card, direct range controls, and search.](assets/approved-map-maker-assets-drawer.png)
+
+### Learn-from-errors review
+
+The earlier design exposed persistent selection metadata and Map Check content even when neither helped the immediate canvas task. That consumed map space and repeated state already visible in the world or header. The approved mockups established the reusable rule applied here: keep document-wide state in one header, expose validation detail on demand, keep asset discovery in a collapsible Place-mode drawer, and attach selection actions directly to the selected world group. Focused state tests now protect those visibility rules from regression.
+
+## Approved-mockup fidelity correction (2026-09-12)
+
+The first approved-mockup evidence is rejected after direct side-by-side review. Structural similarity alone is insufficient. Before replacement evidence is accepted, the native implementation must:
+
+- make Place/Select/Erase icon-led and keep the active tool unmistakable;
+- use the approved Grid, Symmetry, Fit ordering and stronger control hierarchy;
+- render selected placements with bright per-item cyan outlines, a translucent group region, a strong group boundary, four corner handles, and a prominent center move handle;
+- keep the compact selection action row visually anchored to the selected group;
+- present six useful real-3D asset cards when the active category has enough results, with denser horizontal composition, clear selected border/check state, edge arrows, adjacent direct range, and an unmistakable search field;
+- retain a visible world placement preview and erase marker before committing edits;
+- replace the rejected empty-canvas proof with exact-final-build native captures showing a populated production-asset map, multi-item selection, and Place mode with the Assets drawer and placement preview.
+
+The prior a-000008/a-000009 assets remain historical rejected evidence and must not be cited as final acceptance proof.
+
+## Approved-mockup remediation verification (2026-09-12)
+
+- Final native engine evidence: `a-000010` (Place/Assets) and `a-000011` (Select). Both were captured from the exact final build at the normal 1591×752 client window size against a populated 120-placement map.
+- `cargo fmt --all` — passed.
+- `cargo clippy --features client --lib -- -D warnings` — passed.
+- `cargo test --features client map_maker --lib` — 19 passed, 0 failed.
+- `cargo check --features client --all-targets` — passed.
+- `just _check-server` — passed, preserving headless role isolation.
+- `git diff --check` — passed.
+
+### Feedback disposition
+
+- Replaced the generic header/status-heavy layout with the approved compact shell and contextual panels.
+- Replaced misleading wrench/pencil tool art with code-native place/select/erase glyphs.
+- Assets now default to Cover, show six sorted real-engine preview cards, expose explicit active category/asset state, code-native selection check, edge-aware paging/count, and integrated search.
+- Select now communicates state on the map: strong per-item outlines, translucent group bounds, corner handles, center move handle, and compact rotate/duplicate/delete/clear actions.
+- Map Check remains hidden until the issue/readiness action is pressed.
+
+### Learn-from-errors review
+
+- Mistake: earlier evidence was captured from sparse or stale UI states and treated broad structural similarity as sufficient. Cause: verification was not performed as an explicit pixel-level comparison against both approved mockups after the last source change.
+- Prevention: visual acceptance now uses a populated map, captures every required mode from the exact final executable, checks active/disabled/selection states, and rejects stale screenshots before ticket attachment.
+- Reusable lesson: editor controls must communicate mode and object state where the user is looking—on the tool, asset card, and canvas—not through detached explanatory text.
