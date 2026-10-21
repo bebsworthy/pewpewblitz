@@ -1,8 +1,0 @@
-version: 1
-default_repo: brawler
-repos:
-- path: .
-  alias: brawler
-  is_primary: true
-  indexed_at: '2026-08-28T06:30:05.797880+00:00'
-  last_commit_at_index: 535d3ec26d0d2b3784fbc4789acd68a2bd9f9de7
