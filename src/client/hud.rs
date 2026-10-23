@@ -244,11 +244,16 @@ fn receive_heist_objective_cues(
     }
 }
 
-fn spawn_readiness_hud(mut commands: Commands) {
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are passed by value"
+)]
+fn spawn_readiness_hud(mut commands: Commands, asset_server: Option<Res<AssetServer>>) {
+    let font = ui::theme::display_font_handle(asset_server.as_deref());
     commands.spawn((
         ReadinessHudText,
         Text::new(""),
-        TextFont::from_font_size(28.0),
+        ui::theme::hud_text(&font, 28.0),
         TextColor(Color::WHITE),
         TextLayout::new(Justify::Center, LineBreak::WordBoundary),
         GlobalZIndex(100),
@@ -266,7 +271,7 @@ fn spawn_readiness_hud(mut commands: Commands) {
     commands.spawn((
         MatchHudText,
         Text::new("SYNCING OBJECTIVE"),
-        TextFont::from_font_size(18.0),
+        ui::theme::hud_text(&font, 18.0),
         TextColor(Color::WHITE),
         TextLayout::new(Justify::Center, LineBreak::WordBoundary),
         GlobalZIndex(100),
@@ -284,7 +289,7 @@ fn spawn_readiness_hud(mut commands: Commands) {
     commands.spawn((
         CountdownHudText,
         Text::new(""),
-        TextFont::from_font_size(72.0),
+        ui::theme::hud_text(&font, 72.0),
         TextColor(Color::srgb(1.0, 0.85, 0.35)),
         TextLayout::new(Justify::Center, LineBreak::NoWrap),
         GlobalZIndex(225),
@@ -301,7 +306,7 @@ fn spawn_readiness_hud(mut commands: Commands) {
         .spawn((
             MatchPhaseOverlayText,
             Text::new(""),
-            TextFont::from_font_size(34.0),
+            ui::theme::hud_text(&font, 34.0),
             TextColor(Color::WHITE),
             TextLayout::new(Justify::Center, LineBreak::WordBoundary),
             GlobalZIndex(220),
@@ -398,7 +403,7 @@ fn update_readiness_hud(
     // component arrival order displays a syncing label instead of a stale or local countdown.
     let now = match_deadline_tick(match_state.map(|(state, _)| *state), clock);
     for (mut text, mut visibility) in &mut readiness_text {
-        text.0 = match_state.map_or_else(String::new, |(state, _)| match state.phase {
+        let label = match_state.map_or_else(String::new, |(state, _)| match state.phase {
             MatchPhase::Countdown { starts_at_tick } => now.map_or_else(
                 || "SYNCING".to_string(),
                 |now| {
@@ -425,20 +430,11 @@ fn update_readiness_hud(
             ),
             MatchPhase::Waiting | MatchPhase::Completed { .. } => String::new(),
         });
-        *visibility = if text.0.is_empty() {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        };
+        set_retained_text(&mut text, &mut visibility, label, true);
     }
     for (mut text, mut visibility) in &mut countdown_text {
-        if let Some(label) = countdown_label(match_state.map(|(state, _)| *state), now) {
-            text.0 = label;
-            *visibility = Visibility::Inherited;
-        } else {
-            text.0.clear();
-            *visibility = Visibility::Hidden;
-        }
+        let label = countdown_label(match_state.map(|(state, _)| *state), now).unwrap_or_default();
+        set_retained_text(&mut text, &mut visibility, label, true);
     }
     let local_player = fighter.map(|(player, _)| player.0);
     let phase_facts = sync_roster_and_collect_phase_facts(
@@ -471,7 +467,7 @@ fn update_readiness_hud(
         }
     });
     for (mut text, mut visibility) in &mut phase_overlay {
-        if let Some(label) = phase_overlay_label(
+        let label = phase_overlay_label(
             match_state.map(|(state, _)| *state),
             final_line.as_deref(),
             now,
@@ -481,13 +477,9 @@ fn update_readiness_hud(
             phase_facts.local_selected,
             phase_facts.local_ready,
             phase_facts.local_restart_ready,
-        ) {
-            text.0 = label;
-            *visibility = Visibility::Inherited;
-        } else {
-            text.0.clear();
-            *visibility = Visibility::Hidden;
-        }
+        )
+        .unwrap_or_default();
+        set_retained_text(&mut text, &mut visibility, label, true);
     }
     let mut roster_rows = roster_presentation.entries.iter().collect::<Vec<_>>();
     roster_rows.sort_by_key(|(player, entry)| (entry.team.0, **player));
@@ -525,8 +517,14 @@ fn update_readiness_hud(
             build_mode_score_view(match_state, hot_zones.iter().next(), clock)
         }
     });
+    let match_hud_phase = match_state.is_some_and(|(state, _)| {
+        matches!(
+            state.phase,
+            MatchPhase::Countdown { .. } | MatchPhase::Active { .. }
+        )
+    });
     for (mut text, mut visibility) in &mut match_text {
-        text.0 = score_view.map_or_else(String::new, |view| {
+        let label = score_view.map_or_else(String::new, |view| {
             let score = mode_score_text(view);
             if matches!(view, ModeScoreView::Zombie { .. }) {
                 format!("{score}\n\nTEAM\n{roster_text}")
@@ -534,21 +532,28 @@ fn update_readiness_hud(
                 score
             }
         });
-        *visibility = if match_state.is_some_and(|(state, _)| {
-            matches!(
-                state.phase,
-                MatchPhase::Countdown { .. } | MatchPhase::Active { .. }
-            )
-        }) && !text.0.is_empty()
-        {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
+        set_retained_text(&mut text, &mut visibility, label, match_hud_phase);
     }
     for mut text in &mut scoreboard_text {
-        text.0 = format!("SCOREBOARD\n\n{roster_text}");
+        text.set_if_neq(Text(format!("SCOREBOARD\n\n{roster_text}")));
     }
+}
+
+/// Writes retained HUD text and visibility only when they differ, so an unchanged label is not
+/// marked changed (and re-laid out) every frame. Empty labels are always hidden.
+fn set_retained_text(
+    text: &mut Mut<Text>,
+    visibility: &mut Mut<Visibility>,
+    label: String,
+    shown: bool,
+) {
+    let next_visibility = if shown && !label.is_empty() {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    text.set_if_neq(Text(label));
+    visibility.set_if_neq(next_visibility);
 }
 
 /// The shared deadline clock, presentable only when the clock, match envelope, and concrete
@@ -1037,6 +1042,153 @@ mod tests {
             .spawn((ScoreboardOverlay, Text::new(""), Visibility::Hidden));
 
         app.update();
+    }
+
+    #[test]
+    fn retained_hud_text_changes_only_when_its_content_changes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<MatchRosterPresentation>()
+            .init_resource::<ClientHeistReadiness>()
+            .add_systems(Update, update_readiness_hud);
+        let match_id = crate::matchplay::MatchId(7);
+        let root = app
+            .world_mut()
+            .spawn((
+                MatchRoot,
+                MatchState {
+                    match_id,
+                    mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                    phase: MatchPhase::Active { ends_at_tick: 600 },
+                    rules_revision: 1,
+                },
+                crate::matchplay::MatchClock {
+                    match_id,
+                    completed_tick: 10,
+                },
+            ))
+            .id();
+        let timer = app
+            .world_mut()
+            .spawn((ReadinessHudText, Text::new(""), Visibility::Hidden))
+            .id();
+        let objective = app
+            .world_mut()
+            .spawn((MatchHudText, Text::new(""), Visibility::Hidden))
+            .id();
+        let scoreboard = app
+            .world_mut()
+            .spawn((ScoreboardOverlay, Text::new(""), Visibility::Hidden))
+            .id();
+        let changed_ticks = |app: &App| {
+            [timer, objective, scoreboard].map(|entity| {
+                let entity = app.world().entity(entity);
+                (
+                    entity.get_ref::<Text>().expect("HUD text").last_changed(),
+                    entity
+                        .get_ref::<Visibility>()
+                        .expect("HUD visibility")
+                        .last_changed(),
+                )
+            })
+        };
+
+        app.update();
+        assert_eq!(app.world().get::<Text>(timer).unwrap().0, "0:10");
+        let first = changed_ticks(&app);
+        app.update();
+        assert_eq!(
+            changed_ticks(&app),
+            first,
+            "unchanged HUD content was rewritten"
+        );
+
+        app.world_mut()
+            .get_mut::<crate::matchplay::MatchClock>(root)
+            .unwrap()
+            .completed_tick = 70;
+        app.update();
+        assert_eq!(app.world().get::<Text>(timer).unwrap().0, "0:09");
+        let after = changed_ticks(&app);
+        assert_ne!(after[0].0, first[0].0, "a new timer value must be written");
+        assert_eq!(after[0].1, first[0].1);
+        assert_eq!(after[1..], first[1..]);
+    }
+
+    /// Every string literal in the in-match HUD and overhead sources must render in Lilita One.
+    #[test]
+    fn hud_and_overhead_string_templates_use_only_display_font_glyphs() {
+        let sources = [
+            ("src/client/hud.rs", include_str!("hud.rs")),
+            (
+                "src/client/presentation.rs",
+                include_str!("presentation.rs"),
+            ),
+            (
+                "src/combat/client/hud.rs",
+                include_str!("../combat/client/hud.rs"),
+            ),
+            (
+                "src/client/presentation_3d/combat/fighter_ui.rs",
+                include_str!("presentation_3d/combat/fighter_ui.rs"),
+            ),
+        ];
+        for (path, source) in sources {
+            let missing = string_literal_characters(source)
+                .filter(|character| {
+                    !character.is_control() && !ui::theme::display_font_has_glyph(*character)
+                })
+                .collect::<std::collections::BTreeSet<_>>();
+            assert!(missing.is_empty(), "{path} uses missing glyphs {missing:?}");
+        }
+        assert_eq!(
+            string_literal_characters("let c = '\"'; // \"x\"\nf(\"T1 \\\"—\\\" 2\", 'a)")
+                .collect::<String>(),
+            "T1 \"—\" 2"
+        );
+        assert!(ui::theme::display_font_has_glyph('A'));
+        assert!(!ui::theme::display_font_has_glyph('\u{25AF}'));
+    }
+
+    /// Characters inside `"..."` literals, skipping comments, char literals, and lifetimes. The
+    /// scanned sources contain no raw strings.
+    fn string_literal_characters(source: &str) -> impl Iterator<Item = char> + '_ {
+        assert!(!source.contains("r#\u{22}"), "raw strings are not scanned");
+        let mut characters = source.chars().peekable();
+        let mut literal = Vec::new();
+        while let Some(character) = characters.next() {
+            match character {
+                '/' if characters.peek() == Some(&'/') => {
+                    characters
+                        .by_ref()
+                        .take_while(|next| *next != '\n')
+                        .for_each(drop);
+                }
+                '\'' => {
+                    let mut lookahead = characters.clone();
+                    let first = lookahead.next();
+                    if first == Some('\\') || lookahead.next() == Some('\'') {
+                        characters
+                            .by_ref()
+                            .skip(1)
+                            .take_while(|next| *next != '\'')
+                            .for_each(drop);
+                    }
+                }
+                '"' => {
+                    while let Some(next) = characters.next() {
+                        match next {
+                            '"' => break,
+                            // Keep the escaped character itself (`\"` renders `"`).
+                            '\\' => literal.extend(characters.next()),
+                            other => literal.push(other),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        literal.into_iter()
     }
 
     #[test]

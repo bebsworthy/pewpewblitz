@@ -13,11 +13,11 @@ pub(super) struct MatchMenuState {
 mod match_menu;
 use match_menu::{MatchMenuButton, update_match_menu_chrome};
 
-pub(super) fn spawn_client_hud(mut commands: Commands) {
+pub(super) fn spawn_client_hud(mut commands: Commands, font: &Handle<Font>) {
     commands.spawn((
         CombatHudText,
         Text::new("HEALTH  --/--"),
-        TextFont::from_font_size(19.0),
+        ui::theme::hud_text(font, 19.0),
         TextColor(Color::WHITE),
         TextLayout::linebreak(LineBreak::WordBoundary),
         GlobalZIndex(100),
@@ -35,7 +35,7 @@ pub(super) fn spawn_client_hud(mut commands: Commands) {
     commands.spawn((
         CombatAbilityHudText,
         Text::new("WEAPON  --/--\nULT --"),
-        TextFont::from_font_size(18.0),
+        ui::theme::hud_text(font, 18.0),
         TextColor(Color::WHITE),
         TextLayout::new(Justify::Right, LineBreak::WordBoundary),
         GlobalZIndex(100),
@@ -53,7 +53,7 @@ pub(super) fn spawn_client_hud(mut commands: Commands) {
     commands.spawn((
         ScoreboardOverlay,
         Text::new("SCOREBOARD"),
-        TextFont::from_font_size(20.0),
+        ui::theme::hud_text(font, 20.0),
         TextColor(Color::WHITE),
         TextLayout::new(Justify::Left, LineBreak::WordBoundary),
         BackgroundColor(Color::srgba(0.015, 0.025, 0.04, 0.96)),

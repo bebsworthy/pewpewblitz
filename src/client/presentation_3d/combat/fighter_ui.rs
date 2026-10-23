@@ -15,6 +15,7 @@ const OVERHEAD_HEALTH_HEIGHT: f32 = 37.0;
 const OVERHEAD_AMMO_HEIGHT: f32 = 50.0;
 const HEALTH_BAR_WIDTH: f32 = 76.8;
 const PLAYER_NAME_FONT_SIZE: f32 = 12.8;
+const OVERHEAD_STACK_GAP: f32 = 2.0;
 const COLD_PIE_SIZE: f32 = 15.0;
 const COLD_PIE_GAP: f32 = 3.0;
 const COLD_PIE_TEXTURE_SIZE: u32 = 32;
@@ -194,6 +195,7 @@ struct AmmoPresentation {
 #[allow(clippy::needless_pass_by_value)]
 pub(in super::super) fn reconcile_fighter_overheads(
     mut commands: Commands,
+    asset_server: Option<Res<AssetServer>>,
     fighters: Query<Entity, With<Fighter>>,
     fighter_visuals: Query<(Entity, &CombatVisualOwner), With<V3FighterVisual>>,
     overhead_roots: Query<(Entity, &CombatVisualOwner), With<FighterOverheadUi>>,
@@ -209,7 +211,12 @@ pub(in super::super) fn reconcile_fighter_overheads(
         if !roots.contains(&fighter)
             && let Some(&visual_root) = visual_roots.get(&fighter)
         {
-            spawn_fighter_overhead(&mut commands, fighter, visual_root);
+            spawn_fighter_overhead(
+                &mut commands,
+                fighter,
+                visual_root,
+                &ui::theme::display_font_handle(asset_server.as_deref()),
+            );
         }
     }
     for (root, owner, overhead) in &overheads {
@@ -219,9 +226,15 @@ pub(in super::super) fn reconcile_fighter_overheads(
     }
 }
 
-fn spawn_fighter_overhead(commands: &mut Commands, owner: Entity, visual_root: Entity) {
+fn spawn_fighter_overhead(
+    commands: &mut Commands,
+    owner: Entity,
+    visual_root: Entity,
+    font: &Handle<Font>,
+) {
     let (player_name_container, player_name) = spawn_overhead_text(
         commands,
+        font,
         0.0,
         19.0,
         PLAYER_NAME_FONT_SIZE,
@@ -229,6 +242,7 @@ fn spawn_fighter_overhead(commands: &mut Commands, owner: Entity, visual_root: E
     );
     let (health_amount_container, health_amount) = spawn_overhead_text(
         commands,
+        font,
         14.0,
         18.0,
         15.0,
@@ -317,6 +331,7 @@ fn spawn_fighter_overhead(commands: &mut Commands, owner: Entity, visual_root: E
 
 fn spawn_overhead_text(
     commands: &mut Commands,
+    font: &Handle<Font>,
     top: f32,
     height: f32,
     font_size: f32,
@@ -326,12 +341,8 @@ fn spawn_overhead_text(
         .spawn((
             FighterOverheadTextUi,
             Text::new(""),
-            TextFont::from_font_size(font_size),
+            ui::theme::hud_text(font, font_size),
             TextColor(Color::WHITE),
-            TextShadow {
-                offset: Vec2::splat(1.5),
-                color: Color::BLACK,
-            },
             TextLayout::new(Justify::Center, LineBreak::NoWrap),
             Name::new(name),
         ))
@@ -435,8 +446,52 @@ fn projected_overhead_top_left(
         .then_some(top_left)
 }
 
+/// One projected overhead plate awaiting collision resolution.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct OverheadPlacement {
+    root: Entity,
+    top_left: Vec2,
+    height: f32,
+    is_local: bool,
+}
+
+/// Stacks overlapping overhead plates upward so nearby fighters keep readable labels. The local
+/// fighter's plate keeps its projected anchor; the others resolve in a stable order (nearer the
+/// bottom of the screen first, then entity order) and each moves directly above any plate it would
+/// overlap. Every move is strictly upward past one already-placed plate, so resolution is bounded.
+fn resolve_overhead_overlaps(placements: &mut [OverheadPlacement]) {
+    placements.sort_by(|a, b| {
+        b.is_local
+            .cmp(&a.is_local)
+            .then_with(|| b.top_left.y.total_cmp(&a.top_left.y))
+            .then_with(|| a.root.cmp(&b.root))
+    });
+    for index in 1..placements.len() {
+        let (placed, rest) = placements.split_at_mut(index);
+        let plate = &mut rest[0];
+        for _ in 0..placed.len() {
+            let Some(blocking) = placed
+                .iter()
+                .filter(|other| overhead_plates_overlap(plate, other))
+                .map(|other| other.top_left.y)
+                .reduce(f32::min)
+            else {
+                break;
+            };
+            plate.top_left.y = blocking - plate.height - OVERHEAD_STACK_GAP;
+        }
+    }
+}
+
+fn overhead_plates_overlap(a: &OverheadPlacement, b: &OverheadPlacement) -> bool {
+    (a.top_left.x - b.top_left.x).abs() < OVERHEAD_WIDTH
+        && a.top_left.y < b.top_left.y + b.height + OVERHEAD_STACK_GAP
+        && b.top_left.y < a.top_left.y + a.height + OVERHEAD_STACK_GAP
+}
+
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::type_complexity,
     reason = "the projection phase reads the propagated world camera and writes absolute UI nodes"
 )]
 pub(in super::super) fn project_fighter_overhead_ui(
@@ -445,12 +500,14 @@ pub(in super::super) fn project_fighter_overhead_ui(
         (
             &crate::combat::CurrentHealth,
             Option<&crate::combat::Defeated>,
+            Has<Controlled>,
         ),
         With<Fighter>,
     >,
     fighter_visuals: Query<&GlobalTransform, With<V3FighterVisual>>,
     mut overheads: Query<
         (
+            Entity,
             &CombatVisualOwner,
             &FighterOverheadUi,
             &mut Node,
@@ -459,56 +516,70 @@ pub(in super::super) fn project_fighter_overhead_ui(
         With<FighterOverheadUi>,
     >,
 ) {
-    let Ok((camera, camera_transform)) = cameras.single() else {
-        for (_, _, _, mut visibility) in &mut overheads {
+    let Some((camera, camera_transform, viewport_size)) =
+        cameras.single().ok().and_then(|(camera, transform)| {
+            camera
+                .logical_viewport_size()
+                .map(|size| (camera, transform, size))
+        })
+    else {
+        for (_, _, _, _, mut visibility) in &mut overheads {
             *visibility = Visibility::Hidden;
         }
         return;
     };
-    let Some(viewport_size) = camera.logical_viewport_size() else {
-        for (_, _, _, mut visibility) in &mut overheads {
-            *visibility = Visibility::Hidden;
+    let mut placements = Vec::new();
+    for (root, owner, overhead, _, mut visibility) in &mut overheads {
+        let placement = fighters
+            .get(owner.0)
+            .ok()
+            .filter(|(health, defeated, _)| {
+                !character_is_visually_defeated(health.0, defeated.is_some())
+            })
+            .and_then(|(_, _, is_local)| {
+                let ground_position = fighter_visuals
+                    .get(overhead.visual_root)
+                    .ok()?
+                    .translation();
+                let fighter_viewport = camera
+                    .world_to_viewport(
+                        camera_transform,
+                        ground_position + Vec3::Y * FIGHTER_BODY_WORLD_HEIGHT,
+                    )
+                    .ok()?;
+                let overhead_viewport = camera
+                    .world_to_viewport(
+                        camera_transform,
+                        ground_position + Vec3::Y * OVERHEAD_WORLD_HEIGHT,
+                    )
+                    .ok()?;
+                let height = overhead_height(!overhead.ammo_segments.is_empty());
+                projected_overhead_top_left(
+                    viewport_size,
+                    fighter_viewport,
+                    overhead_viewport,
+                    height,
+                )
+                .map(|top_left| OverheadPlacement {
+                    root,
+                    top_left,
+                    height,
+                    is_local,
+                })
+            });
+        match placement {
+            Some(placement) => placements.push(placement),
+            None => *visibility = Visibility::Hidden,
         }
-        return;
-    };
-    for (owner, overhead, mut node, mut visibility) in &mut overheads {
-        let Ok((health, defeated)) = fighters.get(owner.0) else {
-            *visibility = Visibility::Hidden;
+    }
+    resolve_overhead_overlaps(&mut placements);
+    for placement in placements {
+        let Ok((_, _, _, mut node, mut visibility)) = overheads.get_mut(placement.root) else {
             continue;
         };
-        if character_is_visually_defeated(health.0, defeated.is_some()) {
-            *visibility = Visibility::Hidden;
-            continue;
-        }
-        let Ok(visual_transform) = fighter_visuals.get(overhead.visual_root) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        let ground_position = visual_transform.translation();
-        let Ok(fighter_viewport) = camera.world_to_viewport(
-            camera_transform,
-            ground_position + Vec3::Y * FIGHTER_BODY_WORLD_HEIGHT,
-        ) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        let Ok(overhead_viewport) = camera.world_to_viewport(
-            camera_transform,
-            ground_position + Vec3::Y * OVERHEAD_WORLD_HEIGHT,
-        ) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        let height = overhead_height(!overhead.ammo_segments.is_empty());
-        let Some(top_left) =
-            projected_overhead_top_left(viewport_size, fighter_viewport, overhead_viewport, height)
-        else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        node.left = px(top_left.x);
-        node.top = px(top_left.y);
-        node.height = px(height);
+        node.left = px(placement.top_left.x);
+        node.top = px(placement.top_left.y);
+        node.height = px(placement.height);
         // Projection is the sole owner that reveals a root, after installing valid coordinates.
         *visibility = Visibility::Inherited;
     }
@@ -600,7 +671,7 @@ pub(in super::super) fn update_fighter_overhead_state(
                 text.0.clear();
                 text.0.push_str(name);
             }
-            color.0 = overhead_name_color(relation);
+            color.set_if_neq(TextColor(overhead_name_color(relation)));
         }
         if overhead.last_health != Some(current) {
             if let Ok((mut text, _)) = overhead_texts.get_mut(overhead.health_amount) {
@@ -796,6 +867,64 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn nearby_overheads_stack_without_overlap_and_keep_the_local_anchor() {
+        let mut world = World::new();
+        let [local, enemy, ally] = [(); 3].map(|()| world.spawn_empty().id());
+        // Fighters touching at minimum separation project to nearly the same plate anchor.
+        let anchor = Vec2::new(300.0, 200.0);
+        let mut placements = vec![
+            OverheadPlacement {
+                root: enemy,
+                top_left: anchor + Vec2::new(18.0, 4.0),
+                height: OVERHEAD_HEALTH_HEIGHT,
+                is_local: false,
+            },
+            OverheadPlacement {
+                root: local,
+                top_left: anchor,
+                height: OVERHEAD_AMMO_HEIGHT,
+                is_local: true,
+            },
+            OverheadPlacement {
+                root: ally,
+                top_left: anchor - Vec2::new(22.0, 0.0),
+                height: OVERHEAD_HEALTH_HEIGHT,
+                is_local: false,
+            },
+        ];
+        resolve_overhead_overlaps(&mut placements);
+
+        let local_plate = placements.iter().find(|plate| plate.root == local).unwrap();
+        assert_eq!(local_plate.top_left, anchor);
+        for (index, plate) in placements.iter().enumerate() {
+            for other in &placements[index + 1..] {
+                assert!(
+                    !overhead_plates_overlap(plate, other),
+                    "{plate:?} overlaps {other:?}"
+                );
+            }
+        }
+        // Distant plates keep their projected positions.
+        let mut apart = [
+            OverheadPlacement {
+                root: local,
+                top_left: anchor,
+                height: OVERHEAD_HEALTH_HEIGHT,
+                is_local: true,
+            },
+            OverheadPlacement {
+                root: enemy,
+                top_left: anchor + Vec2::new(OVERHEAD_WIDTH, 0.0),
+                height: OVERHEAD_HEALTH_HEIGHT,
+                is_local: false,
+            },
+        ];
+        let before = apart;
+        resolve_overhead_overlaps(&mut apart);
+        assert_eq!(apart, before);
     }
 
     #[test]

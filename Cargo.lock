@@ -2106,6 +2106,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "skrifa 0.44.0",
  "tiny_http",
  "unicode-normalization",
  "unicode-segmentation",

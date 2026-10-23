@@ -1122,6 +1122,7 @@ pub(in crate::client) fn setup_3d_foundation(
         Assets<combat::StraightProjectileTrailMaterial>,
     >,
     splash_area_materials: Option<ResMut<Assets<combat::SplashAreaMaterial>>>,
+    asset_server: Option<Res<AssetServer>>,
 ) {
     let fighter_radius = builds.0.fighter_body.radius;
     let fighter_metrics = FighterPresentationMetrics {
@@ -1562,7 +1563,10 @@ pub(in crate::client) fn setup_3d_foundation(
         Transform::from_xyz(-500.0, 900.0, 650.0).looking_at(Vec3::ZERO, Vec3::Y),
         V3WorldMember,
     ));
-    spawn_client_hud(commands);
+    spawn_client_hud(
+        commands,
+        &ui::theme::display_font_handle(asset_server.as_deref()),
+    );
 }
 
 fn fighter_facing_mesh(fighter_radius: f32) -> Mesh {

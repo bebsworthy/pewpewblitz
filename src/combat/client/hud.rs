@@ -69,19 +69,19 @@ pub(crate) fn update_combat_hud(
     )) = fighter.iter().next()
     else {
         for (_, mut visibility) in &mut health_text {
-            *visibility = Visibility::Hidden;
+            visibility.set_if_neq(Visibility::Hidden);
         }
         for (_, mut visibility) in &mut ability_text {
-            *visibility = Visibility::Hidden;
+            visibility.set_if_neq(Visibility::Hidden);
         }
         return;
     };
     let Some(loadout) = loadout else {
         for (_, mut visibility) in &mut health_text {
-            *visibility = Visibility::Hidden;
+            visibility.set_if_neq(Visibility::Hidden);
         }
         for (_, mut visibility) in &mut ability_text {
-            *visibility = Visibility::Hidden;
+            visibility.set_if_neq(Visibility::Hidden);
         }
         return;
     };
@@ -198,18 +198,19 @@ pub(crate) fn update_combat_hud(
             )
         });
     let health_status = if defeated.is_some() { "  DEFEATED" } else { "" };
+    // Change-aware writes keep unchanged HUD text from being re-laid out every frame.
     for (mut value, mut visibility) in &mut health_text {
-        *visibility = Visibility::Inherited;
-        value.0 = format!(
+        visibility.set_if_neq(Visibility::Inherited);
+        value.set_if_neq(Text(format!(
             "HEALTH  {}/{}{}{}",
             health.0, maximum_health, slow, health_status
-        );
+        )));
     }
     for (mut value, mut visibility) in &mut ability_text {
-        *visibility = Visibility::Inherited;
-        value.0 = format!(
+        visibility.set_if_neq(Visibility::Inherited);
+        value.set_if_neq(Text(format!(
             "{}  {}/{}  {}\n{}{}",
             weapon_name, state.ammo, capacity, phase, ultimate, sentry
-        );
+        )));
     }
 }
