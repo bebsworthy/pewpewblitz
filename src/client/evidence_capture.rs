@@ -19,6 +19,7 @@ use bevy::{
 };
 use directories::{ProjectDirs, UserDirs};
 use lightyear::prelude::Controlled;
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
     env, fs,
@@ -270,6 +271,17 @@ fn collect_client_snapshot(world: &mut World, unix_millis: u64) -> Value {
     })
 }
 
+/// Converts one typed field for a capture snapshot. `json!` unwraps its interpolated
+/// conversions, so a value `serde_json` cannot represent (for example a `u128` above
+/// `u64::MAX`) would otherwise panic and take the client down mid-capture. The failure is
+/// logged and recorded in place so the frame and the rest of the state are still saved.
+fn evidence_field<T: Serialize + ?Sized>(field: &str, value: &T) -> Value {
+    serde_json::to_value(value).unwrap_or_else(|error| {
+        warn!(field, %error, "client evidence field could not be serialized");
+        json!({ "serialization_error": error.to_string() })
+    })
+}
+
 fn collect_window_snapshot(world: &mut World) -> Option<Value> {
     world
         .query_filtered::<&Window, With<PrimaryWindow>>()
@@ -346,13 +358,13 @@ fn collect_map_snapshot(world: &mut World) -> Option<Value> {
         .next()
         .map(|(snapshot, dynamic)| {
             json!({
-                "identity": snapshot.identity,
-                "mode_definition_id": snapshot.mode_definition_id,
-                "dimensions": snapshot.dimensions,
+                "identity": evidence_field("map.identity", &snapshot.identity),
+                "mode_definition_id": evidence_field("map.mode_definition_id", &snapshot.mode_definition_id),
+                "dimensions": evidence_field("map.dimensions", &snapshot.dimensions),
                 "placement_count": snapshot.placements.len(),
-                "dynamic_generation": dynamic.generation,
+                "dynamic_generation": evidence_field("map.dynamic_generation", &dynamic.generation),
                 "dynamic_revision": dynamic.revision,
-                "terminal_states": dynamic.terminal_states,
+                "terminal_states": evidence_field("map.terminal_states", &dynamic.terminal_states),
             })
         })
 }
@@ -360,10 +372,10 @@ fn collect_map_snapshot(world: &mut World) -> Option<Value> {
 fn collect_presented_map_snapshot(world: &World) -> Option<Value> {
     world.get_resource::<crate::map::PresentedMap>().map(|map| {
         json!({
-            "instance_id": map.instance_id,
-            "recipe_fingerprint": map.recipe_fingerprint,
-            "playable_bounds": map.playable_bounds,
-            "camera_bounds": map.camera_bounds,
+            "instance_id": evidence_field("presented_map.instance_id", &map.instance_id),
+            "recipe_fingerprint": evidence_field("presented_map.recipe_fingerprint", &map.recipe_fingerprint),
+            "playable_bounds": evidence_field("presented_map.playable_bounds", &map.playable_bounds),
+            "camera_bounds": evidence_field("presented_map.camera_bounds", &map.camera_bounds),
         })
     })
 }
@@ -383,20 +395,26 @@ fn collect_match_snapshot(world: &mut World) -> Option<Value> {
             json!({
                 "state": {
                     "match_id": state.match_id.to_string(),
-                    "mode_definition_id": state.mode_definition_id,
-                    "phase": state.phase,
+                    "mode_definition_id": evidence_field("match.mode_definition_id", &state.mode_definition_id),
+                    "phase": evidence_field("match.phase", &state.phase),
                     "rules_revision": state.rules_revision,
                 },
                 "clock": clock.map(|clock| json!({
                     "match_id": clock.match_id.to_string(),
                     "completed_tick": clock.completed_tick,
                 })),
-                "wipeout": wipeout,
+                "wipeout": wipeout.map(|wipeout| json!({
+                    "match_id": wipeout.match_id.map(|match_id| match_id.to_string()),
+                    "players": evidence_field("wipeout.players", &wipeout.players),
+                    "completed_result": evidence_field("wipeout.completed_result", &wipeout.completed_result),
+                    "team_scores": wipeout.team_scores,
+                    "target_score": wipeout.target_score,
+                })),
                 "hot_zone": hot_zone.map(|hot_zone| json!({
                     "match_id": hot_zone.match_id.to_string(),
-                    "zone_anchor_id": hot_zone.zone_anchor_id,
+                    "zone_anchor_id": evidence_field("hot_zone.zone_anchor_id", &hot_zone.zone_anchor_id),
                     "occupants": hot_zone.occupants,
-                    "status": hot_zone.status,
+                    "status": evidence_field("hot_zone.status", &hot_zone.status),
                     "progress_ticks": hot_zone.progress_ticks,
                     "target_progress_ticks": hot_zone.target_progress_ticks,
                     "next_evaluation_tick": hot_zone.next_evaluation_tick,
@@ -404,9 +422,9 @@ fn collect_match_snapshot(world: &mut World) -> Option<Value> {
                 "heist": heist.map(|heist| json!({
                     "match_id": heist.match_id.to_string(),
                     "rules_revision": heist.rules_revision,
-                    "generation": heist.generation,
-                    "safes": heist.safes,
-                    "completion": heist.completion,
+                    "generation": evidence_field("heist.generation", &heist.generation),
+                    "safes": evidence_field("heist.safes", &heist.safes),
+                    "completion": evidence_field("heist.completion", &heist.completion),
                 })),
             })
         })
@@ -504,11 +522,11 @@ fn collect_fighter_snapshots(world: &mut World) -> Vec<Value> {
                     "rotation_radians": rotation.as_radians(),
                     "team": team.map(|team| team.0),
                     "health": health.map(|health| health.0),
-                    "weapon": weapon,
-                    "loadout": loadout,
-                    "ability": ability,
-                    "effects": effects,
-                    "concealment": concealment,
+                    "weapon": evidence_field("fighter.weapon", &weapon),
+                    "loadout": evidence_field("fighter.loadout", &loadout),
+                    "ability": evidence_field("fighter.ability", &ability),
+                    "effects": evidence_field("fighter.effects", &effects),
+                    "concealment": evidence_field("fighter.concealment", &concealment),
                     "participant": participant.map(collect_match_participant),
                     "spawn_protection": spawn_protection,
                     "controlled": controlled,
@@ -540,11 +558,11 @@ fn collect_projectile_snapshots(world: &mut World) -> Vec<Value> {
                     "entity": entity.to_bits(),
                     "network_entity_id": network_id.map(|id| id.0),
                     "position": [position.x, position.y],
-                    "source": source,
-                    "body": body,
-                    "straight_flight": straight,
-                    "lobbed_flight": lobbed,
-                    "deadline": deadline,
+                    "source": evidence_field("projectile.source", &source),
+                    "body": evidence_field("projectile.body", &body),
+                    "straight_flight": evidence_field("projectile.straight_flight", &straight),
+                    "lobbed_flight": evidence_field("projectile.lobbed_flight", &lobbed),
+                    "deadline": evidence_field("projectile.deadline", &deadline),
                 })
             },
         )
@@ -570,7 +588,7 @@ fn collect_sentry_snapshots(world: &mut World) -> Vec<Value> {
                 "identity": collect_sentry_identity(identity),
                 "position": [position.x, position.y],
                 "health": health.map(|health| health.0),
-                "deadline": deadline,
+                "deadline": evidence_field("sentry.deadline", &deadline),
             })
         })
         .collect::<Vec<_>>();
@@ -594,7 +612,7 @@ fn collect_damageable_object_snapshots(world: &mut World) -> Vec<Value> {
                 "position": [position.x, position.y],
                 "health": health.0,
                 "maximum_health": maximum.0,
-                "life": life,
+                "life": evidence_field("damageable.life", &life),
             })
         })
         .collect::<Vec<_>>();
@@ -623,7 +641,7 @@ fn collect_objective_snapshots(world: &mut World) -> Vec<Value> {
                 "position": [position.x, position.y],
                 "health": health.0,
                 "maximum_health": maximum.0,
-                "life": life,
+                "life": evidence_field("damageable.life", &life),
             })
         })
         .collect::<Vec<_>>();
@@ -643,8 +661,8 @@ fn collect_pickup_snapshots(world: &mut World) -> Vec<Value> {
         .iter(world)
         .map(|(identity, definition, position, available, expires)| {
             json!({
-                "identity": identity,
-                "definition_id": definition,
+                "identity": evidence_field("pickup.identity", &identity),
+                "definition_id": evidence_field("pickup.definition_id", &definition),
                 "position": [position.x, position.y],
                 "available_at_tick": available.map(|tick| tick.0),
                 "expires_at_tick": expires.map(|tick| tick.0),
@@ -757,6 +775,10 @@ mod tests {
                 target_progress_ticks: 1_800,
                 next_evaluation_tick: 43,
             },
+            crate::matchplay::WipeoutState {
+                match_id: Some(match_id),
+                ..default()
+            },
             crate::matchplay::HeistState {
                 match_id,
                 rules_revision: 1,
@@ -773,6 +795,7 @@ mod tests {
         assert_eq!(snapshot["clock"]["match_id"], expected);
         assert_eq!(snapshot["hot_zone"]["match_id"], expected);
         assert_eq!(snapshot["heist"]["match_id"], expected);
+        assert_eq!(snapshot["wipeout"]["match_id"], expected);
 
         let participant = collect_match_participant(&MatchParticipant {
             match_id,
@@ -800,5 +823,32 @@ mod tests {
         assert_eq!(objective["HeistSafe"]["match_id"], expected);
 
         serde_json::to_vec_pretty(&snapshot).expect("wide-ID snapshot must serialize");
+    }
+
+    struct Unrepresentable;
+
+    impl Serialize for Unrepresentable {
+        fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom(
+                "injected evidence serialization failure",
+            ))
+        }
+    }
+
+    #[test]
+    fn unserializable_evidence_fields_degrade_instead_of_panicking() {
+        let wide = evidence_field("test.wide", &(u128::from(u64::MAX) + 1));
+        assert!(wide["serialization_error"].is_string());
+
+        let snapshot = json!({
+            "injected": evidence_field("test.injected", &Unrepresentable),
+            "kept": 7,
+        });
+        assert_eq!(
+            snapshot["injected"]["serialization_error"],
+            "injected evidence serialization failure"
+        );
+        assert_eq!(snapshot["kept"], 7);
+        serde_json::to_vec_pretty(&snapshot).expect("degraded snapshot must still serialize");
     }
 }

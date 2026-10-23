@@ -20,6 +20,8 @@ reduced_effects=${BRAWLER_RENDER_REDUCED_EFFECTS:-0}
 combat_smoke=${BRAWLER_RENDER_COMBAT:-0}
 client_one_log=${report_path}.client-1.log
 client_two_log=${report_path}.client-2.log
+# The measured client requests exactly this many paired frame/state captures.
+capture_count=3
 
 case "$game_mode" in
     wipeout | hot-zone | heist) ;;
@@ -174,7 +176,7 @@ if [[ "$practice_smoke" == 1 ]]; then
         --auto-connect --product-practice-smoke --product-game-type "$game_type" --move-axis 1,0 \
         --window-size "$window_size" \
         --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
-        --screenshot-count 3 \
+        --screenshot-count "$capture_count" \
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
         --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         ${measured_combat_flags:+$measured_combat_flags} \
@@ -184,7 +186,7 @@ else
         --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis 1,0 \
         --window-size "$window_size" \
         --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
-        --screenshot-count 3 \
+        --screenshot-count "$capture_count" \
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
         --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         ${measured_combat_flags:+$measured_combat_flags} \
@@ -222,11 +224,26 @@ done
 ) &
 watchdog_pid=$!
 
-wait "$measured_pid"
+measured_status=0
+wait "$measured_pid" || measured_status=$?
 measured_pid=
 kill "$watchdog_pid" 2>/dev/null || true
 wait "$watchdog_pid" 2>/dev/null || true
 watchdog_pid=
+
+if [[ "$measured_status" -ne 0 ]]; then
+    printf 'brawler render evidence: measured client exited with status %s; log=%s\n' \
+        "$measured_status" "$client_one_log" >&2
+    exit 1
+fi
+# A panic inside the macOS event loop can unwind out of winit without a non-zero exit status,
+# so the client log is the authoritative signal that a client crashed during the run.
+for client_log in "$client_one_log" "$client_two_log" "${report_path}".client-[0-9]*.log; do
+    if [[ -f "$client_log" ]] && grep -q 'panicked at' "$client_log"; then
+        printf 'brawler render evidence: client panicked; log=%s\n' "$client_log" >&2
+        exit 1
+    fi
+done
 
 completed_reports=("$report_path")
 if [[ "$practice_smoke" == 0 && "$validate_peer" == 1 ]]; then
@@ -241,6 +258,13 @@ for completed_report in "${completed_reports[@]}"; do
         exit 1
     fi
 done
+png_count=$({ find "$capture_dir" -maxdepth 1 -name 'brawler-*.png' -type f 2>/dev/null || true; } | wc -l | tr -d ' ')
+json_count=$({ find "$capture_dir" -maxdepth 1 -name 'brawler-*.json' -type f 2>/dev/null || true; } | wc -l | tr -d ' ')
+if [[ "$png_count" -ne "$capture_count" || "$json_count" -ne "$capture_count" ]]; then
+    printf 'brawler render evidence: expected %s PNG and JSON captures, found %s PNG and %s JSON in %s\n' \
+        "$capture_count" "$png_count" "$json_count" "$capture_dir" >&2
+    exit 1
+fi
 if [[ "$practice_smoke" == 1 ]]; then
     printf 'brawler render evidence: Practice %s passed; report=%s; captures=%s\n' \
         "$game_type" "$report_path" "$capture_dir"

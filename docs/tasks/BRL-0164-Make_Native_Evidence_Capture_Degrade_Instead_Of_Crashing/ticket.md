@@ -1,13 +1,13 @@
 ---
 id: BRL-0164
 title: Make native evidence capture degrade instead of crashing the client
-status: backlog
+status: done
 theme: quality
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-10-23T13:19:05Z
-closed:
-revision: e66453fbfe7cb33b
+modified: 2026-10-23T14:13:23Z
+closed: 2026-10-23T14:13:23Z
+revision: 1017cc3b9093561c
 blocks: []
 related: [BRL-0106, BRL-0115]
 ---
