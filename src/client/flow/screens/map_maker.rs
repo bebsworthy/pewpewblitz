@@ -12,8 +12,8 @@ use crate::{
         },
         map_maker::{MapDraftStorage, delete_map_draft, load_map_drafts, save_map_draft},
         ui::{
-            surface::{Surface, SurfaceState},
-            theme::{CREAM, INK, ORANGE, TEAL, font},
+            surface::{Surface, SurfaceState, SurfaceStyle},
+            theme::{CREAM, CYAN, INK, ORANGE, TEAL, font},
         },
     },
     map::{
@@ -43,13 +43,6 @@ enum EditorTool {
     Place,
     Erase,
     Select,
-}
-
-#[derive(Clone, Copy)]
-enum ToolGlyph {
-    Place,
-    Select,
-    Erase,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -2049,9 +2042,10 @@ pub(in crate::client::flow) fn present_map_editor(
                 session,
                 validation_error.as_deref(),
                 runtime.validation_open,
+                &asset_server,
             );
             editor_tool_rail(root, assets.as_deref(), &runtime, &asset_server);
-            editor_canvas_controls(root, assets.as_deref(), &runtime);
+            editor_canvas_controls(root, assets.as_deref(), &runtime, &asset_server);
             editor_selection_toolbar(
                 root,
                 assets.as_deref(),
@@ -2064,8 +2058,9 @@ pub(in crate::client::flow) fn present_map_editor(
                 assets.as_deref(),
                 &runtime,
                 validation_error.as_deref(),
+                &asset_server,
             );
-            editor_palette(root, assets.as_deref(), &runtime, &catalog.0);
+            editor_palette(root, assets.as_deref(), &runtime, &catalog.0, &asset_server);
             if let Some(status) = runtime.status.as_deref() {
                 root.spawn((
                     Node {
@@ -2074,7 +2069,7 @@ pub(in crate::client::flow) fn present_map_editor(
                         right: percent(25),
                         bottom: px(
                             if runtime.tool == EditorTool::Place && runtime.assets_open {
-                                272
+                                302
                             } else {
                                 34
                             },
@@ -2166,6 +2161,7 @@ fn editor_document_bar(
     session: &MapEditorSession,
     validation_error: Option<&str>,
     validation_open: bool,
+    asset_server: &AssetServer,
 ) {
     let recipe = &session.document.recipe;
     let ready_to_test = validation_error.is_none();
@@ -2181,6 +2177,7 @@ fn editor_document_bar(
             column_gap: px(10),
             padding: UiRect::axes(px(18), px(7)),
             border: UiRect::all(px(1)),
+            border_radius: BorderRadius::all(px(14)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.93)),
@@ -2199,21 +2196,42 @@ fn editor_document_bar(
                     font(assets, 19.0),
                     TextColor(CREAM),
                 ));
-                identity.spawn((
-                    Text::new(format!(
-                        "{} × {}  •  r{}  •  {}",
-                        recipe.dimensions.width,
-                        recipe.dimensions.height,
-                        recipe.revision,
-                        if session.dirty() { "UNSAVED" } else { "SAVED" }
-                    )),
-                    font(assets, 11.0),
-                    TextColor(if ready_to_test && !session.dirty() {
-                        TEAL
-                    } else {
-                        ORANGE
-                    }),
-                ));
+                identity
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(5),
+                        ..default()
+                    })
+                    .with_children(|status| {
+                        if !session.dirty() {
+                            status.spawn((
+                                ImageNode::new(
+                                    asset_server.load("brawler/ui/details/map-saved.png"),
+                                ),
+                                Node {
+                                    width: px(17),
+                                    height: px(17),
+                                    ..default()
+                                },
+                            ));
+                        }
+                        status.spawn((
+                            Text::new(format!(
+                                "{} × {}  •  r{}  •  {}",
+                                recipe.dimensions.width,
+                                recipe.dimensions.height,
+                                recipe.revision,
+                                if session.dirty() { "UNSAVED" } else { "SAVED" }
+                            )),
+                            font(assets, 11.0),
+                            TextColor(if ready_to_test && !session.dirty() {
+                                CYAN
+                            } else {
+                                ORANGE
+                            }),
+                        ));
+                    });
             });
         panel.spawn(Node {
             flex_grow: 1.0,
@@ -2250,25 +2268,31 @@ fn editor_document_bar(
             TEAL,
             false,
         );
-        compact_action_button_disabled(
+        compact_icon_action_button_disabled(
             panel,
             assets,
+            asset_server,
             22,
             FlowUiAction::TestAuthoredMap,
-            "▶  TEST MAP",
+            "TEST MAP",
+            "brawler/ui/details/map-play.png",
+            126.0,
             true,
             !ready_to_test,
         );
-        compact_action_button_disabled(
+        compact_icon_action_button_disabled(
             panel,
             assets,
+            asset_server,
             23,
             FlowUiAction::MapMakerToggleValidation,
+            if ready_to_test { "READY" } else { "1 ISSUE" },
             if ready_to_test {
-                "✓  READY"
+                "brawler/ui/details/map-saved.png"
             } else {
-                "⚠  1 ISSUE"
+                "brawler/ui/details/map-warning.png"
             },
+            112.0,
             validation_open,
             ready_to_test,
         );
@@ -2288,19 +2312,20 @@ fn editor_tool_rail(
     root: &mut ChildSpawnerCommands,
     assets: Option<&crate::client::ClientAssetHandles>,
     runtime: &MapMakerRuntime,
-    _asset_server: &AssetServer,
+    asset_server: &AssetServer,
 ) {
     root.spawn((
         Node {
             position_type: PositionType::Absolute,
             left: px(14),
             top: px(94),
-            width: px(102),
+            width: px(116),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            row_gap: px(8),
-            padding: UiRect::all(px(8)),
-            border: UiRect::all(px(1)),
+            row_gap: px(12),
+            padding: UiRect::all(px(10)),
+            border: UiRect::all(px(2)),
+            border_radius: BorderRadius::all(px(18)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.93)),
@@ -2313,7 +2338,7 @@ fn editor_tool_rail(
             30,
             FlowUiAction::MapMakerUsePlaceTool,
             "PLACE",
-            ToolGlyph::Place,
+            asset_server.load("brawler/ui/details/map-place.png"),
             runtime.tool == EditorTool::Place,
         );
         tool_button(
@@ -2322,7 +2347,7 @@ fn editor_tool_rail(
             32,
             FlowUiAction::MapMakerUseMoveTool,
             "SELECT",
-            ToolGlyph::Select,
+            asset_server.load("brawler/ui/details/map-select.png"),
             runtime.tool == EditorTool::Select,
         );
         tool_button(
@@ -2331,7 +2356,7 @@ fn editor_tool_rail(
             31,
             FlowUiAction::MapMakerUseEraseTool,
             "ERASE",
-            ToolGlyph::Erase,
+            asset_server.load("brawler/ui/details/map-erase.png"),
             runtime.tool == EditorTool::Erase,
         );
     });
@@ -2343,7 +2368,7 @@ fn tool_button(
     index: usize,
     action: FlowUiAction,
     label: &str,
-    glyph: ToolGlyph,
+    icon: Handle<Image>,
     selected: bool,
 ) {
     parent
@@ -2355,100 +2380,36 @@ fn tool_button(
                 error_action: false,
             },
             Node {
-                width: px(84),
-                height: px(82),
+                width: px(94),
+                height: px(104),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                row_gap: px(3),
+                row_gap: px(2),
                 ..default()
             },
             Surface::Card,
+            SurfaceStyle::MAP_TOOL,
             SurfaceState {
                 selected,
                 ..default()
             },
         ))
         .with_children(|button| {
-            spawn_tool_glyph(button, glyph);
+            button.spawn((
+                ImageNode::new(icon),
+                Node {
+                    width: px(46),
+                    height: px(46),
+                    ..default()
+                },
+            ));
             button.spawn((
                 Text::new(label),
-                font(assets, 13.0),
+                font(assets, 17.0),
                 TextColor(INK),
                 TextLayout::justify(Justify::Center),
             ));
-        });
-}
-
-fn spawn_tool_glyph(parent: &mut ChildSpawnerCommands, glyph: ToolGlyph) {
-    let (width, height, rotation, round) = match glyph {
-        ToolGlyph::Place => (25.0, 25.0, 0.78, 2.0),
-        ToolGlyph::Select => (28.0, 28.0, 0.0, 14.0),
-        ToolGlyph::Erase => (29.0, 16.0, -0.55, 3.0),
-    };
-    parent
-        .spawn((Node {
-            width: px(34),
-            height: px(34),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            ..default()
-        },))
-        .with_children(|host| {
-            host.spawn((
-                Node {
-                    width: px(width),
-                    height: px(height),
-                    position_type: PositionType::Relative,
-                    border: UiRect::all(px(3)),
-                    border_radius: BorderRadius::all(px(round)),
-                    ..default()
-                },
-                BorderColor::all(INK),
-                UiTransform::from_rotation(Rot2::radians(rotation)),
-            ))
-            .with_children(|shape| match glyph {
-                ToolGlyph::Place => {
-                    shape.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: px(9),
-                            top: px(0),
-                            width: px(3),
-                            height: px(22),
-                            ..default()
-                        },
-                        BackgroundColor(INK),
-                    ));
-                }
-                ToolGlyph::Select => {
-                    shape.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: px(9),
-                            top: px(9),
-                            width: px(4),
-                            height: px(4),
-                            border_radius: BorderRadius::MAX,
-                            ..default()
-                        },
-                        BackgroundColor(INK),
-                    ));
-                }
-                ToolGlyph::Erase => {
-                    shape.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: px(10),
-                            top: px(0),
-                            width: px(3),
-                            height: px(13),
-                            ..default()
-                        },
-                        BackgroundColor(INK),
-                    ));
-                }
-            });
         });
 }
 
@@ -2456,6 +2417,7 @@ fn editor_canvas_controls(
     root: &mut ChildSpawnerCommands,
     assets: Option<&crate::client::ClientAssetHandles>,
     runtime: &MapMakerRuntime,
+    asset_server: &AssetServer,
 ) {
     let symmetry = runtime
         .session
@@ -2470,42 +2432,52 @@ fn editor_canvas_controls(
             align_items: AlignItems::Center,
             column_gap: px(5),
             padding: UiRect::all(px(5)),
-            border: UiRect::all(px(1)),
+            border: UiRect::all(px(2)),
+            border_radius: BorderRadius::all(px(14)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.92)),
         BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
     ))
     .with_children(|panel| {
-        compact_action_button(
+        compact_icon_action_button_disabled(
             panel,
             assets,
+            asset_server,
             10,
             FlowUiAction::MapMakerToggleGrid,
             if runtime.grid_visible {
-                "▦  GRID\nON"
+                "GRID\nON"
             } else {
-                "▦  GRID\nOFF"
+                "GRID\nOFF"
             },
-            TEAL,
+            "brawler/ui/details/map-grid.png",
+            96.0,
             runtime.grid_visible,
-        );
-        compact_action_button(
-            panel,
-            assets,
-            4,
-            FlowUiAction::MapMakerCycleSymmetry,
-            &format!("◀▶  SYMMETRY\n{}", symmetry_label(symmetry)),
-            TEAL,
             false,
         );
-        compact_action_button(
+        compact_icon_action_button_disabled(
             panel,
             assets,
+            asset_server,
+            4,
+            FlowUiAction::MapMakerCycleSymmetry,
+            &format!("SYMMETRY\n{}", symmetry_label(symmetry)),
+            "brawler/ui/details/map-symmetry.png",
+            146.0,
+            false,
+            false,
+        );
+        compact_icon_action_button_disabled(
+            panel,
+            assets,
+            asset_server,
             11,
             FlowUiAction::MapMakerFitView,
-            "⌗  FIT",
-            TEAL,
+            "FIT",
+            "brawler/ui/details/map-fit.png",
+            78.0,
+            false,
             false,
         );
     });
@@ -2513,7 +2485,7 @@ fn editor_canvas_controls(
 
 fn editor_selection_toolbar(
     root: &mut ChildSpawnerCommands,
-    assets: Option<&crate::client::ClientAssetHandles>,
+    _assets: Option<&crate::client::ClientAssetHandles>,
     runtime: &MapMakerRuntime,
     asset_server: &AssetServer,
     position: Option<Vec2>,
@@ -2530,7 +2502,8 @@ fn editor_selection_toolbar(
             flex_direction: FlexDirection::Row,
             column_gap: px(5),
             padding: UiRect::all(px(5)),
-            border: UiRect::all(px(1)),
+            border: UiRect::all(px(2)),
+            border_radius: BorderRadius::all(px(10)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.94)),
@@ -2541,10 +2514,16 @@ fn editor_selection_toolbar(
             panel,
             40,
             FlowUiAction::MapMakerRotate,
-            asset_server.load("brawler/ui/details/cycle.png"),
+            asset_server.load("brawler/ui/details/map-rotate.png"),
             false,
         );
-        duplicate_icon_button(panel, assets, 41);
+        icon_image_button(
+            panel,
+            41,
+            FlowUiAction::MapMakerDuplicateSelection,
+            asset_server.load("brawler/ui/details/map-duplicate.png"),
+            false,
+        );
         icon_image_button(
             panel,
             42,
@@ -2552,12 +2531,11 @@ fn editor_selection_toolbar(
             asset_server.load("brawler/ui/details/trash.png"),
             true,
         );
-        icon_text_button(
+        icon_image_button(
             panel,
-            assets,
             43,
             FlowUiAction::MapMakerClearSelection,
-            "×",
+            asset_server.load("brawler/ui/details/map-close.png"),
             false,
         );
     });
@@ -2572,7 +2550,10 @@ fn icon_image_button(
 ) {
     let label = match &action {
         FlowUiAction::MapMakerRotate => "Rotate selection 90 degrees",
+        FlowUiAction::MapMakerDuplicateSelection => "Duplicate selection",
         FlowUiAction::MapMakerDeleteSelection => "Delete selection",
+        FlowUiAction::MapMakerClearSelection => "Clear selection",
+        FlowUiAction::MapMakerClearSearch => "Clear asset search",
         _ => "Selection action",
     };
     parent
@@ -2585,8 +2566,8 @@ fn icon_image_button(
                 error_action: false,
             },
             Node {
-                width: px(46),
-                height: px(42),
+                width: px(50),
+                height: px(46),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
@@ -2596,10 +2577,14 @@ fn icon_image_button(
             } else {
                 Surface::Action
             },
+            SurfaceStyle::MAP_ACTION,
             SurfaceState::default(),
         ))
         .with_child((
-            ImageNode::new(icon),
+            ImageNode {
+                color: if danger { CREAM } else { INK },
+                ..ImageNode::new(icon)
+            },
             Node {
                 width: px(25),
                 height: px(25),
@@ -2608,95 +2593,12 @@ fn icon_image_button(
         ));
 }
 
-fn duplicate_icon_button(
-    parent: &mut ChildSpawnerCommands,
-    _assets: Option<&crate::client::ClientAssetHandles>,
-    index: usize,
-) {
-    parent
-        .spawn((
-            Button,
-            AccessibleLabel::new("Duplicate selection"),
-            FlowButton {
-                index,
-                action: FlowUiAction::MapMakerDuplicateSelection,
-                error_action: false,
-            },
-            Node {
-                width: px(46),
-                height: px(42),
-                position_type: PositionType::Relative,
-                ..default()
-            },
-            Surface::Action,
-            SurfaceState::default(),
-        ))
-        .with_children(|button| {
-            for (left, top) in [(11.0, 8.0), (17.0, 14.0)] {
-                button.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: px(left),
-                        top: px(top),
-                        width: px(18),
-                        height: px(18),
-                        border: UiRect::all(px(2)),
-                        ..default()
-                    },
-                    BorderColor::all(INK),
-                ));
-            }
-        });
-}
-
-fn icon_text_button(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::client::ClientAssetHandles>,
-    index: usize,
-    action: FlowUiAction,
-    glyph: &str,
-    danger: bool,
-) {
-    parent
-        .spawn((
-            Button,
-            AccessibleLabel::new(match &action {
-                FlowUiAction::MapMakerClearSelection => "Clear selection",
-                FlowUiAction::MapMakerClearSearch => "Clear asset search",
-                _ => "Selection action",
-            }),
-            FlowButton {
-                index,
-                action,
-                error_action: false,
-            },
-            Node {
-                width: px(46),
-                height: px(42),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            if danger {
-                Surface::Danger
-            } else {
-                Surface::Action
-            },
-            SurfaceState::default(),
-        ))
-        .with_child((
-            Text::new(glyph),
-            font(assets, 27.0),
-            TextColor(INK),
-            TextLayout::justify(Justify::Center),
-        ));
-}
-
 fn editor_validation_popover(
     root: &mut ChildSpawnerCommands,
     assets: Option<&crate::client::ClientAssetHandles>,
     runtime: &MapMakerRuntime,
     validation_error: Option<&str>,
+    asset_server: &AssetServer,
 ) {
     let Some(error) = validation_popover_error(runtime, validation_error) else {
         return;
@@ -2710,27 +2612,64 @@ fn editor_validation_popover(
             flex_direction: FlexDirection::Column,
             row_gap: px(7),
             padding: UiRect::all(px(14)),
-            border: UiRect::all(px(1)),
+            border: UiRect::all(px(2)),
+            border_radius: BorderRadius::all(px(14)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.97)),
         BorderColor::all(ORANGE),
     ))
     .with_children(|panel| {
-        panel.spawn((
-            Text::new("MAP CHECK"),
-            font(assets, 17.0),
-            TextColor(ORANGE),
-        ));
-        panel.spawn((
-            Text::new(error),
-            font(assets, 12.0),
-            TextColor(CREAM),
-            Node {
-                max_width: px(282),
+        panel
+            .spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(8),
                 ..default()
-            },
-        ));
+            })
+            .with_children(|title| {
+                title.spawn((
+                    ImageNode::new(asset_server.load("brawler/ui/details/map-warning.png")),
+                    Node {
+                        width: px(23),
+                        height: px(23),
+                        ..default()
+                    },
+                ));
+                title.spawn((
+                    Text::new("MAP CHECK  •  1 ISSUE"),
+                    font(assets, 17.0),
+                    TextColor(ORANGE),
+                ));
+            });
+        panel
+            .spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::FlexStart,
+                column_gap: px(9),
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        width: px(18),
+                        height: px(18),
+                        flex_shrink: 0.0,
+                        border: UiRect::all(px(2)),
+                        ..default()
+                    },
+                    BorderColor::all(CREAM),
+                ));
+                row.spawn((
+                    Text::new(error),
+                    font(assets, 12.0),
+                    TextColor(CREAM),
+                    Node {
+                        max_width: px(250),
+                        ..default()
+                    },
+                ));
+            });
     });
 }
 
@@ -2753,6 +2692,7 @@ fn editor_palette(
     assets: Option<&crate::client::ClientAssetHandles>,
     runtime: &MapMakerRuntime,
     catalog: &crate::map::MapContentCatalog,
+    asset_server: &AssetServer,
 ) {
     let Some(session) = runtime.session.as_ref() else {
         return;
@@ -2769,16 +2709,31 @@ fn editor_palette(
                 position_type: PositionType::Absolute,
                 left: px(14),
                 bottom: px(8),
-                width: px(164),
-                height: px(54),
+                width: px(184),
+                height: px(58),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            Surface::Panel,
+            Surface::Dark,
+            SurfaceStyle::MAP_ACTION,
             SurfaceState::default(),
         ))
-        .with_child((Text::new("ASSETS  ^"), font(assets, 18.0), TextColor(INK)));
+        .with_children(|button| {
+            button.spawn((Text::new("ASSETS"), font(assets, 20.0), TextColor(CREAM)));
+            button.spawn((
+                ImageNode {
+                    color: CREAM,
+                    ..ImageNode::new(asset_server.load("brawler/ui/details/map-chevron-up.png"))
+                },
+                Node {
+                    width: px(20),
+                    height: px(20),
+                    margin: UiRect::left(px(10)),
+                    ..default()
+                },
+            ));
+        });
         root.spawn((
             Text::new(match runtime.tool {
                 EditorTool::Select => {
@@ -2818,11 +2773,12 @@ fn editor_palette(
             left: px(14),
             right: px(14),
             bottom: px(8),
-            height: px(252),
+            height: px(282),
             flex_direction: FlexDirection::Column,
             row_gap: px(8),
             padding: UiRect::axes(px(12), px(9)),
-            border: UiRect::all(px(1)),
+            border: UiRect::all(px(2)),
+            border_radius: BorderRadius::all(px(18)),
             overflow: Overflow::clip(),
             ..default()
         },
@@ -2847,16 +2803,33 @@ fn editor_palette(
                         error_action: false,
                     },
                     Node {
-                        width: px(150),
+                        width: px(164),
                         height: px(42),
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    Surface::Panel,
+                    Surface::Dark,
+                    SurfaceStyle::MAP_ACTION,
                     SurfaceState::default(),
                 ))
-                .with_child((Text::new("ASSETS  v"), font(assets, 17.0), TextColor(INK)));
+                .with_children(|button| {
+                    button.spawn((Text::new("ASSETS"), font(assets, 18.0), TextColor(CREAM)));
+                    button.spawn((
+                        ImageNode {
+                            color: CREAM,
+                            ..ImageNode::new(
+                                asset_server.load("brawler/ui/details/map-chevron-down.png"),
+                            )
+                        },
+                        Node {
+                            width: px(18),
+                            height: px(18),
+                            margin: UiRect::left(px(8)),
+                            ..default()
+                        },
+                    ));
+                });
             for (index, category) in PaletteCategory::ALL.into_iter().enumerate() {
                 palette_category_button(
                     header,
@@ -2891,18 +2864,18 @@ fn editor_palette(
             search_button(
                 header,
                 assets,
+                asset_server,
                 56,
                 FlowUiAction::MapMakerToggleSearch,
                 &search,
                 runtime.palette_search_active,
             );
             if !runtime.palette_query.is_empty() {
-                icon_text_button(
+                icon_image_button(
                     header,
-                    assets,
                     57,
                     FlowUiAction::MapMakerClearSearch,
-                    "×",
+                    asset_server.load("brawler/ui/details/map-close.png"),
                     false,
                 );
             }
@@ -2919,6 +2892,7 @@ fn editor_palette(
             palette_arrow_button(
                 items,
                 assets,
+                asset_server,
                 1,
                 FlowUiAction::MapMakerCycleAsset(-PALETTE_PAGE_DELTA),
                 "‹",
@@ -2960,6 +2934,7 @@ fn editor_palette(
             palette_arrow_button(
                 items,
                 assets,
+                asset_server,
                 2,
                 FlowUiAction::MapMakerCycleAsset(PALETTE_PAGE_DELTA),
                 "›",
@@ -3001,6 +2976,7 @@ fn palette_window(selected_position: usize, entry_count: usize) -> (usize, usize
 fn search_button(
     parent: &mut ChildSpawnerCommands,
     assets: Option<&crate::client::ClientAssetHandles>,
+    asset_server: &AssetServer,
     index: usize,
     action: FlowUiAction,
     label: &str,
@@ -3015,7 +2991,7 @@ fn search_button(
                 error_action: false,
             },
             Node {
-                width: px(250),
+                width: px(286),
                 height: px(40),
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
@@ -3023,54 +2999,33 @@ fn search_button(
                 padding: UiRect::axes(px(14), px(6)),
                 ..default()
             },
-            Surface::Field,
+            Surface::Dark,
+            SurfaceStyle::MAP_ASSET,
             SurfaceState {
                 selected,
                 ..default()
             },
         ))
         .with_children(|button| {
-            button
-                .spawn(Node {
-                    width: px(22),
-                    height: px(22),
-                    position_type: PositionType::Relative,
+            button.spawn((
+                ImageNode {
+                    color: CREAM,
+                    ..ImageNode::new(asset_server.load("brawler/ui/details/map-search.png"))
+                },
+                Node {
+                    width: px(24),
+                    height: px(24),
                     ..default()
-                })
-                .with_children(|icon| {
-                    icon.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: px(1),
-                            top: px(1),
-                            width: px(14),
-                            height: px(14),
-                            border: UiRect::all(px(3)),
-                            border_radius: BorderRadius::MAX,
-                            ..default()
-                        },
-                        BorderColor::all(INK),
-                    ));
-                    icon.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: px(14),
-                            top: px(15),
-                            width: px(10),
-                            height: px(3),
-                            ..default()
-                        },
-                        BackgroundColor(INK),
-                        UiTransform::from_rotation(Rot2::radians(0.75)),
-                    ));
-                });
-            button.spawn((Text::new(label), font(assets, 13.0), TextColor(INK)));
+                },
+            ));
+            button.spawn((Text::new(label), font(assets, 13.0), TextColor(CREAM)));
         });
 }
 
 fn palette_arrow_button(
     parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::client::ClientAssetHandles>,
+    _assets: Option<&crate::client::ClientAssetHandles>,
+    asset_server: &AssetServer,
     index: usize,
     action: FlowUiAction,
     glyph: &str,
@@ -3090,8 +3045,10 @@ fn palette_arrow_button(
             justify_content: JustifyContent::Center,
             ..default()
         },
-        Surface::Action,
+        Surface::Dark,
+        SurfaceStyle::MAP_ACTION,
         SurfaceState {
+            selected: !disabled,
             disabled,
             ..default()
         },
@@ -3099,7 +3056,26 @@ fn palette_arrow_button(
     if disabled {
         button.insert(InteractionDisabled);
     }
-    button.with_child((Text::new(glyph), font(assets, 30.0), TextColor(INK)));
+    button.with_child((
+        ImageNode {
+            color: if disabled {
+                Color::srgba(0.50, 0.63, 0.64, 0.55)
+            } else {
+                INK
+            },
+            ..ImageNode::new(asset_server.load("brawler/ui/details/map-chevron-down.png"))
+        },
+        Node {
+            width: px(28),
+            height: px(28),
+            ..default()
+        },
+        UiTransform::from_rotation(Rot2::radians(if glyph == "‹" {
+            core::f32::consts::FRAC_PI_2
+        } else {
+            -core::f32::consts::FRAC_PI_2
+        })),
+    ));
 }
 
 fn palette_category_button(
@@ -3119,14 +3095,15 @@ fn palette_category_button(
                 error_action: false,
             },
             Node {
-                width: px(108),
+                width: px(if label == "SPAWNS + GOALS" { 152 } else { 112 }),
                 height: px(40),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 padding: UiRect::axes(px(6), px(5)),
                 ..default()
             },
-            Surface::Card,
+            Surface::Dark,
+            SurfaceStyle::MAP_TAB,
             SurfaceState {
                 selected,
                 ..default()
@@ -3136,7 +3113,7 @@ fn palette_category_button(
             Text::new(label),
             font(assets, 10.0),
             TextLayout::justify(Justify::Center),
-            TextColor(INK),
+            TextColor(if selected { INK } else { CREAM }),
         ));
 }
 
@@ -3159,8 +3136,8 @@ fn palette_item_button(
                 error_action: false,
             },
             Node {
-                width: px(166),
-                height: px(150),
+                width: px(180),
+                height: px(174),
                 position_type: PositionType::Relative,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
@@ -3169,7 +3146,8 @@ fn palette_item_button(
                 row_gap: px(3),
                 ..default()
             },
-            Surface::Card,
+            Surface::Dark,
+            SurfaceStyle::MAP_ASSET,
             SurfaceState {
                 selected,
                 ..default()
@@ -3189,64 +3167,60 @@ fn palette_item_button(
                     },
                     BorderColor::all(Color::srgb(0.02, 0.94, 0.90)),
                 ));
-                button
-                    .spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            right: px(7),
-                            top: px(7),
-                            width: px(30),
-                            height: px(30),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            border: UiRect::all(px(2)),
-                            border_radius: BorderRadius::MAX,
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.05, 0.92, 0.84)),
-                        BorderColor::all(INK),
-                    ))
-                    .with_children(|badge| {
-                        badge.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: px(7),
-                                top: px(15),
-                                width: px(9),
-                                height: px(3),
-                                ..default()
-                            },
-                            BackgroundColor(INK),
-                            UiTransform::from_rotation(Rot2::radians(0.72)),
-                        ));
-                        badge.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: px(12),
-                                top: px(12),
-                                width: px(13),
-                                height: px(3),
-                                ..default()
-                            },
-                            BackgroundColor(INK),
-                            UiTransform::from_rotation(Rot2::radians(-0.78)),
-                        ));
-                    });
+                palette_selection_badge(button);
             }
             button.spawn((
                 preview,
                 Node {
-                    width: px(154),
-                    height: px(106),
+                    width: px(168),
+                    height: px(124),
                     ..default()
                 },
+                BackgroundColor(Color::srgb(0.08, 0.20, 0.22)),
             ));
             button.spawn((
                 Text::new(label.replace('\n', " · ")),
                 font(assets, 11.0),
                 TextLayout::justify(Justify::Center),
-                TextColor(INK),
+                TextColor(CREAM),
             ));
+        });
+}
+
+fn palette_selection_badge(button: &mut ChildSpawnerCommands) {
+    button
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: px(7),
+                top: px(7),
+                width: px(30),
+                height: px(30),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(px(2)),
+                border_radius: BorderRadius::MAX,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.05, 0.92, 0.84)),
+            BorderColor::all(INK),
+            ZIndex(4),
+        ))
+        .with_children(|badge| {
+            for (left, top, width, angle) in [(7, 15, 9, 0.72), (12, 12, 13, -0.78)] {
+                badge.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(left),
+                        top: px(top),
+                        width: px(width),
+                        height: px(3),
+                        ..default()
+                    },
+                    BackgroundColor(INK),
+                    UiTransform::from_rotation(Rot2::radians(angle)),
+                ));
+            }
         });
 }
 
@@ -3278,6 +3252,88 @@ fn compact_action_button(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn compact_icon_action_button_disabled(
+    parent: &mut ChildSpawnerCommands,
+    assets: Option<&crate::client::ClientAssetHandles>,
+    asset_server: &AssetServer,
+    index: usize,
+    action: FlowUiAction,
+    label: &str,
+    icon_path: &'static str,
+    min_width: f32,
+    selected: bool,
+    disabled: bool,
+) {
+    let role = if matches!(
+        action,
+        FlowUiAction::MapMakerToggleGrid
+            | FlowUiAction::MapMakerCycleSymmetry
+            | FlowUiAction::MapMakerFitView
+    ) {
+        Surface::Dark
+    } else {
+        surface_role(&action)
+    };
+    let content_color = if role == Surface::Dark && !selected {
+        CREAM
+    } else {
+        INK
+    };
+    let mut button = parent.spawn((
+        Button,
+        FlowButton {
+            index,
+            action,
+            error_action: false,
+        },
+        Node {
+            min_width: px(min_width),
+            min_height: px(50),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            column_gap: px(7),
+            padding: UiRect::axes(px(10), px(6)),
+            ..default()
+        },
+        role,
+        SurfaceStyle::MAP_ACTION,
+        SurfaceState {
+            selected,
+            disabled,
+            ..default()
+        },
+    ));
+    if disabled {
+        button.insert(InteractionDisabled);
+    }
+    button.with_children(|button| {
+        button.spawn((
+            ImageNode {
+                color: if role == Surface::Dark {
+                    content_color
+                } else {
+                    Color::WHITE
+                },
+                ..ImageNode::new(asset_server.load(icon_path))
+            },
+            Node {
+                width: px(23),
+                height: px(23),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ));
+        button.spawn((
+            Text::new(label),
+            font(assets, 12.0),
+            TextLayout::justify(Justify::Center),
+            TextColor(content_color),
+        ));
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
 fn compact_action_button_disabled(
     parent: &mut ChildSpawnerCommands,
     assets: Option<&crate::client::ClientAssetHandles>,
@@ -3304,6 +3360,7 @@ fn compact_action_button_disabled(
             ..default()
         },
         role,
+        SurfaceStyle::MAP_ACTION,
         SurfaceState {
             selected,
             disabled,

@@ -165,8 +165,8 @@ pub(super) fn reconcile_map_editor_overlay(
                 ..default()
             }),
             place: standard_materials.add(StandardMaterial {
-                base_color: Color::srgba(1.0, 0.42, 0.04, 0.34),
-                emissive: LinearRgba::new(1.4, 0.28, 0.01, 1.0),
+                base_color: Color::srgba(0.02, 0.92, 0.86, 0.42),
+                emissive: LinearRgba::new(0.01, 1.65, 1.45, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
@@ -308,6 +308,23 @@ fn spawn_pointer_marker(
                 MapEditorPointerMode::Erase => "Map Maker erase target",
             }),
         ));
+    }
+    if preview.pointer_mode == MapEditorPointerMode::Place {
+        for scale in [Vec3::new(24.0, 1.0, 4.5), Vec3::new(4.5, 1.0, 24.0)] {
+            commands.spawn((
+                MapEditorOverlay,
+                MapEditorCursor,
+                Mesh3d(primitives.unit_cuboid.clone()),
+                MeshMaterial3d(material.clone()),
+                NotShadowCaster,
+                Transform {
+                    translation: center + Vec3::Y * 1.9,
+                    scale,
+                    ..default()
+                },
+                Name::new("Map Maker placement cursor plus"),
+            ));
+        }
     }
 }
 
@@ -593,7 +610,7 @@ fn spawn_selection_group(
         },
         Name::new("Map Maker selection group fill"),
     ));
-    spawn_outline(
+    spawn_dashed_outline(
         commands,
         primitives,
         &materials.move_selection,
@@ -622,7 +639,19 @@ fn spawn_selection_group(
             Name::new("Map Maker selection corner handle"),
         ));
     }
-    for scale in [Vec3::new(28.0, 1.4, 5.0), Vec3::new(5.0, 1.4, 28.0)] {
+    commands.spawn((
+        MapEditorOverlay,
+        Mesh3d(primitives.ground_ring.clone()),
+        MeshMaterial3d(materials.move_selection.clone()),
+        NotShadowCaster,
+        Transform {
+            translation: ground_position(center) + Vec3::Y * 3.45,
+            rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
+            scale: Vec3::splat(1.25),
+        },
+        Name::new("Map Maker selection move handle ring"),
+    ));
+    for scale in [Vec3::new(31.0, 1.4, 5.0), Vec3::new(5.0, 1.4, 31.0)] {
         commands.spawn((
             MapEditorOverlay,
             Mesh3d(primitives.unit_cuboid.clone()),
@@ -650,7 +679,7 @@ fn spawn_marquee(
     let max = crate::map::MapCell::new(first.x.max(second.x), first.y.max(second.y));
     let a = preview.snapshot.dimensions.cell_center(min);
     let b = preview.snapshot.dimensions.cell_center(max);
-    spawn_outline(
+    spawn_dashed_outline(
         commands,
         primitives,
         &materials.move_selection,
@@ -662,6 +691,54 @@ fn spawn_marquee(
         2.2,
         "Map Maker box selection",
     );
+}
+
+fn spawn_dashed_outline(
+    commands: &mut Commands,
+    primitives: &Primitive3dAssets,
+    material: &Handle<StandardMaterial>,
+    center: Vec2,
+    size: Vec2,
+    height: f32,
+    name: &'static str,
+) {
+    let half = size * 0.5;
+    for (axis, fixed, length) in [
+        (Vec2::X, Vec2::new(0.0, half.y), size.x),
+        (Vec2::X, Vec2::new(0.0, -half.y), size.x),
+        (Vec2::Y, Vec2::new(half.x, 0.0), size.y),
+        (Vec2::Y, Vec2::new(-half.x, 0.0), size.y),
+    ] {
+        let dash: f32 = 13.0;
+        let gap: f32 = 8.0;
+        let mut start = -length * 0.5;
+        while start < length * 0.5 {
+            let segment = dash.min(length * 0.5 - start).max(0.0);
+            if segment <= 0.0 {
+                break;
+            }
+            let along = start + segment * 0.5;
+            let offset = fixed + axis * along;
+            let scale = if axis == Vec2::X {
+                Vec2::new(segment, 3.4)
+            } else {
+                Vec2::new(3.4, segment)
+            };
+            commands.spawn((
+                MapEditorOverlay,
+                Mesh3d(primitives.unit_cuboid.clone()),
+                MeshMaterial3d(material.clone()),
+                NotShadowCaster,
+                Transform {
+                    translation: ground_position(center + offset) + Vec3::Y * height,
+                    scale: Vec3::new(scale.x, 0.9, scale.y),
+                    ..default()
+                },
+                Name::new(name),
+            ));
+            start += dash + gap;
+        }
+    }
 }
 
 fn spawn_outline(

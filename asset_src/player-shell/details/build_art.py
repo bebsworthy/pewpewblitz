@@ -32,6 +32,52 @@ for name in ['chevron','back','edit','trash','empty']:
    line(d,[(7,x),(7,min(x+10,84))],TEAL,3);line(d,[(89,x),(89,min(x+10,84))],TEAL,3)
   line(d,[(30,48),(66,48)],'#7b9198',7);line(d,[(48,30),(48,66)],'#7b9198',7)
  save(im,name)
+# Map Maker uses small transparent pictograms so its compact controls never
+# depend on font glyph coverage or reuse a semantically adjacent shell icon.
+for name in ['map-place','map-select','map-erase','map-grid','map-symmetry','map-fit','map-search','map-rotate','map-duplicate','map-close','map-play','map-saved','map-warning','map-chevron-up','map-chevron-down']:
+ im,d=canvas(96,96)
+ if name=='map-place':
+  poly(d,[(48,10),(82,29),(48,49),(14,29)],INK)
+  poly(d,[(14,34),(44,52),(44,88),(14,69)],'#738087')
+  poly(d,[(52,52),(82,34),(82,69),(52,88)],INK)
+  line(d,[(48,10),(82,29),(48,49),(14,29),(48,10),(48,49)],CREAM,3)
+  line(d,[(14,34),(44,52),(44,88),(14,69),(14,34)],INK,4)
+  line(d,[(52,52),(82,34),(82,69),(52,88),(52,52)],INK,4)
+ elif name=='map-select':
+  poly(d,[(20,9),(76,56),(49,60),(64,84),(51,91),(37,65),(19,84)],INK)
+ elif name=='map-erase':
+  poly(d,[(17,61),(57,21),(83,47),(43,87)],INK)
+  poly(d,[(25,60),(58,29),(74,46),(42,78)],'#7d8990')
+  line(d,[(40,44),(59,63)],CREAM,5)
+ elif name=='map-grid':
+  for x in [11,39,67]:
+   for y in [11,39,67]: poly(d,[(x,y),(x+18,y),(x+18,y+18),(x,y+18)],CREAM)
+ elif name=='map-symmetry':
+  line(d,[(48,8),(48,88)],CREAM,5)
+  poly(d,[(42,18),(12,47),(42,76)],CREAM); poly(d,[(54,18),(84,47),(54,76)],CREAM)
+  line(d,[(24,47),(42,47)],INK,4); line(d,[(54,47),(72,47)],INK,4)
+ elif name=='map-fit':
+  for p in [[(35,12),(13,12),(13,34)],[(61,12),(83,12),(83,34)],[(13,62),(13,84),(35,84)],[(83,62),(83,84),(61,84)]]: line(d,p,CREAM,7)
+ elif name=='map-search':
+  d.ellipse((14*S,14*S,64*S,64*S),outline=CREAM,width=7*S); line(d,[(57,58),(84,85)],CREAM,8)
+ elif name=='map-rotate':
+  d.arc((15*S,15*S,81*S,81*S),35,315,fill=CREAM,width=8*S); poly(d,[(70,8),(89,39),(53,34)],CREAM)
+ elif name=='map-duplicate':
+  d.rounded_rectangle((13*S,26*S,61*S,77*S),radius=5*S,outline=CREAM,width=6*S)
+  d.rounded_rectangle((34*S,12*S,83*S,64*S),radius=5*S,outline=CREAM,width=6*S)
+ elif name=='map-close':
+  line(d,[(20,20),(76,76)],CREAM,10); line(d,[(76,20),(20,76)],CREAM,10)
+ elif name=='map-play':
+  poly(d,[(25,14),(82,48),(25,82)],INK)
+ elif name=='map-saved':
+  ellipse(d,(8,8,88,88),CYAN); line(d,[(25,49),(42,66),(72,31)],INK,8)
+ elif name=='map-warning':
+  poly(d,[(48,7),(92,86),(4,86)],ORANGE); line(d,[(48,29),(48,61)],INK,8); ellipse(d,(43,69,53,79),INK)
+ elif name in ['map-chevron-up','map-chevron-down']:
+  points=[(17,62),(48,31),(79,62)]
+  if name=='map-chevron-down': points=[(x,96-y) for x,y in points]
+  line(d,points,CREAM,10)
+ save(im,name)
 # All current semantic ability families; icons identify mechanics, names remain catalog owned.
 names=['dash','sentry','cloak','scan','field','blast','cold','fire','poison','heal','blob','feather','shield','pulse','target','cycle']
 for name in names:

@@ -1,5 +1,5 @@
 //! Shared shell chrome. Owners supply semantic role and state; geometry stays here.
-use super::theme::{CREAM, INK, ORANGE, TEAL};
+use super::theme::{CREAM, CYAN, INK, ORANGE, TEAL};
 use bevy::{
     prelude::*,
     reflect::TypePath,
@@ -25,6 +25,7 @@ pub(crate) enum Surface {
     Panel,
     Row,
     Field,
+    Dark,
     Quiet,
     Danger,
 }
@@ -39,6 +40,49 @@ pub(crate) struct SurfaceState {
     pub inactive: bool,
     pub disabled: bool,
 }
+
+/// Optional per-component geometry for player-shell surfaces whose approved
+/// silhouette differs from the shared default. Colors and interaction remain
+/// owned by `Surface` and `SurfaceState`.
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct SurfaceStyle {
+    slope: f32,
+    border_width: f32,
+    cut: f32,
+    shadow_x: f32,
+    shadow_y: f32,
+}
+
+impl SurfaceStyle {
+    pub(crate) const MAP_TOOL: Self = Self {
+        slope: 0.07,
+        border_width: 5.0,
+        cut: 9.0,
+        shadow_x: 6.0,
+        shadow_y: 8.0,
+    };
+    pub(crate) const MAP_ACTION: Self = Self {
+        slope: 0.11,
+        border_width: 4.0,
+        cut: 7.0,
+        shadow_x: 5.0,
+        shadow_y: 6.0,
+    };
+    pub(crate) const MAP_ASSET: Self = Self {
+        slope: 0.025,
+        border_width: 3.0,
+        cut: 7.0,
+        shadow_x: 4.0,
+        shadow_y: 5.0,
+    };
+    pub(crate) const MAP_TAB: Self = Self {
+        slope: 0.045,
+        border_width: 3.0,
+        cut: 6.0,
+        shadow_x: 3.0,
+        shadow_y: 4.0,
+    };
+}
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub(crate) struct SurfaceMaterial {
     #[uniform(0)]
@@ -51,6 +95,8 @@ pub(crate) struct SurfaceMaterial {
     geometry: Vec4,
     #[uniform(4)]
     flags: Vec4,
+    #[uniform(5)]
+    details: Vec4,
 }
 impl UiMaterial for SurfaceMaterial {
     fn fragment_shader() -> ShaderRef {
@@ -72,6 +118,7 @@ fn material() -> SurfaceMaterial {
         accent: ORANGE.to_linear().to_vec4(),
         geometry: Vec4::ONE,
         flags: Vec4::ZERO,
+        details: Vec4::new(8.0, 4.0, 5.0, 0.0),
     }
 }
 #[allow(
@@ -173,11 +220,12 @@ pub(crate) fn fill(role: Surface, state: SurfaceState, interaction: Interaction)
             Surface::Back | Surface::Primary => ORANGE,
             Surface::Secondary => TEAL,
             Surface::Danger => Color::srgb(0.82, 0.18, 0.12),
+            Surface::Dark => Color::srgb(0.035, 0.12, 0.14),
             _ => CREAM,
         }
     };
     if state.disabled {
-        return base.mix(&CREAM, 0.65);
+        return base.mix(&CREAM, if role == Surface::Dark { 0.16 } else { 0.65 });
     }
     if state.inactive {
         return base;
@@ -201,10 +249,11 @@ fn present(
         &ComputedNode,
         &MaterialNode<SurfaceMaterial>,
         Option<&Interaction>,
+        Option<&SurfaceStyle>,
         Has<InteractionDisabled>,
     )>,
 ) {
-    for (role, state, node, handle, interaction, disabled) in &surfaces {
+    for (role, state, node, handle, interaction, style, disabled) in &surfaces {
         let mut state = state.copied().unwrap_or_default();
         state.disabled |= disabled;
         let Some(mut mat) = materials.get_mut(&handle.0) else {
@@ -225,22 +274,27 @@ fn present(
         .to_linear()
         .to_vec4();
         let size = node.size() * node.inverse_scale_factor();
+        let default_slope = match role {
+            Surface::Row | Surface::Field => ROW_SLOPE,
+            Surface::Card | Surface::Panel => PANEL_SLOPE,
+            _ => ACTION_SLOPE,
+        };
         mat.geometry = Vec4::new(
             size.x,
             size.y,
-            match role {
-                Surface::Row | Surface::Field => ROW_SLOPE,
-                Surface::Card | Surface::Panel => PANEL_SLOPE,
-                _ => ACTION_SLOPE,
-            },
-            BORDER_WIDTH,
+            style.map_or(default_slope, |style| style.slope),
+            style.map_or(BORDER_WIDTH, |style| style.border_width),
         );
+        mat.accent = CYAN.to_linear().to_vec4();
         mat.flags = Vec4::new(
             f32::from(state.focused && !state.disabled && !state.inactive),
             f32::from(*role == Surface::Quiet),
-            0.,
+            f32::from(state.selected && !state.disabled),
             0.,
         );
+        mat.details = style.map_or(Vec4::new(8.0, 4.0, 5.0, 0.0), |style| {
+            Vec4::new(style.cut, style.shadow_x, style.shadow_y, 0.0)
+        });
     }
 }
 #[cfg(test)]

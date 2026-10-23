@@ -634,3 +634,106 @@ The prior a-000008/a-000009 assets remain historical rejected evidence and must 
 - Mistake: earlier evidence was captured from sparse or stale UI states and treated broad structural similarity as sufficient. Cause: verification was not performed as an explicit pixel-level comparison against both approved mockups after the last source change.
 - Prevention: visual acceptance now uses a populated map, captures every required mode from the exact final executable, checks active/disabled/selection states, and rejects stale screenshots before ticket attachment.
 - Reusable lesson: editor controls must communicate mode and object state where the user is looking—on the tool, asset card, and canvas—not through detached explanatory text.
+
+## Component-by-component visual fidelity remediation plan (2026-09-12)
+
+### Problem statement
+
+The toolbar comparison is representative of the entire Map Maker shell. The delivered implementation often matches component purpose and approximate placement while failing the approved mockup's silhouette, icon semantics, proportions, spacing, depth, typography, and active-state treatment. Previous whole-screen review allowed these local mismatches to hide inside an approximately similar composition.
+
+### Investigation method and acceptance rule
+
+1. Build a visual inventory from `inspiration/mockup/map_builder_shell.png` and `inspiration/mockup/map_builder_assets.png`. For every component, record its bounding box, padding, gaps, colors, border thickness, corner/slope treatment, shadow offset, typography, icon size, and state variants.
+2. Capture the current product at the same aspect ratio and comparable map/camera state. Produce paired crops at identical display scale for each component.
+3. Classify every discrepancy as geometry, typography, color, iconography, depth, state communication, content, or behavior.
+4. Fix one component family at a time. Do not advance while its side-by-side crop still has an unexplained material difference.
+5. A component passes only when normal, hover, pressed, selected, disabled, and relevant open/closed states are verified. Structural similarity alone is not acceptance.
+6. Use dedicated bundled icons or Bevy-native geometry designed for the approved symbol. Do not substitute an available-but-semantically-different icon or a font glyph.
+7. Preserve behavior, map authority, and headless isolation; this is a client-presentation correction.
+
+### Implementation order
+
+#### 1. Visual primitives and measurement harness
+
+- Owners: `src/client/ui/surface.rs`, `src/client/ui/theme.rs`, and Map Maker-local UI helpers.
+- Introduce narrowly scoped Map Maker surface variants for toolbar cards, selected cards, compact controls, asset cards, drawer panels, and floating icon actions.
+- Support rounded panel frames, heavier navy outlines, asymmetric comic-card silhouettes, layered shadows, and explicit cyan focus rings/glows.
+- Keep global shell surfaces unchanged unless another screen demonstrates the identical requirement.
+- Add purpose-built cube, pointer, eraser, grid, symmetry, fit, search, rotate, duplicate, delete, close, warning, play, saved, and chevron assets.
+- Verify in a temporary component gallery showing every primitive and interaction state beside its measured reference crop.
+
+#### 2. Document header
+
+- Owner: `editor_document_bar`.
+- Match the rounded dark header, left map identity/status group, central Undo/Redo group, and right Save/Test/Issues/Maps group.
+- Restore icon semantics, widths, hierarchy, gaps, baseline alignment, saved status, and disabled styling.
+- Verify saved/unsaved, ready/issues, Undo/Redo enabled/disabled, and validation-open states.
+
+#### 3. Side tool rail
+
+- Owners: `editor_tool_rail`, `tool_button`, and dedicated tool icons.
+- Replace abstract diamond/bullseye symbols with the approved cube, mouse pointer, and eraser.
+- Match rounded rail, card size, spacing, shadow, label size, and cyan selected ring/glow.
+- Verify Place, Select, and Erase selected individually plus hover/pressed states.
+
+#### 4. Canvas utility cluster
+
+- Owner: `editor_canvas_controls`.
+- Rebuild Grid, Symmetry, and Fit as distinct mockup controls instead of generic text buttons.
+- Match icon-to-label layout, segmented grouping, dimensions, toggle pills, and active/off contrast.
+- Verify grid on/off and every symmetry value without clipping.
+
+#### 5. Collapsed Assets control and help strip
+
+- Owner: collapsed branch of `editor_palette`.
+- Match the bottom-left Assets tab silhouette, chevron, placement, and open/closed affordance.
+- Match the centered instruction strip typography, spacing, and mode-specific copy.
+- Verify Place/Select/Erase copy and drawer transitions.
+
+#### 6. Assets drawer shell, categories, and search
+
+- Owners: open branch of `editor_palette`, `palette_category_button`, and `search_button`.
+- Match drawer height, full-width rounded frame, top-row geometry, padding, and overlay relationship to the canvas.
+- Match category widths and cyan active treatment.
+- Rebuild the dark inset search field with correct icon, placeholder hierarchy, typing caret, and clear action.
+- Verify every category, active search, query text, clear, and no-results state.
+
+#### 7. Asset cards, previews, paging, and count
+
+- Owners: `palette_item_button`, `palette_arrow_button`, and `map_palette_preview.rs`.
+- Match six-card dimensions, preview camera scale, dark preview stage, label footer, selected cyan outline/glow, and check badge.
+- Ensure every card uses actual production 3D presentation; no abstract fallback cube may stand in for a named concrete asset.
+- Match disabled previous, enabled next, edge arrows, and the range count.
+- Verify first/middle/last pages and long labels.
+
+#### 8. Placement and erase feedback
+
+- Owners: editor input preview and `presentation_3d/map_editor.rs`.
+- Match the translucent cyan 3D placement ghost, footprint/grid alignment, cursor plus marker, and valid/invalid feedback.
+- Add the dedicated erase ghost/marker from the approved interaction design.
+- Verify pre-click, drag painting, invalid placement, rotation, symmetry, and erase drag.
+
+#### 9. Selection overlay and contextual actions
+
+- Owners: `editor_selection_toolbar` and selection rendering in `map_editor.rs`.
+- Match per-object cyan outlines, group fill opacity, dashed bounds, square handles, central four-way move handle, and toolbar placement.
+- Match rotate/duplicate/delete/clear icons, colors, outlines, shadows, and spacing.
+- Verify single, multi, additive, moved, symmetry-respecting, cleared, and deleted selection states.
+
+#### 10. Issues popover
+
+- Owner: `editor_validation_popover`.
+- Keep it hidden by default. When opened, match the anchored card, title, issue count, warning icon, checklist spacing, and relationship to the header action.
+- Verify ready, one issue, multiple issues, open, and dismissed states.
+
+#### 11. Integrated pass and responsive matrix
+
+- Recompose only after components 1–10 pass crop review.
+- Capture deterministic populated Place, Select, Erase, Assets-open, Issues-open, search, and disabled-control states.
+- Verify at the approved mockup aspect ratio, the normal native 1591x752 size, and one narrower supported size.
+- Run focused Map Maker tests, strict client Clippy, all client targets, server-only build, and diff hygiene.
+- Attach only exact-final-build screenshots. Keep BRL-0037 in `doing` until the user accepts the integrated comparison.
+
+### Review cadence
+
+Each slice ends with a reference crop, delivered crop, discrepancy checklist, affected automated checks, and an explicit pass/fail decision. A failed component is corrected before work moves to the next numbered component.
