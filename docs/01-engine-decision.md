@@ -214,11 +214,20 @@ stable identities, compatibility/content handshake, validation, authority rules,
 transport adapter.
 
 The supported gameplay path is dedicated-server authority with replicated and interpolated client
-state. Lightyear capabilities such as prediction, rollback, and lag compensation are not enabled
-merely because the dependency provides them. Owner prediction remains an isolated experimental
-feature, and any production prediction or lag-compensation path requires measured player benefit,
-terrain and collision correctness, explicit lifecycle ownership, protocol verification, and
-acceptance through a focused Ticket.
+state plus owner movement prediction. Lightyear capabilities such as prediction, rollback, and lag
+compensation are not enabled merely because the dependency provides them. Every client predicts
+only its own controlled fighter's movement (`client::prediction`, BRL-0141): it runs the shared
+movement step (`movement::step`, the same intent, eligibility, status, tile, adrenaline, and
+external-motion rules the server coordinator calls) on the local input timeline, resolves the
+replicated current map blockers for presentation, and reconciles each confirmed authoritative pose
+against the prediction recorded for that Lightyear tick. Small errors blend through a decaying
+presented offset; errors at or above the tuned snap distance jump. Dash, defeat, and inactive
+participation suspend local integration. Remote fighters stay interpolated, nothing predicted is
+sent to the server, and the protocol is unchanged. Lightyear-native `PredictionTarget` rollback is
+not used because it would require client Avian physics, client map colliders, whole-schedule
+rollback, and a protocol change. Any further prediction (other fighters, projectiles, hits) or lag
+compensation still requires measured player benefit, terrain and collision correctness, explicit
+lifecycle ownership, protocol verification, and acceptance through a focused Ticket.
 
 The routed transport carries opaque Lightyear datagrams between the public supervisor endpoint and
 the selected lobby or match authority. It does not wrap replication in another snapshot protocol
@@ -285,9 +294,8 @@ The main package's feature graph expresses compile-time execution roles:
 - `client` is the default and enables the windowed/player client dependency surface;
 - `server` enables the dedicated-server and worker surface without Bevy presentation features;
 - `network-test` combines the required client/server and in-process transports for integration and
-  performance tests;
-- `process-metrics` is an isolated measurement feature because its recorder is process-global; and
-- `owner-prediction` is an experimental comparison feature, not part of the supported player path.
+  performance tests; and
+- `process-metrics` is an isolated measurement feature because its recorder is process-global.
 
 Keep role-owned modules gated at their ownership boundary. The server graph must not acquire
 windowing, rendering, PBR, scenes, UI, text rendering, audio, gamepad/keyboard/mouse input, or client

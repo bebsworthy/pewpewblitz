@@ -61,7 +61,6 @@ mod flow;
 mod hud;
 mod input;
 mod map_maker;
-#[cfg(feature = "owner-prediction")]
 pub mod prediction;
 mod presentation;
 pub(crate) mod presentation_3d;
@@ -120,6 +119,7 @@ impl Plugin for ClientReplicatedGameplayPlugin {
             crate::map::MapPresentationPlugin,
             ClientQueuePlugin,
             ClientProfilePlugin,
+            prediction::OwnerPredictionPlugin,
         ));
     }
 }
@@ -622,8 +622,6 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         crate::diagnostics::ProcessDiagnosticsPlugin,
         crate::diagnostics::ClientDiagnosticsOverlayPlugin,
     ));
-    #[cfg(feature = "owner-prediction")]
-    app.add_plugins(prediction::OwnerPredictionPlugin);
     if let Some(path) =
         crate::diagnostics::ProcessDiagnosticsSettings::default().failure_record_path()
     {

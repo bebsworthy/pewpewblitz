@@ -535,12 +535,6 @@ pub(crate) struct EffectTilePulseState {
 }
 
 impl EffectTileOccupancy {
-    #[must_use]
-    #[cfg(feature = "server")]
-    pub(crate) const fn capabilities(&self) -> EffectTileCapabilities {
-        self.capabilities
-    }
-
     /// Whether this authoritative occupancy suppresses positive-health gameplay effects.
     #[must_use]
     pub const fn blocks_healing(&self) -> bool {

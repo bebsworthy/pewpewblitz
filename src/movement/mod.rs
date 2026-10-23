@@ -7,6 +7,7 @@ mod arena;
 #[cfg(feature = "server")]
 mod authority;
 mod input;
+mod step;
 pub use arena::{
     ArenaWall, CAMERA_VERTICAL_SPAN, DEPLOYABLE_LAYER, DESTRUCTIBLE_MAP_LAYER, FIGHTER_LAYER,
     HAZARD_LAYER, HOSTILE_NPC_LAYER, OBJECTIVE_LAYER, PICKUP_LAYER, PLAYER_ONLY_MAP_LAYER,
@@ -22,6 +23,9 @@ pub use input::{
     InputFreshness, InputTuning, active_slow_multiplier, adrenaline_multiplier, committed_aim,
     decoded_move, desired_pose_step, input_should_neutralize, latest_present_remote_tick,
     radial_deadzone, trigger_pressed,
+};
+pub(crate) use step::{
+    MovementModifiers, movement_intent, movement_is_suspended, resolved_movement_velocity,
 };
 
 pub const AUTHORITATIVE_INPUT_STALE_TICKS: u64 = 12;

@@ -18,14 +18,17 @@ use crate::protocol::{Fighter, FighterInput};
 use crate::timing::{SIMULATION_TICK, SimulationTick};
 
 use super::input::{
-    InputFreshness, InputTuning, InputValidationState, committed_aim, decoded_input_is_valid,
-    decoded_move, input_end_tick_is_acceptable, input_history_len_is_valid,
+    InputFreshness, InputTuning, InputValidationState, decoded_input_is_valid,
+    input_end_tick_is_acceptable, input_history_len_is_valid,
     input_sequence_ends_with_present_state, input_should_neutralize, input_target_is_entity,
     latest_present_remote_tick,
 };
 use super::{
     AuthoritativeInputTrace, DESTRUCTIBLE_MAP_LAYER, MovementTuning, STATIC_MAP_LAYER,
     pose_is_valid,
+};
+use super::{
+    MovementModifiers, movement_intent, movement_is_suspended, resolved_movement_velocity,
 };
 
 /// One fighter's per-tick movement decision plus the freshness value to commit.
@@ -37,15 +40,6 @@ pub(crate) struct MovementDecision {
     pub aim: Option<Vec2>,
     /// Raw dequantized move axis and button mask, kept for the input-change trace only.
     pub trace_input: (Vec2, u8),
-}
-
-#[derive(Clone, Copy, Default)]
-pub(crate) struct MovementModifiers<'a> {
-    pub active_effects: Option<&'a crate::combat::ActiveEffects>,
-    pub effect_tile: Option<&'a crate::map::EffectTileOccupancy>,
-    pub passive_capabilities: Option<&'a crate::builds::ResolvedPassives>,
-    pub passive_state: Option<&'a crate::builds::PassiveRuntimeState>,
-    pub external_motion: Option<&'a crate::combat::ExternalMotion>,
 }
 
 /// Pure freshness/eligibility/aim/movement decision shared by the coordinator and tests.
@@ -76,52 +70,14 @@ pub(crate) fn movement_decision(
     } else {
         FighterInput::default()
     };
+    let intent = movement_intent(input, tuning);
     MovementDecision {
         freshness,
         stale,
-        movement: decoded_move(input.move_axis, *tuning),
-        aim: input
-            .aim_update
-            .and_then(|axis| committed_aim(axis.to_vec2(), *tuning)),
+        movement: intent.movement,
+        aim: intent.aim,
         trace_input: (input.move_axis.to_vec2(), input.gameplay_buttons),
     }
-}
-
-/// Resolve the per-tick desired velocity from loadout, effects, adrenaline, and external
-/// motion.
-#[must_use]
-pub(crate) fn resolved_movement_velocity(
-    tick: u64,
-    decision: &MovementDecision,
-    resolved_speed: f32,
-    modifiers: MovementModifiers<'_>,
-) -> Vec2 {
-    let movement_multiplier = modifiers
-        .active_effects
-        .and_then(|effects| effects.slow)
-        .filter(|slow| tick < slow.expires_at_tick)
-        .map_or(1.0, |slow| {
-            f32::from(slow.movement_multiplier_milli) / 1000.0
-        });
-    let tile_multiplier = modifiers.effect_tile.map_or(1.0, |occupancy| {
-        f32::from(occupancy.capabilities().movement_multiplier_milli()) / 1000.0
-    });
-    let adrenaline_multiplier = super::input::adrenaline_multiplier(
-        modifiers
-            .passive_capabilities
-            .and_then(|passives| passives.find(crate::builds::PassiveKind::AdrenalResponse)),
-        modifiers.passive_state,
-        tick,
-    );
-    decision.movement
-        * resolved_speed
-        * movement_multiplier
-        * tile_multiplier
-        * adrenaline_multiplier
-        + modifiers
-            .external_motion
-            .filter(|motion| tick < motion.expires_at_tick)
-            .map_or(Vec2::ZERO, |motion| motion.velocity)
 }
 
 /// Defensive repair for an invalid authoritative pose. In a valid v1 scenario this never
@@ -352,12 +308,11 @@ pub(super) fn authoritative_movement(
         active_combatant,
     ) in &fighters
     {
-        if ability_states
-            .get(entity)
-            .is_ok_and(|state| matches!(state.phase, crate::builds::AbilityPhase::Dashing { .. }))
-            || defeated.is_some()
-            || (participant.is_some() && active_combatant.is_none())
-        {
+        if movement_is_suspended(
+            ability_states.get(entity).ok(),
+            defeated.is_some(),
+            participant.is_some() && active_combatant.is_none(),
+        ) {
             continue;
         }
         let previous_position = position.0;
@@ -379,22 +334,18 @@ pub(super) fn authoritative_movement(
         let Ok((fighter_stats, body, passives, spawn)) = runtime.get(entity) else {
             continue;
         };
-        let desired_velocity = if active_effects.is_some_and(|effects| effects.is_frozen(tick.0)) {
-            Vec2::ZERO
-        } else {
-            resolved_movement_velocity(
-                tick.0,
-                &decision,
-                fighter_stats.movement_speed,
-                MovementModifiers {
-                    active_effects,
-                    effect_tile,
-                    passive_capabilities: Some(passives),
-                    passive_state: passive_states.get(entity).ok(),
-                    external_motion,
-                },
-            )
-        };
+        let desired_velocity = resolved_movement_velocity(
+            tick.0,
+            decision.movement,
+            fighter_stats.movement_speed,
+            MovementModifiers {
+                active_effects,
+                effect_tile,
+                adrenal_response: passives.find(crate::builds::PassiveKind::AdrenalResponse),
+                passive_state: passive_states.get(entity).ok(),
+                external_motion: external_motion.copied(),
+            },
+        );
         let filter = SpatialQueryFilter::from_mask(
             STATIC_MAP_LAYER | DESTRUCTIBLE_MAP_LAYER | crate::movement::PLAYER_ONLY_MAP_LAYER,
         )

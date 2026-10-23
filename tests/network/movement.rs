@@ -97,7 +97,10 @@ fn two_clients_move_simultaneously_and_observe_the_same_authoritative_poses() {
         client_zero.iter().zip(&client_one).zip(&server)
     {
         assert_eq!(player_zero, player_one);
-        assert!((position_zero.0 - position_one.0).length() < 0.5);
+        assert!(
+            (position_zero.0 - position_one.0).length() < 0.5,
+            "clients disagree on {player_zero:?}: {position_zero:?} vs {position_one:?} (server {server_position:?})"
+        );
         assert!(
             (position_zero.0 - server_position.0).length() < 64.0,
             "client pose did not converge toward the authoritative pose: client={position_zero:?} server={server_position:?}"

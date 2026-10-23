@@ -44,7 +44,8 @@ Client presentation and local feedback
 - validate and install the accepted connection-scoped profile, game-type catalog, and advertised
   brawler catalog before entering Dashboard, then clear them together when that lobby ends;
 - send timestamped input commands or input frames;
-- predict local movement later if needed;
+- predict only its own fighter's movement with the shared movement step, reconcile against
+  confirmed authoritative poses, and present the predicted pose (see owner prediction below);
 - render the latest authoritative state;
 - interpolate remote fighters;
 - play visual, audio, and camera effects;
@@ -81,7 +82,7 @@ Client World
   device input
   Lightyear client plugins
   replicated/interpolated state
-  predicted gameplay systems, if adopted
+  owner movement prediction (shared movement step, presentation only)
   rendering, animation, audio, camera, HUD
                  ↕ intent / replication / messages
 Authoritative server World
@@ -206,6 +207,22 @@ neutral-fire assistance are client-local. Assistance may choose direction and re
 from currently presented entities, but it cannot reveal off-screen or unreplicated state and does
 not create a distinct protocol action. The server receives the ordinary aim vector/distance and
 continues to own action acceptance, range and bounds repair, collision, recipients, and effects.
+
+### Owner movement prediction
+
+Each client predicts only its own controlled fighter's movement. It applies its input for local
+Lightyear tick T through the shared movement step (`movement::step`: intent shaping, dash/defeat/
+inactive-participant suspension, slow, freeze, effect tile, adrenaline, and replicated knockback)
+and resolves the result against the replicated current map blockers, including destroyed or
+replaced cover. The server applies the same input at server tick T, so the client reconciles the
+entity's newest Replicon confirmation tick and raw replicated `Position`/`Rotation` against the
+prediction it recorded for that tick: the error shifts every unacknowledged predicted step, a
+presented offset absorbs errors below `OwnerPredictionTuning::snap_distance` and decays, and larger
+errors (respawn, teleport) snap. `AuthoritativePose.tick` maps local ticks to server simulation
+deadlines. The predicted pose replaces the owner's interpolated `Position`/`Rotation` after
+Lightyear interpolation, so renderer, camera, overhead UI, and aim origin share it. The prediction
+is never sent, never mutates server state, and does not change the protocol; remote fighters,
+projectiles, hits, damage, and objectives remain interpolated authoritative state.
 
 Saved-brawler and weapon-equipment edits are not per-tick combat input. They use ordered,
 idempotent profile requests tied to the receiving authenticated lobby connection. A request never
@@ -504,7 +521,7 @@ An offline training mode may use bots, but it must still run the authoritative s
 Networking is validated incrementally rather than treated as one oversized milestone:
 
 1. **v1 Milestone 02 — connection and replication:** two local clients connect, receive stable server-owned identities and entities, and clean up on rejection, disconnect, reconnect, and shutdown under explicit rules.
-2. **v1 Milestone 03 — movement:** the server validates input frames and owns movement and facing; clients interpolate remote state and add local prediction only if measurement justifies it.
+2. **v1 Milestone 03 — movement:** the server validates input frames and owns movement and facing; clients interpolate remote state; owner movement prediction was later adopted by BRL-0141 after latency measurement.
 3. **v1 Milestone 04 — combat:** the server owns firing, projectiles, hits, damage, defeats, and sandbox reset under packet delay, loss, duplication, and jitter tests.
 4. **v1 Milestone 07 — match:** the server owns teams, respawns, scores, timers, victory, restart, and disconnect behavior throughout the match lifecycle.
 5. **v1 Milestone 09 — objectives:** Hot Zone proves that continuous objective state remains authoritative while reusing the same gameplay and match-lifecycle components/plugins.

@@ -529,8 +529,6 @@ impl Harness {
         if extra_protocol {
             client.add_plugins(MismatchedProtocolPlugin);
         }
-        #[cfg(feature = "owner-prediction")]
-        client.add_plugins(brawler::client::prediction::OwnerPredictionPlugin);
         client
             .insert_resource(DeterministicPacketImpairment::default())
             .insert_resource(ReplicationDelayLine::default())
@@ -612,7 +610,6 @@ impl Harness {
         self.client_heist_cues[index].extend(cues);
     }
 
-    #[cfg(feature = "owner-prediction")]
     pub(super) fn set_replication_delay(&mut self, index: usize, delay: usize) {
         self.clients[index]
             .world_mut()

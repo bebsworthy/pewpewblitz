@@ -104,7 +104,6 @@ mod matchplay;
 mod movement;
 #[path = "network/movement_input.rs"]
 mod movement_input;
-#[cfg(feature = "owner-prediction")]
 #[path = "network/prediction.rs"]
 mod prediction;
 #[path = "network/queue.rs"]

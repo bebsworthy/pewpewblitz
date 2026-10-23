@@ -1,10 +1,7 @@
 //! Focused movement, arena, and input validation tests.
 
 #[cfg(feature = "server")]
-use super::authority::{
-    MovementDecision, MovementModifiers, movement_decision, repaired_pose,
-    resolved_movement_velocity,
-};
+use super::authority::{movement_decision, repaired_pose};
 #[cfg(feature = "server")]
 use super::input::{
     decoded_input_is_valid, input_end_tick_is_acceptable, input_history_len_is_valid,
@@ -277,14 +274,10 @@ fn movement_decision_combines_freshness_and_staleness() {
     assert_eq!(decision.movement, Vec2::ZERO);
 }
 
-#[cfg(feature = "server")]
 #[test]
 fn resolved_velocity_applies_modifiers_and_external_motion() {
-    let decision = MovementDecision {
-        movement: Vec2::X,
-        ..MovementDecision::default()
-    };
-    let velocity = resolved_movement_velocity(0, &decision, 320.0, MovementModifiers::default());
+    let movement = Vec2::X;
+    let velocity = resolved_movement_velocity(0, movement, 320.0, MovementModifiers::default());
     assert!((velocity.x - 320.0).abs() < 1e-5);
 
     let slow = crate::combat::ActiveEffects {
@@ -298,7 +291,7 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
     };
     let velocity = resolved_movement_velocity(
         5,
-        &decision,
+        movement,
         300.0,
         MovementModifiers {
             active_effects: Some(&slow),
@@ -310,7 +303,7 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
     // An expired slow no longer applies.
     let velocity = resolved_movement_velocity(
         20,
-        &decision,
+        movement,
         300.0,
         MovementModifiers {
             active_effects: Some(&slow),
@@ -325,10 +318,10 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
     };
     let velocity = resolved_movement_velocity(
         5,
-        &decision,
+        movement,
         300.0,
         MovementModifiers {
-            external_motion: Some(&external),
+            external_motion: Some(external),
             ..default()
         },
     );
@@ -353,12 +346,12 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
     };
     let velocity = resolved_movement_velocity(
         5,
-        &decision,
+        movement,
         300.0,
         MovementModifiers {
             active_effects: Some(&slow),
             effect_tile: Some(&speed_tile),
-            external_motion: Some(&external),
+            external_motion: Some(external),
             ..default()
         },
     );
@@ -369,13 +362,9 @@ fn resolved_velocity_applies_modifiers_and_external_motion() {
     );
 }
 
-#[cfg(feature = "server")]
 #[test]
 fn resolved_velocity_uses_authored_adrenal_movement_bonus() {
-    let decision = MovementDecision {
-        movement: Vec2::X,
-        ..MovementDecision::default()
-    };
+    let movement = Vec2::X;
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
     let mut loadout = crate::builds::resolve_build_recipe(
@@ -405,15 +394,71 @@ fn resolved_velocity_uses_authored_adrenal_movement_bonus() {
     };
     let velocity = resolved_movement_velocity(
         5,
-        &decision,
+        movement,
         300.0,
         MovementModifiers {
-            passive_capabilities: Some(&passives),
+            adrenal_response: passives.find(crate::builds::PassiveKind::AdrenalResponse),
             passive_state: Some(&passive_state),
             ..default()
         },
     );
     assert!((velocity.x - 375.0).abs() < 1e-5);
+}
+
+#[test]
+fn frozen_fighters_ignore_intent_and_external_motion() {
+    let effects = crate::combat::ActiveEffects {
+        cold: crate::combat::ColdState {
+            frozen_until_tick: Some(10),
+            ..default()
+        },
+        ..default()
+    };
+    let external = crate::combat::ExternalMotion {
+        velocity: Vec2::new(0.0, 40.0),
+        expires_at_tick: 30,
+    };
+    let modifiers = MovementModifiers {
+        active_effects: Some(&effects),
+        external_motion: Some(external),
+        ..default()
+    };
+    assert_eq!(
+        resolved_movement_velocity(5, Vec2::X, 300.0, modifiers),
+        Vec2::ZERO
+    );
+    let thawed = resolved_movement_velocity(10, Vec2::X, 300.0, modifiers);
+    assert!((thawed - Vec2::new(300.0, 40.0)).length() < 1e-5);
+}
+
+#[test]
+fn movement_suspends_for_dash_defeat_and_inactive_participants() {
+    let dashing = crate::builds::AbilityState {
+        phase: crate::builds::AbilityPhase::Dashing { ends_at_tick: 9 },
+        ..default()
+    };
+    let ready = crate::builds::AbilityState {
+        phase: crate::builds::AbilityPhase::Ready,
+        ..default()
+    };
+    assert!(movement_is_suspended(Some(&dashing), false, false));
+    assert!(movement_is_suspended(Some(&ready), true, false));
+    assert!(movement_is_suspended(None, false, true));
+    assert!(!movement_is_suspended(Some(&ready), false, false));
+    assert!(!movement_is_suspended(None, false, false));
+}
+
+#[test]
+fn movement_intent_neutralizes_invalid_frames_and_commits_meaningful_aim() {
+    let tuning = InputTuning::default();
+    let intent = movement_intent(FighterInput::from_axes(Vec2::X, Some(Vec2::Y), 0), &tuning);
+    assert!((intent.movement - Vec2::X).length() < 1e-3);
+    assert!((intent.aim.expect("aim commits") - Vec2::Y).length() < 1e-3);
+    let weak = movement_intent(
+        FighterInput::from_axes(Vec2::new(0.1, 0.0), Some(Vec2::new(0.1, 0.0)), 0),
+        &tuning,
+    );
+    assert_eq!(weak, step::MovementIntent::default());
 }
 
 #[cfg(feature = "server")]
