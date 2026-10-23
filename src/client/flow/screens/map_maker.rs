@@ -3629,8 +3629,10 @@ mod tests {
     #[test]
     fn hidden_palette_selection_cannot_be_placed() {
         let catalog = crate::map::MapContentCatalog::embedded().unwrap();
-        let mut runtime = MapMakerRuntime::default();
-        runtime.palette_query = "no asset has this name".to_string();
+        let runtime = MapMakerRuntime {
+            palette_query: "no asset has this name".to_string(),
+            ..MapMakerRuntime::default()
+        };
 
         assert!(
             selected_palette_item(&catalog, &runtime, crate::map::WIPEOUT_MODE_DEFINITION,)

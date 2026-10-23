@@ -313,6 +313,41 @@ fn reveal_focus(
     }
 }
 
+fn surface_example(
+    parent: &mut ChildSpawnerCommands,
+    font: &TextFont,
+    role: Surface,
+    label: &str,
+    height: f32,
+) -> Entity {
+    parent
+        .spawn((
+            Button,
+            role,
+            super::surface::SurfaceState::default(),
+            Node {
+                width: percent(100),
+                height: px(height),
+                flex_shrink: 0.,
+                padding: UiRect::all(px(32)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
+        .with_child((
+            Text::new(label),
+            font.clone(),
+            TextColor(theme::INK),
+            TextLayout::justify(Justify::Center),
+            Node {
+                width: percent(100),
+                ..default()
+            },
+        ))
+        .id()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,39 +391,4 @@ mod tests {
         assert_eq!(label, "110%");
         assert_eq!(app.world().resource::<GalleryFocus>().index, 3);
     }
-}
-
-fn surface_example(
-    parent: &mut ChildSpawnerCommands,
-    font: &TextFont,
-    role: Surface,
-    label: &str,
-    height: f32,
-) -> Entity {
-    parent
-        .spawn((
-            Button,
-            role,
-            super::surface::SurfaceState::default(),
-            Node {
-                width: percent(100),
-                height: px(height),
-                flex_shrink: 0.,
-                padding: UiRect::all(px(32)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-        ))
-        .with_child((
-            Text::new(label),
-            font.clone(),
-            TextColor(theme::INK),
-            TextLayout::justify(Justify::Center),
-            Node {
-                width: percent(100),
-                ..default()
-            },
-        ))
-        .id()
 }

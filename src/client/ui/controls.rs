@@ -359,6 +359,24 @@ fn present_controls(
     }
 }
 
+#[allow(clippy::type_complexity, reason = "presentation state bridge")]
+fn sync_surface_states(
+    mut controls: Query<(
+        &ControlState,
+        Has<InteractionDisabled>,
+        &mut super::surface::SurfaceState,
+    )>,
+) {
+    for (state, disabled, mut surface) in &mut controls {
+        *surface = super::surface::SurfaceState {
+            focused: state.focused,
+            selected: state.selected,
+            inactive: state.inactive,
+            disabled,
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,23 +523,5 @@ mod tests {
             colors(&selected, Interaction::None, true),
             colors(&focused, Interaction::Pressed, true)
         );
-    }
-}
-
-#[allow(clippy::type_complexity, reason = "presentation state bridge")]
-fn sync_surface_states(
-    mut controls: Query<(
-        &ControlState,
-        Has<InteractionDisabled>,
-        &mut super::surface::SurfaceState,
-    )>,
-) {
-    for (state, disabled, mut surface) in &mut controls {
-        *surface = super::surface::SurfaceState {
-            focused: state.focused,
-            selected: state.selected,
-            inactive: state.inactive,
-            disabled,
-        };
     }
 }

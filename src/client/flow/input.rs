@@ -608,29 +608,6 @@ fn equipment_neighbor(
     }
 }
 
-#[cfg(test)]
-mod equipment_navigation_tests {
-    use super::{DashboardNavigationDirection as D, equipment_neighbor};
-    #[test]
-    fn grid_columns_reach_back_and_inventory_beyond_one_hundred() {
-        let mut available = (0..129).collect::<Vec<_>>();
-        available.push(1000);
-        assert_eq!(equipment_neighbor(0, D::Down, &available, 3), 3);
-        assert_eq!(equipment_neighbor(1, D::Up, &available, 3), 1000);
-        assert_eq!(equipment_neighbor(1000, D::Down, &available, 3), 0);
-        assert_eq!(equipment_neighbor(99, D::Down, &available, 3), 102);
-        assert_eq!(equipment_neighbor(128, D::Right, &available, 3), 128);
-        assert_eq!(equipment_neighbor(128, D::Up, &available, 3), 125);
-        assert_eq!(equipment_neighbor(6, D::Down, &available, 6), 12);
-        assert_eq!(equipment_neighbor(9, D::Down, &available, 5), 14);
-        assert_eq!(equipment_neighbor(5, D::Up, &available, 6), 1000);
-        assert_eq!(
-            equipment_neighbor(11, D::Down, &(0..13).collect::<Vec<_>>(), 6),
-            12
-        );
-    }
-}
-
 #[allow(
     clippy::too_many_arguments,
     reason = "Shared bounded name-field input, borrowed by creation and editing"
@@ -682,5 +659,28 @@ fn edit_name_input(
         }
     } else if keyboard.just_pressed(KeyCode::Escape) || cancel {
         *editing = false;
+    }
+}
+
+#[cfg(test)]
+mod equipment_navigation_tests {
+    use super::{DashboardNavigationDirection as D, equipment_neighbor};
+    #[test]
+    fn grid_columns_reach_back_and_inventory_beyond_one_hundred() {
+        let mut available = (0..129).collect::<Vec<_>>();
+        available.push(1000);
+        assert_eq!(equipment_neighbor(0, D::Down, &available, 3), 3);
+        assert_eq!(equipment_neighbor(1, D::Up, &available, 3), 1000);
+        assert_eq!(equipment_neighbor(1000, D::Down, &available, 3), 0);
+        assert_eq!(equipment_neighbor(99, D::Down, &available, 3), 102);
+        assert_eq!(equipment_neighbor(128, D::Right, &available, 3), 128);
+        assert_eq!(equipment_neighbor(128, D::Up, &available, 3), 125);
+        assert_eq!(equipment_neighbor(6, D::Down, &available, 6), 12);
+        assert_eq!(equipment_neighbor(9, D::Down, &available, 5), 14);
+        assert_eq!(equipment_neighbor(5, D::Up, &available, 6), 1000);
+        assert_eq!(
+            equipment_neighbor(11, D::Down, &(0..13).collect::<Vec<_>>(), 6),
+            12
+        );
     }
 }

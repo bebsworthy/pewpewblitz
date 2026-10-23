@@ -696,6 +696,6 @@ mod tests {
         assert!(app.world().get::<ScrollPosition>(area).unwrap().0.y > 100.0);
         app.world_mut().get_mut::<ScrollPosition>(area).unwrap().0.y = 0.0;
         app.update();
-        assert_eq!(app.world().get::<ScrollPosition>(area).unwrap().0.y, 0.0);
+        assert!(app.world().get::<ScrollPosition>(area).unwrap().0.y.abs() < f32::EPSILON);
     }
 }

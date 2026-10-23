@@ -2526,6 +2526,10 @@ mod tests {
         lobby.pending = None;
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one scenario asserts every seat of the filled Practice roster"
+    )]
     #[test]
     fn practice_uses_one_human_and_fills_the_selected_roster_with_named_bots() {
         let mut lobby = state();

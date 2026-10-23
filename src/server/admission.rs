@@ -721,6 +721,10 @@ mod tests {
         MatchManifestBot, PeerId, ProcessId, RouteId, WorkerId, WorkerRole,
     };
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "test fixture builds one complete literal match manifest"
+    )]
     fn manifest() -> MatchManifestV1 {
         let config = ServerNetworkConfig::default();
         let builds = BuildCatalog::embedded().unwrap();

@@ -768,43 +768,6 @@ pub(super) fn present_retry(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pointer_slider_maps_bevy_track_coordinates_to_the_preference_range() {
-        let mut app = App::new();
-        let mut mouse = ButtonInput::<MouseButton>::default();
-        mouse.press(MouseButton::Left);
-        mouse.release(MouseButton::Left);
-        app.insert_resource(mouse)
-            .insert_resource(ClientOverlay::Settings)
-            .init_resource::<SettingsPage>()
-            .insert_resource(ShellSettingsDraft(ClientShellSettings::default()))
-            .add_systems(Update, pointer_sliders);
-        let owner = app
-            .world_mut()
-            .spawn(ShellButton {
-                id: ShellControlId::UiScaleUp,
-                action: Some(ShellAction::UiScaleUp),
-                layer: ShellLayer::Settings,
-            })
-            .id();
-        app.world_mut().spawn((
-            SliderTrack(owner),
-            RelativeCursorPosition {
-                cursor_over: true,
-                normalized: Some(Vec2::new(0.5, 0.0)),
-            },
-        ));
-        app.update();
-        assert!(
-            (app.world().resource::<ShellSettingsDraft>().0.ui_scale - MAX_UI_SCALE).abs() < 0.001
-        );
-    }
-}
-
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Settings root refresh preserves the screen-owned navigation target"
@@ -957,4 +920,41 @@ fn adjust_preference(action: ShellAction, settings: &mut ClientShellSettings) ->
         _ => return false,
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pointer_slider_maps_bevy_track_coordinates_to_the_preference_range() {
+        let mut app = App::new();
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left);
+        mouse.release(MouseButton::Left);
+        app.insert_resource(mouse)
+            .insert_resource(ClientOverlay::Settings)
+            .init_resource::<SettingsPage>()
+            .insert_resource(ShellSettingsDraft(ClientShellSettings::default()))
+            .add_systems(Update, pointer_sliders);
+        let owner = app
+            .world_mut()
+            .spawn(ShellButton {
+                id: ShellControlId::UiScaleUp,
+                action: Some(ShellAction::UiScaleUp),
+                layer: ShellLayer::Settings,
+            })
+            .id();
+        app.world_mut().spawn((
+            SliderTrack(owner),
+            RelativeCursorPosition {
+                cursor_over: true,
+                normalized: Some(Vec2::new(0.5, 0.0)),
+            },
+        ));
+        app.update();
+        assert!(
+            (app.world().resource::<ShellSettingsDraft>().0.ui_scale - MAX_UI_SCALE).abs() < 0.001
+        );
+    }
 }

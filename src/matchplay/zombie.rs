@@ -1551,8 +1551,10 @@ mod tests {
 
     #[test]
     fn pickup_capacity_reserves_every_players_death_stack() {
-        let mut rules = ZombieRules::default();
-        rules.ambient_drop_budget = 65;
+        let mut rules = ZombieRules {
+            ambient_drop_budget: 65,
+            ..ZombieRules::default()
+        };
         assert!(rules.validate().is_err());
 
         rules.ambient_drop_budget = 64;

@@ -2986,7 +2986,7 @@ fn creation_pickers_preserve_named_draft_and_only_submit_from_overview() {
             .resource::<super::super::ClientProfileModel>()
             .pending()
     );
-    app.world_mut().resource_mut::<BrawlerCreationDraft>().name = "".into();
+    app.world_mut().resource_mut::<BrawlerCreationDraft>().name = String::new();
     inject_action(&mut app, FlowUiAction::ConfirmCreateBrawler);
     assert!(
         app.world()
