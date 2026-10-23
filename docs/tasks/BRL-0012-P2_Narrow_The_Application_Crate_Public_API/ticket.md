@@ -4,13 +4,12 @@ title: 'P2: Narrow the application crate public API'
 status: done
 theme: quality
 release:
-priority: none
 created: 2026-08-27T18:15:30Z
 modified: 2026-08-27T22:38:57Z
 closed: 2026-08-27T22:38:57Z
 revision: d47c1147488dfb25
 blocks: []
-related: [BRL-0002]
+related: [BRL-0002, BRL-0170]
 ---
 
 # Description
