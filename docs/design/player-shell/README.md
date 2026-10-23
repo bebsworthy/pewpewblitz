@@ -14,16 +14,34 @@ Current specification, 2026-09-10. Design approvals: BRL-0112 and BRL-0113. Nati
 
 Generated text, numerical values and robot details are illustrative. Runtime uses the shipped Lilita One font, accepted server facts and actual game models.
 
+The references above remain approved for **composition, information architecture and flow**. Their cream/teal/orange palette, flat surfaces and drift-only motion are superseded by the visual language below (BRL-0140, 2026-10-23). Screens move to the new palette under BRL-0156. Until then, the shipped shell keeps the legacy palette.
+
 ## Visual language
 
-| Role | sRGB | Use |
-|---|---|---|
-| Cream | #FAEBCF | Quiet screen and card surfaces |
-| Navy | #081932 | Text, outlines, identity strip |
-| Teal | #52A39E | Secondary action, brawler region and background plane |
-| Orange | #FF6606 | Play, mode badge and bottom background plane |
+The shell matches the game's bright, energetic, toy-like direction in [docs/11](../../11-art-and-presentation-direction.md#visual-direction). It is a saturated blue arcade shell with pressable surfaces, one unmistakable orange primary action, and white display type with a heavy navy stroke.
 
-Large clean color planes, expressive asymmetry, strong hierarchy, substantial navy outlines and crisp offset backing layers. Avoid redundant information: do not add Selected labels or checkmarks when the selection color already communicates the choice. No random slashes, rays, halftone, dirt, busy textures or distressed lettering. No invented stage architecture. Use the refined cream/orange/navy logo while preserving original branding sources. Icons carry meaning: hanging pennant emblems distinguish game modes. Live headings use Lilita One; body copy stays readable at normal UI scale.
+| Token | sRGB | Use |
+|---|---|---|
+| `shell-bg-top` / `shell-bg-bottom` | #2E7BFF / #1B3FA8 | Screen background vertical gradient |
+| `panel` | #24308F | Primary panels, quiet actions, unselected cards |
+| `panel-raised` | #3B5BDB | Raised cards, selected rows and categories, secondary actions |
+| `ink` | #0E1638 | Text stroke, outlines, bottom lips, dark identity strips |
+| `play` / `play-highlight` | #FF8A1F / #FFC21A | The single primary action per screen (Play, confirm) and its top band |
+| `accent` | #38D6FF | Focus frame, links, ultimate/charge accents |
+| `text` | #FFFFFF | Headings, button labels, values |
+| `self` / `ally` / `enemy` | #4CD964 / #2F8BFF / #FF3B3B | Relationship colors, shared with the world and HUD |
+
+Migration from the legacy roles: Cream surface → `panel`. Navy → `ink`. Teal selected/secondary → `panel-raised`. Orange → `play`. The cream/navy focus frame → an `accent` frame with an `ink` outline.
+
+- **Type.** Headings, button labels and HUD numbers use white Lilita One with a 2–4 px `ink` stroke and a soft drop shadow. Supporting copy may drop the stroke but must keep its contrast against the panel.
+- **Surfaces.**
+  - A vertical gradient fill, a 2–3 px light top band and a darker 4–6 px `ink`-tinted bottom lip.
+  - The cut-corner slanted geometry is kept.
+  - Pressed surfaces squash and lose their lip (see [motion](motion.md)).
+- **Selection without redundancy.** Do not add Selected labels or checkmarks when color already communicates the choice.
+- **Iconography.** Multi-tone, outlined, slightly dimensional icons from one cohesive set (BRL-0157). Each icon carries meaning; hanging pennant emblems still distinguish game modes.
+- **Background.** A blue gradient with sparse, low-contrast toy-like motifs is allowed. No grime, halftone, distressed lettering or invented stage architecture.
+- **Branding.** Use the retained logo; preserve the original branding sources.
 
 ## Dashboard implementation contract
 

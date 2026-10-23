@@ -15,23 +15,101 @@ machine-readable sources may evolve without turning this specification into a du
 
 ## Visual direction
 
-Brawler is a stylized, toy-like, orthographic arena shooter with dynamic map/viewport framing,
-designed to remain clean and readable at
-match scale. Its visual identity favors:
+PewPew Blitz is a bright, energetic, toy-like arena shooter. Chunky voxel-toy characters fight
+across saturated, crafted arenas under stylized lighting. Every hit, charge, and victory gets
+immediate visual and audio feedback. Readability of the fight always comes first: style adds
+character and energy, but it never hides footprints, relationships, objectives, or threats.
 
-- recognizable silhouettes and restrained surface detail;
-- matte, graphic materials rather than photorealistic surface variation;
-- calm floors and subordinate environment dressing around the combat space;
-- strong relationship and gameplay-state cues independent of model, theme, or skin color;
-- shallow, restrained shadows that ground objects without hiding their footprints;
-- exact objective boundaries and unmistakable allowed or blocked previews;
-- short, bounded combat effects that communicate outcomes without obscuring actors;
-- an expressive, clean cream/teal/orange/navy product shell that gives the selected brawler and current action clear hierarchy; the approved non-gameplay compositions and restrained motion are specified in [player-shell design](design/player-shell/README.md).
+The direction was decided in BRL-0140 (2026-10-23). It replaces the earlier matte/restrained world
+stance and the cream/teal/orange shell palette. The values below are starting points. Implementing
+tickets tune them through native review but do not change the direction.
 
-Curated third-party models, audio, fonts, icons, and source art provide the established production
-foundation. They are replaceable presentation, not Brawler's permanent identity. Future original
-art should build a coherent PewPew Blitz identity while preserving gameplay proportions, anchors,
-relation semantics, authoritative-shape agreement, accessibility, and degraded fallbacks.
+### Characters
+
+- Chunky voxel-toy figures in the style of the roster concept
+  (`asset_src/04-character_roaster.png`). Riff (`asset_src/characters/riff/`) is the first
+  production character.
+- Exaggerated, readable proportions: the head is about 45% of visual height and the weapon about
+  1.5× oversized. Each character has one strong silhouette and saturated primary colors on
+  clothing.
+- Visual height is about 1.6 map cells. Visual scale stays independent of the canonical 14-unit
+  authoritative radius and its ground ring (see [Fighter identity](#fighter-identity)).
+- Expressive motion: idle, run, per-family hold and shoot with recoil, hit reaction, dash, defeat,
+  and victory, plus procedural squash and stretch on footfalls, firing, and landing.
+
+### World shading
+
+- **Toon ramp.** A shared stylized material with a two-band light ramp. The shadow side is about
+  0.65× albedo and hue-shifted toward blue/purple.
+- **Rim light.** Strength about 0.35. On fighters it is tinted with the relationship color.
+- **Outline.** A dark navy outline (`#0E1638`) scaled to world size, applied to every fighter.
+  Outlines follow observer-specific concealment exactly.
+- **Post-processing.** HDR with a filmic tonemapper and restrained bloom. Only emissive projectiles,
+  muzzle flashes, and pickups bloom.
+- **Color grading.** Saturation about ×1.15–1.25, applied per theme.
+- **Grounding.** Every fighter, projectile, and prop is grounded by a contact shadow or baked
+  ambient occlusion.
+
+### Floors and environments
+
+- **Floor.** A two-tone tile surface aligned to the authoritative grid. The two tones differ by 8%
+  value or less, and the floor stays lighter and less saturated than the props standing on it.
+- **One kit per theme.** Each theme uses a single coherent environment kit with a shared bevel
+  size, a top-face highlight, and baked ambient occlusion. Third-party kits are not mixed within
+  one theme.
+- **Foliage.** Concealing foliage uses chunky, readable bush forms with gentle vertex sway.
+
+### Feedback and readability
+
+- Relationship cues stay independent of model, theme, and skin color: green for the controlled
+  fighter, blue for allies, red for enemies.
+- Hits, healing, and defeats have immediate feedback: a short flash on the target, floating
+  numbers, a defeat pop, and matching audio. Reduced-effects mode keeps required information but
+  removes decorative excess.
+- Objective boundaries stay exact, and allowed or blocked previews stay unmistakable.
+
+### Product shell and HUD
+
+- The shell uses a saturated blue gradient, indigo panels, a single orange primary action, and a
+  cyan accent. White Lilita One type with a navy stroke is used everywhere, including the in-match
+  HUD.
+- Surfaces read as pressable: a vertical gradient, a light top band, and a darker bottom lip.
+- Motion is energetic and always optional under reduced-motion settings.
+- [Player-shell design](design/player-shell/README.md) owns the tokens, compositions, and motion
+  contract.
+
+### Reference and mockup rule
+
+A mockup used as an acceptance reference must show real in-engine captures or real models from the
+project's pipeline. Generated hero art that the pipeline cannot produce is inspiration only. The
+reference board for this direction is attached to BRL-0140.
+
+### Adoption status
+
+The direction is adopted incrementally. Until each owning ticket lands, the shipped client keeps
+the previous presentation for that area:
+
+| Area | Owning ticket |
+|---|---|
+| HDR, tonemapping, bloom, color grading | BRL-0146 |
+| Tile floor | BRL-0147 |
+| Camera framing re-evaluation | BRL-0148 |
+| Overhead plates and aim lane | BRL-0149 |
+| Toon material and rim | BRL-0150 |
+| Fighter outlines | BRL-0151 |
+| Contact shadows / AO | BRL-0152 |
+| One environment kit per theme | BRL-0153 |
+| Riff and the character animation set | BRL-0154 |
+| Touch-first HUD | BRL-0155 |
+| Shell surfaces, palette, motion | BRL-0156 |
+| Icon set | BRL-0157 |
+| Combat feedback | BRL-0144 |
+| Audio | BRL-0158 |
+
+Curated third-party models, audio, fonts, icons, and source art remain replaceable foundation
+content. Original art builds the PewPew Blitz identity while preserving gameplay proportions,
+anchors, relationship semantics, authoritative-shape agreement, accessibility, and degraded
+fallbacks.
 
 ## Presentation model
 
@@ -54,7 +132,9 @@ The accepted gameplay framing targets approximately 14 map cells vertically. The
 gameplay content area is 1591×720 (approximately 2.21:1, matching the supplied mobile reference),
 while explicit window-size overrides and live resizing remain supported. At the default aspect the
 conservative visible ground rectangle is approximately 25.40 by 14 cells. Map authors must not
-widen authoritative bounds merely to compensate for camera presentation.
+widen authoritative bounds merely to compensate for camera presentation. BRL-0148 re-evaluates
+these framing values so fighters read larger, in line with the visual direction. Until it lands,
+the values above remain the accepted contract.
 
 Camera fit and follow are decided independently for each axis from the presented map dimensions and
 current logical viewport. Because the tilted perspective ground view is trapezoidal, the client uses
@@ -459,7 +539,8 @@ Visual footprints must agree with authoritative planar shapes:
 
 - rectangles become cuboids or validated imported models with presentation-only height;
 - circles become cylinders or generated circular geometry;
-- floors use calm generated or cached surfaces;
+- floors use generated or cached grid-aligned tile surfaces that stay subordinate to the actors
+  and objectives on them;
 - destructible map assets reconcile whole-placement normal, removed, or replacement visuals from
   replicated terminal outcomes;
 - arbitrary or dynamic shapes use primitives/generated meshes rather than an approximate prop;
@@ -487,8 +568,9 @@ non-finite, or shape-incompatible imports select the profile's deterministic fal
 delaying gameplay readiness.
 
 Occlusion should first be solved through camera elevation, wall height, material value, and map
-composition. Selective fade, outlines, x-ray rendering, decals, or custom gameplay-world pipelines
-require evidence that these simpler controls are insufficient.
+composition. Fighter silhouette outlines are part of the visual direction, not an occlusion fix.
+Selective fade, x-ray rendering, occlusion-driven outlines, decals, or other custom gameplay-world
+pipelines require evidence that these simpler controls are insufficient.
 
 ## Asset forms
 
@@ -605,8 +687,10 @@ A presentation asset or family is admitted only when:
 ## Performance and verification
 
 The baseline remains deliberately simple: cached meshes and materials, bounded map-asset visuals,
-transients, restrained shadows, limited lighting, and Bevy's normal culling. Instancing, LOD, GPU
-particles, bloom, deferred rendering, or custom gameplay-world pipelines require measured need.
+transients, limited lighting, and Bevy's normal culling. The visual direction adds a shared toon
+material, fighter outlines, HDR tonemapping, and restrained bloom. Each of these must pass the
+render performance gate and have a mobile quality tier (BRL-0161). Instancing, LOD, deferred
+rendering, or other custom gameplay-world pipelines still require measured need.
 
 The authoring contract permits dense coverage up to every cell of a 512×512 map, but the current
 renderer may still materialize repeated static tiles individually. Structural validity therefore

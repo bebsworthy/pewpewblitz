@@ -26,23 +26,26 @@ networking, or gameplay facts.
 
 ## Visual tokens
 
-| Token | sRGB | Use |
-|---|---|---|
-| Cream | `#FAEBCF` | Quiet backgrounds and unselected surfaces |
-| Navy | `#081932` | Text, borders, focus geometry, and dark identity surfaces |
-| Teal | `#52A39E` | Secondary actions, selected content, and the left background plane |
-| Orange | `#FF6606` | Primary actions, Back, mode accents, and the bottom background plane |
+The [approved shell design](README.md#visual-language) owns the token values (BRL-0140):
+`shell-bg-top`, `shell-bg-bottom`, `panel`, `panel-raised`, `ink`, `play`, `play-highlight`,
+`accent`, `text`, `self`, `ally`, and `enemy`. `theme.rs` exposes them as named constants. Screens
+use the token names and never write literal colors.
 
-Lilita One is the shared display face at
-`brawler/ui/fonts/lilita-one-regular.ttf`. Use the theme helper so screens retain the supported
-font fallback. Type size may respond to available width and UI scale, but the hierarchy remains
-heading, label, value, and supporting copy. Body text must remain readable and should wrap before
-shrinking below its useful size.
+Migration status: `theme.rs` still holds the legacy cream/navy/teal/orange values until BRL-0156
+lands. New UI code should use role-based surfaces so that the palette swap needs no per-screen
+color edits.
 
-The shell uses large clean color planes, strong navy outlines, restrained asymmetry, and crisp
-offset shadows. Do not add random slashes, rays, halftone, dirt, busy textures, distressed type, or
-invented scenery. Icons must communicate a real action or game fact. Use the retained real logo
-asset for branding; do not redraw, crop, or substitute it with text.
+Lilita One is the shared display face at `brawler/ui/fonts/lilita-one-regular.ttf`, used by both
+the shell and the in-match HUD. Use the theme helper so screens retain the supported font fallback.
+Headings, labels, and values render white with an `ink` stroke and a soft drop shadow. Type size
+may respond to available width and UI scale, but the hierarchy remains heading, label, value, and
+supporting copy. Body text must remain readable and should wrap before shrinking below its useful
+size.
+
+The shell uses a saturated blue gradient background, pressable surfaces, strong `ink` outlines,
+and expressive asymmetry. Do not add halftone, dirt, distressed type, or invented scenery. Icons
+must communicate a real action or game fact. Use the retained real logo asset for branding; do not
+redraw, crop, or substitute it with text.
 
 ## Surface roles
 
@@ -51,10 +54,10 @@ geometry; state then modifies that role consistently.
 
 | Role | Intended use |
 |---|---|
-| `Back` | The single visible return action for a full-screen child; orange with normalized `‹ LABEL` copy |
-| `Primary` | The strongest commit or forward action on a screen; orange |
-| `Secondary` | A prominent alternate action; teal |
-| `Action` | A regular actionable row or button; cream |
+| `Back` | The single visible return action for a full-screen child; `panel-raised` with normalized `‹ LABEL` copy |
+| `Primary` | The strongest commit or forward action on a screen; `play` orange, only one per screen |
+| `Secondary` | A prominent alternate action; `panel-raised` |
+| `Action` | A regular actionable row or button; `panel` |
 | `Card` | A selectable catalog, brawler, map, or game card |
 | `Panel` | A grouped information or editor region |
 | `Row` | A compact option, result, or list row |
@@ -62,9 +65,11 @@ geometry; state then modifies that role consistently.
 | `Quiet` | Low-emphasis action that remains visually quiet until focused |
 
 Shared button and row chrome has cut top-right and bottom-left corners, slightly slanted side
-edges, a substantial navy border, and an offset shadow. The native `UiMaterial` shader derives
-edge coverage with screen-space derivatives so diagonal edges remain antialiased. Text and hit
-targets stay native Bevy UI; artwork is never stretched to define interaction geometry.
+edges, and a substantial `ink` border. Its fill reads as pressable: a vertical gradient, a 2–3 px
+light top band, and a darker 4–6 px bottom lip that replaces the flat offset shadow. The native
+`UiMaterial` shader derives edge coverage with screen-space derivatives so diagonal edges remain
+antialiased, and it owns the gradient, top band, and lip. Text and hit targets stay native Bevy
+UI; artwork is never stretched to define interaction geometry.
 
 Use internal padding rather than positioning text or trailing controls against the border. Labels
 are vertically centered. Toggle tracks, binding badges, values, and other trailing actions must
@@ -79,9 +84,13 @@ must not bleed into the transparent area outside the border.
 | State | Meaning | Required presentation |
 |---|---|---|
 | Focused | Current keyboard/gamepad navigation target | High-contrast inner frame and pointer; always visible on the active scope |
-| Selected | Persistent product choice or active category | Role-appropriate selected fill, normally teal or orange |
+| Selected | Persistent product choice or active category | Role-appropriate selected fill, normally `panel-raised` or `play` |
 | Inactive | Retained surface behind an overlay or outside the active input scope | No focus treatment or pointer |
 | Disabled | Action cannot currently run | Muted treatment, no false focus emphasis, and factual reason where needed |
+
+Actions activate on pointer or touch release, not on press, and a drag beyond a small threshold
+cancels the activation so touch scrolling never triggers a control. Keyboard and gamepad
+activation are unchanged.
 
 Focus is transient and selected state is persistent. Opening an overlay transfers input and focus
 to that overlay; the underlying screen cannot react to the same navigation event. Pointer hover or
@@ -121,8 +130,9 @@ real screen needs behavior that the existing values cannot express.
 - Each full-screen destination has one clear Back route. An action that confirms and returns does
   not need an additional visible Back button when the approved flow deliberately omits it.
 
-The shared abstract shell background uses cream with teal and orange planes. Screen-specific
-scenery, doors, staircases, and decorative patterns are not part of that background.
+The shared shell background is the `shell-bg-top` → `shell-bg-bottom` vertical gradient, with
+optional sparse, low-contrast toy-like motifs. Screen-specific scenery, doors, and staircases are
+not part of that background.
 Product controls use input-neutral labels and do not add controller-specific button prompts or
 footer legends.
 

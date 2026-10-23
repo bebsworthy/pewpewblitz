@@ -1,11 +1,32 @@
 # Player shell motion
 
-Navigation and accepted state changes occur immediately; presentation never owns saving, admission or route completion.
+The shell is energetic, matching the game's toy-like direction ([docs/11](../../11-art-and-presentation-direction.md#visual-direction), BRL-0140). Navigation and accepted state changes still occur immediately. Motion decorates them; it never owns saving, admission, or route completion, and it never delays input.
 
-- Resting background: slow bounded drift of the two geometric plane edges (about 0.4% of screen height). No noise, particles or random patterns.
-- Hover/focus: clear contrast change immediately. Preserve a distinct focus outline and fixed hit areas. Press has a darker fill; disabled actions have muted fill and factual wording.
-- Later screen transitions: brief opacity/position treatment, around 150–200 ms, interruptible. Implement only when the owning screen slice needs it.
-- Loading: indeterminate activity animation while real progress is pending; never infer progress percentages from time.
-- Reduced motion or reduced effects: background edges fixed, no camera sway or automatic flourish; immediate focus/pressed feedback remains. Loading still conveys pending status in text.
+## Interaction feedback
 
-The current Dashboard slice implements bounded background motion and interaction colors. The real model preview retains its existing lifecycle. Further transition choreography needs native review and its owning ticket.
+| State | Behavior |
+|---|---|
+| Hover / focus | Immediate brightness lift and the `accent` focus frame. Hit areas stay fixed. |
+| Press | Squash to about 0.95 scale over about 60 ms. The label drops about 3 px and the bottom lip collapses. Feedback is visible on press, but the action activates on release. |
+| Release | A short overshoot back to rest (about 120 ms, ease-out-back), then the action fires. A drag past the cancel threshold returns to rest with no action. |
+| Disabled | Muted fill, no squash, and factual wording. |
+
+## Idle and ambient motion
+
+- **Primary action (Play):** gentle breathing scale (about ±2%, 1.6 s period), plus a periodic diagonal shine sweep (about every 4 s).
+- **Background:** slow drift of the sparse motif layer. No noise or random flicker.
+- **Brawler preview:** idle animation from the character's own clip, with an occasional flourish when the character is selected.
+
+## Transitions
+
+- **Screen and panel entrances:** about 150–250 ms, a short slide or scale-in from about 0.92 with ease-out-back. Interruptible, so a new navigation cancels the running transition.
+- **Rewards, confirmations, and match results:** one short burst (scale pop plus particles or shine) on the element that changed.
+- **Loading:** an indeterminate activity animation while real progress is pending. Never infer progress percentages from time.
+
+## Reduced motion and reduced effects
+
+Idle breathing, shine, background drift, entrance slides, and reward bursts are disabled. Press and focus feedback stay immediate, as a color and lip change without scale. Loading still conveys pending status in text.
+
+## Ownership
+
+`shell_surface.wgsl` and the shared surface/control components own interaction feedback, so screens do not animate their own controls. Screen-specific choreography (results bursts, preview flourishes) belongs to the owning screen ticket and needs native review. BRL-0156 delivers the shared interaction, idle, and entrance motion.

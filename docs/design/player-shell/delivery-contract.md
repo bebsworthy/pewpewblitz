@@ -96,7 +96,7 @@ assets/
 - Reuse existing brawler models first. A new stage pedestal, prop or animated backdrop needs its own demonstrated visual purpose.
 - Supply `.blend` with named objects, transforms, units, origin, material setup, packed or relative textures and any animation clips. Export a `.glb` containing the required meshes/materials/animations.
 - Include a preview render, camera/framing notes, dimensions, mesh/material counts and intended motion. A screenshot of a Blender scene is not the scene file.
-- Keep the runtime design compatible with simple matte materials, restrained lighting and a static fallback. Blender-only procedural materials/compositing are reference until explicitly baked or recreated.
+- Keep the runtime design compatible with the shared toon material, rim light and outline described in [docs/11](../../11-art-and-presentation-direction.md#world-shading), and with a static fallback. Bake ambient occlusion into vertex colors or textures where it helps grounding. Blender-only procedural materials and compositing are reference until explicitly baked or recreated.
 - Do not commission a complete 3D menu room just because the style has depth. Native panels, a simple stage and existing fighter render may reproduce the approved design more clearly.
 
 ## Asset manifest record template
