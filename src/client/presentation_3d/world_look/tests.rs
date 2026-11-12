@@ -91,6 +91,15 @@ fn theme_lighting_stays_below_the_bloom_knee() {
             theme.id.0
         );
         assert!(theme.grading.validate("theme").is_ok());
+        // The tile floor (BRL-0147) is an ordinary lit surface: its brightest jittered tone,
+        // linearised, must stay under the knee too.
+        let floor = theme.floor.max_channel();
+        let floor_linear = Color::srgb(floor, floor, floor).to_linear().red;
+        assert!(
+            floor <= 1.0 && lit_white * floor_linear < knee,
+            "theme {} floor {floor} reaches the bloom knee {knee}",
+            theme.id.0
+        );
     }
 }
 

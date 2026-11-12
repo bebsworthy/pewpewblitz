@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const MAP_VISUAL_CATALOG: &str = include_str!("../../../../assets/catalogs/map_asset_visuals.ron");
 const MAP_THEME_CATALOG: &str =
     include_str!("../../../../assets/catalogs/map_presentation_themes.ron");
-const MAP_THEME_SCHEMA_VERSION: u16 = 4;
+const MAP_THEME_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Deserialize, Clone)]
 pub(in crate::client::presentation_3d) enum MapVisualKind {
@@ -102,7 +102,7 @@ struct MapThemeSource {
 #[derive(Clone)]
 pub(in crate::client::presentation_3d) struct MapThemeProfile {
     pub(in crate::client::presentation_3d) id: crate::map::MapPresentationThemeId,
-    pub(in crate::client::presentation_3d) playable_ground: (f32, f32, f32),
+    pub(in crate::client::presentation_3d) floor: floor_tiles::FloorTiles,
     pub(in crate::client::presentation_3d) ground_accent: (f32, f32, f32),
     pub(in crate::client::presentation_3d) outer_ground: (f32, f32, f32),
     pub(in crate::client::presentation_3d) fallback_wall: (f32, f32, f32),
@@ -239,7 +239,6 @@ fn visual_profile_is_valid(profile: &MapVisualProfile) -> bool {
 
 fn theme_colors_are_valid(theme: &MapThemeProfile) -> bool {
     [
-        theme.playable_ground,
         theme.ground_accent,
         theme.outer_ground,
         theme.fallback_wall,
@@ -313,6 +312,9 @@ fn validate_map_themes(
         theme
             .grading
             .validate(&format!("client map theme {} grading", theme.id.0))?;
+        theme
+            .floor
+            .validate(&format!("client map theme {} floor", theme.id.0))?;
     }
     let expected_themes: BTreeSet<_> = catalog
         .presets

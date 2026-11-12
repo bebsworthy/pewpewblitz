@@ -92,7 +92,7 @@ the previous presentation for that area:
 | Area | Owning ticket |
 |---|---|
 | HDR, tonemapping, bloom, color grading | BRL-0146 (adopted) |
-| Tile floor | BRL-0147 |
+| Tile floor | BRL-0147 (adopted) |
 | Camera framing re-evaluation | BRL-0148 |
 | Overhead plates and aim lane | BRL-0149 |
 | Toon material and rim | BRL-0150 |
@@ -188,6 +188,15 @@ target without tonemapping, grading, or bloom, so HUD colors are exact. Offscree
 (Dashboard brawler and card, weapon, Map Maker palette) use the same tonemapper and a preview
 grading without HDR or bloom. Unlit materials ignore `emissive`, so unlit glows carry their HDR
 value in `base_color`.
+
+The playable floor (`presentation_3d/floor_tiles.rs`) is one generated mesh with one quad per
+authoritative map cell, so tile seams always coincide with the gameplay grid. Each theme's `floor`
+block in `assets/catalogs/map_presentation_themes.ron` sets two close tones (validated to differ by
+8% value or less) alternating as a checkerboard, a small deterministic per-cell value jitter, and
+the strength of a darkening that fades over two cell corners from the arena edge and static
+player-blocking walls. Destructible cover does not darken the floor, because the floor is built once
+per map generation. Tones are carried in vertex colors on a white matte material, so the floor stays
+an ordinary lit surface below the bloom knee and works unchanged in the primitive world.
 
 Presentation reads authoritative or replicated facts and resolves stable presentation identities.
 Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or

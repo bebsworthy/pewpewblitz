@@ -28,6 +28,7 @@ mod combat;
 pub(crate) mod coordinates;
 mod diagnostics;
 pub(crate) mod environment_assets;
+mod floor_tiles;
 mod hit_feedback;
 mod map;
 mod map_editor;
@@ -1841,7 +1842,9 @@ fn reconcile_3d_map(
             &mut meshes,
             environment_materials,
             marker,
-            grid_snapshot.dimensions.bounds(),
+            grid_snapshot,
+            &grid_catalog.0,
+            grid_theme.floor,
         );
         materialize_map_static_visuals(
             &mut commands,

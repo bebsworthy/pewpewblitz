@@ -27,7 +27,8 @@ impl MapVisualCatalog {
                 (
                     *id,
                     EnvironmentThemeMaterials {
-                        floor: materials.add(matte(tuple_color(theme.playable_ground))),
+                        // Floor tones live in the tile mesh's vertex colours (BRL-0147).
+                        floor: materials.add(matte(Color::WHITE)),
                         floor_accent: materials.add(matte(tuple_color(theme.ground_accent))),
                         outer_ground: materials.add(matte(tuple_color(theme.outer_ground))),
                         wall: materials.add(matte(tuple_color(theme.fallback_wall))),
