@@ -46,6 +46,8 @@ Client presentation and local feedback
 - send timestamped input commands or input frames;
 - predict only its own fighter's movement with the shared movement step, reconcile against
   confirmed authoritative poses, and present the predicted pose (see owner prediction below);
+- present its own attacks on the input frame and suppress the matching server cue (see local
+  attack presentation below);
 - render the latest authoritative state;
 - interpolate remote fighters;
 - play visual, audio, and camera effects;
@@ -223,6 +225,26 @@ deadlines. The predicted pose replaces the owner's interpolated `Position`/`Rota
 Lightyear interpolation, so renderer, camera, overhead UI, and aim origin share it. The prediction
 is never sent, never mutates server state, and does not change the protocol; remote fighters,
 projectiles, hits, damage, and objectives remain interpolated authoritative state.
+
+### Local attack presentation
+
+Each client presents its own controlled fighter's attacks on the input frame (`client::local_attack`,
+BRL-0142). On local tick T it evaluates the server's fire gate against replicated, delayed state:
+held primary fire with no targeted ultimate held, not defeated, dashing, frozen, or inactive, the
+replicated ammunition (plus a recovery due by the estimated server tick) minus its own unconfirmed
+shots, and the replicated plus locally tracked cooldown. The estimated server simulation tick comes
+from the owner-prediction server clock. When the gate passes, the shoot animation, a small
+presentation-only recoil, the muzzle `VfxRequest`, the fire `AudioRequest`, and, for straight-family
+recipes, cosmetic projectiles start immediately; an ultimate's rising edge with full replicated
+charge starts the animation and recoil only (Dash excluded). The later authoritative
+`AttackAccepted` from the same fighter is paired with the oldest local shot whose estimated tick
+lies within a small early/late window; paired attack ids are echoes that the animation, VFX, and
+audio producers skip, so nothing plays twice. A shot the server does not confirm is rejected once
+the owner's confirmed authoritative tick has passed it by a margin, and its cosmetic projectile
+shrinks out. A replicated projectile of an echoed shot takes over its cosmetic's pose and converges
+on authority at a bounded speed. Cosmetic projectiles stop at replicated projectile-blocking map
+geometry but never test fighters, deployables, damage, or status. Nothing is sent to the server
+and the protocol is unchanged; acceptance, ammunition, deliveries, hits, and damage stay server-only.
 
 Saved-brawler and weapon-equipment edits are not per-tick combat input. They use ordered,
 idempotent profile requests tied to the receiving authenticated lobby connection. A request never

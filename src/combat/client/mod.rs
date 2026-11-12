@@ -24,6 +24,7 @@ pub use preview::MAX_PREVIEW_SEGMENTS;
 pub(crate) use preview::{
     AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, MAX_CONE_SPRAY_SEGMENTS,
     PreviewGeometry, PreviewPrimitive, cone_spray_primitives, preview_primitives,
+    straight_map_travel,
 };
 
 pub struct ClientCombatPlugin;

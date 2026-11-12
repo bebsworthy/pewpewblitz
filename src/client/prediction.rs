@@ -131,10 +131,22 @@ impl OwnerPrediction {
 
     /// Estimated server simulation tick for a local input tick, once a sample has arrived.
     #[must_use]
-    fn simulation_tick_at(&self, tick: Tick) -> Option<u64> {
+    pub(crate) fn simulation_tick_at(&self, tick: Tick) -> Option<u64> {
         self.server_clock.map(|(confirmed, simulation)| {
             simulation.saturating_add_signed(i64::from(tick - confirmed))
         })
+    }
+
+    /// The Lightyear tick of the newest authoritative sample folded into the prediction.
+    #[must_use]
+    pub(crate) const fn last_confirmed_tick(&self) -> Option<Tick> {
+        self.last_sample_tick
+    }
+
+    /// Whether the newest predicted step suspended local movement (dash, defeat, inactive).
+    #[must_use]
+    pub(crate) const fn is_following_authority(&self) -> bool {
+        self.following_authority
     }
 
     /// Whether a sample confirmed at `tick` is newer than every sample already folded in.

@@ -1113,6 +1113,7 @@ mod tests {
                     last_position: Vec2::ZERO,
                     moving: false,
                     shoot_seconds: 0.0,
+                    recoil_seconds: 0.0,
                 },
             ))
             .id();
@@ -1135,6 +1136,7 @@ mod tests {
                     last_position: Vec2::ZERO,
                     moving: false,
                     shoot_seconds: 0.0,
+                    recoil_seconds: 0.0,
                 },
             ))
             .id();

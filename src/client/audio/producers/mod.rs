@@ -35,6 +35,8 @@ impl Plugin for AudioProducersPlugin {
             )
                 .chain()
                 .after(crate::map::MapPresentationSet::Readiness)
+                // Local attack echoes are paired before any cue is turned into sound.
+                .after(crate::client::local_attack::LocalAttackSet::Reconcile)
                 .in_set(AudioProducerSet),
         );
     }
@@ -229,5 +231,54 @@ mod tests {
         scrambled.reverse();
         scrambled.sort_unstable_by_key(|request| request.order);
         assert_eq!(&scrambled, observed);
+    }
+
+    /// Stand-in for the local attack reconciler: the cue becomes an echo of a local shot.
+    fn pair_local_echo(mut ledger: ResMut<crate::client::local_attack::LocalAttackLedger>) {
+        ledger.record(lightyear::prelude::Tick(1), 100);
+        ledger.observe_own_attack(AttackId(11), 100);
+    }
+
+    #[test]
+    fn local_fire_sounds_on_the_input_frame_and_its_paired_echo_is_silent() {
+        use crate::client::local_attack::{
+            LocalAttackKind, LocalAttackLedger, LocalAttackPresented, LocalAttackSet, LocalShotId,
+        };
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<AudioRequest>()
+            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientPlayableGate(false))
+            .insert_resource(ClientMapReadiness::Ready)
+            .init_resource::<LocalAttackLedger>()
+            .init_resource::<ObservedRequests>()
+            .add_plugins(AudioRegistryPlugin)
+            .add_plugins(AudioProducersPlugin)
+            .add_systems(Update, pair_local_echo.in_set(LocalAttackSet::Reconcile))
+            .add_systems(Update, observe_requests.after(AudioProducerSet));
+        crate::test_app::finalize(&mut app);
+
+        app.world_mut().write_message(LocalAttackPresented {
+            fighter: Entity::PLACEHOLDER,
+            owner: NetworkEntityId(12),
+            team: crate::combat::TeamId(1),
+            kind: LocalAttackKind::PrimaryFire(LocalShotId(0)),
+            origin: Vec2::ZERO,
+            facing: 0.0,
+            simulation_tick: 100,
+        });
+        // The echo arrives in the same frame; pairing runs before any cue becomes sound.
+        app.world_mut().write_message(combat_cue());
+        app.update();
+
+        let observed = &app.world().resource::<ObservedRequests>().0;
+        assert_eq!(observed.len(), 1, "one fire sound, no replay: {observed:?}");
+        assert_eq!(observed[0].cue_key, cue_keys::FIRE);
+        assert_ne!(
+            observed[0].occurrence,
+            Some(11),
+            "the local occurrence, not the echo"
+        );
     }
 }

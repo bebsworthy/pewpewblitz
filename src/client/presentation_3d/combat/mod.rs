@@ -10,6 +10,7 @@ mod elemental_style;
 mod entities;
 mod fighter_feedback;
 mod fighter_ui;
+mod local_projectile;
 mod melee_style;
 mod particles;
 mod sentry_style;
@@ -53,6 +54,10 @@ pub(super) use fighter_feedback::{
 pub(super) use fighter_ui::{
     prepare_cold_pie_assets, project_fighter_overhead_ui, reconcile_fighter_overheads,
     update_fighter_overhead_state,
+};
+pub(super) use local_projectile::{
+    LocalProjectileHandoffs, LocalProjectileLead, advance_local_projectiles,
+    retire_impacted_local_projectiles, spawn_local_projectiles,
 };
 pub(super) use melee_style::MeleeArcMeshCache;
 pub(in crate::client) use particles::{

@@ -62,6 +62,10 @@ pub(crate) const KENNEY_BLASTER_GRIP_ROTATION: f32 = 0.0;
 const STRAIGHT_PROJECTILE_HEIGHT: f32 = 4.0;
 const LOBBED_PROJECTILE_LAUNCH_HEIGHT: f32 = 20.0;
 const STRAIGHT_PROJECTILE_CATCH_UP_MULTIPLIER: f32 = 3.0;
+/// Duration of the presentation-only kick a fighter takes when its shoot motion starts.
+const FIGHTER_RECOIL_SECONDS: f32 = 0.09;
+/// Peak backward offset of that kick, in world units (a tenth of a map cell).
+const FIGHTER_RECOIL_DISTANCE: f32 = crate::map::MAP_CELL_SIZE_WORLD * 0.1;
 const HOT_ZONE_RING_WIDTH: f32 = 10.0;
 const GROUND_AREA_HEIGHT: f32 = 1.0;
 // The direction arrow is a flat UI marker rather than body geometry. Keep its tip inside the
@@ -223,6 +227,8 @@ struct V3FighterVisual {
     last_position: Vec2,
     moving: bool,
     shoot_seconds: f32,
+    /// Remaining presentation-only recoil; never moves the gameplay pose or camera target.
+    recoil_seconds: f32,
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -292,6 +298,10 @@ impl ImportedWorldFallbackPolicy {
 #[derive(Component)]
 struct V3ProjectileVisual {
     planar_position: Vec2,
+    /// Set when the local player's cosmetic projectile handed its pose to this replicated one.
+    local_lead: Option<combat::LocalProjectileLead>,
+    /// Whether local hand-off bookkeeping already initialised this visual root.
+    local_handoff_applied: bool,
 }
 
 #[derive(Component)]
@@ -375,8 +385,10 @@ impl Plugin for WorldPresentationPlugin {
         combat::add_retained_material_animation_systems(app, WorldPresentationSet::Animate);
         app.insert_resource(ImportedWorldFallbackPolicy::from_environment())
             .add_message::<PendingCombatEffect>()
+            .add_message::<local_attack::LocalAttackPresented>()
             .init_resource::<VfxTransientDiagnostics>()
             .init_resource::<combat::MeleeArcMeshCache>()
+            .init_resource::<combat::LocalProjectileHandoffs>()
             .init_resource::<combat::ConcealedMaterialVariants>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
             .init_resource::<DamageableObjectHealthUiIndex>()
@@ -434,11 +446,18 @@ impl Plugin for WorldPresentationPlugin {
             .add_systems(
                 Update,
                 (
-                    combat::animate_attack_acceptance,
-                    resolve_vfx_requests.after(vfx::VfxRequestSet),
-                    materialize_combat_effects,
+                    (
+                        combat::animate_attack_acceptance,
+                        resolve_vfx_requests.after(vfx::VfxRequestSet),
+                        materialize_combat_effects,
+                    )
+                        .chain(),
+                    (
+                        combat::spawn_local_projectiles,
+                        combat::retire_impacted_local_projectiles,
+                    )
+                        .chain(),
                 )
-                    .chain()
                     .in_set(WorldPresentationSet::ConsumeCues),
             )
             .add_systems(
@@ -470,6 +489,7 @@ impl Plugin for WorldPresentationPlugin {
                 (
                     (combat::write_fighter_visual_poses, follow_3d_camera).chain(),
                     (
+                        combat::advance_local_projectiles,
                         combat::write_projectile_visual_poses,
                         combat::write_lobbed_projectile_body_poses,
                         combat::write_lobbed_projectile_aid_poses,
@@ -2574,6 +2594,12 @@ fn play_character_motion(
     if !matches!(next, CharacterMotion::Shoot | CharacterMotion::Defeated) {
         animation.repeat();
     }
+}
+
+/// Backward recoil offset for the remaining recoil time: an immediate kick easing back to rest.
+fn fighter_recoil_offset(recoil_seconds: f32) -> f32 {
+    let remaining = (recoil_seconds / FIGHTER_RECOIL_SECONDS).clamp(0.0, 1.0);
+    FIGHTER_RECOIL_DISTANCE * remaining * remaining
 }
 
 fn catch_up_projectile_position(

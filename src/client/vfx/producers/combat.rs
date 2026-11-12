@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use super::VfxRequestSet;
 use crate::{
+    client::local_attack::{LocalAttackKind, LocalAttackLedger, LocalAttackPresented},
     client::vfx::{
         COMBAT_DAMAGE_VFX, COMBAT_IMPACT_VFX, COMBAT_MUZZLE_VFX, COMBAT_RESET_VFX,
         COMBAT_VFX_PRODUCER_RANK, CombatVisualSignature, DEMOLITION_STRIKE_VFX,
@@ -10,7 +11,7 @@ use crate::{
         VfxCarrier, VfxContextOverride, VfxDeadline, VfxGeometry, VfxPhase,
         VfxPresentationIdentity, VfxPresentationVariant, VfxRelationship, VfxRequest,
         VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration, VfxSignatureCache,
-        accent_for_elemental_field,
+        accent_for_elemental_field, activation_geometry_for_recipe, carrier_for_delivery,
     },
     combat::{AuthoritativeTick, CombatCue, client::DeduplicatedCombatCue, combat_cue_key},
     protocol::{Fighter, NetworkEntityId},
@@ -73,7 +74,65 @@ impl Plugin for CombatVfxProducerPlugin {
             app.try_register_vfx_request(registration)
                 .expect("combat VFX request registration must be valid");
         }
-        app.add_systems(Update, produce_combat_vfx_requests.in_set(VfxRequestSet));
+        app.add_message::<LocalAttackPresented>().add_systems(
+            Update,
+            (
+                produce_combat_vfx_requests,
+                produce_local_attack_vfx_requests,
+            )
+                .in_set(VfxRequestSet),
+        );
+    }
+}
+
+/// Request identity of locally presented attacks; disjoint from server combat event ids.
+const LOCAL_ATTACK_VFX_IDENTITY: u64 = 1 << 63;
+
+/// Muzzle effect for the local player's own primary fire on its input frame. The later
+/// authoritative `AttackAccepted` for the same attack is an echo and is skipped below.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the signature cache and variant settings are read-only Bevy system resources"
+)]
+fn produce_local_attack_vfx_requests(
+    mut local_attacks: MessageReader<LocalAttackPresented>,
+    mut requests: MessageWriter<VfxRequest>,
+    cache: Res<VfxSignatureCache>,
+    loadouts: Query<&crate::builds::ResolvedMatchLoadout>,
+) {
+    for local in local_attacks.read() {
+        let LocalAttackKind::PrimaryFire(shot) = local.kind else {
+            continue;
+        };
+        let Ok(loadout) = loadouts.get(local.fighter) else {
+            continue;
+        };
+        let recipe = &loadout.primary_weapon.recipe;
+        let identity = LOCAL_ATTACK_VFX_IDENTITY | shot.0;
+        let signature = cache.signature_for_local_attack(
+            local.owner,
+            local.team,
+            recipe,
+            carrier_for_delivery(recipe.delivery),
+            identity,
+            0,
+            VfxPhase::Activation,
+            activation_geometry_for_recipe(recipe, local.origin, local.facing),
+            VfxAuthoritativeTiming::instant(local.simulation_tick),
+            VfxPresentationVariant::Normal,
+        );
+        if let Ok(request) = VfxRequest::try_new(
+            COMBAT_MUZZLE_VFX,
+            VfxRequestOrder::new(COMBAT_VFX_PRODUCER_RANK, identity),
+            local.origin,
+            None,
+            None,
+            "local input-frame muzzle effect",
+        )
+        .and_then(|request| request.with_signature(signature))
+        {
+            requests.write(request);
+        }
     }
 }
 
@@ -86,6 +145,7 @@ fn produce_combat_vfx_requests(
     mut requests: MessageWriter<VfxRequest>,
     authoritative_ticks: Query<&AuthoritativeTick>,
     cache: Res<VfxSignatureCache>,
+    ledger: Option<Res<LocalAttackLedger>>,
     fighters: Query<
         (
             &NetworkEntityId,
@@ -106,6 +166,13 @@ fn produce_combat_vfx_requests(
 ) {
     let observed_at_tick = authoritative_ticks.iter().map(|tick| tick.0).max();
     for DeduplicatedCombatCue(cue) in cues.read() {
+        if let CombatCue::AttackAccepted { attack_id, .. } = cue
+            && ledger
+                .as_deref()
+                .is_some_and(|ledger| ledger.is_echo(*attack_id))
+        {
+            continue;
+        }
         let Some((key, cue_position, radius, deadline, label)) =
             combat_vfx_request(cue, observed_at_tick, &cache, |target| {
                 replicated_fighter_position(&fighters, target)
@@ -801,6 +868,93 @@ mod tests {
         };
         let (key, _, _, _, _) = combat_vfx_request(&reset, None, &cache, |_| None).unwrap();
         assert_eq!(key, COMBAT_RESET_VFX);
+    }
+
+    fn preset_loadout() -> crate::builds::ResolvedMatchLoadout {
+        let builds = crate::builds::BuildCatalog::embedded().expect("embedded build catalog");
+        let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
+        crate::builds::resolve_build_recipe(
+            &builds,
+            &weapons,
+            crate::builds::BrawlerBuildRecipe {
+                weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+                ultimate: crate::builds::UltimateDefinitionId(1),
+                passives: [
+                    crate::builds::PassiveDefinitionId(1),
+                    crate::builds::PassiveDefinitionId(6),
+                ],
+            },
+        )
+        .expect("preset loadout resolves")
+    }
+
+    #[test]
+    fn local_fire_presents_its_muzzle_once_and_the_server_echo_is_skipped() {
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<VfxRequest>()
+            .add_message::<LocalAttackPresented>()
+            .init_resource::<VfxSignatureCache>()
+            .init_resource::<CapturedRequests>()
+            .add_systems(
+                Update,
+                (
+                    (
+                        produce_combat_vfx_requests,
+                        produce_local_attack_vfx_requests,
+                    ),
+                    capture_requests,
+                )
+                    .chain(),
+            );
+        let mut ledger = LocalAttackLedger::default();
+        let shot = ledger.record(lightyear::prelude::Tick(1), 100);
+        ledger.observe_own_attack(AttackId(11), 100);
+        app.insert_resource(ledger);
+        let fighter = app.world_mut().spawn(preset_loadout()).id();
+        app.world_mut().write_message(LocalAttackPresented {
+            fighter,
+            owner: NetworkEntityId(12),
+            team: crate::combat::TeamId(1),
+            kind: LocalAttackKind::PrimaryFire(shot),
+            origin: Vec2::new(2.0, 3.0),
+            facing: 0.0,
+            simulation_tick: 100,
+        });
+        for (attack_id, source) in [(11, 12), (21, 22)] {
+            app.world_mut()
+                .write_message(DeduplicatedCombatCue(CombatCue::AttackAccepted {
+                    event_id: CombatEventId(attack_id),
+                    tick: 100,
+                    attack_id: AttackId(attack_id),
+                    source: NetworkEntityId(source),
+                    position: WorldPoint { x: 2.0, y: 3.0 },
+                    weapon_definition_id: WeaponDefinitionId(1),
+                }));
+        }
+
+        app.update();
+
+        let captured = &app.world().resource::<CapturedRequests>().0;
+        assert_eq!(
+            captured.len(),
+            2,
+            "local muzzle plus the remote attack only"
+        );
+        assert!(
+            captured
+                .iter()
+                .all(|request| request.key == COMBAT_MUZZLE_VFX)
+        );
+        let local = captured
+            .iter()
+            .find(|request| request.order.event_id & LOCAL_ATTACK_VFX_IDENTITY != 0)
+            .expect("local muzzle request");
+        assert_eq!(local.position, Vec2::new(2.0, 3.0));
+        assert!(
+            captured.iter().any(|request| request.order.event_id == 21),
+            "a remote attack still presents from its cue"
+        );
     }
 
     #[test]

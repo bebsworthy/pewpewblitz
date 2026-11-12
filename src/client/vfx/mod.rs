@@ -38,5 +38,6 @@ pub(crate) use signature::{
     CombatVisualSignature, VfxAccent, VfxAuthoritativeTiming, VfxCarrier, VfxContextOverride,
     VfxGeometry, VfxPhase, VfxPresentationIdentity, VfxPresentationVariant, VfxRelationship,
     VfxSignatureCache, VfxSignatureSet, accent_for_elemental_field, accents_for_payload_effects,
-    update_vfx_signature_cache, vfx_presentation_variant,
+    activation_geometry_for_recipe, carrier_for_delivery, update_vfx_signature_cache,
+    vfx_presentation_variant,
 };

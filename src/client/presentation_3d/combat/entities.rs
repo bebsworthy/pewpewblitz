@@ -155,8 +155,13 @@ type ProjectileVisualPoseQuery<'w, 's> = Query<
         &'static CombatVisualOwner,
         &'static mut V3ProjectileVisual,
         &'static mut Transform,
+        &'static mut Visibility,
     ),
-    (Without<V3FighterVisual>, Without<SentryVisual3d>),
+    (
+        Without<V3FighterVisual>,
+        Without<SentryVisual3d>,
+        Without<super::local_projectile::LocalCosmeticProjectile>,
+    ),
 >;
 
 type ProjectileVisualRootQuery<'w, 's> = Query<
@@ -167,7 +172,10 @@ type ProjectileVisualRootQuery<'w, 's> = Query<
         &'static CombatVisualOwner,
         &'static vfx::CombatVisualSignature,
     ),
-    With<V3ProjectileVisual>,
+    (
+        With<V3ProjectileVisual>,
+        Without<super::local_projectile::LocalCosmeticProjectile>,
+    ),
 >;
 
 type SentryVisualPoseQuery<'w, 's> = Query<
@@ -328,7 +336,7 @@ pub(in super::super) fn reconcile_projectile_visuals(
         let wants_smoke = lobbed.is_some()
             && signature.accents.contains(&Some(vfx::VfxAccent::Fire))
             && signature.variant == vfx::VfxPresentationVariant::Normal;
-        let spawned_smoke = spawn_projectile(
+        let (_, spawned_smoke) = spawn_projectile(
             &mut commands,
             &primitives,
             &materials,
@@ -1071,6 +1079,7 @@ fn spawn_fighter(
                 last_position: position,
                 moving: false,
                 shoot_seconds: 0.0,
+                recoil_seconds: 0.0,
             },
             Transform::from_translation(ground_position(position)),
             Visibility::default(),
@@ -1112,7 +1121,7 @@ fn spawn_fighter(
     clippy::too_many_arguments,
     reason = "the projectile root needs the complete immutable spawn presentation profile"
 )]
-fn spawn_projectile(
+pub(super) fn spawn_projectile(
     commands: &mut Commands,
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
@@ -1125,12 +1134,14 @@ fn spawn_projectile(
     body: Option<&crate::combat::ProjectileBody>,
     lobbed: Option<&crate::combat::LobbedFlight>,
     signature: vfx::CombatVisualSignature,
-) -> bool {
+) -> (Entity, bool) {
     let root = commands
         .spawn((
             CombatVisualOwner(owner),
             V3ProjectileVisual {
                 planar_position: straight.map_or(position, |flight| flight.origin.as_vec2()),
+                local_lead: None,
+                local_handoff_applied: false,
             },
             signature,
             Transform::from_translation(ground_position(position)),
@@ -1191,7 +1202,7 @@ fn spawn_projectile(
             spawn_lobbed_projectile_aids(parent, primitives, materials, owner);
         }
     });
-    allow_particle_smoke
+    let spawned_smoke = allow_particle_smoke
         && signature.accents.contains(&Some(vfx::VfxAccent::Fire))
         && signature.variant == vfx::VfxPresentationVariant::Normal
         && particle_assets.is_some_and(|assets| {
@@ -1202,7 +1213,8 @@ fn spawn_projectile(
                 root,
                 signature.stable_seed(),
             )
-        })
+        });
+    (root, spawned_smoke)
 }
 
 fn spawn_lobbed_projectile_aids(
@@ -1337,7 +1349,12 @@ fn spawn_sentry(
         ));
     });
 }
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Time is a Bevy system resource parameter"
+)]
 pub(in super::super) fn write_fighter_visual_poses(
+    time: Res<Time>,
     fighter_owners: Query<(&Position, &Rotation), With<Fighter>>,
     mut fighter_visuals: Query<(&CombatVisualOwner, &mut V3FighterVisual, &mut Transform)>,
 ) {
@@ -1345,7 +1362,10 @@ pub(in super::super) fn write_fighter_visual_poses(
         if let Ok((position, rotation)) = fighter_owners.get(owner.0) {
             visual.moving = visual.last_position.distance_squared(position.0) > 0.25;
             visual.last_position = position.0;
-            transform.translation = ground_position(position.0);
+            let recoil = Vec2::from_angle(rotation.as_radians())
+                * -fighter_recoil_offset(visual.recoil_seconds);
+            visual.recoil_seconds = (visual.recoil_seconds - time.delta_secs()).max(0.0);
+            transform.translation = ground_position(position.0 + recoil);
             transform.rotation = ground_rotation(*rotation);
         }
     }
@@ -1359,11 +1379,28 @@ pub(in super::super) fn write_projectile_visual_poses(
     mut projectile_visuals: ProjectileVisualPoseQuery,
 ) {
     let current_tick = ticks.iter().next().map_or(0, |tick| tick.0);
-    for (owner, mut visual, mut transform) in &mut projectile_visuals {
+    for (owner, mut visual, mut transform, mut visibility) in &mut projectile_visuals {
         let Ok((position, rotation, straight, lobbed)) = projectile_owners.get(owner.0) else {
             continue;
         };
-        let planar = if let Some(straight) = straight {
+        let planar = if let (Some(_), Some(lead)) = (straight, visual.local_lead) {
+            // A local input-frame shot handed its cosmetic pose to this projectile: keep flying
+            // from there and converge on authority at a bounded rate (never backwards).
+            let step = super::local_projectile::advance_led_projectile(
+                visual.planar_position,
+                position.0,
+                lead,
+                time.delta_secs(),
+            );
+            visual.planar_position = step.position;
+            if step.converged {
+                visual.local_lead = None;
+            }
+            if step.reached_stop {
+                *visibility = Visibility::Hidden;
+            }
+            visual.planar_position
+        } else if let Some(straight) = straight {
             visual.planar_position = catch_up_projectile_position(
                 visual.planar_position,
                 position.0,
@@ -1678,7 +1715,8 @@ mod tests {
     #[test]
     fn independent_root_maps_positive_and_negative_simulation_y_once() {
         let mut app = App::new();
-        app.add_systems(PostUpdate, write_fighter_visual_poses);
+        app.init_resource::<Time>()
+            .add_systems(PostUpdate, write_fighter_visual_poses);
         let owner = app
             .world_mut()
             .spawn((
@@ -1695,6 +1733,7 @@ mod tests {
                     last_position: Vec2::ZERO,
                     moving: false,
                     shoot_seconds: 0.0,
+                    recoil_seconds: 0.0,
                 },
                 Transform::default(),
             ))

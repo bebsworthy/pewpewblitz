@@ -5,6 +5,7 @@ use crate::{
         registry::{AudioProducerRegistration, AudioProducerRegistrationAppExt},
         request::{AudioCueKey, AudioRequest, AudioRequestOrder, cue_keys},
     },
+    client::local_attack::{LocalAttackKind, LocalAttackLedger, LocalAttackPresented},
     combat::{CombatCue, DeduplicatedCombatCue},
 };
 
@@ -21,6 +22,7 @@ const COMBAT_KEYS: &[AudioCueKey] = &[
 ];
 
 pub(super) fn register(app: &mut App) {
+    app.add_message::<LocalAttackPresented>();
     app.try_register_audio_producer(AudioProducerRegistration {
         id: "combat",
         rank: COMBAT_RANK,
@@ -29,12 +31,39 @@ pub(super) fn register(app: &mut App) {
     .expect("combat audio producer registration must be valid");
 }
 
+/// Fire-sound occurrence of a locally presented shot; disjoint from server attack ids.
+const LOCAL_ATTACK_AUDIO_OCCURRENCE: u64 = 1 << 63;
+
+/// Plays the local player's own fire sound on its input frame and every other combat cue as it
+/// arrives. The authoritative `AttackAccepted` echo of a locally presented shot is skipped.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the ledger is a read-only Bevy system resource"
+)]
 pub(super) fn produce_combat_audio_requests(
+    mut local_attacks: MessageReader<LocalAttackPresented>,
     mut cues: MessageReader<DeduplicatedCombatCue>,
+    ledger: Option<Res<LocalAttackLedger>>,
     mut requests: MessageWriter<AudioRequest>,
     mut sequence: Local<AudioProducerSequence>,
 ) {
+    for local in local_attacks.read() {
+        if let LocalAttackKind::PrimaryFire(shot) = local.kind {
+            requests.write(AudioRequest::for_occurrence(
+                cue_keys::FIRE,
+                LOCAL_ATTACK_AUDIO_OCCURRENCE | shot.0,
+                sequence.next(COMBAT_RANK),
+            ));
+        }
+    }
     for DeduplicatedCombatCue(cue) in cues.read() {
+        if let CombatCue::AttackAccepted { attack_id, .. } = cue
+            && ledger
+                .as_deref()
+                .is_some_and(|ledger| ledger.is_echo(*attack_id))
+        {
+            continue;
+        }
         if let Some(request) = combat_audio_request(cue, sequence.next(COMBAT_RANK)) {
             requests.write(request);
         }

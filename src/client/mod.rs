@@ -60,6 +60,7 @@ mod evidence_capture;
 mod flow;
 mod hud;
 mod input;
+pub mod local_attack;
 mod map_maker;
 pub mod prediction;
 mod presentation;
@@ -120,6 +121,7 @@ impl Plugin for ClientReplicatedGameplayPlugin {
             ClientQueuePlugin,
             ClientProfilePlugin,
             prediction::OwnerPredictionPlugin,
+            local_attack::LocalAttackPlugin,
         ));
     }
 }

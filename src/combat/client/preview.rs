@@ -355,6 +355,20 @@ fn trace_projectile_body(
     }
 }
 
+/// Distance a straight projectile body travels from `start` before effective projectile-blocking
+/// map geometry or the playable perimeter stops it. Fighters and deployables are ignored: this is
+/// presentation geometry for cosmetic flight only, never hit detection.
+#[must_use]
+pub(crate) fn straight_map_travel(
+    index: &AimTraceBlockerIndex,
+    body: ProjectileBody,
+    start: Vec2,
+    direction: Vec2,
+    maximum_distance: f32,
+) -> f32 {
+    trace_projectile_body(index, body, start, direction, maximum_distance, &[]).distance
+}
+
 fn collider_time_of_impact(
     projectile: &Collider,
     start: Vec2,

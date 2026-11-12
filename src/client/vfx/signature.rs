@@ -565,6 +565,49 @@ impl VfxSignatureCache {
         )
     }
 
+    /// Signature for an attack the local player presented on its input frame, before the server
+    /// named it. The style comes from the controlled fighter's own replicated recipe, exactly as
+    /// the later authoritative cue resolves it; only the presentation identity is local.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "local signature construction keeps every frozen semantic axis explicit"
+    )]
+    pub(crate) fn signature_for_local_attack(
+        &self,
+        owner: NetworkEntityId,
+        team: crate::combat::TeamId,
+        recipe: &WeaponRecipe,
+        carrier: VfxCarrier,
+        local_identity: u64,
+        delivery_index: u8,
+        phase: VfxPhase,
+        geometry: VfxGeometry,
+        timing: VfxAuthoritativeTiming,
+        variant: VfxPresentationVariant,
+    ) -> CombatVisualSignature {
+        let source = AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
+            attack_id: AttackId(local_identity),
+            player_id: crate::protocol::PlayerId(0),
+            owner_network_entity_id: owner,
+            team_id: team,
+            recipe_fingerprint: WeaponRecipeFingerprint::default(),
+            legacy_compatibility: false,
+            source_preset_id: None,
+            origin: crate::combat::WorldPoint::from(Vec2::ZERO),
+            facing: 0.0,
+        };
+        CachedAttackStyle::from_recipe(source, recipe, carrier).signature(
+            source.attack_id,
+            delivery_index,
+            phase,
+            geometry,
+            timing,
+            variant,
+            self.observer,
+        )
+    }
+
     pub(crate) const fn observer(&self) -> VfxObserver {
         self.observer
     }
@@ -666,6 +709,26 @@ pub(crate) fn accents_for_recipe(recipe: &WeaponRecipe) -> [Option<VfxAccent>; 2
         [Some(VfxAccent::Neutral), None]
     } else {
         collapsed
+    }
+}
+
+/// Activation geometry of a recipe at a launch pose: the melee arc, or the launch point.
+pub(crate) fn activation_geometry_for_recipe(
+    recipe: &WeaponRecipe,
+    origin: Vec2,
+    facing: f32,
+) -> VfxGeometry {
+    match recipe.delivery {
+        DeliveryMethod::MeleeArc {
+            reach,
+            angle_degrees,
+        } => VfxGeometry::Cone {
+            origin: origin.to_array(),
+            facing,
+            reach,
+            angle_degrees,
+        },
+        _ => VfxGeometry::point(origin),
     }
 }
 

@@ -385,9 +385,22 @@ fn vfx_material(key: VfxMaterialKey, materials: &Material3dAssets) -> Handle<Sta
         VfxMaterialKey::RestorationSoft => materials.elemental_restoration.clone(),
     }
 }
+/// Seconds the shoot motion plays after an attack starts.
+const SHOOT_ANIMATION_SECONDS: f32 = 0.18;
+
 /// Keeps fighter animation feedback separate from semantic VFX production.
+///
+/// The controlled fighter's attacks start from the local input-frame presentation; the later
+/// authoritative cue for the same attack is an echo and does not restart the motion. Every other
+/// accepted attack starts from its cue as before.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the ledger is a read-only Bevy system resource"
+)]
 pub(in super::super) fn animate_attack_acceptance(
     mut cues: MessageReader<DeduplicatedCombatCue>,
+    mut local_attacks: MessageReader<local_attack::LocalAttackPresented>,
+    ledger: Option<Res<local_attack::LocalAttackLedger>>,
     owners: Query<(Entity, &NetworkEntityId), With<Fighter>>,
     mut visuals: Query<(Entity, &CombatVisualOwner, &mut V3FighterVisual)>,
 ) {
@@ -403,12 +416,27 @@ pub(in super::super) fn animate_attack_acceptance(
                 .map(|&visual| (network_id.0, visual))
         })
         .collect::<HashMap<_, _>>();
+    let mut start = |visual_entity: Entity| {
+        if let Ok((_, _, mut visual)) = visuals.get_mut(visual_entity) {
+            visual.shoot_seconds = SHOOT_ANIMATION_SECONDS;
+            visual.recoil_seconds = FIGHTER_RECOIL_SECONDS;
+        }
+    };
+    for local in local_attacks.read() {
+        if let Some(&visual_entity) = visuals_by_owner.get(&local.fighter) {
+            start(visual_entity);
+        }
+    }
     for DeduplicatedCombatCue(cue) in cues.read() {
-        if let crate::combat::CombatCue::AttackAccepted { source, .. } = cue
+        if let crate::combat::CombatCue::AttackAccepted {
+            source, attack_id, ..
+        } = cue
+            && !ledger
+                .as_deref()
+                .is_some_and(|ledger| ledger.is_echo(*attack_id))
             && let Some(&visual_entity) = visuals_by_network_id.get(&source.0)
-            && let Ok((_, _, mut visual)) = visuals.get_mut(visual_entity)
         {
-            visual.shoot_seconds = 0.18;
+            start(visual_entity);
         }
     }
 }
@@ -1496,5 +1524,96 @@ mod tests {
             reveal_ring_remaining_duration(100, 400, Some(400)),
             Duration::ZERO
         );
+    }
+
+    #[test]
+    fn local_attack_starts_the_shoot_motion_once_and_its_echo_does_not_restart_it() {
+        use crate::client::local_attack::{
+            LocalAttackKind, LocalAttackLedger, LocalAttackPresented,
+        };
+        use crate::combat::{AttackId, CombatCue, CombatEventId, WeaponDefinitionId, WorldPoint};
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<LocalAttackPresented>()
+            .add_systems(Update, animate_attack_acceptance);
+        let mut ledger = LocalAttackLedger::default();
+        let shot = ledger.record(lightyear::prelude::Tick(1), 100);
+        ledger.observe_own_attack(AttackId(11), 100);
+        app.insert_resource(ledger);
+        let fighter = app.world_mut().spawn((Fighter, NetworkEntityId(12))).id();
+        let visual = app
+            .world_mut()
+            .spawn((
+                CombatVisualOwner(fighter),
+                V3FighterVisual {
+                    last_position: Vec2::ZERO,
+                    moving: false,
+                    shoot_seconds: 0.0,
+                    recoil_seconds: 0.0,
+                },
+            ))
+            .id();
+        let accepted = |attack_id| {
+            DeduplicatedCombatCue(CombatCue::AttackAccepted {
+                event_id: CombatEventId(attack_id),
+                tick: 100,
+                attack_id: AttackId(attack_id),
+                source: NetworkEntityId(12),
+                position: WorldPoint { x: 0.0, y: 0.0 },
+                weapon_definition_id: WeaponDefinitionId(1),
+            })
+        };
+        let started = |app: &App| {
+            let visual = app.world().get::<V3FighterVisual>(visual).expect("visual");
+            (visual.shoot_seconds > 0.0, visual.recoil_seconds > 0.0)
+        };
+        let clear = |app: &mut App| {
+            let mut visual = app
+                .world_mut()
+                .get_mut::<V3FighterVisual>(visual)
+                .expect("visual");
+            visual.shoot_seconds = 0.0;
+            visual.recoil_seconds = 0.0;
+        };
+
+        app.world_mut().write_message(LocalAttackPresented {
+            fighter,
+            owner: NetworkEntityId(12),
+            team: crate::combat::TeamId(1),
+            kind: LocalAttackKind::PrimaryFire(shot),
+            origin: Vec2::ZERO,
+            facing: 0.0,
+            simulation_tick: 100,
+        });
+        app.update();
+        assert_eq!(
+            started(&app),
+            (true, true),
+            "shoot motion and recoil on the input frame"
+        );
+
+        clear(&mut app);
+        app.world_mut().write_message(accepted(11));
+        app.update();
+        assert_eq!(
+            started(&app),
+            (false, false),
+            "the echo never replays the motion"
+        );
+
+        app.world_mut().write_message(accepted(21));
+        app.update();
+        assert_eq!(
+            started(&app),
+            (true, true),
+            "an unpaired accepted attack still animates"
+        );
+
+        // The kick is immediate and eases back to rest within its authored duration.
+        assert!(
+            (fighter_recoil_offset(FIGHTER_RECOIL_SECONDS) - FIGHTER_RECOIL_DISTANCE).abs() < 1e-6
+        );
+        assert!(fighter_recoil_offset(FIGHTER_RECOIL_SECONDS * 0.5) < FIGHTER_RECOIL_DISTANCE);
+        assert!(fighter_recoil_offset(0.0).abs() < 1e-6);
     }
 }

@@ -96,6 +96,8 @@ mod lifecycle;
 mod lifecycle_roster;
 #[path = "network/loadouts.rs"]
 mod loadouts;
+#[path = "network/local_attack.rs"]
+mod local_attack;
 #[path = "network/map.rs"]
 mod map;
 #[path = "network/match.rs"]
