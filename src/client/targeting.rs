@@ -1,8 +1,7 @@
 //! Client-local viewport target assistance converted into ordinary aim intent.
 
 use super::{
-    ArenaCamera, Controlled, Fighter, NetworkEntityId, Position, TargetedUltimateInput,
-    presentation_3d,
+    Controlled, Fighter, NetworkEntityId, Position, TargetedUltimateInput, presentation_3d,
 };
 use bevy::prelude::{Camera, GlobalTransform, Has, Query, Vec2, With};
 
@@ -83,7 +82,7 @@ pub(super) struct ViewportAutoAim<'w, 's> {
 impl ViewportAutoAim<'_, '_> {
     pub fn resolve(
         &self,
-        cameras: &Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
+        cameras: &presentation_3d::ArenaAimCameras,
         targeted_ultimate: TargetedUltimateInput,
     ) -> Option<AssistedAim> {
         let (origin, source_team, loadout) = self.fighters.iter().find_map(
@@ -91,7 +90,9 @@ impl ViewportAutoAim<'_, '_> {
                 (controlled && !defeated).then_some((position.0, *team, loadout?))
             },
         )?;
-        let (camera, camera_transform) = cameras.iter().next()?;
+        // Viewport membership uses the unshaken view so camera shake never changes targets.
+        let (camera, camera_transform) = presentation_3d::arena_aim_view(cameras)?;
+        let camera_transform = &camera_transform;
         let viewport = camera.logical_viewport_size()?;
         let action = AssistedAction::for_loadout(loadout, targeted_ultimate);
 

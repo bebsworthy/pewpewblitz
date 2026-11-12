@@ -1,0 +1,36 @@
+// Client-only gameplay camera rig tuning (BRL-0143). Presentation only: none of these values
+// feed aim, targeting, input, or simulation. Code-owned ceilings live in
+// `src/client/presentation_3d/camera_rig.rs`; framing (FOV, elevation, distance) stays in
+// `camera.rs`.
+(
+    schema_version: 1,
+    follow: (
+        // Critically damped follow of the presented (predicted) local fighter pose.
+        smooth_seconds: 0.11,
+        // Reduced motion keeps the camera nearly rigid instead of trailing the fighter.
+        reduced_motion_smooth_seconds: 0.03,
+        // A larger jump (respawn, teleport) snaps instead of sweeping across the map.
+        snap_distance_cells: 6.0,
+    ),
+    look_ahead: (
+        // Lean toward the aim direction; disabled under reduced motion.
+        distance_cells: 1.5,
+        smooth_seconds: 0.32,
+        // Mouse/lob aim at this distance from the fighter leans fully; closer aim leans less.
+        full_strength_aim_distance_cells: 5.0,
+    ),
+    shake: (
+        max_offset_world: 6.0,
+        frequency_hz: 16.0,
+        decay_per_second: 1.8,
+        exponent: 2.0,
+        triggers: (
+            local_fire: 0.14,
+            local_damage: 0.42,
+            local_defeat: 0.7,
+            nearby_explosion: 0.6,
+            nearby_defeat: 0.3,
+            falloff_radius_cells: 9.0,
+        ),
+    ),
+)

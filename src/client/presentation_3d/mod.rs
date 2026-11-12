@@ -23,6 +23,7 @@ use core::time::Duration;
 
 mod border;
 mod camera;
+mod camera_rig;
 mod combat;
 pub(crate) mod coordinates;
 mod diagnostics;
@@ -34,9 +35,8 @@ mod object_health;
 mod zombie;
 
 pub(super) use camera::cursor_ground_point;
-use camera::{
-    CAMERA_DISTANCE, CAMERA_ELEVATION_RADIANS, CAMERA_VERTICAL_FOV_RADIANS, follow_3d_camera,
-};
+use camera::{CAMERA_VERTICAL_FOV_RADIANS, camera_offset, follow_3d_camera};
+pub(super) use camera_rig::{ArenaAimCameras, arena_aim_view};
 pub(super) use combat::collect_vfx_evidence_snapshot;
 pub(in crate::client) use combat::{
     CombatEffect3d, MAX_ACTIVE_PARTICLE_EMITTERS, PendingCombatEffect,
@@ -392,6 +392,11 @@ impl Plugin for WorldPresentationPlugin {
             .init_resource::<combat::ConcealedMaterialVariants>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
             .init_resource::<DamageableObjectHealthUiIndex>()
+            .init_resource::<camera_rig::CameraRig>()
+            .insert_resource(
+                camera_rig::CameraRigCatalog::embedded()
+                    .expect("the embedded camera rig catalog must be valid"),
+            )
             .insert_resource(GlobalAmbientLight {
                 color: Color::srgb(0.72, 0.78, 0.9),
                 brightness: 350.0,
@@ -457,6 +462,8 @@ impl Plugin for WorldPresentationPlugin {
                         combat::retire_impacted_local_projectiles,
                     )
                         .chain(),
+                    // Reads the world-object inbox before the VFX producer drains it.
+                    camera_rig::accumulate_camera_trauma.before(vfx::VfxRequestSet),
                 )
                     .in_set(WorldPresentationSet::ConsumeCues),
             )
@@ -1544,15 +1551,12 @@ pub(in crate::client) fn setup_3d_foundation(
     commands.insert_resource(fighter_metrics);
     commands.insert_resource(material_assets);
 
-    let offset = Vec3::new(
-        0.0,
-        CAMERA_ELEVATION_RADIANS.sin(),
-        CAMERA_ELEVATION_RADIANS.cos(),
-    ) * CAMERA_DISTANCE;
+    let offset = camera_offset();
     commands.spawn((
         Camera3d::default(),
         Msaa::Sample4,
         ArenaCamera,
+        camera_rig::ArenaCameraShake::default(),
         Projection::Perspective(PerspectiveProjection {
             fov: CAMERA_VERTICAL_FOV_RADIANS,
             near: 0.1,

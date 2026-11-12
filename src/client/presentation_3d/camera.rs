@@ -1,5 +1,6 @@
-//! Per-axis map/viewport framing and ground-plane cursor projection.
+//! Per-axis map/viewport framing, the arena camera writer, and ground-plane cursor projection.
 
+use super::camera_rig::{ArenaCameraShake, CameraRig, CameraRigCatalog, CameraRigFrameInput};
 use super::*;
 
 pub(super) const CAMERA_VERTICAL_FOV_RADIANS: f32 = 15.0_f32.to_radians();
@@ -19,6 +20,17 @@ pub(crate) fn cursor_ground_point(
         .map(ground_point)
 }
 
+/// Presentation inputs of the camera rig: frame time, rig state and tuning, the local aim
+/// sample, and the motion/effects accessibility settings.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct CameraRigParams<'w> {
+    time: Res<'w, Time>,
+    rig: ResMut<'w, CameraRig>,
+    catalog: Res<'w, CameraRigCatalog>,
+    pending: Option<Res<'w, PendingLocalActions>>,
+    settings: Option<Res<'w, ClientShellSettings>>,
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -29,7 +41,8 @@ pub(super) fn follow_3d_camera(
     editor: Option<Res<MapEditorPreview>>,
     fighters: Query<&Position, (With<Fighter>, With<Controlled>, Without<ArenaCamera>)>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut cameras: Query<&mut Transform, With<ArenaCamera>>,
+    mut cameras: Query<(&mut Transform, Option<&mut ArenaCameraShake>), With<ArenaCamera>>,
+    mut rig: CameraRigParams,
 ) {
     let viewport = windows
         .iter()
@@ -47,42 +60,71 @@ pub(super) fn follow_3d_camera(
         let distance = CAMERA_DISTANCE * fit_scale * editor.camera_zoom.clamp(0.5, 3.0);
         let center = editor.camera_center;
         let target = ground_position(center);
-        let offset = Vec3::new(
-            0.0,
-            CAMERA_ELEVATION_RADIANS.sin(),
-            CAMERA_ELEVATION_RADIANS.cos(),
-        ) * distance;
-        for mut transform in &mut cameras {
+        let offset = camera_offset() * (distance / CAMERA_DISTANCE);
+        // The editor camera is direct; leaving the editor snaps the gameplay rig.
+        rig.rig.reset();
+        for (mut transform, shake) in &mut cameras {
             *transform = Transform::from_translation(target + offset).looking_at(target, Vec3::Y);
+            if let Some(mut shake) = shake {
+                shake.0 = Vec3::ZERO;
+            }
         }
         return;
     }
-    let (bounds, position) = map.as_ref().map_or_else(
+    let (bounds, fighter) = map.as_ref().map_or_else(
         || {
             let neutral = crate::map::AxisAlignedMapRect {
                 min: Vec2::ZERO,
                 max: Vec2::ZERO,
             };
-            (neutral, Vec2::ZERO)
+            (neutral, None)
         },
         |map| {
-            let position = fighters
-                .iter()
-                .next()
-                .map_or_else(|| map.camera_bounds.center(), |position| position.0);
-            (map.camera_bounds, position)
+            (
+                map.camera_bounds,
+                fighters.iter().next().map(|position| position.0),
+            )
         },
     );
-    let center = clamp_3d_camera_center(position, bounds, viewport);
-    let target = ground_position(center);
-    let offset = Vec3::new(
+    let settings = rig.settings.as_deref().copied().unwrap_or_default();
+    let aim = rig.pending.as_deref().and_then(|pending| {
+        pending
+            .aim_axis
+            .map(|direction| (direction, pending.aim_distance))
+    });
+    let dt = rig.time.delta_secs();
+    let catalog = *rig.catalog;
+    let frame = rig.rig.step(
+        &catalog,
+        CameraRigFrameInput {
+            fighter,
+            aim,
+            bounds,
+            viewport,
+            dt,
+            reduced_motion: settings.reduced_motion,
+            reduced_effects: settings.reduced_combat_effects,
+        },
+    );
+    let target = ground_position(frame.center);
+    let shake = ground_position(frame.shake);
+    let offset = camera_offset();
+    for (mut transform, shake_component) in &mut cameras {
+        *transform = Transform::from_translation(target + offset + shake)
+            .looking_at(target + shake, Vec3::Y);
+        if let Some(mut shake_component) = shake_component {
+            shake_component.0 = shake;
+        }
+    }
+}
+
+/// Camera position relative to its ground look target at the framing distance.
+pub(super) fn camera_offset() -> Vec3 {
+    Vec3::new(
         0.0,
         CAMERA_ELEVATION_RADIANS.sin(),
         CAMERA_ELEVATION_RADIANS.cos(),
-    ) * CAMERA_DISTANCE;
-    for mut transform in &mut cameras {
-        *transform = Transform::from_translation(target + offset).looking_at(target, Vec3::Y);
-    }
+    ) * CAMERA_DISTANCE
 }
 
 fn viewport_aspect(viewport: Vec2) -> f32 {
@@ -115,7 +157,7 @@ pub(super) fn clamp_3d_camera_center(
     )
 }
 
-fn conservative_ground_footprint(aspect: f32) -> crate::map::AxisAlignedMapRect {
+pub(super) fn conservative_ground_footprint(aspect: f32) -> crate::map::AxisAlignedMapRect {
     let aspect = if aspect.is_finite() && aspect > 0.0 {
         aspect
     } else {

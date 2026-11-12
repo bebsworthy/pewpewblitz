@@ -145,6 +145,18 @@ the default aspect centers its width and scrolls vertically, while larger maps c
 axes. Recipe-owned padding remains part of the authoritative bounds, and the camera does not change
 map authority or collision.
 
+A presentation-only camera rig (`presentation_3d/camera_rig.rs`, tuned by the client-only
+`assets/catalogs/camera_rig.ron`) sits on top of that framing. It follows the controlled fighter's
+presented (predicted) pose with a critically damped spring, snapping on respawn-sized jumps and map
+changes, and leans a bounded distance toward the local aim direction. The combined follow lag and
+look-ahead is capped at three cells and then passes through the unchanged per-axis framing clamp, so
+it never reveals space the framing contract forbids and a fit axis stays locked to the map center.
+A trauma-based shake fed by local fire, local damage and defeat, and distance-scaled nearby lob
+landings, barrel explosions, and defeats adds a ground-plane translation of at most a quarter cell
+after framing. Aim and viewport auto-aim project through the unshaken view, so shake never moves aim,
+targeting, input, or gameplay. Reduced motion disables shake and look-ahead and shortens follow
+smoothing; reduced combat effects also disables shake. The map editor camera bypasses the rig.
+
 Presentation reads authoritative or replicated facts and resolves stable presentation identities.
 Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or
 material handles, client-local entity identities, render height, or other renderer details.

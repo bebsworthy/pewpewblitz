@@ -47,3 +47,9 @@ The review's improvements land in this order, each child ticket implemented, ver
 
 # Process
 One subagent per ticket; verify per ticket spec; commit after each ticket; keep child status in sync. Tickets needing a native playtest stay `doing` until feedback, while work continues on the next ticket.
+
+# Follow-ups filed during implementation
+- BRL-0172 local ultimate activation sound/effect on the input frame (from BRL-0142)
+- BRL-0173 per-weapon/damage-scaled shake and a shake intensity setting (from BRL-0143)
+
+Board order of the `todo` column mirrors this plan (`ticket order todo set`).

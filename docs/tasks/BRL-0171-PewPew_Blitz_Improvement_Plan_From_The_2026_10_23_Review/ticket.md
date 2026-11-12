@@ -5,12 +5,12 @@ status: doing
 theme: core
 release:
 created: 2026-11-12T20:20:38Z
-modified: 2026-11-12T20:20:40Z
+modified: 2026-11-12T21:39:17Z
 closed:
 status_changed: 2026-11-12T20:20:38Z
 history:
 - doing@2026-11-12T20:20:38Z
-revision: 718404bc094ef935
+revision: 3b1097fdd947a5a0
 blocks: []
 related: []
 parent:
