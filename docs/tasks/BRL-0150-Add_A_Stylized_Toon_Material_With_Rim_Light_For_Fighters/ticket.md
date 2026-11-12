@@ -1,15 +1,20 @@
 ---
 id: BRL-0150
 title: Add a stylized toon material with rim light for fighters and world
-status: backlog
+status: todo
 theme: core
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-10-23T13:30:38Z
+modified: 2026-11-12T20:15:04Z
 closed:
-revision: 98927c3c49ef5c45
+status_changed: 2026-11-12T20:15:04Z
+history:
+- backlog@2026-10-23T13:30:38Z
+- todo@2026-11-12T20:15:04Z
+revision: 6dc4a7689f075c68
 blocks: []
 related: [BRL-0046, BRL-0146, BRL-0151, BRL-0152]
+parent: BRL-0171
 ---
 
 # Description

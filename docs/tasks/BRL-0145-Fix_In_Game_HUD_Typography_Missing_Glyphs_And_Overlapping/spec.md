@@ -70,3 +70,6 @@ Owner direction: the parent session assigned this ticket explicitly, which satis
 
 - Mistake: I added `Res<AssetServer>` to `setup_3d_foundation` and broke 4 headless schedule tests that build the foundation without asset plugins. Cause: I checked only direct callers and missed tests that schedule the system indirectly. Prevention: when adding a system parameter to an existing startup or reconcile system, use `Option<Res<_>>` for resources that headless tests may omit, or run the owning module's full test set before `just test`.
 - Mistake: my first raw-string guard in the source scanner (`concat!("r#", "\"")`) contained the very pattern it searched for. Lesson: a test that scans its own source file must not spell the pattern it detects.
+
+# Playtest feedback (2026-11-12)
+- User ran `just run 2` → Practice and accepted the result ("ok for me"). No corrections requested. Overhead plate stacking, glyph coverage, and the navy shadow stroke accepted as-is. Disposition: accepted; no open feedback items.

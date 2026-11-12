@@ -3,8 +3,6 @@
 # Board order
 
 ## idea
-- BRL-0046
-- BRL-0167
 
 ## backlog
 - BRL-0034
@@ -21,6 +19,17 @@
 - BRL-0121
 - BRL-0134
 - BRL-0139
+- BRL-0037
+- BRL-0046
+- BRL-0094
+- BRL-0096
+- BRL-0108
+- BRL-0109
+- BRL-0110
+- BRL-0126
+- BRL-0135
+
+## todo
 - BRL-0142
 - BRL-0143
 - BRL-0144
@@ -44,20 +53,10 @@
 - BRL-0163
 - BRL-0165
 - BRL-0166
+- BRL-0167
 - BRL-0168
 - BRL-0169
 - BRL-0170
 
-## todo
-- BRL-0096
-- BRL-0108
-
 ## doing
-- BRL-0094
-- BRL-0109
-- BRL-0110
-- BRL-0126
-- BRL-0135
-- BRL-0037
-- BRL-0145
-- BRL-0141
+- BRL-0171

@@ -1,15 +1,20 @@
 ---
 id: BRL-0162
 title: Keep routed sessions alive across mobile network changes
-status: backlog
+status: todo
 theme: core
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-10-23T13:19:05Z
+modified: 2026-11-12T20:15:05Z
 closed:
-revision: 9e66af85aa0059b5
+status_changed: 2026-11-12T20:15:05Z
+history:
+- backlog@2026-10-23T13:19:05Z
+- todo@2026-11-12T20:15:05Z
+revision: 21bdbdbe78c88203
 blocks: []
 related: []
+parent: BRL-0171
 ---
 
 # Description

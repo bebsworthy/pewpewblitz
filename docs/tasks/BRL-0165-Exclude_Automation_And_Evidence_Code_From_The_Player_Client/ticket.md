@@ -1,15 +1,20 @@
 ---
 id: BRL-0165
 title: Exclude automation and evidence code from the player client build
-status: backlog
+status: todo
 theme: quality
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-10-23T13:19:05Z
+modified: 2026-11-12T20:15:05Z
 closed:
-revision: 4b6dc4527e3904b1
+status_changed: 2026-11-12T20:15:05Z
+history:
+- backlog@2026-10-23T13:19:05Z
+- todo@2026-11-12T20:15:05Z
+revision: 5775f95b1ff791c4
 blocks: []
 related: [BRL-0159]
+parent: BRL-0171
 ---
 
 # Description

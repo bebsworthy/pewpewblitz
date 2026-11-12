@@ -1,15 +1,20 @@
 ---
 id: BRL-0108
 title: Preview VFX on production game maps in VfxLab
-status: todo
+status: backlog
 theme:
 release:
 created: 2026-08-31T17:42:13Z
-modified: 2026-08-31T17:45:16Z
+modified: 2026-11-12T20:15:05Z
 closed:
-revision: eeed9eb2fbba1678
+status_changed: 2026-11-12T20:15:05Z
+history:
+- todo@2026-08-31T17:45:16Z
+- backlog@2026-11-12T20:15:05Z
+revision: 13c55efa56940993
 blocks: [BRL-0094]
 related: [BRL-0094, BRL-0096, BRL-0098]
+parent:
 ---
 
 # Description

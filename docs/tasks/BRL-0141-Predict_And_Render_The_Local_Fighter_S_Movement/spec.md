@@ -89,3 +89,6 @@ Automated acceptance criteria are met; ticket stays `doing` for the native feel 
 - Mistake: rebasing cleared history whenever the sample predated it, so prediction never engaged. Prevention: distinguish "older than history" (wait) from "newer than history" (rebase); unit-test both.
 - Mistake: the legacy sandbox harness activates fighters outside `MatchPhase::Active`, hiding the participant-activity inference; product-faithful tests must use an active match harness.
 - Mistake: role-gated accessor (`capabilities()` server-only) broke the client build of shared code; run each role's clippy after moving code across role boundaries (already an AGENTS rule, followed late).
+
+# Playtest feedback (2026-11-12)
+- User ran `just run 2` → Practice and accepted the movement feel ("ok for me"). No corrections requested. Induced-latency runs were not reported separately; the automated 60/120 ms RTT measurements above stand as latency evidence. Stepping on >60 Hz displays remains deferred to BRL-0169. Disposition: accepted; no open feedback items.

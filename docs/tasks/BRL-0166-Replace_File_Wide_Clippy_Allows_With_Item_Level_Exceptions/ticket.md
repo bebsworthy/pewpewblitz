@@ -1,15 +1,20 @@
 ---
 id: BRL-0166
 title: Replace file-wide Clippy allows with item-level exceptions
-status: backlog
+status: todo
 theme: quality
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-10-23T13:19:05Z
+modified: 2026-11-12T20:15:05Z
 closed:
-revision: 7dc7a69e1e8a4c55
+status_changed: 2026-11-12T20:15:05Z
+history:
+- backlog@2026-10-23T13:19:05Z
+- todo@2026-11-12T20:15:05Z
+revision: dca772ab2fc83e42
 blocks: []
 related: [BRL-0134]
+parent: BRL-0171
 ---
 
 # Description

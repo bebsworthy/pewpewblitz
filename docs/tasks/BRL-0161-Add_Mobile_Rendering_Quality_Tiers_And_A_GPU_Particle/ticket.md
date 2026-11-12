@@ -1,15 +1,20 @@
 ---
 id: BRL-0161
 title: Add mobile rendering quality tiers and a GPU-particle fallback
-status: backlog
+status: todo
 theme: core
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-10-23T13:19:05Z
+modified: 2026-11-12T20:15:04Z
 closed:
-revision: e752b80d325d07f6
+status_changed: 2026-11-12T20:15:04Z
+history:
+- backlog@2026-10-23T13:19:05Z
+- todo@2026-11-12T20:15:04Z
+revision: 2d22194086c9bc93
 blocks: []
 related: []
+parent: BRL-0171
 ---
 
 # Description

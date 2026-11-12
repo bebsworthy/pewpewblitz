@@ -1,15 +1,20 @@
 ---
 id: BRL-0143
 title: 'Add a gameplay camera rig with smoothed follow, aim look-ahead, and shake'
-status: backlog
+status: todo
 theme: core
 release:
 created: 2026-10-23T13:19:02Z
-modified: 2026-10-23T13:19:04Z
+modified: 2026-11-12T20:15:04Z
 closed:
-revision: b4ca1c6e9ce85bb1
+status_changed: 2026-11-12T20:15:04Z
+history:
+- backlog@2026-10-23T13:19:04Z
+- todo@2026-11-12T20:15:04Z
+revision: 5ef6aeb172df51b6
 blocks: []
 related: [BRL-0141, BRL-0148]
+parent: BRL-0171
 ---
 
 # Description

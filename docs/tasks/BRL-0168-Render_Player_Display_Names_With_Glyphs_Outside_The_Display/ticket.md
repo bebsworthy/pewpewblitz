@@ -1,15 +1,20 @@
 ---
 id: BRL-0168
 title: Render player display names with glyphs outside the display font
-status: backlog
+status: todo
 theme: quality
 release:
 created: 2026-10-23T15:22:16Z
-modified: 2026-10-23T15:22:18Z
+modified: 2026-11-12T20:15:05Z
 closed:
-revision: 718bb6b7dba98afd
+status_changed: 2026-11-12T20:15:05Z
+history:
+- backlog@2026-10-23T15:22:18Z
+- todo@2026-11-12T20:15:05Z
+revision: 27410b00d9ea8298
 blocks: []
 related: [BRL-0145]
+parent: BRL-0171
 ---
 
 # Description

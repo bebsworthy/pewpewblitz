@@ -1,15 +1,20 @@
 ---
 id: BRL-0096
 title: Build a development-only VFX Workbench
-status: todo
+status: backlog
 theme:
 release:
 created: 2026-08-31T08:18:17Z
-modified: 2026-08-31T08:21:28Z
+modified: 2026-11-12T20:15:05Z
 closed:
-revision: a2a73ae668b06fc7
+status_changed: 2026-11-12T20:15:05Z
+history:
+- todo@2026-08-31T08:21:28Z
+- backlog@2026-11-12T20:15:05Z
+revision: c66fb67229f2707b
 blocks: []
 related: [BRL-0094, BRL-0098, BRL-0108]
+parent:
 ---
 
 # Description
