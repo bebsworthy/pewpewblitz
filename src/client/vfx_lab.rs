@@ -11,8 +11,8 @@ use super::{
         Material3dAssets, PendingCombatEffect, Primitive3dAssets,
         VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, VfxParticleAdapterPlugin,
         VfxParticleDiagnostics, VfxParticleEmitter3d, VfxTransientDiagnostics,
-        animate_combat_effect_layers, collect_vfx_evidence_snapshot, materialize_combat_effects,
-        resolve_vfx_requests, setup_3d_foundation,
+        animate_combat_effect_layers, collect_vfx_evidence_snapshot, install_world_look,
+        materialize_combat_effects, resolve_vfx_requests, setup_3d_foundation,
     },
     settings::persistence::ClientShellSettings,
     vfx::{
@@ -604,6 +604,8 @@ struct VfxLabPlugin {
 
 impl Plugin for VfxLabPlugin {
     fn build(&self, app: &mut App) {
+        // The lab previews effects through the production HDR, tonemapping, and bloom path.
+        install_world_look(app);
         app.insert_resource(ClientShellSettings {
             reduced_combat_effects: self.config.reduced,
             ..Default::default()
@@ -615,7 +617,7 @@ impl Plugin for VfxLabPlugin {
         })
         .insert_resource(GlobalAmbientLight {
             color: Color::srgb(0.72, 0.78, 0.9),
-            brightness: 350.0,
+            brightness: 160.0,
             ..default()
         })
         .add_message::<PendingCombatEffect>()

@@ -1,0 +1,19 @@
+// Client-only world look tuning (BRL-0146). Presentation only: nothing here feeds simulation or
+// the gameplay content fingerprint. Code-owned ceilings and the tonemapper choice live in
+// `src/client/presentation_3d/world_look.rs`; per-theme grading lives in
+// `map_presentation_themes.ron`.
+(
+    schema_version: 1,
+    // Restrained additive bloom on the HDR arena camera. Reduced effects removes it entirely.
+    bloom: (
+        intensity: 0.16,
+        low_frequency_boost: 0.5,
+        // Max-channel HDR value before grading. Lit surfaces stay below it; only deliberately
+        // HDR projectile cores, muzzle/explosion flashes, and pickups exceed it.
+        threshold: 3.0,
+        threshold_softness: 0.25,
+    ),
+    // Offscreen previews (dashboard brawler, brawler card, weapon, Map Maker palette): same
+    // tonemapper as the world, no HDR or bloom.
+    preview_grading: (exposure: 0.3, temperature: 0.0, tint: 0.0, saturation: 1.15, contrast: 1.0),
+)

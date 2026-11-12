@@ -91,7 +91,7 @@ the previous presentation for that area:
 
 | Area | Owning ticket |
 |---|---|
-| HDR, tonemapping, bloom, color grading | BRL-0146 |
+| HDR, tonemapping, bloom, color grading | BRL-0146 (adopted) |
 | Tile floor | BRL-0147 |
 | Camera framing re-evaluation | BRL-0148 |
 | Overhead plates and aim lane | BRL-0149 |
@@ -172,6 +172,22 @@ produces neither flash nor number. Reduced motion removes the number pop and ris
 effects uses a dimmer, shorter flash. Defeat feedback stays on the shared request path: the authored
 `defeat` recipe adds a smoke puff and a brief ground marker at the defeat point, and every defeat
 plays the defeat sound.
+
+The world look (`presentation_3d/world_look.rs`, tuned by the client-only
+`assets/catalogs/world_look.ron` and the per-theme `grading` in
+`assets/catalogs/map_presentation_themes.ron`) renders the arena camera in HDR with the
+TonyMcMapface filmic tonemapper. TonyMcMapface was chosen over AgX because it keeps the saturated
+toy palette and team hues stable while rolling bright emissive cores smoothly to white; AgX read
+flatter and pushed team blue and red toward pastel. Each theme's grading (exposure offset, white
+balance, saturation, contrast) is applied with that theme's lights. Restrained additive bloom
+thresholds the HDR image before grading: theme lights keep a head-on white surface below the bloom
+knee, and only projectile cores, muzzle and explosion flashes, and pickups are authored above it, so
+ordinary geometry, relationship rings, and area markers do not glow. Reduced combat effects removes
+bloom but keeps HDR, tonemapping, and grading so colors do not shift. The HUD camera shares the HDR
+target without tonemapping, grading, or bloom, so HUD colors are exact. Offscreen previews
+(Dashboard brawler and card, weapon, Map Maker palette) use the same tonemapper and a preview
+grading without HDR or bloom. Unlit materials ignore `emissive`, so unlit glows carry their HDR
+value in `base_color`.
 
 Presentation reads authoritative or replicated facts and resolves stable presentation identities.
 Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or

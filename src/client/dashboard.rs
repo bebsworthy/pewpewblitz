@@ -7,7 +7,6 @@ use super::{
 use bevy::{
     asset::RenderAssetUsages,
     camera::{ClearColorConfig, RenderTarget, visibility::RenderLayers},
-    core_pipeline::tonemapping::Tonemapping,
     prelude::*,
     reflect::TypePath,
     render::render_resource::{AsBindGroup, TextureDimension, TextureFormat, TextureUsages},
@@ -210,6 +209,7 @@ fn spawn_dashboard_preview(
     materials: Res<super::presentation_3d::Material3dAssets>,
     imported: Option<Res<super::presentation_3d::Imported3dAssets>>,
     existing: Option<Res<DashboardPreviewTarget>>,
+    look: Res<super::presentation_3d::WorldLookCatalog>,
 ) {
     if existing.is_some() {
         return;
@@ -243,7 +243,7 @@ fn spawn_dashboard_preview(
                 fov: 0.42,
                 ..default()
             }),
-            Tonemapping::None,
+            look.preview_camera_look(),
             Transform::from_xyz(205.0, 72.0, 125.0).looking_at(Vec3::new(0.0, 34.0, 0.0), Vec3::Y),
             layer.clone(),
         ))
@@ -323,11 +323,16 @@ struct BrawlerCardTarget {
     camera: Entity,
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are passed by value"
+)]
 fn ensure_brawler_card_target(
     mut commands: Commands,
     hosts: Query<(), With<BrawlerCardPreview>>,
     mut images: ResMut<Assets<Image>>,
     target: Option<Res<BrawlerCardTarget>>,
+    look: Res<super::presentation_3d::WorldLookCatalog>,
 ) {
     if hosts.is_empty() {
         if let Some(target) = target {
@@ -366,7 +371,7 @@ fn ensure_brawler_card_target(
                 fov: 0.42,
                 ..default()
             }),
-            Tonemapping::None,
+            look.preview_camera_look(),
             Transform::from_xyz(205.0, 72.0, 125.0).looking_at(Vec3::new(0.0, 34.0, 0.0), Vec3::Y),
             RenderLayers::layer(DASHBOARD_RENDER_LAYER),
         ))

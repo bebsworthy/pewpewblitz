@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const MAP_VISUAL_CATALOG: &str = include_str!("../../../../assets/catalogs/map_asset_visuals.ron");
 const MAP_THEME_CATALOG: &str =
     include_str!("../../../../assets/catalogs/map_presentation_themes.ron");
+const MAP_THEME_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Deserialize, Clone)]
 pub(in crate::client::presentation_3d) enum MapVisualKind {
@@ -114,6 +115,7 @@ pub(in crate::client::presentation_3d) struct MapThemeProfile {
     pub(in crate::client::presentation_3d) ambient_brightness: f32,
     pub(in crate::client::presentation_3d) directional_color: (f32, f32, f32),
     pub(in crate::client::presentation_3d) directional_illuminance: f32,
+    pub(in crate::client::presentation_3d) grading: world_look::ThemeGrading,
 }
 
 fn tuple_color(color: (f32, f32, f32)) -> Color {
@@ -275,7 +277,7 @@ fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), S
         .map_err(|error| format!("client map visual catalog parse failed: {error}"))?;
     let themes: MapThemeSource = ron::from_str(MAP_THEME_CATALOG)
         .map_err(|error| format!("client map theme catalog parse failed: {error}"))?;
-    if source.schema_version != 5 || themes.schema_version != 3 {
+    if source.schema_version != 5 || themes.schema_version != MAP_THEME_SCHEMA_VERSION {
         return Err("unsupported client map catalog schema".to_string());
     }
     let expected = expected_visual_profiles(catalog);
@@ -308,6 +310,9 @@ fn validate_map_themes(
         {
             return Err("invalid or duplicate client map theme".to_string());
         }
+        theme
+            .grading
+            .validate(&format!("client map theme {} grading", theme.id.0))?;
     }
     let expected_themes: BTreeSet<_> = catalog
         .presets

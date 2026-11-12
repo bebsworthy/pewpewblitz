@@ -3,7 +3,6 @@ use crate::client::flow::WeaponPreviewHost;
 use bevy::{
     asset::RenderAssetUsages,
     camera::{ClearColorConfig, RenderTarget, visibility::RenderLayers},
-    core_pipeline::tonemapping::Tonemapping,
     prelude::*,
     render::render_resource::{TextureDimension, TextureFormat, TextureUsages},
     ui::widget::ViewportNode,
@@ -44,6 +43,7 @@ fn update(
     owned: Query<Entity, With<WeaponOwned>>,
     mut images: ResMut<Assets<Image>>,
     imported: Option<Res<super::super::presentation_3d::Imported3dAssets>>,
+    look: Res<super::super::presentation_3d::WorldLookCatalog>,
 ) {
     let host = hosts.iter().next();
     if let Some(target) = target {
@@ -98,7 +98,7 @@ fn update(
                 fov: 0.5,
                 ..default()
             }),
-            Tonemapping::None,
+            look.preview_camera_look(),
             Transform::from_xyz(0.8, 0.32, 0.9).looking_at(Vec3::new(0.0, -0.05, 0.0), Vec3::Y),
             RenderLayers::layer(LAYER),
         ))

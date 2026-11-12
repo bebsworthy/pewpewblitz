@@ -15,7 +15,7 @@ use bevy::{
         Indices,
         primitives::{MeshBuilder, Meshable},
     },
-    render::render_resource::PrimitiveTopology,
+    render::{render_resource::PrimitiveTopology, view::ColorGrading},
     ui::UiSystems,
     world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady},
 };
@@ -33,6 +33,7 @@ mod map;
 mod map_editor;
 mod map_palette_preview;
 mod object_health;
+mod world_look;
 mod zombie;
 
 pub(super) use camera::cursor_ground_point;
@@ -52,6 +53,7 @@ pub(in crate::client) use map_editor::{
     MapEditorPointerMode, MapEditorPreview, MapEditorPreviewOptions,
 };
 use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_health_ui};
+pub(in crate::client) use world_look::{WorldLookCatalog, install as install_world_look};
 
 const WALL_HEIGHT: f32 = 32.0;
 // Kenney's Mini Characters face local +Z, while Brawler fighter roots face local +X.
@@ -83,6 +85,12 @@ const KENNEY_CHARACTER_WORLD_HEIGHT: f32 =
     KENNEY_CHARACTER_SOURCE_HEIGHT * KENNEY_CHARACTER_HEIGHT_WORLD_SCALE;
 const HEIST_IDOL_FOOTPRINT_WIDTH: f32 = 96.0;
 const HEIST_IDOL_FOOTPRINT_DEPTH: f32 = 64.0;
+// HDR glow colors (linear, max channel above the bloom threshold). Unlit materials ignore
+// `emissive`, so unlit glows carry their HDR value in `base_color`.
+const GLOW_PROJECTILE_BLUE: LinearRgba = LinearRgba::new(0.18, 2.6, 6.0, 1.0);
+const GLOW_PROJECTILE_RED: LinearRgba = LinearRgba::new(6.0, 0.9, 0.03, 1.0);
+const GLOW_MUZZLE: LinearRgba = LinearRgba::new(6.0, 3.6, 0.45, 1.0);
+const GLOW_PICKUP: LinearRgba = LinearRgba::new(0.45, 6.0, 1.05, 0.58);
 
 #[derive(Resource)]
 pub(crate) struct Primitive3dAssets {
@@ -373,6 +381,7 @@ impl Plugin for WorldPresentationPlugin {
         configure_world_presentation_schedule(app);
         map_palette_preview::install(app);
         hit_feedback::install(app);
+        world_look::install(app);
         app.add_plugins((
             vfx::ProductionVfxPlugin,
             VfxParticleAdapterPlugin,
@@ -401,7 +410,7 @@ impl Plugin for WorldPresentationPlugin {
             )
             .insert_resource(GlobalAmbientLight {
                 color: Color::srgb(0.72, 0.78, 0.9),
-                brightness: 350.0,
+                brightness: 160.0,
                 ..default()
             })
             .add_systems(Startup, setup_3d_foundation)
@@ -1275,16 +1284,18 @@ pub(in crate::client) fn setup_3d_foundation(
         projectile_trail_red_reduced: straight_projectile_trail_materials.add(
             combat::StraightProjectileTrailMaterial::red(combat::TrailQuality::Reduced),
         ),
+        // BRL-0146: projectile cores, muzzle/explosion flashes, and pickups are the only
+        // world materials authored above the bloom threshold (`world_look.ron`).
         projectile_hot_blue: materials.add(StandardMaterial {
             base_color: Color::srgb(0.1, 0.55, 0.82),
-            emissive: LinearRgba::new(0.04, 0.45, 0.85, 1.0),
+            emissive: GLOW_PROJECTILE_BLUE,
             perceptual_roughness: 0.2,
             metallic: 0.22,
             ..default()
         }),
         projectile_hot_red: materials.add(StandardMaterial {
             base_color: Color::srgb(0.82, 0.25, 0.04),
-            emissive: LinearRgba::new(0.85, 0.14, 0.004, 1.0),
+            emissive: GLOW_PROJECTILE_RED,
             perceptual_roughness: 0.2,
             metallic: 0.18,
             ..default()
@@ -1485,8 +1496,7 @@ pub(in crate::client) fn setup_3d_foundation(
             ..default()
         }),
         effect_muzzle: materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.8, 0.2),
-            emissive: LinearRgba::new(2.0, 1.2, 0.1, 1.0),
+            base_color: Color::LinearRgba(GLOW_MUZZLE),
             unlit: true,
             ..default()
         }),
@@ -1542,8 +1552,7 @@ pub(in crate::client) fn setup_3d_foundation(
         barrel: materials.add(matte(Color::srgb(0.92, 0.38, 0.06))),
         barrel_damaged: materials.add(matte(Color::srgb(0.34, 0.12, 0.04))),
         pickup_glow: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.18, 1.0, 0.42, 0.58),
-            emissive: LinearRgba::new(0.12, 2.4, 0.42, 1.0),
+            base_color: Color::LinearRgba(GLOW_PICKUP),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
@@ -1565,7 +1574,8 @@ pub(in crate::client) fn setup_3d_foundation(
             far: 4_000.0,
             ..default()
         }),
-        Tonemapping::None,
+        // HDR, filmic tonemapping, and grading; bloom follows reduced effects in `world_look`.
+        world_look::arena_camera_look(),
         Transform::from_translation(offset).looking_at(Vec3::ZERO, Vec3::Y),
         V3WorldMember,
     ));
@@ -1577,12 +1587,12 @@ pub(in crate::client) fn setup_3d_foundation(
             clear_color: ClearColorConfig::None,
             ..default()
         },
-        Tonemapping::None,
+        world_look::hud_camera_look(),
         RenderLayers::layer(31),
     ));
     commands.spawn((
         DirectionalLight {
-            illuminance: 8_000.0,
+            illuminance: 6_000.0,
             shadow_maps_enabled: true,
             ..default()
         },
@@ -1763,6 +1773,7 @@ fn reconcile_3d_map(
     )>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut directional_lights: Query<&mut DirectionalLight, With<V3WorldMember>>,
+    mut arena_grading: Query<&mut ColorGrading, With<ArenaCamera>>,
 ) {
     let current_grid_snapshot = accepted
         .as_deref()
@@ -1815,6 +1826,7 @@ fn reconcile_3d_map(
             light.color = grid_theme.directional_color();
             light.illuminance = grid_theme.directional_illuminance;
         }
+        world_look::apply_theme_grading(grid_theme.grading, &mut arena_grading);
         for (entity, _, generated) in &members {
             if let Some(generated) = generated {
                 meshes.remove(generated.0.id());

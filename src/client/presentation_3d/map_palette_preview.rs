@@ -46,6 +46,7 @@ fn spawn_previews(
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     mut images: ResMut<Assets<Image>>,
+    look: Res<WorldLookCatalog>,
 ) {
     let (Some(catalog), Some(visuals), Some(imported), Some(readiness), Some(themes)) =
         (catalog, visuals, imported, readiness, themes)
@@ -84,7 +85,7 @@ fn spawn_previews(
                     ..default()
                 },
                 RenderTarget::Image(image.into()),
-                Tonemapping::None,
+                look.preview_camera_look(),
                 Projection::Perspective(PerspectiveProjection {
                     fov: 0.52,
                     ..default()

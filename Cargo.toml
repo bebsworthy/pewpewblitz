@@ -69,6 +69,7 @@ bevy-client = [
   "bevy/bevy_gilrs",
   "bevy/bevy_gltf",
   "bevy/bevy_pbr",
+  "bevy/bevy_post_process",
   "bevy/bevy_render",
   "bevy/bevy_scene",
   "bevy/bevy_text",
@@ -87,6 +88,9 @@ bevy-client = [
   "bevy/serialize",
   "bevy/sysinfo_plugin",
   "bevy/bevy_input_focus",
+  # BRL-0146: filmic tonemapping LUTs (KTX2 + pure-Rust zstd) for the HDR world camera.
+  "bevy/tonemapping_luts",
+  "bevy/zstd_rust",
 ]
 bevy-server = []
 
