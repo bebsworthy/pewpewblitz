@@ -39,6 +39,22 @@ pub enum DamageSource {
     },
 }
 
+impl DamageSource {
+    /// The fighter that initiated this damage, when one did.
+    #[must_use]
+    pub const fn initiating_fighter(self) -> Option<NetworkEntityId> {
+        match self {
+            Self::PlayerWeapon { fighter_id, .. }
+            | Self::Ultimate { fighter_id, .. }
+            | Self::Deployable { fighter_id, .. } => Some(fighter_id),
+            Self::Environment {
+                initiating_fighter, ..
+            } => initiating_fighter,
+            Self::HostileNpc { .. } => None,
+        }
+    }
+}
+
 /// Cue variants used by deterministic/process evidence without serializing presentation payloads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CombatCueKind {

@@ -105,7 +105,7 @@ pub(super) fn sticky_fuse_progress(state: crate::combat::StickyBlobState, tick: 
 
 #[derive(Component)]
 pub(in super::super) struct FighterGroundMarker3d {
-    owner: Entity,
+    pub(in super::super) owner: Entity,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,0 +1,44 @@
+// Client-only hit feedback tuning (BRL-0144). Presentation only: every flash and number is driven
+// by an authoritative replicated cue, and none of these values feed simulation, aim, or input.
+// Code-owned ceilings (pool size, durations, scales) live in
+// `src/client/presentation_3d/hit_feedback.rs`; the defeat puff and ground marker are authored in
+// `vfx.ron` under the `defeat` recipes.
+(
+    schema_version: 1,
+    flash: (
+        // White pulse on the damaged fighter, deployable, NPC, or damageable object.
+        duration_millis: 80,
+        // How far the base color moves toward white, and the added white emissive.
+        base_color_mix: 0.65,
+        emissive: 2.4,
+        // Reduced combat effects keep the readable cue but dimmer and shorter.
+        reduced_duration_millis: 60,
+        reduced_base_color_mix: 0.35,
+        reduced_emissive: 0.9,
+    ),
+    numbers: (
+        // Live numbers at once; the oldest is recycled when the pool is full.
+        pool_capacity: 24,
+        lifetime_millis: 820,
+        // Pop: start small, overshoot to `pop_peak_scale`, settle at 1.0.
+        pop_millis: 140,
+        pop_start_scale: 0.6,
+        pop_peak_scale: 1.3,
+        rise_pixels: 38.0,
+        // Fade begins at this fraction of the lifetime.
+        fade_start_fraction: 0.6,
+        // Rapid hits on one subject with one style sum into one number.
+        merge_window_millis: 320,
+        max_merge_millis: 1100,
+        // Numbers spawn beside the body, below the overhead plate stack.
+        anchor_height_fraction: 0.62,
+        side_offset_pixels: 30.0,
+        stack_offset_pixels: 16.0,
+        styles: (
+            dealt: (font_size: 26.0, color: (1.0, 0.93, 0.36)),
+            taken: (font_size: 26.0, color: (1.0, 0.32, 0.30)),
+            healing: (font_size: 24.0, color: (0.42, 1.0, 0.52)),
+            observed: (font_size: 19.0, color: (0.86, 0.88, 0.92)),
+        ),
+    ),
+)

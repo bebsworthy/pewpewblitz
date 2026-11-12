@@ -1,19 +1,20 @@
 ---
 id: BRL-0144
 title: 'Add hit flash, floating damage numbers, and defeat feedback'
-status: todo
+status: doing
 theme: core
 release:
 created: 2026-10-23T13:19:02Z
-modified: 2026-11-12T21:32:43Z
+modified: 2026-11-12T22:10:31Z
 closed:
-status_changed: 2026-11-12T20:15:04Z
+status_changed: 2026-11-12T21:39:17Z
 history:
 - backlog@2026-10-23T13:19:04Z
 - todo@2026-11-12T20:15:04Z
-revision: 545d96611862dbdc
+- doing@2026-11-12T21:39:17Z
+revision: 25aba8db4f4bc566
 blocks: []
-related: [BRL-0094]
+related: [BRL-0094, BRL-0174]
 parent: BRL-0171
 ---
 

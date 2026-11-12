@@ -626,19 +626,6 @@ pub(super) fn send_combat_cues(
 }
 
 #[cfg(feature = "server")]
-fn damage_source_fighter(source: DamageSource) -> Option<NetworkEntityId> {
-    match source {
-        DamageSource::PlayerWeapon { fighter_id, .. }
-        | DamageSource::Ultimate { fighter_id, .. }
-        | DamageSource::Deployable { fighter_id, .. } => Some(fighter_id),
-        DamageSource::Environment {
-            initiating_fighter, ..
-        } => initiating_fighter,
-        DamageSource::HostileNpc { .. } => None,
-    }
-}
-
-#[cfg(feature = "server")]
 fn combat_cue_subjects(cue: &CombatCue) -> Vec<NetworkEntityId> {
     match cue {
         CombatCue::AttackAccepted { source, .. }
@@ -652,11 +639,12 @@ fn combat_cue_subjects(cue: &CombatCue) -> Vec<NetworkEntityId> {
         CombatCue::MeleeContact { source, target, .. } => vec![*source, *target],
         CombatCue::DamageApplied { source, target, .. }
         | CombatCue::EffectApplied { source, target, .. }
-        | CombatCue::Damage { source, target, .. } => damage_source_fighter(*source)
+        | CombatCue::Damage { source, target, .. } => source
+            .initiating_fighter()
             .map_or_else(|| vec![*target], |source| vec![source, *target]),
         CombatCue::FighterDefeated { source, target, .. }
         | CombatCue::Defeat { source, target, .. } => source
-            .and_then(damage_source_fighter)
+            .and_then(DamageSource::initiating_fighter)
             .map_or_else(|| vec![*target], |source| vec![source, *target]),
         CombatCue::FighterReset { target, .. }
         | CombatCue::Reset { target, .. }

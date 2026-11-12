@@ -28,6 +28,7 @@ mod combat;
 pub(crate) mod coordinates;
 mod diagnostics;
 pub(crate) mod environment_assets;
+mod hit_feedback;
 mod map;
 mod map_editor;
 mod map_palette_preview;
@@ -371,6 +372,7 @@ impl Plugin for WorldPresentationPlugin {
         }
         configure_world_presentation_schedule(app);
         map_palette_preview::install(app);
+        hit_feedback::install(app);
         app.add_plugins((
             vfx::ProductionVfxPlugin,
             VfxParticleAdapterPlugin,

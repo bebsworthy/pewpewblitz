@@ -157,6 +157,22 @@ after framing. Aim and viewport auto-aim project through the unshaken view, so s
 targeting, input, or gameplay. Reduced motion disables shake and look-ahead and shortens follow
 smoothing; reduced combat effects also disables shake. The map editor camera bypasses the rig.
 
+Hit feedback (`presentation_3d/hit_feedback.rs`, tuned by the client-only
+`assets/catalogs/hit_feedback.ron`) reads only authoritative replicated cues: fighter and deployable
+damage and healing (`DamageApplied`, healing `EffectApplied`), damageable-object damage
+(`WorldObjectCue::Damaged`), and Heist idol damage. Each damaging hit gives its target's presentation
+root a brief white flash (about 80 ms) derived from whatever material it currently shows, so a
+concealed translucent ally flashes translucent; ground team rings never flash. Each hit or heal also
+feeds a fixed, bounded pool of world-anchored Lilita One numbers drawn above the overhead plates:
+dealt (by the local player or its deployables), taken, healing (`+N`), and muted observed styles. Rapid
+hits of one style on one target merge into one re-popping number for a bounded window, so spray and
+field ticks stay legible; when the pool is full the oldest number is recycled. A cue whose target is
+not replicated to this observer (such as a concealed enemy, which the server already withholds)
+produces neither flash nor number. Reduced motion removes the number pop and rise; reduced combat
+effects uses a dimmer, shorter flash. Defeat feedback stays on the shared request path: the authored
+`defeat` recipe adds a smoke puff and a brief ground marker at the defeat point, and every defeat
+plays the defeat sound.
+
 Presentation reads authoritative or replicated facts and resolves stable presentation identities.
 Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or
 material handles, client-local entity identities, render height, or other renderer details.

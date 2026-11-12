@@ -40,12 +40,12 @@ pub(super) use elemental_style::{
     animate_elemental_support_area_materials, animate_fire_area_material,
 };
 pub(super) use entities::{
-    reconcile_concealment_field_visuals, reconcile_elemental_field_visuals,
-    reconcile_fighter_visuals, reconcile_persistent_splash_visuals, reconcile_projectile_visuals,
-    reconcile_sentry_visuals, reconcile_sticky_blob_visuals, update_sticky_blob_fuse_progress,
-    write_fighter_visual_poses, write_lobbed_projectile_aid_poses,
-    write_lobbed_projectile_body_poses, write_projectile_visual_poses, write_sentry_visual_poses,
-    write_sticky_blob_visual_poses,
+    FighterGroundMarker3d, SentryVisual3d, reconcile_concealment_field_visuals,
+    reconcile_elemental_field_visuals, reconcile_fighter_visuals,
+    reconcile_persistent_splash_visuals, reconcile_projectile_visuals, reconcile_sentry_visuals,
+    reconcile_sticky_blob_visuals, update_sticky_blob_fuse_progress, write_fighter_visual_poses,
+    write_lobbed_projectile_aid_poses, write_lobbed_projectile_body_poses,
+    write_projectile_visual_poses, write_sentry_visual_poses, write_sticky_blob_visual_poses,
 };
 pub(super) use fighter_feedback::{
     ConcealedMaterialVariants, reconcile_dash_trails, reconcile_status_visuals,

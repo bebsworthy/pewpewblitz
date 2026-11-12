@@ -125,8 +125,9 @@ type DashFighterQuery<'w, 's> = Query<
 
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
     clippy::type_complexity,
-    reason = "the presentation pass discovers material-bearing descendants across imported and fallback fighter hierarchies"
+    reason = "the presentation pass discovers material-bearing descendants across imported and fallback fighter hierarchies and reads the hit-flash variant map so the two body-material writers agree"
 )]
 pub(in super::super) fn update_fighter_concealment_visuals(
     mut commands: Commands,
@@ -151,6 +152,7 @@ pub(in super::super) fn update_fighter_concealment_visuals(
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut variants: ResMut<ConcealedMaterialVariants>,
+    flash: Res<hit_feedback::HitFlashMaterials>,
 ) {
     let controlled_team = fighters
         .iter()
@@ -175,13 +177,14 @@ pub(in super::super) fn update_fighter_concealment_visuals(
                 } else {
                     &binding.normal
                 };
-                if material.0 != *desired {
+                // A hit flash shows a variant of the desired material; it restores the base.
+                if *flash.base_of(&material.0) != *desired {
                     material.0 = desired.clone();
                 }
                 continue;
             }
 
-            let normal = material.0.clone();
+            let normal = flash.base_of(&material.0).clone();
             let Some(concealed_material) =
                 concealed_material_variant(&normal, &mut materials, &mut variants)
             else {
@@ -1090,6 +1093,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Assets<StandardMaterial>>()
             .init_resource::<ConcealedMaterialVariants>()
+            .init_resource::<hit_feedback::HitFlashMaterials>()
             .add_systems(Update, update_fighter_concealment_visuals);
         let normal = app
             .world_mut()

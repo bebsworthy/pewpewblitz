@@ -79,7 +79,8 @@ fn combat_audio_request(cue: &CombatCue, order: AudioRequestOrder) -> Option<Aud
         CombatCue::ConeSprayPulse { event_id, .. }
         | CombatCue::SelfCloakEnded { event_id, .. }
         | CombatCue::DemolitionStrikeActivated { event_id, .. } => (cue_keys::IMPACT, event_id.0),
-        CombatCue::FighterDefeated { attack_id, .. } => (cue_keys::DEFEAT, attack_id.0),
+        // One attack can defeat several fighters; every defeat plays its own sound.
+        CombatCue::FighterDefeated { event_id, .. } => (cue_keys::DEFEAT, event_id.0),
         CombatCue::FighterReset { event_id, .. } => (cue_keys::RESET, event_id.0),
         CombatCue::SentryFired { event_id, .. } | CombatCue::DeployableRemoved { event_id, .. } => {
             (cue_keys::SENTRY, event_id.0)

@@ -34,7 +34,7 @@ enum ZombieMotion {
 
 #[derive(Component)]
 pub(super) struct ZombieVisual {
-    owner: Entity,
+    pub(super) owner: Entity,
     imported: bool,
 }
 

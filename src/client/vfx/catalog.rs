@@ -1036,10 +1036,12 @@ mod tests {
             .resolve("combat.damage", &signature, true, false)
             .unwrap();
         assert_eq!(defeat.id, "defeat");
-        assert_eq!(defeat.layers.len(), 4);
-        assert_eq!(defeat.particle_layers.len(), 1);
+        // Pop, fracture, and ring plus the lingering defeat-point marker (BRL-0144).
+        assert_eq!(defeat.layers.len(), 6);
+        // Sparks plus the defeat smoke puff.
+        assert_eq!(defeat.particle_layers.len(), 2);
         assert_eq!(reduced_defeat.id, "defeat_reduced");
-        assert_eq!(reduced_defeat.layers.len(), 2);
+        assert_eq!(reduced_defeat.layers.len(), 3);
         assert!(reduced_defeat.particle_layers.is_empty());
 
         signature.phase = VfxPhase::Expiry;
