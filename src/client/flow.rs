@@ -34,9 +34,9 @@ use screens::{
         spawn_game_type_select,
     },
     map_maker::{
-        MapMakerRuntime, load_map_library, map_maker_input, present_map_editor,
-        present_map_library, resolve_map_maker_action, return_to_editor_after_practice,
-        sync_map_editor_preview, update_map_editor_cursor_copy,
+        MapMakerRuntime, load_map_library, map_maker_input, position_map_editor_selection_toolbar,
+        present_map_editor, present_map_library, resolve_map_maker_action,
+        return_to_editor_after_practice, sync_map_editor_preview, update_map_editor_cursor_copy,
     },
     match_loading::{spawn_match_loading, update_match_loading},
     overlays::{
@@ -196,9 +196,14 @@ impl Plugin for ClientFlowPlugin {
                     update_queue_status,
                     spawn_game_type_select.before(update_flow_button_chrome),
                     present_map_library.run_if(in_state(ClientFlow::MapLibrary)),
-                    present_map_editor.run_if(in_state(ClientFlow::MapEditor)),
-                    sync_map_editor_preview,
-                    update_map_editor_cursor_copy.after(present_map_editor),
+                    (
+                        present_map_editor.run_if(in_state(ClientFlow::MapEditor)),
+                        sync_map_editor_preview,
+                        update_map_editor_cursor_copy.after(present_map_editor),
+                        position_map_editor_selection_toolbar
+                            .after(present_map_editor)
+                            .run_if(in_state(ClientFlow::MapEditor)),
+                    ),
                     update_flow_button_chrome,
                 )
                     .in_set(ClientFlowSet::PresentFlow),

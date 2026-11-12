@@ -178,6 +178,10 @@ pub(in crate::client::flow) struct MapMakerRoot(u64);
 #[derive(Component)]
 pub(in crate::client::flow) struct MapMakerCursorCopy;
 
+/// The selection toolbar follows the editor camera without rebuilding the editor UI.
+#[derive(Component)]
+pub(in crate::client::flow) struct MapMakerSelectionToolbar;
+
 #[derive(Component, Clone, Copy)]
 enum PaletteItem {
     Asset(MapAssetId),
@@ -1425,9 +1429,6 @@ pub(in crate::client::flow) fn map_maker_input(
                 let half = dimensions.world_size() * 0.5;
                 runtime.camera_center = runtime.camera_center.clamp(-half, half);
             }
-            if motion.delta != Vec2::ZERO {
-                runtime.bump_render();
-            }
         }
         runtime.interaction = EditorInteraction::Idle;
     }
@@ -1441,7 +1442,6 @@ pub(in crate::client::flow) fn map_maker_input(
             queue_ui_action(&mut actions, FlowUiAction::MapMakerCycleAsset(direction));
         } else if !ui_owns_pointer {
             runtime.camera_zoom = (runtime.camera_zoom * (-event.y * 0.10).exp()).clamp(0.5, 3.0);
-            runtime.bump_render();
         }
     }
     if mouse_just_pressed && pointer_over_world && !ui_owns_pointer && !panning {
@@ -2493,12 +2493,13 @@ fn editor_selection_toolbar(
     if runtime.tool != EditorTool::Select || runtime.selection.is_empty() {
         return;
     }
-    let position = position.unwrap_or(Vec2::new(700.0, 220.0));
+    let (left, top) = selection_toolbar_offset(position);
     root.spawn((
+        MapMakerSelectionToolbar,
         Node {
             position_type: PositionType::Absolute,
-            left: px((position.x - 102.0).max(126.0)),
-            top: px((position.y - 88.0).max(92.0)),
+            left,
+            top,
             flex_direction: FlexDirection::Row,
             column_gap: px(5),
             padding: UiRect::all(px(5)),
@@ -2539,6 +2540,49 @@ fn editor_selection_toolbar(
             false,
         );
     });
+}
+
+fn selection_toolbar_offset(position: Option<Vec2>) -> (Val, Val) {
+    let position = position.unwrap_or(Vec2::new(700.0, 220.0));
+    (
+        px((position.x - 102.0).max(126.0)),
+        px((position.y - 88.0).max(92.0)),
+    )
+}
+
+/// Keeps the retained selection toolbar anchored to the selection while the camera pans or zooms.
+#[allow(clippy::needless_pass_by_value)]
+pub(in crate::client::flow) fn position_map_editor_selection_toolbar(
+    runtime: Res<MapMakerRuntime>,
+    catalog: Option<Res<MapCatalogResource>>,
+    cameras: Query<(&Camera, Ref<GlobalTransform>), With<ArenaCamera>>,
+    mut toolbars: Query<&mut Node, With<MapMakerSelectionToolbar>>,
+) {
+    let camera = cameras.iter().next();
+    let camera_moved = camera
+        .as_ref()
+        .is_some_and(|(_, transform)| transform.is_changed());
+    if toolbars.is_empty() || !(runtime.is_changed() || camera_moved) {
+        return;
+    }
+    let (Some(session), Some(catalog)) = (runtime.session.as_ref(), catalog.as_deref()) else {
+        return;
+    };
+    let position = selection_toolbar_position(
+        session,
+        &catalog.0,
+        &runtime.selection,
+        camera
+            .as_ref()
+            .map(|(camera, transform)| (*camera, &**transform)),
+    );
+    let (left, top) = selection_toolbar_offset(position);
+    for mut node in &mut toolbars {
+        if node.left != left || node.top != top {
+            node.left = left;
+            node.top = top;
+        }
+    }
 }
 
 fn icon_image_button(
@@ -3624,6 +3668,113 @@ mod tests {
             palette_category(PaletteItem::Spawn(0), &catalog),
             PaletteCategory::SpawnsObjectives
         );
+    }
+
+    #[test]
+    fn five_seconds_of_pan_and_zoom_never_respawn_the_editor_ui() {
+        let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+        let document = MapDraftDocument::blank(
+            MapDraftId(1),
+            "Camera",
+            crate::map::WIPEOUT_MODE_DEFINITION,
+            crate::map::MapDimensions {
+                width: 32,
+                height: 24,
+            },
+            crate::map::MapPresentationThemeId(1),
+            crate::map::GROUND_ASSET,
+        )
+        .unwrap();
+        let mut session = MapEditorSession::open(document);
+        session
+            .place(
+                &catalog,
+                crate::map::TALL_GRASS_ASSET,
+                MapCell::new(10, 10),
+                0,
+            )
+            .unwrap();
+        let selected = session.document.recipe.placements[0].placement_id;
+        let mut runtime = MapMakerRuntime {
+            session: Some(session),
+            ..MapMakerRuntime::default()
+        };
+        // Select a placement so the camera-anchored selection toolbar is present too.
+        activate_editor_tool(&mut runtime, EditorTool::Select);
+        runtime.selection.insert(selected);
+        runtime.bump_render();
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::state::app::StatesPlugin,
+            AssetPlugin::default(),
+        ))
+        .init_asset::<Image>()
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            crate::timing::SIMULATION_TICK,
+        ))
+        .add_message::<KeyboardInput>()
+        .add_message::<MouseWheel>()
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .insert_resource(AccumulatedMouseMotion::default())
+        .insert_resource(PendingFlowActions::default())
+        .insert_resource(MapCatalogResource(catalog))
+        .insert_resource(runtime)
+        .insert_state(ClientFlow::MapEditor)
+        .add_systems(
+            Update,
+            (
+                map_maker_input,
+                present_map_editor,
+                position_map_editor_selection_toolbar,
+            )
+                .chain(),
+        );
+        app.update();
+        let root_and_toolbar = |app: &mut App| {
+            let world = app.world_mut();
+            let roots = world
+                .query_filtered::<Entity, With<MapMakerRoot>>()
+                .iter(world)
+                .collect::<Vec<_>>();
+            let toolbars = world
+                .query_filtered::<Entity, With<MapMakerSelectionToolbar>>()
+                .iter(world)
+                .collect::<Vec<_>>();
+            (roots, toolbars)
+        };
+        let initial = root_and_toolbar(&mut app);
+        assert_eq!(initial.0.len(), 1);
+        assert_eq!(initial.1.len(), 1);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Middle);
+        let frames = crate::timing::simulation_ticks_from_seconds(5).unwrap();
+        for frame in 0..frames {
+            app.world_mut()
+                .resource_mut::<AccumulatedMouseMotion>()
+                .delta = Vec2::new(0.4, -0.3);
+            app.world_mut().write_message(MouseWheel {
+                unit: bevy::input::mouse::MouseScrollUnit::Line,
+                x: 0.0,
+                y: if frame % 2 == 0 { 1.0 } else { -0.5 },
+                window: Entity::PLACEHOLDER,
+                phase: bevy::input::touch::TouchPhase::Moved,
+            });
+            app.update();
+            assert_eq!(
+                root_and_toolbar(&mut app),
+                initial,
+                "frame {frame} respawned editor UI"
+            );
+        }
+
+        let runtime = app.world().resource::<MapMakerRuntime>();
+        assert_ne!(runtime.camera_center, Vec2::ZERO);
+        assert!((runtime.camera_zoom - 1.0).abs() > f32::EPSILON);
     }
 
     #[test]
