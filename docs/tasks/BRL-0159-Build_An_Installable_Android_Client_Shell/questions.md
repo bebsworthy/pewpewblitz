@@ -2,10 +2,12 @@
 
 # Questions · BRL-0159
 
-## q-000019 · open
+## q-000019 · answered
 
 Which Android devices should be the minimum support targets? This decides GPU and feature fallbacks (Vulkan compute for bevy_hanabi, shadows, MSAA).
 
 - [ ] Mid-range Vulkan phones from 2021+ only
 - [ ] Include low-end Mali/GLES-class devices
 - [ ] Only the owner's own phone for now
+
+> **Answer** (2026-11-13 06:09): User (2026-11-13): Only the owner's own phone for now.

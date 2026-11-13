@@ -20,11 +20,10 @@ pub use cues::ClientCombatEvidenceStatus;
 pub use cues::ClientCombatObservation;
 pub(crate) use cues::RecentCombatEvents;
 pub use hud::{CombatAbilityHudText, CombatHudText};
-pub use preview::MAX_PREVIEW_SEGMENTS;
 pub(crate) use preview::{
-    AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, MAX_CONE_SPRAY_SEGMENTS,
-    PreviewGeometry, PreviewPrimitive, cone_spray_primitives, preview_primitives,
-    straight_map_travel,
+    AimMark, AimTone, AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker,
+    MAX_CONE_SPRAY_SEGMENTS, PreviewGeometry, PreviewPrimitive, aim_lane_marks,
+    cone_spray_primitives, straight_map_travel, ultimate_area_marks,
 };
 
 pub struct ClientCombatPlugin;

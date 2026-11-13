@@ -3,10 +3,7 @@ use crate::combat::client::cues::{
     ClientCombatEvidenceStatus, RecentCombatEvents, remember_combat_event,
 };
 use crate::combat::client::hud::{CombatHudText, update_combat_hud};
-use crate::combat::client::preview::{
-    AimTraceBlockerIndex, MAX_PREVIEW_SEGMENTS, PreviewGeometry, PreviewPrimitive,
-    preview_primitives,
-};
+use crate::combat::client::preview::{AimMark, AimTraceBlockerIndex, aim_lane_marks};
 use crate::combat::{
     AuthoritativeTick, CombatEventId, CurrentHealth, Defeated, WeaponPhase, WeaponState,
     fighter_color, projectile_color,
@@ -16,7 +13,7 @@ use crate::map::{MapContentCatalog, MapDynamicState, MapInstanceId, MapPresetId 
 use crate::protocol::{Fighter, PlayerId};
 use crate::timing::SimulationTick;
 
-fn preview_for(id: u16) -> Vec<PreviewPrimitive> {
+fn preview_for(id: u16) -> Vec<AimMark> {
     let catalog = WeaponCatalog::embedded().unwrap();
     let body = crate::builds::BuildCatalog::embedded()
         .unwrap()
@@ -40,11 +37,12 @@ fn preview_for(id: u16) -> Vec<PreviewPrimitive> {
         .expect("resolved preview map spawn");
     let mut index = AimTraceBlockerIndex::default();
     index.refresh(&map.snapshot, &state, &map_catalog);
-    preview_primitives(
+    aim_lane_marks(
         spawn.position,
         spawn.facing,
         None,
         &resolved,
+        body.radius,
         &map.snapshot,
         &state,
         &map_catalog,
@@ -55,14 +53,23 @@ fn preview_for(id: u16) -> Vec<PreviewPrimitive> {
 
 #[test]
 fn preview_geometry_is_bounded_and_finite_for_all_presets() {
-    for id in 1..=6 {
-        let segments = preview_for(id);
-        assert!(segments.len() <= MAX_PREVIEW_SEGMENTS);
-        assert!(segments.iter().all(|primitive| primitive.is_finite()));
+    for id in 1..=7 {
+        let marks = preview_for(id);
+        assert!(
+            !marks.is_empty() && marks.len() <= 8,
+            "weapon {id}: {}",
+            marks.len()
+        );
+        assert!(marks.iter().all(AimMark::is_finite), "weapon {id}");
     }
-    assert_eq!(preview_for(1).len(), 2);
-    assert_eq!(preview_for(3).len(), 14);
-    assert_eq!(preview_for(4).len(), 10);
+    // Pulse: one hit-lane fill, its outline, and one delivery path.
+    assert_eq!(preview_for(1).len(), 3);
+    // Scatter: one fan, its outline, and every emitted delivery.
+    assert_eq!(preview_for(2).len(), 7);
+    // Arc Launcher: guide, landing area fill, landing outline.
+    assert_eq!(preview_for(3).len(), 3);
+    // Impact Blade: sector fill and outline.
+    assert_eq!(preview_for(4).len(), 2);
 }
 
 #[test]
@@ -84,11 +91,12 @@ fn launcher_preview_uses_the_requested_focal_distance() {
     };
     let mut index = AimTraceBlockerIndex::default();
     index.refresh(&map.snapshot, &state, &map_catalog);
-    let segments = preview_primitives(
+    let marks = aim_lane_marks(
         Vec2::ZERO,
         0.0,
         Some(180.0),
         &resolved,
+        body.radius,
         &map.snapshot,
         &state,
         &map_catalog,
@@ -96,10 +104,10 @@ fn launcher_preview_uses_the_requested_focal_distance() {
         &[],
     );
 
-    let PreviewGeometry::Corridor { length, .. } = segments[0].geometry else {
-        panic!("launcher preview starts with its travel corridor");
+    let AimMark::Stroke { points, .. } = &marks[0] else {
+        panic!("launcher preview starts with its guide to the landing point");
     };
-    assert!((length - 180.0).abs() < 0.001);
+    assert!((points[0].distance(points[1]) - 180.0).abs() < 0.001);
 }
 
 /// Resolve a loadout through the real build pipeline, so presentation tests observe the

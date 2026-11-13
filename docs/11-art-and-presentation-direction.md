@@ -99,7 +99,7 @@ the previous presentation for that area:
 | HDR, tonemapping, bloom, color grading | BRL-0146 (adopted) |
 | Tile floor | BRL-0147 (adopted) |
 | Camera framing re-evaluation | BRL-0148 (adopted) |
-| Overhead plates and aim lane | BRL-0149 |
+| Overhead plates and aim lane | BRL-0149 (adopted) |
 | Toon material and rim | BRL-0150 (adopted) |
 | Fighter outlines | BRL-0151 (adopted) |
 | Contact shadows / AO | BRL-0152 (adopted) |
@@ -343,13 +343,18 @@ geometry-verification aid.
 
 ### Overhead information
 
-Each live fighter has a camera-projected overhead cluster:
+Each live fighter has a camera-projected overhead cluster, sized in logical pixels for the
+gameplay framing (a fighter stands about 80 px tall at the 720 px reference height):
 
-- player name centered above the health bar and colored by relation;
-- current health centered in white over the rounded bar;
-- green health fill for the controlled fighter and allies, red for enemies;
-- a compact segmented ammunition row only for the controlled fighter, with one segment per
-  authoritative shot capacity;
+- player name (15 px Lilita One) centered above the health bar and colored by relation;
+- a bold 96 x 22 px rounded health bar with a 2 px navy outline, and the current health (18 px,
+  white with the navy shadow stroke) centered inside it;
+- relation-colored health fill matching the ground rings: green for the controlled fighter, blue
+  for allies, red for enemies;
+- a segmented ammunition row beneath the bar only for the controlled fighter, with one outlined
+  segment per authoritative shot capacity;
+- overlapping plates stack upward from their projected anchors, so floating hit numbers (spawned
+  beside the body, drawn above plates) keep clear of a taller plate;
 - no reserved ammunition-row height for allies or enemies;
 - no cluster for defeated or off-screen fighters.
 
@@ -369,9 +374,18 @@ assignment.
 - Splash geometry remains fixed at its replicated landing center/facing and disappears with the
   authoritative entity. Client animation may communicate remaining lifetime or pulse cadence but
   cannot move the footprint, infer occupancy, or apply effects;
-- straight aim previews sweep the same body shape, show a corridor of its exact width from the
-  muzzle to the first client-observed contact, and distinguish clear from blocked; spread previews
-  show every emitted delivery rather than only outer boundary rays;
+- the aim lane is one translucent ground mesh with crisp outlines, built from the resolved primary
+  weapon and drawn only for the controlled fighter while it aims. Straight and sticky deliveries
+  sweep the same body shape to the first client-observed contact; the fill is the fighter hit lane
+  (the path from the fighter widened by projectile radius plus fighter body radius on each side, so
+  a fighter standing in the lane is in the path) and an exact-width stroke (at least 3 units) marks each
+  delivery's path and stop. Spread fills one fan and still strokes every emitted delivery. Lobbed
+  and Splash deliveries show a ground guide and their authored landing area or Splash shape;
+  melee and cone sprays fill their authored sector (cone rays keep their map occlusion). Areas,
+  sectors, and cones keep the authored shape so the preview matches the effect that follows.
+  Clear is white, blocked is red, targeted ultimates are violet (Demolition orange-red) with a
+  thicker rim. Overlapping parts never stack translucency, and all colors stay below the bloom
+  knee;
 - objective boundaries remain precise and cannot depend on a decorative model or decal;
 - Heist idols show persistent public team/objective health, while neutral barrels and chests show
   compact health only when damaged; the idol, chest, barrel, and restoration pickup remain

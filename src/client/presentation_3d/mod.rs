@@ -175,8 +175,7 @@ pub(crate) struct Material3dAssets {
     pub(crate) neutral: Handle<StandardMaterial>,
     pub(crate) zone_fill: Handle<StandardMaterial>,
     pub(crate) zone_boundary: Handle<StandardMaterial>,
-    pub(crate) preview: Handle<StandardMaterial>,
-    pub(crate) preview_blocked: Handle<StandardMaterial>,
+    pub(crate) aim_lane: Handle<StandardMaterial>,
     pub(in crate::client) spray_gas: Handle<combat::ConeSprayMaterial>,
     pub(in crate::client) spray_gas_reduced: Handle<combat::ConeSprayMaterial>,
     pub(in crate::client) spray_gas_primitive: Handle<combat::ConeSprayMaterial>,
@@ -1298,16 +1297,13 @@ pub(in crate::client) fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
-        preview: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.95, 0.78, 0.22, 0.38),
+        // Tone and translucency come from the aim lane's vertex colors.
+        aim_lane: materials.add(StandardMaterial {
+            base_color: Color::WHITE,
             alpha_mode: AlphaMode::Blend,
             unlit: true,
-            ..default()
-        }),
-        preview_blocked: materials.add(StandardMaterial {
-            base_color: Color::srgba(1.0, 0.16, 0.16, 0.55),
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
+            cull_mode: None,
+            double_sided: true,
             ..default()
         }),
         spray_gas: cone_spray_materials.add(combat::ConeSprayMaterial::normal()),

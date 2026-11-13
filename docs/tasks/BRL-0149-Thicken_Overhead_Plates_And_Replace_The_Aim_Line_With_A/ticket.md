@@ -1,19 +1,20 @@
 ---
 id: BRL-0149
 title: Thicken overhead plates and replace the aim line with a weapon-shaped aim lane
-status: todo
+status: doing
 theme: core
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-11-12T21:32:43Z
+modified: 2026-11-13T03:00:03Z
 closed:
-status_changed: 2026-11-12T20:15:04Z
+status_changed: 2026-11-13T02:21:03Z
 history:
 - backlog@2026-10-23T13:19:05Z
 - todo@2026-11-12T20:15:04Z
-revision: 9a74d8875efc4574
+- doing@2026-11-13T02:21:03Z
+revision: 3c355de1b2637441
 blocks: []
-related: [BRL-0145, BRL-0148, BRL-0160]
+related: [BRL-0145, BRL-0148, BRL-0160, BRL-0182]
 parent: BRL-0171
 ---
 

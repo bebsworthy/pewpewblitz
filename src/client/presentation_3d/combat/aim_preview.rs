@@ -1,16 +1,18 @@
 use super::super::*;
 use super::common::GROUND_EFFECT_HEIGHT;
-use super::fighter_feedback::DashTrailVisual3d;
-use super::fighter_ui::{FighterAmmoRowUi, FighterHealthFillUi, FighterOverheadUi};
 use crate::combat::client::{
-    AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, MAX_PREVIEW_SEGMENTS,
-    PreviewGeometry, PreviewPrimitive, preview_primitives,
+    AimMark, AimTone, AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker,
+    aim_lane_marks, ultimate_area_marks,
 };
+use bevy::camera::visibility::NoFrustumCulling;
 
-#[derive(Component)]
-pub(in super::super) struct WeaponPreviewVisual3d {
-    slot: u8,
+/// The controlled fighter's aim lane: one dynamic vertex-colored ground mesh. It keeps the marks
+/// it last drew so an unchanged lane never re-uploads its mesh.
+#[derive(Component, Default)]
+pub(in super::super) struct AimLaneVisual3d {
+    marks: Vec<AimMark>,
 }
+
 type AimFighterQuery<'w, 's> = Query<
     'w,
     's,
@@ -27,21 +29,13 @@ type AimFighterQuery<'w, 's> = Query<
     With<Fighter>,
 >;
 
-type PreviewVisualQuery<'w, 's> = Query<
+type AimLaneVisualQuery<'w, 's> = Query<
     'w,
     's,
     (
-        &'static WeaponPreviewVisual3d,
-        &'static mut Transform,
+        &'static mut AimLaneVisual3d,
+        &'static Mesh3d,
         &'static mut Visibility,
-        &'static mut Mesh3d,
-        &'static mut MeshMaterial3d<StandardMaterial>,
-    ),
-    (
-        Without<FighterHealthFillUi>,
-        Without<DashTrailVisual3d>,
-        Without<FighterOverheadUi>,
-        Without<FighterAmmoRowUi>,
     ),
 >;
 
@@ -108,61 +102,41 @@ pub(in super::super) struct AimPreviewInputs<'w, 's> {
     hostile_npcs: HostileNpcAimQuery<'w, 's>,
 }
 
-fn ensure_targeting_previews(
-    commands: &mut Commands,
-    primitives: &Primitive3dAssets,
-    materials: &Material3dAssets,
-    previews: &Query<&WeaponPreviewVisual3d>,
-) {
-    if !previews.is_empty() {
-        return;
-    }
-    for slot in 0..u8::try_from(MAX_PREVIEW_SEGMENTS).expect("preview slot bound fits u8") {
-        commands.spawn((
-            WeaponPreviewVisual3d { slot },
-            Mesh3d(primitives.unit_cuboid.clone()),
-            MeshMaterial3d(materials.preview.clone()),
-            NotShadowCaster,
-            Transform::default(),
-            Visibility::Hidden,
-            Name::new("V3 weapon preview slot"),
-        ));
-    }
-    commands.spawn((
-        WeaponPreviewVisual3d { slot: u8::MAX },
-        Mesh3d(primitives.area_ring.clone()),
-        MeshMaterial3d(materials.preview.clone()),
-        NotShadowCaster,
-        NotShadowReceiver,
-        Transform::default(),
-        Visibility::Hidden,
-        Name::new("V9 targeted ultimate area ring"),
-    ));
-}
-
 #[allow(clippy::needless_pass_by_value)]
 pub(in super::super) fn reconcile_aim_preview_visuals(
     mut commands: Commands,
-    primitives: Res<Primitive3dAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
     materials: Res<Material3dAssets>,
-    previews: Query<&WeaponPreviewVisual3d>,
+    lanes: Query<(), With<AimLaneVisual3d>>,
 ) {
-    ensure_targeting_previews(&mut commands, &primitives, &materials, &previews);
+    if !lanes.is_empty() {
+        return;
+    }
+    commands.spawn((
+        AimLaneVisual3d::default(),
+        Mesh3d(meshes.add(aim_lane_mesh(&[]))),
+        MeshMaterial3d(materials.aim_lane.clone()),
+        NotShadowCaster,
+        NotShadowReceiver,
+        // The mesh is rewritten in place, so its construction-time bounds would go stale.
+        NoFrustumCulling,
+        Transform::default(),
+        Visibility::Hidden,
+        Name::new("Aim lane"),
+    ));
 }
 
 #[allow(
     clippy::needless_pass_by_value,
-    clippy::too_many_arguments,
     clippy::type_complexity,
     reason = "aim preview owns controlled-loadout geometry and the complete bounded blocker set"
 )]
 pub(in super::super) fn update_aim_preview(
-    primitives: Res<Primitive3dAssets>,
-    materials: Res<Material3dAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
     builds: Res<crate::builds::BuildCatalogResource>,
     mut aim: AimPreviewInputs,
     fighters: AimFighterQuery,
-    mut previews: PreviewVisualQuery,
+    mut lanes: AimLaneVisualQuery,
 ) {
     let mut controlled = None;
     let mut dynamic_blockers = Vec::new();
@@ -212,29 +186,21 @@ pub(in super::super) fn update_aim_preview(
         aim.index.refresh(snapshot, state, &aim.catalog.0);
     }
     let has_target = aim.pending.aim_axis.is_some();
-    let scan_preview = has_target
+    let ultimate_preview = has_target
         .then(|| targeted_ultimate_preview(map, controlled, &aim.pending))
         .flatten();
-    let segments = if !has_target {
+    let marks = if !has_target {
         Vec::new()
-    } else if let Some((origin, center, _, _)) = scan_preview {
-        let delta = center - origin;
-        vec![PreviewPrimitive {
-            geometry: PreviewGeometry::Corridor {
-                center: origin.midpoint(center),
-                angle: delta.y.atan2(delta.x),
-                length: delta.length().max(0.001),
-                width: 3.0,
-            },
-            blocked: false,
-        }]
+    } else if let Some((origin, center, radius, demolition)) = ultimate_preview {
+        ultimate_area_marks(origin, center, radius, demolition)
     } else {
         match (map, controlled) {
-            (Some((map, state)), Some((origin, facing, loadout, _))) => preview_primitives(
+            (Some((map, state)), Some((origin, facing, loadout, _))) => aim_lane_marks(
                 origin,
                 facing,
                 aim.pending.aim_distance,
                 &loadout.primary_weapon,
+                builds.0.fighter_body.radius,
                 map,
                 state,
                 &aim.catalog.0,
@@ -244,13 +210,19 @@ pub(in super::super) fn update_aim_preview(
             _ => Vec::new(),
         }
     };
-    apply_aim_preview_visuals(
-        &mut previews,
-        &primitives,
-        &materials,
-        scan_preview,
-        &segments,
-    );
+    for (mut lane, mesh, mut visibility) in &mut lanes {
+        visibility.set_if_neq(if marks.is_empty() {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        });
+        if lane.marks != marks {
+            if let Some(mut lane_mesh) = meshes.get_mut(&mesh.0) {
+                *lane_mesh = aim_lane_mesh(&marks);
+            }
+            lane.marks.clone_from(&marks);
+        }
+    }
 }
 
 fn append_nonfighter_aim_blockers(
@@ -392,58 +364,228 @@ fn targeted_ultimate_preview(
     }
 }
 
-fn apply_aim_preview_visuals(
-    previews: &mut PreviewVisualQuery,
-    primitives: &Primitive3dAssets,
-    materials: &Material3dAssets,
-    scan_preview: Option<(Vec2, Vec2, f32, bool)>,
-    segments: &[PreviewPrimitive],
-) {
-    for (slot, mut transform, mut visibility, mut mesh, mut material) in previews.iter_mut() {
-        if slot.slot == u8::MAX {
-            let Some((_, center, radius, demolition)) = scan_preview else {
-                *visibility = Visibility::Hidden;
-                continue;
-            };
-            *visibility = Visibility::Inherited;
-            transform.translation = ground_position(center) + Vec3::Y * GROUND_EFFECT_HEIGHT;
-            transform.rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
-            transform.scale = Vec3::splat(radius);
-            material.0 = if demolition {
-                materials.demolition_area.clone()
+/// Translucent fill and crisp stroke colors for one tone. Every component stays at or below 1.0,
+/// far under the bloom knee, so the lane never glows.
+fn aim_tone_colors(tone: AimTone) -> (Color, Color) {
+    match tone {
+        AimTone::Clear => (
+            Color::srgba(1.0, 0.98, 0.92, 0.26),
+            Color::srgba(1.0, 1.0, 1.0, 0.86),
+        ),
+        AimTone::Blocked => (
+            Color::srgba(1.0, 0.26, 0.2, 0.32),
+            Color::srgba(1.0, 0.34, 0.28, 0.92),
+        ),
+        AimTone::Ultimate => (
+            Color::srgba(0.74, 0.42, 1.0, 0.3),
+            Color::srgba(0.86, 0.62, 1.0, 0.94),
+        ),
+        AimTone::Demolition => (
+            Color::srgba(1.0, 0.34, 0.06, 0.32),
+            Color::srgba(1.0, 0.46, 0.14, 0.94),
+        ),
+    }
+}
+
+/// Strokes ride slightly above fills; one mesh draws fills first, so strokes overlay them.
+const AIM_STROKE_LIFT: f32 = 0.2;
+/// Sharp outline corners are bevelled rather than mitred past this length factor.
+const AIM_MAX_MITER: f32 = 3.0;
+
+#[derive(Default)]
+struct AimLaneMeshBuilder {
+    positions: Vec<[f32; 3]>,
+    colors: Vec<[f32; 4]>,
+    indices: Vec<u32>,
+}
+
+impl AimLaneMeshBuilder {
+    fn vertex(&mut self, point: Vec2, lift: f32, color: Color) -> u32 {
+        let index = u32::try_from(self.positions.len()).expect("aim lane vertex count fits u32");
+        let mut position = ground_position(point);
+        position.y = GROUND_EFFECT_HEIGHT + lift;
+        self.positions.push(position.to_array());
+        self.colors.push(color.to_linear().to_f32_array());
+        index
+    }
+
+    fn fill(&mut self, apex: Vec2, apex_tone: AimTone, rim: &[(Vec2, AimTone)]) {
+        let apex = self.vertex(apex, 0.0, aim_tone_colors(apex_tone).0);
+        let rim: Vec<_> = rim
+            .iter()
+            .map(|(point, tone)| self.vertex(*point, 0.0, aim_tone_colors(*tone).0))
+            .collect();
+        for pair in rim.windows(2) {
+            self.indices.extend([apex, pair[0], pair[1]]);
+        }
+    }
+
+    fn stroke(&mut self, points: &[Vec2], closed: bool, width: f32, tone: AimTone) {
+        let count = points.len();
+        if count < 2 {
+            return;
+        }
+        let color = aim_tone_colors(tone).1;
+        let segment_count = if closed { count } else { count - 1 };
+        let normals: Vec<_> = (0..segment_count)
+            .map(|segment| {
+                (points[(segment + 1) % count] - points[segment])
+                    .normalize_or_zero()
+                    .perp()
+            })
+            .collect();
+        let half_width = width * 0.5;
+        let first = u32::try_from(self.positions.len()).expect("aim lane vertex count fits u32");
+        for vertex in 0..count {
+            let previous = if vertex > 0 {
+                Some(normals[vertex - 1])
+            } else if closed {
+                normals.last().copied()
             } else {
-                materials.preview.clone()
+                None
             };
-            continue;
+            let next = normals
+                .get(vertex)
+                .copied()
+                .filter(|_| closed || vertex < count - 1);
+            let offset = match (previous, next) {
+                (Some(previous), Some(next)) => {
+                    let miter = (previous + next).normalize_or(next);
+                    miter * half_width / miter.dot(next).max(1.0 / AIM_MAX_MITER)
+                }
+                (Some(normal), None) | (None, Some(normal)) => normal * half_width,
+                (None, None) => Vec2::ZERO,
+            };
+            self.vertex(points[vertex] + offset, AIM_STROKE_LIFT, color);
+            self.vertex(points[vertex] - offset, AIM_STROKE_LIFT, color);
         }
-        let Some(primitive) = segments.get(usize::from(slot.slot)) else {
-            *visibility = Visibility::Hidden;
-            continue;
+        for segment in 0..segment_count {
+            let left = first + u32::try_from(segment * 2).expect("stroke index fits u32");
+            let next_left =
+                first + u32::try_from(((segment + 1) % count) * 2).expect("stroke index fits u32");
+            self.indices.extend([
+                left,
+                left + 1,
+                next_left,
+                next_left,
+                left + 1,
+                next_left + 1,
+            ]);
+        }
+    }
+}
+
+/// Builds every aim mark into one ground mesh: fills first, then strokes over them.
+fn aim_lane_mesh(marks: &[AimMark]) -> Mesh {
+    let mut builder = AimLaneMeshBuilder::default();
+    for mark in marks {
+        if let AimMark::Fill {
+            apex,
+            apex_tone,
+            rim,
+        } = mark
+        {
+            builder.fill(*apex, *apex_tone, rim);
+        }
+    }
+    for mark in marks {
+        if let AimMark::Stroke {
+            points,
+            closed,
+            width,
+            tone,
+        } = mark
+        {
+            builder.stroke(points, *closed, *width, *tone);
+        }
+    }
+    let normals = vec![[0.0, 1.0, 0.0]; builder.positions.len()];
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, builder.positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, builder.colors);
+    mesh.insert_indices(Indices::U32(builder.indices));
+    mesh
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aim_lane_mesh_draws_fills_before_strokes_with_bounded_vertices() {
+        let marks = vec![
+            AimMark::Stroke {
+                points: vec![Vec2::ZERO, Vec2::X * 100.0, Vec2::new(100.0, 50.0)],
+                closed: false,
+                width: 3.0,
+                tone: AimTone::Blocked,
+            },
+            AimMark::Fill {
+                apex: Vec2::ZERO,
+                apex_tone: AimTone::Clear,
+                rim: vec![
+                    (Vec2::new(10.0, -5.0), AimTone::Clear),
+                    (Vec2::new(10.0, 5.0), AimTone::Clear),
+                ],
+            },
+        ];
+        let mesh = aim_lane_mesh(&marks);
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("aim lane positions");
         };
-        *visibility = Visibility::Inherited;
-        match primitive.geometry {
-            PreviewGeometry::Corridor {
-                center,
-                angle,
-                length,
-                width,
-            } => {
-                mesh.0 = primitives.unit_cuboid.clone();
-                transform.translation = ground_position(center) + Vec3::Y * GROUND_EFFECT_HEIGHT;
-                transform.rotation = ground_rotation(Rotation::radians(angle));
-                transform.scale = Vec3::new(length, 1.2, width.max(0.001));
+        // Fill: apex + two rim points; stroke: two vertices per polyline point.
+        assert_eq!(positions.len(), 3 + 6);
+        assert!(
+            positions[..3]
+                .iter()
+                .all(|position| (position[1] - GROUND_EFFECT_HEIGHT).abs() < 1e-5)
+        );
+        assert!(
+            positions[3..]
+                .iter()
+                .all(|position| position[1] > GROUND_EFFECT_HEIGHT)
+        );
+        // The straight middle of the stroke keeps its width; the corner mitre stays bounded.
+        let half = |vertex: usize| Vec2::new(positions[vertex][0], -positions[vertex][2]);
+        assert!((half(3).distance(half(4)) - 3.0).abs() < 1e-4);
+        assert!(half(5).distance(half(6)) <= 3.0 * AIM_MAX_MITER + 1e-4);
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            panic!("aim lane indices");
+        };
+        assert_eq!(indices.len(), 3 + 2 * 6);
+        assert_eq!(&indices[..3], &[0, 1, 2]);
+        assert!(aim_lane_mesh(&[]).count_vertices() == 0);
+    }
+
+    #[test]
+    fn aim_tones_stay_below_the_bloom_knee_and_read_distinctly() {
+        let tones = [
+            AimTone::Clear,
+            AimTone::Blocked,
+            AimTone::Ultimate,
+            AimTone::Demolition,
+        ];
+        for tone in tones {
+            let (fill, stroke) = aim_tone_colors(tone);
+            for color in [fill, stroke] {
+                let linear = color.to_linear();
+                assert!(linear.red <= 1.0 && linear.green <= 1.0 && linear.blue <= 1.0);
             }
-            PreviewGeometry::Disc { center, radius } => {
-                mesh.0 = primitives.area_disc.clone();
-                transform.translation = ground_position(center) + Vec3::Y * GROUND_EFFECT_HEIGHT;
-                transform.rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
-                transform.scale = Vec3::splat(radius);
+            assert!(
+                fill.alpha() < stroke.alpha(),
+                "fills stay translucent under strokes"
+            );
+        }
+        for (index, tone) in tones.iter().enumerate() {
+            for other in &tones[index + 1..] {
+                assert_ne!(aim_tone_colors(*tone).1, aim_tone_colors(*other).1);
             }
         }
-        material.0 = if primitive.blocked {
-            materials.preview_blocked.clone()
-        } else {
-            materials.preview.clone()
-        };
     }
 }

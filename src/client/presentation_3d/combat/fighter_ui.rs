@@ -1,5 +1,4 @@
 use super::super::*;
-use super::aim_preview::WeaponPreviewVisual3d;
 use super::common::{GroundMarkerRelation, ground_marker_relation, unique_roots};
 use bevy::{
     asset::RenderAssetUsages,
@@ -10,13 +9,21 @@ use std::fmt::Write as _;
 
 const FIGHTER_BODY_WORLD_HEIGHT: f32 = KENNEY_CHARACTER_WORLD_HEIGHT;
 const OVERHEAD_WORLD_HEIGHT: f32 = FIGHTER_BODY_WORLD_HEIGHT + 12.0;
-const OVERHEAD_WIDTH: f32 = 120.0;
-const OVERHEAD_HEALTH_HEIGHT: f32 = 37.0;
-const OVERHEAD_AMMO_HEIGHT: f32 = 50.0;
-const HEALTH_BAR_WIDTH: f32 = 76.8;
-const PLAYER_NAME_FONT_SIZE: f32 = 12.8;
+// Logical-pixel plate sized for the BRL-0148 framing, where a fighter stands about 80 px tall at
+// the 720 px reference height: a bold 22 px bar with the health number inside it.
+const OVERHEAD_WIDTH: f32 = 140.0;
+const PLAYER_NAME_FONT_SIZE: f32 = 15.0;
+const PLAYER_NAME_HEIGHT: f32 = 19.0;
+const HEALTH_BAR_WIDTH: f32 = 96.0;
+const HEALTH_BAR_HEIGHT: f32 = 22.0;
+const HEALTH_BAR_OUTLINE: f32 = 2.0;
+const HEALTH_AMOUNT_FONT_SIZE: f32 = 18.0;
+const AMMO_ROW_GAP: f32 = 3.0;
+const AMMO_ROW_HEIGHT: f32 = 9.0;
+const OVERHEAD_HEALTH_HEIGHT: f32 = PLAYER_NAME_HEIGHT + HEALTH_BAR_HEIGHT;
+const OVERHEAD_AMMO_HEIGHT: f32 = OVERHEAD_HEALTH_HEIGHT + AMMO_ROW_GAP + AMMO_ROW_HEIGHT;
 const OVERHEAD_STACK_GAP: f32 = 2.0;
-const COLD_PIE_SIZE: f32 = 15.0;
+const COLD_PIE_SIZE: f32 = 18.0;
 const COLD_PIE_GAP: f32 = 3.0;
 const COLD_PIE_TEXTURE_SIZE: u32 = 32;
 const COLD_PIE_FRAME_COUNT: usize = 32;
@@ -172,7 +179,7 @@ fn spawn_cold_pie(commands: &mut Commands) -> Entity {
             Node {
                 position_type: PositionType::Absolute,
                 left: px((OVERHEAD_WIDTH - HEALTH_BAR_WIDTH) * 0.5 - COLD_PIE_SIZE - COLD_PIE_GAP),
-                top: px(22.0),
+                top: px(PLAYER_NAME_HEIGHT + (HEALTH_BAR_HEIGHT - COLD_PIE_SIZE) * 0.5),
                 width: px(COLD_PIE_SIZE),
                 height: px(COLD_PIE_SIZE),
                 ..default()
@@ -236,16 +243,17 @@ fn spawn_fighter_overhead(
         commands,
         font,
         0.0,
-        19.0,
+        PLAYER_NAME_HEIGHT,
         PLAYER_NAME_FONT_SIZE,
         "V3 fighter overhead player name",
     );
+    // The number sits centered inside the bar, above the fill.
     let (health_amount_container, health_amount) = spawn_overhead_text(
         commands,
         font,
-        14.0,
-        18.0,
-        15.0,
+        PLAYER_NAME_HEIGHT,
+        HEALTH_BAR_HEIGHT,
+        HEALTH_AMOUNT_FONT_SIZE,
         "V3 fighter overhead health amount",
     );
     let fill = commands
@@ -266,15 +274,16 @@ fn spawn_fighter_overhead(
             Node {
                 position_type: PositionType::Absolute,
                 left: px((OVERHEAD_WIDTH - HEALTH_BAR_WIDTH) * 0.5),
-                top: px(24.0),
+                top: px(PLAYER_NAME_HEIGHT),
                 width: px(HEALTH_BAR_WIDTH),
-                height: px(11.0),
-                padding: UiRect::all(px(2.0)),
+                height: px(HEALTH_BAR_HEIGHT),
+                border: UiRect::all(px(HEALTH_BAR_OUTLINE)),
                 overflow: Overflow::clip(),
-                border_radius: BorderRadius::all(px(6.0)),
+                border_radius: BorderRadius::all(px(7.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.025, 0.03, 0.04)),
+            BorderColor::all(ui::theme::TYPE_STROKE),
+            BackgroundColor(Color::srgb(0.05, 0.06, 0.11)),
             Name::new("V3 fighter overhead rounded health bar"),
         ))
         .add_child(fill)
@@ -286,10 +295,10 @@ fn spawn_fighter_overhead(
             Node {
                 position_type: PositionType::Absolute,
                 left: px((OVERHEAD_WIDTH - HEALTH_BAR_WIDTH) * 0.5),
-                top: px(39.0),
+                top: px(OVERHEAD_HEALTH_HEIGHT + AMMO_ROW_GAP),
                 width: px(HEALTH_BAR_WIDTH),
-                height: px(7.0),
-                column_gap: px(2.0),
+                height: px(AMMO_ROW_HEIGHT),
+                column_gap: px(3.0),
                 ..default()
             },
             Visibility::Hidden,
@@ -376,9 +385,11 @@ fn overhead_name_color(relation: GroundMarkerRelation) -> Color {
     }
 }
 
+/// Relation-colored fill matching the ground rings: local green, ally blue, enemy red.
 fn overhead_health_color(relation: GroundMarkerRelation) -> Color {
     match relation {
-        GroundMarkerRelation::Local | GroundMarkerRelation::Ally => Color::srgb(0.18, 0.92, 0.34),
+        GroundMarkerRelation::Local => Color::srgb(0.18, 0.92, 0.34),
+        GroundMarkerRelation::Ally => Color::srgb(0.12, 0.66, 0.98),
         GroundMarkerRelation::Enemy => Color::srgb(0.95, 0.14, 0.12),
     }
 }
@@ -596,7 +607,7 @@ pub(in super::super) fn update_fighter_overhead_state(
     fighters: OverheadFighterQuery,
     mut overhead_roots: Query<
         (&CombatVisualOwner, &mut FighterOverheadUi, &mut Visibility),
-        (Without<WeaponPreviewVisual3d>, Without<FighterColdPieUi>),
+        Without<FighterColdPieUi>,
     >,
     mut fill_nodes: AmmoFillQuery,
     mut overhead_texts: Query<(&mut Text, &mut TextColor), With<FighterOverheadTextUi>>,
@@ -748,9 +759,11 @@ fn reconcile_overhead_ammunition(
                             flex_grow: 1.0,
                             height: percent(100.0),
                             overflow: Overflow::clip(),
-                            border_radius: BorderRadius::all(px(2.5)),
+                            border: UiRect::all(px(1.0)),
+                            border_radius: BorderRadius::all(px(3.0)),
                             ..default()
                         },
+                        BorderColor::all(ui::theme::TYPE_STROKE),
                         BackgroundColor(ammo_segment_color(false)),
                         Name::new("V3 fighter ammunition segment"),
                     ))
@@ -799,14 +812,19 @@ mod tests {
             overhead_name_color(GroundMarkerRelation::Local),
             overhead_name_color(GroundMarkerRelation::Ally)
         );
-        assert_eq!(
-            overhead_health_color(GroundMarkerRelation::Local),
-            overhead_health_color(GroundMarkerRelation::Ally)
-        );
-        assert_ne!(
-            overhead_health_color(GroundMarkerRelation::Ally),
-            overhead_health_color(GroundMarkerRelation::Enemy)
-        );
+        let relations = [
+            GroundMarkerRelation::Local,
+            GroundMarkerRelation::Ally,
+            GroundMarkerRelation::Enemy,
+        ];
+        for (index, relation) in relations.iter().enumerate() {
+            for other in &relations[index + 1..] {
+                assert_ne!(
+                    overhead_health_color(*relation),
+                    overhead_health_color(*other)
+                );
+            }
+        }
     }
 
     #[test]
@@ -831,9 +849,13 @@ mod tests {
     }
 
     #[test]
-    fn compact_overhead_reserves_ammunition_height_only_for_the_local_player() {
-        assert!((HEALTH_BAR_WIDTH - 76.8).abs() < f32::EPSILON);
-        assert!((PLAYER_NAME_FONT_SIZE - 12.8).abs() < f32::EPSILON);
+    fn bold_overhead_reserves_ammunition_height_only_for_the_local_player() {
+        // Twice the pre-BRL-0149 11 px bar, with the number inside it.
+        const {
+            assert!(HEALTH_BAR_HEIGHT >= 22.0);
+            assert!(HEALTH_AMOUNT_FONT_SIZE + HEALTH_BAR_OUTLINE * 2.0 <= HEALTH_BAR_HEIGHT);
+            assert!(HEALTH_BAR_WIDTH <= OVERHEAD_WIDTH);
+        }
         assert!((overhead_height(false) - OVERHEAD_HEALTH_HEIGHT).abs() < f32::EPSILON);
         assert!(overhead_height(false) < overhead_height(true));
         assert!((FIGHTER_BODY_WORLD_HEIGHT - KENNEY_CHARACTER_WORLD_HEIGHT).abs() < f32::EPSILON);
@@ -928,6 +950,34 @@ mod tests {
     }
 
     #[test]
+    fn plates_exist_only_while_the_fighter_is_replicated() {
+        let mut app = App::new();
+        app.add_systems(Update, reconcile_fighter_overheads);
+        let fighter = app.world_mut().spawn(Fighter).id();
+        app.world_mut().spawn((
+            V3FighterVisual {
+                last_position: Vec2::ZERO,
+                moving: false,
+                shoot_seconds: 0.0,
+                recoil_seconds: 0.0,
+            },
+            CombatVisualOwner(fighter),
+        ));
+        app.update();
+        let plates = |app: &mut App| {
+            app.world_mut()
+                .query::<&FighterOverheadUi>()
+                .iter(app.world())
+                .count()
+        };
+        assert_eq!(plates(&mut app), 1);
+        // Concealment withholds an enemy by removing its replicated entity; the plate goes with it.
+        app.world_mut().despawn(fighter);
+        app.update();
+        assert_eq!(plates(&mut app), 0);
+    }
+
+    #[test]
     fn overhead_uses_the_current_projected_anchor_when_the_fighter_is_visible() {
         assert_eq!(
             projected_overhead_top_left(
@@ -936,7 +986,7 @@ mod tests {
                 Vec2::new(320.0, 150.0),
                 OVERHEAD_HEALTH_HEIGHT,
             ),
-            Some(Vec2::new(260.0, 113.0))
+            Some(Vec2::new(250.0, 109.0))
         );
     }
 }

@@ -257,10 +257,7 @@ fn cone_spray_surface_mesh(
             angle,
             length,
             ..
-        } = primitive.geometry
-        else {
-            continue;
-        };
+        } = primitive.geometry;
         let endpoint = center + Vec2::from_angle(angle) * (length * 0.5);
         positions.push(ground_position(endpoint).to_array());
     }
