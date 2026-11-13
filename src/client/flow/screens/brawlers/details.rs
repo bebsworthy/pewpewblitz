@@ -4,6 +4,7 @@ use super::{
     BrawlerDetailsScrollArea, BrawlerEditDraft, BrawlerScreenUi, advertised_weapon_name,
     brawler_screen_layout, passive_name, ultimate_name,
 };
+use crate::client::ui::icons;
 use crate::client::ui::surface::Surface;
 use crate::client::{
     flow::{
@@ -438,7 +439,7 @@ impl DetailsView<'_> {
                             ..default()
                         })
                         .with_children(|b| {
-                            self.icon(b, "back", 38., 38.);
+                            self.icon(b, "chevron-left", 38., 38.);
                             self.label(
                                 b,
                                 if self.compact {
@@ -613,10 +614,10 @@ impl DetailsView<'_> {
                                     .definition(part.definition_id)
                                     .map_or("chamber", |d| d.presentation_type.as_str());
                                 slot.spawn((
-                                    ImageNode::new(server.load(format!(
-                                        "brawler/ui/shell/part-{}.png",
+                                    ImageNode::new(server.load(icons::path(&format!(
+                                        "part-{}",
                                         family.to_lowercase()
-                                    ))),
+                                    )))),
                                     Node {
                                         width: percent(90),
                                         height: percent(80),
@@ -626,7 +627,7 @@ impl DetailsView<'_> {
                                 ));
                             } else if let Some(server) = self.art.server {
                                 slot.spawn((
-                                    ImageNode::new(server.load("brawler/ui/details/empty.png")),
+                                    ImageNode::new(server.load(icons::path("empty"))),
                                     Node {
                                         width: percent(100),
                                         height: percent(100),
@@ -806,7 +807,7 @@ impl DetailsView<'_> {
     fn icon(&self, parent: &mut ChildSpawnerCommands, name: &str, width: f32, height: f32) {
         if let Some(server) = self.art.server {
             parent.spawn((
-                ImageNode::new(server.load(format!("brawler/ui/details/{name}.png"))),
+                ImageNode::new(server.load(icons::path(name))),
                 Node {
                     width: px(width * self.factor),
                     height: px(height * self.factor),
@@ -825,6 +826,6 @@ impl DetailsView<'_> {
                 top: percent(38),
                 ..default()
             })
-            .with_children(|edge| self.icon(edge, "chevron", 58., 58.));
+            .with_children(|edge| self.icon(edge, "chevron-right", 58., 58.));
     }
 }

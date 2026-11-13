@@ -4,6 +4,7 @@ use super::{
     scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible},
     shared::{FlowButton, FlowNavigation},
 };
+use crate::client::ui::icons;
 use crate::client::{
     ClientAssetHandles, ClientProfileModel,
     flow::{
@@ -306,7 +307,7 @@ impl ConfirmationView<'_, '_, '_> {
         ) {
             if let Some(server) = self.assets.server.as_deref() {
                 p.spawn((
-                    ImageNode::new(server.load("brawler/ui/details/trash.png")),
+                    ImageNode::new(server.load(icons::path("trash"))),
                     Node {
                         width: px(96),
                         height: px(96),

@@ -262,7 +262,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                             },
                             BackgroundColor(TEXT),
                         ));
-                        shell_icon(identity, assets.as_deref(), 4, 28.0, ACCENT);
+                        shell_icon(identity, assets.as_deref(), 4, 28.0, TEXT);
                         identity.spawn((
                             Text::new(membership.server_name.to_uppercase()),
                             TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
@@ -367,7 +367,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                         ));
                         if let Some(assets) = assets.as_deref() {
                             details.spawn((
-                                ImageNode::new(assets.dashboard_icons[7].clone())
+                                ImageNode::new(assets.dashboard_underline.clone())
                                     .with_mode(NodeImageMode::Stretch),
                                 Node {
                                     width: percent(94),

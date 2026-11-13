@@ -8,6 +8,7 @@ use crate::client::flow::{
     actions::FlowUiAction,
     model::{ClientFlow, ClientOverlay},
 };
+use crate::client::ui::icons;
 use crate::client::ui::theme::{ACCENT, PLAY_HIGHLIGHT, TEXT, font, shell_background};
 use bevy::{
     input::mouse::MouseWheel,
@@ -285,10 +286,9 @@ impl EquipmentView<'_> {
             .map_or("chamber", |d| d.presentation_type.as_str());
         if let Some(server) = self.server {
             parent.spawn((
-                ImageNode::new(server.load(format!(
-                    "brawler/ui/shell/part-{}.png",
-                    family.to_lowercase()
-                ))),
+                ImageNode::new(
+                    server.load(icons::path(&format!("part-{}", family.to_lowercase()))),
+                ),
                 Node {
                     height: px(height * self.factor),
                     aspect_ratio: Some(1.2),

@@ -14,6 +14,8 @@ Bevy entities, not a separate widget runtime.
   binding capture and calibration remain screen-owned.
 - `theme`: BRL-0140 palette tokens, the shared `shell_background()` gradient, the `type_stroke`
   text stroke, and bundled Lilita One font.
+- `icons`: names and asset paths of the generated BRL-0157 icon set
+  (`asset_src/player-shell/icons/`); icons are full color and are never tinted.
 - `press`: `ReleaseActivation`, pointer/touch activation on release with drag-cancel.
 - `scroll`: viewport clamping and focus-reveal geometry, shared by screens and gallery.
 

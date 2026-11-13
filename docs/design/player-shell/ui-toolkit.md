@@ -148,7 +148,9 @@ footer legends.
 ## Assets and degradation
 
 Load retained branding, icons, and fonts through `ClientAssetHandles`. Prefer an existing semantic
-asset over a new approximation. Decorative assets may disappear under fallback, but labels,
+asset over a new approximation. Icons come from the one BRL-0157 set: name them with
+`ui::icons::path(<name>)`, keep their baked colors (no tint), and add new icons through
+`asset_src/player-shell/icons/build_icons.py` rather than drawing one-off art. Decorative assets may disappear under fallback, but labels,
 focus, controls, navigation, saving, recovery, and shutdown must continue to work. The surface
 shader is presentation only and cannot become an authority or interaction dependency.
 

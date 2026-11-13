@@ -209,7 +209,61 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                 }
             });
         });
+        icon_set(root, &font, &assets);
     });
+}
+
+/// The BRL-0157 icon set at shipped sizes on the surfaces that host it.
+fn icon_set(parent: &mut ChildSpawnerCommands, font: &TextFont, assets: &AssetServer) {
+    heading(parent, font, "ICON SET");
+    let framed: Vec<_> = super::icons::BADGES
+        .into_iter()
+        .chain(super::icons::PARTS)
+        .collect();
+    for (role, size) in [
+        (Surface::Primary, 36.0),
+        (Surface::Secondary, 28.0),
+        (Surface::Dark, 22.0),
+    ] {
+        icon_strip(parent, assets, role, &super::icons::PICTOGRAMS, size, size);
+    }
+    icon_strip(parent, assets, Surface::Card, &framed, 120.0, 100.0);
+}
+
+fn icon_strip(
+    parent: &mut ChildSpawnerCommands,
+    assets: &AssetServer,
+    role: Surface,
+    names: &[&str],
+    width: f32,
+    height: f32,
+) {
+    parent
+        .spawn((
+            role,
+            super::surface::SurfaceState::default(),
+            Node {
+                width: percent(100),
+                flex_shrink: 0.,
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: px(14),
+                row_gap: px(12),
+                padding: UiRect::axes(px(32), px(20)),
+                ..default()
+            },
+        ))
+        .with_children(|strip| {
+            for name in names {
+                strip.spawn((
+                    ImageNode::new(assets.load(super::icons::path(name))),
+                    Node {
+                        width: px(width),
+                        height: px(height),
+                        ..default()
+                    },
+                ));
+            }
+        });
 }
 
 fn column() -> Node {

@@ -113,7 +113,7 @@ the previous presentation for that area:
 | Riff and the character animation set | BRL-0154 (adopted) |
 | Touch-first HUD | BRL-0155 |
 | Shell surfaces, palette, motion | BRL-0156 (adopted) |
-| Icon set | BRL-0157 |
+| Icon set | BRL-0157 (adopted) |
 | Combat feedback | BRL-0144 |
 | Audio | BRL-0158 |
 
@@ -803,6 +803,9 @@ under `assets/brawler/models/original/`; their provenance is the `asset_src/` so
 its README (for Riff, `asset_src/characters/riff/README.md`; for environment kits,
 `asset_src/environment/<kit>/README.md`), not a manifest row.
 `assets/licenses/pewpew-blitz-original-environment.txt` points at the environment kit sources.
+The shell icon set under `assets/brawler/ui/icons/` is likewise original generated artwork:
+`asset_src/player-shell/icons/` holds the generator, editable SVG sources and README, and
+`assets/licenses/pewpew-blitz-original-icons.txt` points at them.
 
 ## Asset admission checklist
 

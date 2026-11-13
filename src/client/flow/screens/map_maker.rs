@@ -1,6 +1,7 @@
 //! Native Map Maker library, editor presentation, and input ownership.
 
 use super::shared::{FlowButton, FlowRoot, surface_role};
+use crate::client::ui::icons;
 use crate::{
     client::{
         ArenaCamera, ClientLobbyMembership, ClientPracticeModel, MapDraftDocument, MapDraftId,
@@ -2177,9 +2178,7 @@ fn editor_document_bar(
                     .with_children(|status| {
                         if !session.dirty() {
                             status.spawn((
-                                ImageNode::new(
-                                    asset_server.load("brawler/ui/details/map-saved.png"),
-                                ),
+                                ImageNode::new(asset_server.load(icons::path("check"))),
                                 Node {
                                     width: px(17),
                                     height: px(17),
@@ -2246,7 +2245,7 @@ fn editor_document_bar(
             22,
             FlowUiAction::TestAuthoredMap,
             "TEST MAP",
-            "brawler/ui/details/map-play.png",
+            icons::path("play"),
             126.0,
             true,
             !ready_to_test,
@@ -2259,9 +2258,9 @@ fn editor_document_bar(
             FlowUiAction::MapMakerToggleValidation,
             if ready_to_test { "READY" } else { "1 ISSUE" },
             if ready_to_test {
-                "brawler/ui/details/map-saved.png"
+                icons::path("check")
             } else {
-                "brawler/ui/details/map-warning.png"
+                icons::path("warning")
             },
             112.0,
             validation_open,
@@ -2309,7 +2308,7 @@ fn editor_tool_rail(
             30,
             FlowUiAction::MapMakerUsePlaceTool,
             "PLACE",
-            asset_server.load("brawler/ui/details/map-place.png"),
+            asset_server.load(icons::path("place")),
             runtime.tool == EditorTool::Place,
         );
         tool_button(
@@ -2318,7 +2317,7 @@ fn editor_tool_rail(
             32,
             FlowUiAction::MapMakerUseMoveTool,
             "SELECT",
-            asset_server.load("brawler/ui/details/map-select.png"),
+            asset_server.load(icons::path("select")),
             runtime.tool == EditorTool::Select,
         );
         tool_button(
@@ -2327,7 +2326,7 @@ fn editor_tool_rail(
             31,
             FlowUiAction::MapMakerUseEraseTool,
             "ERASE",
-            asset_server.load("brawler/ui/details/map-erase.png"),
+            asset_server.load(icons::path("erase")),
             runtime.tool == EditorTool::Erase,
         );
     });
@@ -2422,7 +2421,7 @@ fn editor_canvas_controls(
             } else {
                 "GRID\nOFF"
             },
-            "brawler/ui/details/map-grid.png",
+            icons::path("grid"),
             96.0,
             runtime.grid_visible,
             false,
@@ -2434,7 +2433,7 @@ fn editor_canvas_controls(
             4,
             FlowUiAction::MapMakerCycleSymmetry,
             &format!("SYMMETRY\n{}", symmetry_label(symmetry)),
-            "brawler/ui/details/map-symmetry.png",
+            icons::path("symmetry"),
             146.0,
             false,
             false,
@@ -2446,7 +2445,7 @@ fn editor_canvas_controls(
             11,
             FlowUiAction::MapMakerFitView,
             "FIT",
-            "brawler/ui/details/map-fit.png",
+            icons::path("fit"),
             78.0,
             false,
             false,
@@ -2486,28 +2485,28 @@ fn editor_selection_toolbar(
             panel,
             40,
             FlowUiAction::MapMakerRotate,
-            asset_server.load("brawler/ui/details/map-rotate.png"),
+            asset_server.load(icons::path("rotate")),
             false,
         );
         icon_image_button(
             panel,
             41,
             FlowUiAction::MapMakerDuplicateSelection,
-            asset_server.load("brawler/ui/details/map-duplicate.png"),
+            asset_server.load(icons::path("duplicate")),
             false,
         );
         icon_image_button(
             panel,
             42,
             FlowUiAction::MapMakerDeleteSelection,
-            asset_server.load("brawler/ui/details/trash.png"),
+            asset_server.load(icons::path("trash")),
             true,
         );
         icon_image_button(
             panel,
             43,
             FlowUiAction::MapMakerClearSelection,
-            asset_server.load("brawler/ui/details/map-close.png"),
+            asset_server.load(icons::path("close")),
             false,
         );
     });
@@ -2644,7 +2643,7 @@ fn editor_validation_popover(
             })
             .with_children(|title| {
                 title.spawn((
-                    ImageNode::new(asset_server.load("brawler/ui/details/map-warning.png")),
+                    ImageNode::new(asset_server.load(icons::path("warning"))),
                     Node {
                         width: px(23),
                         height: px(23),
@@ -2739,7 +2738,7 @@ fn editor_palette(
             button.spawn((
                 ImageNode {
                     color: TEXT,
-                    ..ImageNode::new(asset_server.load("brawler/ui/details/map-chevron-up.png"))
+                    ..ImageNode::new(asset_server.load(icons::path("chevron-up")))
                 },
                 Node {
                     width: px(20),
@@ -2833,9 +2832,7 @@ fn editor_palette(
                     button.spawn((
                         ImageNode {
                             color: TEXT,
-                            ..ImageNode::new(
-                                asset_server.load("brawler/ui/details/map-chevron-down.png"),
-                            )
+                            ..ImageNode::new(asset_server.load(icons::path("chevron-down")))
                         },
                         Node {
                             width: px(18),
@@ -2890,7 +2887,7 @@ fn editor_palette(
                     header,
                     57,
                     FlowUiAction::MapMakerClearSearch,
-                    asset_server.load("brawler/ui/details/map-close.png"),
+                    asset_server.load(icons::path("close")),
                     false,
                 );
             }
@@ -3025,7 +3022,7 @@ fn search_button(
             button.spawn((
                 ImageNode {
                     color: TEXT,
-                    ..ImageNode::new(asset_server.load("brawler/ui/details/map-search.png"))
+                    ..ImageNode::new(asset_server.load(icons::path("search")))
                 },
                 Node {
                     width: px(24),
@@ -3078,7 +3075,7 @@ fn palette_arrow_button(
             } else {
                 TEXT
             },
-            ..ImageNode::new(asset_server.load("brawler/ui/details/map-chevron-down.png"))
+            ..ImageNode::new(asset_server.load(icons::path("chevron-down")))
         },
         Node {
             width: px(28),
@@ -3274,7 +3271,7 @@ fn compact_icon_action_button_disabled(
     index: usize,
     action: FlowUiAction,
     label: &str,
-    icon_path: &'static str,
+    icon_path: String,
     min_width: f32,
     selected: bool,
     disabled: bool,

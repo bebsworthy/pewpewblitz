@@ -29,14 +29,9 @@ pub(crate) struct ClientAssetHandles {
     pub dashboard_logo: Handle<Image>,
     pub dashboard_badges: [Handle<Image>; 4],
     pub dashboard_identity_panel: Handle<Image>,
-    pub dashboard_icons: [Handle<Image>; 8],
+    pub dashboard_icons: [Handle<Image>; 7],
+    pub dashboard_underline: Handle<Image>,
     pub dashboard_font: Handle<Font>,
-    pub settings_icon: Handle<Image>,
-    pub menu_icon: Handle<Image>,
-    pub build_icon: Handle<Image>,
-    pub mode_icon: Handle<Image>,
-    pub practice_icon: Handle<Image>,
-    pub play_icon: Handle<Image>,
 }
 
 impl ClientAssetHandles {
@@ -59,23 +54,17 @@ impl ClientAssetHandles {
                 .map(|name| asset_server.load(format!("brawler/ui/shell/{name}.png"))),
             dashboard_identity_panel: asset_server.load("brawler/ui/shell/panel-identity.png"),
             dashboard_icons: [
-                "icon-lightning",
-                "icon-crosshair",
-                "icon-menu",
-                "icon-player",
-                "icon-arena",
-                "icon-skull",
-                "icon-chevron",
-                "underline",
+                "lightning",
+                "crosshair",
+                "menu",
+                "player",
+                "arena",
+                "skull",
+                "chevron-right",
             ]
-            .map(|name| asset_server.load(format!("brawler/ui/shell/{name}.png"))),
+            .map(|name| asset_server.load(ui::icons::path(name))),
+            dashboard_underline: asset_server.load("brawler/ui/shell/underline.png"),
             dashboard_font: asset_server.load(ui::theme::FONT_PATH),
-            settings_icon: asset_server.load("brawler/ui/icons/settings.png"),
-            menu_icon: asset_server.load("brawler/ui/icons/menu.png"),
-            build_icon: asset_server.load("brawler/ui/icons/build.png"),
-            mode_icon: asset_server.load("brawler/ui/icons/mode.png"),
-            practice_icon: asset_server.load("brawler/ui/icons/practice.png"),
-            play_icon: asset_server.load("brawler/ui/icons/play.png"),
         }
     }
 
@@ -116,12 +105,7 @@ impl ClientAssetHandles {
                 ("ui.pewpew_blitz_loading_logo", &self.loading_logo),
                 ("ui.identity_panel", &self.dashboard_identity_panel),
                 ("ui.pewpew_blitz_wordmark", &self.wordmark),
-                ("ui.icon_settings", &self.settings_icon),
-                ("ui.icon_menu", &self.menu_icon),
-                ("ui.icon_build", &self.build_icon),
-                ("ui.icon_mode", &self.mode_icon),
-                ("ui.icon_practice", &self.practice_icon),
-                ("ui.icon_play", &self.play_icon),
+                ("ui.shell_underline", &self.dashboard_underline),
             ]
             .into_iter()
             .map(|(name, handle)| (name, false, asset_server.load_state(handle))),
@@ -373,15 +357,7 @@ mod tests {
     #[test]
     fn dashboard_font_icons_and_licenses_are_shipped() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let promoted = [
-            "brawler/ui/fonts/lilita-one-regular.ttf",
-            "brawler/ui/icons/settings.png",
-            "brawler/ui/icons/menu.png",
-            "brawler/ui/icons/build.png",
-            "brawler/ui/icons/mode.png",
-            "brawler/ui/icons/practice.png",
-            "brawler/ui/icons/play.png",
-        ];
+        let promoted = ["brawler/ui/fonts/lilita-one-regular.ttf"];
         let manifest: AssetManifest = ron::from_str(CLIENT_ASSET_MANIFEST).unwrap();
         let manifested = manifest
             .assets
@@ -397,7 +373,7 @@ mod tests {
         }
         for file in [
             "assets/licenses/LilitaOne-OFL-1.1.txt",
-            "assets/licenses/kenney-game-icons.txt",
+            "assets/licenses/pewpew-blitz-original-icons.txt",
         ] {
             assert!(root.join(file).is_file(), "missing promoted asset: {file}");
         }

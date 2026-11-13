@@ -1,6 +1,7 @@
 //! Catalog cards shared by creation and saved-brawler ability selection.
 use super::{BrawlerBrowserArt, BrawlerCardPreview};
 use crate::client::flow::actions::FlowUiAction;
+use crate::client::ui::icons;
 use crate::client::ui::{
     surface::Surface,
     theme::{ACCENT, TEXT, font},
@@ -168,7 +169,7 @@ impl ChoiceCards<'_> {
             ChoiceArt::Icon(icon) => {
                 if let Some(server) = self.server {
                     art.spawn((
-                        ImageNode::new(server.load(format!("brawler/ui/details/{icon}.png"))),
+                        ImageNode::new(server.load(icons::path(icon))),
                         Node {
                             width: Val::Auto,
                             aspect_ratio: Some(1.),

@@ -32,7 +32,7 @@ mod controls;
 mod settings_screen;
 
 const ENTRANCE_SECONDS: f32 = 0.16;
-const CREDITS: &str = "PewPew Blitz 0.1.0\n\nBuilt with Bevy 0.19 (MIT OR Apache-2.0).\nLilita One: Juan Montoreano, SIL OFL 1.1.\nDefault Fira Mono font: Mozilla Foundation / Telefonica, SIL OFL 1.1.\nFighters, icons, and sounds: Kenney, CC0 1.0.\nFacility tiles: Murphy's Dad / HaywardMorihara, CC0 1.0.\n\nFull license texts ship in assets/licenses/.";
+const CREDITS: &str = "PewPew Blitz 0.1.0\n\nBuilt with Bevy 0.19 (MIT OR Apache-2.0).\nLilita One: Juan Montoreano, SIL OFL 1.1.\nDefault Fira Mono font: Mozilla Foundation / Telefonica, SIL OFL 1.1.\nIcons: original PewPew Blitz artwork.\nFighters and sounds: Kenney, CC0 1.0.\nFacility tiles: Murphy's Dad / HaywardMorihara, CC0 1.0.\n\nFull license texts ship in assets/licenses/.";
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 struct ShellSettingsDraft(ClientShellSettings);

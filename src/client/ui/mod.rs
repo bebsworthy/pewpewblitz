@@ -5,6 +5,7 @@ pub(crate) mod theme;
 
 pub(crate) mod controls;
 pub(crate) mod gallery;
+pub(crate) mod icons;
 
 pub(crate) mod press;
 
