@@ -75,3 +75,6 @@ Run `just run` (or `just server` + `just client`), open Map Maker, create/open a
 # Deferred
 
 - BRL-0175 (todo, related, parent BRL-0171): retained updates for discrete value-only Map Maker edits, gated on evidence that one-shot rebuilds cause a problem.
+
+# Playtest feedback (2026-11-13)
+- Gameplay playtest accepted for the other plan tickets; the Map Maker was not exercised yet. Ticket stays `doing` awaiting the Map Maker pan/zoom check.

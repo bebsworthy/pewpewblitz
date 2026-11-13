@@ -1,17 +1,18 @@
 ---
 id: BRL-0154
 title: Ship Riff as the first production fighter model with a full animation set
-status: todo
+status: doing
 theme: core
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-11-12T21:32:43Z
+modified: 2026-11-13T06:15:25Z
 closed:
-status_changed: 2026-11-12T20:15:04Z
+status_changed: 2026-11-13T06:09:26Z
 history:
 - backlog@2026-10-23T13:19:14Z
 - todo@2026-11-12T20:15:04Z
-revision: 9d6c6a8b885c1d48
+- doing@2026-11-13T06:09:26Z
+revision: 8d34d945a1c6768c
 blocks: []
 related: []
 parent: BRL-0171

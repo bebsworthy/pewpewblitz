@@ -92,3 +92,7 @@ Automated acceptance criteria are met; the ticket stays `doing` for the native l
 - Mistake: the hand-off set the replicated visual to the cosmetic's current pose and then the pose writer advanced it again in the same frame (a one-frame skip). Prevention: when handing state to a writer that integrates the same frame, seed it with the pre-step value; assert continuity in an App test.
 - Mistake: adding `Res<Time>` to an existing pose writer broke an older test app that did not provide `Time`. Prevention: grep existing tests of a system before adding a resource parameter (run the role's full lib tests, not only new ones, before the canonical suite).
 - Reusable: BRL-0141's server clock and confirmed-tick accessors made a latency-adaptive confirmation timeout trivial; future local-presentation work should reuse `OwnerPrediction::simulation_tick_at`/`last_confirmed_tick` rather than wall-clock timeouts.
+
+# Playtest feedback (2026-11-13)
+- User ran native sessions (`just run 2`, `just run 1`) with several 3v3 Practice matches and accepted the result ("seems fine"). No corrections requested; the open tuning choices in this spec are accepted as implemented. No induced-latency run was reported separately.
+- Observed in the session logs, not user-visible: recurring `bevy_render::slab_allocator: Use-after-free` errors at client start and on match exit; tracked separately (see BRL-0171 children). Disposition: accepted; no open feedback items.

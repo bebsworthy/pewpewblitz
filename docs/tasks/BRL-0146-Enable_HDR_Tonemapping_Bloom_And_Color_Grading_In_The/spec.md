@@ -197,3 +197,7 @@ area-effect shaders may slightly bloom at bright cores (BRL-0176).
 
 - BRL-0176 (todo): retune non-glow VFX shaders/unlit materials for the HDR bloom pipeline.
 - BRL-0177 (backlog): Heist 3v3 Practice render evidence measures the match-end transition.
+
+# Playtest feedback (2026-11-13)
+- User ran native sessions (`just run 2`, `just run 1`) with several 3v3 Practice matches and accepted the result ("seems fine"). No corrections requested; the open tuning choices in this spec are accepted as implemented. No induced-latency run was reported separately.
+- Observed in the session logs, not user-visible: recurring `bevy_render::slab_allocator: Use-after-free` errors at client start and on match exit; tracked separately (see BRL-0171 children). Disposition: accepted; no open feedback items.

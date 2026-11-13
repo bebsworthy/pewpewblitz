@@ -149,3 +149,7 @@ the floor rebuild under the editor preview.
 
 - BRL-0178 (todo): sparse wall-adjacent floor decals per theme (optional scope here; belongs with
   the per-theme kit, BRL-0153).
+
+# Playtest feedback (2026-11-13)
+- User ran native sessions (`just run 2`, `just run 1`) with several 3v3 Practice matches and accepted the result ("seems fine"). No corrections requested; the open tuning choices in this spec are accepted as implemented. No induced-latency run was reported separately.
+- Observed in the session logs, not user-visible: recurring `bevy_render::slab_allocator: Use-after-free` errors at client start and on match exit; tracked separately (see BRL-0171 children). Disposition: accepted; no open feedback items.

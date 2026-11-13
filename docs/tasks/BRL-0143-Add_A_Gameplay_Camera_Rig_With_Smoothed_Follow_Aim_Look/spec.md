@@ -83,3 +83,7 @@ Known limitations: one fire-shake value for every weapon; damage-taken shake ign
 - An initial test asserted that the framed center stays within the lead ceiling of the raw fighter position, which is false at clamped map edges. The correct invariant compares against the rigidly framed center, since the clamp is 1-Lipschitz per axis. Lesson: state framing invariants relative to the clamp output, not raw positions.
 - Clippy's pedantic float/cast lints in tests failed the first lint pass. Lesson: write test step counts as integers and compare floats with tolerances from the start.
 - Repository lint scripts depend on `rg` and silently pass when it is missing. That is a tooling risk worth noting at handoff, not a code change in this ticket.
+
+# Playtest feedback (2026-11-13)
+- User ran native sessions (`just run 2`, `just run 1`) with several 3v3 Practice matches and accepted the result ("seems fine"). No corrections requested; the open tuning choices in this spec are accepted as implemented. No induced-latency run was reported separately.
+- Observed in the session logs, not user-visible: recurring `bevy_render::slab_allocator: Use-after-free` errors at client start and on match exit; tracked separately (see BRL-0171 children). Disposition: accepted; no open feedback items.

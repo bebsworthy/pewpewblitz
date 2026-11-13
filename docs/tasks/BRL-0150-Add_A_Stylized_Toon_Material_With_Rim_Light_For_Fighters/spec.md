@@ -178,3 +178,7 @@ Dashboard brawler/card and weapon previews still use PBR (BRL-0179); world props
 # Deferred
 
 - BRL-0179 (todo): toon-shade the Dashboard brawler/card and weapon previews with a reworked rig.
+
+# Playtest feedback (2026-11-13)
+- User ran native sessions (`just run 2`, `just run 1`) with several 3v3 Practice matches and accepted the result ("seems fine"). No corrections requested; the open tuning choices in this spec are accepted as implemented. No induced-latency run was reported separately.
+- Observed in the session logs, not user-visible: recurring `bevy_render::slab_allocator: Use-after-free` errors at client start and on match exit; tracked separately (see BRL-0171 children). Disposition: accepted; no open feedback items.

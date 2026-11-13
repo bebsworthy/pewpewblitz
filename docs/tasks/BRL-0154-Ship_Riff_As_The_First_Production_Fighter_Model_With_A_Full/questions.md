@@ -2,13 +2,6 @@
 
 # Questions · BRL-0154
 
-## q-000017 · answered
+## Resolved
 
-How should production character models be sourced? The review estimates $300-800 per commissioned stylized rigged character. Alternatives are extending the procedural build_riff.py approach, or image-to-3D generation from the roster concepts followed by cleanup and auto-rigging.
-
-- [ ] Commission an artist
-- [ ] Procedural Blender scripts (build_riff.py approach)
-- [ ] Image-to-3D generation plus manual cleanup
-- [ ] Mix: procedural for blocky, commission hero characters
-
-> **Answer** (2026-11-13 06:09): User (2026-11-13): Procedural Blender scripts (extend the build_riff.py approach).
+- q-000017

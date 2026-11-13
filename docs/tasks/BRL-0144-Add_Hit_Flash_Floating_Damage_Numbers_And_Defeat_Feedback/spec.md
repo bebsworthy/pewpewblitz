@@ -186,3 +186,7 @@ are shown in a muted smaller style — say if they clutter 3v3.
 
 - BRL-0174 (todo, related, parent BRL-0171): hit-confirm/damage-taken audio and healing numbers for
   non-cue recovery.
+
+# Playtest feedback (2026-11-13)
+- User ran native sessions (`just run 2`, `just run 1`) with several 3v3 Practice matches and accepted the result ("seems fine"). No corrections requested; the open tuning choices in this spec are accepted as implemented. No induced-latency run was reported separately.
+- Observed in the session logs, not user-visible: recurring `bevy_render::slab_allocator: Use-after-free` errors at client start and on match exit; tracked separately (see BRL-0171 children). Disposition: accepted; no open feedback items.
