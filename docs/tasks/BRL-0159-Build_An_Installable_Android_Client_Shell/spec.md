@@ -293,3 +293,7 @@ Report the `AdapterInfo` logcat line, any visual corruption (particles), and fra
 # Re-verification after the Android startup-connect change (2026-11-13)
 - `just lint` exit 0, `just test` exit 0, `just e2e 2` exit 0 (1 exact 1v1 roster reached Active). Committed as d1f2a32c on top of 5dda92a4.
 - Remaining for closeout: owner playtest on the phone (create a brawler, Practice entry, "Don't allow" dialog path, audio after backgrounding) and confirmation of the target device (tested Pixel 8a / Mali-G715; Pixel 10 PowerVR unverified).
+
+# User decision (2026-11-13): target device
+- "Pixel 8a is fine": the owner's Pixel 8a (Tensor G3, Mali-G715, Vulkan, Android 17 / API 37) replaces the Pixel 10 as the Android target device. Pixel 10 / PowerVR verification is no longer required for this plan.
+- APK size (119 MB) and memory (~1.55 GB) stay with BRL-0161 unless the owner says otherwise.
