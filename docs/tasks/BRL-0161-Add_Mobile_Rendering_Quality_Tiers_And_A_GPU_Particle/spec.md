@@ -49,3 +49,6 @@ Desktop quality settings beyond sharing the same tier model.
 - APK is 119 MB: `libbrawler_android.so` is 113.5 MB stripped (82 MB of code) under the `android`
   profile with opt-level 3 and thin LTO. Consider opt-level "s"/"z", codegen-units 1, or fat LTO, and
   fewer Bevy features, as part of mobile tiers.
+
+# Target device update (2026-11-13)
+- The owner's Pixel 8a (Tensor G3, Mali-G715, Vulkan, Android 17) is the Android target (user decision on BRL-0159). APK size (119 MB, mostly the 113.5 MB native library) and ~1.55 GB Dashboard memory measured there are in scope for this ticket.
