@@ -1,0 +1,17 @@
+// Android shell for the PewPew Blitz player client (BRL-0159). Build with `just android-build`.
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "PewPewBlitz"
+include ':app'

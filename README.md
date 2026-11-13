@@ -139,11 +139,37 @@ Run `just` to list the supported everyday surface.
 | `just e2e [2, 4, or 6]` | Run the real-process 1v1, 2v2, or 3v3 product path; default is 2 |
 | `just practice-e2e [game type]` | Run one exact real-process Practice match with one human and server-filled bots; default is `wipeout-1v1` |
 | `just v3-render-evidence [path]` | Record the bounded native release render report; the historical recipe name is retained |
+| `just android-build [HOST:PORT]` / `just android-install [HOST:PORT]` | Build the Android player APK (and install/launch it over adb); see [Android client](#android-client) |
 | `just ci` | Run lint, deterministic tests, the complete 2/4/6-client E2E matrix, and all nine Practice game types |
 | `just clean` | Remove Cargo build artifacts |
 
 E2E runs choose an unused loopback port by default and may run beside an interactive server. Set
 `BRAWLER_ROUTED_BIND` only when a fixed test address is required.
+
+## Android client
+
+The Android build is the same player shell (`--features client`, no automation) packaged as an
+arm64-v8a APK by `packages/brawler-android` (a thin `cdylib` with Bevy's GameActivity) and its
+Gradle project. It targets Android 12+ (min SDK 31, target SDK 37) and is developed on a Pixel 10.
+
+One-time setup on macOS: `brew install openjdk@21 gradle`, `rustup target add aarch64-linux-android`,
+`cargo install cargo-ndk --locked`, then install the Android command-line tools into
+`$ANDROID_HOME` (default `~/Library/Android/sdk`) and run
+`sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" "ndk;29.0.14206865"`
+(this requires accepting the Android SDK license).
+
+```bash
+BRAWLER_ROUTED_BIND=0.0.0.0:5000 just server   # serve the LAN from the Mac
+just android-install 192.168.1.20:5000          # build, install, and launch; the address is the Mac's LAN IP
+```
+
+`just android-build` only builds `packages/brawler-android/android/app/build/outputs/apk/release/app-release.apk`
+(signed with the local debug keystore; not a store build). The baked address is an editable prefill;
+connected servers are remembered. On first launch Android 17 asks for local network access, which a
+server on your Wi-Fi requires; if it is denied, the app explains why and offers Try again / Open settings. Settings and connections live in the app's private storage;
+F12 captures (hardware keyboard) go to `/sdcard/Android/data/com.pewpewblitz.client/files/captures`.
+Touch gameplay controls, mobile quality tiers, and background-resilient sessions are not part of
+this shell yet.
 
 ## Current player flow
 

@@ -3,7 +3,6 @@
 use super::parse_server_address;
 use atomic_write_file::AtomicWriteFile;
 use bevy::prelude::Resource;
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -33,9 +32,9 @@ impl Default for ClientConnectionsPath {
         {
             return Self::for_data_directory(directory);
         }
-        let path = ProjectDirs::from("com", "Brawler", "Brawler").map_or_else(
+        let path = crate::client::platform_dirs::config_directory().map_or_else(
             || PathBuf::from("connections.ron"),
-            |dirs| dirs.config_dir().join("connections.ron"),
+            |directory| directory.join("connections.ron"),
         );
         Self(path)
     }

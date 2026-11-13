@@ -17,6 +17,7 @@ use bevy::{
     tasks::IoTaskPool,
     window::PrimaryWindow,
 };
+#[cfg(not(target_os = "android"))]
 use directories::{ProjectDirs, UserDirs};
 use lightyear::prelude::Controlled;
 use serde::Serialize;
@@ -56,18 +57,26 @@ impl Default for EvidenceCaptureDirectory {
     fn default() -> Self {
         let path = env::var_os("BRAWLER_CAPTURE_DIR")
             .map(PathBuf::from)
-            .or_else(|| {
-                UserDirs::new()
-                    .and_then(|dirs| dirs.picture_dir().map(PathBuf::from))
-                    .map(|pictures| pictures.join("PewPew Blitz").join("Captures"))
-            })
-            .or_else(|| {
-                ProjectDirs::from("com", "Brawler", "Brawler")
-                    .map(|dirs| dirs.data_local_dir().join("captures"))
-            })
+            .or_else(platform_capture_directory)
             .unwrap_or_else(|| PathBuf::from("captures"));
         Self(path)
     }
+}
+
+#[cfg(not(target_os = "android"))]
+fn platform_capture_directory() -> Option<PathBuf> {
+    UserDirs::new()
+        .and_then(|dirs| dirs.picture_dir().map(PathBuf::from))
+        .map(|pictures| pictures.join("PewPew Blitz").join("Captures"))
+        .or_else(|| {
+            ProjectDirs::from("com", "Brawler", "Brawler")
+                .map(|dirs| dirs.data_local_dir().join("captures"))
+        })
+}
+
+#[cfg(target_os = "android")]
+fn platform_capture_directory() -> Option<PathBuf> {
+    crate::client::platform_dirs::android_capture_directory()
 }
 
 #[derive(Resource, Default)]

@@ -1,0 +1,28 @@
+[package]
+name = "brawler-android"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Thin Android (GameActivity) entry point for the PewPew Blitz player client"
+publish = false
+
+# Built only by `just android-build` (cargo-ndk, aarch64-linux-android). The library name is the
+# `android.app.lib_name` that the Gradle shell's GameActivity loads.
+[lib]
+name = "brawler_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+# The BRL-0165 player configuration: no automation, evidence, or developer tooling.
+brawler = { path = "../..", default-features = false, features = ["client"] }
+bevy = { version = "=0.19.1", default-features = false, features = [
+  "android-game-activity",
+  "touch",
+] }
+
+[lints.rust]
+unused_qualifications = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

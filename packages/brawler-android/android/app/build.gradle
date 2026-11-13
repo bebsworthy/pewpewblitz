@@ -1,0 +1,59 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.pewpewblitz.client'
+    compileSdk 37
+    // Only for stripping/packaging checks; the Rust library is prebuilt by cargo-ndk.
+    ndkVersion '29.0.14206865'
+
+    defaultConfig {
+        applicationId 'com.pewpewblitz.client'
+        // Android 12+. Target 37 (Android 17): LAN access needs the ACCESS_LOCAL_NETWORK runtime
+        // permission, which MainActivity requests before the player connects.
+        minSdk 31
+        targetSdk 37
+        versionCode 1
+        versionName '0.1.0'
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Development installs only: signed with the local debug keystore. Store signing is
+            // separate deferred work.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            // The client's runtime assets, read through Bevy's AndroidAssetReader.
+            assets.srcDirs = [file('../../../../assets')]
+            // Written by `just android-build` (cargo ndk -o ...); ignored by git.
+            jniLibs.srcDirs = [file('src/main/jniLibs')]
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // The `android` Cargo profile already strips the library.
+            keepDebugSymbols += ['**/*.so']
+        }
+    }
+}
+
+dependencies {
+    // Must match the `android-activity` crate that Bevy 0.19 uses (0.6.1 -> 4.4.0).
+    implementation 'androidx.games:games-activity:4.4.0'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+}

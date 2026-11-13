@@ -7,7 +7,7 @@ description = "Brawler — a server-authoritative top-down arena shooter"
 publish = false
 
 [workspace]
-members = ["packages/brawler-routing"]
+members = ["packages/brawler-android", "packages/brawler-routing"]
 resolver = "3"
 
 [features]
@@ -127,8 +127,11 @@ unicode-normalization = "0.1"
 unicode-segmentation = "1"
 atomic-write-file = { version = "0.3", optional = true }
 directories = { version = "6.0", optional = true }
-arboard = { version = "3.6", default-features = false, optional = true }
 rusqlite = { version = "0.40.0", features = ["backup", "bundled"], optional = true }
+
+# `arboard` has no Android backend; Android paste reports unavailable (BRL-0159).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+arboard = { version = "3.6", default-features = false, optional = true }
 
 [dev-dependencies]
 # Glyph-coverage tests read the shipped display font's character map.
@@ -190,3 +193,11 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Android player library (`just android-build`): optimized, thin-LTO, stripped, abort-on-panic.
+# Desktop and server profiles are unaffected.
+[profile.android]
+inherits = "release"
+lto = "thin"
+strip = true
+panic = "abort"

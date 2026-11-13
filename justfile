@@ -28,6 +28,14 @@ vfx-lab args="":
 run clients:
     ./scripts/dev.sh run {{clients}}
 
+# Build the Android player APK (arm64-v8a); optional HOST:PORT bakes an editable server prefill.
+android-build server="":
+    ./scripts/android.sh build {{server}}
+
+# Build, install over adb, and launch the Android player APK on the connected device.
+android-install server="":
+    ./scripts/android.sh install {{server}}
+
 # Format all Rust sources.
 fmt:
     cargo fmt --all

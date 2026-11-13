@@ -11,3 +11,12 @@ Which Android devices should be the minimum support targets? This decides GPU an
 - [ ] Only the owner's own phone for now
 
 > **Answer** (2026-11-13 06:09): User (2026-11-13): Only the owner's own phone for now.
+
+## q-000021 · answered
+
+Installing the SDK platform, build-tools, platform-tools (adb) and NDK with sdkmanager requires accepting the Android SDK License Agreement (`sdkmanager --licenses`). The agent did not accept it on your behalf. Will you run `yes | ~/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses` yourself (JAVA_HOME=/opt/homebrew/opt/openjdk@21), or do you explicitly authorize the agent to accept it?
+
+- [ ] I accepted the licenses myself; continue the install and APK build
+- [ ] I authorize the agent to accept the Android SDK licenses
+
+> **Answer** (2026-11-13 16:14): User (2026-11-13), answering in chat: 'I accept; you run it' — the owner accepts the Android SDK License Agreement and authorizes running sdkmanager --licenses.

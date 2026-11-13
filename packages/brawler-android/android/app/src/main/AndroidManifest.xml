@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Routed UDP to the LAN/remote server. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 17 (API 37) gates LAN traffic, such as a server on the developer's Wi-Fi. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
+
+    <application
+        android:appCategory="game"
+        android:icon="@mipmap/ic_launcher"
+        android:label="PewPew Blitz"
+        android:theme="@style/Theme.AppCompat.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="layoutDirection|locale|orientation|keyboardHidden|screenSize|smallestScreenSize|density|keyboard|navigation|screenLayout|uiMode">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="brawler_android" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

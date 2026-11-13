@@ -1,6 +1,7 @@
 //! Client-only semantic audio requests, bounded one-shot playback, music, and volume mixing.
 
 mod catalog;
+mod lifecycle;
 mod mix;
 mod music;
 mod playback;
@@ -8,7 +9,7 @@ mod producers;
 mod registry;
 mod request;
 
-use bevy::prelude::*;
+use bevy::{prelude::*, window::AppLifecycle};
 
 use music::ClientMusicPlugin;
 use playback::{ClientAudioPlaybackPlugin, ClientAudioSet};
@@ -33,6 +34,13 @@ impl Plugin for ClientAudioPlugin {
                 mix::apply_audio_mix
                     .after(ClientAudioSet::PlaybackRequests)
                     .after(music::MusicSet),
+            )
+            // Android suspends the app with the activity; pause and later resume exactly the
+            // sinks that were playing. Idempotent registration keeps window-free tests valid.
+            .add_message::<AppLifecycle>()
+            .add_systems(
+                Update,
+                lifecycle::pause_audio_while_suspended.after(mix::apply_audio_mix),
             );
     }
 }

@@ -34,3 +34,10 @@ Desktop quality settings beyond sharing the same tier model.
 # Source
 
 2026-10-23 review of commit `cc4d3da` (code, in-game/out-of-game UI/UX, rendering, engine, Android). Review page: https://claude.ai/artifact/HtwNHVkZueKuu6BrmGmXHN. Live 3v3 Practice capture taken the same day.
+
+# Inherited from BRL-0159 (2026-11-13)
+- Reactive `WinitSettings` in menus / continuous in matches (power) was deferred here from BRL-0159 so the
+  Android shell left desktop update behavior unchanged.
+- Pixel 10 GPU: Imagination PowerVR DXT-48-1536 (Tensor G5), Vulkan 1.3 at launch, Imagination 25.x /
+  Vulkan 1.4 driver reported from Android 16 QPR3. bevy_hanabi compute particles and HDR/bloom are the
+  first things to check on device; record `AdapterInfo` from logcat.

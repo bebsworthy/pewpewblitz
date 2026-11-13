@@ -12,6 +12,9 @@ use brawler::client::build_app_with_config;
 #[cfg(not(feature = "automation"))]
 use brawler::config::ClientNetworkConfig;
 use brawler::config::NetworkTransport;
+#[cfg(feature = "automation")]
+use brawler::config::random_nonzero_client_id;
+#[cfg(feature = "automation")]
 use core::net::SocketAddr;
 use std::{env, process};
 
@@ -37,6 +40,7 @@ fn parse_transport(flag: &str, value: Option<String>) -> Result<NetworkTransport
 
 /// A routed IPv6 supervisor must be reached from an IPv6 client socket. Preserve the historical
 /// loopback defaults for IPv4 while deriving the local family from the selected server address.
+#[cfg(feature = "automation")]
 fn default_local_addr(server_addr: SocketAddr) -> SocketAddr {
     match server_addr {
         SocketAddr::V4(_) => "127.0.0.1:0"
@@ -71,32 +75,11 @@ fn parse_args() -> Result<ClientNetworkConfig, String> {
     if transport.is_some_and(|transport| transport != NetworkTransport::RoutedUdp) {
         return Err("the interactive product shell requires --transport routed-udp".to_string());
     }
-    let mut config = ClientNetworkConfig::new(random_nonzero_client_id()?);
-    config.product_server_prefill = server;
-    config.local_addr = default_local_addr(config.server_addr);
-    config.transport = NetworkTransport::RoutedUdp;
-    config.window_size = window_size;
-    config
-        .validate()
-        .map_err(|error| format!("invalid client configuration: {error}"))?;
-    Ok(config)
+    ClientNetworkConfig::product_shell(server, window_size)
 }
 
 #[cfg(feature = "automation")]
 use automation::parse_args;
-
-fn random_nonzero_client_id() -> Result<u64, String> {
-    for _ in 0..4 {
-        let mut bytes = [0_u8; 8];
-        getrandom::fill(&mut bytes)
-            .map_err(|error| format!("OS entropy unavailable for client identity: {error}"))?;
-        let id = u64::from_ne_bytes(bytes);
-        if id != 0 {
-            return Ok(id);
-        }
-    }
-    Err("OS entropy repeatedly produced a zero client identity".to_string())
-}
 
 fn parse_window_size(flag: &str, value: Option<String>) -> Result<(u16, u16), String> {
     let value = value.ok_or_else(|| format!("{flag} requires WIDTHxHEIGHT"))?;

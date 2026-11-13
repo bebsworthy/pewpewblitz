@@ -1,7 +1,6 @@
 use super::{MapDraftDocument, MapDraftId, MapDraftLibrary};
 use atomic_write_file::AtomicWriteFile;
 use bevy::prelude::Resource;
-use directories::ProjectDirs;
 use std::{
     fs,
     io::{Read as _, Write as _},
@@ -30,10 +29,10 @@ impl Default for MapDraftStorage {
         {
             return Self::for_data_directory(directory);
         }
-        Self(ProjectDirs::from("com", "Brawler", "Brawler").map_or_else(
-            || PathBuf::from("maps"),
-            |dirs| dirs.config_dir().join("maps"),
-        ))
+        Self(
+            crate::client::platform_dirs::config_directory()
+                .map_or_else(|| PathBuf::from("maps"), |directory| directory.join("maps")),
+        )
     }
 }
 

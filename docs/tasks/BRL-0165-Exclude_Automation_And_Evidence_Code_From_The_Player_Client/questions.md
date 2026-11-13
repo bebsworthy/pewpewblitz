@@ -2,6 +2,6 @@
 
 # Questions · BRL-0165
 
-## q-000020 · open
+## Resolved
 
-Should the player and Android builds also drop F12 / north-button Instant evidence capture (paired PNG + state JSON)? docs/13-player-ux.md defines it as a rebindable player action and it is your playtest feedback path in just run / just client. This ticket currently keeps it in the player build and gates only scripted/scheduled capture, smoke flags, demos, render reports, and dev tools.
+- q-000020

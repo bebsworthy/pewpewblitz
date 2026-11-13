@@ -64,6 +64,7 @@ mod hud;
 mod input;
 pub mod local_attack;
 mod map_maker;
+mod platform_dirs;
 pub mod prediction;
 mod presentation;
 pub(crate) mod presentation_3d;

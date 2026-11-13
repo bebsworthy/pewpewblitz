@@ -3,7 +3,6 @@
 use super::{ClientInputSettings, GamepadBindings, KeyboardBindings};
 use atomic_write_file::AtomicWriteFile;
 use bevy::prelude::{MouseButton, Resource};
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -83,9 +82,9 @@ pub struct ClientSettingsPath(pub PathBuf);
 
 impl Default for ClientSettingsPath {
     fn default() -> Self {
-        let path = ProjectDirs::from("com", "Brawler", "Brawler").map_or_else(
+        let path = crate::client::platform_dirs::config_directory().map_or_else(
             || PathBuf::from("settings.ron"),
-            |dirs| dirs.config_dir().join("settings.ron"),
+            |directory| directory.join("settings.ron"),
         );
         Self(path)
     }

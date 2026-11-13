@@ -277,7 +277,7 @@ pub(super) fn collect_flow_input(
                 KeyCode::SuperRight,
             ])
         {
-            match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
+            match clipboard_text() {
                 Ok(text) => insert_editor_text(&mut model, field, &text),
                 Err(error) => {
                     model.inline_error = Some(format!("Clipboard text is unavailable: {error}"));
@@ -537,6 +537,20 @@ pub(super) fn next_caret(value: &str, caret: usize, field: EditingField) -> usiz
             .nth(1)
             .map_or(value.len(), |(index, _)| caret + index),
     }
+}
+
+/// System clipboard text for Ctrl/Cmd+V in the address and name editors.
+#[cfg(not(target_os = "android"))]
+fn clipboard_text() -> Result<String, String> {
+    arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.get_text())
+        .map_err(|error| error.to_string())
+}
+
+/// Android has no `arboard` backend; hardware-keyboard paste reports the gap inline.
+#[cfg(target_os = "android")]
+fn clipboard_text() -> Result<String, String> {
+    Err("paste is not supported on Android".to_string())
 }
 
 pub(super) fn insert_editor_text(model: &mut ServerSelectModel, field: EditingField, text: &str) {

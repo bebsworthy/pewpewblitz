@@ -341,11 +341,41 @@ pub struct RenderMeasurementConfig {
     pub reduced_effects: bool,
 }
 
+/// Draws a nonzero client identity from operating-system entropy.
+pub fn random_nonzero_client_id() -> Result<u64, String> {
+    for _ in 0..4 {
+        let mut bytes = [0_u8; 8];
+        getrandom::fill(&mut bytes)
+            .map_err(|error| format!("OS entropy unavailable for client identity: {error}"))?;
+        let id = u64::from_ne_bytes(bytes);
+        if id != 0 {
+            return Ok(id);
+        }
+    }
+    Err("OS entropy repeatedly produced a zero client identity".to_string())
+}
+
 /// Enables a reproducible windowed smoke scenario through the native gamepad input path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowedControllerDemo;
 
 impl ClientNetworkConfig {
+    /// The interactive product shell shared by the desktop player binary and the Android library:
+    /// routed UDP, a random client identity, and an optional editable server prefill.
+    pub fn product_shell(
+        server_prefill: Option<String>,
+        window_size: Option<(u16, u16)>,
+    ) -> Result<Self, String> {
+        let mut config = Self::new(random_nonzero_client_id()?);
+        config.product_server_prefill = server_prefill;
+        config.transport = NetworkTransport::RoutedUdp;
+        config.window_size = window_size;
+        config
+            .validate()
+            .map_err(|error| format!("invalid client configuration: {error}"))?;
+        Ok(config)
+    }
+
     #[must_use]
     pub fn new(client_id: u64) -> Self {
         Self {

@@ -236,6 +236,7 @@ dependencies = [
  "ndk-context",
  "ndk-sys",
  "num_enum",
+ "simd_cesu8",
  "thiserror 2.0.20",
 ]
 
@@ -2138,6 +2139,14 @@ dependencies = [
  "tiny_http",
  "unicode-normalization",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "brawler-android"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "brawler",
 ]
 
 [[package]]
