@@ -19,6 +19,7 @@ pub(super) enum FlowUiAction {
     DismissError,
     JoinSaved(String),
     RemoveFavorite(String),
+    ForgetServer(String),
     SelectGameTypeDraft(usize),
     ConfirmGameType,
     CancelGameType,

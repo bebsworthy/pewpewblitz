@@ -128,6 +128,7 @@ pub(super) fn project_damageable_object_health_ui(
             Without<DamageableObjectHealthUi>,
         ),
     >,
+    ui_scale: Option<Res<UiScale>>,
 ) {
     let damaged: std::collections::BTreeMap<_, _> = objects
         .iter()
@@ -175,10 +176,11 @@ pub(super) fn project_damageable_object_health_ui(
             );
         }
     }
+    let to_ui = |point| ui::viewport::viewport_to_ui(point, ui_scale.as_deref());
     let projection = cameras.single().ok().and_then(|(camera, transform)| {
         camera
             .logical_viewport_size()
-            .map(|viewport| (camera, transform, viewport))
+            .map(|viewport| (camera, transform, to_ui(viewport)))
     });
     let stale: Vec<_> = index
         .0
@@ -214,7 +216,7 @@ pub(super) fn project_damageable_object_health_ui(
             *visibility = Visibility::Hidden;
             continue;
         };
-        let Some(top_left) = projected_object_health_top_left(viewport, anchor) else {
+        let Some(top_left) = projected_object_health_top_left(viewport, to_ui(anchor)) else {
             *visibility = Visibility::Hidden;
             continue;
         };

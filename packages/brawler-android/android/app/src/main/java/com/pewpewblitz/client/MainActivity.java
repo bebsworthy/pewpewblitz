@@ -4,9 +4,13 @@ import android.Manifest;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.provider.Settings;
+import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 
@@ -27,6 +31,31 @@ public class MainActivity extends GameActivity {
     private boolean localNetworkDeclined;
     private boolean localNetworkRequestPending;
     private AlertDialog localNetworkDialog;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        keepSurfaceOutOfDisplayCutout();
+    }
+
+    /**
+     * Edge-to-edge is mandatory from API 35, so the game surface would otherwise extend under the
+     * camera cutout and hide shell and HUD controls there. Padding the content view by the cutout
+     * insets keeps the whole Bevy window in the safe area; the strip shows black (BRL-0196).
+     */
+    private void keepSurfaceOutOfDisplayCutout() {
+        View content = findViewById(android.R.id.content);
+        if (content == null) {
+            return;
+        }
+        content.setBackgroundColor(Color.BLACK);
+        content.setOnApplyWindowInsetsListener((view, insets) -> {
+            Insets cutout = insets.getInsets(WindowInsets.Type.displayCutout());
+            view.setPadding(cutout.left, cutout.top, cutout.right, cutout.bottom);
+            return insets;
+        });
+        content.requestApplyInsets();
+    }
 
     @Override
     protected void onResume() {

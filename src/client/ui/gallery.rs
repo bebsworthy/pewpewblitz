@@ -9,7 +9,8 @@ use super::{
 use bevy::input::mouse::MouseWheel;
 use bevy::{
     prelude::*,
-    ui::{InteractionDisabled, RelativeCursorPosition, ScrollPosition, UiSystems},
+    ui::{InteractionDisabled, RelativeCursorPosition, ScrollPosition, UiScale, UiSystems},
+    window::PrimaryWindow,
 };
 
 /// Builds the native component review tool without gameplay, networking or settings persistence.
@@ -24,7 +25,10 @@ pub fn build_ui_gallery_app() -> App {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "PewPew Blitz — UI Gallery".into(),
-                    resolution: if std::env::var_os("BRAWLER_UI_GALLERY_COMPACT").is_some() {
+                    // BRL-0196: the Pixel 8a landscape logical viewport.
+                    resolution: if std::env::var_os("BRAWLER_UI_GALLERY_PHONE").is_some() {
+                        (914, 411).into()
+                    } else if std::env::var_os("BRAWLER_UI_GALLERY_COMPACT").is_some() {
                         (900, 600).into()
                     } else {
                         (1440, 900).into()
@@ -44,7 +48,13 @@ pub fn build_ui_gallery_app() -> App {
     .add_systems(Startup, setup)
     .add_systems(
         Update,
-        (interact, scroll_gallery, resize_gallery, sync_motion_demo),
+        (
+            fit_gallery_viewport,
+            interact,
+            scroll_gallery,
+            resize_gallery,
+            sync_motion_demo,
+        ),
     )
     .add_systems(PreUpdate, hold_press_demo.after(UiSystems::Focus))
     .add_systems(PostUpdate, reveal_focus.after(UiSystems::Layout));
@@ -56,6 +66,17 @@ pub fn build_ui_gallery_app() -> App {
         .add_systems(Last, capture_gallery);
     }
     app
+}
+
+/// Applies the shell's small-viewport fit, as the player client does (BRL-0196).
+fn fit_gallery_viewport(windows: Query<&Window, With<PrimaryWindow>>, mut scale: ResMut<UiScale>) {
+    let fit = windows
+        .iter()
+        .next()
+        .map_or(1.0, |window| super::viewport::viewport_fit(window.height()));
+    if (scale.0 - fit).abs() > f32::EPSILON {
+        scale.0 = fit;
+    }
 }
 
 /// Development evidence: save the settled top of the gallery to `BRAWLER_UI_GALLERY_CAPTURE`,

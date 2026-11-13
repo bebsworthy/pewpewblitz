@@ -17,7 +17,12 @@ Bevy entities, not a separate widget runtime.
 - `icons`: names and asset paths of the generated BRL-0157 icon set
   (`asset_src/player-shell/icons/`); icons are full color and are never tinted.
 - `press`: `ReleaseActivation`, pointer/touch activation on release with drag-cancel.
-- `scroll`: viewport clamping and focus-reveal geometry, shared by screens and gallery.
+- `scroll`: viewport clamping and focus-reveal geometry, shared by screens and gallery, plus the
+  generic touch drag-scroll for every vertical `Overflow::scroll_y` area (past the press
+  drag-cancel distance).
+- `viewport`: the small-window fit. Below 640 logical pixels of height the effective `UiScale` is
+  the player's setting times `height / 640` (floor 0.5), so landscape phones get the authored
+  wide layouts on a 640-pixel-tall virtual canvas; taller windows are unchanged.
 
 The procedural `shell_surface.wgsl` draws frames from final logical dimensions: a vertical
 gradient, light top band, `ink` bottom lip that collapses on press, and the Play shine sweep. Action sides
@@ -72,5 +77,6 @@ fill, scroll endpoints and inactive overlay isolation. Physical controller check
 separately from synthetic input tests.
 
 For a repeatable compact gallery launch, use
-`BRAWLER_UI_GALLERY_COMPACT=1 just ui-gallery` (900×600). The gallery resolves assets
+`BRAWLER_UI_GALLERY_COMPACT=1 just ui-gallery` (900×600); `BRAWLER_UI_GALLERY_PHONE=1` opens the
+Pixel 8a landscape viewport (914×411) with the player client's viewport fit. The gallery resolves assets
 from the repository in the same way as the client, including when launched by a native app wrapper.

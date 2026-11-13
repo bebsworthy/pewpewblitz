@@ -526,12 +526,14 @@ pub(in super::super) fn project_fighter_overhead_ui(
         ),
         With<FighterOverheadUi>,
     >,
+    ui_scale: Option<Res<UiScale>>,
 ) {
+    let to_ui = |point| ui::viewport::viewport_to_ui(point, ui_scale.as_deref());
     let Some((camera, camera_transform, viewport_size)) =
         cameras.single().ok().and_then(|(camera, transform)| {
             camera
                 .logical_viewport_size()
-                .map(|size| (camera, transform, size))
+                .map(|size| (camera, transform, to_ui(size)))
         })
     else {
         for (_, _, _, _, mut visibility) in &mut overheads {
@@ -552,18 +554,22 @@ pub(in super::super) fn project_fighter_overhead_ui(
                     .get(overhead.visual_root)
                     .ok()?
                     .translation();
-                let fighter_viewport = camera
-                    .world_to_viewport(
-                        camera_transform,
-                        ground_position + Vec3::Y * FIGHTER_BODY_WORLD_HEIGHT,
-                    )
-                    .ok()?;
-                let overhead_viewport = camera
-                    .world_to_viewport(
-                        camera_transform,
-                        ground_position + Vec3::Y * OVERHEAD_WORLD_HEIGHT,
-                    )
-                    .ok()?;
+                let fighter_viewport = to_ui(
+                    camera
+                        .world_to_viewport(
+                            camera_transform,
+                            ground_position + Vec3::Y * FIGHTER_BODY_WORLD_HEIGHT,
+                        )
+                        .ok()?,
+                );
+                let overhead_viewport = to_ui(
+                    camera
+                        .world_to_viewport(
+                            camera_transform,
+                            ground_position + Vec3::Y * OVERHEAD_WORLD_HEIGHT,
+                        )
+                        .ok()?,
+                );
                 let height = overhead_height(!overhead.ammo_segments.is_empty());
                 projected_overhead_top_left(
                     viewport_size,

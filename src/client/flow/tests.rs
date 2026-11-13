@@ -45,6 +45,10 @@ use screens::{
 use std::time::Duration;
 
 fn flow_test_app() -> App {
+    flow_test_app_with(|_| {})
+}
+
+fn flow_test_app_with(extend: impl FnOnce(&mut App)) -> App {
     let mut app = App::new();
     let mut config = ClientNetworkConfig::new(0x1234);
     config.transport = crate::config::NetworkTransport::RoutedUdp;
@@ -63,6 +67,7 @@ fn flow_test_app() -> App {
             crate::modes::BuiltInModeRegistrationsPlugin,
         ))
         .add_plugins(ClientFlowPlugin);
+    extend(&mut app);
     crate::test_app::finalize(&mut app);
     app.update();
     app
@@ -81,7 +86,11 @@ fn inject_flow_actions(
 }
 
 fn flow_action_test_app() -> App {
-    let mut app = flow_test_app();
+    flow_action_test_app_with(|_| {})
+}
+
+fn flow_action_test_app_with(extend: impl FnOnce(&mut App)) -> App {
+    let mut app = flow_test_app_with(extend);
     app.init_resource::<InjectedFlowActions>().add_systems(
         Update,
         inject_flow_actions
@@ -413,7 +422,14 @@ fn explicit_action_preempts_session_and_ordinary_while_profile_decision_still_ap
 }
 
 fn configured_lobby_flow_app(membership: ClientLobbyMembership) -> App {
-    let mut app = flow_action_test_app();
+    configured_lobby_flow_app_with(membership, |_| {})
+}
+
+fn configured_lobby_flow_app_with(
+    membership: ClientLobbyMembership,
+    extend: impl FnOnce(&mut App),
+) -> App {
+    let mut app = flow_action_test_app_with(extend);
     enter_dashboard(&mut app);
     select_first_game(&mut app, &membership);
     app.world_mut().spawn((
@@ -3285,4 +3301,134 @@ fn confirmation_navigation_starts_safe_and_supports_both_axes() {
         *app.world().resource::<ClientOverlay>(),
         ClientOverlay::BrawlerDetails(id)
     );
+}
+
+/// Pixel 8a landscape logical window: 2400x1080 at density 420 minus the 121 px camera-cutout
+/// strip the Android activity keeps clear (914x411 full screen).
+const PHONE_VIEWPORT: (u32, u32) = (868, 411);
+
+fn phone_layout_flow_app() -> App {
+    let mut app = flow_test_app_with(|app| {
+        crate::client::ui::layout_harness::add_layout(app, PHONE_VIEWPORT.0, PHONE_VIEWPORT.1);
+    });
+    crate::client::ui::layout_harness::apply_viewport_fit(&mut app);
+    app
+}
+
+fn settle_layout(app: &mut App) {
+    for _ in 0..3 {
+        app.update();
+    }
+}
+
+#[test]
+fn server_select_fits_a_landscape_phone_and_shows_field_values() {
+    let mut app = phone_layout_flow_app();
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    settle_layout(&mut app);
+
+    let unreachable = crate::client::ui::layout_harness::unreachable_buttons(app.world_mut());
+    assert!(
+        unreachable.is_empty(),
+        "unreachable controls: {unreachable:?}"
+    );
+    let mut fields = app
+        .world_mut()
+        .query::<(Entity, &screens::server_select::FieldLabel, &Text)>();
+    let fields: Vec<_> = fields
+        .iter(app.world())
+        .map(|(entity, _, text)| (entity, text.0.clone()))
+        .collect();
+    assert_eq!(fields.len(), 2);
+    for (entity, text) in fields {
+        assert!(!text.is_empty());
+        let rect = crate::client::ui::layout_harness::node_rect(app.world(), entity).unwrap();
+        assert!(
+            rect.width() > 40.0 && rect.height() > 10.0,
+            "{text}: {rect:?}"
+        );
+    }
+
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+        kind: FlowErrorKind::Connection,
+        message: "The lobby connection was lost unexpectedly".to_string(),
+        return_flow: ClientFlow::ServerSelect,
+        actions: [
+            Some(FlowErrorAction::RetryConnection),
+            Some(FlowErrorAction::Back),
+        ],
+    });
+    assert_phone_reachable(&mut app, "Connection lost");
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::Connecting);
+    assert_phone_reachable(&mut app, "Connecting");
+}
+
+fn assert_phone_reachable(app: &mut App, screen: &str) {
+    settle_layout(app);
+    let mut buttons = app
+        .world_mut()
+        .query_filtered::<&ComputedNode, With<Button>>();
+    let laid_out = buttons
+        .iter(app.world())
+        .filter(|node| !node.is_empty())
+        .count();
+    let total = buttons.iter(app.world()).count();
+    let state = *app.world().resource::<State<ClientFlow>>().get();
+    assert!(
+        laid_out > 0,
+        "{screen}: no laid-out controls ({total} buttons, {state:?})"
+    );
+    let unreachable = crate::client::ui::layout_harness::unreachable_buttons(app.world_mut());
+    assert!(
+        unreachable.is_empty(),
+        "{screen}: unreachable controls at the phone viewport: {unreachable:?}"
+    );
+}
+
+#[test]
+fn player_path_screens_keep_every_control_reachable_on_a_landscape_phone() {
+    let membership = lobby_membership_with_brawler();
+    let brawler = membership.profile.brawlers[0].id;
+    let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
+        crate::client::ui::layout_harness::add_layout(app, PHONE_VIEWPORT.0, PHONE_VIEWPORT.1);
+    });
+    crate::client::ui::layout_harness::apply_viewport_fit(&mut app);
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(membership.profile.clone());
+    // Re-enter the Dashboard now that the lobby membership exists, as a real join does.
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    app.update();
+    enter_dashboard(&mut app);
+    assert_phone_reachable(&mut app, "Dashboard");
+    let mut classes = app.world_mut().query::<&DashboardLayoutClass>();
+    assert_eq!(
+        classes.iter(app.world()).copied().collect::<Vec<_>>(),
+        [DashboardLayoutClass::Wide],
+        "the viewport fit keeps the phone on the wide Dashboard"
+    );
+
+    inject_action(&mut app, FlowUiAction::OpenBrawlerList);
+    assert_phone_reachable(&mut app, "Brawlers");
+    inject_action(&mut app, FlowUiAction::OpenBrawlerDetails(brawler));
+    assert_phone_reachable(&mut app, "Brawler details");
+    inject_action(&mut app, FlowUiAction::BackToBrawlerList);
+    inject_action(&mut app, FlowUiAction::CreateBrawler);
+    assert_phone_reachable(&mut app, "Create Brawler");
+    inject_action(&mut app, FlowUiAction::CancelCreateBrawler);
+    inject_action(&mut app, FlowUiAction::CloseBrawlerList);
+    assert_phone_reachable(&mut app, "Dashboard after Brawlers");
+
+    inject_action(&mut app, FlowUiAction::OpenGameTypeSelect);
+    assert_phone_reachable(&mut app, "Choose Game");
+    inject_action(&mut app, FlowUiAction::CancelGameType);
+    inject_action(&mut app, FlowUiAction::OpenPracticeMaps);
+    assert_phone_reachable(&mut app, "Practice maps");
 }

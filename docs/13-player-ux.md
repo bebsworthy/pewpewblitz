@@ -282,7 +282,21 @@ Responsive presentation does not change this semantic hierarchy. At an effective
 least `1000x640`, Dashboard uses the Wide hierarchy with fighter/build presentation on the left
 and a vertical game-type, Play, and Practice stack on the right. Below either threshold, it uses the same targets in a
 vertically scrollable Compact hierarchy. Effective size is logical window size divided by the
-persisted UI scale.
+effective UI scale: the persisted UI scale times the small-window fit.
+
+Small windows (BRL-0196) keep the authored layouts instead of switching every screen to stacked
+variants. Below 640 logical pixels of height the effective UI scale is multiplied by
+`height / 640` (never below 0.5), so a landscape phone such as the Pixel 8a (914x411 logical, 868
+wide after the camera-cutout strip the Android activity keeps clear) sees the Wide Dashboard and the
+desktop shell on a 640-pixel-tall canvas. Windows at least 640 pixels tall, including 1280x720 and
+above, are unchanged. World-anchored UI (overheads, floating numbers, object health, the map-editor
+selection toolbar) converts camera viewport positions into the scaled UI space. Every vertical shell
+scroll area also scrolls by touch drag: once a finger travels past the press drag-cancel distance,
+the innermost overflowing area under it follows the finger, the press under it is cancelled, and a
+mostly sideways drag never scrolls. Focus reveal runs on focus changes only, so a drag may move the
+focused row out of view. Server Select shows the address and name values beside their labels, and
+each recent server has FORGET, which removes the recent entry, any favorite, and the address's
+binding to a logical server so a fresh server at the same address can be joined.
 
 Resizing preserves the selected model and preview target. Keyboard arrows/WASD and controller D-pad
 follow spatial neighbors in Wide and visible order in Compact. Disabled targets are skipped, stale

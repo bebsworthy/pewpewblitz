@@ -2527,6 +2527,7 @@ pub(in crate::client::flow) fn position_map_editor_selection_toolbar(
     catalog: Option<Res<MapCatalogResource>>,
     cameras: Query<(&Camera, Ref<GlobalTransform>), With<ArenaCamera>>,
     mut toolbars: Query<&mut Node, With<MapMakerSelectionToolbar>>,
+    ui_scale: Option<Res<UiScale>>,
 ) {
     let camera = cameras.iter().next();
     let camera_moved = camera
@@ -2545,7 +2546,8 @@ pub(in crate::client::flow) fn position_map_editor_selection_toolbar(
         camera
             .as_ref()
             .map(|(camera, transform)| (*camera, &**transform)),
-    );
+    )
+    .map(|point| crate::client::ui::viewport::viewport_to_ui(point, ui_scale.as_deref()));
     let (left, top) = selection_toolbar_offset(position);
     for mut node in &mut toolbars {
         if node.left != left || node.top != top {

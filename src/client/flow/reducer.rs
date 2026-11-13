@@ -286,6 +286,21 @@ fn remove_favorite(
     }
 }
 
+fn forget_server(
+    address: &str,
+    path: &ClientConnectionsPath,
+    persistence: &mut ConnectionPersistence,
+    commit: &mut FlowCommit,
+) {
+    if persistence.state.forget_server(address) {
+        if let Err(error) = save_connections(&path.0, &persistence.state) {
+            persistence.dirty_error = Some(error);
+        }
+        // Focus returns to Connect; the forgotten row and its neighbours are rebuilt.
+        commit.refresh_server_select = Some(2);
+    }
+}
+
 fn retry_connection_persistence(
     path: &ClientConnectionsPath,
     persistence: &mut ConnectionPersistence,
@@ -534,6 +549,9 @@ pub(super) fn resolve_flow_action(
         }
         FlowUiAction::RemoveFavorite(address) => {
             remove_favorite(&address, &path, &mut persistence, &mut commit);
+        }
+        FlowUiAction::ForgetServer(address) => {
+            forget_server(&address, &path, &mut persistence, &mut commit);
         }
         FlowUiAction::Back => commit.overlay = Some(OverlayCommit::Clear),
         FlowUiAction::Quit => {

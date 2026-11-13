@@ -203,6 +203,38 @@ impl ConnectionsFileV1 {
         self.favorites.len() != before
     }
 
+    /// Forgets one server address: its recent entry, any favorite, and its binding to a logical
+    /// server, so a different server now listening there can be joined. The account for the
+    /// previously bound logical server is kept in case that server is reached again.
+    pub fn forget_server(&mut self, address: &str) -> bool {
+        let Ok(address) = canonical_address(address) else {
+            return false;
+        };
+        let before = (
+            self.recents.len(),
+            self.favorites.len(),
+            self.server_identities
+                .iter()
+                .map(|identity| identity.addresses.len())
+                .sum::<usize>(),
+        );
+        self.recents.retain(|recent| recent.address != address);
+        self.favorites
+            .retain(|favorite| favorite.address != address);
+        for identity in &mut self.server_identities {
+            identity.addresses.retain(|bound| *bound != address);
+        }
+        let after = (
+            self.recents.len(),
+            self.favorites.len(),
+            self.server_identities
+                .iter()
+                .map(|identity| identity.addresses.len())
+                .sum::<usize>(),
+        );
+        before != after
+    }
+
     pub fn account_for_server(
         &mut self,
         logical_server_id: &str,
@@ -345,6 +377,39 @@ mod tests {
         assert_eq!(state.favorites[0].name, "Renamed");
         assert!(state.remove_favorite("localhost"));
         assert!(state.favorites.is_empty());
+    }
+
+    #[test]
+    fn forgetting_a_server_unbinds_its_address_for_a_new_logical_server() {
+        const OLD_SERVER: &str = "0000000000000000000000000000000a";
+        const NEW_SERVER: &str = "0000000000000000000000000000000b";
+        let mut state = ConnectionsFileV1::empty();
+        state.record_recent("Old", "192.168.1.2:5000").unwrap();
+        state.add_favorite("Old", "192.168.1.2:5000").unwrap();
+        let old_account = state
+            .account_for_server(OLD_SERVER, "192.168.1.2:5000")
+            .unwrap();
+        assert!(
+            state
+                .account_for_server(NEW_SERVER, "192.168.1.2:5000")
+                .is_err()
+        );
+
+        assert!(state.forget_server("192.168.1.2:5000"));
+        assert!(state.recents.is_empty() && state.favorites.is_empty());
+        assert!(
+            state
+                .account_for_server(NEW_SERVER, "192.168.1.2:5000")
+                .is_ok()
+        );
+        assert_eq!(
+            state
+                .account_for_server(OLD_SERVER, "10.0.0.9:5000")
+                .unwrap(),
+            old_account
+        );
+        assert!(!state.forget_server("192.168.1.77:5000"));
+        assert!(state.clone().validate().is_ok());
     }
 
     #[test]

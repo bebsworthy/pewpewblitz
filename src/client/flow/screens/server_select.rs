@@ -91,7 +91,11 @@ fn spawn_editor_button(
                 font(assets, 22.0),
                 TextColor(TEXT),
                 TextLayout::new(Justify::Right, LineBreak::AnyCharacter),
+                // The value takes the space beside its label; a zero basis without growth let
+                // the flex pass collapse it to nothing (BRL-0196).
                 Node {
+                    flex_grow: 1.0,
+                    flex_basis: px(0),
                     min_width: px(0),
                     ..default()
                 },
@@ -256,7 +260,20 @@ fn spawn_saved_servers(
                     &label,
                     Some(Surface::Row),
                     false,
-                    action_node(percent(49), 62.0),
+                    action_node(percent(74), 62.0),
+                );
+                index += 1;
+                // Forgetting also clears the address's server binding, so a fresh server at the
+                // same address can be joined (BRL-0196).
+                spawn_action(
+                    cards,
+                    assets,
+                    index,
+                    FlowUiAction::ForgetServer(recent.address.clone()),
+                    "FORGET",
+                    Some(Surface::Quiet),
+                    false,
+                    action_node(percent(24), 62.0),
                 );
                 index += 1;
             }
@@ -290,13 +307,8 @@ pub(in crate::client::flow) fn update_server_select_copy(
 ) {
     for (field, mut text) in &mut fields {
         text.0 = match field {
-            FieldLabel::Address => format!(
-                "ADDRESS: {}",
-                render_editor_value(&model, EditingField::Address)
-            ),
-            FieldLabel::Name => {
-                format!("NAME: {}", render_editor_value(&model, EditingField::Name))
-            }
+            FieldLabel::Address => render_editor_value(&model, EditingField::Address),
+            FieldLabel::Name => render_editor_value(&model, EditingField::Name),
         };
     }
 }

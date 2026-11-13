@@ -70,12 +70,21 @@ impl ReleaseActivation {
     }
 }
 
-/// Installs the shared tracker once, whichever shell owner composes first.
+/// Installs the shared release tracker and touch drag-scrolling once, whichever shell owner
+/// composes first; both share the press/drag distance policy.
 pub(crate) struct ReleaseActivationPlugin;
 
 impl Plugin for ReleaseActivationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, track_release_activation.after(UiSystems::Focus));
+        app.init_resource::<super::scroll::TouchDragScroll>()
+            .add_systems(
+                PreUpdate,
+                (
+                    track_release_activation,
+                    super::scroll::drag_scroll_by_touch,
+                )
+                    .after(UiSystems::Focus),
+            );
     }
 }
 

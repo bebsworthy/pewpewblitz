@@ -892,7 +892,13 @@ fn preview_shell_preferences(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let settings = draft.as_deref().map_or(*active, |draft| draft.0);
-    scale.0 = settings.ui_scale;
+    let fit = windows.iter().next().map_or(1.0, |window| {
+        super::ui::viewport::viewport_fit(window.height())
+    });
+    let next_scale = settings.ui_scale * fit;
+    if (scale.0 - next_scale).abs() > f32::EPSILON {
+        scale.0 = next_scale;
+    }
     for mut window in &mut windows {
         window.mode = if settings.fullscreen {
             WindowMode::BorderlessFullscreen(MonitorSelection::Current)
@@ -981,16 +987,24 @@ fn keep_focused_control_visible(
         ),
         With<ShellScrollArea>,
     >,
+    mut revealed: Local<Option<Entity>>,
 ) {
     let Some(focused) = focus.get() else {
+        *revealed = None;
         return;
     };
+    // Reveal once per focus change: re-clamping every frame would fight touch drag-scrolling,
+    // which may legitimately move the focused row out of view (BRL-0196).
+    if *revealed == Some(focused) {
+        return;
+    }
     let Ok((button_node, button_transform)) = buttons.get(focused) else {
         return;
     };
     if button_node.is_empty() {
         return;
     }
+    *revealed = Some(focused);
     let (_, _, button_center) = button_transform.to_scale_angle_translation();
     let button_half_height = button_node.size().y * 0.5;
     for (panel_entity, panel_node, panel_transform, mut scroll) in &mut panels {
@@ -1062,6 +1076,75 @@ mod tests {
     pub(super) fn request_settings(app: &mut App) {
         *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Settings;
         app.update();
+    }
+
+    #[test]
+    fn settings_and_controls_fit_a_landscape_phone() {
+        let path = std::env::temp_dir().join(format!(
+            "brawler-brl0196-shell-phone-{}-settings.ron",
+            std::process::id()
+        ));
+        let mut app = shell_test_app(path);
+        crate::client::ui::layout_harness::add_layout(&mut app, 868, 411);
+        app.update();
+        request_settings(&mut app);
+        for category in [
+            None,
+            Some(ShellAction::AudioCategory),
+            Some(ShellAction::AccessibilityCategory),
+            Some(ShellAction::ControlsCategory),
+        ] {
+            if let Some(category) = category {
+                app.world_mut()
+                    .resource_mut::<PendingActions>()
+                    .0
+                    .push(category);
+            }
+            for _ in 0..3 {
+                app.update();
+            }
+            // The shell applies the viewport fit itself from the primary window height.
+            assert!((app.world().resource::<UiScale>().0 - 411.0 / 640.0).abs() < 1e-3);
+            let unreachable =
+                crate::client::ui::layout_harness::unreachable_buttons(app.world_mut());
+            assert!(
+                unreachable.is_empty(),
+                "{category:?}: unreachable controls: {unreachable:?}"
+            );
+        }
+
+        // A touch drag may move the focused row out of view; the focus reveal must not snap the
+        // panel back on later frames.
+        let mut areas = app
+            .world_mut()
+            .query_filtered::<(Entity, &ComputedNode), With<ShellScrollArea>>();
+        let area = areas
+            .iter(app.world())
+            .find(|(_, node)| node.content_size().y > node.size().y + 1.0)
+            .map(|(entity, _)| entity)
+            .expect("the Controls page overflows the phone viewport");
+        let mut buttons = app
+            .world_mut()
+            .query_filtered::<Entity, With<ShellButton>>();
+        let first_row = buttons
+            .iter(app.world())
+            .find(|button| {
+                std::iter::successors(Some(*button), |entity| {
+                    app.world().get::<ChildOf>(*entity).map(ChildOf::parent)
+                })
+                .any(|ancestor| ancestor == area)
+            })
+            .expect("a row inside the scroll area");
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(first_row, FocusCause::Pressed);
+        app.update();
+        app.update();
+        app.world_mut().get_mut::<ScrollPosition>(area).unwrap().0.y = 400.0;
+        app.update();
+        app.update();
+        let scroll = app.world().get::<ScrollPosition>(area).unwrap().0.y;
+        assert!((scroll - 400.0).abs() < f32::EPSILON, "{scroll}");
     }
 
     #[test]

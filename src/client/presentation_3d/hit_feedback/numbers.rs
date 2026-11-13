@@ -260,6 +260,7 @@ pub(in crate::client::presentation_3d) fn project_floating_numbers(
     mut book: ResMut<FloatingNumberBook>,
     cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
     mut slots: FloatingNumberSlotQuery,
+    ui_scale: Option<Res<UiScale>>,
 ) {
     let tuning = catalog.numbers;
     book.advance(time.delta_secs(), &tuning);
@@ -290,6 +291,7 @@ pub(in crate::client::presentation_3d) fn project_floating_numbers(
             .and_then(|(camera, camera_transform)| {
                 camera.world_to_viewport(camera_transform, world).ok()
             })
+            .map(|point| ui::viewport::viewport_to_ui(point, ui_scale.as_deref()))
             .filter(|point| point.is_finite())
         else {
             visibility.set_if_neq(Visibility::Hidden);
