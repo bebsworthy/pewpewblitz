@@ -666,7 +666,7 @@ fn calibrated_arc_target_suppresses_rest_drift_and_preserves_near_range() {
 
 /// Resolve the Arc Launcher loadout through the real build pipeline, so input shaping
 /// tests observe the same `ResolvedMatchLoadout` a joined client receives by replication.
-fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {
+pub(super) fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {
     let build_catalog = crate::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
     crate::builds::resolve_build_recipe(
@@ -684,7 +684,7 @@ fn resolved_arc_launcher_loadout() -> crate::builds::ResolvedMatchLoadout {
     .expect("arc launcher loadout resolves")
 }
 
-fn resolved_reveal_scan_loadout() -> crate::builds::ResolvedMatchLoadout {
+pub(super) fn resolved_reveal_scan_loadout() -> crate::builds::ResolvedMatchLoadout {
     let build_catalog = crate::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
     crate::builds::resolve_build_recipe(

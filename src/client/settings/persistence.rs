@@ -107,6 +107,11 @@ pub struct SettingsFile {
     pub trigger_release: f32,
     pub invert_move_y: bool,
     pub invert_aim_y: bool,
+    /// Added by BRL-0160; defaulted so earlier settings files still load.
+    #[serde(default = "default_touch_deadzone")]
+    pub touch_deadzone: f32,
+    #[serde(default = "default_touch_sensitivity")]
+    pub touch_sensitivity: f32,
     pub ui_scale: f32,
     pub reduced_motion: bool,
     pub reduced_combat_effects: bool,
@@ -130,6 +135,14 @@ const fn default_music_volume() -> u8 {
     DEFAULT_MUSIC_VOLUME
 }
 
+const fn default_touch_deadzone() -> f32 {
+    super::DEFAULT_TOUCH_DEADZONE
+}
+
+const fn default_touch_sensitivity() -> f32 {
+    super::DEFAULT_TOUCH_SENSITIVITY
+}
+
 impl SettingsFile {
     #[must_use]
     pub fn from_active(input: ClientInputSettings, shell: ClientShellSettings) -> Self {
@@ -144,6 +157,8 @@ impl SettingsFile {
             trigger_release: input.trigger_release,
             invert_move_y: input.invert_move_y,
             invert_aim_y: input.invert_aim_y,
+            touch_deadzone: input.touch_deadzone,
+            touch_sensitivity: input.touch_sensitivity,
             ui_scale: shell.ui_scale,
             reduced_motion: shell.reduced_motion,
             reduced_combat_effects: shell.reduced_combat_effects,
@@ -168,6 +183,8 @@ impl SettingsFile {
             trigger_release: self.trigger_release,
             invert_move_y: self.invert_move_y,
             invert_aim_y: self.invert_aim_y,
+            touch_deadzone: self.touch_deadzone,
+            touch_sensitivity: self.touch_sensitivity,
             revision: 0,
         };
         input.validate()?;
@@ -346,6 +363,37 @@ mod tests {
             load_settings(&path),
             Err(SettingsLoadError::Rejected(_))
         ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn settings_saved_before_touch_controls_load_with_default_touch_tuning() {
+        let dir = test_path("pre-touch");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.ron");
+        let tuned = ClientInputSettings {
+            touch_deadzone: 0.3,
+            touch_sensitivity: 0.9,
+            ..ClientInputSettings::default()
+        };
+        let current = ron::ser::to_string_pretty(
+            &SettingsFile::from_active(tuned, ClientShellSettings::default()),
+            ron::ser::PrettyConfig::default(),
+        )
+        .unwrap();
+        fs::write(&path, &current).unwrap();
+        let (input, _) = load_settings(&path).unwrap().unwrap();
+        assert_eq!(input, tuned);
+
+        let legacy = current
+            .lines()
+            .filter(|line| !line.contains("touch_"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_ne!(legacy, current);
+        fs::write(&path, legacy).unwrap();
+        let (input, _) = load_settings(&path).unwrap().unwrap();
+        assert_eq!(input, ClientInputSettings::default());
         fs::remove_dir_all(dir).unwrap();
     }
 

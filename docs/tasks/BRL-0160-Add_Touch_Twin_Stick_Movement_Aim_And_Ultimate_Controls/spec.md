@@ -66,3 +66,119 @@ Gyro aim and custom control layouts.
 - Visuals / BRL-0155 seam: the `TouchControls` resource exposes the layout and live stick state (`base`, `knob`, kind, aimed). A minimal placeholder overlay (translucent circles for the ultimate button and active stick base/knob, no animation, so reduced motion is unaffected) appears only after a touch is seen in gameplay; desktop never shows it. BRL-0155 replaces the overlay by reading the same resource.
 - Protocol: unchanged (`FighterInput` encoding untouched).
 - Deferred: in-match touch pause / Android Back mapping, and fire queuing while the weapon is reloading (a release while not Ready is dropped, like a mouse click).
+
+
+# Implementation (2026-11-13)
+- New `src/client/touch/`:
+  - `mod.rs` composes the module.
+  - `model.rs` holds the pure layout, the floating sticks, release classification, and touch ownership/`track`.
+  - `sample.rs` holds `apply_touch_controls`, which maps touch into `PendingLocalActions`.
+  - `overlay.rs` holds the placeholder visuals.
+  - `tests.rs` holds the tests.
+- `src/client/session/mod.rs` chains `sample_local_input -> apply_touch_controls -> resolve_targeted_ultimate_input` and initializes `TouchControls`. `src/client/mod.rs` adds the overlay plugin for windowed clients only.
+- `src/client/input.rs` extracts `targeted_ultimate_range` and `primary_placement_range` from `controlled_gamepad_aim_range`, so touch and gamepad share one range rule (no behavior change).
+- Settings: `ClientInputSettings.touch_deadzone` (0-0.5, default 0.15) and `touch_sensitivity` (0-1, default 0.5).
+  - Validated, persisted with `serde(default)`, and edited as `CalibrationField::TouchDeadzone`/`TouchSensitivity` under a "TOUCH STICKS" heading on the shell's Controls > Advanced page. Page reset covers them.
+  - Deviation from the design note: they are not added to the pause-overlay row list. That overlay is keyboard/gamepad-only, and its fixed 24-row cycle is covered by existing tests.
+- `docs/13-player-ux.md` gains a "Touch play" paragraph in the input section.
+- Protocol, server, and wire encoding are unchanged.
+
+# Design changes made during verification
+- **Release hold (4 fixed ticks).**
+  - Finding: with the phone on Wi-Fi, the server logged 662 `server_late_input_mismatch` corrections in about 5 minutes of owner play. A late packet for the only tick carrying a one-tick press loses that action, because authority already simulated the tick.
+  - Change: a touch release keeps its button and aim asserted for `RELEASE_HOLD_TICKS = 4` fixed ticks (about one quick mouse click).
+  - Why this is safe: authority fires once per Ready weapon (catalog fire cooldowns are 9 ticks or more) and activates ultimates only on a rising edge.
+  - Device check: one drag-release consumed exactly 1 of 4 ammo.
+- **Aim lead for auto-aimed immediate-ultimate taps.**
+  - Finding: Dash reads `Rotation` in `AbilitySet::Activation`, which runs before `GameplaySet::Simulation` applies that tick's `aim_update`. On the device, a Dash tap with the old facing pointed into a wall and did nothing.
+  - Change: an auto-aimed tap on an immediate ultimate sends the aim for one fixed tick (tracked on the `Time<Fixed>` clock) before asserting `ULTIMATE`. Targeted ultimates already use `aim_update` for their center, and primary fire runs after movement, so neither needs the lead.
+
+# Verification (2026-11-13)
+Focused tests: `cargo test --features client,automation --lib -- touch::` reports 11 passed. They drive synthetic `TouchInput` through `touch_screen_input_system` and the production chain `sample_local_input -> apply_touch_controls -> resolve_targeted_ultimate_input`:
+- Zones and settings scaling.
+- Floating move stick: full-speed direction, base follow, release to neutral.
+- Attack drag: lane aim and lobbed distance, release fires once along the drag, release hold across fixed ticks, then clears.
+- Same-frame tap fires with auto-aim fallback.
+- Drag back into the dead zone cancels.
+- Reveal Scan drag arms the preview and the release latches ULTIMATE with placement; ultimate tap works for targeted and immediate ultimates.
+- Two simultaneous touches plus a third ignored finger.
+- Platform Canceled and lost (stale) touches never fire.
+- Leaving gameplay drops gestures and disarms.
+- Aim-lead for auto-aimed immediate ultimates.
+- Settings: `settings_saved_before_touch_controls_load_with_default_touch_tuning`.
+
+Canonical runs, all on the final code:
+- `just lint`: exit 0. A real ripgrep is put first on PATH through a scratch wrapper, because `rg` is only a shell function here.
+- `just test`: exit 0, 2230 passed, 0 failed.
+- `just e2e 2`: exit 0, 1 exact 1v1 roster reached Active.
+- `just android-build 192.168.31.47:5000`: exit 0, 119 MB APK.
+
+Mid-run problem: one `just test` run failed at link time with "symbol(s) not found". I had killed a cargo test mid-build and corrupted the artifacts. `cargo clean -p brawler` plus a rerun fixed it; this was not a code issue.
+
+# Device evidence (Pixel 8a, serial 45171JEKB03025, Wi-Fi to the Mac server)
+Server setup: `BRAWLER_ROUTED_BIND=0.0.0.0:5001 BRAWLER_DEV_DATA_DIR=<scratch>`. Port 5001 was needed because the phone's saved account binding for 192.168.31.47:5000 points at the BRL-0159 scratch server. Connecting to :5000 failed with "server address is already bound to a different logical server". `data/` and `config/` are unchanged.
+
+What happened:
+- The owner created a brawler (Pulse Sidearm + Dash) and entered Practice Wipeout 3v3.
+- **The owner then played on the phone themselves** (getevent showed live touchscreen input), so injection was paused.
+  - The overlay showed engaged move and attack sticks.
+  - The server received PRIMARY_FIRE with aim (84) and without aim (26), and ULTIMATE (3), in its late-input dumps.
+  - Two Practice workers returned results.
+  - No panics or FATAL entries; only audio one-shot cap warnings.
+- Later, on the release-hold build, I drove input with `adb shell input motionevent`:
+  - The drag showed a red, blocked aim lane that followed the finger direction.
+  - Release fired exactly one shot (ammo 4/4 -> 3/4).
+  - The move stick moved the fighter.
+  - The match ran to the results screen (8-10).
+- An ultimate **tap** while facing a wall did not Dash. That led to the aim-lead fix above.
+- The final APK (with the aim lead) is installed and connects. Getting back into Practice to re-check the Dash tap was blocked by DPAD focus on the clipped phone Dashboard (BRL-0196 territory), so the Dash-tap fix is covered by a unit test only.
+
+Screenshots (scratch only, not in the repo), under `/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/shots/`:
+- 27.png, 29.png: the owner in a match with the sticks overlay.
+- 51.png: single shot, ammo 3/4.
+- 52.png: aim lane while dragging.
+- 54.png: move stick.
+- 56.png: ultimate tap did not dash (before the fix).
+- 57.png: results.
+
+Logs (scratch only): `/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/server.log` and `/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/logcat-final.txt`.
+
+Observations for other tickets:
+- **BRL-0162:** about 784 `server_late_input_mismatch` corrections over the Wi-Fi session.
+- **BRL-0196:**
+  - Server Select fields show no values.
+  - Touch drag-scroll does not scroll Create Brawler, Choose Game, or the Dashboard at 914x411. They are reachable only with DPAD key events, and Practice sits below the fold.
+  - There is no way to forget a saved server binding after the server identity changes.
+
+# Playtest request (owner, Pixel 8a)
+Setup:
+- Run: `BRAWLER_ROUTED_BIND=0.0.0.0:5001 BRAWLER_DEV_DATA_DIR=<any scratch dir> just server`.
+- On the phone, type `192.168.31.47:5001` in Server Address (or reuse your original BRL-0159 data dir on :5000).
+- The installed APK is the final build.
+
+Then play Practice Wipeout 3v3 to the result by touch only, and check:
+1. Movement: left half, floating stick, full speed. Does the stick feel too large or small? Adjust under Settings > Controls > Gamepad > Advanced > TOUCH STICKS.
+2. Attack: drag on the right half to see the lane, release to fire. Does the lane follow your finger, and does every release fire?
+3. Quick tap auto-aims at the nearest visible enemy.
+4. Drag back to the center to cancel.
+5. Ultimate (violet ring, upper right): drag to aim, release to Dash. Also tap with an enemy on screen: the Dash should now go toward the enemy.
+6. If you can, try a targeted-ultimate brawler (Reveal Scan or Fire Field): the violet area should follow your drag.
+7. Hold move and attack at the same time; add a third finger.
+8. Leave the match and come back.
+
+Known limitations:
+- The visuals are placeholders, and the movement base can overlap the HEALTH box (BRL-0155 owns the touch HUD).
+- There is no touch pause or Back gesture (BRL-0197).
+- A release while the weapon is reloading does nothing, as with mouse fire.
+
+# Learn-from-errors
+- **One-tick latches are fragile over real networks.** Desktop tests and localhost e2e never exposed this; device logs did. Action: for touch release actions, assert over a short hold, and check `server_late_input_mismatch` counts on any Wi-Fi playtest.
+- **Same-tick aim does not steer immediate ultimates.** `AbilitySet::Activation` runs before movement applies `aim_update`. Action: before using an input as "aim then act" in one tick, check which schedule set reads `Rotation`.
+- **Never kill a running cargo build.** It corrupted the incremental artifacts and also deleted `target/debug/brawler-server` while a dev server depended on it. Action: wait for builds, or clean only after stopping dependent servers.
+- **The owner may be using the phone live.** Action: check `getevent` activity before injecting input, and do not reinstall over an active session.
+
+# Deferred
+- BRL-0197 (todo, related, parent BRL-0171): open the match menu by touch and the Android Back gesture.
+
+
+Correction to the playtest setup: the phone is now bound to the logical server in `/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/devdata` for `192.168.31.47:5001`. That directory also holds the brawler "Brawler 1". Use `BRAWLER_DEV_DATA_DIR=/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/devdata` with port 5001. A fresh data dir on :5001 hits the same "different logical server" rejection until saved bindings can be forgotten (BRL-0196 observation).

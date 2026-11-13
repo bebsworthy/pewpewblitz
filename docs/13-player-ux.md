@@ -499,6 +499,24 @@ Player-only water and allies do not clip it. Because the guide uses only the cli
 observed state, it never reveals concealed/unreplicated opponents and is not a promise about future
 movement or network latency; the server remains the only hit authority.
 
+Touch play (BRL-0160) uses twin sticks that produce the same intent as the other devices; the
+wire input is unchanged. The left half of the screen holds a floating movement stick. Its base is
+where the finger lands and follows the finger past full travel. Any deflection outside the dead zone
+moves at full speed. The ultimate button sits above and left of the lower-right corner. Any other
+touch on the right half is a floating attack stick. The top band is reserved for the HUD. Dragging
+an attack or ultimate stick shows the same aim lane or targeted-ultimate area as other devices, and
+placement distance follows deflection. Releasing outside the dead zone fires or activates along
+the drag. A tap that never left the dead zone uses the viewport auto-aim described above. Dragging
+back into the dead zone before release cancels. The released action stays asserted for a few fixed
+ticks, about one quick mouse click, so a single late input packet does not drop it. An auto-aimed
+tap on an immediate ultimate such as Dash sends its direction one fixed tick before the button,
+because authority activates those ultimates along the facing committed on the previous tick. Each control
+owns one finger and ignores extra fingers. A finger lost without an end event, a platform cancel,
+or leaving gameplay (menu, shell, match end) cancels without acting. Touch dead zone and touch
+sensitivity (finger travel for full deflection) live on the Controls advanced page. The placeholder
+touch visuals are static; the touch-first HUD (BRL-0155) replaces them by reading the same
+touch-control state.
+
 ## Error and recovery contract
 
 Errors map structured causes to the nearest honest action:

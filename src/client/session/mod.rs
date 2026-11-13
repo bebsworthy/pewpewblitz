@@ -141,6 +141,7 @@ fn install_session_state(app: &mut App) {
         .init_resource::<LiveInputTrace>()
         .init_resource::<HeadlessAutomation>()
         .init_resource::<InputDeviceActivity>()
+        .init_resource::<super::touch::TouchControls>()
         .init_resource::<ClientInputContext>()
         .init_resource::<ClientPlayableGate>()
         .init_resource::<MatchCommandState>()
@@ -157,7 +158,11 @@ fn configure_input_and_automation(app: &mut App) {
     app.add_systems(Startup, spawn_client_connection)
         .add_systems(
             RunFixedMainLoop,
-            (sample_local_input, resolve_targeted_ultimate_input)
+            (
+                sample_local_input,
+                super::touch::apply_touch_controls,
+                resolve_targeted_ultimate_input,
+            )
                 .chain()
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
         )

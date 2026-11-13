@@ -81,6 +81,13 @@ pub(in crate::client::shell) fn spawn_options(
             ] {
                 row(parent, font, label, id, slider());
             }
+            heading(parent, font, "TOUCH STICKS");
+            for (label, id) in [
+                ("Touch deadzone", InputControl::TouchDeadzone),
+                ("Touch sensitivity", InputControl::TouchSensitivity),
+            ] {
+                row(parent, font, label, id, slider());
+            }
         }
     }
     if !state.capture.waiting()
@@ -319,7 +326,12 @@ pub(in crate::client::shell) fn present_values(
             });
         } else if let Some(field) = id.calibration() {
             let current = calibration_value(field, draft.0);
-            let maximum = if matches!(id, InputControl::MoveDeadzone | InputControl::AimDeadzone) {
+            let maximum = if matches!(
+                id,
+                InputControl::MoveDeadzone
+                    | InputControl::AimDeadzone
+                    | InputControl::TouchDeadzone
+            ) {
                 0.5
             } else {
                 1.0
@@ -396,6 +408,12 @@ pub(in crate::client::shell) fn detail_text(
         }
         Some(InputControl::TriggerPress) => {
             "Trigger magnitude required to start firing. Kept above the release threshold to prevent flicker."
+        }
+        Some(InputControl::TouchDeadzone) => {
+            "Share of the touch stick's travel that is ignored. A tap that stays inside it auto-aims; dragging back into it cancels the shot."
+        }
+        Some(InputControl::TouchSensitivity) => {
+            "Higher sensitivity needs less finger travel for full movement and aim range."
         }
         Some(InputControl::TriggerRelease) => {
             "Release firing below this trigger magnitude. Kept below the press threshold."

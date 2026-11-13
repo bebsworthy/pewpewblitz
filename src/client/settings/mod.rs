@@ -313,6 +313,10 @@ pub struct ClientInputSettings {
     pub trigger_release: f32,
     pub invert_move_y: bool,
     pub invert_aim_y: bool,
+    /// Touch stick dead zone as a fraction of the stick travel radius.
+    pub touch_deadzone: f32,
+    /// Touch stick sensitivity: higher values shorten the finger travel for full deflection.
+    pub touch_sensitivity: f32,
     /// Bumped by every mutation so consumers can clear held/latched state on changes.
     pub revision: u32,
 }
@@ -330,10 +334,17 @@ impl Default for ClientInputSettings {
             trigger_release: 0.45,
             invert_move_y: false,
             invert_aim_y: false,
+            touch_deadzone: DEFAULT_TOUCH_DEADZONE,
+            touch_sensitivity: DEFAULT_TOUCH_SENSITIVITY,
             revision: 0,
         }
     }
 }
+
+/// Default touch stick dead zone, as a fraction of the stick travel radius.
+pub const DEFAULT_TOUCH_DEADZONE: f32 = 0.15;
+/// Default touch stick sensitivity in `[0, 1]`.
+pub const DEFAULT_TOUCH_SENSITIVITY: f32 = 0.5;
 
 /// A calibration field selectable in the pause settings overlay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -343,6 +354,8 @@ pub enum CalibrationField {
     AimCommitThreshold,
     TriggerPress,
     TriggerRelease,
+    TouchDeadzone,
+    TouchSensitivity,
 }
 
 impl CalibrationField {
@@ -354,6 +367,8 @@ impl CalibrationField {
             Self::AimCommitThreshold => "Aim commit threshold",
             Self::TriggerPress => "Trigger press",
             Self::TriggerRelease => "Trigger release",
+            Self::TouchDeadzone => "Touch deadzone",
+            Self::TouchSensitivity => "Touch sensitivity",
         }
     }
 }
@@ -367,6 +382,8 @@ impl ClientInputSettings {
             ("aim commit threshold", self.aim_commit_threshold),
             ("trigger press", self.trigger_press),
             ("trigger release", self.trigger_release),
+            ("touch deadzone", self.touch_deadzone),
+            ("touch sensitivity", self.touch_sensitivity),
         ] {
             if !value.is_finite() || !(0.0..=MAX_CALIBRATION + 0.5).contains(&value) {
                 return Err(format!("client input {label} is out of range: {value}"));
@@ -383,6 +400,12 @@ impl ClientInputSettings {
         }
         if self.aim_commit_threshold < self.aim_deadzone {
             return Err("client aim commit threshold cannot be below the aim deadzone".to_string());
+        }
+        if self.touch_deadzone > MAX_CALIBRATION {
+            return Err("client touch deadzone must be between 0.0 and 0.5".to_string());
+        }
+        if self.touch_sensitivity > 1.0 {
+            return Err("client touch sensitivity must be between 0.0 and 1.0".to_string());
         }
         if self.trigger_release >= self.trigger_press {
             return Err("client trigger release must be strictly below press".to_string());
@@ -445,12 +468,13 @@ impl ClientInputSettings {
     /// Adjust one calibration field by a clamped step and bump the revision.
     pub fn adjust_calibration(&mut self, field: CalibrationField, step: f32) {
         let (limit_min, limit_max) = match field {
-            CalibrationField::MoveDeadzone | CalibrationField::AimDeadzone => {
-                (0.0, MAX_CALIBRATION)
-            }
+            CalibrationField::MoveDeadzone
+            | CalibrationField::AimDeadzone
+            | CalibrationField::TouchDeadzone => (0.0, MAX_CALIBRATION),
             CalibrationField::AimCommitThreshold
             | CalibrationField::TriggerPress
-            | CalibrationField::TriggerRelease => (0.0, 1.0),
+            | CalibrationField::TriggerRelease
+            | CalibrationField::TouchSensitivity => (0.0, 1.0),
         };
         let target = match field {
             CalibrationField::MoveDeadzone => &mut self.move_deadzone,
@@ -458,6 +482,8 @@ impl ClientInputSettings {
             CalibrationField::AimCommitThreshold => &mut self.aim_commit_threshold,
             CalibrationField::TriggerPress => &mut self.trigger_press,
             CalibrationField::TriggerRelease => &mut self.trigger_release,
+            CalibrationField::TouchDeadzone => &mut self.touch_deadzone,
+            CalibrationField::TouchSensitivity => &mut self.touch_sensitivity,
         };
         *target = (*target + step).clamp(limit_min, limit_max);
         // Adjusting one half of a paired invariant can break the other half; restore both

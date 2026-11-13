@@ -39,6 +39,8 @@ pub(in crate::client::shell) enum InputControl {
     AimCommit,
     TriggerPress,
     TriggerRelease,
+    TouchDeadzone,
+    TouchSensitivity,
     Measure,
     UseValues,
     KeepCurrent,
@@ -70,6 +72,8 @@ impl InputControl {
             Self::AimCommit => Some(CalibrationField::AimCommitThreshold),
             Self::TriggerPress => Some(CalibrationField::TriggerPress),
             Self::TriggerRelease => Some(CalibrationField::TriggerRelease),
+            Self::TouchDeadzone => Some(CalibrationField::TouchDeadzone),
+            Self::TouchSensitivity => Some(CalibrationField::TouchSensitivity),
             _ => None,
         }
     }
@@ -332,6 +336,8 @@ fn reset_page(page: InputPage, settings: &mut ClientInputSettings) {
                 defaults.aim_commit_threshold.max(settings.aim_deadzone);
             settings.trigger_press = defaults.trigger_press;
             settings.trigger_release = defaults.trigger_release;
+            settings.touch_deadzone = defaults.touch_deadzone;
+            settings.touch_sensitivity = defaults.touch_sensitivity;
         }
     }
     settings.revision = settings.revision.saturating_add(1);
@@ -433,7 +439,9 @@ pub(in crate::client::shell) fn pointer_sliders(
         {
             let maximum = if matches!(
                 field,
-                CalibrationField::MoveDeadzone | CalibrationField::AimDeadzone
+                CalibrationField::MoveDeadzone
+                    | CalibrationField::AimDeadzone
+                    | CalibrationField::TouchDeadzone
             ) {
                 0.5
             } else {
@@ -457,5 +465,7 @@ pub(super) fn calibration_value(field: CalibrationField, settings: ClientInputSe
         CalibrationField::AimCommitThreshold => settings.aim_commit_threshold,
         CalibrationField::TriggerPress => settings.trigger_press,
         CalibrationField::TriggerRelease => settings.trigger_release,
+        CalibrationField::TouchDeadzone => settings.touch_deadzone,
+        CalibrationField::TouchSensitivity => settings.touch_sensitivity,
     }
 }

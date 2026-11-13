@@ -76,6 +76,7 @@ mod session;
 mod settings;
 mod shell;
 mod targeting;
+mod touch;
 mod ui;
 pub(crate) mod vfx;
 #[cfg(feature = "automation")]
@@ -637,6 +638,7 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         app.add_plugins((
             ClientPresentationPlugin,
             evidence_capture::ClientEvidenceCapturePlugin,
+            touch::TouchControlsOverlayPlugin,
         ));
         if app
             .world()

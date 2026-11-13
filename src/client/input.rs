@@ -463,33 +463,47 @@ fn controlled_gamepad_aim_range(
         && loadout.ultimate.kind.activation_style()
             == crate::builds::UltimateActivationStyle::Targeted
     {
-        let maximum_range_milliunits = match loadout.ultimate.parameters {
-            crate::builds::UltimateParameters::RevealScan {
-                maximum_range_milliunits,
-                ..
-            }
-            | crate::builds::UltimateParameters::ConcealmentField {
-                maximum_range_milliunits,
-                ..
-            }
-            | crate::builds::UltimateParameters::DemolitionStrike {
-                maximum_range_milliunits,
-                ..
-            }
-            | crate::builds::UltimateParameters::ElementalField {
-                maximum_range_milliunits,
-                ..
-            }
-            | crate::builds::UltimateParameters::BigBlob {
-                maximum_range_milliunits,
-                ..
-            } => maximum_range_milliunits,
-            crate::builds::UltimateParameters::Dash { .. }
-            | crate::builds::UltimateParameters::Sentry { .. }
-            | crate::builds::UltimateParameters::SelfCloak { .. } => return None,
-        };
-        return crate::builds::world_units_from_milliunits(maximum_range_milliunits);
+        return targeted_ultimate_range(loadout);
     }
+    primary_placement_range(loadout)
+}
+
+/// Maximum placement range of a targeted ultimate; `None` for immediate ultimates.
+pub(super) fn targeted_ultimate_range(
+    loadout: &crate::builds::ResolvedMatchLoadout,
+) -> Option<f32> {
+    let maximum_range_milliunits = match loadout.ultimate.parameters {
+        crate::builds::UltimateParameters::RevealScan {
+            maximum_range_milliunits,
+            ..
+        }
+        | crate::builds::UltimateParameters::ConcealmentField {
+            maximum_range_milliunits,
+            ..
+        }
+        | crate::builds::UltimateParameters::DemolitionStrike {
+            maximum_range_milliunits,
+            ..
+        }
+        | crate::builds::UltimateParameters::ElementalField {
+            maximum_range_milliunits,
+            ..
+        }
+        | crate::builds::UltimateParameters::BigBlob {
+            maximum_range_milliunits,
+            ..
+        } => maximum_range_milliunits,
+        crate::builds::UltimateParameters::Dash { .. }
+        | crate::builds::UltimateParameters::Sentry { .. }
+        | crate::builds::UltimateParameters::SelfCloak { .. } => return None,
+    };
+    crate::builds::world_units_from_milliunits(maximum_range_milliunits)
+}
+
+/// Placement range of a lobbed or splash primary weapon; straight deliveries have none.
+pub(super) fn primary_placement_range(
+    loadout: &crate::builds::ResolvedMatchLoadout,
+) -> Option<f32> {
     match loadout.primary_weapon.recipe.delivery {
         crate::combat::DeliveryMethod::Lobbed { distance, .. }
         | crate::combat::DeliveryMethod::Splash { distance, .. } => Some(distance),
