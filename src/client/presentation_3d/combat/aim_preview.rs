@@ -409,6 +409,15 @@ impl AimLaneMeshBuilder {
         index
     }
 
+    /// One zero-area, fully transparent triangle. Bevy's mesh allocator skips a zero-vertex mesh
+    /// but still copies its data, logging a slab "use-after-free" pair, so the lane never empties.
+    fn placeholder(&mut self) {
+        let anchor = self.vertex(Vec2::ZERO, 0.0, Color::NONE);
+        self.vertex(Vec2::ZERO, 0.0, Color::NONE);
+        self.vertex(Vec2::ZERO, 0.0, Color::NONE);
+        self.indices.extend([anchor, anchor + 1, anchor + 2]);
+    }
+
     fn fill(&mut self, apex: Vec2, apex_tone: AimTone, rim: &[(Vec2, AimTone)]) {
         let apex = self.vertex(apex, 0.0, aim_tone_colors(apex_tone).0);
         let rim: Vec<_> = rim
@@ -499,6 +508,9 @@ fn aim_lane_mesh(marks: &[AimMark]) -> Mesh {
             builder.stroke(points, *closed, *width, *tone);
         }
     }
+    if builder.positions.is_empty() {
+        builder.placeholder();
+    }
     let normals = vec![[0.0, 1.0, 0.0]; builder.positions.len()];
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
@@ -560,7 +572,33 @@ mod tests {
         };
         assert_eq!(indices.len(), 3 + 2 * 6);
         assert_eq!(&indices[..3], &[0, 1, 2]);
-        assert!(aim_lane_mesh(&[]).count_vertices() == 0);
+    }
+
+    #[test]
+    fn aim_lane_mesh_without_geometry_keeps_an_allocatable_placeholder() {
+        // Bevy 0.19 skips allocating a zero-vertex mesh yet still copies its vertex and index
+        // data, logging a slab-allocator use-after-free pair (BRL-0183).
+        let degenerate_stroke = [AimMark::Stroke {
+            points: vec![Vec2::ZERO],
+            closed: false,
+            width: 3.0,
+            tone: AimTone::Clear,
+        }];
+        for marks in [&[][..], &degenerate_stroke[..]] {
+            let mesh = aim_lane_mesh(marks);
+            assert_eq!(mesh.count_vertices(), 3);
+            assert!(mesh.get_vertex_buffer_size() > 0);
+            let Some(Indices::U32(indices)) = mesh.indices() else {
+                panic!("aim lane indices");
+            };
+            assert_eq!(indices.len(), 3);
+            let Some(bevy::mesh::VertexAttributeValues::Float32x4(colors)) =
+                mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+            else {
+                panic!("aim lane colors");
+            };
+            assert!(colors.iter().all(|color| color[3] == 0.0));
+        }
     }
 
     #[test]

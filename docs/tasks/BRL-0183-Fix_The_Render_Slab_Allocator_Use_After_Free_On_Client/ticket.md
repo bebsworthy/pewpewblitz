@@ -1,16 +1,17 @@
 ---
 id: BRL-0183
 title: Fix the render slab allocator use-after-free on client start and match exit
-status: todo
+status: doing
 theme: quality
 release:
 created: 2026-11-13T06:34:38Z
-modified: 2026-11-13T06:34:41Z
+modified: 2026-11-13T08:19:51Z
 closed:
-status_changed: 2026-11-13T06:34:38Z
+status_changed: 2026-11-13T07:30:09Z
 history:
 - todo@2026-11-13T06:34:38Z
-revision: 2e17da4220de2fa6
+- doing@2026-11-13T07:30:09Z
+revision: 7118e0dc8216c3be
 blocks: []
 related: [BRL-0149, BRL-0151, BRL-0152]
 parent: BRL-0171
