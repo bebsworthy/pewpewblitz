@@ -448,6 +448,14 @@ mod tests {
             .collect::<HashSet<_>>();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
         for asset_path in presentation_3d::environment_assets::environment_asset_paths().unwrap() {
+            if asset_path.starts_with("brawler/models/original/") {
+                // Original kits are provenanced by their `asset_src/` builder, not the manifest.
+                assert!(
+                    root.join(&asset_path).is_file(),
+                    "missing original environment asset: {asset_path}"
+                );
+                continue;
+            }
             assert!(
                 manifested.contains(asset_path.as_str()),
                 "unmanifested environment asset: {asset_path}"

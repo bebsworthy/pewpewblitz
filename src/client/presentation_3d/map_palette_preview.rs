@@ -197,10 +197,9 @@ fn spawn_asset_visual(
         return;
     };
     let footprint = asset.footprint_cells;
-    let profile = visuals.profile(asset.visual_profile_id);
+    let profile = visuals.resolve(asset.visual_profile_id, preview.theme);
     if let Some((profile, fitted)) = profile.zip(profile.and_then(|profile| {
         imported.fitted(
-            asset.visual_profile_id,
             profile,
             Vec2::new(
                 f32::from(footprint.width) * crate::map::MAP_CELL_SIZE_WORLD,
@@ -211,11 +210,7 @@ fn spawn_asset_visual(
         commands.spawn((
             PalettePreviewOwned { host },
             PaletteImportedRoot(preview.slot),
-            environment_assets::EnvironmentMaterialTint([
-                profile.tint.0,
-                profile.tint.1,
-                profile.tint.2,
-            ]),
+            environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
             WorldAssetRoot(fitted.scene),
             fitted.transform,
             layer,

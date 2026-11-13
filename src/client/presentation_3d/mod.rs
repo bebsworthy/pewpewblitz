@@ -492,6 +492,7 @@ impl Plugin for WorldPresentationPlugin {
                     fighter_character::update_character_animation,
                     zombie::update_zombie_animation,
                     tint_3d_zone,
+                    environment_assets::sway_foliage,
                 )
                     .in_set(WorldPresentationSet::Animate),
             )
@@ -625,11 +626,7 @@ fn spawn_heist_safe_visual(
             let mut transform = fitted.transform;
             transform.translation.y += 16.0;
             parent.spawn((
-                environment_assets::EnvironmentMaterialTint([
-                    profile.tint.0,
-                    profile.tint.1,
-                    profile.tint.2,
-                ]),
+                environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
                 WorldAssetRoot(fitted.scene.clone()),
                 transform,
                 Name::new("imported Heist team idol"),
@@ -672,6 +669,8 @@ fn reconcile_heist_safe_visuals(
     visual_catalog: Option<Res<environment_assets::MapVisualCatalog>>,
     imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
     readiness: Res<hud::ClientHeistReadiness>,
+    accepted: Option<Res<crate::map::PresentedMap>>,
+    map_snapshots: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
     safes: Query<(
         Entity,
         &crate::matchplay::HeistSafe,
@@ -711,14 +710,13 @@ fn reconcile_heist_safe_visuals(
         } else {
             materials.team_red.clone()
         };
-        let profile_id = crate::map::HEIST_SAFE_VISUAL_PROFILE;
-        let profile = visual_catalog
-            .as_deref()
-            .and_then(|catalog| catalog.profile(profile_id));
+        let theme = accepted_map_theme(accepted.as_deref(), &map_snapshots);
+        let profile = visual_catalog.as_deref().and_then(|catalog| {
+            resolve_map_visual(catalog, crate::map::HEIST_SAFE_VISUAL_PROFILE, theme)
+        });
         let imported_core = profile.and_then(|profile| {
             imported.as_deref().and_then(|scenes| {
                 scenes.fitted(
-                    profile_id,
                     profile,
                     Vec2::new(HEIST_IDOL_FOOTPRINT_WIDTH, HEIST_IDOL_FOOTPRINT_DEPTH),
                 )
@@ -788,6 +786,25 @@ fn update_heist_safe_status_visuals(
                 status.team_material.clone()
             };
     }
+}
+
+/// The presentation theme of the accepted match map, when one is presented.
+fn accepted_map_theme(
+    accepted: Option<&crate::map::PresentedMap>,
+    snapshots: &Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
+) -> Option<crate::map::MapPresentationThemeId> {
+    accepted
+        .and_then(|accepted| snapshots.get(accepted.source_root).ok())
+        .map(|snapshot| snapshot.presentation_theme_id)
+}
+
+/// The theme kit's visual when the theme is known, else the default profile.
+fn resolve_map_visual(
+    catalog: &environment_assets::MapVisualCatalog,
+    id: crate::map::MapVisualProfileId,
+    theme: Option<crate::map::MapPresentationThemeId>,
+) -> Option<&environment_assets::MapVisualProfile> {
+    theme.map_or_else(|| catalog.profile(id), |theme| catalog.resolve(id, theme))
 }
 
 fn map_profile_has_dynamic_runtime(profile: &crate::map::MapGameplayProfile) -> bool {
@@ -904,9 +921,9 @@ fn reconcile_dynamic_map_visuals(
         let Some(asset) = catalog.0.asset(asset_id) else {
             continue;
         };
-        let profile = map_visuals
-            .as_deref()
-            .and_then(|visuals| visuals.profile(asset.visual_profile_id));
+        let profile = map_visuals.as_deref().and_then(|visuals| {
+            visuals.resolve(asset.visual_profile_id, snapshot.presentation_theme_id)
+        });
         let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
         let imported_requested = profile.is_some_and(|profile| {
             matches!(
@@ -917,7 +934,6 @@ fn reconcile_dynamic_map_visuals(
         let fitted = profile.and_then(|profile| {
             imported_scenes.as_deref().and_then(|scenes| {
                 scenes.fitted(
-                    asset.visual_profile_id,
                     profile,
                     Vec2::new(
                         f32::from(footprint.width) * crate::map::MAP_CELL_SIZE_WORLD,
@@ -981,11 +997,7 @@ fn reconcile_dynamic_map_visuals(
         if let (Some(profile), Some(fitted)) = (profile, fitted) {
             commands.entity(visual).with_children(|parent| {
                 parent.spawn((
-                    environment_assets::EnvironmentMaterialTint([
-                        profile.tint.0,
-                        profile.tint.1,
-                        profile.tint.2,
-                    ]),
+                    environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
                     WorldAssetRoot(fitted.scene),
                     fitted.transform,
                     Name::new("imported dynamic map asset"),
@@ -1021,6 +1033,8 @@ fn reconcile_restoration_pickup_visuals(
     visual_catalog: Option<Res<environment_assets::MapVisualCatalog>>,
     imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
     catalog: Res<crate::map::MapCatalogResource>,
+    accepted: Option<Res<crate::map::PresentedMap>>,
+    map_snapshots: Query<&crate::map::ResolvedMapSnapshot, With<crate::map::MapRoot>>,
     pickups: Query<(
         Entity,
         &Position,
@@ -1045,16 +1059,13 @@ fn reconcile_restoration_pickup_visuals(
         let Some(definition) = catalog.0.restoration_pickup(*definition_id) else {
             continue;
         };
+        let theme = accepted_map_theme(accepted.as_deref(), &map_snapshots);
         let profile = visual_catalog
             .as_deref()
-            .and_then(|visuals| visuals.profile(definition.visual_profile_id));
+            .and_then(|visuals| resolve_map_visual(visuals, definition.visual_profile_id, theme));
         let fitted = profile.and_then(|profile| {
             imported.as_deref().and_then(|scenes| {
-                scenes.fitted(
-                    definition.visual_profile_id,
-                    profile,
-                    Vec2::splat(crate::map::MAP_CELL_SIZE_WORLD),
-                )
+                scenes.fitted(profile, Vec2::splat(crate::map::MAP_CELL_SIZE_WORLD))
             })
         });
         let root = commands
@@ -1074,11 +1085,7 @@ fn reconcile_restoration_pickup_visuals(
             ));
             if let (Some(profile), Some(fitted)) = (profile, fitted) {
                 parent.spawn((
-                    environment_assets::EnvironmentMaterialTint([
-                        profile.tint.0,
-                        profile.tint.1,
-                        profile.tint.2,
-                    ]),
+                    environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
                     WorldAssetRoot(fitted.scene),
                     fitted.transform,
                     Name::new("imported restoration potion"),
@@ -1921,7 +1928,9 @@ fn materialize_map_static_visuals(
         }
         let center = crate::map::placement_world_center(snapshot.dimensions, asset, placement);
         let rotation = f32::from(placement.quarter_turns) * core::f32::consts::FRAC_PI_2;
-        let profile = visual_catalog.and_then(|catalog| catalog.profile(asset.visual_profile_id));
+        let profile = visual_catalog.and_then(|catalog| {
+            catalog.resolve(asset.visual_profile_id, snapshot.presentation_theme_id)
+        });
         let adjacent_cells: std::collections::BTreeSet<_> = snapshot
             .placements
             .iter()
@@ -1933,7 +1942,6 @@ fn materialize_map_static_visuals(
         let fitted = profile.and_then(|profile| {
             imported.and_then(|scenes| {
                 scenes.fitted(
-                    asset.visual_profile_id,
                     profile,
                     Vec2::new(
                         f32::from(footprint.width) * crate::map::MAP_CELL_SIZE_WORLD,
@@ -2057,12 +2065,11 @@ fn materialize_map_editor_markers(
             f32::from(width_cells) * crate::map::MAP_CELL_SIZE_WORLD,
             f32::from(height_cells) * crate::map::MAP_CELL_SIZE_WORLD,
         );
-        let profile =
-            visual_catalog.and_then(|catalog| catalog.profile(objective_visual_profile_id));
-        let fitted = profile.and_then(|profile| {
-            imported
-                .and_then(|scenes| scenes.fitted(objective_visual_profile_id, profile, footprint))
+        let profile = visual_catalog.and_then(|catalog| {
+            catalog.resolve(objective_visual_profile_id, snapshot.presentation_theme_id)
         });
+        let fitted = profile
+            .and_then(|profile| imported.and_then(|scenes| scenes.fitted(profile, footprint)));
         let root = commands
             .spawn((
                 marker,
@@ -2088,11 +2095,7 @@ fn materialize_map_editor_markers(
             ));
             if let (Some(profile), Some(fitted)) = (profile, fitted) {
                 parent.spawn((
-                    environment_assets::EnvironmentMaterialTint([
-                        profile.tint.0,
-                        profile.tint.1,
-                        profile.tint.2,
-                    ]),
+                    environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
                     WorldAssetRoot(fitted.scene),
                     fitted.transform,
                     Name::new("Map Maker imported Heist safe"),
@@ -2158,18 +2161,26 @@ fn spawn_imported_map_asset(
             Name::new("imported map asset root"),
         ))
         .id();
-    commands.entity(root).with_children(|parent| {
-        parent.spawn((
-            environment_assets::EnvironmentMaterialTint([
-                profile.tint.0,
-                profile.tint.1,
-                profile.tint.2,
-            ]),
-            WorldAssetRoot(fitted.scene),
-            fitted.transform,
-            Name::new("imported map asset"),
-        ));
-    });
+    let scene = (
+        environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
+        WorldAssetRoot(fitted.scene),
+        fitted.transform,
+        Name::new("imported map asset"),
+    );
+    if profile.sway {
+        commands.entity(root).with_children(|parent| {
+            parent
+                .spawn((
+                    environment_assets::FoliageSway::at(center),
+                    Transform::default(),
+                    Visibility::default(),
+                    Name::new("foliage sway pivot"),
+                ))
+                .with_child(scene);
+        });
+    } else {
+        commands.entity(root).with_child(scene);
+    }
 }
 
 fn hot_zone_visual_geometry(snapshot: &crate::map::ResolvedMapSnapshot) -> Option<(Vec2, f32)> {
@@ -2296,7 +2307,7 @@ fn spawn_map_water(
             commands.spawn((
                 marker,
                 Mesh3d(primitives.cover_block.clone()),
-                MeshMaterial3d(materials.floor_accent.clone()),
+                MeshMaterial3d(materials.water_edge.clone()),
                 Transform {
                     translation: ground_position(center + offset) + Vec3::Y * 2.0,
                     scale,

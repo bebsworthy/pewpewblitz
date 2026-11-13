@@ -7,7 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 const MAP_VISUAL_CATALOG: &str = include_str!("../../../../assets/catalogs/map_asset_visuals.ron");
 const MAP_THEME_CATALOG: &str =
     include_str!("../../../../assets/catalogs/map_presentation_themes.ron");
-const MAP_THEME_SCHEMA_VERSION: u16 = 5;
+const MAP_VISUAL_SCHEMA_VERSION: u16 = 6;
+const MAP_THEME_SCHEMA_VERSION: u16 = 6;
 
 #[derive(Deserialize, Clone)]
 pub(in crate::client::presentation_3d) enum MapVisualKind {
@@ -31,11 +32,7 @@ pub(in crate::client::presentation_3d) enum EffectTileStatusVisual {
     None,
 }
 
-#[derive(Deserialize, Clone)]
-#[allow(
-    dead_code,
-    reason = "fallback identity is validated structurally in M01"
-)]
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
 enum MapVisualFallback {
     Wall,
     Decoration,
@@ -75,6 +72,9 @@ pub(in crate::client::presentation_3d) struct MapVisualProfile {
     pub(in crate::client::presentation_3d) scale: f32,
     pub(in crate::client::presentation_3d) yaw_degrees: f32,
     pub(in crate::client::presentation_3d) vertical_offset: f32,
+    /// Legacy third-party tint multiplier; theme kit visuals author colour in their palette and
+    /// omit it (BRL-0153).
+    #[serde(default = "untinted")]
     pub(in crate::client::presentation_3d) tint: (f32, f32, f32),
     fallback: MapVisualFallback,
     #[serde(default)]
@@ -84,6 +84,36 @@ pub(in crate::client::presentation_3d) struct MapVisualProfile {
     /// Lies flat on the floor (floor details, rubble, debris): no contact shadow (BRL-0152).
     #[serde(default)]
     pub(in crate::client::presentation_3d) flat: bool,
+    /// Concealing foliage bends gently about its base (BRL-0153).
+    #[serde(default)]
+    pub(in crate::client::presentation_3d) sway: bool,
+}
+
+const fn untinted() -> (f32, f32, f32) {
+    (1.0, 1.0, 1.0)
+}
+
+impl MapVisualProfile {
+    pub(in crate::client::presentation_3d) fn tint_rgb(&self) -> [f32; 3] {
+        [self.tint.0, self.tint.1, self.tint.2]
+    }
+
+    pub(in crate::client::presentation_3d) fn imported_path(&self) -> Option<&str> {
+        match &self.kind {
+            MapVisualKind::Imported { path } => Some(path),
+            _ => None,
+        }
+    }
+}
+
+/// One theme's environment kit: visuals that replace the default profile with the same id on
+/// maps of that theme, all imported from one kit directory (BRL-0153).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapThemeKit {
+    theme: crate::map::MapPresentationThemeId,
+    directory: String,
+    visuals: Vec<MapVisualProfile>,
 }
 
 #[derive(Deserialize)]
@@ -91,6 +121,8 @@ pub(in crate::client::presentation_3d) struct MapVisualProfile {
 struct MapVisualSource {
     schema_version: u16,
     visuals: Vec<MapVisualProfile>,
+    #[serde(default)]
+    theme_kits: Vec<MapThemeKit>,
 }
 
 #[derive(Deserialize)]
@@ -106,12 +138,13 @@ struct MapThemeSource {
 pub(in crate::client::presentation_3d) struct MapThemeProfile {
     pub(in crate::client::presentation_3d) id: crate::map::MapPresentationThemeId,
     pub(in crate::client::presentation_3d) floor: floor_tiles::FloorTiles,
-    pub(in crate::client::presentation_3d) ground_accent: (f32, f32, f32),
     pub(in crate::client::presentation_3d) outer_ground: (f32, f32, f32),
     pub(in crate::client::presentation_3d) fallback_wall: (f32, f32, f32),
     pub(in crate::client::presentation_3d) fallback_perimeter: (f32, f32, f32),
     pub(in crate::client::presentation_3d) destructible_cover: (f32, f32, f32),
     pub(in crate::client::presentation_3d) water: (f32, f32, f32),
+    /// Kit-coloured curb along open water edges (BRL-0153).
+    pub(in crate::client::presentation_3d) water_edge: (f32, f32, f32),
     pub(in crate::client::presentation_3d) vegetation: (f32, f32, f32),
     pub(in crate::client::presentation_3d) rubble: (f32, f32, f32),
     pub(in crate::client::presentation_3d) ambient_color: (f32, f32, f32),
@@ -176,6 +209,8 @@ fn visual_kind_matches_fallback(profile: &MapVisualProfile) -> bool {
                 | MapVisualFallback::Decoration
                 | MapVisualFallback::Rubble
                 | MapVisualFallback::Barrel
+                | MapVisualFallback::Vegetation
+                | MapVisualFallback::Barrier
         ) | (MapVisualKind::GeneratedGround, MapVisualFallback::Ground)
             | (MapVisualKind::GeneratedCover, MapVisualFallback::Cover)
             | (MapVisualKind::GeneratedWater, MapVisualFallback::Water)
@@ -238,16 +273,17 @@ fn visual_profile_is_valid(profile: &MapVisualProfile) -> bool {
         && visual_kind_matches_fallback(profile)
         && visual_fitting_matches_kind(profile)
         && color_is_valid(profile.tint)
+        && (!profile.sway || profile.fallback == MapVisualFallback::Vegetation)
 }
 
 fn theme_colors_are_valid(theme: &MapThemeProfile) -> bool {
     [
-        theme.ground_accent,
         theme.outer_ground,
         theme.fallback_wall,
         theme.fallback_perimeter,
         theme.destructible_cover,
         theme.water,
+        theme.water_edge,
         theme.vegetation,
         theme.rubble,
         theme.ambient_color,
@@ -279,23 +315,78 @@ fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), S
         .map_err(|error| format!("client map visual catalog parse failed: {error}"))?;
     let themes: MapThemeSource = ron::from_str(MAP_THEME_CATALOG)
         .map_err(|error| format!("client map theme catalog parse failed: {error}"))?;
-    if source.schema_version != 5 || themes.schema_version != MAP_THEME_SCHEMA_VERSION {
+    if source.schema_version != MAP_VISUAL_SCHEMA_VERSION
+        || themes.schema_version != MAP_THEME_SCHEMA_VERSION
+    {
         return Err("unsupported client map catalog schema".to_string());
     }
     let expected = expected_visual_profiles(catalog);
-    let mut actual = BTreeSet::new();
-    for profile in source.visuals {
-        if !visual_profile_is_valid(&profile) || !actual.insert(profile.id) {
+    let mut defaults = BTreeMap::new();
+    for profile in &source.visuals {
+        if !visual_profile_is_valid(profile) || defaults.insert(profile.id, profile).is_some() {
             return Err("invalid or duplicate client map visual".to_string());
         }
-        if !imported_visual_path_is_valid(&profile) {
+        if !imported_visual_path_is_valid(profile) {
             return Err("invalid imported client map visual path".to_string());
         }
     }
-    if actual != expected {
+    if !defaults.keys().copied().eq(expected.iter().copied()) {
         return Err("client visual catalog does not exactly cover shared map assets".to_string());
     }
+    let theme_ids: BTreeSet<_> = themes.themes.iter().map(|theme| theme.id).collect();
+    validate_theme_kits(&source.theme_kits, &defaults, &theme_ids)?;
     validate_map_themes(themes, catalog)?;
+    Ok(())
+}
+
+fn validate_theme_kits(
+    kits: &[MapThemeKit],
+    defaults: &BTreeMap<crate::map::MapVisualProfileId, &MapVisualProfile>,
+    theme_ids: &BTreeSet<crate::map::MapPresentationThemeId>,
+) -> Result<(), String> {
+    let mut kit_themes = BTreeSet::new();
+    for kit in kits {
+        let owner = format!("client map theme {} kit", kit.theme.0);
+        if !theme_ids.contains(&kit.theme) || !kit_themes.insert(kit.theme) {
+            return Err(format!("{owner} names an unknown or duplicate theme"));
+        }
+        if kit.directory.trim().is_empty() || !kit.directory.ends_with('/') {
+            return Err(format!("{owner} directory must be a non-empty folder path"));
+        }
+        let mut ids = BTreeSet::new();
+        for visual in &kit.visuals {
+            let Some(default) = defaults.get(&visual.id) else {
+                return Err(format!(
+                    "{owner} visual {} is not a shared visual",
+                    visual.id.0
+                ));
+            };
+            if !ids.insert(visual.id)
+                || !visual_profile_is_valid(visual)
+                || !imported_visual_path_is_valid(visual)
+            {
+                return Err(format!(
+                    "{owner} visual {} is invalid or duplicate",
+                    visual.id.0
+                ));
+            }
+            if visual.fallback != default.fallback {
+                return Err(format!(
+                    "{owner} visual {} must keep the default fallback",
+                    visual.id.0
+                ));
+            }
+            if visual
+                .imported_path()
+                .is_some_and(|path| !path.starts_with(&kit.directory))
+            {
+                return Err(format!(
+                    "{owner} visual {} imports from outside the kit directory",
+                    visual.id.0
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -336,18 +427,27 @@ pub(crate) fn environment_asset_paths() -> Result<Vec<String>, String> {
         .map_err(|error| format!("map visual catalog parse failed: {error}"))?;
     Ok(source
         .visuals
+        .iter()
+        .chain(source.theme_kits.iter().flat_map(|kit| kit.visuals.iter()))
+        .filter_map(|profile| profile.imported_path().map(str::to_string))
+        .collect::<BTreeSet<_>>()
         .into_iter()
-        .filter_map(|profile| match profile.kind {
-            MapVisualKind::Imported { path } => Some(path),
-            _ => None,
-        })
         .collect())
 }
+
+type ThemeKitVisuals = BTreeMap<
+    (
+        crate::map::MapPresentationThemeId,
+        crate::map::MapVisualProfileId,
+    ),
+    MapVisualProfile,
+>;
 
 #[derive(Resource)]
 pub(in crate::client::presentation_3d) struct MapVisualCatalog {
     pub(in crate::client::presentation_3d) profiles:
         BTreeMap<crate::map::MapVisualProfileId, MapVisualProfile>,
+    kits: ThemeKitVisuals,
     pub(in crate::client::presentation_3d) themes:
         BTreeMap<crate::map::MapPresentationThemeId, MapThemeProfile>,
 }
@@ -367,6 +467,16 @@ impl MapVisualCatalog {
                 .into_iter()
                 .map(|profile| (profile.id, profile))
                 .collect(),
+            kits: source
+                .theme_kits
+                .into_iter()
+                .flat_map(|kit| {
+                    let theme = kit.theme;
+                    kit.visuals
+                        .into_iter()
+                        .map(move |visual| ((theme, visual.id), visual))
+                })
+                .collect(),
             themes: themes
                 .themes
                 .into_iter()
@@ -380,6 +490,24 @@ impl MapVisualCatalog {
         id: crate::map::MapVisualProfileId,
     ) -> Option<&MapVisualProfile> {
         self.profiles.get(&id)
+    }
+
+    /// The visual a map of `theme` draws for `id`: the theme kit's visual, else the default.
+    pub(in crate::client::presentation_3d) fn resolve(
+        &self,
+        id: crate::map::MapVisualProfileId,
+        theme: crate::map::MapPresentationThemeId,
+    ) -> Option<&MapVisualProfile> {
+        self.kits
+            .get(&(theme, id))
+            .or_else(|| self.profiles.get(&id))
+    }
+
+    /// Every default and kit visual, for loading and admission of imported scenes.
+    pub(in crate::client::presentation_3d) fn all_visuals(
+        &self,
+    ) -> impl Iterator<Item = &MapVisualProfile> {
+        self.profiles.values().chain(self.kits.values())
     }
 
     pub(in crate::client::presentation_3d) fn theme(
@@ -532,6 +660,158 @@ mod grid_catalog_tests {
             assert!((profile.scale - 1.0).abs() < f32::EPSILON);
             assert_eq!(profile.fitting, super::MapVisualFitting::Exact);
         }
+    }
+
+    /// Every visual a built-in map of a kitted theme draws, keyed by the shared visual id.
+    fn builtin_map_visual_ids(
+        shared: &crate::map::MapContentCatalog,
+        preset: &crate::map::MapPreset,
+    ) -> std::collections::BTreeSet<crate::map::MapVisualProfileId> {
+        let recipe = &preset.recipe;
+        let mut assets: std::collections::BTreeSet<_> = recipe
+            .placements
+            .iter()
+            .map(|placement| placement.asset_id)
+            .chain(recipe.filled_rects.iter().map(|rect| rect.asset_id))
+            .collect();
+        // Destruction outcomes replace placements with these assets at runtime.
+        for damage in &shared.damage_profiles {
+            let outcome = match damage.terminal {
+                crate::map::MapObjectTerminalBehavior::Explode { outcome, .. }
+                | crate::map::MapObjectTerminalBehavior::DropPickup { outcome, .. } => outcome,
+            };
+            if let crate::map::MapPlacementOutcome::ReplacedWith(asset) = outcome {
+                assets.insert(asset);
+            }
+        }
+        let mut ids: std::collections::BTreeSet<_> = assets
+            .into_iter()
+            .filter_map(|id| shared.asset(id))
+            .filter(|asset| asset.slot != crate::map::MapAssetSlot::Marker)
+            .map(|asset| asset.visual_profile_id)
+            .collect();
+        ids.extend(
+            recipe
+                .mode_anchors
+                .iter()
+                .filter_map(|anchor| match anchor.kind {
+                    crate::map::MapModeAnchorKind::HeistSafe {
+                        objective_visual_profile_id,
+                        ..
+                    } => Some(objective_visual_profile_id),
+                    _ => None,
+                }),
+        );
+        ids.extend(
+            shared
+                .restoration_pickups
+                .iter()
+                .map(|pickup| pickup.visual_profile_id),
+        );
+        ids
+    }
+
+    #[test]
+    fn crossroads_facility_maps_render_only_their_theme_kit() {
+        let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
+        let source: super::MapVisualSource = ron::from_str(super::MAP_VISUAL_CATALOG).unwrap();
+        let theme = crate::map::MapPresentationThemeId(1);
+        let kit = source
+            .theme_kits
+            .iter()
+            .find(|kit| kit.theme == theme)
+            .expect("Crossroads Facility has a theme kit");
+        let mut maps = 0;
+        for preset in shared
+            .presets
+            .iter()
+            .filter(|preset| preset.recipe.presentation_theme_id == theme)
+        {
+            maps += 1;
+            for id in builtin_map_visual_ids(&shared, preset) {
+                let visual = visuals.resolve(id, theme).unwrap();
+                if let Some(path) = visual.imported_path() {
+                    assert!(
+                        path.starts_with(&kit.directory),
+                        "{} draws visual {} from outside its kit: {path}",
+                        preset.key,
+                        id.0
+                    );
+                }
+            }
+        }
+        assert_eq!(maps, 6, "every theme-1 built-in map is covered");
+        for visual in &kit.visuals {
+            assert_eq!(visual.tint, (1.0, 1.0, 1.0), "kit visuals carry no tint");
+            let path = visual.imported_path().unwrap();
+            assert!(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("assets")
+                    .join(path)
+                    .is_file(),
+                "missing kit piece: {path}"
+            );
+        }
+        let bush = visuals
+            .resolve(crate::map::MapVisualProfileId(33), theme)
+            .unwrap();
+        assert!(bush.sway);
+        assert!(
+            !visuals
+                .resolve(
+                    crate::map::MapVisualProfileId(33),
+                    crate::map::MapPresentationThemeId(3)
+                )
+                .unwrap()
+                .sway,
+            "other themes keep their own foliage until their kit lands"
+        );
+    }
+
+    fn kit_errors(kit: &str) -> Result<(), String> {
+        let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let source: super::MapVisualSource = ron::from_str(super::MAP_VISUAL_CATALOG).unwrap();
+        let defaults = source
+            .visuals
+            .iter()
+            .map(|profile| (profile.id, profile))
+            .collect();
+        let themes = shared
+            .presets
+            .iter()
+            .map(|preset| preset.recipe.presentation_theme_id)
+            .collect();
+        let kits: Vec<super::MapThemeKit> = ron::from_str(kit).unwrap();
+        super::validate_theme_kits(&kits, &defaults, &themes)
+    }
+
+    #[test]
+    fn theme_kit_validation_rejects_foreign_paths_fallback_drift_and_misplaced_sway() {
+        let kit = |visual: &str| {
+            format!(
+                "[(theme: MapPresentationThemeId(1), directory: \"kit/\", visuals: [{visual}])]"
+            )
+        };
+        let bush = "id: MapVisualProfileId(33), kind: Imported(path: \"kit/bush.glb\"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, fitting: Contained";
+        assert!(kit_errors(&kit(&format!("({bush}, fallback: Vegetation, sway: true)"))).is_ok());
+        assert!(kit_errors(&kit(&format!("({bush}, fallback: Cover)"))).is_err());
+        assert!(
+            kit_errors(&kit(
+                "(id: MapVisualProfileId(24), kind: Imported(path: \"other/crate.glb\"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Cover, fitting: Contained)"
+            ))
+            .is_err()
+        );
+        assert!(
+            kit_errors(&kit(
+                "(id: MapVisualProfileId(24), kind: Imported(path: \"kit/crate.glb\"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Cover, fitting: Contained, sway: true)"
+            ))
+            .is_err()
+        );
+        assert!(
+            kit_errors("[(theme: MapPresentationThemeId(9), directory: \"kit/\", visuals: [])]")
+                .is_err()
+        );
     }
 
     #[test]

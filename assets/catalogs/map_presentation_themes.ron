@@ -1,19 +1,20 @@
 // Client-only map theme presentation. `grading` (BRL-0146) is applied to the HDR arena camera
 // with the theme lights; bounds live in `src/client/presentation_3d/world_look.rs`. `floor` (BRL-0147)
 // is the grid-aligned two-tone tile surface: tones differ by at most 8% value, plus a per-cell
-// value jitter and darkening near walls and the arena edge (`floor_tiles.rs`).
+// value jitter and darkening near walls and the arena edge (`floor_tiles.rs`). `water_edge`
+// (BRL-0153, formerly `ground_accent`) colours the curb along open water edges in the kit palette.
 (
-    schema_version: 5,
+    schema_version: 6,
     themes: [
         (
             id: MapPresentationThemeId(1),
             floor: (tone_a: (0.52, 0.38, 0.24), tone_b: (0.54, 0.40, 0.25), value_jitter: 0.025, edge_darkening: 0.22),
-            ground_accent: (0.53, 0.35, 0.18),
             outer_ground: (0.055, 0.22, 0.105),
             fallback_wall: (0.10, 0.36, 0.58),
             fallback_perimeter: (0.42, 0.16, 0.075),
             destructible_cover: (0.08, 0.30, 0.055),
             water: (0.08, 0.48, 0.72),
+            water_edge: (0.50, 0.57, 0.65),
             vegetation: (0.12, 0.48, 0.14),
             rubble: (0.40, 0.31, 0.22),
             ambient_color: (0.72, 0.82, 0.94), ambient_brightness: 160.0,
@@ -23,12 +24,12 @@
         (
             id: MapPresentationThemeId(2),
             floor: (tone_a: (0.72, 0.57, 0.38), tone_b: (0.745, 0.595, 0.40), value_jitter: 0.02, edge_darkening: 0.2),
-            ground_accent: (0.82, 0.64, 0.36),
             outer_ground: (0.08, 0.26, 0.18),
             fallback_wall: (0.48, 0.36, 0.22),
             fallback_perimeter: (0.22, 0.38, 0.20),
             destructible_cover: (0.52, 0.32, 0.16),
             water: (0.05, 0.46, 0.72),
+            water_edge: (0.82, 0.64, 0.36),
             vegetation: (0.10, 0.54, 0.16),
             rubble: (0.46, 0.34, 0.23),
             ambient_color: (0.70, 0.84, 0.96), ambient_brightness: 190.0,
@@ -38,12 +39,12 @@
         (
             id: MapPresentationThemeId(3),
             floor: (tone_a: (0.44, 0.43, 0.41), tone_b: (0.46, 0.45, 0.43), value_jitter: 0.025, edge_darkening: 0.3),
-            ground_accent: (0.31, 0.34, 0.38),
             outer_ground: (0.055, 0.10, 0.12),
             fallback_wall: (0.30, 0.36, 0.44),
             fallback_perimeter: (0.12, 0.14, 0.18),
             destructible_cover: (0.10, 0.24, 0.20),
             water: (0.08, 0.34, 0.46),
+            water_edge: (0.31, 0.34, 0.38),
             vegetation: (0.12, 0.30, 0.24),
             rubble: (0.24, 0.27, 0.31),
             ambient_color: (0.62, 0.70, 0.82), ambient_brightness: 240.0,

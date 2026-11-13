@@ -1,5 +1,8 @@
+// Client-only map asset visuals. `visuals` are the defaults; `theme_kits` (BRL-0153) replace the
+// visual with the same id on maps of that theme, all imported from one original kit directory
+// (`asset_src/environment/<kit>/`). Kit visuals carry their colour in the kit palette, not a tint.
 (
-    schema_version: 5,
+    schema_version: 6,
     visuals: [
         (id: MapVisualProfileId(1), kind: Imported(path: "brawler/models/kenney/mini-arena/wall.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (0.68, 0.54, 0.42), fallback: Wall, fitting: Contained),
         (id: MapVisualProfileId(2), kind: Imported(path: "brawler/models/kenney/mini-dungeon/wall.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (0.58, 0.68, 0.78), fallback: Wall),
@@ -38,5 +41,27 @@
         (id: MapVisualProfileId(50), kind: GeneratedEffectTile(status: Speed), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (0.16, 0.88, 1.0), fallback: EffectTile),
         (id: MapVisualProfileId(51), kind: GeneratedEffectTile(status: Slow), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (0.56, 0.30, 1.0), fallback: EffectTile),
         (id: MapVisualProfileId(52), kind: GeneratedEffectTile(status: Damage), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, tint: (1.0, 0.12, 0.08), fallback: EffectTile),
+    ],
+    theme_kits: [
+        (
+            theme: MapPresentationThemeId(1),
+            directory: "brawler/models/original/environment/crossroads-facility/",
+            visuals: [
+                (id: MapVisualProfileId(1), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/wall-block.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Wall, fitting: Exact, adjacency_group: Wall),
+                (id: MapVisualProfileId(2), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/wall-course.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Wall, fitting: Exact, adjacency_group: Wall),
+                (id: MapVisualProfileId(11), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/weapon-rack.glb"), scale: 0.88, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Decoration, fitting: Contained),
+                (id: MapVisualProfileId(12), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/target.glb"), scale: 0.72, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Decoration, fitting: Contained),
+                (id: MapVisualProfileId(13), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/pumpkin.glb"), scale: 0.64, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Decoration, fitting: Contained),
+                (id: MapVisualProfileId(14), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/floor-hatch.glb"), scale: 0.94, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Decoration, fitting: Contained, flat: true),
+                (id: MapVisualProfileId(24), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/crate.glb"), scale: 0.91, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Cover, fitting: Contained),
+                (id: MapVisualProfileId(33), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/bush.glb"), scale: 0.96, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Vegetation, fitting: Contained, adjacency_group: Vegetation, sway: true),
+                (id: MapVisualProfileId(34), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/barrier.glb"), scale: 0.92, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Barrier, fitting: Contained),
+                (id: MapVisualProfileId(37), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/barrel.glb"), scale: 0.73, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Barrel, fitting: Contained),
+                (id: MapVisualProfileId(38), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/barrel-debris.glb"), scale: 0.77, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Rubble, fitting: Contained, flat: true),
+                (id: MapVisualProfileId(39), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/vault.glb"), scale: 0.96, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Cover, fitting: Contained),
+                (id: MapVisualProfileId(40), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/chest.glb"), scale: 0.84, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Cover, fitting: Contained),
+                (id: MapVisualProfileId(42), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/pickup.glb"), scale: 0.55, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Decoration, fitting: Contained),
+            ],
+        ),
     ],
 )

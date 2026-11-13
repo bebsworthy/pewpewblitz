@@ -1,19 +1,20 @@
 ---
 id: BRL-0153
 title: Build one cohesive environment kit per map theme
-status: todo
+status: doing
 theme: core
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-11-13T06:34:38Z
+modified: 2026-11-13T09:07:56Z
 closed:
-status_changed: 2026-11-12T20:15:04Z
+status_changed: 2026-11-13T08:20:17Z
 history:
 - backlog@2026-10-23T13:19:05Z
 - todo@2026-11-12T20:15:04Z
-revision: ba2d5f10d2ed2347
+- doing@2026-11-13T08:20:17Z
+revision: f3cf157558146930
 blocks: []
-related: [BRL-0178]
+related: [BRL-0178, BRL-0187, BRL-0188]
 parent: BRL-0171
 ---
 

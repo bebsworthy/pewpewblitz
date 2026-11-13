@@ -32,7 +32,6 @@ impl MapVisualCatalog {
                     EnvironmentThemeMaterials {
                         // Floor tones live in the tile mesh's vertex colours (BRL-0147).
                         floor: add(matte(Color::WHITE)),
-                        floor_accent: add(matte(tuple_color(theme.ground_accent))),
                         outer_ground: add(matte(tuple_color(theme.outer_ground))),
                         wall: add(matte(tuple_color(theme.fallback_wall))),
                         perimeter: add(matte(tuple_color(theme.fallback_perimeter))),
@@ -49,6 +48,7 @@ impl MapVisualCatalog {
                             ..matte(tuple_color(theme.vegetation))
                         }),
                         rubble: add(matte(tuple_color(theme.rubble))),
+                        water_edge: add(matte(tuple_color(theme.water_edge))),
                     },
                 )
             })
@@ -59,7 +59,6 @@ impl MapVisualCatalog {
 #[derive(Clone)]
 pub(crate) struct EnvironmentThemeMaterials {
     pub(in crate::client) floor: Handle<ToonMaterial>,
-    pub(in crate::client) floor_accent: Handle<ToonMaterial>,
     pub(in crate::client) outer_ground: Handle<ToonMaterial>,
     pub(in crate::client) wall: Handle<ToonMaterial>,
     pub(in crate::client) perimeter: Handle<ToonMaterial>,
@@ -67,6 +66,7 @@ pub(crate) struct EnvironmentThemeMaterials {
     pub(in crate::client) water: Handle<ToonMaterial>,
     pub(in crate::client) vegetation: Handle<ToonMaterial>,
     pub(in crate::client) rubble: Handle<ToonMaterial>,
+    pub(in crate::client) water_edge: Handle<ToonMaterial>,
 }
 
 #[derive(Resource, Clone)]
@@ -90,7 +90,8 @@ fn tuple_color(color: (f32, f32, f32)) -> Color {
 
 #[derive(Resource)]
 pub(in crate::client::presentation_3d) struct EnvironmentAssetHandles {
-    handles: BTreeMap<crate::map::MapVisualProfileId, Handle<Gltf>>,
+    /// One handle per imported GLB path; default and theme-kit visuals may share a path.
+    handles: BTreeMap<String, Handle<Gltf>>,
 }
 
 /// Authored profile tint for an imported environment instance; such instances are toon shaded and
@@ -114,8 +115,8 @@ pub(in crate::client::presentation_3d) struct FittedEnvironmentScene {
 
 #[derive(Resource, Default)]
 pub(in crate::client::presentation_3d) struct EnvironmentImportedScenes {
-    scenes: BTreeMap<crate::map::MapVisualProfileId, EnvironmentImportedScene>,
-    rejected: BTreeSet<crate::map::MapVisualProfileId>,
+    scenes: BTreeMap<String, EnvironmentImportedScene>,
+    rejected: BTreeSet<String>,
 }
 
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
@@ -123,17 +124,16 @@ pub(in crate::client::presentation_3d) enum EnvironmentAssetReadiness {
     #[default]
     Loading,
     Ready,
-    Degraded(Vec<crate::map::MapVisualProfileId>),
+    Degraded(Vec<String>),
 }
 
 impl EnvironmentImportedScenes {
     pub(in crate::client::presentation_3d) fn fitted(
         &self,
-        id: crate::map::MapVisualProfileId,
         profile: &MapVisualProfile,
         footprint_world: Vec2,
     ) -> Option<FittedEnvironmentScene> {
-        let imported = self.scenes.get(&id)?;
+        let imported = self.scenes.get(profile.imported_path()?)?;
         let transform = fit_scene_to_footprint(
             imported.bounds,
             profile.fitting,
@@ -167,10 +167,13 @@ pub(in crate::client::presentation_3d) fn load_environment_assets(
         materials: map_visuals.build_theme_materials(&mut materials, &shading),
     };
     let mut handles = BTreeMap::new();
-    for (id, profile) in &map_visuals.profiles {
-        if let MapVisualKind::Imported { path } = &profile.kind {
-            handles.insert(*id, asset_server.load(path.clone()));
-        }
+    for path in map_visuals
+        .all_visuals()
+        .filter_map(MapVisualProfile::imported_path)
+    {
+        handles
+            .entry(path.to_string())
+            .or_insert_with(|| asset_server.load(path.to_string()));
     }
     commands.insert_resource(map_visuals);
     commands.insert_resource(theme_materials);
@@ -192,9 +195,9 @@ fn admit_loaded_environment_scenes(
         || (BTreeMap::new(), BTreeSet::new()),
         |current| (current.scenes.clone(), current.rejected.clone()),
     );
-    for (id, handle) in &handles.handles {
-        if scenes.contains_key(id)
-            || rejected.contains(id)
+    for (path, handle) in &handles.handles {
+        if scenes.contains_key(path)
+            || rejected.contains(path)
             || !asset_server.is_loaded_with_dependencies(handle)
         {
             continue;
@@ -203,27 +206,24 @@ fn admit_loaded_environment_scenes(
             .get(handle)
             .and_then(|gltf| gltf.default_scene.clone())
         else {
-            warn!(
-                visual_profile = id.0,
-                "imported environment GLB has no default scene"
-            );
-            rejected.insert(*id);
+            warn!(path, "imported environment GLB has no default scene");
+            rejected.insert(path.clone());
             continue;
         };
         let Some(world_asset) = world_assets.get(&scene) else {
             continue;
         };
         let admission = world_asset_scene_bounds(world_asset).and_then(|bounds| {
-            validate_scene_against_owned_map_assets(*id, bounds, map_catalog, visual_catalog)?;
+            validate_scene_against_owned_map_assets(path, bounds, map_catalog, visual_catalog)?;
             Ok(EnvironmentImportedScene { scene, bounds })
         });
         match admission {
             Ok(imported) => {
-                scenes.insert(*id, imported);
+                scenes.insert(path.clone(), imported);
             }
             Err(error) => {
-                warn!(visual_profile = id.0, %error, "imported environment scene rejected");
-                rejected.insert(*id);
+                warn!(path, %error, "imported environment scene rejected");
+                rejected.insert(path.clone());
             }
         }
     }
@@ -235,15 +235,18 @@ fn environment_asset_readiness(
     imported: &EnvironmentImportedScenes,
     asset_server: &AssetServer,
 ) -> EnvironmentAssetReadiness {
-    let failed = handles.handles.iter().filter_map(|(id, handle)| {
-        matches!(
-            asset_server.load_state(handle),
-            bevy::asset::LoadState::Failed(_)
-        )
-        .then_some(*id)
-    });
+    let failed = handles
+        .handles
+        .iter()
+        .filter(|(_, handle)| {
+            matches!(
+                asset_server.load_state(*handle),
+                bevy::asset::LoadState::Failed(_)
+            )
+        })
+        .map(|(path, _)| path.clone());
     let degraded = failed
-        .chain(imported.rejected.iter().copied())
+        .chain(imported.rejected.iter().cloned())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -319,31 +322,90 @@ pub(in crate::client::presentation_3d) fn prepare_environment_scenes(
     publish_environment_scene_progress(&mut commands, &handles, current.as_deref(), imported);
 }
 
+/// Every default or theme-kit visual importing `path` must fit every map asset that uses it.
 fn validate_scene_against_owned_map_assets(
-    visual_id: crate::map::MapVisualProfileId,
+    path: &str,
     bounds: SceneBounds,
     map_catalog: &crate::map::MapContentCatalog,
     visual_catalog: &MapVisualCatalog,
 ) -> Result<(), String> {
-    let profile = visual_catalog
-        .profile(visual_id)
-        .ok_or_else(|| "imported scene has no visual profile".to_string())?;
-    for asset in map_catalog
-        .assets
-        .iter()
-        .filter(|asset| asset.visual_profile_id == visual_id)
+    let mut owned = false;
+    for profile in visual_catalog
+        .all_visuals()
+        .filter(|profile| profile.imported_path() == Some(path))
     {
-        fit_scene_to_footprint(
-            bounds,
-            profile.fitting,
-            profile.scale,
-            Vec2::new(
-                f32::from(asset.footprint_cells.width) * crate::map::MAP_CELL_SIZE_WORLD,
-                f32::from(asset.footprint_cells.height) * crate::map::MAP_CELL_SIZE_WORLD,
-            ),
-            profile.yaw_degrees.to_radians(),
-            profile.vertical_offset,
-        )?;
+        owned = true;
+        for asset in map_catalog
+            .assets
+            .iter()
+            .filter(|asset| asset.visual_profile_id == profile.id)
+        {
+            fit_scene_to_footprint(
+                bounds,
+                profile.fitting,
+                profile.scale,
+                Vec2::new(
+                    f32::from(asset.footprint_cells.width) * crate::map::MAP_CELL_SIZE_WORLD,
+                    f32::from(asset.footprint_cells.height) * crate::map::MAP_CELL_SIZE_WORLD,
+                ),
+                profile.yaw_degrees.to_radians(),
+                profile.vertical_offset,
+            )?;
+        }
     }
-    Ok(())
+    if owned {
+        Ok(())
+    } else {
+        Err("imported scene has no visual profile".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Intrinsic bounds of a single-mesh original kit GLB, read from its POSITION accessor.
+    fn glb_bounds(path: &str) -> SceneBounds {
+        let bytes = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("assets")
+                .join(path),
+        )
+        .unwrap();
+        assert_eq!(&bytes[..4], b"glTF", "{path} is not a GLB");
+        let length =
+            usize::try_from(u32::from_le_bytes(bytes[12..16].try_into().unwrap())).unwrap();
+        let document: serde_json::Value = serde_json::from_slice(&bytes[20..20 + length]).unwrap();
+        let primitive = &document["meshes"][0]["primitives"][0];
+        let position = primitive["attributes"]["POSITION"].as_u64().unwrap();
+        let accessor = &document["accessors"][usize::try_from(position).unwrap()];
+        let read = |key: &str| {
+            let values: Vec<f32> = serde_json::from_value(accessor[key].clone()).unwrap();
+            Vec3::new(values[0], values[1], values[2])
+        };
+        SceneBounds {
+            min: read("min"),
+            max: read("max"),
+        }
+    }
+
+    #[test]
+    fn original_kit_scenes_fit_every_owned_map_footprint() {
+        let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let visuals = MapVisualCatalog::embedded(&shared).unwrap();
+        let mut checked = 0;
+        for path in visuals
+            .all_visuals()
+            .filter_map(MapVisualProfile::imported_path)
+            .filter(|path| path.starts_with("brawler/models/original/environment/"))
+            .collect::<BTreeSet<_>>()
+        {
+            let bounds = glb_bounds(path);
+            validate_scene_against_owned_map_assets(path, bounds, &shared, &visuals)
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert!(bounds.min.y.abs() < 1e-4, "{path} must stand on the ground");
+            checked += 1;
+        }
+        assert_eq!(checked, 14);
+    }
 }

@@ -67,7 +67,8 @@ tickets tune them through native review but do not change the direction.
 - **One kit per theme.** Each theme uses a single coherent environment kit with a shared bevel
   size, a top-face highlight, and baked ambient occlusion. Third-party kits are not mixed within
   one theme.
-- **Foliage.** Concealing foliage uses chunky, readable bush forms with gentle vertex sway.
+- **Foliage.** Concealing foliage uses chunky, readable bush forms with a gentle sway (a slow
+  bend about the base; held still under reduced effects).
 
 ### Feedback and readability
 
@@ -108,7 +109,7 @@ the previous presentation for that area:
 | Toon material and rim | BRL-0150 (adopted) |
 | Fighter outlines | BRL-0151 (adopted) |
 | Contact shadows / AO | BRL-0152 (adopted) |
-| One environment kit per theme | BRL-0153 |
+| One environment kit per theme | BRL-0153 (theme 1), BRL-0187 (theme 2), BRL-0188 (theme 3) |
 | Riff and the character animation set | BRL-0154 (adopted) |
 | Touch-first HUD | BRL-0155 |
 | Shell surfaces, palette, motion | BRL-0156 |
@@ -684,7 +685,13 @@ visual profile, but neither the theme nor the model decides collision, destructi
 replacement, or other gameplay behavior.
 
 The client resolves shared stable theme and visual-profile IDs through its map presentation
-catalogs.
+catalogs. A theme's environment kit (`theme_kits` in `assets/catalogs/map_asset_visuals.ron`)
+replaces the default visual with the same profile ID on maps of that theme only, so the shared
+content (asset and visual-profile IDs, footprints, gameplay profiles) and its fingerprint are
+unchanged. Kit visuals keep the default's primitive fallback, import only from the kit's directory,
+and carry their colour in the kit palette rather than a tint. Every presentation site that knows the
+map (static and dynamic map assets, Heist safes, restoration pickups, Map Maker markers and palette
+previews) resolves through the theme. Imported scenes load and admit once per GLB path.
 Asset paths, tints, transforms, and fallbacks remain client-only and do not contribute renderer
 details to the gameplay protocol. Presentation reconciliation keys include the accepted map
 instance, recipe fingerprint, and theme so replacement cannot retain stale geometry or materials.
@@ -784,7 +791,9 @@ Every redistributed third-party file must have exact provenance in the manifest 
 license text where required. Original replacements should also preserve their source masters and
 document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
-its README (for Riff, `asset_src/characters/riff/README.md`), not a manifest row.
+its README (for Riff, `asset_src/characters/riff/README.md`; for environment kits,
+`asset_src/environment/<kit>/README.md`), not a manifest row.
+`assets/licenses/pewpew-blitz-original-environment.txt` points at the environment kit sources.
 
 ## Asset admission checklist
 

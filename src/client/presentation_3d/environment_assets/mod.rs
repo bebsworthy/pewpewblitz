@@ -5,6 +5,7 @@ use super::*;
 mod catalog;
 mod fitting;
 mod runtime;
+mod sway;
 
 #[cfg(test)]
 pub(crate) use catalog::environment_asset_paths;
@@ -16,3 +17,4 @@ pub(in crate::client::presentation_3d) use runtime::{
     FittedEnvironmentScene, load_environment_assets, prepare_environment_scenes,
 };
 pub(crate) use runtime::{EnvironmentThemeMaterialCatalog, EnvironmentThemeMaterials};
+pub(in crate::client::presentation_3d) use sway::{FoliageSway, sway_foliage};
