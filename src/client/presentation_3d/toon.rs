@@ -29,7 +29,7 @@ const MIN_FLAT_LEVEL: f32 = 0.3;
 const MIN_SHADOW_TINT: f32 = 0.3;
 const MAX_SHADOW_TINT: f32 = 1.0;
 const MAX_RIM_STRENGTH: f32 = 0.6;
-/// Distinct imported materials × authored tints; past the ceiling a mesh keeps PBR shading.
+/// Distinct imported materials; past the ceiling a mesh keeps PBR shading.
 const MAX_TOON_SCENE_MATERIALS: usize = 512;
 
 /// The shared toon material: `StandardMaterial` inputs with toon lighting.
@@ -275,22 +275,17 @@ impl ToonShading {
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub(in crate::client::presentation_3d) struct ToonScene;
 
-/// Toon materials converted from imported scene materials, keyed by source and authored tint.
+/// Toon materials converted from imported scene materials, keyed by source material.
 #[derive(Resource, Default)]
 pub(in crate::client::presentation_3d) struct ToonSceneMaterials {
-    handles: HashMap<(AssetId<StandardMaterial>, [u32; 3]), Handle<ToonMaterial>>,
+    handles: HashMap<AssetId<StandardMaterial>, Handle<ToonMaterial>>,
 }
 
 /// Everything the scene conversion reads and writes.
 #[derive(SystemParam)]
 pub(in crate::client::presentation_3d) struct ToonSceneConversion<'w, 's> {
     commands: Commands<'w, 's>,
-    roots: Query<
-        'w,
-        's,
-        Option<&'static environment_assets::EnvironmentMaterialTint>,
-        With<ToonScene>,
-    >,
+    roots: Query<'w, 's, (), With<ToonScene>>,
     children: Query<'w, 's, &'static Children>,
     meshes: Query<'w, 's, &'static MeshMaterial3d<StandardMaterial>>,
     standard: Res<'w, Assets<StandardMaterial>>,
@@ -300,29 +295,26 @@ pub(in crate::client::presentation_3d) struct ToonSceneConversion<'w, 's> {
 }
 
 impl ToonSceneConversion<'_, '_> {
-    /// Converts every `StandardMaterial` mesh under a [`ToonScene`] root to the toon material,
-    /// applying the environment profile tint in the same pass. Other roots are left untouched.
+    /// Converts every `StandardMaterial` mesh under a [`ToonScene`] root to the toon material.
+    /// Other roots are left untouched.
     fn convert(&mut self, root: Entity) {
-        let Ok(tint) = self.roots.get(root) else {
+        if !self.roots.contains(root) {
             return;
-        };
-        let tint = tint.map_or([1.0; 3], |tint| tint.0);
-        let tint_key = tint.map(f32::to_bits);
+        }
         for entity in self.children.iter_descendants(root) {
             let Ok(source) = self.meshes.get(entity) else {
                 continue;
             };
-            let key = (source.0.id(), tint_key);
+            let key = source.0.id();
             let handle = if let Some(handle) = self.converted.handles.get(&key) {
                 handle.clone()
             } else {
                 if self.converted.handles.len() >= MAX_TOON_SCENE_MATERIALS {
                     continue;
                 }
-                let Some(mut base) = self.standard.get(&source.0).cloned() else {
+                let Some(base) = self.standard.get(&source.0).cloned() else {
                     continue;
                 };
-                base.base_color = multiply_color(base.base_color, tint);
                 let handle = self.toon.add(self.shading.material(base));
                 self.converted.handles.insert(key, handle.clone());
                 handle
@@ -345,16 +337,6 @@ pub(in crate::client::presentation_3d) fn prepare_toon_scene(
     mut conversion: ToonSceneConversion,
 ) {
     conversion.convert(ready.entity);
-}
-
-fn multiply_color(color: Color, tint: [f32; 3]) -> Color {
-    let color = color.to_srgba();
-    Color::srgba(
-        color.red * tint[0],
-        color.green * tint[1],
-        color.blue * tint[2],
-        color.alpha,
-    )
 }
 
 pub(in crate::client) fn install(app: &mut App) {

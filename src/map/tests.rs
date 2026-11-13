@@ -541,7 +541,7 @@ fn zombie_yard_resolves_cooperative_spawns_and_perimeter_ingress() {
 }
 
 #[test]
-fn proper_three_vs_three_maps_resolve_the_kaykit_visual_variants() {
+fn proper_three_vs_three_maps_resolve_their_wall_and_cover_variants() {
     let catalog = MapContentCatalog::embedded().unwrap();
     let wipeout = catalog
         .resolve_preset(VERDANT_CROSSFIRE_PRESET, MapInstanceId(10))

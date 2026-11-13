@@ -41,6 +41,8 @@ PALETTE = {
     "seaweed": "#2C8C70",
     "brick": "#8C362F",
     "brick_light": "#9E4437",
+    # Dark, desaturated brick top so a wall top never reads as the red damage tile (BRL-0188).
+    "brick_top": "#4B3A38",
     "iron": "#3C4B62",
     "iron_light": "#485A74",
     "verdigris": "#3AA092",
@@ -118,7 +120,7 @@ def sea_stone_wall() -> Piece:
 
 def coral_brick_wall() -> Piece:
     piece = Piece("coral-brick-wall")
-    seawall(piece, "brick")
+    seawall(piece, "brick_top")
     courses(piece, [[-0.25, 0.25], [0.0], [-0.25, 0.25], [0.0]], ("brick", "brick_light"))
     return piece
 

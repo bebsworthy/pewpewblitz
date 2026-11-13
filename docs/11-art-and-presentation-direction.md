@@ -688,12 +688,18 @@ The client resolves shared stable theme and visual-profile IDs through its map p
 catalogs. A theme's environment kit (`theme_kits` in `assets/catalogs/map_asset_visuals.ron`)
 replaces the default visual with the same profile ID on maps of that theme only, so the shared
 content (asset and visual-profile IDs, footprints, gameplay profiles) and its fingerprint are
-unchanged. Kit visuals keep the default's primitive fallback, import only from the kit's directory,
-and carry their colour in the kit palette rather than a tint. Every presentation site that knows the
+unchanged. Every presentation theme must have a kit, and every built-in map draws its imported
+pieces only from its own theme's kit. Kit visuals keep the default's primitive fallback, import only
+from the kit's directory, and carry their colour in the kit palette; there is no per-asset tint.
+The defaults serve a visual that a theme's kit does not cover (a Map Maker document placing another
+theme's prop): every imported default is the original kit piece of its native theme, and validation
+rejects an imported default outside the kit directories, so no third-party environment pack ships
+(BRL-0188). Wall, cover, and wall-top colours stay clear of the effect-tile hues (speed cyan, slow
+violet, damage red). Every presentation site that knows the
 map (static and dynamic map assets, Heist safes, restoration pickups, Map Maker markers and palette
 previews) resolves through the theme. Imported scenes load and admit once per GLB path. Every
 kit builder shares one kit contract module (`asset_src/environment/kit_common.py`).
-Asset paths, tints, transforms, and fallbacks remain client-only and do not contribute renderer
+Asset paths, transforms, and fallbacks remain client-only and do not contribute renderer
 details to the gameplay protocol. Presentation reconciliation keys include the accepted map
 instance, recipe fingerprint, and theme so replacement cannot retain stale geometry or materials.
 

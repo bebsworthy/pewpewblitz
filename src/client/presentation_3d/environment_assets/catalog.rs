@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const MAP_VISUAL_CATALOG: &str = include_str!("../../../../assets/catalogs/map_asset_visuals.ron");
 const MAP_THEME_CATALOG: &str =
     include_str!("../../../../assets/catalogs/map_presentation_themes.ron");
-const MAP_VISUAL_SCHEMA_VERSION: u16 = 6;
+const MAP_VISUAL_SCHEMA_VERSION: u16 = 7;
 const MAP_THEME_SCHEMA_VERSION: u16 = 6;
 
 #[derive(Deserialize, Clone)]
@@ -72,10 +72,6 @@ pub(in crate::client::presentation_3d) struct MapVisualProfile {
     pub(in crate::client::presentation_3d) scale: f32,
     pub(in crate::client::presentation_3d) yaw_degrees: f32,
     pub(in crate::client::presentation_3d) vertical_offset: f32,
-    /// Legacy third-party tint multiplier; theme kit visuals author colour in their palette and
-    /// omit it (BRL-0153).
-    #[serde(default = "untinted")]
-    pub(in crate::client::presentation_3d) tint: (f32, f32, f32),
     fallback: MapVisualFallback,
     #[serde(default)]
     pub(in crate::client::presentation_3d) fitting: MapVisualFitting,
@@ -89,15 +85,7 @@ pub(in crate::client::presentation_3d) struct MapVisualProfile {
     pub(in crate::client::presentation_3d) sway: bool,
 }
 
-const fn untinted() -> (f32, f32, f32) {
-    (1.0, 1.0, 1.0)
-}
-
 impl MapVisualProfile {
-    pub(in crate::client::presentation_3d) fn tint_rgb(&self) -> [f32; 3] {
-        [self.tint.0, self.tint.1, self.tint.2]
-    }
-
     pub(in crate::client::presentation_3d) fn imported_path(&self) -> Option<&str> {
         match &self.kind {
             MapVisualKind::Imported { path } => Some(path),
@@ -272,7 +260,6 @@ fn visual_profile_is_valid(profile: &MapVisualProfile) -> bool {
         && profile.vertical_offset.is_finite()
         && visual_kind_matches_fallback(profile)
         && visual_fitting_matches_kind(profile)
-        && color_is_valid(profile.tint)
         && (!profile.sway || profile.fallback == MapVisualFallback::Vegetation)
 }
 
@@ -335,6 +322,7 @@ fn validate_map_visuals(catalog: &crate::map::MapContentCatalog) -> Result<(), S
     }
     let theme_ids: BTreeSet<_> = themes.themes.iter().map(|theme| theme.id).collect();
     validate_theme_kits(&source.theme_kits, &defaults, &theme_ids)?;
+    validate_defaults_import_from_kits(&source.theme_kits, &defaults)?;
     validate_map_themes(themes, catalog)?;
     Ok(())
 }
@@ -350,8 +338,13 @@ fn validate_theme_kits(
         if !theme_ids.contains(&kit.theme) || !kit_themes.insert(kit.theme) {
             return Err(format!("{owner} names an unknown or duplicate theme"));
         }
-        if kit.directory.trim().is_empty() || !kit.directory.ends_with('/') {
-            return Err(format!("{owner} directory must be a non-empty folder path"));
+        if kit.directory.trim().is_empty()
+            || !kit.directory.ends_with('/')
+            || kit.visuals.is_empty()
+        {
+            return Err(format!(
+                "{owner} needs a non-empty folder path and at least one visual"
+            ));
         }
         let mut ids = BTreeSet::new();
         for visual in &kit.visuals {
@@ -385,6 +378,33 @@ fn validate_theme_kits(
                     visual.id.0
                 ));
             }
+        }
+    }
+    if let Some(theme) = theme_ids.difference(&kit_themes).next() {
+        return Err(format!(
+            "client map theme {} has no environment kit",
+            theme.0
+        ));
+    }
+    Ok(())
+}
+
+/// Every imported default names a piece of some theme kit, so no third-party environment model
+/// can return through a default visual (BRL-0188).
+fn validate_defaults_import_from_kits(
+    kits: &[MapThemeKit],
+    defaults: &BTreeMap<crate::map::MapVisualProfileId, &MapVisualProfile>,
+) -> Result<(), String> {
+    for default in defaults.values() {
+        if default.imported_path().is_some_and(|path| {
+            !kits
+                .iter()
+                .any(|kit| path.starts_with(kit.directory.as_str()))
+        }) {
+            return Err(format!(
+                "client map visual {} imports from outside every theme kit",
+                default.id.0
+            ));
         }
     }
     Ok(())
@@ -541,125 +561,50 @@ mod grid_catalog_tests {
                 );
             }
         }
-        assert_eq!(
-            visuals
-                .profile(crate::map::MapVisualProfileId(37))
-                .and_then(|profile| match &profile.kind {
-                    super::MapVisualKind::Imported { path } => Some(path.as_str()),
-                    _ => None,
-                }),
-            Some("brawler/models/kenney/mini-dungeon/barrel.glb")
-        );
-        assert_eq!(
-            visuals
-                .profile(crate::map::MapVisualProfileId(37))
-                .unwrap()
-                .fitting,
-            super::MapVisualFitting::Contained
-        );
-        assert_eq!(
-            visuals
-                .profile(crate::map::MapVisualProfileId(38))
-                .and_then(|profile| match &profile.kind {
-                    super::MapVisualKind::Imported { path } => Some(path.as_str()),
-                    _ => None,
-                }),
-            Some("brawler/models/kenney/graveyard/debris-wood.glb")
-        );
-        assert!(
-            (visuals
-                .profile(crate::map::MapVisualProfileId(38))
-                .unwrap()
-                .scale
-                - 1.0)
-                .abs()
-                < f32::EPSILON
-        );
-        assert_eq!(
-            visuals
-                .profile(crate::map::MapVisualProfileId(39))
-                .and_then(|profile| match &profile.kind {
-                    super::MapVisualKind::Imported { path } => Some(path.as_str()),
-                    _ => None,
-                }),
-            Some("brawler/models/kenney/mini-arena/statue.glb")
-        );
-        assert!(
-            (visuals
-                .profile(crate::map::MapVisualProfileId(39))
-                .unwrap()
-                .scale
-                - 0.9625)
-                .abs()
-                < f32::EPSILON,
-            "the imported idol must remain inside the 96-by-64 authoritative footprint"
-        );
     }
 
     #[test]
-    fn chest_feedback_visuals_use_enlarged_live_profiles_and_no_terminal_model() {
+    fn chests_have_no_terminal_visual_model() {
         let shared = crate::map::MapContentCatalog::embedded().unwrap();
         let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
-        let chest_scale = visuals
-            .profile(crate::map::MapVisualProfileId(40))
-            .unwrap()
-            .scale;
-        let potion_scale = visuals
-            .profile(crate::map::MapVisualProfileId(42))
-            .unwrap()
-            .scale;
-
-        assert!((chest_scale - 1.0).abs() < f32::EPSILON);
         assert!(
             visuals
                 .profile(crate::map::MapVisualProfileId(41))
                 .is_none()
         );
-        assert!((potion_scale - 0.738).abs() < f32::EPSILON);
     }
 
+    /// The defaults serve visuals a theme's kit does not cover (Map Maker documents). Every
+    /// imported default is the native theme's kit piece, unchanged (BRL-0188).
     #[test]
-    fn cactus_uses_the_promoted_graveyard_trunk_visual() {
-        let shared = crate::map::MapContentCatalog::embedded().unwrap();
-        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
-        let cactus = visuals.profile(crate::map::MapVisualProfileId(43)).unwrap();
-
-        assert_eq!(
-            match &cactus.kind {
-                super::MapVisualKind::Imported { path } => Some(path.as_str()),
-                _ => None,
-            },
-            Some("brawler/models/kenney/graveyard/trunk.glb")
-        );
-        assert!((cactus.scale - 0.90).abs() < f32::EPSILON);
-        assert_eq!(cactus.fitting, super::MapVisualFitting::Contained);
-    }
-
-    #[test]
-    fn proper_three_vs_three_maps_use_exact_kaykit_block_bits_visuals() {
-        let shared = crate::map::MapContentCatalog::embedded().unwrap();
-        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
-        let expected = [
-            (44, "decorative-block-green.glb"),
-            (45, "bricks-a.glb"),
-            (46, "metal.glb"),
-            (47, "wood.glb"),
-            (48, "striped-block-yellow.glb"),
-            (49, "striped-block-green.glb"),
-        ];
-
-        for (id, file_name) in expected {
-            let profile = visuals.profile(crate::map::MapVisualProfileId(id)).unwrap();
-            let super::MapVisualKind::Imported { path } = &profile.kind else {
-                panic!("KayKit profile {id} must use an imported GLB");
+    fn imported_defaults_are_their_native_theme_kit_pieces() {
+        let source: super::MapVisualSource = ron::from_str(super::MAP_VISUAL_CATALOG).unwrap();
+        let mut imported = 0;
+        for default in &source.visuals {
+            let Some(path) = default.imported_path() else {
+                continue;
             };
-            assert_eq!(
-                path,
-                &format!("brawler/models/kaykit/block-bits/{file_name}")
+            imported += 1;
+            let native = source
+                .theme_kits
+                .iter()
+                .flat_map(|kit| kit.visuals.iter())
+                .find(|visual| visual.id == default.id && visual.imported_path() == Some(path))
+                .unwrap_or_else(|| panic!("default {} is not a kit piece: {path}", default.id.0));
+            assert!((native.scale - default.scale).abs() < f32::EPSILON);
+            assert_eq!(native.fitting, default.fitting);
+            assert_eq!(native.adjacency_group, default.adjacency_group);
+            assert_eq!(native.flat, default.flat);
+            assert_eq!(native.sway, default.sway);
+            assert!(
+                !path.contains("/kenney/") && !path.contains("/kaykit/"),
+                "no third-party environment pack: {path}"
             );
-            assert!((profile.scale - 1.0).abs() < f32::EPSILON);
-            assert_eq!(profile.fitting, super::MapVisualFitting::Exact);
         }
+        assert_eq!(
+            imported, 25,
+            "every formerly third-party default is retired"
+        );
     }
 
     /// Every visual a built-in map of a kitted theme draws, keyed by the shared visual id.
@@ -766,7 +711,6 @@ mod grid_catalog_tests {
             }
         }
         for visual in &kit.visuals {
-            assert_eq!(visual.tint, (1.0, 1.0, 1.0), "kit visuals carry no tint");
             let path = visual.imported_path().unwrap();
             assert!(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -794,32 +738,43 @@ mod grid_catalog_tests {
         let theme = crate::map::MapPresentationThemeId(2);
         let maps = assert_theme_maps_render_only_their_kit(theme);
         assert_eq!(maps, 2, "Tidal Garden and Powderline Vault are covered");
-        let shared = crate::map::MapContentCatalog::embedded().unwrap();
-        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
-        assert!(
-            !visuals
-                .resolve(
-                    crate::map::MapVisualProfileId(33),
-                    crate::map::MapPresentationThemeId(3)
-                )
-                .unwrap()
-                .sway,
-            "theme 3 keeps its own foliage until its kit lands"
+    }
+
+    #[test]
+    fn ashen_court_maps_render_only_their_theme_kit() {
+        let theme = crate::map::MapPresentationThemeId(3);
+        let maps = assert_theme_maps_render_only_their_kit(theme);
+        assert_eq!(
+            maps, 3,
+            "Ashen Court, Switchback Basin, and Verdant Crossfire are covered"
         );
     }
 
-    fn kit_errors(kit: &str) -> Result<(), String> {
+    #[test]
+    fn every_builtin_map_renders_only_its_theme_kit() {
         let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let themes: std::collections::BTreeSet<_> = shared
+            .presets
+            .iter()
+            .map(|preset| preset.recipe.presentation_theme_id)
+            .collect();
+        let maps: usize = themes
+            .into_iter()
+            .map(assert_theme_maps_render_only_their_kit)
+            .sum();
+        assert_eq!(maps, shared.presets.len());
+    }
+
+    /// Validates `kit` as the whole kit list of a catalog whose only theme is theme 1.
+    fn kit_errors(kit: &str) -> Result<(), String> {
         let source: super::MapVisualSource = ron::from_str(super::MAP_VISUAL_CATALOG).unwrap();
         let defaults = source
             .visuals
             .iter()
             .map(|profile| (profile.id, profile))
             .collect();
-        let themes = shared
-            .presets
-            .iter()
-            .map(|preset| preset.recipe.presentation_theme_id)
+        let themes = [crate::map::MapPresentationThemeId(1)]
+            .into_iter()
             .collect();
         let kits: Vec<super::MapThemeKit> = ron::from_str(kit).unwrap();
         super::validate_theme_kits(&kits, &defaults, &themes)
@@ -848,19 +803,19 @@ mod grid_catalog_tests {
             .is_err()
         );
         assert!(
-            kit_errors("[(theme: MapPresentationThemeId(9), directory: \"kit/\", visuals: [])]")
-                .is_err()
+            kit_errors(&format!(
+                "[(theme: MapPresentationThemeId(9), directory: \"kit/\", visuals: [({bush}, fallback: Vegetation)])]"
+            ))
+            .is_err()
         );
-    }
-
-    #[test]
-    fn rectangular_kenney_walls_use_contained_fitting() {
-        let shared = crate::map::MapContentCatalog::embedded().unwrap();
-        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
-
-        for id in [1, 16, 32] {
-            let profile = visuals.profile(crate::map::MapVisualProfileId(id)).unwrap();
-            assert_eq!(profile.fitting, super::MapVisualFitting::Contained);
-        }
+        assert!(
+            kit_errors("[]").is_err(),
+            "every presentation theme needs a kit"
+        );
+        assert!(
+            kit_errors("[(theme: MapPresentationThemeId(1), directory: \"kit/\", visuals: [])]")
+                .is_err(),
+            "an empty kit is not coverage"
+        );
     }
 }

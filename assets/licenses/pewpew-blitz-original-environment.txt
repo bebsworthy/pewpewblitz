@@ -12,3 +12,7 @@ the build command, the Blender version, the kit contract, and the piece inventor
 Kits:
 - crossroads-facility (map presentation theme 1), BRL-0153, built with Blender 5.2.3 LTS.
 - tidal-garden (map presentation theme 2), BRL-0187, built with Blender 5.2.3 LTS.
+- ashen-court (map presentation theme 3), BRL-0188, built with Blender 5.2.3 LTS.
+
+Since BRL-0188 every shipped environment model is one of these original kit pieces; the
+third-party Kenney and KayKit environment packs were retired with their license texts.

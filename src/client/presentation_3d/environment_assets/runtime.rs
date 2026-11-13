@@ -94,14 +94,6 @@ pub(in crate::client::presentation_3d) struct EnvironmentAssetHandles {
     handles: BTreeMap<String, Handle<Gltf>>,
 }
 
-/// Authored profile tint for an imported environment instance; such instances are toon shaded and
-/// the toon conversion applies the tint.
-#[derive(Component, Clone, Copy)]
-#[require(ToonScene)]
-pub(in crate::client::presentation_3d) struct EnvironmentMaterialTint(
-    pub(in crate::client::presentation_3d) [f32; 3],
-);
-
 #[derive(Clone)]
 struct EnvironmentImportedScene {
     scene: Handle<WorldAsset>,
@@ -407,8 +399,8 @@ mod tests {
             checked += 1;
         }
         assert_eq!(
-            checked, 25,
-            "14 Crossroads Facility + 11 Tidal Garden pieces"
+            checked, 38,
+            "14 Crossroads Facility + 11 Tidal Garden + 13 Ashen Court pieces"
         );
     }
 }

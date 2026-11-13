@@ -156,7 +156,7 @@ fn convert(app: &mut App, root: Entity) {
 }
 
 #[test]
-fn ready_toon_scenes_convert_and_tint_their_materials_once() {
+fn ready_toon_scenes_convert_their_materials_once() {
     let mut app = App::new();
     app.init_resource::<Assets<StandardMaterial>>()
         .init_resource::<Assets<ToonMaterial>>()
@@ -169,13 +169,8 @@ fn ready_toon_scenes_convert_and_tint_their_materials_once() {
             base_color: Color::srgb(1.0, 0.5, 0.5),
             ..default()
         });
-    let spawn_scene = |app: &mut App, tint: Option<[f32; 3]>| {
-        let mut root = app.world_mut().spawn_empty();
-        match tint {
-            Some(tint) => root.insert(environment_assets::EnvironmentMaterialTint(tint)),
-            None => root.insert(ToonScene),
-        };
-        let root = root.id();
+    let spawn_scene = |app: &mut App| {
+        let root = app.world_mut().spawn(ToonScene).id();
         let mesh = app
             .world_mut()
             .spawn((MeshMaterial3d(source.clone()), ChildOf(root)))
@@ -183,9 +178,8 @@ fn ready_toon_scenes_convert_and_tint_their_materials_once() {
         convert(app, root);
         mesh
     };
-    let fighter = spawn_scene(&mut app, None);
-    let tinted = spawn_scene(&mut app, Some([0.5, 1.0, 1.0]));
-    let fighter_again = spawn_scene(&mut app, None);
+    let fighter = spawn_scene(&mut app);
+    let environment = spawn_scene(&mut app);
 
     let toon_of = |app: &App, mesh: Entity| {
         assert!(
@@ -201,20 +195,14 @@ fn ready_toon_scenes_convert_and_tint_their_materials_once() {
             .clone()
     };
     let plain = toon_of(&app, fighter);
-    assert_eq!(
-        toon_of(&app, fighter_again),
-        plain,
-        "conversions are cached"
-    );
-    let tinted = toon_of(&app, tinted);
-    assert_ne!(tinted, plain);
+    assert_eq!(toon_of(&app, environment), plain, "conversions are cached");
     let materials = app.world().resource::<Assets<ToonMaterial>>();
-    let tinted_color = materials.get(&tinted).unwrap().base.base_color.to_srgba();
+    let color = materials.get(&plain).unwrap().base.base_color.to_srgba();
     assert!(
-        (tinted_color.red - 0.5).abs() < 1e-5,
-        "the profile tint is applied"
+        (color.red - 1.0).abs() < 1e-5 && (color.green - 0.5).abs() < 1e-5,
+        "the authored colour is kept"
     );
-    assert_eq!(materials.len(), 2);
+    assert_eq!(materials.len(), 1);
 
     // A world asset without a toon root (offscreen previews) keeps its PBR material.
     let preview = app.world_mut().spawn_empty().id();
@@ -228,14 +216,4 @@ fn ready_toon_scenes_convert_and_tint_their_materials_once() {
             .get::<MeshMaterial3d<StandardMaterial>>(preview_mesh)
             .is_some()
     );
-}
-
-#[test]
-fn material_tint_preserves_alpha_and_scales_color_channels() {
-    let tinted = multiply_color(Color::srgba(0.8, 0.6, 0.4, 0.5), [0.5, 0.75, 1.0]).to_srgba();
-
-    assert!((tinted.red - 0.4).abs() < 0.001);
-    assert!((tinted.green - 0.45).abs() < 0.001);
-    assert!((tinted.blue - 0.4).abs() < 0.001);
-    assert!((tinted.alpha - 0.5).abs() < 0.001);
 }

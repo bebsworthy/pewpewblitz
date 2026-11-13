@@ -47,7 +47,8 @@ piece; Exact pieces fill exactly one cell.
 ## Readability on the sand floor
 
 - Walls share a dark stone plinth and a sea-stone cap rim; the cap inlay and the faces show the
-  material. All are darker and cooler (brick: much darker) than the sand.
+  material. All are darker and cooler (brick: much darker) than the sand. The coral wall's top
+  inlay is a dark, desaturated brick so a wall top never reads as the red damage tile (BRL-0188).
 - Destructible cover is lower and painted: a turquoise beach-hut crate (the complement of the sand)
   and a sage cactus in a terracotta pot.
 - Concealment is deep sea green with upright fronds and sways in game.
@@ -58,7 +59,7 @@ piece; Exact pieces fill exactly one cell.
 | GLB | Visual profile | Use | Fitting | Triangles |
 |---|---|---|---|---|
 | `sea-stone-wall.glb` | 32 (garden wall) | blue-grey stone courses, seaweed band | Exact | 496 |
-| `coral-brick-wall.glb` | 45 (red brick wall) | coral-red brick courses | Exact | 584 |
+| `coral-brick-wall.glb` | 45 (red brick wall) | coral-red brick courses, dark brick top (BRL-0188) | Exact | 584 |
 | `tide-gate-wall.glb` | 46 (metal wall) | iron panels, verdigris straps | Exact | 364 |
 | `driftwood-wall.glb` | 47 (wood wall) | driftwood palisade, rope bands | Exact | 452 |
 | `beach-crate.glb` | 48 (striped cover) | turquoise and white striped crate | Contained 0.91 | 1,584 |

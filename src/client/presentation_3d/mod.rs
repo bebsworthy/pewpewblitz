@@ -586,7 +586,6 @@ struct HeistSafeVisualAssets<'a> {
     primitives: &'a Primitive3dAssets,
     materials: &'a Material3dAssets,
     imported_core: Option<environment_assets::FittedEnvironmentScene>,
-    profile: Option<&'a environment_assets::MapVisualProfile>,
 }
 
 fn spawn_heist_safe_visual(
@@ -622,11 +621,11 @@ fn spawn_heist_safe_visual(
                 HEIST_IDOL_FOOTPRINT_DEPTH,
             )),
         ));
-        if let (Some(fitted), Some(profile)) = (assets.imported_core.as_ref(), assets.profile) {
+        if let Some(fitted) = assets.imported_core.as_ref() {
             let mut transform = fitted.transform;
             transform.translation.y += 16.0;
             parent.spawn((
-                environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
+                ToonScene,
                 WorldAssetRoot(fitted.scene.clone()),
                 transform,
                 Name::new("imported Heist team idol"),
@@ -736,7 +735,6 @@ fn reconcile_heist_safe_visuals(
                 primitives: &primitives,
                 materials: &materials,
                 imported_core,
-                profile,
             },
         );
     }
@@ -995,10 +993,10 @@ fn reconcile_dynamic_map_visuals(
                     asset.footprint_cells,
                 ));
         }
-        if let (Some(profile), Some(fitted)) = (profile, fitted) {
+        if let Some(fitted) = fitted {
             commands.entity(visual).with_children(|parent| {
                 parent.spawn((
-                    environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
+                    ToonScene,
                     WorldAssetRoot(fitted.scene),
                     fitted.transform,
                     Name::new("imported dynamic map asset"),
@@ -1084,9 +1082,9 @@ fn reconcile_restoration_pickup_visuals(
                 Transform::from_xyz(0.0, -15.0, 0.0).with_scale(Vec3::splat(36.0)),
                 Name::new("restoration pickup ground glow"),
             ));
-            if let (Some(profile), Some(fitted)) = (profile, fitted) {
+            if let Some(fitted) = fitted {
                 parent.spawn((
-                    environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
+                    ToonScene,
                     WorldAssetRoot(fitted.scene),
                     fitted.transform,
                     Name::new("imported restoration potion"),
@@ -2095,9 +2093,9 @@ fn materialize_map_editor_markers(
                 )),
                 Name::new("Map Maker safe footprint"),
             ));
-            if let (Some(profile), Some(fitted)) = (profile, fitted) {
+            if let Some(fitted) = fitted {
                 parent.spawn((
-                    environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
+                    ToonScene,
                     WorldAssetRoot(fitted.scene),
                     fitted.transform,
                     Name::new("Map Maker imported Heist safe"),
@@ -2164,7 +2162,7 @@ fn spawn_imported_map_asset(
         ))
         .id();
     let scene = (
-        environment_assets::EnvironmentMaterialTint(profile.tint_rgb()),
+        ToonScene,
         WorldAssetRoot(fitted.scene),
         fitted.transform,
         Name::new("imported map asset"),

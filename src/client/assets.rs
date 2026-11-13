@@ -439,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn environment_catalog_assets_are_promoted_manifested_and_dependency_complete() {
+    fn environment_catalog_assets_are_original_kit_pieces_and_retired_packs_are_gone() {
         let manifest: AssetManifest = ron::from_str(CLIENT_ASSET_MANIFEST).unwrap();
         let manifested = manifest
             .assets
@@ -448,43 +448,49 @@ mod tests {
             .collect::<HashSet<_>>();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
         for asset_path in presentation_3d::environment_assets::environment_asset_paths().unwrap() {
-            if asset_path.starts_with("brawler/models/original/") {
-                // Original kits are provenanced by their `asset_src/` builder, not the manifest.
-                assert!(
-                    root.join(&asset_path).is_file(),
-                    "missing original environment asset: {asset_path}"
-                );
-                continue;
-            }
+            // Original kits are provenanced by their `asset_src/` builder, not the manifest.
             assert!(
-                manifested.contains(asset_path.as_str()),
-                "unmanifested environment asset: {asset_path}"
+                asset_path.starts_with("brawler/models/original/environment/"),
+                "environment visual outside the original kits: {asset_path}"
             );
             assert!(
                 root.join(&asset_path).is_file(),
-                "missing promoted environment asset: {asset_path}"
+                "missing original environment asset: {asset_path}"
             );
         }
-        for dependency in [
-            "brawler/models/kenney/mini-arena/Textures/colormap.png",
-            "brawler/models/kenney/mini-dungeon/Textures/colormap.png",
-            "brawler/models/kenney/mini-forest/Textures/colormap.png",
-            "brawler/models/kenney/graveyard/Textures/colormap.png",
+        // Third-party environment packs are retired (BRL-0188): only original kits remain.
+        let manifested_environment = manifested
+            .iter()
+            .filter(|path| {
+                path.starts_with("brawler/models/")
+                    && !path.starts_with("brawler/models/kenney/mini-characters/")
+                    && !path.starts_with("brawler/models/kenney/blaster-kit/")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            manifested_environment.is_empty(),
+            "retired third-party environment rows remain: {manifested_environment:?}"
+        );
+        for license in [
+            "kenney-mini-arena.txt",
+            "kenney-mini-dungeon.txt",
+            "kenney-mini-forest.txt",
+            "kenney-graveyard-kit.txt",
+            "kaykit-block-bits.txt",
         ] {
             assert!(
-                manifested.contains(dependency),
-                "unmanifested GLB dependency: {dependency}"
-            );
-            assert!(
-                root.join(dependency).is_file(),
-                "missing GLB dependency: {dependency}"
+                !std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("assets/licenses")
+                    .join(license)
+                    .exists(),
+                "retired environment pack license still ships: {license}"
             );
         }
         assert!(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("assets/licenses/kaykit-block-bits.txt")
+                .join("assets/licenses/pewpew-blitz-original-environment.txt")
                 .is_file(),
-            "missing retained KayKit Block Bits license"
+            "missing original environment kit provenance"
         );
     }
 

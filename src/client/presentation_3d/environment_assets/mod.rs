@@ -13,8 +13,8 @@ pub(in crate::client::presentation_3d) use catalog::{
     EffectTileStatusVisual, MapVisualCatalog, MapVisualFitting, MapVisualKind, MapVisualProfile,
 };
 pub(in crate::client::presentation_3d) use runtime::{
-    EnvironmentAssetReadiness, EnvironmentImportedScenes, EnvironmentMaterialTint,
-    FittedEnvironmentScene, load_environment_assets, prepare_environment_scenes,
+    EnvironmentAssetReadiness, EnvironmentImportedScenes, FittedEnvironmentScene,
+    load_environment_assets, prepare_environment_scenes,
 };
 pub(crate) use runtime::{EnvironmentThemeMaterialCatalog, EnvironmentThemeMaterials};
 pub(in crate::client::presentation_3d) use sway::{FoliageSway, sway_foliage};

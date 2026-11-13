@@ -69,6 +69,10 @@ facility-kit blender="/Applications/Blender.app/Contents/MacOS/Blender":
 tidal-kit blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/environment/tidal-garden/build_kit.py
 
+# Rebuild the Ashen Court environment kit GLBs, source master, and review sheet (headless).
+ashen-kit blender="/Applications/Blender.app/Contents/MacOS/Blender":
+    {{blender}} -b --factory-startup -P asset_src/environment/ashen-court/build_kit.py
+
 # Run the complete automated gate, including 2/4/6-client product matches and all Practice types.
 ci: lint test _e2e-matrix _practice-e2e-matrix
 
