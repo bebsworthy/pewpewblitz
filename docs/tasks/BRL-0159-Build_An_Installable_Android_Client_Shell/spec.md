@@ -289,3 +289,7 @@ Report the `AdapterInfo` logcat line, any visual corruption (particles), and fra
   stopped, and `data/` and `config/` are untouched.
 - Rust changed again (connection.rs), so `just lint`, `just test` and `just e2e 2` were re-run; results
   are recorded in the handback because the run was still in progress when this was written.
+
+# Re-verification after the Android startup-connect change (2026-11-13)
+- `just lint` exit 0, `just test` exit 0, `just e2e 2` exit 0 (1 exact 1v1 roster reached Active). Committed as d1f2a32c on top of 5dda92a4.
+- Remaining for closeout: owner playtest on the phone (create a brawler, Practice entry, "Don't allow" dialog path, audio after backgrounding) and confirmation of the target device (tested Pixel 8a / Mali-G715; Pixel 10 PowerVR unverified).
