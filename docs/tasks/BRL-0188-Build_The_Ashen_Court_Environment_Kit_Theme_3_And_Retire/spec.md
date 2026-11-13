@@ -230,3 +230,6 @@ tops; Map Maker palette on a theme-3 document shows the kit. Known limits: Credi
   read saturated blue); palette was judged and fixed only in captures (reconfirmed lesson).
 - Practice automation cannot be steered to an arbitrary prop; captures of central props need a
   scripted camera or spawn selection (not added; noted as a limit).
+
+# Playtest feedback (2026-11-13)
+- User played native sessions (`just run 1`, several 3v3 Practice matches across themes) at e03db203 and accepted the result ("ok for me"). Open look choices in this spec are accepted as implemented. Disposition: accepted; deferred items stay in their linked tickets.

@@ -208,3 +208,6 @@ default profiles and `tint` remain for theme 3 until BRL-0188.
   keep contained props near their collision footprint in both axes.
 - Practice countdown and random spawn made early fixed-frame captures miss props; captures after
   the countdown with an explicit move axis were needed.
+
+# Playtest feedback (2026-11-13)
+- User played native sessions (`just run 1`, several 3v3 Practice matches across themes) at e03db203 and accepted the result ("ok for me"). Open look choices in this spec are accepted as implemented. Disposition: accepted; deferred items stay in their linked tickets.

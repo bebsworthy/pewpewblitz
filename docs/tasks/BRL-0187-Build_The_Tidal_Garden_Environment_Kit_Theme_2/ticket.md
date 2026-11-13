@@ -1,17 +1,18 @@
 ---
 id: BRL-0187
 title: 'Build the Tidal Garden environment kit (theme 2)'
-status: doing
+status: done
 theme: core
 release:
 created: 2026-11-13T08:42:48Z
-modified: 2026-11-13T09:45:45Z
-closed:
-status_changed: 2026-11-13T09:08:41Z
+modified: 2026-11-13T10:40:43Z
+closed: 2026-11-13T10:40:43Z
+status_changed: 2026-11-13T10:40:43Z
 history:
 - todo@2026-11-13T08:42:48Z
 - doing@2026-11-13T09:08:41Z
-revision: b5dc267ee3ad754a
+- done@2026-11-13T10:40:43Z
+revision: c1c79e7f544318c2
 blocks: []
 related: [BRL-0153, BRL-0188]
 parent: BRL-0171

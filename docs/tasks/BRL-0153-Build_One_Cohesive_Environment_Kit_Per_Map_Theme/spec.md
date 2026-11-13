@@ -199,3 +199,6 @@ palette on a theme-1 document shows the kit. Known limits: themes 2/3 still use 
 - Theme 3 evidence first ran on Feature Yard because the script defaults Wipeout to 1v1 regardless
   of players per team. Prevention: always pass `BRAWLER_RENDER_GAME_TYPE` for 3v3 maps and check
   `presentation_theme_id` in each report.
+
+# Playtest feedback (2026-11-13)
+- User played native sessions (`just run 1`, several 3v3 Practice matches across themes) at e03db203 and accepted the result ("ok for me"). Open look choices in this spec are accepted as implemented. Disposition: accepted; deferred items stay in their linked tickets.
