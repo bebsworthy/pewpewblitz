@@ -17,8 +17,9 @@ use std::collections::VecDeque;
 
 const CAMERA_RIG_CATALOG: &str = include_str!("../../../assets/catalogs/camera_rig.ron");
 const CAMERA_RIG_SCHEMA_VERSION: u16 = 1;
-/// Largest distance the rig may lead or trail the fighter before framing. Well inside the
-/// conservative view's half extents (about 7 by 12.7 cells), so the fighter always stays visible.
+/// Largest distance the rig may lead or trail the fighter before framing. Inside the conservative
+/// view's nearest extent (about 4.9 cells below the look target, 7.1 above, 8.8 to each side at
+/// the reference aspect), so the fighter always stays visible.
 pub(super) const MAX_CAMERA_LEAD_WORLD: f32 = MAP_CELL_SIZE_WORLD * 3.0;
 /// Shake stays a small transient offset: at most a quarter cell beyond the framing clamp.
 const MAX_SHAKE_OFFSET_WORLD: f32 = MAP_CELL_SIZE_WORLD * 0.25;

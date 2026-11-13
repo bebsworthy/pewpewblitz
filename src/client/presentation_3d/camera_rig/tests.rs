@@ -312,6 +312,7 @@ fn rig_app() -> App {
     app.world_mut().spawn((
         ArenaCamera,
         ArenaCameraShake::default(),
+        Projection::default(),
         Transform::default(),
     ));
     app
@@ -467,4 +468,30 @@ fn ecs_reduced_motion_keeps_shake_at_zero() {
         app.update();
         assert_eq!(camera_shake(&mut app), Vec3::ZERO);
     }
+}
+
+#[test]
+fn ecs_framing_writes_the_aspect_fair_field_of_view() {
+    let mut app = rig_app();
+    for mut projection in app
+        .world_mut()
+        .query::<&mut Projection>()
+        .iter_mut(app.world_mut())
+    {
+        if let Projection::Perspective(perspective) = projection.as_mut() {
+            perspective.fov = 1.0;
+        }
+    }
+    app.update();
+    let projection = app
+        .world_mut()
+        .query::<&Projection>()
+        .single(app.world())
+        .expect("one projection");
+    let Projection::Perspective(perspective) = projection else {
+        panic!("arena camera keeps a perspective projection");
+    };
+    let expected =
+        camera::camera_vertical_fov(DEFAULT_GAMEPLAY_VIEWPORT.x / DEFAULT_GAMEPLAY_VIEWPORT.y);
+    assert!((perspective.fov - expected).abs() < 1e-6);
 }

@@ -3,11 +3,24 @@
 use super::camera_rig::{ArenaCameraShake, CameraRig, CameraRigCatalog, CameraRigFrameInput};
 use super::*;
 
-pub(super) const CAMERA_VERTICAL_FOV_RADIANS: f32 = 15.0_f32.to_radians();
-pub(super) const CAMERA_ELEVATION_RADIANS: f32 = 62.0_f32.to_radians();
-/// Keeps approximately fourteen map cells visible vertically while the conservative near edge
-/// remains wider than the 25-cell production maps at the reference aspect.
-pub(super) const CAMERA_DISTANCE: f32 = 1_495.0;
+/// Vertical field of view at the reference (default native) aspect and every narrower one.
+pub(super) const CAMERA_VERTICAL_FOV_RADIANS: f32 = 30.0_f32.to_radians();
+pub(super) const CAMERA_ELEVATION_RADIANS: f32 = 55.0_f32.to_radians();
+/// Keeps approximately twelve map cells visible vertically (BRL-0148).
+pub(super) const CAMERA_DISTANCE: f32 = 566.0;
+
+/// Vertical field of view for a viewport aspect. Narrower viewports keep the reference vertical
+/// view and see less width; wider ones keep the reference horizontal view and see less depth, so
+/// no window shape sees more of the arena than the reference aspect on either axis.
+pub(super) fn camera_vertical_fov(aspect: f32) -> f32 {
+    let aspect = valid_aspect(aspect);
+    if aspect <= DEFAULT_GAMEPLAY_WINDOW_ASPECT {
+        CAMERA_VERTICAL_FOV_RADIANS
+    } else {
+        2.0 * ((CAMERA_VERTICAL_FOV_RADIANS * 0.5).tan() * DEFAULT_GAMEPLAY_WINDOW_ASPECT / aspect)
+            .atan()
+    }
+}
 
 /// Intersect a viewport ray with the sole gameplay ground plane (`Y = 0`).
 pub(crate) fn cursor_ground_point(
@@ -41,7 +54,14 @@ pub(super) fn follow_3d_camera(
     editor: Option<Res<MapEditorPreview>>,
     fighters: Query<&Position, (With<Fighter>, With<Controlled>, Without<ArenaCamera>)>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut cameras: Query<(&mut Transform, Option<&mut ArenaCameraShake>), With<ArenaCamera>>,
+    mut cameras: Query<
+        (
+            &mut Transform,
+            &mut Projection,
+            Option<&mut ArenaCameraShake>,
+        ),
+        With<ArenaCamera>,
+    >,
     mut rig: CameraRigParams,
 ) {
     let viewport = windows
@@ -50,6 +70,15 @@ pub(super) fn follow_3d_camera(
         .map_or(DEFAULT_GAMEPLAY_VIEWPORT, |window| {
             Vec2::new(window.width(), window.height())
         });
+    let fov = camera_vertical_fov(viewport_aspect(viewport));
+    for (_, mut projection, _) in &mut cameras {
+        if let Projection::Perspective(perspective) = projection.bypass_change_detection()
+            && (perspective.fov - fov).abs() > f32::EPSILON
+        {
+            perspective.fov = fov;
+            projection.set_changed();
+        }
+    }
     if let Some(editor) = editor {
         let bounds = editor.snapshot.dimensions.bounds();
         let footprint = conservative_ground_footprint(viewport_aspect(viewport));
@@ -63,7 +92,7 @@ pub(super) fn follow_3d_camera(
         let offset = camera_offset() * (distance / CAMERA_DISTANCE);
         // The editor camera is direct; leaving the editor snaps the gameplay rig.
         rig.rig.reset();
-        for (mut transform, shake) in &mut cameras {
+        for (mut transform, _, shake) in &mut cameras {
             *transform = Transform::from_translation(target + offset).looking_at(target, Vec3::Y);
             if let Some(mut shake) = shake {
                 shake.0 = Vec3::ZERO;
@@ -109,7 +138,7 @@ pub(super) fn follow_3d_camera(
     let target = ground_position(frame.center);
     let shake = ground_position(frame.shake);
     let offset = camera_offset();
-    for (mut transform, shake_component) in &mut cameras {
+    for (mut transform, _, shake_component) in &mut cameras {
         *transform = Transform::from_translation(target + offset + shake)
             .looking_at(target + shake, Vec3::Y);
         if let Some(mut shake_component) = shake_component {
@@ -130,6 +159,14 @@ pub(super) fn camera_offset() -> Vec3 {
 fn viewport_aspect(viewport: Vec2) -> f32 {
     if viewport.is_finite() && viewport.x > 0.0 && viewport.y > 0.0 {
         viewport.x / viewport.y
+    } else {
+        DEFAULT_GAMEPLAY_WINDOW_ASPECT
+    }
+}
+
+fn valid_aspect(aspect: f32) -> f32 {
+    if aspect.is_finite() && aspect > 0.0 {
+        aspect
     } else {
         DEFAULT_GAMEPLAY_WINDOW_ASPECT
     }
@@ -158,16 +195,12 @@ pub(super) fn clamp_3d_camera_center(
 }
 
 pub(super) fn conservative_ground_footprint(aspect: f32) -> crate::map::AxisAlignedMapRect {
-    let aspect = if aspect.is_finite() && aspect > 0.0 {
-        aspect
-    } else {
-        DEFAULT_GAMEPLAY_WINDOW_ASPECT
-    };
+    let aspect = valid_aspect(aspect);
     let sin_elevation = CAMERA_ELEVATION_RADIANS.sin();
     let cos_elevation = CAMERA_ELEVATION_RADIANS.cos();
     let camera_height = CAMERA_DISTANCE * sin_elevation;
     let camera_ground_distance = CAMERA_DISTANCE * cos_elevation;
-    let vertical_tangent = (CAMERA_VERTICAL_FOV_RADIANS * 0.5).tan();
+    let vertical_tangent = (camera_vertical_fov(aspect) * 0.5).tan();
     let horizontal_tangent = vertical_tangent * aspect;
     let far_parameter = camera_height / (sin_elevation - vertical_tangent * cos_elevation);
     let near_parameter = camera_height / (sin_elevation + vertical_tangent * cos_elevation);
@@ -216,19 +249,63 @@ mod tests {
     }
 
     #[test]
-    fn reference_view_matches_the_fourteen_cell_mobile_target() {
+    fn reference_view_matches_the_twelve_cell_target() {
         let footprint = conservative_ground_footprint(DEFAULT_GAMEPLAY_WINDOW_ASPECT);
         let visible_cells = footprint.size() / crate::map::MAP_CELL_SIZE_WORLD;
 
-        assert!((visible_cells.y - 14.0).abs() < 0.01);
-        assert!((visible_cells.x - 25.40).abs() < 0.02);
+        assert!((visible_cells.y - 12.0).abs() < 0.02, "{visible_cells}");
+        assert!((visible_cells.x - 17.64).abs() < 0.02, "{visible_cells}");
+        // The fighter sits nearer the bottom edge: ~4.9 cells behind, ~7.1 cells ahead.
+        assert!((footprint.min.y / crate::map::MAP_CELL_SIZE_WORLD + 4.87).abs() < 0.02);
+        assert!((footprint.max.y / crate::map::MAP_CELL_SIZE_WORLD - 7.12).abs() < 0.02);
     }
 
     #[test]
-    fn production_map_centers_width_and_follows_height() {
-        let bounds = centered_map(25.0, 37.0);
+    fn standard_pulse_range_fits_beside_the_fighter_at_the_reference_aspect() {
+        // At the look target the view is wider than the trapezoid's conservative near edge.
+        let half_width_at_target = CAMERA_DISTANCE
+            * (camera_vertical_fov(DEFAULT_GAMEPLAY_WINDOW_ASPECT) * 0.5).tan()
+            * DEFAULT_GAMEPLAY_WINDOW_ASPECT;
+        // Standard Pulse Sidearm reach (`content/catalogs/weapons.ron`).
+        assert!(half_width_at_target >= 320.0, "{half_width_at_target}");
+    }
+
+    #[test]
+    fn no_viewport_shape_sees_more_than_the_reference_aspect() {
+        let reference = conservative_ground_footprint(DEFAULT_GAMEPLAY_WINDOW_ASPECT);
+        let reference_horizontal =
+            (CAMERA_VERTICAL_FOV_RADIANS * 0.5).tan() * DEFAULT_GAMEPLAY_WINDOW_ASPECT;
+        for aspect in [4.0 / 3.0, 16.0 / 9.0, 21.0 / 9.0, 32.0 / 9.0, 8.0] {
+            let fov = camera_vertical_fov(aspect);
+            let horizontal = (fov * 0.5).tan() * aspect;
+            let footprint = conservative_ground_footprint(aspect);
+            assert!(fov <= CAMERA_VERTICAL_FOV_RADIANS + 1e-6);
+            assert!(horizontal <= reference_horizontal + 1e-5, "{aspect}");
+            assert!(footprint.min.y >= reference.min.y - EPSILON, "{aspect}");
+            assert!(footprint.max.y <= reference.max.y + EPSILON, "{aspect}");
+            if aspect < DEFAULT_GAMEPLAY_WINDOW_ASPECT {
+                // Narrower windows keep the reference depth and lose width.
+                assert_approximately(footprint.min.y, reference.min.y);
+                assert_approximately(footprint.max.y, reference.max.y);
+                assert!(footprint.size().x < reference.size().x);
+            } else {
+                // Wider windows keep the reference width at the look target and lose depth.
+                assert!((horizontal - reference_horizontal).abs() < 1e-5, "{aspect}");
+                assert!(footprint.size().y < reference.size().y);
+            }
+        }
+        assert!(
+            (camera_vertical_fov(f32::NAN) - camera_vertical_fov(DEFAULT_GAMEPLAY_WINDOW_ASPECT))
+                .abs()
+                < 1e-6
+        );
+    }
+
+    #[test]
+    fn narrow_map_centers_width_and_follows_height() {
+        let bounds = centered_map(16.0, 37.0);
         let viewport = DEFAULT_GAMEPLAY_VIEWPORT;
-        let player = Vec2::new(390.0, 300.0);
+        let player = Vec2::new(150.0, 300.0);
         let center = clamp_3d_camera_center(player, bounds, viewport);
         let visible = visible_ground_bounds(center, viewport);
 
@@ -236,6 +313,22 @@ mod tests {
         assert_approximately(center.y, player.y);
         assert!(visible.min.x <= bounds.min.x);
         assert!(visible.max.x >= bounds.max.x);
+    }
+
+    #[test]
+    fn production_map_follows_both_axes_and_clamps_at_the_perimeter() {
+        let bounds = centered_map(25.0, 37.0);
+        let viewport = DEFAULT_GAMEPLAY_VIEWPORT;
+        let near_center = Vec2::new(60.0, 100.0);
+        assert_eq!(
+            clamp_3d_camera_center(near_center, bounds, viewport),
+            near_center
+        );
+
+        let corner = clamp_3d_camera_center(bounds.max, bounds, viewport);
+        let visible = visible_ground_bounds(corner, viewport);
+        assert_approximately(visible.max.x, bounds.max.x);
+        assert_approximately(visible.max.y, bounds.max.y);
     }
 
     #[test]
@@ -270,8 +363,8 @@ mod tests {
 
     #[test]
     fn resizing_recomputes_fit_vs_follow_per_axis() {
-        let bounds = centered_map(25.0, 37.0);
-        let player = Vec2::new(40.0, 0.0);
+        let bounds = centered_map(16.0, 37.0);
+        let player = Vec2::new(20.0, 0.0);
         let reference = clamp_3d_camera_center(player, bounds, DEFAULT_GAMEPLAY_VIEWPORT);
         let narrow = clamp_3d_camera_center(player, bounds, Vec2::new(16.0, 9.0));
 

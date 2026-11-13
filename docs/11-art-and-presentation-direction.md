@@ -98,7 +98,7 @@ the previous presentation for that area:
 |---|---|
 | HDR, tonemapping, bloom, color grading | BRL-0146 (adopted) |
 | Tile floor | BRL-0147 (adopted) |
-| Camera framing re-evaluation | BRL-0148 |
+| Camera framing re-evaluation | BRL-0148 (adopted) |
 | Overhead plates and aim lane | BRL-0149 |
 | Toon material and rim | BRL-0150 (adopted) |
 | Fighter outlines | BRL-0151 (adopted) |
@@ -132,22 +132,31 @@ The gameplay camera is fixed, tilted, and uses restrained perspective. There is 
 authoritative height, jumping, or walkable wall top. The depth buffer owns visual occlusion; render
 height, animation, particles, audio, and UI never feed back into simulation.
 
-The accepted gameplay framing targets approximately 14 map cells vertically. The camera uses a
-15-degree vertical field of view, 62-degree elevation, and 1,495-unit distance. The default native
-gameplay content area is 1591×720 (approximately 2.21:1, matching the supplied mobile reference),
-while explicit window-size overrides and live resizing remain supported. At the default aspect the
-conservative visible ground rectangle is approximately 25.40 by 14 cells. Map authors must not
-widen authoritative bounds merely to compensate for camera presentation. BRL-0148 re-evaluates
-these framing values so fighters read larger, in line with the visual direction. Until it lands,
-the values above remain the accepted contract.
+The accepted gameplay framing (BRL-0148) targets approximately 12 map cells vertically. At the
+reference aspect the camera uses a 30-degree vertical field of view, 55-degree elevation, and
+566-unit distance, so a fighter stands about 11% of the screen height and its face and front read.
+The default native gameplay content area is 1591×720 (approximately 2.21:1, matching the supplied
+mobile reference), while explicit window-size overrides and live resizing remain supported. At the
+default aspect the conservative visible ground rectangle is approximately 17.6 by 12 cells: about
+4.9 cells behind the look target and 7.1 ahead, and about 21 cells wide on the fighter's row, so
+the standard 320-unit Pulse Sidearm range stays on screen to either side. Longer reaches (lobs,
+Splash, Sticky Blomb, and ultimates up to 20 cells) and vertical aim beyond about 5–7 cells rely on
+aim look-ahead and the aim indicator rather than the full range being on screen. Map authors must
+not widen authoritative bounds merely to compensate for camera presentation.
+
+Visible area is aspect-fair: no window shape sees more of the arena than the reference aspect on
+either axis. Narrower viewports keep the reference vertical field of view and see less width.
+Wider viewports keep the reference horizontal field of view, so their vertical field of view, and
+therefore their visible depth, shrinks. Viewport auto-aim only considers on-screen targets, so the
+same rule bounds its reach.
 
 Camera fit and follow are decided independently for each axis from the presented map dimensions and
 current logical viewport. Because the tilted perspective ground view is trapezoidal, the client uses
 the narrow near-edge width for its conservative fit rectangle rather than claiming the wider far
 edge. If a complete map axis fits, that camera axis is locked to the map center; otherwise it follows
-the controlled player and clamps at the map edge so the player remains visible. Thus a 25×37 map at
-the default aspect centers its width and scrolls vertically, while larger maps can scroll on both
-axes. Recipe-owned padding remains part of the authoritative bounds, and the camera does not change
+the controlled player and clamps at the map edge so the player remains visible. Thus a 25×37
+production map at the default aspect scrolls on both axes, while a map narrower than about 17
+cells centers its width. Recipe-owned padding remains part of the authoritative bounds, and the camera does not change
 map authority or collision.
 
 A presentation-only camera rig (`presentation_3d/camera_rig.rs`, tuned by the client-only
