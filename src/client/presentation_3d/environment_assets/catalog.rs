@@ -81,6 +81,9 @@ pub(in crate::client::presentation_3d) struct MapVisualProfile {
     pub(in crate::client::presentation_3d) fitting: MapVisualFitting,
     #[serde(default)]
     pub(in crate::client::presentation_3d) adjacency_group: MapAdjacencyGroup,
+    /// Lies flat on the floor (floor details, rubble, debris): no contact shadow (BRL-0152).
+    #[serde(default)]
+    pub(in crate::client::presentation_3d) flat: bool,
 }
 
 #[derive(Deserialize)]

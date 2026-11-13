@@ -52,7 +52,8 @@ tickets tune them through native review but do not change the direction.
   muzzle flashes, and pickups bloom.
 - **Color grading.** Saturation about ×1.15–1.25, applied per theme.
 - **Grounding.** Every fighter, projectile, and prop is grounded by a contact shadow or baked
-  ambient occlusion.
+  ambient occlusion. Static walls and indestructible blockers use the floor's baked darkening;
+  everything else gets a soft blob contact shadow directly beneath it (no SSAO).
 
 ### Floors and environments
 
@@ -101,7 +102,7 @@ the previous presentation for that area:
 | Overhead plates and aim lane | BRL-0149 |
 | Toon material and rim | BRL-0150 (adopted) |
 | Fighter outlines | BRL-0151 (adopted) |
-| Contact shadows / AO | BRL-0152 |
+| Contact shadows / AO | BRL-0152 (adopted) |
 | One environment kit per theme | BRL-0153 |
 | Riff and the character animation set | BRL-0154 |
 | Touch-first HUD | BRL-0155 |
@@ -219,6 +220,25 @@ the Map Maker palette preview), and the generated theme surfaces, primitive figh
 primitive barrel are built as toon materials. Hit flash and concealment variants work on both
 material families. VFX, rings, markers, and status visuals keep their own materials; the Dashboard
 brawler and weapon previews keep PBR until their light rig is reworked.
+
+Grounding (`presentation_3d/contact_shadow.rs`, tuned by the client-only
+`assets/catalogs/contact_shadows.ron`) is a hybrid. Static walls and indestructible blockers are
+grounded by the floor's baked corner darkening. Every other object that stands on the floor gets
+one soft blob contact shadow: fighters and zombies, straight projectiles (including local cosmetic
+shots), sentries, Heist idols, destructible and damageable map objects, and static non-blocking
+props such as concealing foliage and decorations. Lobbed projectiles keep their height-scaled
+ground shadow, and pickups keep their ground glow. Effect tiles, water, markers, and visual profiles
+marked `flat` in `map_asset_visuals.ron` (floor details, rubble, debris) get none. The blob is a
+shared soft-disc mesh drawn just above the floor, below the relationship rings and effect
+overlays, with an unlit dark navy tint per class (fighter, projectile, prop), so it never reaches
+the bloom knee. It is a child of the object's visual root, so it follows the object and disappears
+with it: destroyed cover loses its shadow, and a concealed enemy, which the server does not
+replicate, has none. A locally concealed ally hides its shadow like its outline. Reduced effects
+and the primitive world keep contact shadows. A class with opacity 0 spawns no blobs, which is the
+seam for a lower device tier. SSAO was rejected because it needs depth and normal prepasses,
+disables MSAA, and costs a full-screen pass for little gain under the high gameplay camera. The
+directional light's cast shadows do not reach the gameplay view (its default cascade range ends
+far in front of the floor), so cast shadows currently play no part in grounding.
 
 Presentation reads authoritative or replicated facts and resolves stable presentation identities.
 Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or

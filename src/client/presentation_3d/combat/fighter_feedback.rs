@@ -210,7 +210,7 @@ pub(in super::super) fn update_fighter_concealment_visuals<M: ShadedMaterial>(
     }
 }
 
-pub(super) fn fighter_is_visually_concealed(
+pub(in super::super) fn fighter_is_visually_concealed(
     state: Option<&crate::concealment::ConcealmentPresentationState>,
     current_tick: u64,
     observer_team: Option<crate::combat::TeamId>,

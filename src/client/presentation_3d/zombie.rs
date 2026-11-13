@@ -180,6 +180,7 @@ pub(super) fn reconcile_zombie_mode_visuals(
                 },
                 Transform::from_translation(ground_position(position.0)),
                 Visibility::default(),
+                contact_shadow::GroundContactShadow::fighter(metrics.radius),
                 Name::new("zombie visual"),
             ))
             .id();

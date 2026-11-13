@@ -1,0 +1,20 @@
+// Client-only soft contact shadows (BRL-0152). Presentation only: nothing here feeds simulation or
+// the gameplay content fingerprint. Validation bounds live in
+// `src/client/presentation_3d/contact_shadow.rs`.
+//
+// Static walls and indestructible blockers are grounded by the baked floor darkening of
+// `map_presentation_themes.ron` (`floor.edge_darkening`) instead; everything else gets one soft
+// blob drawn directly under it.
+(
+    schema_version: 1,
+    // Dark navy tint (sRGB): reads as shadow on warm, sand, and grey floors, never as black ink.
+    color: (0.06, 0.07, 0.17),
+    // Fraction of the blob radius at full opacity before the smooth falloff to its edge.
+    core: 0.55,
+    // Per class: `opacity` at the blob core (0 disables the class: the mobile-tier seam) and `size`
+    // relative to the object's footprint: fighters and zombies to the authoritative fighter radius,
+    // projectiles to their visual radius, props to half their footprint on each axis.
+    fighter: (opacity: 0.75, size: 1.7),
+    projectile: (opacity: 0.45, size: 1.5),
+    prop: (opacity: 0.65, size: 1.6),
+)

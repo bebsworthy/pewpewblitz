@@ -25,6 +25,7 @@ mod border;
 mod camera;
 mod camera_rig;
 mod combat;
+mod contact_shadow;
 pub(crate) mod coordinates;
 mod diagnostics;
 pub(crate) mod environment_assets;
@@ -67,6 +68,7 @@ pub(crate) const KENNEY_BLASTER_GRIP_ROTATION: f32 = 0.0;
 // Keep a straight shot nearly on its authoritative plane. A larger lift produces a strong
 // screen-space parallax offset under the tilted orthographic camera and makes it miss the muzzle.
 const STRAIGHT_PROJECTILE_HEIGHT: f32 = 4.0;
+const SENTRY_BASE_RADIUS: f32 = 22.0;
 const LOBBED_PROJECTILE_LAUNCH_HEIGHT: f32 = 20.0;
 const STRAIGHT_PROJECTILE_CATCH_UP_MULTIPLIER: f32 = 3.0;
 /// Duration of the presentation-only kick a fighter takes when its shoot motion starts.
@@ -391,6 +393,7 @@ impl Plugin for WorldPresentationPlugin {
         world_look::install(app);
         toon::install(app);
         combat::install_fighter_outlines(app);
+        contact_shadow::install(app);
         app.add_plugins((
             vfx::ProductionVfxPlugin,
             VfxParticleAdapterPlugin,
@@ -498,6 +501,11 @@ impl Plugin for WorldPresentationPlugin {
                     (
                         combat::attach_fighter_outlines,
                         combat::tag_fighter_rim_relation,
+                    )
+                        .chain(),
+                    (
+                        contact_shadow::attach_contact_shadows,
+                        contact_shadow::update_fighter_contact_shadows,
                     )
                         .chain(),
                     combat::update_fighter_overhead_state,
@@ -624,6 +632,9 @@ fn spawn_heist_safe_visual(
                 ..default()
             },
             Visibility::default(),
+            contact_shadow::GroundContactShadow::prop(
+                Vec2::new(HEIST_IDOL_FOOTPRINT_WIDTH, HEIST_IDOL_FOOTPRINT_DEPTH) * 0.5,
+            ),
             Name::new("Heist team idol"),
         ))
         .id();
@@ -981,6 +992,19 @@ fn reconcile_dynamic_map_visuals(
                 Name::new("dynamic map asset"),
             ))
             .id();
+        if catalog
+            .0
+            .profile(asset.gameplay_profile_id)
+            .is_some_and(|gameplay| {
+                contact_shadow::map_prop_casts_contact_shadow(asset, gameplay, profile)
+            })
+        {
+            commands
+                .entity(visual)
+                .insert(contact_shadow::GroundContactShadow::map_footprint(
+                    asset.footprint_cells,
+                ));
+        }
         if let (Some(profile), Some(fitted)) = (profile, fitted) {
             commands.entity(visual).with_children(|parent| {
                 parent.spawn((
@@ -1194,7 +1218,7 @@ pub(in crate::client) fn setup_3d_foundation(
         projectile_trail: meshes.add(projectile_trail_mesh()),
         lobbed_projectile: meshes.add(Sphere::new(9.0)),
         unit_cuboid: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-        sentry_base: meshes.add(Cylinder::new(22.0, 8.0)),
+        sentry_base: meshes.add(Cylinder::new(SENTRY_BASE_RADIUS, 8.0)),
         sentry_body: meshes.add(Cylinder::new(15.0, 24.0)),
         ground_ring: meshes.add(
             Annulus::new(fighter_radius - 3.0, fighter_radius)
@@ -1948,6 +1972,11 @@ fn materialize_map_static_visuals(
                 )
             })
         });
+        if let Some(gameplay) = catalog.profile(asset.gameplay_profile_id) {
+            contact_shadow::spawn_static_prop_shadow(
+                commands, marker, asset, gameplay, profile, center, rotation,
+            );
+        }
         if let (Some(profile), Some(fitted)) = (profile, fitted) {
             spawn_imported_map_asset(commands, marker, center, rotation, profile, fitted);
         } else if placement.asset_id == crate::map::WATER_ASSET {

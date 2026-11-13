@@ -96,15 +96,23 @@ pub(super) fn floor_occluder_cells(
         .filter_map(|placement| {
             let asset = catalog.asset(placement.asset_id)?;
             let profile = catalog.profile(asset.gameplay_profile_id)?;
-            let static_wall = asset.slot == crate::map::MapAssetSlot::Feature
-                && profile.player_collision == crate::map::PlayerCollision::Block
-                && !map_profile_has_dynamic_runtime(profile);
-            static_wall
+            grounded_by_floor_darkening(asset, profile)
                 .then(|| crate::map::placement_cells(snapshot.dimensions, asset, placement))
                 .flatten()
         })
         .flatten()
         .collect()
+}
+
+/// Static walls and indestructible blockers: the baked floor darkening grounds them, so they need
+/// no contact shadow (BRL-0152).
+pub(super) fn grounded_by_floor_darkening(
+    asset: &crate::map::MapAssetDefinition,
+    profile: &crate::map::MapGameplayProfile,
+) -> bool {
+    asset.slot == crate::map::MapAssetSlot::Feature
+        && profile.player_collision == crate::map::PlayerCollision::Block
+        && !map_profile_has_dynamic_runtime(profile)
 }
 
 /// Deterministic per-cell value in [-1, 1].

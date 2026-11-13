@@ -1083,6 +1083,7 @@ fn spawn_fighter(
             },
             Transform::from_translation(ground_position(position)),
             Visibility::default(),
+            contact_shadow::GroundContactShadow::fighter(fighter_radius),
             Name::new("V3 independent fighter visual root"),
         ))
         .id();
@@ -1135,6 +1136,7 @@ pub(super) fn spawn_projectile(
     lobbed: Option<&crate::combat::LobbedFlight>,
     signature: vfx::CombatVisualSignature,
 ) -> (Entity, bool) {
+    let visual_radius = body.map_or(9.0, |body| body.shape.bounding_radius());
     let root = commands
         .spawn((
             CombatVisualOwner(owner),
@@ -1149,6 +1151,15 @@ pub(super) fn spawn_projectile(
             Name::new("V3 independent projectile visual root"),
         ))
         .id();
+    if lobbed.is_none() {
+        // Lobbed projectiles keep their own height-scaled ground shadow.
+        commands
+            .entity(root)
+            .insert(contact_shadow::GroundContactShadow::projectile(
+                visual_radius,
+                STRAIGHT_PROJECTILE_HEIGHT,
+            ));
+    }
     commands.entity(root).with_children(|parent| {
         let transform = if lobbed.is_some() {
             Transform::default()
@@ -1163,7 +1174,6 @@ pub(super) fn spawn_projectile(
             primitives.projectile.clone()
         };
         let relationship_material = team_material(team, materials);
-        let visual_radius = body.map_or(9.0, |body| body.shape.bounding_radius());
         if lobbed.is_some() {
             parent
                 .spawn((
@@ -1317,6 +1327,7 @@ fn spawn_sentry(
             signature,
             Transform::from_translation(ground_position(position)),
             Visibility::default(),
+            contact_shadow::GroundContactShadow::prop(Vec2::splat(SENTRY_BASE_RADIUS)),
             Name::new("V3 independent sentry visual root"),
         ))
         .id();
