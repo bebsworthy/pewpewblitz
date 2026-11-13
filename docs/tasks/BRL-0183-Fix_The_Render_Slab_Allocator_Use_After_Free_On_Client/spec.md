@@ -84,3 +84,6 @@ Bisect across the Phase 2 commits (bf8e19fd…884e0488) with a native run that s
   pointing at the deleted worktree. Use a separate `CARGO_TARGET_DIR` for bisect worktrees, or
   `cargo clean -p brawler` afterwards, and confirm "Compiling brawler (<expected path>)" in the
   evidence log. Native runs also rewrite `data/server/profiles.sqlite3`; restore it before handoff.
+
+# Native acceptance (2026-11-13)
+- User session `just run 1` at e03db203: client start → 3v3 Practice match → match completion → lobby → second match reached play. Client log shows zero `slab_allocator` errors across start, both matches and the exit (previously 2 per start/exit). Acceptance criteria met.
