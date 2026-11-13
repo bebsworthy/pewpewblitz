@@ -674,16 +674,28 @@ mod grid_catalog_tests {
             .map(|placement| placement.asset_id)
             .chain(recipe.filled_rects.iter().map(|rect| rect.asset_id))
             .collect();
-        // Destruction outcomes replace placements with these assets at runtime.
-        for damage in &shared.damage_profiles {
-            let outcome = match damage.terminal {
-                crate::map::MapObjectTerminalBehavior::Explode { outcome, .. }
-                | crate::map::MapObjectTerminalBehavior::DropPickup { outcome, .. } => outcome,
-            };
-            if let crate::map::MapPlacementOutcome::ReplacedWith(asset) = outcome {
-                assets.insert(asset);
-            }
-        }
+        // Destroying a placed asset may replace it with another asset at runtime.
+        let replacements: Vec<_> = assets
+            .iter()
+            .filter_map(|id| shared.asset(*id))
+            .filter_map(|asset| shared.profile(asset.gameplay_profile_id))
+            .filter_map(|profile| match profile.durability {
+                crate::map::MapDurabilityBehavior::HitPoints(id) => shared
+                    .damage_profile(id)
+                    .map(|damage| damage.terminal.outcome()),
+                crate::map::MapDurabilityBehavior::Indestructible => match profile.destruction {
+                    crate::map::MapDestructionBehavior::ReplaceOnMapDestruction(asset) => {
+                        Some(crate::map::MapPlacementOutcome::ReplacedWith(asset))
+                    }
+                    _ => None,
+                },
+            })
+            .filter_map(|outcome| match outcome {
+                crate::map::MapPlacementOutcome::ReplacedWith(asset) => Some(asset),
+                crate::map::MapPlacementOutcome::Removed => None,
+            })
+            .collect();
+        assets.extend(replacements);
         let mut ids: std::collections::BTreeSet<_> = assets
             .into_iter()
             .filter_map(|id| shared.asset(id))
@@ -711,17 +723,17 @@ mod grid_catalog_tests {
         ids
     }
 
-    #[test]
-    fn crossroads_facility_maps_render_only_their_theme_kit() {
+    /// Asserts every built-in map of `theme` draws each non-generated-surface visual from the
+    /// theme's kit, and returns the number of maps checked.
+    fn assert_theme_maps_render_only_their_kit(theme: crate::map::MapPresentationThemeId) -> usize {
         let shared = crate::map::MapContentCatalog::embedded().unwrap();
         let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
         let source: super::MapVisualSource = ron::from_str(super::MAP_VISUAL_CATALOG).unwrap();
-        let theme = crate::map::MapPresentationThemeId(1);
         let kit = source
             .theme_kits
             .iter()
             .find(|kit| kit.theme == theme)
-            .expect("Crossroads Facility has a theme kit");
+            .unwrap_or_else(|| panic!("theme {} has a kit", theme.0));
         let mut maps = 0;
         for preset in shared
             .presets
@@ -731,17 +743,28 @@ mod grid_catalog_tests {
             maps += 1;
             for id in builtin_map_visual_ids(&shared, preset) {
                 let visual = visuals.resolve(id, theme).unwrap();
-                if let Some(path) = visual.imported_path() {
-                    assert!(
+                match (&visual.kind, visual.imported_path()) {
+                    (_, Some(path)) => assert!(
                         path.starts_with(&kit.directory),
                         "{} draws visual {} from outside its kit: {path}",
                         preset.key,
                         id.0
-                    );
+                    ),
+                    // Surfaces, rubble, and effect tiles stay generated from the theme palette.
+                    (
+                        super::MapVisualKind::GeneratedGround
+                        | super::MapVisualKind::GeneratedWater
+                        | super::MapVisualKind::GeneratedRubble
+                        | super::MapVisualKind::GeneratedEffectTile { .. },
+                        None,
+                    ) => {}
+                    (_, None) => panic!(
+                        "{} draws visual {} as a generated prop instead of a kit piece",
+                        preset.key, id.0
+                    ),
                 }
             }
         }
-        assert_eq!(maps, 6, "every theme-1 built-in map is covered");
         for visual in &kit.visuals {
             assert_eq!(visual.tint, (1.0, 1.0, 1.0), "kit visuals carry no tint");
             let path = visual.imported_path().unwrap();
@@ -756,7 +779,23 @@ mod grid_catalog_tests {
         let bush = visuals
             .resolve(crate::map::MapVisualProfileId(33), theme)
             .unwrap();
-        assert!(bush.sway);
+        assert!(bush.sway, "theme {} concealment foliage sways", theme.0);
+        maps
+    }
+
+    #[test]
+    fn crossroads_facility_maps_render_only_their_theme_kit() {
+        let maps = assert_theme_maps_render_only_their_kit(crate::map::MapPresentationThemeId(1));
+        assert_eq!(maps, 6, "every theme-1 built-in map is covered");
+    }
+
+    #[test]
+    fn tidal_garden_maps_render_only_their_theme_kit() {
+        let theme = crate::map::MapPresentationThemeId(2);
+        let maps = assert_theme_maps_render_only_their_kit(theme);
+        assert_eq!(maps, 2, "Tidal Garden and Powderline Vault are covered");
+        let shared = crate::map::MapContentCatalog::embedded().unwrap();
+        let visuals = super::MapVisualCatalog::embedded(&shared).unwrap();
         assert!(
             !visuals
                 .resolve(
@@ -765,7 +804,7 @@ mod grid_catalog_tests {
                 )
                 .unwrap()
                 .sway,
-            "other themes keep their own foliage until their kit lands"
+            "theme 3 keeps its own foliage until its kit lands"
         );
     }
 

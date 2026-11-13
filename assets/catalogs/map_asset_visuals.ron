@@ -63,5 +63,22 @@
                 (id: MapVisualProfileId(42), kind: Imported(path: "brawler/models/original/environment/crossroads-facility/pickup.glb"), scale: 0.55, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Decoration, fitting: Contained),
             ],
         ),
+        (
+            theme: MapPresentationThemeId(2),
+            directory: "brawler/models/original/environment/tidal-garden/",
+            visuals: [
+                (id: MapVisualProfileId(32), kind: Imported(path: "brawler/models/original/environment/tidal-garden/sea-stone-wall.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Wall, fitting: Exact, adjacency_group: Wall),
+                (id: MapVisualProfileId(33), kind: Imported(path: "brawler/models/original/environment/tidal-garden/seagrass-bush.glb"), scale: 0.96, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Vegetation, fitting: Contained, adjacency_group: Vegetation, sway: true),
+                (id: MapVisualProfileId(34), kind: Imported(path: "brawler/models/original/environment/tidal-garden/lifeguard-fence.glb"), scale: 0.95, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Barrier, fitting: Contained),
+                (id: MapVisualProfileId(36), kind: Imported(path: "brawler/models/original/environment/tidal-garden/scallop-shell.glb"), scale: 0.62, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Decoration, fitting: Contained),
+                (id: MapVisualProfileId(39), kind: Imported(path: "brawler/models/original/environment/tidal-garden/sea-vault.glb"), scale: 0.96, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Cover, fitting: Contained),
+                (id: MapVisualProfileId(42), kind: Imported(path: "brawler/models/original/environment/tidal-garden/pickup.glb"), scale: 0.55, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Decoration, fitting: Contained),
+                (id: MapVisualProfileId(43), kind: Imported(path: "brawler/models/original/environment/tidal-garden/cactus.glb"), scale: 0.84, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Cover, fitting: Contained),
+                (id: MapVisualProfileId(45), kind: Imported(path: "brawler/models/original/environment/tidal-garden/coral-brick-wall.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Wall, fitting: Exact, adjacency_group: Wall),
+                (id: MapVisualProfileId(46), kind: Imported(path: "brawler/models/original/environment/tidal-garden/tide-gate-wall.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Wall, fitting: Exact, adjacency_group: Wall),
+                (id: MapVisualProfileId(47), kind: Imported(path: "brawler/models/original/environment/tidal-garden/driftwood-wall.glb"), scale: 1.0, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Wall, fitting: Exact, adjacency_group: Wall),
+                (id: MapVisualProfileId(48), kind: Imported(path: "brawler/models/original/environment/tidal-garden/beach-crate.glb"), scale: 0.91, yaw_degrees: 0.0, vertical_offset: 0.0, fallback: Cover, fitting: Contained),
+            ],
+        ),
     ],
 )

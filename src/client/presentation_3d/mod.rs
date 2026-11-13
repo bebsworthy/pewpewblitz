@@ -924,7 +924,8 @@ fn reconcile_dynamic_map_visuals(
         let profile = map_visuals.as_deref().and_then(|visuals| {
             visuals.resolve(asset.visual_profile_id, snapshot.presentation_theme_id)
         });
-        let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
+        // The visual root carries the placement rotation, so children fit the unrotated footprint.
+        let footprint = asset.footprint_cells;
         let imported_requested = profile.is_some_and(|profile| {
             matches!(
                 profile.kind,
@@ -1938,7 +1939,8 @@ fn materialize_map_static_visuals(
             .map(|candidate| candidate.cell)
             .collect();
         let adjacency = crate::map::cardinal_adjacency_mask(placement.cell, &adjacent_cells);
-        let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
+        // Every visual below is rotated by the placement, so it is sized in the unrotated footprint.
+        let footprint = asset.footprint_cells;
         let fitted = profile.and_then(|profile| {
             imported.and_then(|scenes| {
                 scenes.fitted(
@@ -2694,6 +2696,23 @@ mod tests {
         assert_eq!(barrel.scale, Vec3::ONE);
         assert_eq!(debris.translation, Vec3::Y * 4.0);
         assert_eq!(debris.scale, Vec3::new(0.5, 0.25, 0.5));
+    }
+
+    #[test]
+    fn rotated_rectangular_dynamic_visual_matches_its_rotated_authoritative_footprint() {
+        // A 2x1 breakable barrier placed with one quarter turn occupies 1x2 cells in the world
+        // (Tidal Garden). The root carries the rotation; the child is sized in the local footprint.
+        let local = crate::map::MapFootprint {
+            width: 2,
+            height: 1,
+        };
+        let root = Quat::from_rotation_y(core::f32::consts::FRAC_PI_2);
+        let child = primitive_dynamic_visual_transform(crate::map::BREAKABLE_BARRIER_ASSET, local);
+        let world_half = (root * (child.scale * Vec3::new(1.0, 0.0, 1.0))).abs();
+        let world = local.rotated(1);
+
+        assert!((world_half.x - f32::from(world.width) * 0.5).abs() < 1e-5);
+        assert!((world_half.z - f32::from(world.height) * 0.5).abs() < 1e-5);
     }
 
     #[test]

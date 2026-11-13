@@ -406,6 +406,9 @@ mod tests {
             assert!(bounds.min.y.abs() < 1e-4, "{path} must stand on the ground");
             checked += 1;
         }
-        assert_eq!(checked, 14);
+        assert_eq!(
+            checked, 25,
+            "14 Crossroads Facility + 11 Tidal Garden pieces"
+        );
     }
 }

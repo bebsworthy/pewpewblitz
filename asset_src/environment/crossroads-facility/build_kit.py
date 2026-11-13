@@ -4,15 +4,9 @@ Run headless from the repository root (see `just facility-kit`):
 
     blender -b --factory-startup -P asset_src/environment/crossroads-facility/build_kit.py
 
-Every piece is assembled from a few bevelled blocks, cylinders, and lobes that share one kit
-contract, so the theme reads as one place built from one set of parts:
-
-- 1 Blender unit is one map cell; +Z is up; the origin is the ground centre of the cell.
-- One chamfer size (`BEVEL`) on every block and cylinder cap edge.
-- One material whose colour is a flat per-face vertex palette in `COLOR_0`; no normals (Bevy
-  rebuilds flat normals), UVs, or textures. The toon material shades it in game.
-- Baked shading in the palette: upward faces are lifted (`TOP_HIGHLIGHT`) and every vertex is
-  darkened towards the ground by a height gradient (`AO_FLOOR` .. 1.0 over `AO_HEIGHT`).
+This file owns only the theme-1 palette and piece geometry. The kit contract shared by every
+theme kit (one bevel, flat per-face vertex palette, top-face highlight, baked height AO, one
+material, export, self-validation, review sheet) lives in `asset_src/environment/kit_common.py`.
 
 It writes the source master `kit.blend`, the review sheet `previews/kit-sheet.png`, and one GLB per
 piece under `assets/brawler/models/original/environment/crossroads-facility/`, then validates every
@@ -21,29 +15,16 @@ export and fails the run when the contract is broken. Never hand-edit the GLBs.
 
 from __future__ import annotations
 
-import colorsys
-import json
 import math
-import struct
 import sys
 from pathlib import Path
 
-import bmesh
-import bpy
-from mathutils import Matrix, Vector
-
-
 HERE = Path(__file__).resolve().parent
-REPOSITORY = HERE.parents[2]
-BLEND_PATH = HERE / "kit.blend"
-PREVIEW_DIR = HERE / "previews"
-OUTPUT_DIR = REPOSITORY / "assets" / "brawler" / "models" / "original" / "environment" / "crossroads-facility"
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(HERE.parent))
 
-BEVEL = 0.045
-TOP_HIGHLIGHT = 1.18
-AO_FLOOR = 0.62
-AO_HEIGHT = 0.35
-TRIANGLE_BUDGET = 2_500
+from kit_common import KitPiece, KitSpec, Piece, build  # noqa: E402
+
 
 PALETTE = {
     # Walls: cool slate concrete with a pale cap, a dark plinth, and a dark mortar core.
@@ -75,133 +56,10 @@ PALETTE = {
     "orange_dark": "#B85A18",
     "stem": "#4E7A2A",
 }
-PALETTE_KEYS = list(PALETTE)
-
-
-def srgb(hex_color: str) -> tuple[float, float, float]:
-    value = hex_color.lstrip("#")
-    return tuple(int(value[index:index + 2], 16) / 255.0 for index in (0, 2, 4))
-
-
-def to_linear(channel: float) -> float:
-    if channel <= 0.04045:
-        return channel / 12.92
-    return ((channel + 0.055) / 1.055) ** 2.4
-
-
-def smoothstep(edge0: float, edge1: float, value: float) -> float:
-    t = min(1.0, max(0.0, (value - edge0) / (edge1 - edge0)))
-    return t * t * (3.0 - 2.0 * t)
 
 
 # --------------------------------------------------------------------------------------------
-# Parts: every part is its own object until the piece is joined.
-# --------------------------------------------------------------------------------------------
-
-class Piece:
-    def __init__(self, name: str):
-        self.name = name
-        self.parts: list[bpy.types.Object] = []
-
-    def _object(self, bm: bmesh.types.BMesh, color: str) -> bpy.types.Object:
-        mesh = bpy.data.meshes.new(f"{self.name}_part_{len(self.parts)}")
-        bm.to_mesh(mesh)
-        bm.free()
-        attribute = mesh.attributes.new("pal", "INT", "FACE")
-        attribute.data.foreach_set("value", [PALETTE_KEYS.index(color)] * len(mesh.polygons))
-        obj = bpy.data.objects.new(mesh.name, mesh)
-        bpy.context.scene.collection.objects.link(obj)
-        self.parts.append(obj)
-        return obj
-
-    def box(self, color, lo, hi, bevel=BEVEL, rot_z=0.0, rot_x=0.0, rot_y=0.0):
-        lo, hi = Vector(lo), Vector(hi)
-        size = hi - lo
-        bm = bmesh.new()
-        bmesh.ops.create_cube(bm, size=1.0)
-        for vertex in bm.verts:
-            vertex.co = Vector((vertex.co.x * size.x, vertex.co.y * size.y, vertex.co.z * size.z))
-        offset = min(bevel, 0.3 * min(size))
-        if offset > 1e-4:
-            bmesh.ops.bevel(bm, geom=list(bm.verts) + list(bm.edges), offset=offset,
-                            offset_type="OFFSET", segments=1, profile=0.5, affect="EDGES",
-                            clamp_overlap=True)
-        rotation = (Matrix.Rotation(rot_z, 4, "Z") @ Matrix.Rotation(rot_y, 4, "Y")
-                    @ Matrix.Rotation(rot_x, 4, "X"))
-        bmesh.ops.transform(bm, matrix=Matrix.Translation((lo + hi) / 2) @ rotation, verts=bm.verts)
-        return self._object(bm, color)
-
-    def cylinder(self, color, base, radius, height, segments=10, bevel=BEVEL, axis="Z"):
-        bm = bmesh.new()
-        bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False, segments=segments,
-                              radius1=radius, radius2=radius, depth=height)
-        rings = [edge for edge in bm.edges
-                 if abs(edge.verts[0].co.z - edge.verts[1].co.z) < 1e-6]
-        offset = min(bevel, 0.3 * min(radius, height))
-        if offset > 1e-4:
-            bmesh.ops.bevel(bm, geom=rings + list({v for e in rings for v in e.verts}),
-                            offset=offset, offset_type="OFFSET", segments=1, profile=0.5,
-                            affect="EDGES", clamp_overlap=True)
-        orient = {"Z": Matrix.Identity(4), "X": Matrix.Rotation(math.pi / 2, 4, "Y"),
-                  "Y": Matrix.Rotation(math.pi / 2, 4, "X")}[axis]
-        bmesh.ops.transform(bm, matrix=Matrix.Translation(Vector(base)) @ orient, verts=bm.verts)
-        return self._object(bm, color)
-
-    def lobe(self, color, center, radii):
-        bm = bmesh.new()
-        bmesh.ops.create_icosphere(bm, subdivisions=2, radius=1.0)
-        for vertex in bm.verts:
-            vertex.co = Vector((vertex.co.x * radii[0], vertex.co.y * radii[1],
-                                vertex.co.z * radii[2])) + Vector(center)
-        return self._object(bm, color)
-
-    def join(self, material, ao_floor=AO_FLOOR) -> bpy.types.Object:
-        bpy.ops.object.select_all(action="DESELECT")
-        for part in self.parts:
-            part.select_set(True)
-        bpy.context.view_layer.objects.active = self.parts[0]
-        bpy.ops.object.join()
-        obj = bpy.context.view_layer.objects.active
-        obj.name = f"mesh_{self.name.replace('-', '_')}"
-        obj.data.name = f"MESH__{self.name}"
-        mesh = obj.data
-        ground = min(vertex.co.z for vertex in mesh.vertices)
-        mesh.transform(Matrix.Translation((0.0, 0.0, -ground)))
-        bake_palette(mesh, ao_floor)
-        mesh.materials.clear()
-        mesh.materials.append(material)
-        for polygon in mesh.polygons:
-            polygon.material_index = 0
-            polygon.use_smooth = False
-        obj["asset_id"] = self.name
-        obj["owning_ticket"] = "BRL-0153"
-        obj.select_set(False)
-        return obj
-
-
-def bake_palette(mesh, ao_floor: float) -> None:
-    """Writes the flat palette with the top-face highlight and height AO into `Col`."""
-    palette = mesh.attributes["pal"].data
-    min_z = min(vertex.co.z for vertex in mesh.vertices)
-    colors = []
-    for polygon in mesh.polygons:
-        base = srgb(PALETTE[PALETTE_KEYS[palette[polygon.index].value]])
-        lift = TOP_HIGHLIGHT if polygon.normal.z > 0.65 else 1.0
-        for loop_index in polygon.loop_indices:
-            z = mesh.vertices[mesh.loops[loop_index].vertex_index].co.z - min_z
-            ao = ao_floor + (1.0 - ao_floor) * smoothstep(0.0, AO_HEIGHT, z)
-            hue, lightness, saturation = colorsys.rgb_to_hls(*base)
-            red, green, blue = colorsys.hls_to_rgb(hue, min(1.0, lightness * lift), saturation)
-            colors.extend((to_linear(red * ao), to_linear(green * ao), to_linear(blue * ao), 1.0))
-    attribute = mesh.color_attributes.new("Col", "FLOAT_COLOR", "CORNER")
-    attribute.data.foreach_set("color", colors)
-    mesh.color_attributes.active_color = attribute
-    mesh.color_attributes.render_color_index = mesh.color_attributes.active_color_index
-    mesh.attributes.remove(mesh.attributes["pal"])
-
-
-# --------------------------------------------------------------------------------------------
-# Pieces. Each returns (piece, fitting, flat). Front faces -Y (towards the gameplay camera).
+# Pieces. Each returns a Piece; its front faces -Y (towards the gameplay camera).
 # --------------------------------------------------------------------------------------------
 
 def wall_courses(piece: Piece, splits: list[list[float]]) -> None:
@@ -408,190 +266,35 @@ def floor_hatch() -> Piece:
     return piece
 
 
-# (builder, visual profile id it serves, fitting, flat-lying, baked AO floor)
-PIECES = [
-    (wall_block, 1, "Exact", False, AO_FLOOR),
-    (wall_course, 2, "Exact", False, AO_FLOOR),
-    (crate, 24, "Contained", False, AO_FLOOR),
-    (bush, 33, "Contained", False, 0.55),
-    (barrier, 34, "Contained", False, AO_FLOOR),
-    (barrel, 37, "Contained", False, AO_FLOOR),
-    (barrel_debris, 38, "Contained", True, 1.0),
-    (chest, 40, "Contained", False, AO_FLOOR),
-    (vault, 39, "Contained", False, AO_FLOOR),
-    (pickup, 42, "Contained", False, 0.85),
-    (weapon_rack, 11, "Contained", False, AO_FLOOR),
-    (target, 12, "Contained", False, AO_FLOOR),
-    (pumpkin, 13, "Contained", False, 0.75),
-    (floor_hatch, 14, "Contained", True, 1.0),
-]
 
 
-# --------------------------------------------------------------------------------------------
-# Export and validation
-# --------------------------------------------------------------------------------------------
-
-def kit_material() -> bpy.types.Material:
-    mat = bpy.data.materials.new("MAT_facility_kit")
-    mat.use_nodes = True
-    nodes = mat.node_tree.nodes
-    bsdf = next(node for node in nodes if node.type == "BSDF_PRINCIPLED")
-    bsdf.inputs["Roughness"].default_value = 0.8
-    bsdf.inputs["Metallic"].default_value = 0.0
-    color = nodes.new("ShaderNodeVertexColor")
-    color.layer_name = "Col"
-    mat.node_tree.links.new(color.outputs["Color"], bsdf.inputs["Base Color"])
-    return mat
-
-
-def export_piece(obj, path: Path) -> None:
-    bpy.ops.object.select_all(action="DESELECT")
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.export_scene.gltf(
-        filepath=str(path), export_format="GLB", use_selection=True, export_apply=False,
-        export_yup=True, export_texcoords=False, export_normals=False, export_tangents=False,
-        export_materials="EXPORT", export_vertex_color="MATERIAL", export_all_vertex_colors=False,
-        export_attributes=False, export_extras=False, export_cameras=False, export_lights=False,
-        export_animations=False, export_skins=False, export_morph=False,
-        export_draco_mesh_compression_enable=False,
-    )
-    obj.select_set(False)
-
-
-def read_glb(path: Path):
-    data = path.read_bytes()
-    magic, _version, _length = struct.unpack_from("<4sII", data, 0)
-    assert magic == b"glTF", f"{path} is not a GLB"
-    chunk_length, chunk_type = struct.unpack_from("<I4s", data, 12)
-    assert chunk_type == b"JSON"
-    return json.loads(data[20:20 + chunk_length]), len(data)
-
-
-def validate_piece(name: str, path: Path, fitting: str, flat: bool) -> dict:
-    document, size = read_glb(path)
-    problems = []
-    meshes = document.get("meshes", [])
-    if len(meshes) != 1 or len(meshes[0]["primitives"]) != 1:
-        problems.append("expected one mesh with one primitive")
-    if len(document.get("materials", [])) != 1:
-        problems.append("expected exactly one material")
-    primitive = meshes[0]["primitives"][0]
-    attributes = set(primitive["attributes"])
-    if attributes != {"POSITION", "COLOR_0"}:
-        problems.append(f"unexpected attributes {sorted(attributes)}")
-    for forbidden in ("cameras", "lights", "skins", "animations", "textures", "images"):
-        if document.get(forbidden):
-            problems.append(f"export contains {forbidden}")
-    triangles = document["accessors"][primitive["indices"]]["count"] // 3
-    if triangles > TRIANGLE_BUDGET:
-        problems.append(f"{triangles} triangles exceed the {TRIANGLE_BUDGET} budget")
-    position = document["accessors"][primitive["attributes"]["POSITION"]]
-    # glTF is +Y up: x is width, z is depth.
-    lo, hi = position["min"], position["max"]
-    width, height, depth = hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]
-    if min(width, height, depth) <= 0.0:
-        problems.append("empty bounds")
-    if abs(lo[1]) > 1e-4:
-        problems.append(f"piece is not grounded (min y {lo[1]})")
-    if fitting == "Exact" and (abs(width - 1.0) > 1e-3 or abs(depth - 1.0) > 1e-3):
-        problems.append(f"exact piece must fill one cell, got {width:.4f} x {depth:.4f}")
-    if flat and height > 0.1:
-        problems.append(f"flat piece is {height:.3f} tall")
-    report = {
-        "glb": str(path.relative_to(REPOSITORY)), "bytes": size, "triangles": triangles,
-        "width": round(width, 4), "depth": round(depth, 4), "height": round(height, 4),
-    }
-    if problems:
-        raise SystemExit(f"KIT EXPORT INVALID {name}: " + "; ".join(problems) + f" :: {report}")
-    return report
-
-
-# --------------------------------------------------------------------------------------------
-# Review sheet (Workbench, vertex colours, gameplay-like 55-degree view)
-# --------------------------------------------------------------------------------------------
-
-def review_sheet(paths: list[Path]) -> None:
-    """Re-imports every exported GLB (a round-trip check of the runtime files) into a sheet."""
-    scene = bpy.context.scene
-    columns = 7
-    spacing = 1.9
-    copies = []
-    for index, path in enumerate(paths):
-        row, column = divmod(index, columns)
-        before = set(bpy.data.objects)
-        bpy.ops.import_scene.gltf(filepath=str(path))
-        for imported in set(bpy.data.objects) - before:
-            imported.location = Vector(((column - (columns - 1) / 2) * spacing,
-                                        row * spacing * 1.2, 0.0))
-            if imported.type == "MESH":
-                attributes = imported.data.color_attributes
-                if attributes:
-                    attributes.active_color = attributes[0]
-            copies.append(imported)
-    ground = bpy.data.objects.new("REVIEW_ground", bpy.data.meshes.new("REVIEW_ground"))
-    bm = bmesh.new()
-    bmesh.ops.create_grid(bm, x_segments=1, y_segments=1, size=20.0)
-    bm.to_mesh(ground.data)
-    bm.free()
-    scene.collection.objects.link(ground)
-    camera = bpy.data.objects.new("REVIEW_camera", bpy.data.cameras.new("REVIEW_camera"))
-    scene.collection.objects.link(camera)
-    camera.data.type = "ORTHO"
-    camera.data.ortho_scale = 14.5
-    elevation = math.radians(55.0)
-    target = Vector((0.0, spacing * 0.6, 0.4))
-    camera.location = target + Vector((0.0, -math.cos(elevation), math.sin(elevation))) * 30.0
-    direction = target - camera.location
-    camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-    scene.camera = camera
-    scene.render.engine = "BLENDER_WORKBENCH"
-    scene.display.shading.light = "STUDIO"
-    scene.display.shading.color_type = "VERTEX"
-    scene.display.shading.show_shadows = True
-    scene.display.shading.show_cavity = False
-    scene.render.resolution_x, scene.render.resolution_y = 1800, 760
-    scene.render.film_transparent = False
-    scene.render.filepath = str(PREVIEW_DIR / "kit-sheet.png")
-    bpy.ops.render.render(write_still=True)
-    for copy in copies:
-        bpy.data.objects.remove(copy)
-    bpy.data.objects.remove(ground)
-    bpy.data.objects.remove(camera)
-
-
-def main() -> None:
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    bpy.context.preferences.filepaths.save_version = 0
-    scene = bpy.context.scene
-    scene.name = "Crossroads Facility Kit Source"
-    scene["owning_ticket"] = "BRL-0153"
-    scene.unit_settings.system = "NONE"
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    material = kit_material()
-    export_collection = bpy.data.collections.new("EXPORT__crossroads_facility")
-    scene.collection.children.link(export_collection)
-    reports = {}
-    for builder, visual_id, fitting, flat, ao_floor in PIECES:
-        piece = builder()
-        obj = piece.join(material, ao_floor)
-        scene.collection.objects.unlink(obj)
-        export_collection.objects.link(obj)
-        obj["visual_profile_id"] = visual_id
-        path = OUTPUT_DIR / f"{piece.name}.glb"
-        export_piece(obj, path)
-        report = validate_piece(piece.name, path, fitting, flat)
-        report.update({"visual_profile_id": visual_id, "fitting": fitting, "flat": flat,
-                       "contained_fill": round(max(report["width"], report["depth"]), 4)})
-        reports[piece.name] = report
-    if "--no-renders" not in sys.argv:
-        export_collection.hide_render = True
-        review_sheet([OUTPUT_DIR / f"{name}.glb" for name in reports])
-        export_collection.hide_render = False
-    bpy.ops.wm.save_as_mainfile(filepath=str(BLEND_PATH), check_existing=False)
-    print("KIT_BUILD_REPORT " + json.dumps(reports, sort_keys=True))
+# Builder, visual profile id it serves, fitting, flat-lying, baked AO floor.
+KIT = KitSpec(
+    slug="crossroads-facility",
+    ticket="BRL-0153",
+    scene_name="Crossroads Facility Kit Source",
+    material_name="MAT_facility_kit",
+    collection_name="EXPORT__crossroads_facility",
+    palette=PALETTE,
+    source_dir=HERE,
+    pieces=[
+        KitPiece(wall_block, 1, "Exact"),
+        KitPiece(wall_course, 2, "Exact"),
+        KitPiece(crate, 24, "Contained"),
+        KitPiece(bush, 33, "Contained", ao_floor=0.55),
+        KitPiece(barrier, 34, "Contained"),
+        KitPiece(barrel, 37, "Contained"),
+        KitPiece(barrel_debris, 38, "Contained", flat=True, ao_floor=1.0),
+        KitPiece(chest, 40, "Contained"),
+        KitPiece(vault, 39, "Contained"),
+        KitPiece(pickup, 42, "Contained", ao_floor=0.85),
+        KitPiece(weapon_rack, 11, "Contained"),
+        KitPiece(target, 12, "Contained"),
+        KitPiece(pumpkin, 13, "Contained", ao_floor=0.75),
+        KitPiece(floor_hatch, 14, "Contained", flat=True, ao_floor=1.0),
+    ],
+)
 
 
 if __name__ == "__main__":
-    main()
+    build(KIT)

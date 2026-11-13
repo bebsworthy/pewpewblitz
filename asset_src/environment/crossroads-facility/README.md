@@ -8,7 +8,9 @@ hand-edited model data is involved.
 
 ## Files
 
-- `build_kit.py` — the builder and exporter (all geometry, palette, baked shading, validation).
+- `build_kit.py` — the theme-1 palette and piece geometry. The kit contract shared with every
+  theme kit (parts, bevel, palette bake, material, export, validation, review sheet) lives in
+  `../kit_common.py` (BRL-0187).
 - `kit.blend` — the generated source master: the `EXPORT__crossroads_facility` collection with one
   joined `mesh_<piece>` object per piece.
 - `previews/kit-sheet.png` — generated review sheet. It re-imports every exported GLB (a round-trip

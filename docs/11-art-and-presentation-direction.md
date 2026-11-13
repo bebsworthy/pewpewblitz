@@ -691,7 +691,8 @@ content (asset and visual-profile IDs, footprints, gameplay profiles) and its fi
 unchanged. Kit visuals keep the default's primitive fallback, import only from the kit's directory,
 and carry their colour in the kit palette rather than a tint. Every presentation site that knows the
 map (static and dynamic map assets, Heist safes, restoration pickups, Map Maker markers and palette
-previews) resolves through the theme. Imported scenes load and admit once per GLB path.
+previews) resolves through the theme. Imported scenes load and admit once per GLB path. Every
+kit builder shares one kit contract module (`asset_src/environment/kit_common.py`).
 Asset paths, tints, transforms, and fallbacks remain client-only and do not contribute renderer
 details to the gameplay protocol. Presentation reconciliation keys include the accepted map
 instance, recipe fingerprint, and theme so replacement cannot retain stale geometry or materials.
@@ -704,6 +705,8 @@ not a model-space correction. Imported `Tiled` content is unsupported until a re
 requires it; generated water and vegetation retain their tiled presentation. Missing, empty,
 non-finite, or shape-incompatible imports select the profile's deterministic fallback without
 delaying gameplay readiness.
+The placement's quarter turns rotate the visual root, so imported and primitive visuals are fitted
+in the asset's unrotated footprint (a rotated 2x1 barrier stays two cells long).
 
 Occlusion should first be solved through camera elevation, wall height, material value, and map
 composition. Fighter silhouette outlines are part of the visual direction, not an occlusion fix.
