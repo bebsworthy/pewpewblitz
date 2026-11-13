@@ -8,7 +8,8 @@ async function write(name, w, h, body) {
   await sharp(Buffer.from(svg)).png().toFile(`${base}/assets/brawler/ui/shell/${name}.png`);
 }
 (async () => {
-  await write('game-selection-background', 1600, 900, '<path fill="#faebcf" d="M0 0h1600v900H0z"/><path fill="#69aaa3" d="M0 180 1100 900H0z"/><path fill="#ff7909" d="m0 900 1600-230v230z"/>');
+  // BRL-0156: shell-bg gradient with two low-contrast tonal planes (BRL-0140 tokens).
+  await write('game-selection-background', 1600, 900, '<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2e7bff"/><stop offset="1" stop-color="#1b3fa8"/></linearGradient></defs><path fill="url(#bg)" d="M0 0h1600v900H0z"/><path fill="#0e1638" fill-opacity=".14" d="M0 180 1100 900H0z"/><path fill="#ffffff" fill-opacity=".08" d="m0 900 1600-230v230z"/>');
   const icons = [
     ['hot-zone', '#318f8c', '<circle cx="100" cy="94" r="49" fill="none" stroke="#faebcf" stroke-width="15"/><circle cx="100" cy="94" r="20" fill="#faebcf"/>'],
     ['heist', '#061a25', '<rect x="49" y="47" width="102" height="99" rx="7" fill="none" stroke="#faebcf" stroke-width="12"/><circle cx="100" cy="96" r="24" fill="none" stroke="#faebcf" stroke-width="9"/><path d="M100 65v62M69 96h62" stroke="#faebcf" stroke-width="8"/>'],

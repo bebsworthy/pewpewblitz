@@ -127,6 +127,7 @@ enum SettingsReturnTarget {
 }
 
 #[derive(Component)]
+#[require(super::ui::press::ReleaseActivation)]
 struct ShellButton {
     id: ShellControlId,
     action: Option<ShellAction>,
@@ -139,6 +140,7 @@ pub struct ClientShellPlugin;
 
 impl Plugin for ClientShellPlugin {
     fn build(&self, app: &mut App) {
+        super::ui::press::add_release_activation(app);
         app.add_plugins((
             DirectionalNavigationPlugin,
             super::ui::controls::UiControlsPlugin,
@@ -326,7 +328,7 @@ fn spawn_overlay(
         .spawn((
             OverlayRoot,
             root_node(),
-            BackgroundColor(Color::srgba(0.005, 0.01, 0.02, 0.94)),
+            BackgroundColor(super::ui::theme::INK.with_alpha(0.94)),
             GlobalZIndex(500),
             EntranceAnimation { elapsed: 0.0 },
             UiTransform::from_translation(Val2::new(px(0), px(14))),
@@ -336,13 +338,13 @@ fn spawn_overlay(
                 ShellScrollArea,
                 ScrollPosition::default(),
                 panel_node(),
-                BackgroundColor(Color::srgb(0.055, 0.08, 0.12)),
+                BackgroundColor(super::ui::theme::PANEL),
             ))
             .with_children(|panel| {
                 panel.spawn((
                     Text::new(title),
                     TextFont::from_font_size(32.0),
-                    TextColor(Color::srgb(0.25, 0.9, 1.0)),
+                    TextColor(super::ui::theme::ACCENT),
                 ));
                 build(panel);
             });
@@ -358,7 +360,7 @@ fn spawn_credits(commands: &mut Commands) {
         panel.spawn((
             Text::new(CREDITS),
             TextFont::from_font_size(16.0),
-            TextColor(Color::srgb(0.85, 0.9, 0.96)),
+            TextColor(super::ui::theme::TEXT),
             TextLayout::new(Justify::Center, LineBreak::WordBoundary),
             Node {
                 width: percent(100),
@@ -400,9 +402,9 @@ fn spawn_button(
             Text::new(label),
             TextFont::from_font_size(15.0),
             TextColor(if action.is_some() {
-                Color::WHITE
+                super::ui::theme::TEXT
             } else {
-                Color::srgb(0.42, 0.48, 0.54)
+                super::ui::theme::TEXT.with_alpha(0.45)
             }),
         ));
 }
@@ -602,7 +604,12 @@ fn transfer_settings_focus(
     reason = "Bevy system parameters are runtime-owned"
 )]
 fn collect_pointer_actions(
-    interactions: Query<(Entity, &Interaction, &ShellButton), Changed<Interaction>>,
+    interactions: Query<(
+        Entity,
+        Ref<Interaction>,
+        &super::ui::press::ReleaseActivation,
+        &ShellButton,
+    )>,
     overlay: Res<ClientOverlay>,
     controls_state: Res<controls::ControlsState>,
     consumed: Res<InputCaptureConsumed>,
@@ -612,16 +619,18 @@ fn collect_pointer_actions(
     if consumed.0 {
         return;
     }
-    for (entity, interaction, button) in &interactions {
+    for (entity, interaction, release, button) in &interactions {
         if button.layer != active_layer(&overlay) || !controls::allows(button.id, &controls_state) {
             continue;
         }
-        if matches!(interaction, Interaction::Hovered | Interaction::Pressed)
+        if interaction.is_changed()
+            && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
             && button.action.is_some()
         {
             focus.set(entity, FocusCause::Pressed);
         }
-        if *interaction == Interaction::Pressed
+        // Sliders adjust while held; every other shell action fires on an undragged release.
+        if release.activated()
             && settings_screen::slider_actions(button.id).is_none()
             && let Some(action) = button.action
             && !pending.0.contains(&action)

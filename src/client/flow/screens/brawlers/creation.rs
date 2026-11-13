@@ -10,7 +10,7 @@ use crate::client::flow::{
     model::{ClientFlow, ClientOverlay},
 };
 use crate::client::ui::surface::Surface;
-use crate::client::ui::theme::{CREAM, INK, font};
+use crate::client::ui::theme::{TEXT, font, shell_background};
 use bevy::{prelude::*, ui::ScrollPosition};
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -99,7 +99,7 @@ pub(in crate::client::flow) fn present_brawler_creation(
                 row_gap: px(20),
                 ..default()
             },
-            BackgroundColor(CREAM),
+            shell_background(),
             GlobalZIndex(510),
         ))
         .with_children(|root| view.draw(root));
@@ -232,12 +232,12 @@ impl CreationView<'_> {
                     body,
                     "Fighter and weapon are fixed after creation.",
                     18.,
-                    INK,
+                    TEXT,
                 );
                 self.footer(body);
             }
             if let Some(error) = &self.draft.inline_error {
-                self.text(body, error, 18., INK);
+                self.text(body, error, 18., TEXT);
             }
         });
     }
@@ -295,14 +295,14 @@ impl CreationView<'_> {
                         "‹ BRAWLERS"
                     },
                     22.,
-                    INK,
+                    TEXT,
                 );
             });
             self.text(
                 header,
                 title,
                 if self.width < 1000. { 28. } else { 42. },
-                INK,
+                TEXT,
             );
         });
     }
@@ -441,7 +441,7 @@ impl CreationView<'_> {
                 if self.draft.editing_name {
                     name.insert(self.draft.name_caret, '|');
                 }
-                self.text(p, format!("NAME   {name}"), 24., INK);
+                self.text(p, format!("NAME   {name}"), 24., TEXT);
             });
             let e = self.button(
                 row,
@@ -466,7 +466,7 @@ impl CreationView<'_> {
                         "CREATE BRAWLER"
                     },
                     26.,
-                    INK,
+                    TEXT,
                 );
             });
         });

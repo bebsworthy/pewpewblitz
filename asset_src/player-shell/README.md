@@ -13,6 +13,12 @@ BRL-0114 visual correction: `generate-chrome.cjs` authors the six angled panel s
 
 BRL-0116 game selection: `generate-game-selection.cjs` exports the clean cream/teal/orange background, portrait card silhouettes with separate selected/focused states, semantic Hot Zone/Heist/Zombie badges. These are original code-authored SVG decorations with PNG runtime exports. Text, hit targets and choices remain native UI. The screen owns strong image handles while mounted; no generated full-screen mockup is used at runtime. Reuses the shipped logo, Wipeout badge, font and action panels. Run with Node and Sharp as above.
 
+BRL-0156 palette swap: the shared background in `generate-game-selection.cjs` and
+`game-selection-background.svg` is now the BRL-0140 `shell-bg` gradient with two low-contrast
+tonal planes. The shipped PNG was rasterized from that SVG description by an equivalent
+supersampled pure-Python writer because Sharp was unavailable; re-exporting with Sharp produces
+the same design. The Dashboard shader draws the same planes natively.
+
 ## Practice map overviews
 
 Run `python3 asset_src/player-shell/generate-map-overviews.py`, then `node asset_src/player-shell/render-map-overviews.cjs` with Sharp available. The seven original schematic overviews encode actual authored map dimensions, placements, filled rectangles, rotated footprints and spawn points. They are overview diagrams, not gameplay screenshots. Regenerate when map geometry changes. SVG sources live in `map-overviews/`; runtime PNGs live in `assets/brawler/ui/shell/`.

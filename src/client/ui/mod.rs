@@ -6,6 +6,8 @@ pub(crate) mod theme;
 pub(crate) mod controls;
 pub(crate) mod gallery;
 
+pub(crate) mod press;
+
 pub(crate) mod scroll;
 
 pub(crate) mod surface;

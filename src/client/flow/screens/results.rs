@@ -49,7 +49,7 @@ pub(in crate::client::flow) fn present_match_completion(
             MatchCompletionRoot,
             DespawnOnExit(ClientFlow::Match),
             flow_root_node(),
-            BackgroundColor(Color::srgba(0.025, 0.04, 0.07, 0.96)),
+            crate::client::ui::theme::shell_background(),
             GlobalZIndex(450),
         ))
         .with_children(|root| {
@@ -57,12 +57,12 @@ pub(in crate::client::flow) fn present_match_completion(
             root.spawn((
                 Text::new(result),
                 TextFont::from_font_size(28.0),
-                TextColor(Color::srgb(0.9, 0.95, 1.0)),
+                TextColor(crate::client::ui::theme::TEXT),
             ));
             root.spawn((
                 Text::new("RETURNING TO LOBBY…"),
                 TextFont::from_font_size(18.0),
-                TextColor(Color::srgb(0.58, 0.66, 0.74)),
+                TextColor(crate::client::ui::theme::TEXT.with_alpha(0.75)),
             ));
         });
 }

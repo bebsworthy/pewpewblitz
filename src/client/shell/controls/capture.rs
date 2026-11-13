@@ -15,7 +15,7 @@ pub(in crate::client::shell) fn capture_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     gamepads: Query<&Gamepad>,
-    buttons: Query<(&Interaction, &ShellButton)>,
+    buttons: Query<(&crate::client::ui::press::ReleaseActivation, &ShellButton)>,
     mut state: ResMut<ControlsState>,
     mut selection: ResMut<InputSettingsSelection>,
     mut consumed: ResMut<InputCaptureConsumed>,
@@ -36,8 +36,8 @@ pub(in crate::client::shell) fn capture_input(
         _ => return,
     };
     consumed.0 = true;
-    let cancel_clicked = buttons.iter().any(|(interaction, button)| {
-        *interaction == Interaction::Pressed
+    let cancel_clicked = buttons.iter().any(|(release, button)| {
+        release.activated()
             && matches!(
                 button.id,
                 ShellControlId::Cancel | ShellControlId::Input(InputControl::CancelCapture)

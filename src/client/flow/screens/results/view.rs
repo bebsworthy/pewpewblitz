@@ -14,7 +14,7 @@ use crate::{
         hud::mode_score_text,
         ui::{
             surface::{Surface, SurfaceState},
-            theme::{CREAM, INK, font},
+            theme::{INK, TEXT, font, shell_background},
         },
     },
     combat::TeamId,
@@ -113,7 +113,7 @@ impl ResultsPainter<'_> {
                 FlowRoot,
                 DespawnOnExit(ClientFlow::Results),
                 GlobalZIndex(410),
-                BackgroundColor(CREAM),
+                shell_background(),
                 Node {
                     position_type: PositionType::Absolute,
                     width: percent(100),
@@ -220,7 +220,7 @@ impl ResultsPainter<'_> {
         p.spawn((
             Text::new(text),
             font(self.assets, size),
-            TextColor(INK),
+            TextColor(TEXT),
             TextLayout::justify(Justify::Center),
             Node {
                 max_width: percent(100),

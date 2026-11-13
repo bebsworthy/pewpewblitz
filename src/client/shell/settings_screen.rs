@@ -138,7 +138,7 @@ pub(super) fn spawn(commands: &mut Commands) {
                     row_gap: px(20),
                     ..default()
                 },
-                BackgroundColor(theme::CREAM),
+                theme::shell_background(),
             ))
             .with_children(|root| {
                 spawn_header(
@@ -158,7 +158,7 @@ pub(super) fn spawn(commands: &mut Commands) {
                     },
                     Text::new(""),
                     font.clone(),
-                    TextColor(theme::ORANGE),
+                    TextColor(theme::PLAY_HIGHLIGHT),
                 ));
                 root.spawn((
                     SaveErrorContainer,
@@ -211,7 +211,7 @@ fn spawn_header(root: &mut ChildSpawnerCommands, font: &TextFont, child: bool) {
                 font_size: 44.0.into(),
                 ..font.clone()
             },
-            TextColor(theme::INK),
+            TextColor(theme::TEXT),
             Node {
                 flex_grow: 1.0,
                 margin: UiRect::right(px(if child { 240.0 } else { 160.0 })),
@@ -300,7 +300,7 @@ fn spawn_columns(
                 RelativeCursorPosition::default(),
             ))
             .with_children(|details| {
-                details.spawn((Details, Text::new(""), font.clone(), TextColor(theme::INK)));
+                details.spawn((Details, Text::new(""), font.clone(), TextColor(theme::TEXT)));
                 if page.display_change.is_some() {
                     control(
                         details,
@@ -360,7 +360,7 @@ fn spawn_options(
                     font_size: 30.0.into(),
                     ..font.clone()
                 },
-                TextColor(theme::INK),
+                TextColor(theme::TEXT),
             ));
             if category == Category::Controls {
                 super::controls::spawn_options(options, font, input);

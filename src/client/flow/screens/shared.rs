@@ -18,6 +18,7 @@ pub(in crate::client::flow) struct FlowNavigation {
 pub(in crate::client::flow) struct FlowRoot;
 
 #[derive(Component, Clone, Debug)]
+#[require(crate::client::ui::press::ReleaseActivation)]
 pub(in crate::client::flow) struct FlowButton {
     pub(in crate::client::flow) index: usize,
     pub(in crate::client::flow) action: FlowUiAction,
@@ -43,7 +44,7 @@ pub(in crate::client::flow) fn spawn_heading(parent: &mut ChildSpawnerCommands, 
     parent.spawn((
         Text::new(text),
         TextFont::from_font_size(38.0),
-        TextColor(Color::srgb(0.25, 0.9, 1.0)),
+        TextColor(crate::client::ui::theme::ACCENT),
     ));
 }
 

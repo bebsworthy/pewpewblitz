@@ -15,6 +15,7 @@ model or a separate UI framework.
 | Surface shader and antialiasing | [`assets/brawler/shaders/shell_surface.wgsl`](../../../assets/brawler/shaders/shell_surface.wgsl) |
 | Action, tab, toggle, slider, and binding controls | [`src/client/ui/controls.rs`](../../../src/client/ui/controls.rs) |
 | Shared scroll calculations | [`src/client/ui/scroll.rs`](../../../src/client/ui/scroll.rs) |
+| Pointer release activation and drag-cancel | [`src/client/ui/press.rs`](../../../src/client/ui/press.rs) |
 | Product-flow action and focus bridge | [`src/client/flow/screens/shared.rs`](../../../src/client/flow/screens/shared.rs) |
 | Product-flow focus reveal and scrolling | [`src/client/flow/screens/scroll.rs`](../../../src/client/flow/screens/scroll.rs) |
 | Shared connection-screen composition | [`src/client/flow/screens/connection_shell.rs`](../../../src/client/flow/screens/connection_shell.rs) |
@@ -28,16 +29,20 @@ networking, or gameplay facts.
 
 The [approved shell design](README.md#visual-language) owns the token values (BRL-0140):
 `shell-bg-top`, `shell-bg-bottom`, `panel`, `panel-raised`, `ink`, `play`, `play-highlight`,
-`accent`, `text`, `self`, `ally`, and `enemy`. `theme.rs` exposes them as named constants. Screens
-use the token names and never write literal colors.
+`accent`, `text`, `self`, `ally`, and `enemy`. `theme.rs` exposes the shell roles as named
+constants (`SHELL_BG_TOP`, `SHELL_BG_BOTTOM`, `PANEL`, `PANEL_RAISED`, `INK`, `PLAY`,
+`PLAY_HIGHLIGHT`, `ACCENT`, `TEXT`); relationship tokens are added when a shell consumer needs them.
+Screens use the token names and never write literal colors. Full-screen roots use
+`theme::shell_background()`.
 
-Migration status: `theme.rs` still holds the legacy cream/navy/teal/orange values until BRL-0156
-lands. New UI code should use role-based surfaces so that the palette swap needs no per-screen
-color edits.
+BRL-0156 replaced the legacy cream/navy/teal/orange constants; see the migration mapping in the
+[approved shell design](README.md#visual-language).
 
 Lilita One is the shared display face at `brawler/ui/fonts/lilita-one-regular.ttf`, used by both
 the shell and the in-match HUD. Use the theme helper so screens retain the supported font fallback.
-Headings, labels, and values render white with an `ink` stroke and a soft drop shadow. Type size
+Headings, labels, and values render white with an `ink` stroke and a soft drop shadow. Bevy UI has
+no text outline, so the stroke is a size-scaled `TextShadow` (`theme::type_stroke`);
+`SurfacePlugin` adds it to any text whose color is the `TEXT` token. Type size
 may respond to available width and UI scale, but the hierarchy remains heading, label, value, and
 supporting copy. Body text must remain readable and should wrap before shrinking below its useful
 size.
@@ -66,7 +71,9 @@ geometry; state then modifies that role consistently.
 
 Shared button and row chrome has cut top-right and bottom-left corners, slightly slanted side
 edges, and a substantial `ink` border. Its fill reads as pressable: a vertical gradient, a 2–3 px
-light top band, and a darker 4–6 px bottom lip that replaces the flat offset shadow. The native
+light top band, and a solid 6 px `ink` bottom lip that replaces the flat offset shadow and
+collapses while pressed. Fills by role: `Primary` is `play` warming to `play-highlight` at the top;
+`Back`, `Secondary`, and selected surfaces are `panel-raised`; other roles are `panel`. The native
 `UiMaterial` shader derives edge coverage with screen-space derivatives so diagonal edges remain
 antialiased, and it owns the gradient, top band, and lip. Text and hit targets stay native Bevy
 UI; artwork is never stretched to define interaction geometry.
@@ -83,14 +90,16 @@ must not bleed into the transparent area outside the border.
 
 | State | Meaning | Required presentation |
 |---|---|---|
-| Focused | Current keyboard/gamepad navigation target | High-contrast inner frame and pointer; always visible on the active scope |
-| Selected | Persistent product choice or active category | Role-appropriate selected fill, normally `panel-raised` or `play` |
+| Focused | Current keyboard/gamepad navigation target | `accent` inner frame with an `ink` keyline and an `accent` pointer; always visible on the active scope |
+| Selected | Persistent product choice or active category | `panel-raised` fill with a `play-highlight` rim; the primary action keeps `play` |
 | Inactive | Retained surface behind an overlay or outside the active input scope | No focus treatment or pointer |
 | Disabled | Action cannot currently run | Muted treatment, no false focus emphasis, and factual reason where needed |
 
 Actions activate on pointer or touch release, not on press, and a drag beyond a small threshold
-cancels the activation so touch scrolling never triggers a control. Keyboard and gamepad
-activation are unchanged.
+(12 logical px) cancels the activation so touch scrolling never triggers a control. Keyboard and
+gamepad activation are unchanged. Controls carry `ReleaseActivation` and owners read
+`activated()`; a press still moves navigation focus. Slider dragging remains a held-press
+interaction. Press, idle and entrance motion follow [motion](motion.md) and are presentation only.
 
 Focus is transient and selected state is persistent. Opening an overlay transfers input and focus
 to that overlay; the underlying screen cannot react to the same navigation event. Pointer hover or
@@ -145,7 +154,10 @@ shader is presentation only and cannot become an authority or interaction depend
 
 The component gallery is a development review surface and is never installed in the player
 application. Run `just ui-gallery` for the wide state matrix and
-`BRAWLER_UI_GALLERY_COMPACT=1 just ui-gallery` for its compact layout. It supplements native
+`BRAWLER_UI_GALLERY_COMPACT=1 just ui-gallery` for its compact layout. Set
+`BRAWLER_UI_GALLERY_CAPTURE=<path>.png` to save the settled top and scrolled bottom
+(`<path>-bottom.png`) and exit, for native evidence without OS screen capture. Its Reduced motion
+demo switch drives the production surface motion policy. It supplements native
 screen review; it does not validate product flow or replace screen-level tests.
 
 ## Extending the toolkit

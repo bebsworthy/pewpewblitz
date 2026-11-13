@@ -1,7 +1,8 @@
 //! Fullscreen Practice map browsing; focus is independent from the requested map.
 use super::shared::FlowRoot;
+use crate::client::ui::press::ReleaseActivation;
 use crate::client::ui::surface::{Surface, SurfaceState};
-use crate::client::ui::theme::{CREAM, INK, font};
+use crate::client::ui::theme::{TEXT, font, shell_background};
 use crate::client::{
     ClientLobbyMembership, ClientPracticeModel,
     flow::{
@@ -67,6 +68,7 @@ pub(in crate::client::flow) struct PracticeMapRoot {
 #[derive(Component)]
 pub(in crate::client::flow) struct PracticeMapRow;
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[require(ReleaseActivation)]
 pub(in crate::client::flow) enum PracticeControl {
     Map(usize),
     Previous,
@@ -183,7 +185,7 @@ pub(in crate::client::flow) fn present_practice_maps(
                 row_gap: px(20.0 * factor),
                 ..default()
             },
-            BackgroundColor(CREAM),
+            shell_background(),
             GlobalZIndex(410),
         ))
         .with_children(|root| {
@@ -418,7 +420,7 @@ fn label(
     text: &str,
     size: f32,
 ) {
-    parent.spawn((Text::new(text), font(assets, size), TextColor(INK)));
+    parent.spawn((Text::new(text), font(assets, size), TextColor(TEXT)));
 }
 fn control(
     parent: &mut ChildSpawnerCommands,
@@ -455,7 +457,7 @@ pub(in crate::client::flow) fn practice_map_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     mut wheel: MessageReader<MouseWheel>,
-    buttons: Query<(&PracticeControl, &Interaction), Changed<Interaction>>,
+    buttons: Query<(&PracticeControl, &ReleaseActivation)>,
     mut carousel: ResMut<PracticeCarousel>,
     mut actions: ResMut<PendingFlowActions>,
 ) {
@@ -483,8 +485,8 @@ pub(in crate::client::flow) fn practice_map_input(
         return;
     }
     let mut activation = None;
-    for (control, interaction) in &buttons {
-        if *interaction == Interaction::Pressed {
+    for (control, release) in &buttons {
+        if release.activated() {
             activation = Some(*control);
         }
     }

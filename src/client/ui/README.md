@@ -12,17 +12,22 @@ Bevy entities, not a separate widget runtime.
 - `controls`: compact Settings action/category rows, switches with knobs, sliders and binding
   capsules. These compose the same surface renderer and state policy. Value conversion,
   binding capture and calibration remain screen-owned.
-- `theme`: palette and bundled Lilita One font.
+- `theme`: BRL-0140 palette tokens, the shared `shell_background()` gradient, the `type_stroke`
+  text stroke, and bundled Lilita One font.
+- `press`: `ReleaseActivation`, pointer/touch activation on release with drag-cancel.
 - `scroll`: viewport clamping and focus-reveal geometry, shared by screens and gallery.
 
-The procedural `shell_surface.wgsl` draws frames from final logical dimensions. Action sides
+The procedural `shell_surface.wgsl` draws frames from final logical dimensions: a vertical
+gradient, light top band, `ink` bottom lip that collapses on press, and the Play shine sweep. Action sides
 have a pronounced slant; cards/panels use the gentler approved slant; compact rows use a subtle
 slant. Outlines and short shadows retain their thickness across sizes. Text and icons remain
 upright, and Bevy's rectangular button hit area remains generous around the visual corners.
-Back is always orange and gets shared label/arrow composition. Destination wording may vary.
+Back is always `panel-raised` and gets shared label/arrow composition. Destination wording may
+vary. `SurfaceMotion` adds press squash, release overshoot, entrance scale-in and the opt-in
+`PrimaryIdleMotion` through `UiTransform`; `SurfaceMotionPolicy` disables it for reduced motion.
 
-Semantic selection keeps its teal fill. Focus uses an inset contrasting double outline and
-triangle marker on every fill, including orange. Disabled overrides interaction, and inactive
+Semantic selection uses a `panel-raised` fill with a `play-highlight` rim. Focus uses an inset
+`accent` frame, `ink` keyline and `accent` triangle marker on every fill, including `play`. Disabled overrides interaction, and inactive
 owners suppress focus/hover/press. Screens must not choose frame images, focus palettes, border
 radii or shadow styles. The old image-button and brawler-card chrome systems are retired.
 

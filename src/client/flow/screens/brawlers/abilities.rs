@@ -13,7 +13,7 @@ use crate::client::flow::{
 };
 use crate::client::ui::{
     surface::Surface,
-    theme::{CREAM, INK, TEAL},
+    theme::{ACCENT, TEXT, shell_background},
 };
 use bevy::{prelude::*, ui::ScrollPosition};
 
@@ -92,7 +92,7 @@ pub(in crate::client::flow) fn present_brawler_editor(
             key,
             DespawnOnExit(ClientFlow::Dashboard),
             GlobalZIndex(510),
-            BackgroundColor(CREAM),
+            shell_background(),
             Node {
                 position_type: PositionType::Absolute,
                 left: px(0),
@@ -165,10 +165,10 @@ impl AbilityView<'_> {
         ))
         .with_children(|body| {
             if let Some(error) = &self.draft.inline_error {
-                self.cards.text(body, error, 18., INK);
+                self.cards.text(body, error, 18., TEXT);
             }
             if self.cards.pending {
-                self.cards.text(body, "Updating ability…", 18., INK);
+                self.cards.text(body, "Updating ability…", 18., TEXT);
             }
             body.spawn(Node {
                 width: percent(100),
@@ -213,10 +213,10 @@ impl AbilityView<'_> {
                         "‹ BRAWLER"
                     },
                     22.,
-                    INK,
+                    TEXT,
                 );
             });
-            self.cards.text(header, &self.draft.name, 22., TEAL);
+            self.cards.text(header, &self.draft.name, 22., ACCENT);
         });
         root.spawn(Node {
             width: percent(100),
@@ -233,7 +233,7 @@ impl AbilityView<'_> {
                     Some(AbilityPicker::Passive(_)) => "CHOOSE PASSIVE",
                 },
                 if self.cards.width < 1000. { 28. } else { 48. },
-                INK,
+                TEXT,
             );
         });
     }

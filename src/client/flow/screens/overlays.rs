@@ -15,7 +15,7 @@ use crate::client::{
     },
     ui::{
         surface::Surface,
-        theme::{INK, font},
+        theme::{INK, PANEL, PLAY, PLAY_HIGHLIGHT, TEXT, font},
     },
 };
 use bevy::{prelude::*, ui::InteractionDisabled};
@@ -117,7 +117,7 @@ pub(in crate::client::flow) fn present_flow_error_overlay(
                 padding: UiRect::all(px(24)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
+            BackgroundColor(INK.with_alpha(0.72)),
             GlobalZIndex(500),
         ))
         .with_children(|root| {
@@ -133,15 +133,12 @@ pub(in crate::client::flow) fn present_flow_error_overlay(
                     border: UiRect::all(px(2)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.055, 0.08, 0.12)),
-                BorderColor::all(Color::srgb(0.85, 0.3, 0.25)),
+                BackgroundColor(PANEL),
+                BorderColor::all(PLAY),
             ))
             .with_children(|panel| {
                 spawn_heading(panel, error.kind.title());
-                panel.spawn((
-                    Text::new(error.message.clone()),
-                    TextColor(Color::srgb(1.0, 0.72, 0.65)),
-                ));
+                panel.spawn((Text::new(error.message.clone()), TextColor(PLAY_HIGHLIGHT)));
                 for (offset, action) in error.actions.into_iter().flatten().enumerate() {
                     let (ui_action, label) = flow_error_action_button(action);
                     if action == FlowErrorAction::TryAgainQueue {
@@ -223,7 +220,7 @@ fn spawn_connection_recovery_content(
     panel.spawn((
         Text::new(error.message.clone()),
         font(assets, 22.0),
-        TextColor(INK),
+        TextColor(TEXT),
         TextLayout::new(Justify::Center, LineBreak::WordBoundary),
         Node {
             max_width: px(640),
@@ -370,7 +367,7 @@ pub(in crate::client::flow) fn present_cancel_confirmation(
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
+            BackgroundColor(INK.with_alpha(0.72)),
             GlobalZIndex(500),
         ))
         .with_children(|root| {
@@ -384,7 +381,7 @@ pub(in crate::client::flow) fn present_cancel_confirmation(
                     padding: UiRect::all(px(24)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.055, 0.08, 0.12)),
+                BackgroundColor(PANEL),
             ))
             .with_children(|panel| {
                 spawn_heading(panel, "CANCEL MATCH START?");

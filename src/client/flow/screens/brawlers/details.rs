@@ -10,7 +10,7 @@ use crate::client::{
         actions::FlowUiAction,
         model::{ClientFlow, ClientOverlay},
     },
-    ui::theme::{CREAM, INK, TEAL, font},
+    ui::theme::{ACCENT, PANEL_RAISED, TEXT, font, shell_background},
 };
 use bevy::{prelude::*, ui::ScrollPosition};
 pub(super) mod art;
@@ -117,7 +117,7 @@ pub(in crate::client::flow) fn present_brawler_details(
                 row_gap: px(16. * factor),
                 ..default()
             },
-            BackgroundColor(CREAM),
+            shell_background(),
             GlobalZIndex(510),
             DespawnOnExit(ClientFlow::Dashboard),
         ))
@@ -320,7 +320,7 @@ impl DetailsView<'_> {
                         "SELECT FOR PLAY"
                     },
                     if self.compact { 42. } else { 62. },
-                    INK,
+                    TEXT,
                     Justify::Center,
                 );
             });
@@ -395,7 +395,7 @@ impl DetailsView<'_> {
                     })
                     .with_children(|b| {
                         self.icon(b, "trash", 32., 32.);
-                        self.label(b, "DELETE BRAWLER", 21., INK);
+                        self.label(b, "DELETE BRAWLER", 21., TEXT);
                     });
             });
         });
@@ -447,7 +447,7 @@ impl DetailsView<'_> {
                                     "BACK TO BRAWLERS"
                                 },
                                 26.,
-                                INK,
+                                TEXT,
                             );
                         });
                 });
@@ -506,10 +506,10 @@ impl DetailsView<'_> {
                     min_width: px(0),
                     ..default()
                 })
-                .with_children(|copy| self.label_aligned(copy, text, size, INK, Justify::Center));
+                .with_children(|copy| self.label_aligned(copy, text, size, TEXT, Justify::Center));
                 self.icon(name, "edit", 48., 48.);
                 if let Some(error) = self.rename.and_then(|r| r.inline_error.as_deref()) {
-                    self.label(name, error, 16., INK);
+                    self.label(name, error, 16., TEXT);
                 }
             });
     }
@@ -558,13 +558,13 @@ impl DetailsView<'_> {
                         ..default()
                     })
                     .with_children(|heading| {
-                        self.label(heading, "WEAPON", 26., TEAL);
+                        self.label(heading, "WEAPON", 26., ACCENT);
                         self.label(
                             heading,
                             advertised_weapon_name(self.catalog, self.brawler.weapon_base_id)
                                 .to_uppercase(),
                             if self.compact { 38. } else { 48. },
-                            INK,
+                            TEXT,
                         );
                     });
                     self.slots(copy);
@@ -603,7 +603,7 @@ impl DetailsView<'_> {
                                 justify_content: JustifyContent::Center,
                                 ..default()
                             },
-                            BorderColor::all(TEAL),
+                            BorderColor::all(ACCENT),
                         ))
                         .with_children(|slot| {
                             if let (Some(part), Some(server)) = (part, self.art.server) {
@@ -649,7 +649,7 @@ impl DetailsView<'_> {
         );
         parent.commands().entity(id).with_children(|panel| {
             self.chevron(panel);
-            self.label(panel, "ABILITIES", 40., INK);
+            self.label(panel, "ABILITIES", 40., TEXT);
             panel
                 .spawn(Node {
                     width: percent(91),
@@ -685,7 +685,7 @@ impl DetailsView<'_> {
                             height: percent(90),
                             ..default()
                         },
-                        BackgroundColor(TEAL),
+                        BackgroundColor(PANEL_RAISED),
                     ));
                     groups
                         .spawn(Node {
@@ -753,21 +753,21 @@ impl DetailsView<'_> {
                         height: px(2. * self.factor),
                         ..default()
                     },
-                    BackgroundColor(TEAL),
+                    BackgroundColor(PANEL_RAISED),
                 ));
                 row.spawn(Node {
                     width: px(112. * self.factor),
                     flex_shrink: 0.,
                     ..default()
                 })
-                .with_children(|copy| self.label_aligned(copy, text, 21., TEAL, Justify::Center));
+                .with_children(|copy| self.label_aligned(copy, text, 21., ACCENT, Justify::Center));
                 row.spawn((
                     Node {
                         flex_grow: 1.,
                         height: px(2. * self.factor),
                         ..default()
                     },
-                    BackgroundColor(TEAL),
+                    BackgroundColor(PANEL_RAISED),
                 ));
             });
     }
@@ -792,7 +792,7 @@ impl DetailsView<'_> {
                         self.art.assets,
                         if ultimate { 27. } else { 23. } * self.factor,
                     ),
-                    TextColor(INK),
+                    TextColor(TEXT),
                     TextLayout::justify(Justify::Center),
                     Node {
                         width: percent(100),

@@ -85,6 +85,7 @@ impl Plugin for ClientDashboardPlugin {
                     .chain()
                     .run_if(in_state(ClientFlow::Dashboard)),
             )
+            .add_systems(Update, sync_surface_motion_policy)
             .add_systems(
                 Update,
                 (
@@ -135,14 +136,14 @@ fn ensure_dashboard_background(
             bottom: px(0),
             ..default()
         },
-        BackgroundColor(Color::srgb(0.98, 0.92, 0.81)),
+        super::ui::theme::shell_background(),
         GlobalZIndex(408),
     ));
     let material = materials.add(DashboardBackgroundMaterial {
         time_motion: Vec4::new(0.0, 1.0, 0.0, 0.0),
-        palette_dark: Color::srgb(0.98, 0.92, 0.81).to_linear().to_vec4(),
-        palette_light: Color::srgb(0.32, 0.64, 0.62).to_linear().to_vec4(),
-        glow: Color::srgb(1.0, 0.40, 0.025).to_linear().to_vec4(),
+        palette_dark: super::ui::theme::SHELL_BG_TOP.to_linear().to_vec4(),
+        palette_light: super::ui::theme::SHELL_BG_BOTTOM.to_linear().to_vec4(),
+        glow: super::ui::theme::INK.to_linear().to_vec4(),
     });
     commands.spawn((
         DashboardOwned,
@@ -185,6 +186,21 @@ fn update_dashboard_background(
     );
     material.time_motion.x = time;
     material.time_motion.y = motion;
+}
+
+/// Shell surface motion follows the persisted reduced motion/effects preferences.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy owns persisted settings as a system resource"
+)]
+fn sync_surface_motion_policy(
+    settings: Res<super::ClientShellSettings>,
+    mut policy: ResMut<super::ui::surface::SurfaceMotionPolicy>,
+) {
+    let reduced = settings.reduced_motion || settings.reduced_combat_effects;
+    if policy.reduced != reduced {
+        policy.reduced = reduced;
+    }
 }
 
 fn dashboard_motion(time: f32, reduced_motion: bool, reduced_effects: bool) -> (f32, f32) {

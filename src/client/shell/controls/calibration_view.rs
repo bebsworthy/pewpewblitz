@@ -20,7 +20,7 @@ pub(super) fn spawn(parent: &mut ChildSpawnerCommands, font: &TextFont) {
             font_size: 17.0.into(),
             ..font.clone()
         },
-        TextColor(theme::INK),
+        TextColor(theme::TEXT),
     ));
     parent
         .spawn(Node {
@@ -41,7 +41,7 @@ pub(super) fn spawn(parent: &mut ChildSpawnerCommands, font: &TextFont) {
                         ..default()
                     })
                     .with_children(|column| {
-                        column.spawn((Text::new(label), font.clone(), TextColor(theme::INK)));
+                        column.spawn((Text::new(label), font.clone(), TextColor(theme::TEXT)));
                         column
                             .spawn((
                                 Node {
@@ -74,7 +74,7 @@ pub(super) fn spawn(parent: &mut ChildSpawnerCommands, font: &TextFont) {
                                         border_radius: BorderRadius::all(percent(50)),
                                         ..default()
                                     },
-                                    BackgroundColor(theme::TEAL.with_alpha(0.3)),
+                                    BackgroundColor(theme::ACCENT.with_alpha(0.3)),
                                 ));
                                 for processed in [false, true] {
                                     plot.spawn((
@@ -88,9 +88,9 @@ pub(super) fn spawn(parent: &mut ChildSpawnerCommands, font: &TextFont) {
                                             ..default()
                                         },
                                         BackgroundColor(if processed {
-                                            theme::TEAL
+                                            theme::ACCENT
                                         } else {
-                                            theme::ORANGE
+                                            theme::PLAY
                                         }),
                                     ));
                                 }
@@ -102,7 +102,7 @@ pub(super) fn spawn(parent: &mut ChildSpawnerCommands, font: &TextFont) {
                                 font_size: 17.0.into(),
                                 ..font.clone()
                             },
-                            TextColor(theme::INK),
+                            TextColor(theme::TEXT),
                         ));
                     });
             }

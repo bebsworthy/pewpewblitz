@@ -4,14 +4,38 @@ use bevy::prelude::*;
 
 pub(crate) const FONT_PATH: &str = "brawler/ui/fonts/lilita-one-regular.ttf";
 
-// Representative dark navy sampled from the approved mockup (#081932).
-pub(crate) const INK: Color = Color::srgb(8.0 / 255.0, 25.0 / 255.0, 50.0 / 255.0);
-pub(crate) const CREAM: Color = Color::srgb(0.98, 0.92, 0.81);
-pub(crate) const TEAL: Color = Color::srgb(0.32, 0.64, 0.62);
-pub(crate) const CYAN: Color = Color::srgb(0.05, 0.92, 0.88);
-pub(crate) const ORANGE: Color = Color::srgb(1.0, 0.40, 0.025);
-// Approved display-type stroke navy (#0E1638, BRL-0140 art direction).
-pub(crate) const TYPE_STROKE: Color = Color::srgb(14.0 / 255.0, 22.0 / 255.0, 56.0 / 255.0);
+// BRL-0140 player-shell tokens; `docs/design/player-shell/README.md` owns the values.
+pub(crate) const SHELL_BG_TOP: Color = Color::srgb_u8(0x2E, 0x7B, 0xFF);
+pub(crate) const SHELL_BG_BOTTOM: Color = Color::srgb_u8(0x1B, 0x3F, 0xA8);
+pub(crate) const PANEL: Color = Color::srgb_u8(0x24, 0x30, 0x8F);
+pub(crate) const PANEL_RAISED: Color = Color::srgb_u8(0x3B, 0x5B, 0xDB);
+/// Outlines, text stroke, bottom lips, and dark identity strips.
+pub(crate) const INK: Color = Color::srgb_u8(0x0E, 0x16, 0x38);
+pub(crate) const PLAY: Color = Color::srgb_u8(0xFF, 0x8A, 0x1F);
+pub(crate) const PLAY_HIGHLIGHT: Color = Color::srgb_u8(0xFF, 0xC2, 0x1A);
+pub(crate) const ACCENT: Color = Color::srgb_u8(0x38, 0xD6, 0xFF);
+pub(crate) const TEXT: Color = Color::srgb_u8(0xFF, 0xFF, 0xFF);
+
+/// The shared full-screen shell background: the `shell-bg` vertical gradient over its bottom
+/// color, which remains the fallback fill.
+pub(crate) fn shell_background() -> (BackgroundColor, BackgroundGradient) {
+    (
+        BackgroundColor(SHELL_BG_BOTTOM),
+        BackgroundGradient::from(LinearGradient::to_bottom(vec![
+            ColorStop::auto(SHELL_BG_TOP),
+            ColorStop::auto(SHELL_BG_BOTTOM),
+        ])),
+    )
+}
+
+/// White display type keeps an `ink` stroke, approximated by a size-scaled shadow because Bevy
+/// UI text has no outline stroke.
+pub(crate) fn type_stroke(size: f32) -> TextShadow {
+    TextShadow {
+        offset: Vec2::splat((size * 0.07).max(1.5)),
+        color: INK,
+    }
+}
 
 pub(crate) fn font(assets: Option<&crate::client::ClientAssetHandles>, size: f32) -> TextFont {
     assets.map_or_else(
@@ -38,10 +62,7 @@ pub(crate) fn hud_text(font: &Handle<Font>, size: f32) -> (TextFont, TextShadow)
             font_size: FontSize::Px(size),
             ..default()
         },
-        TextShadow {
-            offset: Vec2::splat((size * 0.07).max(1.5)),
-            color: TYPE_STROKE,
-        },
+        type_stroke(size),
     )
 }
 

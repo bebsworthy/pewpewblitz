@@ -282,7 +282,7 @@ fn spawn_fighter_overhead(
                 border_radius: BorderRadius::all(px(7.0)),
                 ..default()
             },
-            BorderColor::all(ui::theme::TYPE_STROKE),
+            BorderColor::all(ui::theme::INK),
             BackgroundColor(Color::srgb(0.05, 0.06, 0.11)),
             Name::new("V3 fighter overhead rounded health bar"),
         ))
@@ -763,7 +763,7 @@ fn reconcile_overhead_ammunition(
                             border_radius: BorderRadius::all(px(3.0)),
                             ..default()
                         },
-                        BorderColor::all(ui::theme::TYPE_STROKE),
+                        BorderColor::all(ui::theme::INK),
                         BackgroundColor(ammo_segment_color(false)),
                         Name::new("V3 fighter ammunition segment"),
                     ))

@@ -112,7 +112,7 @@ the previous presentation for that area:
 | One environment kit per theme | BRL-0153 (theme 1), BRL-0187 (theme 2), BRL-0188 (theme 3) |
 | Riff and the character animation set | BRL-0154 (adopted) |
 | Touch-first HUD | BRL-0155 |
-| Shell surfaces, palette, motion | BRL-0156 |
+| Shell surfaces, palette, motion | BRL-0156 (adopted) |
 | Icon set | BRL-0157 |
 | Combat feedback | BRL-0144 |
 | Audio | BRL-0158 |

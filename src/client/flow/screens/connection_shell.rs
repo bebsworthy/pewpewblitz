@@ -6,7 +6,7 @@ use crate::client::{
     flow::actions::FlowUiAction,
     ui::{
         surface::{Surface, SurfaceState},
-        theme::{CREAM, INK, font},
+        theme::{TEXT, font, shell_background},
     },
 };
 use bevy::prelude::*;
@@ -77,7 +77,7 @@ pub(super) fn spawn_text(
         .spawn((
             Text::new(copy),
             font(assets, size),
-            TextColor(INK),
+            TextColor(TEXT),
             TextLayout::new(Justify::Center, LineBreak::WordBoundary),
         ))
         .id()
@@ -116,7 +116,7 @@ pub(super) fn spawn_action(
         .with_child((
             Text::new(label),
             font(assets, 22.0),
-            TextColor(INK),
+            TextColor(TEXT),
             TextLayout::new(Justify::Center, LineBreak::WordBoundary),
         ))
         .id()
@@ -134,6 +134,6 @@ pub(super) fn action_node(width: Val, min_height: f32) -> Node {
     }
 }
 
-pub(super) fn root_background() -> BackgroundColor {
-    BackgroundColor(CREAM)
+pub(super) fn root_background() -> impl Bundle {
+    shell_background()
 }

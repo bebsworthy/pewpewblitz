@@ -1,5 +1,6 @@
 //! Pure focus navigation, overlay filtering, and action-priority policy for flow input.
 
+use crate::client::ui::press::ReleaseActivation;
 use crate::client::{
     connection_persistence::{ClientConnectionsPath, save_connections},
     flow::{
@@ -186,7 +187,12 @@ pub(super) fn collect_flow_input(
     mut persistence: ResMut<ConnectionPersistence>,
     path: Res<ClientConnectionsPath>,
     mut navigation: ResMut<FlowNavigation>,
-    buttons: Query<(&FlowButton, &Interaction, Has<InteractionDisabled>)>,
+    buttons: Query<(
+        &FlowButton,
+        &Interaction,
+        &ReleaseActivation,
+        Has<InteractionDisabled>,
+    )>,
     dashboard_layout: Query<&DashboardLayoutClass, With<DashboardRoot>>,
     game_columns: Query<&super::screens::game_select::GameSelectionColumns>,
     mut actions: ResMut<PendingFlowActions>,
@@ -200,11 +206,15 @@ pub(super) fn collect_flow_input(
     {
         return;
     }
-    for (button, interaction, disabled) in &buttons {
-        if !disabled
-            && *interaction == Interaction::Pressed
-            && overlay_allows_button(&overlay, button)
-        {
+    for (button, interaction, activation, disabled) in &buttons {
+        if disabled || !overlay_allows_button(&overlay, button) {
+            continue;
+        }
+        // Focus follows the press; the action waits for an undragged release.
+        if *interaction == Interaction::Pressed {
+            navigation.selected = button.index;
+        }
+        if activation.activated() {
             navigation.selected = button.index;
             queue_ui_action(&mut actions, button.action.clone());
         }
@@ -318,8 +328,8 @@ pub(super) fn collect_flow_input(
 
     let mut available = buttons
         .iter()
-        .filter(|(button, _, disabled)| !*disabled && overlay_allows_button(&overlay, button))
-        .map(|(button, _, _)| button.index)
+        .filter(|(button, _, _, disabled)| !*disabled && overlay_allows_button(&overlay, button))
+        .map(|(button, _, _, _)| button.index)
         .collect::<Vec<_>>();
     available.sort_unstable();
     available.dedup();
@@ -431,14 +441,14 @@ pub(super) fn collect_flow_input(
     }
     if (keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
         || pad_pressed(GamepadButton::South))
-        && let Some((button, _, _)) = buttons
+        && let Some((button, _, _, _)) = buttons
             .iter()
-            .filter(|(button, _, disabled)| {
+            .filter(|(button, _, _, disabled)| {
                 !*disabled
                     && button.index == navigation.selected
                     && overlay_allows_button(&overlay, button)
             })
-            .min_by_key(|(button, _, _)| button.index)
+            .min_by_key(|(button, _, _, _)| button.index)
     {
         queue_ui_action(&mut actions, button.action.clone());
     }

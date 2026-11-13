@@ -119,7 +119,11 @@ fn handle_match_menu_input(
     overlay: Option<ResMut<ClientOverlay>>,
     flow: Option<Res<State<ClientFlow>>>,
     settings_request: Option<ResMut<MatchSettingsRequest>>,
-    buttons: Query<(&MatchMenuButton, &Interaction), Changed<Interaction>>,
+    buttons: Query<(
+        &MatchMenuButton,
+        Ref<Interaction>,
+        &ui::press::ReleaseActivation,
+    )>,
 ) {
     if menu.scoreboard_latched && pending.cancel_pressed {
         menu.scoreboard_latched = false;
@@ -150,10 +154,15 @@ fn handle_match_menu_input(
         menu.selected = menu.selected.saturating_sub(1);
     }
     let mut clicked = false;
-    for (button, interaction) in &buttons {
-        if matches!(interaction, Interaction::Hovered | Interaction::Pressed) {
+    for (button, interaction, release) in &buttons {
+        if interaction.is_changed()
+            && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
+        {
             menu.selected = button.0;
-            clicked |= *interaction == Interaction::Pressed;
+        }
+        if release.activated() {
+            menu.selected = button.0;
+            clicked = true;
         }
     }
     let activate = clicked
@@ -231,6 +240,7 @@ pub struct ClientPresentationPlugin;
 
 impl Plugin for ClientPresentationPlugin {
     fn build(&self, app: &mut App) {
+        ui::press::add_release_activation(app);
         app.init_resource::<ClientPresentation>()
             .init_resource::<MatchMenuState>()
             .add_systems(Startup, match_menu::spawn_pause_overlay)
@@ -278,11 +288,14 @@ mod tests {
             .init_resource::<PendingLocalActions>()
             .init_resource::<MatchMenuState>()
             .init_resource::<ButtonInput<KeyCode>>()
+            .add_plugins(ui::press::ReleaseActivationPlugin)
             .add_systems(Update, handle_match_menu_input);
         let button = app
             .world_mut()
             .spawn((MatchMenuButton(0), Interaction::Pressed))
             .id();
+        app.update();
+        *app.world_mut().get_mut::<Interaction>(button).unwrap() = Interaction::Hovered;
         app.update();
         assert_eq!(
             *app.world().resource::<ClientInputContext>(),
@@ -296,6 +309,13 @@ mod tests {
             ClientInputContext::Menu
         );
         *app.world_mut().get_mut::<Interaction>(button).unwrap() = Interaction::Pressed;
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Menu,
+            "a held press only focuses; the action waits for release"
+        );
+        *app.world_mut().get_mut::<Interaction>(button).unwrap() = Interaction::Hovered;
         app.update();
         assert_eq!(
             *app.world().resource::<ClientInputContext>(),

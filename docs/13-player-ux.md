@@ -182,7 +182,7 @@ Opening the in-match menu does not pause authoritative simulation. Local gamepla
 suppressed and neutral intent is sent while the match continues and the fighter remains vulnerable.
 Leaving requires confirmation and follows the server-owned forfeit and lobby-return policy.
 The menu is a fullscreen shell surface with Resume, Settings, Scoreboard, and Leave Match buttons.
-Resume starts focused and uses the orange primary action; other actions use cream. Pointer,
+Resume starts focused and uses the `play` primary action; other actions use `panel`. Pointer,
 keyboard, and D-pad navigation share the same selected action. Settings and confirmation screens
 isolate the underlying menu; returning from the scoreboard restores the menu.
 
@@ -242,8 +242,8 @@ Deleting the selected brawler selects the next creation ordinal with wraparound;
 leaves the empty list with Create available.
 
 Delete Brawler, Leave Match, and Change Server share the same fullscreen confirmation composition,
-navy typography and slanted cut-corner actions. Safe actions use cream; confirming actions use
-orange. Wide windows place actions side by side; compact windows stack them with vertical scrolling
+white display type with an `ink` stroke and slanted cut-corner actions. Safe actions use `panel`;
+confirming actions use `play`. Wide windows place actions side by side; compact windows stack them with vertical scrolling
 and focus reveal. Arrow keys or gamepad navigation move between actions; cancel returns safely.
 The Leave Match confirmation does not pause simulation.
 
@@ -263,7 +263,8 @@ and inline reason.
 
 Customize Weapon presents the native weapon preview, borderless resolved statistics and four
 numbered slot tiles. A slot opens a fullscreen owned-parts grid with six columns on wide screens, five at medium widths and fewer on compact windows. Nothing is the first
-selectable item and clears that slot. The accepted choice uses orange; keyboard/gamepad focus has
+selectable item and clears that slot. The accepted choice uses the shared selection treatment
+(`panel-raised` fill with a `play-highlight` rim); keyboard/gamepad focus has
 an independent outline, without a duplicate Selected label. Part family illustrations are UI
 symbols, not claims that the physical weapon model changes with equipment.
 
@@ -303,7 +304,8 @@ as current, and no speculative wait time or waiting-player roster is exposed.
 
 Practice first opens a full-screen map picker with recipe-derived map overviews. The server
 advertises all approved maps for the selected mode that can host the selected roster, independently
-of that exact multiplayer pool. Orange marks the chosen map; the separate focus frame marks the
+of that exact multiplayer pool. The shared selection treatment marks the chosen map; the separate
+`accent` focus frame marks the
 current navigation target. Browsing never changes the choice until activation. Left/right navigation
 wraps continuously, with wheel/trackpad and arrow controls; one map needs no navigation. Start
 Practice submits the chosen map, while Escape/controller East returns to Dashboard. No popup or
@@ -582,7 +584,8 @@ advance.
 
 The ability overview has one ultimate and two passive cards. Each opens a fullscreen,
 responsive catalog grid (five columns on wide screens), with vertical wheel scrolling and
-keyboard/gamepad focus reveal. The current choice is teal; the shared contrasting focus
+keyboard/gamepad focus reveal. The current choice uses the shared selection treatment; the `accent`
+focus
 frame identifies navigation separately. Choosing a valid replacement submits one authoritative
 profile edit while preserving the name and other slots. The picker returns only after server
 acceptance; rejection retains the prior accepted build and shows the error in the picker.

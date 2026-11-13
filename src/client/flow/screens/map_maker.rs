@@ -13,7 +13,7 @@ use crate::{
         map_maker::{MapDraftStorage, delete_map_draft, load_map_drafts, save_map_draft},
         ui::{
             surface::{Surface, SurfaceState, SurfaceStyle},
-            theme::{CREAM, CYAN, INK, ORANGE, TEAL, font},
+            theme::{ACCENT, INK, PANEL, PANEL_RAISED, PLAY, TEXT, font},
         },
     },
     map::{
@@ -139,7 +139,6 @@ pub(in crate::client::flow) struct MapMakerRuntime {
     return_to_editor: bool,
     camera_center: Vec2,
     camera_zoom: f32,
-    ui_press_latched: bool,
 }
 
 impl Default for MapMakerRuntime {
@@ -167,7 +166,6 @@ impl Default for MapMakerRuntime {
             return_to_editor: false,
             camera_center: Vec2::ZERO,
             camera_zoom: 1.0,
-            ui_press_latched: false,
         }
     }
 }
@@ -1203,34 +1201,27 @@ pub(in crate::client::flow) fn map_maker_input(
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
     catalog: Option<Res<MapCatalogResource>>,
-    buttons: Query<(&FlowButton, Ref<Interaction>)>,
+    buttons: Query<(
+        &FlowButton,
+        &Interaction,
+        &crate::client::ui::press::ReleaseActivation,
+    )>,
     mut runtime: ResMut<MapMakerRuntime>,
     mut actions: ResMut<PendingFlowActions>,
 ) {
     if !matches!(*flow.get(), ClientFlow::MapLibrary | ClientFlow::MapEditor) {
         return;
     }
-    let pointer_is_down = mouse
-        .as_deref()
-        .is_some_and(|mouse| mouse.pressed(MouseButton::Left));
-    if !pointer_is_down {
-        runtime.ui_press_latched = false;
-    }
     let mut ui_activated = false;
-    for (button, interaction) in &buttons {
-        if is_map_maker_action(&button.action)
-            && accept_button_press(
-                interaction.is_changed(),
-                *interaction,
-                pointer_is_down,
-                &mut runtime.ui_press_latched,
-            )
-        {
+    // Release activation also keeps a button rebuilt under a held pointer from firing: it never
+    // observed that press.
+    for (button, _, release) in &buttons {
+        if is_map_maker_action(&button.action) && release.activated() {
             queue_ui_action(&mut actions, button.action.clone());
             ui_activated = true;
         }
     }
-    let validation_trigger_owns_pointer = buttons.iter().any(|(button, interaction)| {
+    let validation_trigger_owns_pointer = buttons.iter().any(|(button, interaction, _)| {
         button.action == FlowUiAction::MapMakerToggleValidation
             && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
     });
@@ -1398,10 +1389,10 @@ pub(in crate::client::flow) fn map_maker_input(
         queue_ui_action(&mut actions, FlowUiAction::MapMakerUseMoveTool);
     }
     let ui_owns_pointer = ui_activated
-        || buttons.iter().any(|(_, interaction)| {
+        || buttons.iter().any(|(_, interaction, _)| {
             matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
         });
-    let palette_owns_pointer = buttons.iter().any(|(button, interaction)| {
+    let palette_owns_pointer = buttons.iter().any(|(button, interaction, _)| {
         is_palette_action(&button.action)
             && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
     });
@@ -1640,22 +1631,6 @@ fn append_interpolated_cells(cells: &mut Vec<MapCell>, destination: MapCell) {
     }
 }
 
-fn accept_button_press(
-    interaction_changed: bool,
-    interaction: Interaction,
-    pointer_is_down: bool,
-    latched: &mut bool,
-) -> bool {
-    if !pointer_is_down {
-        *latched = false;
-    }
-    if !interaction_changed || interaction != Interaction::Pressed || *latched {
-        return false;
-    }
-    *latched = pointer_is_down;
-    true
-}
-
 #[allow(clippy::needless_pass_by_value)]
 pub(in crate::client::flow) fn present_map_library(
     mut commands: Commands,
@@ -1698,7 +1673,7 @@ pub(in crate::client::flow) fn present_map_library(
                 root.spawn((
                     Text::new(status),
                     font(assets.as_deref(), 18.0),
-                    TextColor(ORANGE),
+                    TextColor(PLAY),
                 ));
             }
             if let Some((_, name)) = runtime.renaming.as_ref() {
@@ -1711,7 +1686,7 @@ pub(in crate::client::flow) fn present_map_library(
                 root.spawn((
                     Text::new("No maps yet. Create a bounded draft to begin."),
                     font(assets.as_deref(), 22.0),
-                    TextColor(CREAM),
+                    TextColor(TEXT),
                 ));
             }
             root.spawn((Node {
@@ -1739,7 +1714,7 @@ pub(in crate::client::flow) fn present_map_library(
                 9000,
                 FlowUiAction::CreateMap,
                 "CREATE MAP",
-                ORANGE,
+                PLAY,
             );
             action_button(
                 root,
@@ -1747,7 +1722,7 @@ pub(in crate::client::flow) fn present_map_library(
                 9001,
                 FlowUiAction::CloseMapMaker,
                 "BACK",
-                TEAL,
+                ACCENT,
             );
         });
 }
@@ -1785,17 +1760,13 @@ fn create_map_panel(
                 border: UiRect::all(px(3)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.98)),
-            BorderColor::all(TEAL),
+            BackgroundColor(INK.with_alpha(0.98)),
+            BorderColor::all(ACCENT),
             GlobalZIndex(460),
         ))
         .with_children(|modal| {
-            modal.spawn((
-                Text::new("CREATE MAP"),
-                font(assets, 32.0),
-                TextColor(CREAM),
-            ));
-            modal.spawn((Text::new("MAP NAME"), font(assets, 14.0), TextColor(TEAL)));
+            modal.spawn((Text::new("CREATE MAP"), font(assets, 32.0), TextColor(TEXT)));
+            modal.spawn((Text::new("MAP NAME"), font(assets, 14.0), TextColor(ACCENT)));
             modal
                 .spawn((
                     Node {
@@ -1805,13 +1776,13 @@ fn create_map_panel(
                         border: UiRect::all(px(2)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.09, 0.14, 0.15)),
-                    BorderColor::all(ORANGE),
+                    BackgroundColor(INK.mix(&PANEL, 0.5)),
+                    BorderColor::all(PLAY),
                 ))
                 .with_child((
                     Text::new(format!("{name}|")),
                     font(assets, 21.0),
-                    TextColor(CREAM),
+                    TextColor(TEXT),
                 ));
             modal
                 .spawn((
@@ -1822,10 +1793,10 @@ fn create_map_panel(
                         border: UiRect::all(px(2)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.12, 0.28, 0.25)),
-                    BorderColor::all(TEAL),
+                    BackgroundColor(PANEL_RAISED),
+                    BorderColor::all(ACCENT),
                 ))
-                .with_child((Text::new(preview), font(assets, 19.0), TextColor(CREAM)));
+                .with_child((Text::new(preview), font(assets, 19.0), TextColor(TEXT)));
             modal
                 .spawn((Node {
                     flex_direction: FlexDirection::Row,
@@ -1840,7 +1811,7 @@ fn create_map_panel(
                         8_980,
                         FlowUiAction::CancelCreateMap,
                         "CANCEL",
-                        TEAL,
+                        ACCENT,
                     );
                     action_button(
                         actions,
@@ -1848,7 +1819,7 @@ fn create_map_panel(
                         8_981,
                         FlowUiAction::ConfirmCreateMap,
                         "CREATE",
-                        ORANGE,
+                        PLAY,
                     );
                 });
         });
@@ -1862,7 +1833,7 @@ fn rename_panel(
     parent.spawn((
         Text::new(format!("RENAME: {name}|")),
         font(assets, 22.0),
-        TextColor(CREAM),
+        TextColor(TEXT),
     ));
     parent
         .spawn((Node {
@@ -1877,7 +1848,7 @@ fn rename_panel(
                 8990,
                 FlowUiAction::ConfirmRenameMapDraft,
                 "CONFIRM RENAME",
-                ORANGE,
+                PLAY,
             );
             action_button(
                 actions,
@@ -1885,7 +1856,7 @@ fn rename_panel(
                 8991,
                 FlowUiAction::CancelRenameMapDraft,
                 "CANCEL",
-                TEAL,
+                ACCENT,
             );
         });
 }
@@ -1911,14 +1882,14 @@ fn map_card(
                 border: UiRect::all(px(2)),
                 ..default()
             },
-            BackgroundColor(CREAM),
-            BorderColor::all(TEAL),
+            BackgroundColor(PANEL),
+            BorderColor::all(ACCENT),
         ))
         .with_children(|card| {
             card.spawn((
                 Text::new(document.name.clone()),
                 font(assets, 25.0),
-                TextColor(INK),
+                TextColor(TEXT),
             ));
             if let Some(catalog) = catalog {
                 let known = document
@@ -1933,7 +1904,7 @@ fn map_card(
                         document.recipe.presentation_theme_id.0
                     )),
                     font(assets, 14.0),
-                    TextColor(TEAL),
+                    TextColor(ACCENT),
                 ));
             }
             card.spawn((
@@ -1944,7 +1915,7 @@ fn map_card(
                     document.recipe.placements.len()
                 )),
                 font(assets, 16.0),
-                TextColor(INK),
+                TextColor(TEXT),
             ));
             action_button(
                 card,
@@ -1952,7 +1923,7 @@ fn map_card(
                 button_base,
                 FlowUiAction::OpenMapDraft(document.id),
                 "OPEN",
-                ORANGE,
+                PLAY,
             );
             action_button(
                 card,
@@ -1960,7 +1931,7 @@ fn map_card(
                 button_base.saturating_add(1),
                 FlowUiAction::BeginRenameMapDraft(document.id),
                 "RENAME",
-                TEAL,
+                ACCENT,
             );
             action_button(
                 card,
@@ -1968,7 +1939,7 @@ fn map_card(
                 button_base.saturating_add(2),
                 FlowUiAction::DuplicateMapDraft(document.id),
                 "DUPLICATE",
-                TEAL,
+                ACCENT,
             );
             action_button(
                 card,
@@ -2079,13 +2050,13 @@ pub(in crate::client::flow) fn present_map_editor(
                         border: UiRect::all(px(2)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.92)),
-                    BorderColor::all(ORANGE),
+                    BackgroundColor(INK.with_alpha(0.92)),
+                    BorderColor::all(PLAY),
                 ))
                 .with_child((
                     Text::new(status),
                     font(assets.as_deref(), 15.0),
-                    TextColor(CREAM),
+                    TextColor(TEXT),
                 ));
             }
         });
@@ -2180,8 +2151,8 @@ fn editor_document_bar(
             border_radius: BorderRadius::all(px(14)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.93)),
-        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
+        BackgroundColor(INK.with_alpha(0.93)),
+        BorderColor::all(ACCENT.with_alpha(0.35)),
     ))
     .with_children(|panel| {
         panel
@@ -2194,7 +2165,7 @@ fn editor_document_bar(
                 identity.spawn((
                     Text::new(session.document.name.to_uppercase()),
                     font(assets, 19.0),
-                    TextColor(CREAM),
+                    TextColor(TEXT),
                 ));
                 identity
                     .spawn(Node {
@@ -2226,9 +2197,9 @@ fn editor_document_bar(
                             )),
                             font(assets, 11.0),
                             TextColor(if ready_to_test && !session.dirty() {
-                                CYAN
+                                ACCENT
                             } else {
-                                ORANGE
+                                PLAY
                             }),
                         ));
                     });
@@ -2265,7 +2236,7 @@ fn editor_document_bar(
             21,
             FlowUiAction::SaveMapDraft,
             "SAVE",
-            TEAL,
+            ACCENT,
             false,
         );
         compact_icon_action_button_disabled(
@@ -2302,7 +2273,7 @@ fn editor_document_bar(
             20,
             FlowUiAction::BackToMapLibrary,
             "MAPS",
-            TEAL,
+            ACCENT,
             false,
         );
     });
@@ -2328,8 +2299,8 @@ fn editor_tool_rail(
             border_radius: BorderRadius::all(px(18)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.93)),
-        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
+        BackgroundColor(INK.with_alpha(0.93)),
+        BorderColor::all(ACCENT.with_alpha(0.35)),
     ))
     .with_children(|panel| {
         tool_button(
@@ -2407,7 +2378,7 @@ fn tool_button(
             button.spawn((
                 Text::new(label),
                 font(assets, 17.0),
-                TextColor(INK),
+                TextColor(TEXT),
                 TextLayout::justify(Justify::Center),
             ));
         });
@@ -2436,8 +2407,8 @@ fn editor_canvas_controls(
             border_radius: BorderRadius::all(px(14)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.92)),
-        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
+        BackgroundColor(INK.with_alpha(0.92)),
+        BorderColor::all(ACCENT.with_alpha(0.35)),
     ))
     .with_children(|panel| {
         compact_icon_action_button_disabled(
@@ -2507,8 +2478,8 @@ fn editor_selection_toolbar(
             border_radius: BorderRadius::all(px(10)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.94)),
-        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
+        BackgroundColor(INK.with_alpha(0.94)),
+        BorderColor::all(ACCENT.with_alpha(0.35)),
     ))
     .with_children(|panel| {
         icon_image_button(
@@ -2626,7 +2597,7 @@ fn icon_image_button(
         ))
         .with_child((
             ImageNode {
-                color: if danger { CREAM } else { INK },
+                color: TEXT,
                 ..ImageNode::new(icon)
             },
             Node {
@@ -2660,8 +2631,8 @@ fn editor_validation_popover(
             border_radius: BorderRadius::all(px(14)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.97)),
-        BorderColor::all(ORANGE),
+        BackgroundColor(INK.with_alpha(0.97)),
+        BorderColor::all(PLAY),
     ))
     .with_children(|panel| {
         panel
@@ -2683,7 +2654,7 @@ fn editor_validation_popover(
                 title.spawn((
                     Text::new("MAP CHECK  •  1 ISSUE"),
                     font(assets, 17.0),
-                    TextColor(ORANGE),
+                    TextColor(PLAY),
                 ));
             });
         panel
@@ -2702,12 +2673,12 @@ fn editor_validation_popover(
                         border: UiRect::all(px(2)),
                         ..default()
                     },
-                    BorderColor::all(CREAM),
+                    BorderColor::all(TEXT),
                 ));
                 row.spawn((
                     Text::new(error),
                     font(assets, 12.0),
-                    TextColor(CREAM),
+                    TextColor(TEXT),
                     Node {
                         max_width: px(250),
                         ..default()
@@ -2764,10 +2735,10 @@ fn editor_palette(
             SurfaceState::default(),
         ))
         .with_children(|button| {
-            button.spawn((Text::new("ASSETS"), font(assets, 20.0), TextColor(CREAM)));
+            button.spawn((Text::new("ASSETS"), font(assets, 20.0), TextColor(TEXT)));
             button.spawn((
                 ImageNode {
-                    color: CREAM,
+                    color: TEXT,
                     ..ImageNode::new(asset_server.load("brawler/ui/details/map-chevron-up.png"))
                 },
                 Node {
@@ -2791,7 +2762,7 @@ fn editor_palette(
                 }
             }),
             font(assets, 11.0),
-            TextColor(Color::srgba(0.52, 0.85, 0.82, 0.78)),
+            TextColor(TEXT.with_alpha(0.78)),
             Node {
                 position_type: PositionType::Absolute,
                 left: percent(28),
@@ -2826,8 +2797,8 @@ fn editor_palette(
             overflow: Overflow::clip(),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.04, 0.07, 0.08, 0.94)),
-        BorderColor::all(Color::srgba(0.32, 0.64, 0.62, 0.35)),
+        BackgroundColor(INK.with_alpha(0.94)),
+        BorderColor::all(ACCENT.with_alpha(0.35)),
     ))
     .with_children(|tray| {
         tray.spawn(Node {
@@ -2858,10 +2829,10 @@ fn editor_palette(
                     SurfaceState::default(),
                 ))
                 .with_children(|button| {
-                    button.spawn((Text::new("ASSETS"), font(assets, 18.0), TextColor(CREAM)));
+                    button.spawn((Text::new("ASSETS"), font(assets, 18.0), TextColor(TEXT)));
                     button.spawn((
                         ImageNode {
-                            color: CREAM,
+                            color: TEXT,
                             ..ImageNode::new(
                                 asset_server.load("brawler/ui/details/map-chevron-down.png"),
                             )
@@ -2967,7 +2938,7 @@ fn editor_palette(
                 items.spawn((
                     Text::new("NO ASSETS MATCH THIS CATEGORY AND SEARCH"),
                     font(assets, 13.0),
-                    TextColor(CREAM),
+                    TextColor(TEXT),
                     Node {
                         width: px(812),
                         ..default()
@@ -2992,7 +2963,7 @@ fn editor_palette(
                 }),
                 font(assets, 12.0),
                 TextLayout::justify(Justify::Center),
-                TextColor(TEAL),
+                TextColor(ACCENT),
                 Node {
                     width: px(82),
                     ..default()
@@ -3002,7 +2973,7 @@ fn editor_palette(
         tray.spawn((
             Text::new("Click or drag to place  •  R rotates  •  Esc cancels  •  Space-drag to pan"),
             font(assets, 10.0),
-            TextColor(Color::srgba(0.52, 0.85, 0.82, 0.78)),
+            TextColor(TEXT.with_alpha(0.78)),
             Node {
                 width: percent(100),
                 ..default()
@@ -3053,7 +3024,7 @@ fn search_button(
         .with_children(|button| {
             button.spawn((
                 ImageNode {
-                    color: CREAM,
+                    color: TEXT,
                     ..ImageNode::new(asset_server.load("brawler/ui/details/map-search.png"))
                 },
                 Node {
@@ -3062,7 +3033,7 @@ fn search_button(
                     ..default()
                 },
             ));
-            button.spawn((Text::new(label), font(assets, 13.0), TextColor(CREAM)));
+            button.spawn((Text::new(label), font(assets, 13.0), TextColor(TEXT)));
         });
 }
 
@@ -3103,9 +3074,9 @@ fn palette_arrow_button(
     button.with_child((
         ImageNode {
             color: if disabled {
-                Color::srgba(0.50, 0.63, 0.64, 0.55)
+                TEXT.with_alpha(0.45)
             } else {
-                INK
+                TEXT
             },
             ..ImageNode::new(asset_server.load("brawler/ui/details/map-chevron-down.png"))
         },
@@ -3157,7 +3128,7 @@ fn palette_category_button(
             Text::new(label),
             font(assets, 10.0),
             TextLayout::justify(Justify::Center),
-            TextColor(if selected { INK } else { CREAM }),
+            TextColor(TEXT),
         ));
 }
 
@@ -3209,7 +3180,7 @@ fn palette_item_button(
                         border: UiRect::all(px(3)),
                         ..default()
                     },
-                    BorderColor::all(Color::srgb(0.02, 0.94, 0.90)),
+                    BorderColor::all(ACCENT),
                 ));
                 palette_selection_badge(button);
             }
@@ -3220,13 +3191,13 @@ fn palette_item_button(
                     height: px(124),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.08, 0.20, 0.22)),
+                BackgroundColor(PANEL),
             ));
             button.spawn((
                 Text::new(label.replace('\n', " · ")),
                 font(assets, 11.0),
                 TextLayout::justify(Justify::Center),
-                TextColor(CREAM),
+                TextColor(TEXT),
             ));
         });
 }
@@ -3246,7 +3217,7 @@ fn palette_selection_badge(button: &mut ChildSpawnerCommands) {
                 border_radius: BorderRadius::MAX,
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.05, 0.92, 0.84)),
+            BackgroundColor(ACCENT),
             BorderColor::all(INK),
             ZIndex(4),
         ))
@@ -3318,11 +3289,7 @@ fn compact_icon_action_button_disabled(
     } else {
         surface_role(&action)
     };
-    let content_color = if role == Surface::Dark && !selected {
-        CREAM
-    } else {
-        INK
-    };
+    let content_color = TEXT;
     let mut button = parent.spawn((
         Button,
         FlowButton {
@@ -3418,7 +3385,7 @@ fn compact_action_button_disabled(
         Text::new(label),
         font(assets, 12.0),
         TextLayout::justify(Justify::Center),
-        TextColor(INK),
+        TextColor(TEXT),
     ));
 }
 
@@ -3470,8 +3437,8 @@ fn header(
     title: &str,
     subtitle: &str,
 ) {
-    parent.spawn((Text::new(title), font(assets, 38.0), TextColor(CREAM)));
-    parent.spawn((Text::new(subtitle), font(assets, 17.0), TextColor(TEAL)));
+    parent.spawn((Text::new(title), font(assets, 38.0), TextColor(TEXT)));
+    parent.spawn((Text::new(subtitle), font(assets, 17.0), TextColor(ACCENT)));
 }
 
 fn action_button(
@@ -3500,9 +3467,9 @@ fn action_button(
                 ..default()
             },
             BackgroundColor(color),
-            BorderColor::all(CREAM),
+            BorderColor::all(TEXT),
         ))
-        .with_child((Text::new(label), font(assets, 16.0), TextColor(INK)));
+        .with_child((Text::new(label), font(assets, 16.0), TextColor(TEXT)));
 }
 
 pub(in crate::client::flow) fn return_to_editor_after_practice(
@@ -3522,48 +3489,6 @@ pub(in crate::client::flow) fn return_to_editor_after_practice(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn held_pointer_cannot_reactivate_rebuilt_button() {
-        let mut latched = false;
-        assert!(accept_button_press(
-            true,
-            Interaction::Pressed,
-            true,
-            &mut latched
-        ));
-        assert!(latched);
-        assert!(!accept_button_press(
-            true,
-            Interaction::Pressed,
-            true,
-            &mut latched
-        ));
-        assert!(!accept_button_press(
-            true,
-            Interaction::None,
-            false,
-            &mut latched
-        ));
-        assert!(!latched);
-        assert!(accept_button_press(
-            true,
-            Interaction::Pressed,
-            true,
-            &mut latched
-        ));
-    }
-
-    #[test]
-    fn unchanged_pressed_interaction_does_not_emit_an_action() {
-        let mut latched = false;
-        assert!(!accept_button_press(
-            false,
-            Interaction::Pressed,
-            true,
-            &mut latched
-        ));
-    }
 
     #[test]
     fn valid_three_quarter_turn_rotation_displays_without_u8_overflow() {

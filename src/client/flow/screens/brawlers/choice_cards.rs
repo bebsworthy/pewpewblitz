@@ -3,7 +3,7 @@ use super::{BrawlerBrowserArt, BrawlerCardPreview};
 use crate::client::flow::actions::FlowUiAction;
 use crate::client::ui::{
     surface::Surface,
-    theme::{INK, TEAL, font},
+    theme::{ACCENT, TEXT, font},
 };
 use bevy::prelude::*;
 
@@ -93,7 +93,7 @@ impl ChoiceCards<'_> {
                 card.spawn((
                     Text::new("›"),
                     font(self.handles, 42.),
-                    TextColor(INK),
+                    TextColor(TEXT),
                     Node {
                         position_type: PositionType::Absolute,
                         right: px(32),
@@ -103,7 +103,7 @@ impl ChoiceCards<'_> {
                 ));
             }
             if !category.is_empty() {
-                self.text(card, category, 28., TEAL);
+                self.text(card, category, 28., ACCENT);
             }
             self.illustration(card, illustration, height);
             self.text(
@@ -116,7 +116,7 @@ impl ChoiceCards<'_> {
                 } else {
                     26.
                 },
-                INK,
+                TEXT,
             );
             if !description.is_empty() {
                 self.text(
@@ -127,7 +127,7 @@ impl ChoiceCards<'_> {
                     } else {
                         18.
                     },
-                    INK,
+                    TEXT,
                 );
             }
         });

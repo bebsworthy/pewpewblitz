@@ -1,7 +1,7 @@
 //! Mode cards and exact advertised variant selection; confirmation remains flow-owned.
 use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
 use super::shared::{FlowButton, FlowNavigation, FlowRoot};
-use crate::client::ui::theme::{CREAM, INK, font};
+use crate::client::ui::theme::{TEXT, font, shell_background};
 use crate::client::{
     ClientLobbyMembership,
     flow::{actions::FlowUiAction, model::ClientFlow},
@@ -183,7 +183,7 @@ pub(in crate::client::flow) fn spawn_game_type_select(
                 ..default()
             },
             ScrollPosition::default(),
-            BackgroundColor(CREAM),
+            shell_background(),
             GlobalZIndex(410),
         ))
         .with_children(|root| {
@@ -268,7 +268,7 @@ fn label(
     text: &str,
     size: f32,
 ) {
-    parent.spawn((Text::new(text), font(assets, size), TextColor(INK)));
+    parent.spawn((Text::new(text), font(assets, size), TextColor(TEXT)));
 }
 struct Choice<'a> {
     index: usize,

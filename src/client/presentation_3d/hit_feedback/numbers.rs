@@ -304,7 +304,7 @@ pub(in crate::client::presentation_3d) fn project_floating_numbers(
         let (scale, rise, alpha) = number_animation(entry.age, &tuning, reduced_motion);
         let (red, green, blue) = style.color;
         color.0 = Color::srgba(red, green, blue, alpha);
-        shadow.color = ui::theme::TYPE_STROKE.with_alpha(alpha);
+        shadow.color = ui::theme::INK.with_alpha(alpha);
         node.left =
             px(viewport.x + tuning.side_offset_pixels + entry.lateral * tuning.stack_offset_pixels);
         node.top = px(viewport.y - rise - style.font_size * 0.6);

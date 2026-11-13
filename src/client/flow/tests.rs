@@ -282,6 +282,11 @@ fn press_flow_button(app: &mut App, action: &FlowUiAction) {
         .entity_mut(entity)
         .insert(Interaction::Pressed);
     app.update();
+    // Shell actions fire on an undragged release over the control.
+    if let Ok(mut entity) = app.world_mut().get_entity_mut(entity) {
+        entity.insert(Interaction::Hovered);
+    }
+    app.update();
 }
 
 fn lobby_membership() -> ClientLobbyMembership {
@@ -1199,6 +1204,15 @@ fn selected_brawler_cards_open_list_details_and_reach_equipment() {
     app.world_mut()
         .entity_mut(preview)
         .insert(Interaction::Pressed);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::None,
+        "pressing only focuses; navigation waits for release"
+    );
+    app.world_mut()
+        .entity_mut(preview)
+        .insert(Interaction::Hovered);
     app.update();
     assert_eq!(
         *app.world().resource::<ClientOverlay>(),

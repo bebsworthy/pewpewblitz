@@ -90,6 +90,7 @@ impl Plugin for ClientFlowPlugin {
         reason = "the composition point keeps the ordered product-flow schedule and state hooks visible"
     )]
     fn build(&self, app: &mut App) {
+        super::ui::press::add_release_activation(app);
         app.init_state::<ClientFlow>()
             .init_resource::<ClientOverlay>()
             .init_resource::<PendingFlowActions>()
@@ -270,6 +271,30 @@ impl Plugin for ClientFlowPlugin {
                 .after(UiSystems::Layout)
                 .run_if(in_state(ClientFlow::GameTypeSelect)),
         );
+        app.add_systems(Update, begin_surface_entrance);
+    }
+}
+
+/// Opens the shared surface entrance when the visible destination changes. Rebuilds of an
+/// unchanged screen keep their surfaces still; presentation never gates the navigation itself.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+fn begin_surface_entrance(
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    time: Res<Time>,
+    entrance: Option<ResMut<super::ui::surface::SurfaceEntrance>>,
+    mut shown: Local<Option<(ClientFlow, ClientOverlay)>>,
+) {
+    let current = (*flow.get(), overlay.clone());
+    if shown.as_ref() == Some(&current) {
+        return;
+    }
+    *shown = Some(current);
+    if let Some(mut entrance) = entrance {
+        entrance.begin(time.elapsed_secs());
     }
 }
 

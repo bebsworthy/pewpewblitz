@@ -4,7 +4,7 @@ use super::{
     brawlers::ultimate_name,
     shared::{FlowButton, FlowNavigation, FlowRoot},
 };
-use crate::client::ui::theme::{CREAM, INK, TEAL, font};
+use crate::client::ui::theme::{ACCENT, INK, PANEL, PANEL_RAISED, TEXT, font};
 use crate::client::{
     ClientLobbyMembership, RuntimeLobbyTarget,
     flow::{
@@ -222,7 +222,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                         DashboardLayoutRole::Wordmark,
                         Text::new("PEWPEW BLITZ"),
                         font(assets.as_deref(), 32.0),
-                        TextColor(INK),
+                        TextColor(TEXT),
                     ));
                 }
                 header
@@ -246,12 +246,12 @@ pub(in crate::client::flow) fn spawn_dashboard(
                         identity_panel(assets.as_deref()),
                     ))
                     .with_children(|identity| {
-                        shell_icon(identity, assets.as_deref(), 3, 26.0, CREAM);
+                        shell_icon(identity, assets.as_deref(), 3, 26.0, TEXT);
                         identity.spawn((
                             Text::new(&membership.accepted_display_name),
                             TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
                             font(assets.as_deref(), 22.0),
-                            TextColor(CREAM),
+                            TextColor(TEXT),
                         ));
                         identity.spawn((
                             Node {
@@ -260,14 +260,14 @@ pub(in crate::client::flow) fn spawn_dashboard(
                                 flex_shrink: 0.0,
                                 ..default()
                             },
-                            BackgroundColor(CREAM),
+                            BackgroundColor(TEXT),
                         ));
-                        shell_icon(identity, assets.as_deref(), 4, 28.0, TEAL);
+                        shell_icon(identity, assets.as_deref(), 4, 28.0, ACCENT);
                         identity.spawn((
                             Text::new(membership.server_name.to_uppercase()),
                             TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
                             font(assets.as_deref(), 22.0),
-                            TextColor(TEAL),
+                            TextColor(ACCENT),
                         ));
                     });
                 header.spawn((
@@ -298,7 +298,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                     DashboardLayoutRole::Notice,
                     Text::new(message),
                     font(assets.as_deref(), 18.0),
-                    TextColor(INK),
+                    TextColor(TEXT),
                 ));
             }
             root.spawn((
@@ -363,7 +363,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                             TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
                             DashboardBrawlerNameLabel,
                             font(assets.as_deref(), 64.0),
-                            TextColor(INK),
+                            TextColor(TEXT),
                         ));
                         if let Some(assets) = assets.as_deref() {
                             details.spawn((
@@ -380,7 +380,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                             Text::new(build_summary),
                             DashboardBrawlerSummaryLabel,
                             font(assets.as_deref(), 20.0),
-                            TextColor(INK),
+                            TextColor(TEXT),
                         ));
                         let mut button = details.spawn((
                             Button,
@@ -408,14 +408,14 @@ pub(in crate::client::flow) fn spawn_dashboard(
                                 justify_content: JustifyContent::Center,
                                 ..default()
                             },
-                            BackgroundColor(TEAL),
+                            BackgroundColor(PANEL_RAISED),
                             BorderColor::all(INK),
                         ));
                         if admission_pending {
                             button.insert(InteractionDisabled);
                         }
                         button.with_children(|button| {
-                            shell_icon(button, assets.as_deref(), 5, 38.0, CREAM);
+                            shell_icon(button, assets.as_deref(), 5, 38.0, TEXT);
                             button.spawn((
                                 DashboardBrawlerActionLabel,
                                 Text::new(if selected_brawler.is_some() {
@@ -424,7 +424,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                                     "CREATE BRAWLER"
                                 }),
                                 font(assets.as_deref(), 24.0),
-                                TextColor(CREAM),
+                                TextColor(TEXT),
                             ));
                         });
                     });
@@ -465,7 +465,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                         border_radius: BorderRadius::all(px(16)),
                         ..default()
                     },
-                    BackgroundColor(CREAM),
+                    BackgroundColor(PANEL),
                     BorderColor::all(INK),
                 ));
                 if admission_pending {
@@ -490,7 +490,7 @@ pub(in crate::client::flow) fn spawn_dashboard(
                     if let Some(assets) = assets.as_deref() {
                         card.spawn((
                             ImageNode {
-                                color: INK,
+                                color: TEXT,
                                 ..ImageNode::new(assets.dashboard_icons[6].clone())
                             },
                             Node {
@@ -516,13 +516,13 @@ pub(in crate::client::flow) fn spawn_dashboard(
                                     font_size: FontSize::Vh(10.0),
                                     ..font(assets.as_deref(), 42.0)
                                 },
-                                TextColor(INK),
+                                TextColor(TEXT),
                             ));
                             details.spawn((
                                 Text::new(game_summary),
                                 DashboardGameSummaryLabel,
                                 font(assets.as_deref(), 32.0),
-                                TextColor(INK),
+                                TextColor(TEXT),
                                 TextLayout::new(Justify::Left, LineBreak::WordBoundary),
                             ));
                         });
@@ -945,7 +945,8 @@ fn spawn_dashboard_button(
     let icon_size = dashboard_button_icon_size(is_play, is_practice);
     let mut button = parent.spawn((
         Button,
-        if primary || is_utility {
+        // Play is the screen's single `play` action; Menu and Practice are raised panels.
+        if primary {
             crate::client::ui::surface::Surface::Primary
         } else {
             crate::client::ui::surface::Surface::Secondary
@@ -971,6 +972,7 @@ fn spawn_dashboard_button(
         button.insert((
             DashboardButtonStyle::Play,
             DashboardLayoutRole::ActionButton,
+            crate::client::ui::surface::PrimaryIdleMotion,
         ));
     } else if is_practice {
         button.insert((
@@ -1011,7 +1013,7 @@ fn spawn_dashboard_button_contents(
     let icon_node = icon.map(|icon| {
         (
             ImageNode {
-                color: INK,
+                color: TEXT,
                 ..ImageNode::new(icon)
             },
             Node {
@@ -1032,7 +1034,7 @@ fn spawn_dashboard_button_contents(
         DashboardButtonContentKind::Practice => 40.0,
         DashboardButtonContentKind::Utility | DashboardButtonContentKind::Other => 24.0,
     };
-    let color = INK;
+    let color = TEXT;
     let mut text = parent.spawn((Text::new(label), font(assets, font_size), TextColor(color)));
     match kind {
         DashboardButtonContentKind::Play => {
@@ -1105,7 +1107,7 @@ pub(in crate::client::flow) fn present_dashboard_menu(
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.015, 0.04, 0.78)),
+            BackgroundColor(INK.with_alpha(0.78)),
             GlobalZIndex(500),
         ))
         .with_children(|root| {
@@ -1121,14 +1123,14 @@ pub(in crate::client::flow) fn present_dashboard_menu(
                     border_radius: BorderRadius::all(px(14)),
                     ..default()
                 },
-                BackgroundColor(CREAM),
+                BackgroundColor(PANEL),
                 BorderColor::all(INK),
             ))
             .with_children(|panel| {
                 panel.spawn((
                     Text::new("MENU"),
                     font(assets.as_deref(), 34.0),
-                    TextColor(INK),
+                    TextColor(TEXT),
                 ));
                 spawn_menu_button(
                     panel,
@@ -1210,7 +1212,7 @@ fn spawn_menu_button(
                 ..default()
             },
         ))
-        .with_child((Text::new(label), font(assets, 22.0), TextColor(INK)));
+        .with_child((Text::new(label), font(assets, 22.0), TextColor(TEXT)));
 }
 
 // Artwork contains only chrome; all text and actions remain live Bevy UI.

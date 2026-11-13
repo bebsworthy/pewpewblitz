@@ -34,13 +34,86 @@ pub fn build_ui_gallery_app() -> App {
                 ..default()
             }),
     )
-    .insert_resource(ClearColor(theme::CREAM))
+    .insert_resource(ClearColor(theme::SHELL_BG_BOTTOM))
     .init_resource::<GalleryFocus>()
-    .add_plugins((controls::UiControlsPlugin, super::surface::SurfacePlugin))
+    .add_plugins((
+        controls::UiControlsPlugin,
+        super::surface::SurfacePlugin,
+        super::press::ReleaseActivationPlugin,
+    ))
     .add_systems(Startup, setup)
-    .add_systems(Update, (interact, scroll_gallery, resize_gallery))
+    .add_systems(
+        Update,
+        (interact, scroll_gallery, resize_gallery, sync_motion_demo),
+    )
+    .add_systems(PreUpdate, hold_press_demo.after(UiSystems::Focus))
     .add_systems(PostUpdate, reveal_focus.after(UiSystems::Layout));
+    if let Some(path) = std::env::var_os("BRAWLER_UI_GALLERY_CAPTURE") {
+        app.insert_resource(GalleryCapture {
+            path: path.into(),
+            frame: 0,
+        })
+        .add_systems(Last, capture_gallery);
+    }
     app
+}
+
+/// Development evidence: save the settled top of the gallery to `BRAWLER_UI_GALLERY_CAPTURE`,
+/// then its scrolled bottom beside it (`<stem>-bottom.png`), then exit.
+#[derive(Resource)]
+struct GalleryCapture {
+    path: std::path::PathBuf,
+    frame: u32,
+}
+
+const GALLERY_CAPTURE_FRAME: u32 = 120;
+
+fn capture_gallery(
+    mut commands: Commands,
+    mut capture: ResMut<GalleryCapture>,
+    mut roots: Query<&mut ScrollPosition, With<GalleryRoot>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+    capture.frame += 1;
+    let bottom = capture.path.with_file_name(format!(
+        "{}-bottom.png",
+        capture
+            .path
+            .file_stem()
+            .map_or("gallery".into(), |stem| stem.to_string_lossy())
+    ));
+    match capture.frame {
+        GALLERY_CAPTURE_FRAME => {
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(capture.path.clone()));
+        }
+        frame if frame == GALLERY_CAPTURE_FRAME + 10 => {
+            for mut scroll in &mut roots {
+                scroll.0.y = 10_000.0;
+            }
+        }
+        frame if frame == GALLERY_CAPTURE_FRAME + 40 => {
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(bottom));
+        }
+        frame if frame == GALLERY_CAPTURE_FRAME + 70 => {
+            exit.write(AppExit::Success);
+        }
+        _ => {}
+    }
+}
+
+/// Reference-only state: keeps one example visibly held, as if under a pointer.
+#[derive(Component)]
+struct HeldPressDemo;
+
+fn hold_press_demo(mut held: Query<&mut Interaction, With<HeldPressDemo>>) {
+    for mut interaction in &mut held {
+        interaction.set_if_neq(Interaction::Pressed);
+    }
 }
 
 #[derive(Resource, Default)]
@@ -59,6 +132,7 @@ struct GalleryColumns;
 struct GalleryColumn;
 
 #[derive(Component)]
+#[require(super::press::ReleaseActivation)]
 struct GalleryItem(usize);
 
 #[allow(clippy::needless_pass_by_value, reason = "Bevy gallery setup")]
@@ -72,17 +146,17 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((GalleryRoot, ScrollPosition::default(), Node {
         width: percent(100), height: percent(100), padding: UiRect::all(px(32)),
         flex_direction: FlexDirection::Column, row_gap: px(24), overflow: Overflow::scroll_y(), ..default()
-    }, BackgroundColor(theme::CREAM))).with_children(|root| {
-        root.spawn((Text::new("UI GALLERY"), TextFont { font_size: FontSize::Px(42.0), ..font.clone() }, TextColor(theme::INK)));
+    }, theme::shell_background())).with_children(|root| {
+        root.spawn((Text::new("UI GALLERY"), TextFont { font_size: FontSize::Px(42.0), ..font.clone() }, TextColor(theme::TEXT)));
         root.spawn((Text::new("Development preview · Up/Down or D-pad: focus · Left/Right: adjust · Enter/South: activate"),
-            TextFont { font_size: FontSize::Px(18.0), ..font.clone() }, TextColor(theme::INK)));
+            TextFont { font_size: FontSize::Px(18.0), ..font.clone() }, TextColor(theme::TEXT)));
         root.spawn((GalleryColumns, Node { width: percent(100), column_gap: px(32), row_gap: px(32), flex_shrink: 0.0, ..default() })).with_children(|columns| {
             columns.spawn((GalleryColumn, column())).with_children(|left| {
                 heading(left, &font, "INTERACTIVE CONTROLS");
                 let controls = [
                     ("Measure stick drift", ControlValue::Action),
                     ("Accessibility", ControlValue::Tab),
-                    ("Reduced motion", ControlValue::Toggle(true)),
+                    ("Reduced motion", ControlValue::Toggle(false)),
                     ("UI scale", ControlValue::Slider { fraction: 0.5, label: "100%".into() }),
                     ("Active item", ControlValue::Binding("Q".into())),
                 ];
@@ -93,7 +167,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                 heading(left, &font, "SHELL COMPONENTS");
                 for (offset, (role, label, height)) in [
                     (Surface::Back, "BACK TO BRAWLERS", 64.),
-                    (Surface::Primary, "SELECT FOR PLAY", 96.),
+                    (Surface::Primary, "PLAY", 96.),
                     (Surface::Secondary, "PRACTICE", 72.),
                     (Surface::Card, "BRAWLER CARD\nPulse Sidearm", 220.),
                     (Surface::Panel, "WEAPON OVERVIEW\nFour attachment slots", 150.),
@@ -101,6 +175,10 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                 ].into_iter().enumerate() {
                     let entity=surface_example(left,&font,role,label,height);
                     left.commands().entity(entity).insert((GalleryItem(offset+5),ControlValue::Action,ControlState::default()));
+                    if role == Surface::Primary {
+                        // The Dashboard Play treatment: breathing and periodic shine.
+                        left.commands().entity(entity).insert(super::surface::PrimaryIdleMotion);
+                    }
                 }
             });
             columns.spawn((GalleryColumn, column())).with_children(|right| {
@@ -117,13 +195,17 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                 heading(right, &font, "SHARED SURFACE STATES");
                 for (label, state, disabled) in [
                     ("Selected and focused", ControlState{selected:true,focused:true,..default()}, false),
-                    ("Focused orange action", ControlState{focused:true,..default()}, false),
+                    ("Focused play action", ControlState{focused:true,..default()}, false),
                     ("Disabled action", ControlState::default(), true),
                     ("Inactive selected card", ControlState{selected:true,focused:true,inactive:true}, false),
+                    ("Held press (squash, lip collapse)", ControlState::default(), false),
                 ] {
                     let entity=surface_example(right,&font,Surface::Primary,label,100.);
                     right.commands().entity(entity).insert(state);
                     if disabled { right.commands().entity(entity).insert(InteractionDisabled); }
+                    if label.starts_with("Held press") {
+                        right.commands().entity(entity).insert(HeldPressDemo);
+                    }
                 }
             });
         });
@@ -141,7 +223,7 @@ fn column() -> Node {
 }
 
 fn heading(parent: &mut ChildSpawnerCommands, font: &TextFont, label: &str) {
-    parent.spawn((Text::new(label), font.clone(), TextColor(theme::TEAL)));
+    parent.spawn((Text::new(label), font.clone(), TextColor(theme::ACCENT)));
 }
 
 #[allow(
@@ -157,7 +239,8 @@ fn interact(
     mut focus: ResMut<GalleryFocus>,
     mut controls: Query<(
         &GalleryItem,
-        Ref<Interaction>,
+        &Interaction,
+        &super::press::ReleaseActivation,
         &mut ControlState,
         &mut ControlValue,
     )>,
@@ -168,7 +251,7 @@ fn interact(
     {
         for (track, cursor) in &tracks {
             if let Some(position) = controls::slider_fraction(cursor)
-                && let Ok((item, _, _, mut value)) = controls.get_mut(track.0)
+                && let Ok((item, _, _, _, mut value)) = controls.get_mut(track.0)
                 && let ControlValue::Slider { fraction, label } = &mut *value
             {
                 *fraction = position;
@@ -202,17 +285,17 @@ fn interact(
         i8::from(keys.just_pressed(KeyCode::ArrowRight) || pressed(GamepadButton::DPadRight))
             - i8::from(keys.just_pressed(KeyCode::ArrowLeft) || pressed(GamepadButton::DPadLeft));
     let activate = keys.just_pressed(KeyCode::Enter) || pressed(GamepadButton::South);
-    for (item, interaction, _, _) in &mut controls {
+    for (item, interaction, _, _, _) in &mut controls {
         if *interaction == Interaction::Pressed {
             focus.index = item.0;
         }
     }
-    for (item, interaction, mut state, mut value) in &mut controls {
+    for (item, _, release, mut state, mut value) in &mut controls {
         state.focused = item.0 == focus.index;
         if !state.focused {
             continue;
         }
-        let clicked = interaction.is_changed() && *interaction == Interaction::Pressed;
+        let clicked = release.activated();
         if direction != 0 || activate || clicked {
             match &mut *value {
                 ControlValue::Toggle(on) if direction != 0 || activate || clicked => *on = !*on,
@@ -226,6 +309,23 @@ fn interact(
         }
     }
 }
+
+/// The demo Reduced motion switch drives the production surface motion policy.
+fn sync_motion_demo(
+    values: Query<(&GalleryItem, &ControlValue)>,
+    mut policy: ResMut<super::surface::SurfaceMotionPolicy>,
+) {
+    for (item, value) in &values {
+        if item.0 == REDUCED_MOTION_ITEM
+            && let ControlValue::Toggle(reduced) = value
+            && policy.reduced != *reduced
+        {
+            policy.reduced = *reduced;
+        }
+    }
+}
+
+const REDUCED_MOTION_ITEM: usize = 2;
 
 #[allow(clippy::needless_pass_by_value, reason = "gallery responsive layout")]
 fn resize_gallery(
@@ -338,7 +438,7 @@ fn surface_example(
         .with_child((
             Text::new(label),
             font.clone(),
-            TextColor(theme::INK),
+            TextColor(theme::TEXT),
             TextLayout::justify(Justify::Center),
             Node {
                 width: percent(100),

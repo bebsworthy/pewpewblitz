@@ -193,7 +193,7 @@ fn heading(parent: &mut ChildSpawnerCommands, font: &TextFont, label: &str) {
             font_size: 20.0.into(),
             ..font.clone()
         },
-        TextColor(theme::TEAL),
+        TextColor(theme::ACCENT),
         Node {
             margin: UiRect::top(px(12)),
             ..default()

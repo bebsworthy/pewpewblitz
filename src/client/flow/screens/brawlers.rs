@@ -16,7 +16,7 @@ use crate::client::flow::{
     actions::FlowUiAction,
     model::{ClientFlow, ClientOverlay},
 };
-use crate::client::ui::theme::{CREAM, INK, TEAL, font};
+use crate::client::ui::theme::{ACCENT, TEXT, font, shell_background};
 use bevy::{
     input::mouse::MouseWheel,
     prelude::*,
@@ -313,7 +313,7 @@ impl BrawlerBrowserArt<'_> {
             header
                 .commands()
                 .entity(back)
-                .with_children(|b| self.label(b, "‹ BACK", 22.0, INK));
+                .with_children(|b| self.label(b, "‹ BACK", 22.0, TEXT));
             header
                 .spawn(Node {
                     width: px((width - 330.0).max(130.0)),
@@ -324,7 +324,7 @@ impl BrawlerBrowserArt<'_> {
                         title,
                         "BRAWLERS",
                         if width < 760.0 { 30.0 } else { 46.0 },
-                        INK,
+                        TEXT,
                     );
                 });
         });
@@ -347,10 +347,10 @@ impl BrawlerBrowserArt<'_> {
             browser_card_node(self.card_height),
         );
         grid.commands().entity(create).with_children(|card| {
-            self.label(card, "+", 96.0, TEAL);
-            self.label(card, "CREATE\nBRAWLER", 32.0, INK);
+            self.label(card, "+", 96.0, ACCENT);
+            self.label(card, "CREATE\nBRAWLER", 32.0, TEXT);
             if full {
-                self.label(card, "Brawler limit reached", 16.0, INK);
+                self.label(card, "Brawler limit reached", 16.0, TEXT);
             }
         });
         for (index, brawler) in snapshot.brawlers.iter().enumerate() {
@@ -441,12 +441,12 @@ fn spawn_brawler_list_row(
                     },
                 ));
             });
-            art.label(card, brawler.name.to_uppercase(), 34.0, INK);
+            art.label(card, brawler.name.to_uppercase(), 34.0, TEXT);
             art.label(
                 card,
                 advertised_weapon_name(catalog, brawler.weapon_base_id),
                 20.0,
-                INK,
+                TEXT,
             );
         });
 }
@@ -579,7 +579,7 @@ pub(in crate::client::flow) fn present_brawler_list(
                 row_gap: px(20),
                 ..default()
             },
-            BackgroundColor(CREAM),
+            shell_background(),
             GlobalZIndex(510),
         ))
         .with_children(|root| {

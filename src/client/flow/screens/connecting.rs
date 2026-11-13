@@ -16,7 +16,7 @@ use crate::client::{
     },
     ui::{
         surface::Surface,
-        theme::{INK, ORANGE, TEAL, font},
+        theme::{ACCENT, PLAY, TEXT, font},
     },
 };
 use bevy::prelude::*;
@@ -78,7 +78,7 @@ pub(in crate::client::flow) fn spawn_connecting(
                 panel.spawn((
                     Text::new(address),
                     font(assets.as_deref(), 22.0),
-                    TextColor(TEAL),
+                    TextColor(ACCENT),
                     TextLayout::new(Justify::Center, LineBreak::WordBoundary),
                 ));
                 panel
@@ -99,9 +99,9 @@ pub(in crate::client::flow) fn spawn_connecting(
                                     ..default()
                                 },
                                 BackgroundColor(if step == 0 {
-                                    ORANGE
+                                    PLAY
                                 } else {
-                                    INK.with_alpha(0.18)
+                                    TEXT.with_alpha(0.22)
                                 }),
                             ));
                         }
@@ -110,14 +110,14 @@ pub(in crate::client::flow) fn spawn_connecting(
                     ConnectingPhaseLabel,
                     Text::new("PREPARING CONNECTION"),
                     font(assets.as_deref(), 28.0),
-                    TextColor(INK),
+                    TextColor(TEXT),
                     TextLayout::new(Justify::Center, LineBreak::WordBoundary),
                 ));
                 panel.spawn((
                     ConnectingDetailLabel,
                     Text::new("Starting connection"),
                     font(assets.as_deref(), 18.0),
-                    TextColor(INK),
+                    TextColor(TEXT),
                     TextLayout::new(Justify::Center, LineBreak::WordBoundary),
                 ));
                 spawn_action(
@@ -188,9 +188,9 @@ pub(in crate::client::flow) fn update_connecting_copy(
     }
     for (segment, mut color) in &mut segments {
         color.0 = match segment.0.cmp(&step) {
-            std::cmp::Ordering::Less => TEAL,
-            std::cmp::Ordering::Equal => ORANGE,
-            std::cmp::Ordering::Greater => INK.with_alpha(0.18),
+            std::cmp::Ordering::Less => ACCENT,
+            std::cmp::Ordering::Equal => PLAY,
+            std::cmp::Ordering::Greater => TEXT.with_alpha(0.22),
         };
     }
 }

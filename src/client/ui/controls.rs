@@ -1,6 +1,6 @@
 //! Settings control presentation. Owners handle activation, adjustment and persistence.
 
-use super::theme::{CREAM, INK, ORANGE, TEAL};
+use super::theme::{ACCENT, INK, PANEL, PANEL_RAISED, PLAY, TEXT};
 use bevy::{
     prelude::*,
     ui::{InteractionDisabled, RelativeCursorPosition, UiSystems},
@@ -76,25 +76,25 @@ pub(crate) fn colors(
     disabled: bool,
 ) -> (Color, Color) {
     if disabled {
-        return (CREAM.mix(&INK, 0.12), INK.with_alpha(0.35));
+        return (PANEL.mix(&INK, 0.35), INK.with_alpha(0.35));
     }
-    let background = if state.selected { TEAL } else { CREAM };
+    let background = if state.selected { PANEL_RAISED } else { PANEL };
     if state.inactive {
         return (background, INK);
     }
     if interaction == Interaction::Pressed {
-        (background.mix(&INK, 0.12), ORANGE)
+        (background.mix(&INK, 0.12), ACCENT)
     } else if state.focused {
         (
             if state.selected {
-                TEAL
+                PANEL_RAISED
             } else {
-                CREAM.mix(&ORANGE, 0.22)
+                PANEL.mix(&ACCENT, 0.18)
             },
-            ORANGE,
+            ACCENT,
         )
     } else if interaction == Interaction::Hovered {
-        (background.mix(&TEAL, 0.16), TEAL)
+        (background.mix(&TEXT, 0.12), PANEL_RAISED)
     } else {
         (background, INK)
     }
@@ -126,7 +126,7 @@ pub(crate) fn spawn_control(
             align_items: AlignItems::Center,
             ..default()
         },
-        BackgroundColor(CREAM),
+        BackgroundColor(PANEL),
         BorderColor::all(INK),
     ));
     let owner = entity.id();
@@ -134,7 +134,7 @@ pub(crate) fn spawn_control(
         row.spawn((
             Text::new(label),
             font.clone(),
-            TextColor(INK),
+            TextColor(TEXT),
             Node {
                 flex_grow: 1.0,
                 min_width: px(0),
@@ -145,7 +145,7 @@ pub(crate) fn spawn_control(
             FocusMarker(owner),
             Text::new("›"),
             font.clone(),
-            TextColor(INK),
+            TextColor(TEXT),
             Node {
                 position_type: PositionType::Absolute,
                 left: px(-18),
@@ -165,7 +165,7 @@ pub(crate) fn spawn_control(
                 ValueLabel(owner),
                 Text::new(""),
                 font.clone(),
-                TextColor(INK),
+                TextColor(TEXT),
             ));
             if binding {
                 text.insert((
@@ -178,7 +178,7 @@ pub(crate) fn spawn_control(
                         ..default()
                     },
                     TextLayout::new(Justify::Center, LineBreak::NoWrap),
-                    BackgroundColor(CREAM),
+                    BackgroundColor(INK.mix(&PANEL, 0.4)),
                     BorderColor::all(INK),
                 ));
             }
@@ -210,7 +210,7 @@ fn spawn_slider(parent: &mut ChildSpawnerCommands, owner: Entity) {
                     border_radius: BorderRadius::all(px(4)),
                     ..default()
                 },
-                BackgroundColor(TEAL.with_alpha(0.25)),
+                BackgroundColor(INK.with_alpha(0.55)),
             ));
             track.spawn((
                 SliderFill(owner),
@@ -222,7 +222,7 @@ fn spawn_slider(parent: &mut ChildSpawnerCommands, owner: Entity) {
                     border_radius: BorderRadius::all(px(4)),
                     ..default()
                 },
-                BackgroundColor(TEAL),
+                BackgroundColor(ACCENT),
             ));
             track.spawn((
                 SliderKnob(owner),
@@ -237,7 +237,7 @@ fn spawn_slider(parent: &mut ChildSpawnerCommands, owner: Entity) {
                     border_radius: BorderRadius::all(px(12)),
                     ..default()
                 },
-                BackgroundColor(CREAM),
+                BackgroundColor(TEXT),
                 BorderColor::all(INK),
             ));
         });
@@ -283,7 +283,7 @@ fn spawn_switch(parent: &mut ChildSpawnerCommands, owner: Entity) {
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(TEAL),
+            BackgroundColor(INK.mix(&PANEL, 0.4)),
         ))
         .with_child((
             Node {
@@ -292,7 +292,7 @@ fn spawn_switch(parent: &mut ChildSpawnerCommands, owner: Entity) {
                 border_radius: BorderRadius::all(px(12)),
                 ..default()
             },
-            BackgroundColor(CREAM),
+            BackgroundColor(TEXT),
         ));
 }
 
@@ -308,7 +308,7 @@ fn present_switches(
             } else {
                 JustifyContent::FlexStart
             };
-            let fill = if *on { ORANGE } else { INK.mix(&CREAM, 0.55) };
+            let fill = if *on { PLAY } else { INK.mix(&PANEL, 0.4) };
             background.0 = if disabled { fill.with_alpha(0.4) } else { fill };
         }
     }
@@ -463,7 +463,7 @@ mod tests {
         state.selected = true;
         let after = colors(&state, Interaction::None, false);
         assert_ne!(before.0, after.0);
-        assert_eq!(after, (TEAL, ORANGE));
+        assert_eq!(after, (PANEL_RAISED, ACCENT));
     }
 
     #[test]
@@ -518,7 +518,10 @@ mod tests {
             focused: true,
             inactive: true,
         };
-        assert_eq!(colors(&inactive, Interaction::Pressed, false), (TEAL, INK));
+        assert_eq!(
+            colors(&inactive, Interaction::Pressed, false),
+            (PANEL_RAISED, INK)
+        );
         assert_eq!(
             colors(&selected, Interaction::None, true),
             colors(&focused, Interaction::Pressed, true)

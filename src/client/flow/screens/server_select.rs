@@ -17,7 +17,7 @@ use crate::client::{
     ClientAssetHandles,
     ui::{
         surface::{Surface, SurfaceState},
-        theme::{INK, ORANGE, font},
+        theme::{PLAY_HIGHLIGHT, TEXT, font},
     },
 };
 use bevy::prelude::*;
@@ -79,7 +79,7 @@ fn spawn_editor_button(
             row.spawn((
                 Text::new(label),
                 font(assets, 22.0),
-                TextColor(INK),
+                TextColor(TEXT),
                 Node {
                     flex_shrink: 0.0,
                     ..default()
@@ -89,7 +89,7 @@ fn spawn_editor_button(
                 field,
                 Text::new(""),
                 font(assets, 22.0),
-                TextColor(INK),
+                TextColor(TEXT),
                 TextLayout::new(Justify::Right, LineBreak::AnyCharacter),
                 Node {
                     min_width: px(0),
@@ -192,7 +192,7 @@ pub(in crate::client::flow) fn spawn_server_select_root(
                     content.spawn((
                         Text::new(error.clone()),
                         font(assets, 18.0),
-                        TextColor(ORANGE),
+                        TextColor(PLAY_HIGHLIGHT),
                         TextLayout::new(Justify::Center, LineBreak::WordBoundary),
                     ));
                 }

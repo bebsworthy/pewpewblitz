@@ -14,7 +14,7 @@ Current specification, 2026-09-10. Design approvals: BRL-0112 and BRL-0113. Nati
 
 Generated text, numerical values and robot details are illustrative. Runtime uses the shipped Lilita One font, accepted server facts and actual game models.
 
-The references above remain approved for **composition, information architecture and flow**. Their cream/teal/orange palette, flat surfaces and drift-only motion are superseded by the visual language below (BRL-0140, 2026-10-23). Screens move to the new palette under BRL-0156. Until then, the shipped shell keeps the legacy palette.
+The references above remain approved for **composition, information architecture and flow**. Their cream/teal/orange palette, flat surfaces and drift-only motion are superseded by the visual language below (BRL-0140, 2026-10-23). BRL-0156 moved every shipped shell screen to the new palette, pressable surfaces and motion; where later sections still name legacy colors, read them through the migration mapping below.
 
 ## Visual language
 
@@ -31,7 +31,7 @@ The shell matches the game's bright, energetic, toy-like direction in [docs/11](
 | `text` | #FFFFFF | Headings, button labels, values |
 | `self` / `ally` / `enemy` | #4CD964 / #2F8BFF / #FF3B3B | Relationship colors, shared with the world and HUD |
 
-Migration from the legacy roles: Cream surface → `panel`. Navy → `ink`. Teal selected/secondary → `panel-raised`. Orange → `play`. The cream/navy focus frame → an `accent` frame with an `ink` outline.
+Migration from the legacy roles: Cream surface → `panel`. Cream background → the `shell-bg` gradient. Navy text → `text` with an `ink` stroke. Navy outline → `ink`. Teal selected/secondary → `panel-raised`. Orange primary → `play`. Orange or teal "current choice" → the shared selection treatment: `panel-raised` fill with a `play-highlight` rim (the primary action keeps `play`). The cream/navy focus frame and pointer → an `accent` frame with an `ink` keyline and an `accent` pointer.
 
 - **Type.** Headings, button labels and HUD numbers use white Lilita One with a 2–4 px `ink` stroke and a soft drop shadow. Supporting copy may drop the stroke but must keep its contrast against the panel.
 - **Surfaces.**

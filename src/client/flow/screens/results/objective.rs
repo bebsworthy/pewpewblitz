@@ -1,10 +1,10 @@
 //! Objective-only results share the approved shell without fabricated player statistics.
 use super::ResultsPainter;
-use crate::{client::ui::theme::TEAL, matchplay::ObjectiveTotals};
+use crate::matchplay::ObjectiveTotals;
 use crate::{
     client::ui::{
         surface::{Surface, SurfaceState},
-        theme::{CREAM, INK},
+        theme::{INK, PANEL, PANEL_RAISED, PLAY},
     },
     combat::TeamId,
 };
@@ -82,7 +82,7 @@ impl ResultsPainter<'_> {
                         self.text(card, label, if self.compact { 19. } else { 24. });
                         self.text(card, &detail, if self.compact { 42. } else { 64. });
                         card.spawn((
-                            BackgroundColor(CREAM),
+                            BackgroundColor(INK.mix(&PANEL, 0.4)),
                             Node {
                                 width: percent(100),
                                 height: px(22),
@@ -93,7 +93,7 @@ impl ResultsPainter<'_> {
                         ))
                         .with_children(|bar| {
                             bar.spawn((
-                                BackgroundColor(if ours { INK } else { TEAL }),
+                                BackgroundColor(if ours { PLAY } else { PANEL_RAISED }),
                                 Node {
                                     width: percent(amount),
                                     height: percent(100),

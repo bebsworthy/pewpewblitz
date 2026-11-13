@@ -8,7 +8,7 @@ use crate::client::flow::{
     actions::FlowUiAction,
     model::{ClientFlow, ClientOverlay},
 };
-use crate::client::ui::theme::{CREAM, INK, font};
+use crate::client::ui::theme::{ACCENT, PLAY_HIGHLIGHT, TEXT, font, shell_background};
 use bevy::{
     input::mouse::MouseWheel,
     prelude::*,
@@ -216,7 +216,7 @@ pub(in crate::client::flow) fn present_weapon_equipment(
                 row_gap: px(22.0 * view.factor),
                 ..default()
             },
-            BackgroundColor(CREAM),
+            shell_background(),
         ))
         .with_children(|root| {
             if let Some(s) = view.server {
@@ -243,10 +243,10 @@ pub(in crate::client::flow) fn present_weapon_equipment(
                 view.overview(root, &draft, snapshot, catalog, saved);
             }
             if let Some(error) = &draft.inline_error {
-                view.label(root, error, 22.0, Color::srgb(0.75, 0.15, 0.02));
+                view.label(root, error, 22.0, PLAY_HIGHLIGHT);
             }
             if draft.awaiting_save {
-                view.label(root, "Saving…", 22.0, INK);
+                view.label(root, "Saving…", 22.0, TEXT);
             }
         });
 }
@@ -334,7 +334,7 @@ impl EquipmentView<'_> {
                             "‹ BACK TO BRAWLER"
                         },
                         24.0,
-                        INK,
+                        TEXT,
                     );
                 },
             );
@@ -346,7 +346,7 @@ impl EquipmentView<'_> {
                     "CUSTOMIZE WEAPON"
                 },
                 46.0,
-                INK,
+                TEXT,
             );
             self.label(
                 h,
@@ -356,7 +356,7 @@ impl EquipmentView<'_> {
                     name.to_uppercase()
                 },
                 24.0,
-                Color::srgb(0.08, 0.44, 0.44),
+                ACCENT,
             );
         });
     }
@@ -434,8 +434,8 @@ impl EquipmentView<'_> {
                         draft.equipped_part_ids[draft.selected_slot].is_none(),
                         Node::default(),
                         |b| {
-                            self.label(b, "−", 75.0, Color::srgb(0.08, 0.44, 0.44));
-                            self.label(b, "NOTHING", 24.0, INK);
+                            self.label(b, "−", 75.0, ACCENT);
+                            self.label(b, "NOTHING", 24.0, TEXT);
                         },
                     );
                     for (i, part) in snapshot.inventory.iter().enumerate() {
@@ -447,22 +447,22 @@ impl EquipmentView<'_> {
                             Node::default(),
                             |b| {
                                 self.part_image(b, part, 90.0);
-                                self.label(b, &part.display_name.to_uppercase(), 24.0, INK);
+                                self.label(b, &part.display_name.to_uppercase(), 24.0, TEXT);
                                 for effect in &part.effects {
-                                    self.label(b, &weapon_part_effect_text(*effect), 20.0, INK);
+                                    self.label(b, &weapon_part_effect_text(*effect), 20.0, TEXT);
                                 }
                                 if let Some(owner) = snapshot.brawlers.iter().find(|b| {
                                     Some(b.id) != draft.brawler_id
                                         && b.equipped_part_ids.contains(&Some(part.id))
                                 }) {
-                                    self.label(b, &format!("Used by {}", owner.name), 18.0, INK);
+                                    self.label(b, &format!("Used by {}", owner.name), 18.0, TEXT);
                                 } else if let Some(slot) = draft
                                     .equipped_part_ids
                                     .iter()
                                     .position(|id| *id == Some(part.id))
                                     .filter(|slot| *slot != draft.selected_slot)
                                 {
-                                    self.label(b, &format!("Slot {}", slot + 1), 18.0, INK);
+                                    self.label(b, &format!("Slot {}", slot + 1), 18.0, TEXT);
                                 }
                             },
                         );
@@ -507,8 +507,8 @@ impl EquipmentView<'_> {
                             ..default()
                         })
                         .with_children(|row| {
-                            self.label(row, label, 27.0, INK);
-                            self.label(row, &value, 34.0, Color::srgb(0.08, 0.44, 0.44));
+                            self.label(row, label, 27.0, TEXT);
+                            self.label(row, &value, 34.0, ACCENT);
                         });
                 }
             }
@@ -544,7 +544,7 @@ impl EquipmentView<'_> {
                         .map_or("WEAPON", |w| w.display_name.as_str())
                         .to_uppercase(),
                     65.0,
-                    INK,
+                    TEXT,
                 );
             });
             body.spawn((
@@ -579,17 +579,17 @@ impl EquipmentView<'_> {
                         ..default()
                     },
                     |b| {
-                        self.label(b, &format!("{}", slot + 1), 23.0, INK);
+                        self.label(b, &format!("{}", slot + 1), 23.0, TEXT);
                         if let Some(part) = part {
                             self.part_image(b, part, 90.0);
                         } else {
-                            self.label(b, "+", 62.0, Color::srgb(0.08, 0.44, 0.44));
+                            self.label(b, "+", 62.0, ACCENT);
                         }
                         self.label(
                             b,
                             part.map_or("EMPTY", |p| p.display_name.as_str()),
                             24.0,
-                            INK,
+                            TEXT,
                         );
                     },
                 );

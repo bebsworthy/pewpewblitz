@@ -3,7 +3,7 @@ use super::{
     dashboard::DashboardPreviewHost,
     shared::{FlowButton, FlowNavigation, FlowRoot},
 };
-use crate::client::ui::theme::{CREAM, INK, font};
+use crate::client::ui::theme::{INK, PLAY, TEXT, font, shell_background};
 use crate::client::{
     ClientMatchLoadingModel,
     flow::{ClientFlow, actions::FlowUiAction},
@@ -86,7 +86,7 @@ pub(in crate::client::flow) fn spawn_match_loading(
                 height: percent(100),
                 ..default()
             },
-            BackgroundColor(CREAM),
+            shell_background(),
         ))
         .with_children(|root| {
             view.background(root);
@@ -200,13 +200,13 @@ impl LoadingView<'_> {
                     },
                 ));
             }
-            self.label(group, title, 78.0, INK);
+            self.label(group, title, 78.0, TEXT);
             let topology = if active.team_count == 1 {
                 format!("{} PLAYERS", active.players_per_team)
             } else {
                 format!("{}v{}", active.players_per_team, active.players_per_team)
             };
-            self.label(group, &topology, 38.0, INK);
+            self.label(group, &topology, 38.0, TEXT);
             group.spawn((
                 Node {
                     width: percent(96),
@@ -232,8 +232,8 @@ impl LoadingView<'_> {
             ..default()
         })
         .with_children(|group| {
-            self.label(group, "MATCH LOADING", 48.0, Color::srgb(0.9, 0.32, 0.02));
-            let id = self.label(group, &match_loading_text(active, phase), 30.0, INK);
+            self.label(group, "MATCH LOADING", 48.0, PLAY);
+            let id = self.label(group, &match_loading_text(active, phase), 30.0, TEXT);
             group.commands().entity(id).insert(MatchLoadingStatusLabel);
             group
                 .spawn(Node {
@@ -276,7 +276,7 @@ impl LoadingView<'_> {
             },
         ))
         .with_children(|c| {
-            self.label(c, "CANCEL MATCH START", 30.0, INK);
+            self.label(c, "CANCEL MATCH START", 30.0, TEXT);
         });
     }
 }

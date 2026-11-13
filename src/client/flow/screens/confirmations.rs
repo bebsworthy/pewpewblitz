@@ -13,7 +13,7 @@ use crate::client::{
     },
     ui::{
         surface::{Surface, SurfaceState},
-        theme::{CREAM, INK, TEAL, font},
+        theme::{ACCENT, INK, TEXT, font, shell_background},
     },
 };
 use bevy::{
@@ -110,7 +110,7 @@ pub(in crate::client::flow) fn present_confirmations(
         key.clone(),
         DespawnOnExit(*flow.get()),
         GlobalZIndex(610),
-        BackgroundColor(CREAM),
+        shell_background(),
         Node {
             position_type: PositionType::Absolute,
             left: px(0),
@@ -222,16 +222,21 @@ impl ConfirmationView<'_, '_, '_> {
             ),
         };
         self.icon(body);
-        self.text(body, title, if compact { 44. } else { 76. }, INK);
+        self.text(body, title, if compact { 44. } else { 76. }, TEXT);
         if !self.key.name.is_empty() {
-            self.text(body, &self.key.name, if compact { 36. } else { 58. }, TEAL);
+            self.text(
+                body,
+                &self.key.name,
+                if compact { 36. } else { 58. },
+                ACCENT,
+            );
         }
-        self.text(body, copy, if compact { 24. } else { 32. }, INK);
+        self.text(body, copy, if compact { 24. } else { 32. }, TEXT);
         if self.key.pending {
-            self.text(body, "Deleting…", 22., INK);
+            self.text(body, "Deleting…", 22., TEXT);
         }
         if let Some(error) = &self.key.error {
-            self.text(body, error, 22., INK);
+            self.text(body, error, 22., TEXT);
         }
         body.spawn(Node {
             width: percent(100),
@@ -292,7 +297,7 @@ impl ConfirmationView<'_, '_, '_> {
         if self.key.pending {
             e.insert(InteractionDisabled);
         }
-        e.with_children(|p| self.text(p, label, if compact { 26. } else { 34. }, INK));
+        e.with_children(|p| self.text(p, label, if compact { 26. } else { 34. }, TEXT));
     }
     fn icon(&self, p: &mut ChildSpawnerCommands) {
         if matches!(

@@ -41,7 +41,7 @@ pub(in crate::client::flow) fn spawn_queue(
             FlowRoot,
             DespawnOnExit(ClientFlow::Queue),
             flow_root_node(),
-            BackgroundColor(Color::srgb(0.025, 0.04, 0.07)),
+            crate::client::ui::theme::shell_background(),
             GlobalZIndex(410),
         ))
         .with_children(|root| {
@@ -50,7 +50,7 @@ pub(in crate::client::flow) fn spawn_queue(
                 QueueStatusLabel,
                 Text::new(queue_membership_text(&queue, membership, lobby, &builds.0)),
                 TextFont::from_font_size(20.0),
-                TextColor(Color::srgb(0.86, 0.94, 1.0)),
+                TextColor(crate::client::ui::theme::TEXT),
                 TextLayout::new(Justify::Center, LineBreak::WordBoundary),
             ));
             spawn_queue_cancel_button(root);
