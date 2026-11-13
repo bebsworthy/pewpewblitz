@@ -34,21 +34,30 @@ impl Plugin for PickupVfxProducerPlugin {
             app.try_register_vfx_request(registration)
                 .expect("pickup VFX request registration must be valid");
         }
-        app.add_systems(Update, produce_pickup_vfx_requests.in_set(VfxRequestSet));
+        app.add_systems(
+            Update,
+            produce_pickup_vfx_requests
+                .after(crate::map::ClientPickupCueSet)
+                .in_set(VfxRequestSet),
+        );
     }
 }
 
+/// Reads this frame's pickup inbox; the audio pickup producer reads the same inbox.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the inbox is a read-only Bevy system resource"
+)]
 fn produce_pickup_vfx_requests(
-    received: Option<ResMut<crate::map::ReceivedPickupCues>>,
+    received: Option<Res<crate::map::ReceivedPickupCues>>,
     mut requests: MessageWriter<VfxRequest>,
     map_states: Query<&crate::map::MapDynamicState, With<crate::map::MapRoot>>,
 ) {
-    let Some(mut received) = received else { return };
+    let Some(received) = received else { return };
     let Ok(map_state) = map_states.single() else {
-        received.0.clear();
         return;
     };
-    for cue in received.0.drain(..) {
+    for cue in received.0.iter().copied() {
         let Some(request) = pickup_vfx_request(cue, map_state.generation_id()) else {
             continue;
         };

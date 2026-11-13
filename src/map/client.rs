@@ -87,17 +87,23 @@ impl Plugin for ClientMapPlugin {
                     converge_map_dynamic_state,
                     converge_world_object_readiness.after(converge_map_dynamic_state),
                     receive_world_object_cues,
-                    receive_pickup_cues,
+                    receive_pickup_cues.in_set(ClientPickupCueSet),
                 ),
             );
     }
 }
+
+/// Fills `ReceivedPickupCues` with this frame's newly received pickup cues. Presentation readers
+/// (pickup VFX and audio) run after this set and read the inbox without draining it.
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ClientPickupCueSet;
 
 fn receive_pickup_cues(
     mut receivers: Query<Option<&mut MessageReceiver<PickupCue>>, With<Client>>,
     mut inbox: ResMut<ReceivedPickupCues>,
     mut seen: ResMut<SeenPickupCueIds>,
 ) {
+    inbox.0.clear();
     for receiver in &mut receivers {
         let Some(mut receiver) = receiver else {
             continue;

@@ -124,7 +124,7 @@ them in a focused ticket when their trigger occurs or another ticket changes the
 | Font licensing (`GAP-LEGAL-FONTS`) | Resolved by V5 with shipped Fira Mono and Lilita One SIL OFL license texts and Credits attribution |
 | Focus-loss audio (`GAP-AUDIO-FOCUS`) | Resolved by persisted mute-when-unfocused behavior; broader audio work remains `CAND-RELEASE-POLISH` |
 | Fullscreen/vsync baseline (`GAP-UI-WINDOW`) | Partially resolved by persisted fullscreen, vsync, and UI-scale settings. Explicit resolution, frame-limit, and cursor-capture policy remains under `CAND-RELEASE-READINESS` |
-| Audio-settings baseline (`GAP-AUDIO-SETTINGS`) | Partially resolved by persisted master volume and focus mute. Separate SFX/music categories and actual music remain optional release-polish slices |
+| Audio-settings baseline (`GAP-AUDIO-SETTINGS`) | Resolved by BRL-0158: persisted master, effects, and music volume plus focus mute, with menu and match music loops |
 | V5 dashboard planning rows | Preferred-server policy, factual dashboard information, preview composition, results actions, and branding promotion were resolved by V5 M01–M03. See [V5 backlog and closeout](./implementation/v5/roadmap.md#initial-v5-backlog) |
 
 ## Legacy gap-ID mapping

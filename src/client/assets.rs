@@ -300,9 +300,7 @@ fn validate_manifest(source: &str) -> Result<(), String> {
         if entry.pack.is_empty()
             || entry.original.is_empty()
             || entry.author.is_empty()
-            || !matches!(entry.license.as_str(), "CC0-1.0" | "OFL-1.1")
-            || !entry.license_url.starts_with("https://")
-            || !entry.source_url.starts_with("https://")
+            || !valid_license(&entry)
             || !valid_import_date(&entry.imported)
             || entry.fallback.is_empty()
         {
@@ -316,6 +314,24 @@ fn validate_manifest(source: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Third-party entries cite a public license and source. Original project audio (BRL-0158) has
+/// no URL: it points at its checked-in generator and the repository's original-audio notice.
+fn valid_license(entry: &AssetManifestEntry) -> bool {
+    match entry.license.as_str() {
+        "CC0-1.0" | "OFL-1.1" => {
+            entry.license_url.starts_with("https://") && entry.source_url.starts_with("https://")
+        }
+        "Original" => {
+            entry.original.starts_with("asset_src/")
+                && entry.source_url.starts_with("asset_src/")
+                && entry
+                    .license_url
+                    .starts_with("assets/licenses/pewpew-blitz-original-")
+        }
+        _ => false,
+    }
 }
 
 fn valid_import_date(value: &str) -> bool {
@@ -352,6 +368,63 @@ mod tests {
         assert_eq!(paths["audio.defeat"], "brawler/audio/defeat.ogg");
         assert_eq!(paths["audio.ready"], "brawler/audio/ready.ogg");
         assert_eq!(paths["audio.error"], "brawler/audio/error.ogg");
+    }
+
+    #[test]
+    fn every_manifest_audio_file_ships_and_original_audio_cites_its_generator() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest: AssetManifest = ron::from_str(CLIENT_ASSET_MANIFEST).unwrap();
+        let mut original = 0;
+        for entry in manifest
+            .assets
+            .iter()
+            .filter(|entry| entry.id.starts_with("audio."))
+        {
+            assert!(
+                root.join("assets").join(&entry.path).is_file(),
+                "{} is missing",
+                entry.path
+            );
+            if entry.license == "Original" {
+                original += 1;
+                let (script, clip) = entry.original.split_once('#').unwrap();
+                assert!(root.join(script).is_file());
+                assert!(entry.path.ends_with(&format!("original/{clip}.ogg")));
+                assert!(root.join(&entry.license_url).is_file());
+                assert!(root.join(&entry.source_url).is_file());
+            }
+        }
+        assert!(original > 0);
+
+        let mut forged: AssetManifest = ron::from_str(CLIENT_ASSET_MANIFEST).unwrap();
+        let entry = forged
+            .assets
+            .iter_mut()
+            .find(|entry| entry.license == "Original")
+            .unwrap();
+        entry.original = "downloads/unknown.ogg".to_string();
+        assert!(!valid_license(entry));
+        entry.original = "asset_src/audio/build_audio.py#x".to_string();
+        entry.license = "CC-BY-4.0".to_string();
+        assert!(!valid_license(entry));
+    }
+
+    /// Every shipped clip decodes with the client's own Vorbis decoder (lewton via rodio).
+    #[test]
+    fn every_manifest_audio_clip_decodes_with_the_client_decoder() {
+        use bevy::audio::{Decodable, Source};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for (id, path) in audio_asset_paths().unwrap() {
+            let bytes = std::fs::read(root.join("assets").join(&path)).unwrap();
+            let source = AudioSource {
+                bytes: bytes.into(),
+            };
+            let decoder = source.decoder();
+            let rate = decoder.sample_rate();
+            let samples = decoder.count();
+            assert_eq!(rate.get(), 44_100, "{id}");
+            assert!(samples > 0, "{id} decoded no samples");
+        }
     }
 
     #[test]

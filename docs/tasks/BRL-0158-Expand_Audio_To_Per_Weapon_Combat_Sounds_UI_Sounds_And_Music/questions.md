@@ -2,12 +2,6 @@
 
 # Questions · BRL-0158
 
-## q-000018 · answered
+## Resolved
 
-What is the sourcing approach and budget for audio? Options: CC0 packs only (e.g. Kenney impact/interface), purchased sound libraries, or a commissioned music loop plus CC0 effects.
-
-- [ ] CC0 packs only
-- [ ] CC0 effects + commissioned music
-- [ ] Purchased libraries
-
-> **Answer** (2026-11-13 06:09): User (2026-11-13): CC0 packs only.
+- q-000018

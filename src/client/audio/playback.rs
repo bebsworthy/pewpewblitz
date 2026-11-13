@@ -7,10 +7,11 @@ use bevy::{
 
 use super::{
     catalog::{AudioPlaybackPlan, AudioProfileCatalog},
+    mix::{AudioCategory, AudioMix, category_volume},
     registry::AudioRegistry,
     request::{AudioCueKey, AudioRequest},
 };
-use crate::client::assets::ClientAssetHandles;
+use crate::client::{ClientShellSettings, assets::ClientAssetHandles};
 
 const MAX_RECENT_AUDIO_KEYS: usize = 128;
 
@@ -116,10 +117,15 @@ fn play_audio_requests(
     catalog: Res<AudioProfileCatalog>,
     registry: Option<Res<AudioRegistry>>,
     asset_server: Option<Res<AssetServer>>,
+    settings: Option<Res<ClientShellSettings>>,
     mut requests: MessageReader<AudioRequest>,
     mut state: ResMut<ClientAudioPlaybackState>,
     mut reservations: ResMut<AudioFrameReservations>,
 ) {
+    let effects = category_volume(
+        &settings.as_deref().copied().unwrap_or_default(),
+        AudioCategory::Effects,
+    );
     let mut pending = requests.read().copied().collect::<Vec<_>>();
     sort_audio_requests(&mut pending);
     for request in pending {
@@ -140,6 +146,7 @@ fn play_audio_requests(
                 handles.as_deref(),
                 asset_server.as_deref(),
                 request.cue_key,
+                effects,
                 &mut reservations,
             ),
             PlaybackAttempt::Capped
@@ -185,6 +192,7 @@ fn try_play_audio(
     handles: Option<&ClientAssetHandles>,
     asset_server: Option<&AssetServer>,
     cue_key: AudioCueKey,
+    effects: f32,
     reservations: &mut AudioFrameReservations,
 ) -> PlaybackAttempt {
     let Some(plan) = catalog.playback_plan(cue_key, |asset_id| {
@@ -198,13 +206,16 @@ fn try_play_audio(
         .and_then(|handles| handles.audio(plan.asset_id))
         .expect("resolved audio asset ID has a retained handle")
         .clone();
-    materialize_audio_plan(commands, handle, plan, reservations)
+    materialize_audio_plan(commands, handle, plan, effects, reservations)
 }
 
+/// `effects` is the Effects category's current share of the master volume; the mix system keeps
+/// the live sink at `effects × profile volume` afterwards.
 fn materialize_audio_plan(
     commands: &mut Commands,
     handle: Handle<AudioSource>,
     plan: AudioPlaybackPlan<'_>,
+    effects: f32,
     reservations: &mut AudioFrameReservations,
 ) -> PlaybackAttempt {
     if !reservations.reserve(plan.concurrency_cap) {
@@ -212,10 +223,11 @@ fn materialize_audio_plan(
     }
     commands.spawn((
         ClientAudioOneShot,
+        AudioMix::effects(plan.volume),
         AudioPlayer::new(handle),
         PlaybackSettings {
             speed: plan.speed,
-            volume: Volume::Linear(plan.volume),
+            volume: Volume::Linear(effects * plan.volume),
             ..PlaybackSettings::DESPAWN
         },
     ));
@@ -239,7 +251,7 @@ mod tests {
         let mut state = ClientAudioPlaybackState::default();
         for occurrence in 0..=MAX_RECENT_AUDIO_KEYS {
             assert!(state.accept(AudioRequest::for_occurrence(
-                cue_keys::IMPACT,
+                cue_keys::IMPACT_PROJECTILE,
                 occurrence as u64,
                 TEST_ORDER,
             )));
@@ -248,11 +260,11 @@ mod tests {
         assert_eq!(state.recent_occurrences.len(), MAX_RECENT_AUDIO_KEYS);
         assert_eq!(
             state.recent_occurrences.front(),
-            Some(&(cue_keys::IMPACT, 1))
+            Some(&(cue_keys::IMPACT_PROJECTILE, 1))
         );
         assert_eq!(
             state.recent_occurrences.back(),
-            Some(&(cue_keys::IMPACT, MAX_RECENT_AUDIO_KEYS as u64))
+            Some(&(cue_keys::IMPACT_PROJECTILE, MAX_RECENT_AUDIO_KEYS as u64))
         );
     }
 
@@ -260,15 +272,23 @@ mod tests {
     fn equal_occurrences_for_different_cue_keys_deduplicate_independently() {
         let mut state = ClientAudioPlaybackState::default();
 
-        assert!(state.accept(AudioRequest::for_occurrence(cue_keys::FIRE, 42, TEST_ORDER,)));
         assert!(state.accept(AudioRequest::for_occurrence(
-            cue_keys::IMPACT,
+            cue_keys::FIRE_STRAIGHT,
             42,
             TEST_ORDER,
         )));
-        assert!(!state.accept(AudioRequest::for_occurrence(cue_keys::FIRE, 42, TEST_ORDER,)));
+        assert!(state.accept(AudioRequest::for_occurrence(
+            cue_keys::IMPACT_PROJECTILE,
+            42,
+            TEST_ORDER,
+        )));
         assert!(!state.accept(AudioRequest::for_occurrence(
-            cue_keys::IMPACT,
+            cue_keys::FIRE_STRAIGHT,
+            42,
+            TEST_ORDER,
+        )));
+        assert!(!state.accept(AudioRequest::for_occurrence(
+            cue_keys::IMPACT_PROJECTILE,
             42,
             TEST_ORDER,
         )));
@@ -277,7 +297,7 @@ mod tests {
     #[test]
     fn once_requests_are_never_deduplicated() {
         let mut state = ClientAudioPlaybackState::default();
-        let request = AudioRequest::once(cue_keys::READY, TEST_ORDER);
+        let request = AudioRequest::once(cue_keys::PLAYABLE, TEST_ORDER);
 
         assert!(state.accept(request));
         assert!(state.accept(request));
@@ -287,9 +307,9 @@ mod tests {
     #[test]
     fn scrambled_requests_sort_by_registered_rank_then_producer_sequence() {
         let mut requests = [
-            AudioRequest::once(cue_keys::READY, AudioRequestOrder::new(50, 1)),
-            AudioRequest::once(cue_keys::IMPACT, AudioRequestOrder::new(10, 2)),
-            AudioRequest::once(cue_keys::FIRE, AudioRequestOrder::new(10, 1)),
+            AudioRequest::once(cue_keys::PLAYABLE, AudioRequestOrder::new(50, 1)),
+            AudioRequest::once(cue_keys::IMPACT_PROJECTILE, AudioRequestOrder::new(10, 2)),
+            AudioRequest::once(cue_keys::FIRE_STRAIGHT, AudioRequestOrder::new(10, 1)),
             AudioRequest::once(cue_keys::RELOAD, AudioRequestOrder::new(40, 1)),
         ];
 
@@ -298,10 +318,10 @@ mod tests {
         assert_eq!(
             requests.map(|request| request.cue_key),
             [
-                cue_keys::FIRE,
-                cue_keys::IMPACT,
+                cue_keys::FIRE_STRAIGHT,
+                cue_keys::IMPACT_PROJECTILE,
                 cue_keys::RELOAD,
-                cue_keys::READY,
+                cue_keys::PLAYABLE,
             ]
         );
     }
@@ -331,6 +351,7 @@ mod tests {
                 &mut commands,
                 Handle::<AudioSource>::default(),
                 plan,
+                0.5,
                 &mut reservations,
             ),
             PlaybackAttempt::Played
@@ -346,11 +367,14 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let mut one_shots = world.query_filtered::<&PlaybackSettings, With<ClientAudioOneShot>>();
-        let settings = *one_shots.single(world).unwrap();
+        let mut one_shots =
+            world.query_filtered::<(&PlaybackSettings, &AudioMix), With<ClientAudioOneShot>>();
+        let (settings, mix) = one_shots.single(world).unwrap();
         assert!(matches!(settings.mode, PlaybackMode::Despawn));
         assert!((settings.speed - 1.25).abs() < f32::EPSILON);
-        assert!((settings.volume.to_linear() - 0.5).abs() < f32::EPSILON);
+        // Effects at 50% of a 0.5 profile volume; the live mix keeps the profile as its base.
+        assert!((settings.volume.to_linear() - 0.25).abs() < f32::EPSILON);
+        assert_eq!(*mix, AudioMix::effects(0.5));
     }
 
     #[derive(Resource, Default)]
@@ -397,7 +421,8 @@ mod tests {
 
     #[test]
     fn registered_request_without_runtime_assets_degrades_to_terminal_silence() {
-        const TEST_KEYS: &[AudioCueKey] = &[cue_keys::READY];
+        const TEST_KEYS: &[AudioCueKey] = &[cue_keys::PLAYABLE];
+        static REMAINING_KEYS: std::sync::OnceLock<Vec<AudioCueKey>> = std::sync::OnceLock::new();
         let mut app = App::new();
         app.add_plugins(AudioRegistryPlugin);
         app.try_register_audio_producer(AudioProducerRegistration {
@@ -411,29 +436,18 @@ mod tests {
         app.try_register_audio_producer(AudioProducerRegistration {
             id: "remaining",
             rank: 20,
-            cue_keys: &[
-                cue_keys::FIRE,
-                cue_keys::IMPACT,
-                cue_keys::DEFEAT,
-                cue_keys::RESET,
-                cue_keys::ERROR,
-                cue_keys::DASH,
-                cue_keys::SENTRY,
-                cue_keys::SENTRY_SPAWN,
-                cue_keys::CONCEALMENT_FIELD_SPAWN,
-                cue_keys::CHARGE_READY,
-                cue_keys::PASSIVE,
-                cue_keys::OBJECTIVE_HIT,
-                cue_keys::OBJECTIVE_CRITICAL,
-                cue_keys::OBJECTIVE_DESTROYED,
-                cue_keys::RELOAD,
-            ],
+            cue_keys: REMAINING_KEYS.get_or_init(|| {
+                cue_keys::BUILTIN
+                    .into_iter()
+                    .filter(|key| *key != cue_keys::PLAYABLE)
+                    .collect()
+            }),
         })
         .unwrap();
         app.add_plugins(ClientAudioPlaybackPlugin);
         crate::test_app::finalize(&mut app);
         app.world_mut().write_message(AudioRequest::once(
-            cue_keys::READY,
+            cue_keys::PLAYABLE,
             AudioRequestOrder::new(10, 0),
         ));
 

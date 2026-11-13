@@ -1,0 +1,12 @@
+PewPew Blitz original audio
+
+Files: brawler/audio/original/*.ogg
+
+These sound effects and music loops are original work of the PewPew Blitz project (BRL-0158).
+They are synthesized by the checked-in script asset_src/audio/build_audio.py (Python 3 standard
+library) and encoded to Ogg Vorbis with FFmpeg's built-in vorbis encoder. They contain no
+third-party, purchased, sampled, AI-generated or hand-edited audio. The README beside the script
+records the build command, the sound contract and the inventory.
+
+The five clips directly under brawler/audio/ (fire, impact, defeat, ready, error) are Kenney CC0
+sounds; see kenney-*-sounds.txt and assets/manifest.ron.

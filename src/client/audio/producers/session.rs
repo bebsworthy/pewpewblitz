@@ -14,7 +14,7 @@ use crate::{
 use super::AudioProducerSequence;
 
 const SESSION_RANK: u16 = 50;
-const SESSION_KEYS: &[AudioCueKey] = &[cue_keys::READY, cue_keys::ERROR];
+const SESSION_KEYS: &[AudioCueKey] = &[cue_keys::PLAYABLE, cue_keys::ERROR];
 
 #[derive(Resource, Default)]
 pub(in crate::client::audio::producers) struct SessionAudioMemory {
@@ -78,7 +78,7 @@ fn session_audio_cue(
     previous: SessionAudioSnapshot,
 ) -> Option<AudioCueKey> {
     if current.playable && !previous.playable {
-        Some(cue_keys::READY)
+        Some(cue_keys::PLAYABLE)
     } else if current.is_error && !previous.is_error {
         Some(cue_keys::ERROR)
     } else {
@@ -95,7 +95,7 @@ mod tests {
         let observation = |playable, is_error| SessionAudioSnapshot { playable, is_error };
         assert_eq!(
             session_audio_cue(observation(true, true), observation(false, false)),
-            Some(cue_keys::READY)
+            Some(cue_keys::PLAYABLE)
         );
         assert_eq!(
             session_audio_cue(observation(false, true), observation(false, false)),

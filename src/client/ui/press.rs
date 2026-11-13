@@ -30,6 +30,15 @@ impl ReleaseActivation {
         self.activated
     }
 
+    /// A control whose press ended over it this frame, for consumers' focused tests.
+    #[cfg(test)]
+    pub(crate) const fn activated_for_test() -> Self {
+        Self {
+            held: None,
+            activated: true,
+        }
+    }
+
     /// Advances the gesture by one observed frame.
     fn observe(&mut self, interaction: Interaction, pointer: Option<Vec2>, touch: bool) {
         self.activated = false;

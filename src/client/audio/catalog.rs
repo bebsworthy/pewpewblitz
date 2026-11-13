@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::request::{AudioCueKey, validate_audio_cue_key};
 
 const AUDIO_PROFILE_CATALOG: &str = include_str!("../../../assets/catalogs/audio_profiles.ron");
-const AUDIO_PROFILE_SCHEMA_VERSION: u16 = 3;
+const AUDIO_PROFILE_SCHEMA_VERSION: u16 = 4;
+const MAX_MUSIC_TRACKS: usize = 8;
+const MAX_MUSIC_LOOP_SECONDS: f32 = 600.0;
 const MAX_AUDIO_CONCURRENCY: usize = 24;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -15,6 +17,25 @@ struct AudioCatalogSource {
     default_profile: String,
     mappings: Vec<AudioFamilyMapping>,
     profiles: Vec<AudioProfile>,
+    music: Vec<MusicTrack>,
+}
+
+/// One looping music track selected by a semantic music key.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct MusicTrack {
+    key: String,
+    asset: String,
+    volume: f32,
+    loop_seconds: f32,
+}
+
+/// Resolved looping playback for one music key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct MusicPlaybackPlan<'a> {
+    pub asset_id: &'a str,
+    pub volume: f32,
+    pub loop_seconds: f32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -47,6 +68,7 @@ pub(super) struct AudioPlaybackPlan<'a> {
 pub(super) struct AudioProfileCatalog {
     mappings: BTreeMap<String, String>,
     profiles: BTreeMap<String, AudioProfile>,
+    music: BTreeMap<String, MusicTrack>,
 }
 
 impl AudioProfileCatalog {
@@ -132,7 +154,39 @@ impl AudioProfileCatalog {
                 return Err(format!("duplicate audio cue mapping: {}", mapping.cue_key));
             }
         }
-        Ok(Self { mappings, profiles })
+        let music = validate_music(source.music, &audio_assets)?;
+        Ok(Self {
+            mappings,
+            profiles,
+            music,
+        })
+    }
+
+    /// Exact coverage between the music keys the client selects and the authored tracks.
+    pub(super) fn validate_music_keys<'a>(
+        &self,
+        selected: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), String> {
+        let selected = selected.into_iter().collect::<BTreeSet<_>>();
+        if let Some(missing) = selected.iter().find(|key| !self.music.contains_key(**key)) {
+            return Err(format!("music key {missing} has no catalog track"));
+        }
+        if let Some(orphan) = self
+            .music
+            .keys()
+            .find(|key| !selected.contains(key.as_str()))
+        {
+            return Err(format!("music track {orphan} has no selector"));
+        }
+        Ok(())
+    }
+
+    pub(super) fn music_plan(&self, key: &str) -> Option<MusicPlaybackPlan<'_>> {
+        self.music.get(key).map(|track| MusicPlaybackPlan {
+            asset_id: &track.asset,
+            volume: track.volume,
+            loop_seconds: track.loop_seconds,
+        })
     }
 
     pub(super) fn validate_registered_keys<'a>(
@@ -231,6 +285,39 @@ impl AudioProfileCatalog {
     }
 }
 
+fn validate_music(
+    tracks: Vec<MusicTrack>,
+    audio_assets: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, MusicTrack>, String> {
+    if tracks.len() > MAX_MUSIC_TRACKS {
+        return Err("too many music tracks".to_string());
+    }
+    let mut music = BTreeMap::new();
+    for track in tracks {
+        validate_audio_cue_key(&track.key)
+            .map_err(|error| format!("invalid music key {}: {error}", track.key))?;
+        if !audio_assets.contains_key(&track.asset) {
+            return Err(format!(
+                "music track {} references an unknown asset-manifest id",
+                track.key
+            ));
+        }
+        if !track.volume.is_finite() || !(0.0..=1.0).contains(&track.volume) {
+            return Err(format!("music track {} has invalid volume", track.key));
+        }
+        if !track.loop_seconds.is_finite()
+            || track.loop_seconds <= 0.0
+            || track.loop_seconds > MAX_MUSIC_LOOP_SECONDS
+        {
+            return Err(format!("music track {} has invalid loop length", track.key));
+        }
+        if music.insert(track.key.clone(), track).is_some() {
+            return Err("duplicate music key".to_string());
+        }
+    }
+    Ok(music)
+}
+
 fn validate_profile(profile: &AudioProfile) -> Result<(), String> {
     if profile.id.trim().is_empty() || profile.fallback_profile.trim().is_empty() {
         return Err("audio profile ids and fallback references must be non-empty".to_string());
@@ -256,108 +343,98 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_catalog_preserves_all_builtin_mappings_and_profile_values() {
+    fn every_builtin_cue_has_its_own_distinct_authored_clip() {
         let catalog = AudioProfileCatalog::embedded().unwrap();
-        let expected_mappings = [
-            (cue_keys::FIRE, "fire"),
-            (cue_keys::IMPACT, "impact"),
-            (cue_keys::DEFEAT, "defeat"),
-            (cue_keys::RESET, "reset"),
-            (cue_keys::READY, "ready"),
-            (cue_keys::ERROR, "error"),
-            (cue_keys::DASH, "dash"),
-            (cue_keys::SENTRY, "sentry"),
-            (cue_keys::SENTRY_SPAWN, "sentry_spawn"),
-            (cue_keys::CONCEALMENT_FIELD_SPAWN, "concealment_field_spawn"),
-            (cue_keys::CHARGE_READY, "charge_ready"),
-            (cue_keys::PASSIVE, "passive"),
-            (cue_keys::OBJECTIVE_HIT, "objective_hit"),
-            (cue_keys::OBJECTIVE_CRITICAL, "objective_critical"),
-            (cue_keys::OBJECTIVE_DESTROYED, "objective_destroyed"),
-            (cue_keys::RELOAD, "reload"),
-        ];
-        assert_eq!(catalog.mappings.len(), expected_mappings.len());
-        for (cue_key, profile) in expected_mappings {
-            assert_eq!(
-                catalog.mappings.get(cue_key.as_str()).map(String::as_str),
-                Some(profile)
+        assert_eq!(catalog.mappings.len(), cue_keys::BUILTIN.len());
+        let mut assets = BTreeSet::new();
+        for cue_key in cue_keys::BUILTIN {
+            let profile = catalog.mapped_profile(cue_key);
+            let asset = profile
+                .asset
+                .as_deref()
+                .unwrap_or_else(|| panic!("{} maps to silence", cue_key.as_str()));
+            assert!(
+                assets.insert(asset),
+                "{} shares clip {asset} with another cue",
+                cue_key.as_str()
             );
         }
-
-        let source: AudioCatalogSource = ron::from_str(AUDIO_PROFILE_CATALOG).unwrap();
-        assert_eq!(source.default_profile, "silent");
-        assert_eq!(
-            source.profiles,
-            vec![
-                profile("silent", None, 1.0, 1.0, 24, "silent"),
-                profile("fire", Some("audio.fire"), 1.0, 1.0, 20, "silent"),
-                profile("impact", Some("audio.impact"), 1.0, 1.0, 22, "silent"),
-                profile("defeat", Some("audio.defeat"), 1.0, 1.0, 24, "silent"),
-                profile("reset", Some("audio.ready"), 1.0, 1.0, 24, "silent"),
-                profile("ready", Some("audio.ready"), 1.0, 1.0, 24, "silent"),
-                profile("error", Some("audio.error"), 1.0, 1.0, 24, "silent"),
-                profile("dash", Some("audio.defeat"), 1.45, 1.0, 24, "silent"),
-                profile("sentry", Some("audio.ready"), 1.0, 1.0, 24, "silent"),
-                profile("sentry_spawn", Some("audio.ready"), 0.75, 1.0, 24, "silent",),
-                profile(
-                    "concealment_field_spawn",
-                    Some("audio.ready"),
-                    0.9,
-                    1.0,
-                    24,
-                    "silent",
-                ),
-                profile("charge_ready", Some("audio.ready"), 1.25, 1.0, 24, "silent",),
-                profile("passive", Some("audio.impact"), 1.35, 1.0, 24, "silent",),
-                profile("objective_hit", Some("audio.impact"), 1.0, 1.0, 6, "silent",),
-                profile(
-                    "objective_critical",
-                    Some("audio.ready"),
-                    1.0,
-                    1.0,
-                    24,
-                    "silent",
-                ),
-                profile(
-                    "objective_destroyed",
-                    Some("audio.defeat"),
-                    1.0,
-                    1.0,
-                    24,
-                    "silent",
-                ),
-                profile("reload", Some("audio.ready"), 1.0, 1.0, 24, "silent"),
-            ]
-        );
-
-        let dash = catalog.mapped_profile(cue_keys::DASH);
-        assert_eq!(dash.asset.as_deref(), Some("audio.defeat"));
-        assert!((dash.speed - 1.45).abs() < f32::EPSILON);
-        assert!((dash.volume - 1.0).abs() < f32::EPSILON);
-        assert_eq!(catalog.mapped_profile(cue_keys::FIRE).concurrency_cap, 20);
-        assert_eq!(
-            catalog
-                .mapped_profile(cue_keys::OBJECTIVE_HIT)
-                .concurrency_cap,
-            6
-        );
+        for key in ["menu", "match"] {
+            let plan = catalog.music_plan(key).unwrap();
+            assert!(assets.insert(plan.asset_id), "music {key} reuses a clip");
+        }
     }
 
-    fn profile(
-        id: &str,
-        asset: Option<&str>,
-        speed: f32,
-        volume: f32,
-        concurrency_cap: usize,
-        fallback_profile: &str,
-    ) -> AudioProfile {
-        AudioProfile {
-            id: id.to_string(),
-            asset: asset.map(str::to_string),
-            speed,
-            volume,
-            concurrency_cap,
-            fallback_profile: fallback_profile.to_string(),
+    #[test]
+    fn every_weapon_delivery_family_has_its_own_fire_and_impact_cue() {
+        let catalog = AudioProfileCatalog::embedded().unwrap();
+        for cue_key in [
+            cue_keys::FIRE_STRAIGHT,
+            cue_keys::FIRE_STICKY,
+            cue_keys::FIRE_LOBBED,
+            cue_keys::FIRE_SPLASH,
+            cue_keys::FIRE_MELEE,
+            cue_keys::FIRE_SPRAY,
+            cue_keys::IMPACT_PROJECTILE,
+            cue_keys::IMPACT_LOB,
+            cue_keys::IMPACT_MELEE,
+            cue_keys::IMPACT_SPRAY,
+            cue_keys::HIT_DEALT,
+            cue_keys::HIT_TAKEN,
+        ] {
+            assert!(catalog.contains_mapping(cue_key), "{}", cue_key.as_str());
+            assert!(catalog.playback_plan(cue_key, |_| true).is_some());
+        }
+        // Rapid spray and hit confirmations keep tight live limits.
+        assert!(catalog.mapped_profile(cue_keys::HIT_DEALT).concurrency_cap <= 6);
+        assert!(catalog.mapped_profile(cue_keys::HIT_TAKEN).concurrency_cap <= 6);
+        assert!(catalog.mapped_profile(cue_keys::UI_CLICK).concurrency_cap <= 4);
+    }
+
+    #[test]
+    fn music_tracks_cover_exactly_the_selected_keys_with_bounded_loops() {
+        let catalog = AudioProfileCatalog::embedded().unwrap();
+        catalog.validate_music_keys(["menu", "match"]).unwrap();
+        assert_eq!(
+            catalog.validate_music_keys(["menu"]).unwrap_err(),
+            "music track match has no selector"
+        );
+        assert_eq!(
+            catalog
+                .validate_music_keys(["menu", "match", "credits"])
+                .unwrap_err(),
+            "music key credits has no catalog track"
+        );
+        let menu = catalog.music_plan("menu").unwrap();
+        assert!((menu.loop_seconds - 19.2).abs() < f32::EPSILON);
+        assert!(catalog.music_plan("missing").is_none());
+    }
+
+    /// The encoded loop decodes to its authored length plus at most one Vorbis block of
+    /// padding, which `loop_seconds` trims at playback so the seam has no gap.
+    #[test]
+    fn music_loops_decode_to_their_authored_loop_length() {
+        use bevy::audio::{AudioSource, Decodable, Source};
+        let catalog = AudioProfileCatalog::embedded().unwrap();
+        let paths = crate::client::assets::audio_asset_paths().unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for key in ["menu", "match"] {
+            let plan = catalog.music_plan(key).unwrap();
+            let bytes = std::fs::read(root.join("assets").join(&paths[plan.asset_id])).unwrap();
+            let decoder = AudioSource {
+                bytes: bytes.into(),
+            }
+            .decoder();
+            let rate = f64::from(decoder.sample_rate().get());
+            let channels = f64::from(decoder.channels().get());
+            let samples = f64::from(u32::try_from(decoder.count()).unwrap());
+            let seconds = samples / channels / rate;
+            let loop_seconds = f64::from(plan.loop_seconds);
+            assert!(
+                seconds > loop_seconds - 1e-4 && seconds - loop_seconds < 0.05,
+                "{key} decodes to {seconds} s for a {} s loop",
+                plan.loop_seconds
+            );
         }
     }
 
@@ -373,7 +450,7 @@ mod tests {
     #[test]
     fn bad_schema_invalid_asset_reference_values_and_caps_are_rejected() {
         for (needle, replacement) in [
-            ("schema_version: 3", "schema_version: 4"),
+            ("schema_version: 4", "schema_version: 3"),
             ("id: \"silent\"", "id: \"silent\", playback: OneShot"),
             (
                 "asset: Some(\"audio.fire\")",
@@ -386,7 +463,20 @@ mod tests {
                 "fallback_profile: \"silent\"",
                 "fallback_profile: \"missing\"",
             ),
+            ("loop_seconds: 19.2", "loop_seconds: 0.0"),
+            ("loop_seconds: 19.2", "loop_seconds: 601.0"),
+            ("volume: 0.8, loop_seconds", "volume: 1.5, loop_seconds"),
+            (
+                "asset: \"audio.original.music-menu\"",
+                "asset: \"audio.original.missing\"",
+            ),
+            ("key: \"menu\"", "key: \"Menu Theme\""),
+            ("key: \"match\"", "key: \"menu\""),
         ] {
+            assert!(
+                AUDIO_PROFILE_CATALOG.contains(needle),
+                "fixture needle missing: {needle}"
+            );
             let source = AUDIO_PROFILE_CATALOG.replacen(needle, replacement, 1);
             assert!(
                 AudioProfileCatalog::from_ron(&source).is_err(),
@@ -403,7 +493,9 @@ mod tests {
             1,
         );
         let catalog = AudioProfileCatalog::from_ron(&source).unwrap();
-        let plan = catalog.playback_plan(cue_keys::FIRE, |_| true).unwrap();
+        let plan = catalog
+            .playback_plan(cue_keys::FIRE_STRAIGHT, |_| true)
+            .unwrap();
         assert_eq!(plan.asset_id, "audio.error");
         assert!((plan.speed - 0.8).abs() < f32::EPSILON);
         assert!((plan.volume - 0.5).abs() < f32::EPSILON);
@@ -412,12 +504,20 @@ mod tests {
     #[test]
     fn missing_runtime_asset_follows_fallback_then_silences_deterministically() {
         let mut catalog = AudioProfileCatalog::embedded().unwrap();
-        catalog.profiles.get_mut("fire").unwrap().fallback_profile = "ready".to_string();
+        catalog
+            .profiles
+            .get_mut("fire-straight")
+            .unwrap()
+            .fallback_profile = "playable".to_string();
         let plan = catalog
-            .playback_plan(cue_keys::FIRE, |asset| asset == "audio.ready")
+            .playback_plan(cue_keys::FIRE_STRAIGHT, |asset| asset == "audio.ready")
             .unwrap();
         assert_eq!(plan.asset_id, "audio.ready");
-        assert!(catalog.playback_plan(cue_keys::FIRE, |_| false).is_none());
+        assert!(
+            catalog
+                .playback_plan(cue_keys::FIRE_STRAIGHT, |_| false)
+                .is_none()
+        );
     }
 
     #[test]
@@ -437,22 +537,22 @@ mod tests {
         assert!(AudioProfileCatalog::from_source(duplicate_mapping).is_err());
 
         let invalid_key =
-            AUDIO_PROFILE_CATALOG.replacen("cue_key: \"reset\"", "cue_key: \"Reset_Key\"", 1);
+            AUDIO_PROFILE_CATALOG.replacen("cue_key: \"respawn\"", "cue_key: \"Reset_Key\"", 1);
         assert!(AudioProfileCatalog::from_ron(&invalid_key).is_err());
 
         let mut fallback_cycle: AudioCatalogSource = ron::from_str(AUDIO_PROFILE_CATALOG).unwrap();
         fallback_cycle
             .profiles
             .iter_mut()
-            .find(|profile| profile.id == "fire")
+            .find(|profile| profile.id == "fire-straight")
             .unwrap()
-            .fallback_profile = "impact".to_string();
+            .fallback_profile = "impact-projectile".to_string();
         fallback_cycle
             .profiles
             .iter_mut()
-            .find(|profile| profile.id == "impact")
+            .find(|profile| profile.id == "impact-projectile")
             .unwrap()
-            .fallback_profile = "fire".to_string();
+            .fallback_profile = "fire-straight".to_string();
         assert!(AudioProfileCatalog::from_source(fallback_cycle).is_err());
     }
 
@@ -468,11 +568,11 @@ mod tests {
                 .validate_registered_keys(
                     cue_keys::BUILTIN
                         .into_iter()
-                        .filter(|key| *key != cue_keys::RESET)
+                        .filter(|key| *key != cue_keys::RESPAWN)
                         .map(AudioCueKey::as_str),
                 )
                 .unwrap_err(),
-            "audio catalog mapping reset has no registered producer"
+            "audio catalog mapping respawn has no registered producer"
         );
         assert_eq!(
             catalog

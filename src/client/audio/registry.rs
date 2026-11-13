@@ -226,26 +226,9 @@ mod tests {
     use super::super::request::{AudioRequestOrder, cue_keys};
     use super::*;
 
-    const CORE_KEYS: &[AudioCueKey] = &[
-        cue_keys::FIRE,
-        cue_keys::IMPACT,
-        cue_keys::DEFEAT,
-        cue_keys::RESET,
-        cue_keys::READY,
-        cue_keys::ERROR,
-        cue_keys::DASH,
-        cue_keys::SENTRY,
-        cue_keys::SENTRY_SPAWN,
-        cue_keys::CONCEALMENT_FIELD_SPAWN,
-        cue_keys::CHARGE_READY,
-        cue_keys::PASSIVE,
-        cue_keys::OBJECTIVE_HIT,
-        cue_keys::OBJECTIVE_CRITICAL,
-        cue_keys::OBJECTIVE_DESTROYED,
-        cue_keys::RELOAD,
-    ];
-    const READY_ONLY: &[AudioCueKey] = &[cue_keys::READY];
-    const DUPLICATE_READY: &[AudioCueKey] = &[cue_keys::READY, cue_keys::READY];
+    const CORE_KEYS: &[AudioCueKey] = &cue_keys::BUILTIN;
+    const READY_ONLY: &[AudioCueKey] = &[cue_keys::PLAYABLE];
+    const DUPLICATE_READY: &[AudioCueKey] = &[cue_keys::PLAYABLE, cue_keys::PLAYABLE];
     const INVALID_KEY: &[AudioCueKey] = &[AudioCueKey::new("Invalid_Key")];
 
     fn registration(
@@ -291,7 +274,7 @@ mod tests {
             builder
                 .register(registration("duplicate", 3, DUPLICATE_READY))
                 .unwrap_err(),
-            AudioRegistryError::DuplicateCueKeyWithinProducer("ready")
+            AudioRegistryError::DuplicateCueKeyWithinProducer("playable")
         );
     }
 
@@ -422,7 +405,7 @@ mod tests {
         const SYNTHETIC_KEYS: &[AudioCueKey] = &[SYNTHETIC];
         let catalog = AudioProfileCatalog::embedded()
             .unwrap()
-            .with_test_mapping(SYNTHETIC, "ready")
+            .with_test_mapping(SYNTHETIC, "playable")
             .unwrap();
         let mut builder = AudioRegistryBuilder::default();
         builder
@@ -464,24 +447,24 @@ mod tests {
         let registry = builder.seal(&catalog).unwrap();
 
         assert!(registry.allows(&AudioRequest::once(
-            cue_keys::FIRE,
+            cue_keys::FIRE_STRAIGHT,
             AudioRequestOrder::new(10, 0),
         )));
         assert!(registry.allows(&AudioRequest::once(
-            cue_keys::READY,
+            cue_keys::PLAYABLE,
             AudioRequestOrder::new(10, 1),
         )));
         assert!(registry.allows(&AudioRequest::once(
-            cue_keys::READY,
+            cue_keys::PLAYABLE,
             AudioRequestOrder::new(20, 0),
         )));
         assert!(!registry.allows(&AudioRequest::once(
-            cue_keys::FIRE,
+            cue_keys::FIRE_STRAIGHT,
             AudioRequestOrder::new(20, 0),
         )));
         assert!(!registry.allows(&AudioRequest::once(UNKNOWN, AudioRequestOrder::new(10, 0),)));
         assert!(!registry.allows(&AudioRequest::once(
-            cue_keys::FIRE,
+            cue_keys::FIRE_STRAIGHT,
             AudioRequestOrder::new(0, 0),
         )));
     }

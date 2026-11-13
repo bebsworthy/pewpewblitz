@@ -432,8 +432,8 @@ The settings contract includes:
 
 The current Settings preference pages use a fullscreen category/options/details layout with
 Display, Audio, Accessibility and Controls navigation. Display exposes borderless fullscreen and
-VSync; Audio exposes master volume and focus-loss mute; Accessibility exposes UI scale, reduced
-motion and reduced combat effects. These ordinary preferences apply and save on change. A failed
+VSync; Audio exposes master, effects and music volume and focus-loss mute; Accessibility exposes
+UI scale, reduced motion and reduced combat effects. These ordinary preferences apply and save on change. A failed
 save retains the active session value and presents an inline retry. Pointer sliders save when the
 interaction ends; keyboard/gamepad adjustments save directly. Fullscreen changes preview for 15
 seconds and require Keep display; timeout, Revert, or leaving Settings restores the previous mode.

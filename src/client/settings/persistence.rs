@@ -26,10 +26,17 @@ pub struct ClientShellSettings {
     pub reduced_motion: bool,
     pub reduced_combat_effects: bool,
     pub master_volume: u8,
+    /// Combat, match, and interface one-shots, as a share of the master volume.
+    pub effects_volume: u8,
+    /// Menu and match music, as a share of the master volume.
+    pub music_volume: u8,
     pub mute_when_unfocused: bool,
     pub fullscreen: bool,
     pub vsync: bool,
 }
+
+pub const DEFAULT_EFFECTS_VOLUME: u8 = 100;
+pub const DEFAULT_MUSIC_VOLUME: u8 = 70;
 
 impl Default for ClientShellSettings {
     fn default() -> Self {
@@ -38,6 +45,8 @@ impl Default for ClientShellSettings {
             reduced_motion: false,
             reduced_combat_effects: false,
             master_volume: 100,
+            effects_volume: DEFAULT_EFFECTS_VOLUME,
+            music_volume: DEFAULT_MUSIC_VOLUME,
             mute_when_unfocused: true,
             fullscreen: false,
             vsync: true,
@@ -52,8 +61,16 @@ impl ClientShellSettings {
                 "UI scale must be between {MIN_UI_SCALE:.1} and {MAX_UI_SCALE:.1}"
             ));
         }
-        if self.master_volume > 100 || !self.master_volume.is_multiple_of(10) {
-            return Err("Master volume must be between 0 and 100 in steps of 10".to_string());
+        for (name, volume) in [
+            ("Master", self.master_volume),
+            ("Effects", self.effects_volume),
+            ("Music", self.music_volume),
+        ] {
+            if volume > 100 || !volume.is_multiple_of(10) {
+                return Err(format!(
+                    "{name} volume must be between 0 and 100 in steps of 10"
+                ));
+            }
         }
         Ok(())
     }
@@ -95,9 +112,23 @@ pub struct SettingsFile {
     pub reduced_motion: bool,
     pub reduced_combat_effects: bool,
     pub master_volume: u8,
+    /// Added by BRL-0158. Defaulted so a settings file saved before the audio categories existed
+    /// still loads instead of being rejected with every binding; unknown fields stay rejected.
+    #[serde(default = "default_effects_volume")]
+    pub effects_volume: u8,
+    #[serde(default = "default_music_volume")]
+    pub music_volume: u8,
     pub mute_when_unfocused: bool,
     pub fullscreen: bool,
     pub vsync: bool,
+}
+
+const fn default_effects_volume() -> u8 {
+    DEFAULT_EFFECTS_VOLUME
+}
+
+const fn default_music_volume() -> u8 {
+    DEFAULT_MUSIC_VOLUME
 }
 
 impl SettingsFile {
@@ -118,6 +149,8 @@ impl SettingsFile {
             reduced_motion: shell.reduced_motion,
             reduced_combat_effects: shell.reduced_combat_effects,
             master_volume: shell.master_volume,
+            effects_volume: shell.effects_volume,
+            music_volume: shell.music_volume,
             mute_when_unfocused: shell.mute_when_unfocused,
             fullscreen: shell.fullscreen,
             vsync: shell.vsync,
@@ -144,6 +177,8 @@ impl SettingsFile {
             reduced_motion: self.reduced_motion,
             reduced_combat_effects: self.reduced_combat_effects,
             master_volume: self.master_volume,
+            effects_volume: self.effects_volume,
+            music_volume: self.music_volume,
             mute_when_unfocused: self.mute_when_unfocused,
             fullscreen: self.fullscreen,
             vsync: self.vsync,
@@ -255,6 +290,8 @@ mod tests {
             reduced_motion: true,
             reduced_combat_effects: true,
             master_volume: 60,
+            effects_volume: 80,
+            music_volume: 30,
             fullscreen: true,
             vsync: false,
             ..ClientShellSettings::default()
@@ -270,6 +307,47 @@ mod tests {
         assert_eq!(loaded_input.revision, 0);
         assert_eq!(loaded_shell, shell);
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn settings_saved_before_audio_categories_load_with_default_category_volumes() {
+        let dir = test_path("pre-categories");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.ron");
+        let current = ron::ser::to_string_pretty(
+            &SettingsFile::from_active(
+                ClientInputSettings::default(),
+                ClientShellSettings {
+                    master_volume: 40,
+                    ..ClientShellSettings::default()
+                },
+            ),
+            ron::ser::PrettyConfig::default(),
+        )
+        .unwrap();
+        let legacy = current
+            .lines()
+            .filter(|line| !line.contains("effects_volume") && !line.contains("music_volume"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_ne!(legacy, current);
+        fs::write(&path, legacy).unwrap();
+        let (_, shell) = load_settings(&path).unwrap().unwrap();
+        assert_eq!(shell.master_volume, 40);
+        assert_eq!(shell.effects_volume, DEFAULT_EFFECTS_VOLUME);
+        assert_eq!(shell.music_volume, DEFAULT_MUSIC_VOLUME);
+
+        let mut invalid = SettingsFile::from_active(
+            ClientInputSettings::default(),
+            ClientShellSettings::default(),
+        );
+        invalid.music_volume = 75;
+        fs::write(&path, ron::to_string(&invalid).unwrap()).unwrap();
+        assert!(matches!(
+            load_settings(&path),
+            Err(SettingsLoadError::Rejected(_))
+        ));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

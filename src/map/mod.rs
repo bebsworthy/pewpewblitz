@@ -53,6 +53,8 @@ pub use catalog::{
     ZOMBIE_YARD_PRESET,
 };
 #[cfg(feature = "client")]
+pub(crate) use client::ClientPickupCueSet;
+#[cfg(feature = "client")]
 pub use client::{
     ClientMapPlugin, ClientMapReadiness, ClientWorldObjectReadiness, MapPresentationMember,
     MapPresentationPlugin, MapPresentationSet, PresentedMap, perimeter_visual_shapes,

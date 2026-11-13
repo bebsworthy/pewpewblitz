@@ -14,7 +14,6 @@ use super::{
     },
 };
 use bevy::{
-    audio::{AudioSink, AudioSinkPlayback, GlobalVolume, SpatialAudioSink, Volume},
     input::mouse::{MouseScrollUnit, MouseWheel},
     input_focus::{
         FocusCause, InputFocus, InputFocusVisible,
@@ -80,6 +79,8 @@ enum ShellControlId {
     ToggleReducedMotion,
     ToggleReducedEffects,
     VolumeUp,
+    EffectsVolumeUp,
+    MusicVolumeUp,
     ToggleFocusMute,
     ToggleFullscreen,
     ToggleVsync,
@@ -107,6 +108,10 @@ enum ShellAction {
     ToggleReducedEffects,
     VolumeDown,
     VolumeUp,
+    EffectsVolumeDown,
+    EffectsVolumeUp,
+    MusicVolumeDown,
+    MusicVolumeUp,
     ToggleFocusMute,
     ToggleFullscreen,
     ToggleVsync,
@@ -197,7 +202,6 @@ impl Plugin for ClientShellPlugin {
                     controls::present_values,
                     controls::present_plots,
                     preview_shell_preferences,
-                    apply_audio_preferences,
                     animate_shell_entrance,
                     scroll_shell_panels,
                 )
@@ -900,42 +904,6 @@ fn preview_shell_preferences(
         } else {
             PresentMode::AutoNoVsync
         };
-    }
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
-)]
-fn apply_audio_preferences(
-    settings: Res<ClientShellSettings>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    global: Option<ResMut<GlobalVolume>>,
-    mut sinks: Query<&mut AudioSink>,
-    mut spatial_sinks: Query<&mut SpatialAudioSink>,
-) {
-    let volume = Volume::Linear(f32::from(settings.master_volume) / 100.0);
-    if let Some(mut global) = global {
-        global.volume = volume;
-    }
-    let muted =
-        settings.mute_when_unfocused && windows.iter().next().is_some_and(|window| !window.focused);
-    for mut sink in &mut sinks {
-        sink.set_volume(volume);
-        if muted {
-            sink.mute();
-        } else {
-            sink.unmute();
-        }
-    }
-    for mut sink in &mut spatial_sinks {
-        sink.set_volume(volume);
-        if muted {
-            sink.mute();
-        } else {
-            sink.unmute();
-        }
     }
 }
 

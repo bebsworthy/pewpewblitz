@@ -8,12 +8,15 @@ use crate::{
         },
         hud::ClientHeistReadiness,
     },
+    combat::TeamId,
     map::HOT_ZONE_MODE_DEFINITION,
     matchplay::{
-        HeistObjectiveCueKind, HotZoneState, HotZoneStatus, MatchId, MatchPhase, MatchRoot,
-        MatchState, ReceivedHeistObjectiveCue, WipeoutState,
+        HeistObjectiveCueKind, HotZoneState, HotZoneStatus, MatchId, MatchPhase, MatchResult,
+        MatchRoot, MatchState, ReceivedHeistObjectiveCue, WipeoutState,
     },
+    protocol::Fighter,
 };
+use lightyear::prelude::Controlled;
 
 use super::AudioProducerSequence;
 
@@ -25,8 +28,18 @@ const HEIST_KEYS: &[AudioCueKey] = &[
     cue_keys::OBJECTIVE_CRITICAL,
     cue_keys::OBJECTIVE_DESTROYED,
 ];
-const MATCH_KEYS: &[AudioCueKey] = &[cue_keys::DEFEAT, cue_keys::IMPACT, cue_keys::READY];
-const HOT_ZONE_KEYS: &[AudioCueKey] = &[cue_keys::READY, cue_keys::IMPACT];
+const MATCH_KEYS: &[AudioCueKey] = &[
+    cue_keys::MATCH_START,
+    cue_keys::MATCH_SCORE,
+    cue_keys::MATCH_VICTORY,
+    cue_keys::MATCH_DEFEAT,
+    cue_keys::MATCH_DRAW,
+];
+const HOT_ZONE_KEYS: &[AudioCueKey] = &[
+    cue_keys::ZONE_CAPTURED,
+    cue_keys::ZONE_LOST,
+    cue_keys::ZONE_PROGRESS,
+];
 
 #[derive(Resource, Default)]
 pub(in crate::client::audio::producers) struct HeistAudioMemory {
@@ -142,6 +155,7 @@ pub(super) fn produce_match_audio_requests(
             Or<(Changed<MatchState>, Changed<WipeoutState>)>,
         ),
     >,
+    local_team: Query<&TeamId, (With<Fighter>, With<Controlled>)>,
     mut memory: ResMut<MatchAudioMemory>,
     mut requests: MessageWriter<AudioRequest>,
     mut sequence: Local<AudioProducerSequence>,
@@ -152,7 +166,8 @@ pub(super) fn produce_match_audio_requests(
     let wipeout_scores = wipeout.map(|wipeout| wipeout.team_scores);
     let previous = memory.last;
     memory.last = Some((current.match_id, current.phase, wipeout_scores));
-    if let Some(cue_key) = match_audio_cue(current, wipeout_scores, previous) {
+    let local_team = local_team.iter().next().copied();
+    if let Some(cue_key) = match_audio_cue(current, wipeout_scores, previous, local_team) {
         requests.write(AudioRequest::once(cue_key, sequence.next(MATCH_RANK)));
     }
 }
@@ -161,29 +176,46 @@ fn match_audio_cue(
     current: &MatchState,
     wipeout_scores: Option<[u16; 2]>,
     previous: Option<(MatchId, MatchPhase, Option<[u16; 2]>)>,
+    local_team: Option<TeamId>,
 ) -> Option<AudioCueKey> {
     let hot_zone_mode = current.mode_definition_id == HOT_ZONE_MODE_DEFINITION;
-    if matches!(current.phase, MatchPhase::Completed { .. })
+    if let MatchPhase::Completed { result, .. } = current.phase
         && !previous.is_some_and(|(id, phase, _)| {
             id == current.match_id && matches!(phase, MatchPhase::Completed { .. })
         })
     {
-        Some(cue_keys::DEFEAT)
+        Some(result_sting(result, local_team))
     } else if !hot_zone_mode
         && previous.is_some_and(|(id, _, scores)| {
             id == current.match_id && scores.is_some_and(|scores| Some(scores) != wipeout_scores)
         })
     {
-        Some(cue_keys::IMPACT)
+        Some(cue_keys::MATCH_SCORE)
     } else if previous.is_none_or(|(id, phase, _)| id != current.match_id || phase != current.phase)
         && matches!(
             current.phase,
             MatchPhase::Countdown { .. } | MatchPhase::Active { .. }
         )
     {
-        Some(cue_keys::READY)
+        Some(cue_keys::MATCH_START)
     } else {
         None
+    }
+}
+
+/// The completion sting as heard by the controlled fighter's team. Without a controlled fighter
+/// (observer) a decided match plays the neutral sting.
+fn result_sting(result: MatchResult, local_team: Option<TeamId>) -> AudioCueKey {
+    let winner = match result {
+        MatchResult::TeamVictory { team } | MatchResult::Forfeit { winner: team, .. } => team,
+        MatchResult::Draw => return cue_keys::MATCH_DRAW,
+        MatchResult::Cleared => return cue_keys::MATCH_VICTORY,
+        MatchResult::Overrun => return cue_keys::MATCH_DEFEAT,
+    };
+    match local_team {
+        Some(team) if team == winner => cue_keys::MATCH_VICTORY,
+        Some(_) => cue_keys::MATCH_DEFEAT,
+        None => cue_keys::MATCH_DRAW,
     }
 }
 
@@ -244,12 +276,12 @@ fn hot_zone_audio_cue(
             };
             (snapshot.progress_ticks[team] > previous.progress_ticks[team]
                 && crossed(snapshot.progress_ticks[team]))
-            .then_some(cue_keys::IMPACT)
+            .then_some(cue_keys::ZONE_PROGRESS)
         })
     } else if controlled_now {
-        Some(cue_keys::READY)
+        Some(cue_keys::ZONE_CAPTURED)
     } else {
-        Some(cue_keys::IMPACT)
+        Some(cue_keys::ZONE_LOST)
     }
 }
 
@@ -348,6 +380,43 @@ mod tests {
     }
 
     #[test]
+    fn completion_sting_is_relative_to_the_controlled_fighters_team() {
+        for (result, team, sting) in [
+            (
+                MatchResult::TeamVictory { team: TeamId(1) },
+                Some(TeamId(1)),
+                cue_keys::MATCH_VICTORY,
+            ),
+            (
+                MatchResult::TeamVictory { team: TeamId(1) },
+                Some(TeamId(2)),
+                cue_keys::MATCH_DEFEAT,
+            ),
+            (
+                MatchResult::Forfeit {
+                    winner: TeamId(2),
+                    departed_team: TeamId(1),
+                },
+                Some(TeamId(2)),
+                cue_keys::MATCH_VICTORY,
+            ),
+            (
+                MatchResult::TeamVictory { team: TeamId(1) },
+                None,
+                cue_keys::MATCH_DRAW,
+            ),
+            (MatchResult::Cleared, None, cue_keys::MATCH_VICTORY),
+            (
+                MatchResult::Overrun,
+                Some(TeamId(1)),
+                cue_keys::MATCH_DEFEAT,
+            ),
+        ] {
+            assert_eq!(result_sting(result, team), sting, "{result:?}");
+        }
+    }
+
+    #[test]
     fn common_match_and_hot_zone_transition_selectors_keep_exact_keys() {
         let current = MatchState {
             match_id: MatchId(7),
@@ -360,8 +429,9 @@ mod tests {
                 &current,
                 Some([1, 0]),
                 Some((current.match_id, current.phase, Some([0, 0]))),
+                Some(TeamId(1)),
             ),
-            Some(cue_keys::IMPACT)
+            Some(cue_keys::MATCH_SCORE)
         );
         let completed = MatchState {
             phase: MatchPhase::Completed {
@@ -376,8 +446,17 @@ mod tests {
                 &completed,
                 Some([1, 0]),
                 Some((current.match_id, current.phase, Some([1, 0]))),
+                Some(TeamId(1)),
             ),
-            Some(cue_keys::DEFEAT)
+            Some(cue_keys::MATCH_DRAW)
+        );
+        let countdown = MatchState {
+            phase: MatchPhase::Countdown { starts_at_tick: 10 },
+            ..current
+        };
+        assert_eq!(
+            match_audio_cue(&countdown, Some([0, 0]), None, None),
+            Some(cue_keys::MATCH_START)
         );
 
         let previous = HotZoneAudioSnapshot {
@@ -395,7 +474,17 @@ mod tests {
                 },
                 previous,
             ),
-            Some(cue_keys::READY)
+            Some(cue_keys::ZONE_CAPTURED)
+        );
+        assert_eq!(
+            hot_zone_audio_cue(
+                previous,
+                HotZoneAudioSnapshot {
+                    status: HotZoneStatus::Controlled { team: TeamId(0) },
+                    ..previous
+                },
+            ),
+            Some(cue_keys::ZONE_LOST)
         );
         assert_eq!(
             hot_zone_audio_cue(
@@ -405,7 +494,7 @@ mod tests {
                 },
                 previous,
             ),
-            Some(cue_keys::IMPACT)
+            Some(cue_keys::ZONE_PROGRESS)
         );
     }
 }

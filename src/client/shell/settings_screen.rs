@@ -432,12 +432,12 @@ pub(super) fn control(
 
 fn category_rows(category: Category) -> &'static [ShellControlId] {
     use ShellControlId::{
-        ToggleFocusMute, ToggleFullscreen, ToggleReducedEffects, ToggleReducedMotion, ToggleVsync,
-        UiScaleUp, VolumeUp,
+        EffectsVolumeUp, MusicVolumeUp, ToggleFocusMute, ToggleFullscreen, ToggleReducedEffects,
+        ToggleReducedMotion, ToggleVsync, UiScaleUp, VolumeUp,
     };
     match category {
         Category::Display => &[ToggleFullscreen, ToggleVsync],
-        Category::Audio => &[VolumeUp, ToggleFocusMute],
+        Category::Audio => &[VolumeUp, EffectsVolumeUp, MusicVolumeUp, ToggleFocusMute],
         Category::Accessibility => &[UiScaleUp, ToggleReducedMotion, ToggleReducedEffects],
         Category::Controls => &[],
     }
@@ -448,6 +448,8 @@ fn action(id: ShellControlId) -> ShellAction {
         ShellControlId::ToggleFullscreen => ShellAction::ToggleFullscreen,
         ShellControlId::ToggleVsync => ShellAction::ToggleVsync,
         ShellControlId::VolumeUp => ShellAction::VolumeUp,
+        ShellControlId::EffectsVolumeUp => ShellAction::EffectsVolumeUp,
+        ShellControlId::MusicVolumeUp => ShellAction::MusicVolumeUp,
         ShellControlId::ToggleFocusMute => ShellAction::ToggleFocusMute,
         ShellControlId::UiScaleUp => ShellAction::UiScaleUp,
         ShellControlId::ToggleReducedMotion => ShellAction::ToggleReducedMotion,
@@ -467,6 +469,11 @@ fn description(id: ShellControlId) -> (&'static str, &'static str) {
             "Synchronize presentation with the display refresh to reduce screen tearing.",
         ),
         ShellControlId::VolumeUp => ("Master volume", "Adjust the volume of all game audio."),
+        ShellControlId::EffectsVolumeUp => (
+            "Effects volume",
+            "Adjust combat, match and interface sounds.",
+        ),
+        ShellControlId::MusicVolumeUp => ("Music volume", "Adjust menu and match music."),
         ShellControlId::ToggleFocusMute => (
             "Mute when unfocused",
             "Mute game audio while another application has focus.",
@@ -491,6 +498,12 @@ pub(super) fn slider_actions(id: ShellControlId) -> Option<(ShellAction, ShellAc
     match id {
         ShellControlId::UiScaleUp => Some((ShellAction::UiScaleDown, ShellAction::UiScaleUp)),
         ShellControlId::VolumeUp => Some((ShellAction::VolumeDown, ShellAction::VolumeUp)),
+        ShellControlId::EffectsVolumeUp => {
+            Some((ShellAction::EffectsVolumeDown, ShellAction::EffectsVolumeUp))
+        }
+        ShellControlId::MusicVolumeUp => {
+            Some((ShellAction::MusicVolumeDown, ShellAction::MusicVolumeUp))
+        }
         ShellControlId::Input(id) => super::controls::slider_actions(id),
         _ => None,
     }
@@ -509,11 +522,39 @@ fn value(id: ShellControlId, settings: ClientShellSettings) -> ControlValue {
             fraction: (settings.ui_scale - MIN_UI_SCALE) / (MAX_UI_SCALE - MIN_UI_SCALE),
             label: format!("{:.0}%", settings.ui_scale * 100.0),
         },
-        ShellControlId::VolumeUp => ControlValue::Slider {
-            fraction: f32::from(settings.master_volume) / 100.0,
-            label: format!("{}%", settings.master_volume),
-        },
+        ShellControlId::VolumeUp => volume_slider(settings.master_volume),
+        ShellControlId::EffectsVolumeUp => volume_slider(settings.effects_volume),
+        ShellControlId::MusicVolumeUp => volume_slider(settings.music_volume),
         _ => ControlValue::Action,
+    }
+}
+
+fn volume_slider(volume: u8) -> ControlValue {
+    ControlValue::Slider {
+        fraction: f32::from(volume) / 100.0,
+        label: format!("{volume}%"),
+    }
+}
+
+/// The nearest 10% step to a pointer position along a volume slider.
+fn volume_from_fraction(fraction: f32) -> u8 {
+    (0_u8..=10)
+        .min_by(|left, right| {
+            (f32::from(*left) - fraction * 10.0)
+                .abs()
+                .total_cmp(&(f32::from(*right) - fraction * 10.0).abs())
+        })
+        .unwrap_or(0)
+        * 10
+}
+
+/// The persisted volume a volume slider row owns.
+fn volume_field(settings: &mut ClientShellSettings, id: ShellControlId) -> Option<&mut u8> {
+    match id {
+        ShellControlId::VolumeUp => Some(&mut settings.master_volume),
+        ShellControlId::EffectsVolumeUp => Some(&mut settings.effects_volume),
+        ShellControlId::MusicVolumeUp => Some(&mut settings.music_volume),
+        _ => None,
     }
 }
 
@@ -704,18 +745,12 @@ pub(super) fn pointer_sliders(
                     ((MIN_UI_SCALE + fraction * (MAX_UI_SCALE - MIN_UI_SCALE)) * 10.0).round()
                         / 10.0;
             }
-            ShellControlId::VolumeUp => {
-                page.defer_save = mouse.pressed(MouseButton::Left);
-                draft.0.master_volume = (0_u8..=10)
-                    .min_by(|left, right| {
-                        (f32::from(*left) - fraction * 10.0)
-                            .abs()
-                            .total_cmp(&(f32::from(*right) - fraction * 10.0).abs())
-                    })
-                    .unwrap_or(0)
-                    * 10;
+            id => {
+                if let Some(volume) = volume_field(&mut draft.0, id) {
+                    page.defer_save = mouse.pressed(MouseButton::Left);
+                    *volume = volume_from_fraction(fraction);
+                }
             }
-            _ => {}
         }
     }
 }
@@ -882,6 +917,8 @@ fn reset_category(
         }
         Category::Audio => {
             settings.master_volume = source.master_volume;
+            settings.effects_volume = source.effects_volume;
+            settings.music_volume = source.music_volume;
             settings.mute_when_unfocused = source.mute_when_unfocused;
         }
         Category::Accessibility => {
@@ -909,6 +946,18 @@ fn adjust_preference(action: ShellAction, settings: &mut ClientShellSettings) ->
         ShellAction::VolumeUp => {
             settings.master_volume = settings.master_volume.saturating_add(10).min(100);
         }
+        ShellAction::EffectsVolumeDown => {
+            settings.effects_volume = settings.effects_volume.saturating_sub(10);
+        }
+        ShellAction::EffectsVolumeUp => {
+            settings.effects_volume = settings.effects_volume.saturating_add(10).min(100);
+        }
+        ShellAction::MusicVolumeDown => {
+            settings.music_volume = settings.music_volume.saturating_sub(10);
+        }
+        ShellAction::MusicVolumeUp => {
+            settings.music_volume = settings.music_volume.saturating_add(10).min(100);
+        }
         ShellAction::ToggleFocusMute => {
             settings.mute_when_unfocused = !settings.mute_when_unfocused;
         }
@@ -925,6 +974,49 @@ fn adjust_preference(action: ShellAction, settings: &mut ClientShellSettings) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_page_owns_master_effects_and_music_volume_sliders() {
+        assert_eq!(
+            category_rows(Category::Audio),
+            [
+                ShellControlId::VolumeUp,
+                ShellControlId::EffectsVolumeUp,
+                ShellControlId::MusicVolumeUp,
+                ShellControlId::ToggleFocusMute,
+            ]
+        );
+        let mut settings = ClientShellSettings::default();
+        assert!(adjust_preference(ShellAction::MusicVolumeUp, &mut settings));
+        assert_eq!(settings.music_volume, 80);
+        for _ in 0..5 {
+            adjust_preference(ShellAction::MusicVolumeUp, &mut settings);
+        }
+        assert_eq!(settings.music_volume, 100);
+        assert!(adjust_preference(
+            ShellAction::EffectsVolumeDown,
+            &mut settings
+        ));
+        assert_eq!(settings.effects_volume, 90);
+        assert_eq!(settings.master_volume, 100);
+        assert_eq!(volume_from_fraction(0.34), 30);
+
+        let mut changed = ClientShellSettings {
+            effects_volume: 10,
+            music_volume: 0,
+            ..ClientShellSettings::default()
+        };
+        reset_category(
+            Category::Audio,
+            &mut changed,
+            ClientShellSettings::default(),
+        );
+        assert_eq!(changed, ClientShellSettings::default());
+        assert_eq!(
+            slider_actions(ShellControlId::MusicVolumeUp),
+            Some((ShellAction::MusicVolumeDown, ShellAction::MusicVolumeUp))
+        );
+    }
 
     #[test]
     fn pointer_slider_maps_bevy_track_coordinates_to_the_preference_range() {

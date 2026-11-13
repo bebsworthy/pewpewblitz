@@ -1,6 +1,8 @@
-//! Client-only semantic audio requests and bounded one-shot playback.
+//! Client-only semantic audio requests, bounded one-shot playback, music, and volume mixing.
 
 mod catalog;
+mod mix;
+mod music;
 mod playback;
 mod producers;
 mod registry;
@@ -8,6 +10,7 @@ mod request;
 
 use bevy::prelude::*;
 
+use music::ClientMusicPlugin;
 use playback::{ClientAudioPlaybackPlugin, ClientAudioSet};
 use producers::{AudioProducerSet, AudioProducersPlugin};
 use registry::AudioRegistryPlugin;
@@ -22,7 +25,15 @@ impl Plugin for ClientAudioPlugin {
                 Update,
                 AudioProducerSet.in_set(ClientAudioSet::ProduceRequests),
             )
-            .add_plugins(AudioProducersPlugin);
+            .add_plugins(AudioProducersPlugin)
+            .add_plugins(ClientMusicPlugin)
+            // One mix pass after every spawn and fade of the frame.
+            .add_systems(
+                Update,
+                mix::apply_audio_mix
+                    .after(ClientAudioSet::PlaybackRequests)
+                    .after(music::MusicSet),
+            );
     }
 }
 
@@ -42,5 +53,7 @@ mod tests {
         }
         assert_eq!(registry.producer_rank("combat"), Some(10));
         assert_eq!(registry.producer_rank("hot-zone"), Some(70));
+        assert_eq!(registry.producer_rank("pickup"), Some(80));
+        assert_eq!(registry.producer_rank("ui"), Some(90));
     }
 }

@@ -3,7 +3,9 @@
 mod ability;
 mod combat;
 mod matchplay;
+mod pickup;
 mod session;
+mod ui;
 
 use bevy::prelude::*;
 
@@ -21,6 +23,8 @@ impl Plugin for AudioProducersPlugin {
         session::register(app);
         matchplay::register_common(app);
         matchplay::register_hot_zone(app);
+        pickup::register(app);
+        ui::register(app);
 
         app.add_systems(
             Update,
@@ -32,9 +36,13 @@ impl Plugin for AudioProducersPlugin {
                 session::produce_session_audio_requests,
                 matchplay::produce_match_audio_requests,
                 matchplay::produce_hot_zone_audio_requests,
+                pickup::produce_pickup_audio_requests,
+                ui::produce_ui_audio_requests,
             )
                 .chain()
                 .after(crate::map::MapPresentationSet::Readiness)
+                // Pickup cues are read from this frame's shared inbox.
+                .after(crate::map::ClientPickupCueSet)
                 // Local attack echoes are paired before any cue is turned into sound.
                 .after(crate::client::local_attack::LocalAttackSet::Reconcile)
                 .in_set(AudioProducerSet),
@@ -212,7 +220,11 @@ mod tests {
         assert_eq!(
             app.world().resource::<ObservedRequests>().0,
             [
-                AudioRequest::for_occurrence(cue_keys::FIRE, 11, AudioRequestOrder::new(10, 0),),
+                AudioRequest::for_occurrence(
+                    cue_keys::FIRE_STRAIGHT,
+                    11,
+                    AudioRequestOrder::new(10, 0),
+                ),
                 AudioRequest::for_occurrence(
                     cue_keys::OBJECTIVE_HIT,
                     20,
@@ -220,9 +232,9 @@ mod tests {
                 ),
                 AudioRequest::once(cue_keys::DASH, AudioRequestOrder::new(30, 0)),
                 AudioRequest::once(cue_keys::RELOAD, AudioRequestOrder::new(40, 0)),
-                AudioRequest::once(cue_keys::READY, AudioRequestOrder::new(50, 0)),
-                AudioRequest::once(cue_keys::IMPACT, AudioRequestOrder::new(60, 1)),
-                AudioRequest::once(cue_keys::READY, AudioRequestOrder::new(70, 0)),
+                AudioRequest::once(cue_keys::PLAYABLE, AudioRequestOrder::new(50, 0)),
+                AudioRequest::once(cue_keys::MATCH_SCORE, AudioRequestOrder::new(60, 1)),
+                AudioRequest::once(cue_keys::ZONE_CAPTURED, AudioRequestOrder::new(70, 0)),
             ]
         );
 
@@ -274,11 +286,51 @@ mod tests {
 
         let observed = &app.world().resource::<ObservedRequests>().0;
         assert_eq!(observed.len(), 1, "one fire sound, no replay: {observed:?}");
-        assert_eq!(observed[0].cue_key, cue_keys::FIRE);
+        assert_eq!(observed[0].cue_key, cue_keys::FIRE_STRAIGHT);
         assert_ne!(
             observed[0].occurrence,
             Some(11),
             "the local occurrence, not the echo"
         );
+    }
+
+    #[test]
+    fn released_controls_request_their_surface_role_sound_and_disabled_controls_stay_silent() {
+        use crate::client::ui::{press::ReleaseActivation, surface::Surface};
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<AudioRequest>()
+            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientPlayableGate(false))
+            .insert_resource(ClientMapReadiness::Ready)
+            .init_resource::<ObservedRequests>()
+            .add_plugins(AudioRegistryPlugin)
+            .add_plugins(AudioProducersPlugin)
+            .add_systems(Update, observe_requests.after(AudioProducerSet));
+        crate::test_app::finalize(&mut app);
+        app.world_mut()
+            .spawn((ReleaseActivation::activated_for_test(), Surface::Back));
+        app.world_mut()
+            .spawn((ReleaseActivation::activated_for_test(), Surface::Primary));
+        app.world_mut().spawn((
+            ReleaseActivation::activated_for_test(),
+            bevy::ui::InteractionDisabled,
+        ));
+        app.world_mut().spawn(ReleaseActivation::default());
+
+        app.update();
+
+        let mut keys = app
+            .world()
+            .resource::<ObservedRequests>()
+            .0
+            .iter()
+            .map(|request| request.cue_key)
+            .collect::<Vec<_>>();
+        keys.sort();
+        let mut expected = vec![cue_keys::UI_BACK, cue_keys::UI_CONFIRM];
+        expected.sort();
+        assert_eq!(keys, expected);
     }
 }
