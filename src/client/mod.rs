@@ -2,10 +2,7 @@
 
 use crate::{
     VERSION,
-    combat::{
-        AuthoritativeTick, ClientCombatEvidenceStatus, ClientCombatPlugin, CombatAbilityHudText,
-        CombatHudText,
-    },
+    combat::{AuthoritativeTick, ClientCombatEvidenceStatus, ClientCombatPlugin},
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     content::GameplayContentPlugin,
     gameplay::GameplayPlugin,
@@ -638,7 +635,6 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         app.add_plugins((
             ClientPresentationPlugin,
             evidence_capture::ClientEvidenceCapturePlugin,
-            touch::TouchControlsOverlayPlugin,
         ));
         if app
             .world()

@@ -1,19 +1,20 @@
 ---
 id: BRL-0155
 title: Redesign the in-game HUD around touch-first attack and ultimate controls
-status: todo
+status: doing
 theme: core
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-11-13T20:09:05Z
+modified: 2026-11-13T22:50:01Z
 closed:
-status_changed: 2026-11-12T20:15:04Z
+status_changed: 2026-11-13T22:00:07Z
 history:
 - backlog@2026-10-23T13:19:05Z
 - todo@2026-11-12T20:15:04Z
-revision: cd4d0dcfe1c51298
+- doing@2026-11-13T22:00:07Z
+revision: e740d75160cb8496
 blocks: []
-related: [BRL-0133, BRL-0160]
+related: [BRL-0133, BRL-0160, BRL-0200]
 parent: BRL-0171
 ---
 

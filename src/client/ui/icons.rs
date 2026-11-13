@@ -49,6 +49,25 @@ pub(crate) const PARTS: [&str; 5] = [
     "part-element",
 ];
 
+/// The badge of an ultimate family. Icons are selected by advertised semantic family, never by
+/// built-in definition IDs; the brawler screens and the in-match ultimate button share it.
+pub(crate) fn ultimate_icon(kind: crate::builds::UltimateKind) -> &'static str {
+    use crate::builds::UltimateKind;
+    match kind {
+        UltimateKind::Dash => "dash",
+        UltimateKind::Sentry => "sentry",
+        UltimateKind::SelfCloak => "cloak",
+        UltimateKind::RevealScan => "scan",
+        UltimateKind::ConcealmentField => "field",
+        UltimateKind::DemolitionStrike => "blast",
+        UltimateKind::CryogenicField => "cold",
+        UltimateKind::FireField => "fire",
+        UltimateKind::PoisonField => "poison",
+        UltimateKind::RestorationField => "heal",
+        UltimateKind::BigBlob => "blob",
+    }
+}
+
 /// Asset path of a named icon.
 pub(crate) fn path(name: &str) -> String {
     format!("brawler/ui/icons/{name}.png")

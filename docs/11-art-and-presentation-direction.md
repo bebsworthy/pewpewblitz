@@ -111,7 +111,7 @@ the previous presentation for that area:
 | Contact shadows / AO | BRL-0152 (adopted) |
 | One environment kit per theme | BRL-0153 (theme 1), BRL-0187 (theme 2), BRL-0188 (theme 3) |
 | Riff and the character animation set | BRL-0154 (adopted) |
-| Touch-first HUD | BRL-0155 |
+| Touch-first HUD | BRL-0155 (implemented; owner playtest pending) |
 | Shell surfaces, palette, motion | BRL-0156 (adopted) |
 | Icon set | BRL-0157 (adopted) |
 | Combat feedback | BRL-0144 |

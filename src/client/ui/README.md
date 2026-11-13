@@ -55,6 +55,7 @@ asset-free native row presentation for isolated behavior tests.
 | Settings and Controls | Back plus rows, categories, switches, sliders, bindings; Settings adapter |
 | Server entry, connecting, queue, loading, results and recovery | Shared flow fields/actions; existing screen layout retained |
 | Credits and shell overlays | Shared actions; shell focus/layer adapter |
+| In-match HUD (`client::hud`) | Theme tokens, `hud_text`, icons and ultimate badges; non-interactive nodes, geometry shared with touch hit areas |
 
 The non-interactive dashboard identity strip, logos, mode badges, map overviews, model renders
 and ability pictograms remain content artwork. They are not alternate control renderers.

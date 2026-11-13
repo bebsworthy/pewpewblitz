@@ -70,9 +70,9 @@ pub use crate::content::GameplayContentFingerprint;
 #[cfg(feature = "client")]
 pub use client::ClientCombatEvidenceStatus;
 #[cfg(feature = "client")]
-pub(crate) use client::DeduplicatedCombatCue;
+pub use client::ClientCombatPlugin;
 #[cfg(feature = "client")]
-pub use client::{ClientCombatPlugin, CombatAbilityHudText, CombatHudText};
+pub(crate) use client::DeduplicatedCombatCue;
 pub use cues::{
     CombatCue, CombatCueKey, CombatCueKind, CombatEffectCue, DamageSource, SelfCloakEndReason,
     combat_cue_key, decode_combat_cue, encode_combat_cue,

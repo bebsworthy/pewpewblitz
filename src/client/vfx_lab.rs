@@ -637,7 +637,6 @@ impl Plugin for VfxLabPlugin {
                 animate_combat_effect_layers,
                 update_lab_fixture_facts,
                 update_lab_dash_fixture,
-                hide_gameplay_hud,
                 update_lab_inspector,
                 exit_after_lab_capture,
             )
@@ -1762,22 +1761,6 @@ fn update_lab_dash_fixture(
         } else {
             crate::builds::AbilityPhase::Charging
         };
-    }
-}
-
-type VfxLabGameplayHudQuery<'w, 's> = Query<
-    'w,
-    's,
-    &'static mut Visibility,
-    Or<(
-        With<crate::combat::CombatHudText>,
-        With<crate::combat::CombatAbilityHudText>,
-    )>,
->;
-
-fn hide_gameplay_hud(mut hud: VfxLabGameplayHudQuery) {
-    for mut visibility in &mut hud {
-        *visibility = Visibility::Hidden;
     }
 }
 

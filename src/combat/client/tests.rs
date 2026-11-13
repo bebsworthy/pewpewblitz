@@ -2,16 +2,11 @@ use super::*;
 use crate::combat::client::cues::{
     ClientCombatEvidenceStatus, RecentCombatEvents, remember_combat_event,
 };
-use crate::combat::client::hud::{CombatHudText, update_combat_hud};
 use crate::combat::client::preview::{AimMark, AimTraceBlockerIndex, aim_lane_marks};
-use crate::combat::{
-    AuthoritativeTick, CombatEventId, CurrentHealth, Defeated, WeaponPhase, WeaponState,
-    fighter_color, projectile_color,
-};
+use crate::combat::{CombatEventId, fighter_color, projectile_color};
 use crate::combat::{WeaponCatalog, WeaponPresetId};
 use crate::map::{MapContentCatalog, MapDynamicState, MapInstanceId, MapPresetId as ArenaPresetId};
-use crate::protocol::{Fighter, PlayerId};
-use crate::timing::SimulationTick;
+use crate::protocol::PlayerId;
 
 fn preview_for(id: u16) -> Vec<AimMark> {
     let catalog = WeaponCatalog::embedded().unwrap();
@@ -140,97 +135,6 @@ fn headless_exit_waits_for_required_combat_evidence() {
             ready: false,
         }
         .permits_exit()
-    );
-}
-
-#[test]
-fn combat_hud_reports_replicated_reload_and_defeat_without_reveal_text() {
-    let mut loadout = crate::builds::resolve_build_recipe(
-        &crate::builds::BuildCatalog::embedded().unwrap(),
-        &WeaponCatalog::embedded().unwrap(),
-        crate::builds::BrawlerBuildRecipe {
-            weapon: crate::builds::WeaponChoice::Preset(WeaponPresetId(1)),
-            ultimate: crate::builds::UltimateDefinitionId(1),
-            passives: [
-                crate::builds::PassiveDefinitionId(3),
-                crate::builds::PassiveDefinitionId(4),
-            ],
-        },
-    )
-    .unwrap();
-    loadout.fighter_stats.maximum_health = 100;
-    loadout.primary_weapon.recipe.economy = WeaponEconomy::Magazine {
-        capacity: 6,
-        refill_ticks: 60,
-    };
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .insert_resource(SimulationTick(999))
-        .add_systems(Update, update_combat_hud);
-    let hud = app
-        .world_mut()
-        .spawn((
-            CombatHudText,
-            Text::new("placeholder"),
-            Visibility::Inherited,
-        ))
-        .id();
-    let abilities = app
-        .world_mut()
-        .spawn((
-            CombatAbilityHudText,
-            Text::new("placeholder"),
-            Visibility::Inherited,
-        ))
-        .id();
-    app.world_mut().spawn((
-        Fighter,
-        lightyear::prelude::Controlled,
-        PlayerId(1),
-        CurrentHealth(42),
-        AuthoritativeTick(10),
-        loadout,
-        crate::concealment::ConcealmentPresentationState {
-            revealed_until_tick: 130,
-            ..default()
-        },
-        WeaponState {
-            ammo: 0,
-            phase: WeaponPhase::Ready,
-            ammo_recovery: Some(AmmoRecovery {
-                started_at_tick: 10,
-                ready_at_tick: 25,
-            }),
-        },
-    ));
-
-    app.update();
-    assert_eq!(
-        app.world().get::<Text>(hud).expect("combat HUD").0,
-        "HEALTH  42/100"
-    );
-    assert_eq!(
-        app.world().get::<Text>(abilities).expect("ability HUD").0,
-        "Pulse  0/6  READY · AMMO 0%\nULT --"
-    );
-
-    app.world_mut().entity_mut(hud).insert(Text::new("stale"));
-    let fighter = app
-        .world_mut()
-        .query_filtered::<Entity, With<Fighter>>()
-        .single(app.world())
-        .expect("controlled fighter");
-    app.world_mut().entity_mut(fighter).insert(Defeated {
-        event_id: CombatEventId(1),
-    });
-    app.update();
-    assert_eq!(
-        app.world().get::<Text>(hud).expect("combat HUD").0,
-        "HEALTH  42/100  DEFEATED"
-    );
-    assert_eq!(
-        app.world().get::<Text>(abilities).expect("ability HUD").0,
-        "Pulse  0/6  DEFEATED\nULT --"
     );
 }
 

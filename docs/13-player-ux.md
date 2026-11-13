@@ -516,8 +516,9 @@ movement or network latency; the server remains the only hit authority.
 Touch play (BRL-0160) uses twin sticks that produce the same intent as the other devices; the
 wire input is unchanged. The left half of the screen holds a floating movement stick. Its base is
 where the finger lands and follows the finger past full travel. Any deflection outside the dead zone
-moves at full speed. The ultimate button sits above and left of the lower-right corner. Any other
-touch on the right half is a floating attack stick. The top band is reserved for the HUD. Dragging
+moves at full speed. The ultimate button sits left of the attack button in the lower-right corner
+and its touch circle is exactly the drawn button. Any other touch on the right half is a floating
+attack stick. The top band is reserved for the HUD. Dragging
 an attack or ultimate stick shows the same aim lane or targeted-ultimate area as other devices, and
 placement distance follows deflection. Releasing outside the dead zone fires or activates along
 the drag. A tap that never left the dead zone uses the viewport auto-aim described above. Dragging
@@ -527,9 +528,26 @@ tap on an immediate ultimate such as Dash sends its direction one fixed tick bef
 because authority activates those ultimates along the facing committed on the previous tick. Each control
 owns one finger and ignores extra fingers. A finger lost without an end event, a platform cancel,
 or leaving gameplay (menu, shell, match end) cancels without acting. Touch dead zone and touch
-sensitivity (finger travel for full deflection) live on the Controls advanced page. The placeholder
-touch visuals are static; the touch-first HUD (BRL-0155) replaces them by reading the same
-touch-control state.
+sensitivity (finger travel for full deflection) live on the Controls advanced page. The touch-first
+HUD draws the stick bases and knobs from the same touch-control state; they appear only after a
+touch reaches gameplay (always on Android), together with a faint movement-zone ring.
+
+The persistent in-match HUD (BRL-0155) has no text boxes:
+
+- Top center: a score and timer plate. The observer's team is on the left in ally blue and the
+  opponent on the right in enemy red. It shows Wipeout kills and target, Hot Zone capture
+  percentages and zone control, Heist idol health (DEFEND/ATTACK), or Zombie boosts and live
+  zombies. A teammate strip under it at top left covers Zombie.
+- Top right: a kill feed (at most four rows for four seconds). It is fed only by the defeat cues the
+  server relays to that observer, so it never names a concealed fighter.
+- Bottom right on every platform: an attack button and an ultimate button. The attack button dims
+  and shows the reload while the magazine is empty. The ultimate button shows its family badge
+  inside a radial charge ring that turns gold with a pulse when Ready (no pulse under reduced
+  motion), and seconds left while the ultimate is active. Desktop shows the current key or
+  controller binding on each button.
+- Health and ammunition stay on the local overhead plate.
+
+The Tab/menu scoreboard and the waiting and results panels remain on-demand overlays.
 
 ## Error and recovery contract
 

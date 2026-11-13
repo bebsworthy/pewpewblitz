@@ -6,10 +6,6 @@ use bevy::prelude::{Resource, Vec2};
 
 /// Share of the viewport height at the top that stays reserved for the HUD.
 const TOP_RESERVED_FRACTION: f32 = 0.12;
-/// Ultimate button center offset from the bottom-right corner, in short-side units.
-const ULTIMATE_OFFSET: Vec2 = Vec2::new(0.62, 0.58);
-/// Ultimate button hit radius, in short-side units.
-const ULTIMATE_RADIUS: f32 = 0.16;
 /// Stick travel for full deflection at sensitivity 0 and the reduction at sensitivity 1.
 const TRAVEL_AT_LOWEST_SENSITIVITY: f32 = 0.26;
 const TRAVEL_SENSITIVITY_SPAN: f32 = 0.16;
@@ -51,12 +47,14 @@ impl TouchLayout {
             .clamp(0.0, 0.5)
             .max(TAP_SLOP_PX / travel)
             .min(0.9);
+        // The ultimate hit circle is exactly the button the HUD draws.
+        let controls = crate::client::hud::HudControlLayout::new(viewport);
         Self {
             viewport,
             travel,
             dead_fraction,
-            ultimate_center: viewport - ULTIMATE_OFFSET * unit,
-            ultimate_radius: ULTIMATE_RADIUS * unit,
+            ultimate_center: controls.ultimate.center,
+            ultimate_radius: controls.ultimate.radius,
             top_reserved: viewport.y * TOP_RESERVED_FRACTION,
         }
     }

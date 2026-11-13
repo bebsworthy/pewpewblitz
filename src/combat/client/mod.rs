@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 mod cues;
-mod hud;
 mod preview;
 #[cfg(test)]
 mod tests;
@@ -19,7 +18,6 @@ pub use cues::CaptureCombatCues;
 pub use cues::ClientCombatEvidenceStatus;
 pub use cues::ClientCombatObservation;
 pub(crate) use cues::RecentCombatEvents;
-pub use hud::{CombatAbilityHudText, CombatHudText};
 pub(crate) use preview::{
     AimMark, AimTone, AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker,
     MAX_CONE_SPRAY_SEGMENTS, PreviewGeometry, PreviewPrimitive, aim_lane_marks,
@@ -77,7 +75,6 @@ impl Plugin for ClientCombatPlugin {
                 (
                     cues::receive_combat_cues.in_set(CombatClientSet::Ingest),
                     receive_combat_evidence_checkpoints.in_set(CombatClientSet::Ingest),
-                    hud::update_combat_hud.in_set(CombatClientSet::HudAndStatus),
                     cues::rumble_spray_feedback.in_set(CombatClientSet::Effects),
                     capture_client_combat_checkpoints.in_set(CombatClientSet::Evidence),
                     record_headless_combat_observation.in_set(CombatClientSet::Evidence),

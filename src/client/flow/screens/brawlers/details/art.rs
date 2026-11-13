@@ -1,22 +1,6 @@
 //! Icons are selected by advertised semantic family, never by built-in definition IDs.
-use crate::builds::{PassiveKind, UltimateKind};
-pub(in crate::client::flow::screens::brawlers) fn ultimate_icon(
-    kind: UltimateKind,
-) -> &'static str {
-    match kind {
-        UltimateKind::Dash => "dash",
-        UltimateKind::Sentry => "sentry",
-        UltimateKind::SelfCloak => "cloak",
-        UltimateKind::RevealScan => "scan",
-        UltimateKind::ConcealmentField => "field",
-        UltimateKind::DemolitionStrike => "blast",
-        UltimateKind::CryogenicField => "cold",
-        UltimateKind::FireField => "fire",
-        UltimateKind::PoisonField => "poison",
-        UltimateKind::RestorationField => "heal",
-        UltimateKind::BigBlob => "blob",
-    }
-}
+use crate::builds::PassiveKind;
+pub(in crate::client::flow::screens::brawlers) use crate::client::ui::icons::ultimate_icon;
 pub(in crate::client::flow::screens::brawlers) fn passive_icon(kind: PassiveKind) -> &'static str {
     match kind {
         PassiveKind::LightweightFrame => "feather",
@@ -37,8 +21,8 @@ mod tests {
 
     #[test]
     fn every_ultimate_and_passive_family_resolves_to_a_shipped_icon() {
+        use crate::builds::UltimateKind as U;
         use PassiveKind as P;
-        use UltimateKind as U;
         let ultimates = [
             U::Dash,
             U::Sentry,

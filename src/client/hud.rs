@@ -5,6 +5,35 @@ use super::*;
 use crate::combat::TeamId;
 use std::collections::BTreeMap;
 
+mod controls;
+mod kill_feed;
+mod layout;
+mod plate;
+#[cfg(test)]
+mod screen_tests;
+
+pub(crate) use layout::HudControlLayout;
+use plate::{PlateState, TeamStripRow};
+
+/// HUD colors: observer relations match the overhead plates and ground rings.
+mod palette {
+    use bevy::prelude::Color;
+
+    pub(super) const LOCAL: Color = Color::srgb(0.18, 0.92, 0.34);
+    pub(super) const ALLY: Color = Color::srgb(0.12, 0.66, 0.98);
+    pub(super) const ENEMY: Color = Color::srgb(0.95, 0.14, 0.12);
+    /// Translucent `ink` behind HUD plates, feed rows and button tracks.
+    pub(super) const PLATE: Color = Color::srgba(0.055, 0.086, 0.22, 0.86);
+    /// The ultimate violet shared with the targeted-ultimate previews.
+    pub(super) const ULTIMATE: Color = Color::srgb(0.74, 0.42, 1.0);
+}
+
+const HUD_Z_INDEX: i32 = 150;
+
+/// Full-screen root of the persistent in-match HUD (plate, kill feed, controls).
+#[derive(Component)]
+pub(crate) struct HudRoot;
+
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ClientHeistReadiness {
     #[default]
@@ -15,12 +44,6 @@ pub(crate) enum ClientHeistReadiness {
 
 #[derive(Resource, Default)]
 struct SeenHeistObjectiveCueIds(std::collections::VecDeque<crate::combat::CombatEventId>);
-
-#[derive(Component)]
-struct ReadinessHudText;
-
-#[derive(Component)]
-struct MatchHudText;
 
 #[derive(Component)]
 struct CountdownHudText;
@@ -98,7 +121,8 @@ struct ZombieHudFacts<'w, 's> {
         (
             &'static PlayerId,
             &'static crate::combat::CurrentHealth,
-            &'static crate::builds::ResolvedFighterStats,
+            // Replicated on every fighter (the overhead plates read it too).
+            &'static crate::builds::ResolvedMatchLoadout,
             Option<&'static crate::matchplay::BoostStacks>,
         ),
         With<Fighter>,
@@ -113,13 +137,28 @@ impl Plugin for ClientReadinessHudPlugin {
             .init_resource::<ClientHeistReadiness>()
             .init_resource::<SeenHeistObjectiveCueIds>()
             .add_message::<crate::matchplay::ReceivedHeistObjectiveCue>()
+            .init_resource::<PlateState>()
+            .init_resource::<kill_feed::KillFeed>()
+            .init_resource::<touch::TouchControls>()
             .add_systems(Startup, spawn_readiness_hud)
             .add_systems(
                 Update,
                 (
                     converge_heist_readiness,
                     receive_heist_objective_cues,
-                    update_readiness_hud.after(converge_heist_readiness),
+                    (update_readiness_hud, plate::present_plate)
+                        .chain()
+                        .after(converge_heist_readiness),
+                    (kill_feed::collect_kill_feed, kill_feed::present_kill_feed)
+                        .chain()
+                        .after(crate::combat::client::CombatClientSet::Ingest),
+                    (
+                        controls::place_controls,
+                        controls::present_button_rings,
+                        controls::present_button_content,
+                        controls::present_hints,
+                    )
+                        .chain(),
                 ),
             );
     }
@@ -250,42 +289,30 @@ fn receive_heist_objective_cues(
 )]
 fn spawn_readiness_hud(mut commands: Commands, asset_server: Option<Res<AssetServer>>) {
     let font = ui::theme::display_font_handle(asset_server.as_deref());
-    commands.spawn((
-        ReadinessHudText,
-        Text::new(""),
-        ui::theme::hud_text(&font, 28.0),
-        TextColor(Color::WHITE),
-        TextLayout::new(Justify::Center, LineBreak::WordBoundary),
-        GlobalZIndex(100),
-        Node {
-            position_type: PositionType::Absolute,
-            left: percent(40.0),
-            right: percent(40.0),
-            top: px(16.0),
-            padding: UiRect::axes(px(10.0), px(5.0)),
-            border_radius: BorderRadius::all(px(7.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.015, 0.025, 0.04, 0.9)),
-    ));
-    commands.spawn((
-        MatchHudText,
-        Text::new("SYNCING OBJECTIVE"),
-        ui::theme::hud_text(&font, 18.0),
-        TextColor(Color::WHITE),
-        TextLayout::new(Justify::Center, LineBreak::WordBoundary),
-        GlobalZIndex(100),
-        Node {
-            position_type: PositionType::Absolute,
-            right: px(16.0),
-            top: px(16.0),
-            width: px(270.0),
-            padding: UiRect::all(px(10.0)),
-            border_radius: BorderRadius::all(px(7.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.015, 0.025, 0.04, 0.92)),
-    ));
+    let root = commands
+        .spawn((
+            HudRoot,
+            Name::new("Match HUD"),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0.0),
+                top: px(0.0),
+                width: percent(100.0),
+                height: percent(100.0),
+                ..default()
+            },
+            // Above world-anchored overheads, numbers and object bars (119-124), below the
+            // phase panels (220+), scoreboard and match menu.
+            GlobalZIndex(HUD_Z_INDEX),
+        ))
+        .id();
+    let skull = asset_server
+        .as_deref()
+        .map(|server| server.load(ui::icons::path("skull")))
+        .unwrap_or_default();
+    controls::spawn_controls(&mut commands, &font, asset_server.as_deref(), root);
+    plate::spawn_plate(&mut commands, &font, root);
+    kill_feed::spawn_kill_feed(&mut commands, &font, &skull, root);
     commands.spawn((
         CountdownHudText,
         Text::new(""),
@@ -345,32 +372,11 @@ fn update_readiness_hud(
     heist_readiness: Res<ClientHeistReadiness>,
     mut roster_presentation: ResMut<MatchRosterPresentation>,
     zombie: ZombieHudFacts,
-    mut readiness_text: Query<
-        (&mut Text, &mut Visibility),
-        (
-            With<ReadinessHudText>,
-            Without<MatchHudText>,
-            Without<CountdownHudText>,
-            Without<MatchPhaseOverlayText>,
-            Without<ScoreboardOverlay>,
-        ),
-    >,
-    mut match_text: Query<
-        (&mut Text, &mut Visibility),
-        (
-            With<MatchHudText>,
-            Without<ReadinessHudText>,
-            Without<CountdownHudText>,
-            Without<MatchPhaseOverlayText>,
-            Without<ScoreboardOverlay>,
-        ),
-    >,
+    mut plate_state: ResMut<PlateState>,
     mut countdown_text: Query<
         (&mut Text, &mut Visibility),
         (
             With<CountdownHudText>,
-            Without<ReadinessHudText>,
-            Without<MatchHudText>,
             Without<MatchPhaseOverlayText>,
             Without<ScoreboardOverlay>,
         ),
@@ -379,8 +385,6 @@ fn update_readiness_hud(
         (&mut Text, &mut Visibility),
         (
             With<MatchPhaseOverlayText>,
-            Without<ReadinessHudText>,
-            Without<MatchHudText>,
             Without<CountdownHudText>,
             Without<ScoreboardOverlay>,
         ),
@@ -389,8 +393,6 @@ fn update_readiness_hud(
         &mut Text,
         (
             With<ScoreboardOverlay>,
-            Without<ReadinessHudText>,
-            Without<MatchHudText>,
             Without<CountdownHudText>,
             Without<MatchPhaseOverlayText>,
         ),
@@ -402,36 +404,13 @@ fn update_readiness_hud(
     // Deadlines derive only from the phase minus the generation-tagged match clock; any other
     // component arrival order displays a syncing label instead of a stale or local countdown.
     let now = match_deadline_tick(match_state.map(|(state, _)| *state), clock);
-    for (mut text, mut visibility) in &mut readiness_text {
-        let label = match_state.map_or_else(String::new, |(state, _)| match state.phase {
-            MatchPhase::Countdown { starts_at_tick } => now.map_or_else(
-                || "SYNCING".to_string(),
-                |now| {
-                    format!(
-                        "START {}",
-                        starts_at_tick.saturating_sub(now).div_ceil(60).max(1)
-                    )
-                },
-            ),
-            MatchPhase::Active { ends_at_tick } => now.map_or_else(
-                || "SYNCING".to_string(),
-                |now| {
-                    if state.mode_definition_id == crate::map::ZOMBIE_MODE_DEFINITION
-                        && now >= ends_at_tick
-                    {
-                        zombie.states.iter().next().map_or_else(
-                            || "REMAINING HORDE".to_string(),
-                            |mode| format!("REMAINING HORDE  {}", mode.live_zombies),
-                        )
-                    } else {
-                        format_match_time(ends_at_tick.saturating_sub(now))
-                    }
-                },
-            ),
-            MatchPhase::Waiting | MatchPhase::Completed { .. } => String::new(),
-        });
-        set_retained_text(&mut text, &mut visibility, label, true);
-    }
+    let zombie_overtime = match_state.is_some_and(|(state, _)| {
+        state.mode_definition_id == crate::map::ZOMBIE_MODE_DEFINITION
+            && matches!(state.phase, MatchPhase::Active { ends_at_tick } if now.is_some_and(|now| now >= ends_at_tick))
+    });
+    let timer = match_state.map_or_else(String::new, |(state, _)| {
+        plate_timer_label(state.phase, now)
+    });
     for (mut text, mut visibility) in &mut countdown_text {
         let label = countdown_label(match_state.map(|(state, _)| *state), now).unwrap_or_default();
         set_retained_text(&mut text, &mut visibility, label, true);
@@ -443,12 +422,15 @@ fn update_readiness_hud(
         participants.iter(),
         &mut roster_presentation,
     );
-    for (player, health, stats, stacks) in &zombie.fighters {
+    for (player, health, loadout, stacks) in &zombie.fighters {
         if let Some(entry) = roster_presentation.entries.get_mut(&player.0) {
             let stacks = stacks.copied().unwrap_or_default();
             entry.health = Some((
                 health.0,
-                crate::matchplay::effective_maximum_health(stats.maximum_health, stacks),
+                crate::matchplay::effective_maximum_health(
+                    loadout.fighter_stats.maximum_health,
+                    stacks,
+                ),
             ));
             entry.boost_stacks = stacks.0;
         }
@@ -523,20 +505,84 @@ fn update_readiness_hud(
             MatchPhase::Countdown { .. } | MatchPhase::Active { .. }
         )
     });
-    for (mut text, mut visibility) in &mut match_text {
-        let label = score_view.map_or_else(String::new, |view| {
-            let score = mode_score_text(view);
-            if matches!(view, ModeScoreView::Zombie { .. }) {
-                format!("{score}\n\nTEAM\n{roster_text}")
-            } else {
-                score
-            }
-        });
-        set_retained_text(&mut text, &mut visibility, label, match_hud_phase);
-    }
+    let local_team = fighter.map(|(_, team)| *team);
+    let team_strip = if matches!(score_view, Some(ModeScoreView::Zombie { .. })) {
+        team_strip_rows(&roster_presentation, local_player, local_team, now)
+    } else {
+        Vec::new()
+    };
+    plate_state.set_if_neq(PlateState {
+        shown: match_hud_phase && score_view.is_some(),
+        timer,
+        content: score_view.map_or_else(plate::PlateContent::default, |view| {
+            plate::plate_content(view, local_team, zombie_overtime)
+        }),
+        team_strip,
+    });
     for mut text in &mut scoreboard_text {
         text.set_if_neq(Text(format!("SCOREBOARD\n\n{roster_text}")));
     }
+}
+
+/// The plate timer: start countdown, remaining time, or the Zombie overtime clock.
+fn plate_timer_label(phase: MatchPhase, now: Option<u64>) -> String {
+    let Some(now) = now else {
+        return match phase {
+            MatchPhase::Countdown { .. } | MatchPhase::Active { .. } => "--:--".to_string(),
+            MatchPhase::Waiting | MatchPhase::Completed { .. } => String::new(),
+        };
+    };
+    match phase {
+        MatchPhase::Countdown { starts_at_tick } => format!(
+            "START {}",
+            starts_at_tick.saturating_sub(now).div_ceil(60).max(1)
+        ),
+        MatchPhase::Active { ends_at_tick } => format_match_time(ends_at_tick.saturating_sub(now)),
+        MatchPhase::Waiting | MatchPhase::Completed { .. } => String::new(),
+    }
+}
+
+/// Zombie teammate rows (own team, local first), with health, boosts and down/respawn state.
+fn team_strip_rows(
+    roster: &MatchRosterPresentation,
+    local_player: Option<u64>,
+    local_team: Option<TeamId>,
+    now: Option<u64>,
+) -> Vec<TeamStripRow> {
+    let mut rows: Vec<_> = roster
+        .entries
+        .iter()
+        .filter(|(_, entry)| local_team.is_none_or(|team| entry.team == team))
+        .collect();
+    rows.sort_by_key(|(player, _)| (local_player != Some(**player), **player));
+    rows.into_iter()
+        .take(plate::TEAM_STRIP_ROWS)
+        .map(|(player, entry)| {
+            let seconds = |tick: u64| tick.saturating_sub(now.unwrap_or(tick)).div_ceil(60);
+            let status = if entry.connected {
+                match entry.status {
+                    CachedRosterStatus::Defeated => "DOWN".to_string(),
+                    CachedRosterStatus::Respawning(at) => format!("{}s", seconds(at)),
+                    _ => format!("+{}", entry.boost_stacks),
+                }
+            } else {
+                "OFF".to_string()
+            };
+            let health_fraction = entry
+                .health
+                .map(|(current, maximum)| f32::from(current) / f32::from(maximum.max(1)));
+            TeamStripRow {
+                name: entry.display_name.clone(),
+                health_fraction: if matches!(entry.status, CachedRosterStatus::Defeated) {
+                    Some(0.0)
+                } else {
+                    health_fraction
+                },
+                status,
+                local: local_player == Some(*player),
+            }
+        })
+        .collect()
 }
 
 /// Writes retained HUD text and visibility only when they differ, so an unchanged label is not
@@ -1029,11 +1075,8 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<MatchRosterPresentation>()
             .init_resource::<ClientHeistReadiness>()
+            .init_resource::<PlateState>()
             .add_systems(Update, update_readiness_hud);
-        app.world_mut()
-            .spawn((ReadinessHudText, Text::new(""), Visibility::Hidden));
-        app.world_mut()
-            .spawn((MatchHudText, Text::new(""), Visibility::Hidden));
         app.world_mut()
             .spawn((CountdownHudText, Text::new(""), Visibility::Hidden));
         app.world_mut()
@@ -1050,6 +1093,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<MatchRosterPresentation>()
             .init_resource::<ClientHeistReadiness>()
+            .init_resource::<PlateState>()
             .add_systems(Update, update_readiness_hud);
         let match_id = crate::matchplay::MatchId(7);
         let root = app
@@ -1062,39 +1106,43 @@ mod tests {
                     phase: MatchPhase::Active { ends_at_tick: 600 },
                     rules_revision: 1,
                 },
+                crate::matchplay::WipeoutState {
+                    team_scores: [2, 1],
+                    target_score: 10,
+                    ..default()
+                },
                 crate::matchplay::MatchClock {
                     match_id,
                     completed_tick: 10,
                 },
             ))
             .id();
-        let timer = app
-            .world_mut()
-            .spawn((ReadinessHudText, Text::new(""), Visibility::Hidden))
-            .id();
-        let objective = app
-            .world_mut()
-            .spawn((MatchHudText, Text::new(""), Visibility::Hidden))
-            .id();
         let scoreboard = app
             .world_mut()
             .spawn((ScoreboardOverlay, Text::new(""), Visibility::Hidden))
             .id();
         let changed_ticks = |app: &App| {
-            [timer, objective, scoreboard].map(|entity| {
-                let entity = app.world().entity(entity);
-                (
-                    entity.get_ref::<Text>().expect("HUD text").last_changed(),
-                    entity
-                        .get_ref::<Visibility>()
-                        .expect("HUD visibility")
-                        .last_changed(),
-                )
-            })
+            (
+                app.world().resource_ref::<PlateState>().last_changed(),
+                app.world()
+                    .entity(scoreboard)
+                    .get_ref::<Text>()
+                    .expect("scoreboard text")
+                    .last_changed(),
+            )
         };
 
         app.update();
-        assert_eq!(app.world().get::<Text>(timer).unwrap().0, "0:10");
+        let plate = app.world().resource::<PlateState>();
+        assert!(plate.shown);
+        assert_eq!(plate.timer, "0:10");
+        assert_eq!(
+            (
+                plate.content.left.value.as_str(),
+                plate.content.subline.as_str()
+            ),
+            ("2", "FIRST TO 10")
+        );
         let first = changed_ticks(&app);
         app.update();
         assert_eq!(
@@ -1108,11 +1156,10 @@ mod tests {
             .unwrap()
             .completed_tick = 70;
         app.update();
-        assert_eq!(app.world().get::<Text>(timer).unwrap().0, "0:09");
+        assert_eq!(app.world().resource::<PlateState>().timer, "0:09");
         let after = changed_ticks(&app);
-        assert_ne!(after[0].0, first[0].0, "a new timer value must be written");
-        assert_eq!(after[0].1, first[0].1);
-        assert_eq!(after[1..], first[1..]);
+        assert_ne!(after.0, first.0, "a new timer value must be written");
+        assert_eq!(after.1, first.1);
     }
 
     /// Every string literal in the in-match HUD and overhead sources must render in Lilita One.
@@ -1124,9 +1171,14 @@ mod tests {
                 "src/client/presentation.rs",
                 include_str!("presentation.rs"),
             ),
+            ("src/client/hud/plate.rs", include_str!("hud/plate.rs")),
             (
-                "src/combat/client/hud.rs",
-                include_str!("../combat/client/hud.rs"),
+                "src/client/hud/kill_feed.rs",
+                include_str!("hud/kill_feed.rs"),
+            ),
+            (
+                "src/client/hud/controls.rs",
+                include_str!("hud/controls.rs"),
             ),
             (
                 "src/client/presentation_3d/combat/fighter_ui.rs",

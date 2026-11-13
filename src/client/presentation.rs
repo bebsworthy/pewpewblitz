@@ -13,43 +13,8 @@ pub(super) struct MatchMenuState {
 mod match_menu;
 use match_menu::{MatchMenuButton, update_match_menu_chrome};
 
+/// Spawns the on-demand scoreboard panel; the persistent HUD belongs to `hud`.
 pub(super) fn spawn_client_hud(mut commands: Commands, font: &Handle<Font>) {
-    commands.spawn((
-        CombatHudText,
-        Text::new("HEALTH  --/--"),
-        ui::theme::hud_text(font, 19.0),
-        TextColor(Color::WHITE),
-        TextLayout::linebreak(LineBreak::WordBoundary),
-        GlobalZIndex(100),
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(16.0),
-            bottom: px(16.0),
-            max_width: px(330.0),
-            padding: UiRect::all(px(10.0)),
-            border_radius: BorderRadius::all(px(7.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.015, 0.025, 0.04, 0.92)),
-    ));
-    commands.spawn((
-        CombatAbilityHudText,
-        Text::new("WEAPON  --/--\nULT --"),
-        ui::theme::hud_text(font, 18.0),
-        TextColor(Color::WHITE),
-        TextLayout::new(Justify::Right, LineBreak::WordBoundary),
-        GlobalZIndex(100),
-        Node {
-            position_type: PositionType::Absolute,
-            right: px(16.0),
-            bottom: px(16.0),
-            max_width: px(360.0),
-            padding: UiRect::all(px(10.0)),
-            border_radius: BorderRadius::all(px(7.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.015, 0.025, 0.04, 0.92)),
-    ));
     commands.spawn((
         ScoreboardOverlay,
         Text::new("SCOREBOARD"),
