@@ -94,3 +94,7 @@ Run `just ui-gallery` and `just run 1` (or `just server` + `just client`).
 - Mistake: the bulk import rewrite picked up tokens named inside string literals (for example "PLAY"), producing unused imports caught only by Clippy. Prevention: strip string literals before scanning for identifiers, or let the compiler drive import edits.
 - Mistake: first-pass new code hit pedantic Clippy rules (bool-heavy struct, 9-argument system, float equality in tests, u32→u8 casts). Prevention: run client Clippy with `-D warnings` before the full `just lint`, and model gesture state as an enum/option rather than flags.
 - Reusable: OS screen capture is unavailable to agents here; in-app `Screenshot` hooks (`--screenshot-dir`, `BRAWLER_UI_GALLERY_CAPTURE`) plus scratch server/client data dirs (seeding a brawler row in the scratch SQLite) give repeatable native shell evidence without touching `data/`.
+
+# Playtest feedback (2026-11-13)
+- Buttons/press feel accepted ("Buttons feel ok").
+- Focus/selection ring look: deferred to BRL-0192 for a better affordance design.
