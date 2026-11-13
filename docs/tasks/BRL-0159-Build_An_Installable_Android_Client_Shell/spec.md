@@ -297,3 +297,6 @@ Report the `AdapterInfo` logcat line, any visual corruption (particles), and fra
 # User decision (2026-11-13): target device
 - "Pixel 8a is fine": the owner's Pixel 8a (Tensor G3, Mali-G715, Vulkan, Android 17 / API 37) replaces the Pixel 10 as the Android target device. Pixel 10 / PowerVR verification is no longer required for this plan.
 - APK size (119 MB) and memory (~1.55 GB) stay with BRL-0161 unless the owner says otherwise.
+
+# Playtest feedback (2026-11-13)
+- Owner: "can't test creating a brawler because dashboard and UX is not sized for mobile and buttons are inaccessible on most pages". Phone playtest of the remaining items is blocked on BRL-0196 (fit the player shell to phone-sized landscape viewports), now prioritized next.

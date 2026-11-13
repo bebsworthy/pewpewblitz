@@ -18,3 +18,6 @@ Shell screens (Server Select, Dashboard, Brawlers, Create Brawler, errors) fit a
 # Acceptance criteria
 - Device screenshots of each shell screen with no clipped controls and visible field values; desktop
   layout unchanged at 1280x720 and above.
+
+# Priority (2026-11-13)
+- Owner feedback on the Pixel 8a: the Dashboard and most shell pages are not sized for the phone and their buttons are unreachable, which blocks creating a brawler and entering Practice on Android (BRL-0159 playtest, BRL-0160 touch testing). Moved to the top of todo; scope must cover every shell page on the brawler-creation → Dashboard → Practice path at ~914x411 logical px, not only Select Server and the error panel.
