@@ -390,6 +390,7 @@ impl Plugin for WorldPresentationPlugin {
         hit_feedback::install(app);
         world_look::install(app);
         toon::install(app);
+        combat::install_fighter_outlines(app);
         app.add_plugins((
             vfx::ProductionVfxPlugin,
             VfxParticleAdapterPlugin,
@@ -494,7 +495,11 @@ impl Plugin for WorldPresentationPlugin {
                     update_damageable_map_visuals,
                     combat::update_fighter_concealment_visuals::<StandardMaterial>,
                     combat::update_fighter_concealment_visuals::<ToonMaterial>,
-                    combat::tag_fighter_rim_relation,
+                    (
+                        combat::attach_fighter_outlines,
+                        combat::tag_fighter_rim_relation,
+                    )
+                        .chain(),
                     combat::update_fighter_overhead_state,
                     combat::reconcile_status_visuals,
                     combat::reconcile_dash_trails,

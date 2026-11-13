@@ -2,10 +2,12 @@
 //!
 //! Every toon mesh under a fighter visual root carries the observer-relative relation of its ground
 //! ring as a `MeshTag`; the toon shader picks the rim colour from it. Shared glTF materials stay
-//! shared, and a relation change is only a tag write.
+//! shared, and a relation change is only a tag write. The fighter outline hulls (BRL-0151) carry the
+//! same tag, so their optional relationship tint follows the same relation.
 
 use super::super::*;
 use super::common::{GroundMarkerRelation, ground_marker_relation};
+use super::fighter_outline::FighterOutlineHull;
 use bevy::mesh::MeshTag;
 
 const fn rim_relation(relation: GroundMarkerRelation) -> RimRelation {
@@ -16,6 +18,14 @@ const fn rim_relation(relation: GroundMarkerRelation) -> RimRelation {
     }
 }
 
+/// Toon body meshes and outline hulls: both carry the relation tag.
+type RelationTaggedMeshes<'w, 's> = Query<
+    'w,
+    's,
+    Option<&'static MeshTag>,
+    Or<(With<MeshMaterial3d<ToonMaterial>>, With<FighterOutlineHull>)>,
+>;
+
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are passed by value"
@@ -25,7 +35,7 @@ pub(in super::super) fn tag_fighter_rim_relation(
     roots: Query<(Entity, &CombatVisualOwner), With<V3FighterVisual>>,
     children: Query<&Children>,
     fighters: Query<(&crate::combat::TeamId, Has<Controlled>), With<Fighter>>,
-    meshes: Query<Option<&MeshTag>, With<MeshMaterial3d<ToonMaterial>>>,
+    meshes: RelationTaggedMeshes,
 ) {
     let controlled_team = fighters
         .iter()

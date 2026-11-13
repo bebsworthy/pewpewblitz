@@ -43,7 +43,11 @@ tickets tune them through native review but do not change the direction.
   0.65× albedo and hue-shifted toward blue/purple.
 - **Rim light.** Strength about 0.35. On fighters it is tinted with the relationship color.
 - **Outline.** A dark navy outline (`#0E1638`) scaled to world size, applied to every fighter.
-  Outlines follow observer-specific concealment exactly.
+  Outlines follow observer-specific concealment exactly. The client draws it as a depth-tested
+  inverted hull on each fighter mesh (smoothed normals, extruded in screen space by a world-unit
+  width, flat colour, no shadows), so world geometry in front of a fighter still hides it and it
+  never shows through walls. A locally concealed ally shows no outline over its translucent body.
+  Width, colour, and an optional relationship tint live in `assets/catalogs/fighter_outline.ron`.
 - **Post-processing.** HDR with a filmic tonemapper and restrained bloom. Only emissive projectiles,
   muzzle flashes, and pickups bloom.
 - **Color grading.** Saturation about ×1.15–1.25, applied per theme.
@@ -96,7 +100,7 @@ the previous presentation for that area:
 | Camera framing re-evaluation | BRL-0148 |
 | Overhead plates and aim lane | BRL-0149 |
 | Toon material and rim | BRL-0150 (adopted) |
-| Fighter outlines | BRL-0151 |
+| Fighter outlines | BRL-0151 (adopted) |
 | Contact shadows / AO | BRL-0152 |
 | One environment kit per theme | BRL-0153 |
 | Riff and the character animation set | BRL-0154 |

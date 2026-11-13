@@ -253,6 +253,14 @@ impl ToonShading {
         })
     }
 
+    /// The rim colour (sRGB as authored) of one fighter relation; the fighter outline's optional
+    /// relationship tint reuses it so both relationship cues agree.
+    pub(in crate::client::presentation_3d) fn rim_rgb(&self, relation: RimRelation) -> [f32; 3] {
+        self.extension.settings.rim_colors[relation as usize]
+            .truncate()
+            .to_array()
+    }
+
     /// The toon material for `base`. The single place every toon handle's shading is chosen, so a
     /// later quality tier (BRL-0161) can adjust it here.
     pub(in crate::client) fn material(&self, base: StandardMaterial) -> ToonMaterial {

@@ -9,6 +9,7 @@ mod effects;
 mod elemental_style;
 mod entities;
 mod fighter_feedback;
+mod fighter_outline;
 mod fighter_rim;
 mod fighter_ui;
 mod local_projectile;
@@ -52,6 +53,7 @@ pub(super) use fighter_feedback::{
     ConcealedMaterialVariants, reconcile_dash_trails, reconcile_status_visuals,
     update_fighter_concealment_visuals, write_status_visual_poses,
 };
+pub(super) use fighter_outline::{attach_fighter_outlines, install as install_fighter_outlines};
 pub(super) use fighter_rim::tag_fighter_rim_relation;
 pub(super) use fighter_ui::{
     prepare_cold_pie_assets, project_fighter_overhead_ui, reconcile_fighter_overheads,
