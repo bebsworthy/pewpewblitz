@@ -22,6 +22,7 @@ fn game() -> crate::lobby::AdvertisedGameType {
     }
 }
 
+#[cfg(feature = "automation")]
 #[test]
 fn automation_can_target_an_exact_game_instead_of_the_first_matching_roster() {
     let wipeout = game();

@@ -134,7 +134,7 @@ Run `just` to list the supported everyday surface.
 | `just run <N>` | Build once, start the routed server, and open exactly 1–16 interactive clients |
 | `just fmt` | Format all Rust sources |
 | `just check` | Check every independently buildable role |
-| `just lint` | Run formatting, Clippy, role isolation, renderer/map-boundary checks, and Balance Lab web checks |
+| `just lint` | Run formatting, Clippy, role isolation (including the player-client automation exclusion), renderer/map-boundary checks, and Balance Lab web checks |
 | `just test` | Run deterministic routing, client, server, Balance Lab, network, and performance suites |
 | `just e2e [2, 4, or 6]` | Run the real-process 1v1, 2v2, or 3v3 product path; default is 2 |
 | `just practice-e2e [game type]` | Run one exact real-process Practice match with one human and server-filled bots; default is `wipeout-1v1` |
@@ -209,8 +209,8 @@ and bindings shape local intent before quantization and never become server auth
 Evidence captures are saved as matching PNG/JSON pairs under the platform Pictures directory at
 `PewPew Blitz/Captures` (or the application data directory when Pictures is unavailable).
 `BRAWLER_CAPTURE_DIR` overrides that destination for troubleshooting and automation. The
-`--screenshot-dir` scheduled visual-verification path writes the same paired capture format into
-its explicit directory.
+automation build's `--screenshot-dir` scheduled visual-verification path writes the same paired
+capture format into its explicit directory.
 
 Recovery is authored per fighter profile and weapon. The Default fighter recovers `100` health per
 second; Lightweight and Reinforced recover `10`, all after `3.0` seconds without a server-accepted
@@ -297,7 +297,10 @@ contract. Important ownership rules are:
 - `--server` prefills the interactive connection target and selects the automation endpoint;
 - `--window-size WIDTHxHEIGHT` reproduces supported visual-check layouts;
 - `--weapon-preset 1..6`, movement/aim/fire flags, demos, screenshots, and render reports are
-  development or automation inputs rather than alternate product flows;
+  development or automation inputs rather than alternate product flows. They exist only in a
+  `--features client,automation` build; the player build (`--features client`, used by
+  `just client` and `just run`) accepts only `--server`, `--transport routed-udp`, and
+  `--window-size`;
 - `BRAWLER_FORCE_PRIMITIVE_WORLD=1` verifies deterministic meshes inside the sole 3D renderer; it is
   not a renderer or content-mode selector;
 - `RUST_LOG` controls filtering, for example `RUST_LOG=brawler=info`.
@@ -323,8 +326,9 @@ server, preserve the current database together with any `-wal` and `-shm` siblin
 validated backup into a fresh data directory as `profiles.sqlite3`, and restart the supervisor.
 
 Do not use `--all-features` as a supported application build. Cargo features are additive: client
-and server are independently tested production configurations, while `network-test` is the
-dedicated separate-App integration-test configuration.
+and server are independently tested production configurations, `client,automation` is the scripted
+client used by E2E, evidence, and developer-tool commands, and `network-test` is the dedicated
+separate-App integration-test configuration.
 
 ## Verification and diagnostics
 

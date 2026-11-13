@@ -211,9 +211,16 @@ impl Plugin for ClientProfilePlugin {
                 bind_profile_snapshot,
                 receive_profile_outcomes,
                 send_profile_commands,
-                create_automation_default_brawler,
             )
                 .chain(),
+        );
+        // Automation-only: headless and render-evidence clients create one default brawler so
+        // they can queue without the interactive editor. Queued after outbound drain so the
+        // create command leaves on the following frame, as it did inside the former chain tail.
+        #[cfg(feature = "automation")]
+        app.add_systems(
+            Update,
+            create_automation_default_brawler.after(send_profile_commands),
         );
     }
 }
@@ -284,6 +291,7 @@ fn send_profile_commands(
     }
 }
 
+#[cfg(feature = "automation")]
 #[allow(clippy::needless_pass_by_value)]
 fn create_automation_default_brawler(
     config: Res<crate::config::ClientNetworkConfig>,

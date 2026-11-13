@@ -36,7 +36,7 @@ trap abort INT TERM
 trap cleanup EXIT
 
 cd "$project_dir"
-cargo build --locked --bin brawler-client --no-default-features --features client
+cargo build --locked --bin brawler-client --no-default-features --features client,automation
 cargo build --locked --bin brawler-server --no-default-features --features server
 cargo build --locked -p brawler-routing --bin brawler-supervisor
 

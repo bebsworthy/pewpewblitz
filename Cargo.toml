@@ -40,8 +40,13 @@ server = [
   "lightyear/server",
   "lightyear/udp",
 ]
+# Scripted smoke/demo drivers, scheduled captures, native render reports, and developer-only
+# review tools (VfxLab, UI gallery). Never in `default` or `client`: the player build is
+# `--features client` and must not contain this code (scripts/check-client-features.sh).
+automation = ["client"]
 network-test = [
   "client",
+  "automation",
   "server",
   "lightyear/client",
   "lightyear/crossbeam",
@@ -137,12 +142,12 @@ required-features = ["client"]
 [[bin]]
 name = "brawler-vfx-lab"
 path = "src/bin/vfx_lab.rs"
-required-features = ["client"]
+required-features = ["client", "automation"]
 
 [[bin]]
 name = "brawler-ui-gallery"
 path = "src/bin/ui_gallery.rs"
-required-features = ["client"]
+required-features = ["client", "automation"]
 
 [[bin]]
 name = "brawler-server"

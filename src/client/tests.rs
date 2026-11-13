@@ -3,39 +3,6 @@
 use super::*;
 
 #[test]
-fn scheduled_evidence_capture_uses_stable_due_stems_and_stops_at_count() {
-    let mut plan = ScheduledScreenshots {
-        dir: std::path::PathBuf::from("target/captures"),
-        first_update: 2,
-        interval: 3,
-        remaining: 2,
-        update_index: 0,
-        captured: 0,
-    };
-
-    assert_eq!(plan.take_due(), None);
-    assert_eq!(plan.take_due(), None);
-    assert_eq!(
-        plan.take_due(),
-        Some((
-            std::path::PathBuf::from("target/captures"),
-            "brawler-000002".to_string(),
-        ))
-    );
-    assert_eq!(plan.take_due(), None);
-    assert_eq!(plan.take_due(), None);
-    assert_eq!(
-        plan.take_due(),
-        Some((
-            std::path::PathBuf::from("target/captures"),
-            "brawler-000005".to_string(),
-        ))
-    );
-    assert_eq!(plan.take_due(), None);
-    assert_eq!((plan.remaining, plan.captured), (0, 2));
-}
-
-#[test]
 fn client_network_plugin_does_not_select_gameplay_or_presentation() {
     let mut config = ClientNetworkConfig::new(1);
     config.transport = NetworkTransport::Udp;
@@ -146,7 +113,7 @@ fn gameplay_window_defaults_to_reference_aspect_and_preserves_override() {
 }
 
 #[test]
-fn headless_weapon_preset_and_cover_lane_movement_are_bounded() {
+fn headless_weapon_preset_and_window_size_are_bounded() {
     let mut config = ClientNetworkConfig::new(1);
     config.headless = true;
     config.weapon_preset = Some(5);
@@ -160,23 +127,6 @@ fn headless_weapon_preset_and_cover_lane_movement_are_bounded() {
     assert!(config.validate().is_ok());
     config.window_size = Some((639, 540));
     assert!(config.validate().is_err());
-
-    assert_eq!(
-        headless_navigation_delta(Vec2::new(-768.0, 0.0), Vec2::new(768.0, 0.0)),
-        Some(Vec2::Y)
-    );
-    assert_eq!(
-        headless_navigation_delta(Vec2::new(-500.0, 180.0), Vec2::new(500.0, 180.0)),
-        Some(Vec2::X)
-    );
-    assert_eq!(
-        headless_combat_move_axis(Vec2::X, Some(Vec2::new(350.0, 0.0)), Some(Vec2::X), true),
-        Vec2::ZERO
-    );
-    assert_eq!(
-        headless_combat_move_axis(Vec2::X, Some(Vec2::new(100.0, 0.0)), Some(Vec2::X), false),
-        Vec2::ZERO
-    );
 }
 
 #[test]

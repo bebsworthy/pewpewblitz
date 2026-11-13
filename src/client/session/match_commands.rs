@@ -1,11 +1,11 @@
 use super::{
-    ACTION_INTERACT, AppExit, AuthoritativeTick, Client, ClientMatchLoadingModel,
-    ClientNetworkConfig, ClientPlayableGate, Controlled, Duration, Fighter, MatchCommand,
-    MatchCommandOutcome, MatchCommandRequest, MatchCommandState, MatchLoadingClientAction,
-    MatchLoadingClientMessage, MatchLoadingServerMessage, MatchLoadingStatus, MatchParticipant,
-    MatchPhase, MatchRoot, MatchState, MessageReceiver, MessageSender, MessageWriter,
-    NetworkTransport, PendingLocalActions, Query, Real, Remote, Res, ResMut, Resource,
-    RoutedClientLifecycle, RoutedClientPhase, SessionChannel, Time, With,
+    ACTION_INTERACT, AuthoritativeTick, Client, ClientMatchLoadingModel, ClientNetworkConfig,
+    ClientPlayableGate, Controlled, Duration, Fighter, MatchCommand, MatchCommandOutcome,
+    MatchCommandRequest, MatchCommandState, MatchLoadingClientAction, MatchLoadingClientMessage,
+    MatchLoadingServerMessage, MatchLoadingStatus, MatchParticipant, MatchPhase, MatchRoot,
+    MatchState, MessageReceiver, MessageSender, NetworkTransport, PendingLocalActions, Query, Real,
+    Remote, Res, ResMut, Resource, RoutedClientLifecycle, RoutedClientPhase, SessionChannel, Time,
+    With,
 };
 
 pub(super) fn process_match_command_outcomes(
@@ -265,23 +265,6 @@ pub(super) fn send_match_command(
         });
     }
     state.sent_for_phase = Some((match_state.match_id, match_state.phase));
-}
-
-#[allow(clippy::needless_pass_by_value)]
-pub(super) fn finish_product_match_smoke(
-    config: Res<ClientNetworkConfig>,
-    roots: Query<&MatchState, With<MatchRoot>>,
-    mut exit: MessageWriter<AppExit>,
-) {
-    if config.product_match_smoke
-        && config.render_measurement.is_none()
-        && !config.product_requeue_smoke
-        && roots
-            .iter()
-            .any(|state| matches!(state.phase, MatchPhase::Active { .. }))
-    {
-        exit.write(AppExit::Success);
-    }
 }
 
 pub(in crate::client) fn should_rearm_headless_match_command(

@@ -65,9 +65,12 @@ pub use model::{
     FlowErrorKind, SelectedGameType, SessionPurpose,
 };
 pub(super) use persistence::{ClientLocalLoadFailures, ConnectionPersistence};
+/// Native render reports count Dashboard-owned entities (automation only).
+#[cfg(feature = "automation")]
+pub(super) use screens::dashboard::DashboardRoot;
 pub(super) use screens::{
     brawlers::{BrawlerCardPreview, BrawlerDetailsPreviewHost},
-    dashboard::{DashboardPreviewHost, DashboardRoot},
+    dashboard::DashboardPreviewHost,
     map_maker::{MapPalettePreviewHost, MapPaletteVisual},
 };
 

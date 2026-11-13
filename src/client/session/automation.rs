@@ -1,7 +1,15 @@
+//! Automation-only session drivers: the windowed synthetic-controller demo and the headless
+//! product-match smoke exit. Compiled only with the `automation` feature.
+
 use super::{
-    ClientNetworkConfig, Commands, Controlled, ControllerDemoGamepad, Fighter, Gamepad,
-    GamepadAxis, GamepadButton, NetworkEntityId, Position, Query, Res, Vec2, With, info,
+    AppExit, ClientNetworkConfig, Commands, Component, Controlled, Fighter, Gamepad, GamepadAxis,
+    GamepadButton, MatchPhase, MatchRoot, MatchState, MessageWriter, NetworkEntityId, Position,
+    Query, Res, Vec2, With, info,
 };
+
+/// Marker for the reproducible, windowed controller smoke path.
+#[derive(Component)]
+pub(super) struct ControllerDemoGamepad;
 
 #[allow(
     clippy::needless_pass_by_value,
@@ -50,5 +58,23 @@ pub(super) fn update_controller_demo_gamepad(
         gamepad.analog_mut().set(GamepadAxis::RightStickX, aim.x);
         gamepad.analog_mut().set(GamepadAxis::RightStickY, aim.y);
         gamepad.analog_mut().set(GamepadButton::RightTrigger2, 1.0);
+    }
+}
+
+/// Headless M05 evidence: exit successfully once the joined product match reaches Active.
+#[allow(clippy::needless_pass_by_value)]
+pub(super) fn finish_product_match_smoke(
+    config: Res<ClientNetworkConfig>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if config.product_match_smoke
+        && config.render_measurement.is_none()
+        && !config.product_requeue_smoke
+        && roots
+            .iter()
+            .any(|state| matches!(state.phase, MatchPhase::Active { .. }))
+    {
+        exit.write(AppExit::Success);
     }
 }

@@ -291,10 +291,16 @@ layer only when a concrete player-facing slice demonstrates the need.
 
 The main package's feature graph expresses compile-time execution roles:
 
-- `client` is the default and enables the windowed/player client dependency surface;
+- `client` is the default and enables the windowed/player client dependency surface; it is the
+  player build used by `just client`, `just run`, `just balance-lab`, the macOS bundle, and future
+  platform shells;
+- `automation` (non-default, implies `client`) adds the scripted client surface: smoke, headless,
+  demo, scheduled-capture, and render-report CLI flags and their drivers, the native render report,
+  and the developer-only VfxLab and UI gallery binaries. Every E2E, evidence, and dev-tool script
+  enables it; `scripts/check-client-features.sh` (in `just lint`) proves the player build excludes it;
 - `server` enables the dedicated-server and worker surface without Bevy presentation features;
-- `network-test` combines the required client/server and in-process transports for integration and
-  performance tests; and
+- `network-test` combines the required client/server, `automation`, and in-process transports for
+  integration and performance tests; and
 - `process-metrics` is an isolated measurement feature because its recorder is process-global.
 
 Keep role-owned modules gated at their ownership boundary. The server graph must not acquire

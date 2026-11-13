@@ -140,6 +140,7 @@ fn request_evidence_capture(world: &mut World, mut sequence: Local<u32>) {
     request_evidence_capture_pair(world, &directory, &stem, unix_millis);
 }
 
+#[cfg(feature = "automation")]
 pub(super) fn request_scheduled_evidence_capture(world: &mut World, directory: &Path, stem: &str) {
     request_evidence_capture_pair(world, directory, stem, current_unix_millis());
 }

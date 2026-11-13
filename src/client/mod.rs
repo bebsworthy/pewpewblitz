@@ -54,6 +54,8 @@ const DEFAULT_GAMEPLAY_WINDOW_ASPECT: f32 = 1_591.0 / 720.0;
 
 mod assets;
 mod audio;
+#[cfg(feature = "automation")]
+mod automation;
 mod connection_persistence;
 mod dashboard;
 mod evidence_capture;
@@ -75,6 +77,7 @@ mod shell;
 mod targeting;
 mod ui;
 pub(crate) mod vfx;
+#[cfg(feature = "automation")]
 mod vfx_lab;
 pub(crate) use assets::ClientAssetHandles;
 pub use flow::{
@@ -106,7 +109,9 @@ pub use settings::{
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
 pub use shell::ClientShellPlugin;
+#[cfg(feature = "automation")]
 pub use ui::gallery::build_ui_gallery_app;
+#[cfg(feature = "automation")]
 pub use vfx_lab::{VfxLabAccent, VfxLabConfig, VfxLabRelationship, build_vfx_lab_app};
 
 /// Installs client-side gameplay state reconstructed from authoritative replication and messages.
@@ -461,7 +466,6 @@ impl Default for PendingLocalActions {
     }
 }
 
-const HEADLESS_FIRE_DURATION_TICKS: u32 = 6_000;
 #[cfg(test)]
 const ACTION_PRIMARY_FIRE: u16 = 1 << 0;
 const ACTION_INTERACT: u16 = 1 << 3;
@@ -557,10 +561,6 @@ fn apply_pause_request(
 #[derive(Component)]
 pub(crate) struct ArenaCamera;
 
-/// Marker for the reproducible, windowed controller smoke path.
-#[derive(Component)]
-struct ControllerDemoGamepad;
-
 #[derive(Component)]
 struct PauseOverlay;
 
@@ -575,6 +575,7 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
     let headless = config.headless;
     let render_profile = config.render_profile;
     let window_size = config.window_size;
+    #[cfg(feature = "automation")]
     let screenshot_schedule = config.screenshot_schedule.clone();
     let mut app = App::new();
     app.insert_resource(config);
@@ -647,17 +648,9 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
                 dashboard::ClientDashboardPlugin,
             ));
         }
+        #[cfg(feature = "automation")]
         if let Some(schedule) = screenshot_schedule {
-            std::fs::create_dir_all(&schedule.dir).expect("screenshot directory is creatable");
-            app.insert_resource(ScheduledScreenshots {
-                dir: schedule.dir,
-                first_update: schedule.first_update,
-                interval: schedule.interval,
-                remaining: schedule.count,
-                update_index: 0,
-                captured: 0,
-            })
-            .add_systems(Update, capture_scheduled_screenshot);
+            automation::install_scheduled_screenshots(&mut app, schedule);
         }
     }
     app
@@ -672,46 +665,6 @@ fn gameplay_window_resolution(window_size: Option<(u16, u16)>) -> WindowResoluti
         |(width, height)| (u32::from(width), u32::from(height)),
     );
     WindowResolution::new(width, height)
-}
-
-/// In-process paired frame/state capture state for windowed visual verification.
-#[derive(Resource, Debug)]
-struct ScheduledScreenshots {
-    dir: std::path::PathBuf,
-    first_update: u32,
-    interval: u32,
-    remaining: u32,
-    update_index: u32,
-    captured: u32,
-}
-
-impl ScheduledScreenshots {
-    fn take_due(&mut self) -> Option<(std::path::PathBuf, String)> {
-        if self.remaining == 0 {
-            return None;
-        }
-        let current = self.update_index;
-        self.update_index = current.saturating_add(1);
-        let due = self.first_update + self.interval * self.captured;
-        if current < due {
-            return None;
-        }
-        self.remaining -= 1;
-        self.captured += 1;
-        Some((self.dir.clone(), format!("brawler-{current:06}")))
-    }
-}
-
-fn capture_scheduled_screenshot(world: &mut World) {
-    let capture = {
-        let mut plan = world.resource_mut::<ScheduledScreenshots>();
-        let Some(capture) = plan.take_due() else {
-            return;
-        };
-        capture
-    };
-    info!(directory = %capture.0.display(), stem = %capture.1, "capturing scheduled frame + client state");
-    evidence_capture::request_scheduled_evidence_capture(world, &capture.0, &capture.1);
 }
 
 const RENDER_30_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 30);

@@ -7,30 +7,34 @@ use super::{
     ClientJoinStatus, ClientLobbyFailure, ClientLobbyIdentity, ClientLobbyMembership,
     ClientMatchLoadingModel, ClientMatchResultContext, ClientMatchResultState, ClientNetworkConfig,
     ClientPlayableGate, ClientProfileIdentityState, ClientSettingsUiSet, ClientShutdown, Commands,
-    Component, Connect, Connected, Connecting, Controlled, ControllerDemoGamepad, Disconnect,
-    Disconnected, Duration, Entity, FallbackErrorHandler, Fighter, FixedPreUpdate, FixedUpdate,
-    Gamepad, GamepadAxis, GamepadButton, Has, HeadlessAutomation, InputDeviceActivity,
-    InputSettingsSelection, InputSystems, IntoScheduleConfigs, Last, Link, LinkMtu, LiveInputTrace,
-    LobbyHello, LobbyJoinOutcome, LobbyServerIdentity, LocalAddr, MatchCommand,
-    MatchCommandOutcome, MatchCommandRequest, MatchCommandState, MatchHello, MatchJoinOutcome,
-    MatchJoinRejection, MatchLoadingClientAction, MatchLoadingClientMessage,
+    Component, Connect, Connected, Connecting, Controlled, Disconnect, Disconnected, Duration,
+    Entity, FallbackErrorHandler, Fighter, FixedPreUpdate, Has, HeadlessAutomation,
+    InputDeviceActivity, InputSettingsSelection, InputSystems, IntoScheduleConfigs, Last, Link,
+    LinkMtu, LiveInputTrace, LobbyHello, LobbyJoinOutcome, LobbyServerIdentity, LocalAddr,
+    MatchCommand, MatchCommandOutcome, MatchCommandRequest, MatchCommandState, MatchHello,
+    MatchJoinOutcome, MatchJoinRejection, MatchLoadingClientAction, MatchLoadingClientMessage,
     MatchLoadingServerMessage, MatchLoadingStatus, MatchParticipant, MatchPhase, MatchRoot,
     MatchRouteGrant, MatchState, MessageReceiver, MessageSender, MessageWriter, Messages, Name,
     NetcodeClient, NetcodeConfig, NetworkEntityId, NetworkTransport, PeerAddr, PendingLocalActions,
-    PingManager, PlayerId, Plugin, Position, ProtocolFingerprint, Query, ROUTED_LINK_MTU, Real,
-    Remote, ReplicationReceiver, Res, ResMut, Resource, Result, RosterLogState,
-    RoutedClientLifecycle, RoutedClientPhase, RoutedClientSession, RoutedClientSessionKind,
-    RoutedUdpIo, RoutedUdpPlugin, RunFixedMainLoop, RunFixedMainLoopSystems, RuntimeLobbyTarget,
-    SelectedGameType, SessionChannel, Startup, String, SystemSet, Time, ToOwned, ToString, UdpIo,
-    Unlink, UnlinkReason, Unlinked, Update, VERSION, Vec, Vec2, With, Without,
-    add_controlled_input_marker, adjust_input_settings_from_pause_keys,
-    advance_headless_automation, apply_headless_input, connection_persistence, default, error,
-    flow, format, hud, info, resolve_targeted_ultimate_input, sample_local_input,
+    PingManager, PlayerId, Plugin, ProtocolFingerprint, Query, ROUTED_LINK_MTU, Real, Remote,
+    ReplicationReceiver, Res, ResMut, Resource, Result, RosterLogState, RoutedClientLifecycle,
+    RoutedClientPhase, RoutedClientSession, RoutedClientSessionKind, RoutedUdpIo, RoutedUdpPlugin,
+    RunFixedMainLoop, RunFixedMainLoopSystems, RuntimeLobbyTarget, SelectedGameType,
+    SessionChannel, Startup, String, SystemSet, Time, ToOwned, ToString, UdpIo, Unlink,
+    UnlinkReason, Unlinked, Update, VERSION, Vec, With, Without, add_controlled_input_marker,
+    adjust_input_settings_from_pause_keys, connection_persistence, default, error, flow, format,
+    hud, info, resolve_targeted_ultimate_input, sample_local_input,
     trace_client_interpolation_history, trace_client_interpolation_sync,
     update_input_settings_overlay, warn, write_client_input,
 };
 
+// Automation-only session drivers import their device/fixed-tick names here so the player
+// build's pass-through import list above stays warning-free.
+#[cfg(feature = "automation")]
+use super::{FixedUpdate, Gamepad, GamepadAxis, GamepadButton, Position, Vec2};
+
 mod admission;
+#[cfg(feature = "automation")]
 mod automation;
 mod connection;
 mod match_commands;
@@ -40,15 +44,14 @@ mod routing;
 use admission::{
     process_join_outcome, process_lobby_server_identity, record_client_failure, send_client_hello,
 };
-use automation::{spawn_controller_demo_gamepad, update_controller_demo_gamepad};
 pub(in crate::client) use connection::{ProductLobbyAttempt, spawn_product_lobby_connection};
 use connection::{
     connect_spawned_clients, finish_spawned_client_connect, spawn_client_connection,
     spawn_client_entity,
 };
 use match_commands::{
-    MatchLoadingCommandState, drive_match_loading_check_in, finish_product_match_smoke,
-    process_match_command_outcomes, send_match_command,
+    MatchLoadingCommandState, drive_match_loading_check_in, process_match_command_outcomes,
+    send_match_command,
 };
 use observation::{enforce_client_timeout, log_replicated_roster};
 use routing::{
@@ -151,28 +154,50 @@ fn install_session_state(app: &mut App) {
 }
 
 fn configure_input_and_automation(app: &mut App) {
+    app.add_systems(Startup, spawn_client_connection)
+        .add_systems(
+            RunFixedMainLoop,
+            (sample_local_input, resolve_targeted_ultimate_input)
+                .chain()
+                .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+        )
+        .add_systems(
+            FixedPreUpdate,
+            write_client_input.in_set(InputSystems::WriteClientInputs),
+        );
+    #[cfg(feature = "automation")]
+    configure_automation_drivers(app);
+}
+
+/// Automation-only drivers keep their former positions around the product input chain: the
+/// synthetic controller writes before device sampling, and headless intent overwrites the sampled
+/// intent after targeted-ultimate resolution and before the fixed-tick write.
+#[cfg(feature = "automation")]
+fn configure_automation_drivers(app: &mut App) {
+    use super::automation::{advance_headless_automation, apply_headless_input};
+    use automation::{spawn_controller_demo_gamepad, update_controller_demo_gamepad};
     app.add_systems(
         Startup,
-        (spawn_client_connection, spawn_controller_demo_gamepad).chain(),
+        spawn_controller_demo_gamepad.after(spawn_client_connection),
     )
     .add_systems(
         RunFixedMainLoop,
         (
-            update_controller_demo_gamepad,
-            sample_local_input,
-            resolve_targeted_ultimate_input,
-            apply_headless_input,
+            update_controller_demo_gamepad.before(sample_local_input),
+            apply_headless_input.after(resolve_targeted_ultimate_input),
         )
-            .chain()
             .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
-    )
-    .add_systems(
-        FixedPreUpdate,
-        write_client_input.in_set(InputSystems::WriteClientInputs),
     )
     .add_systems(
         FixedUpdate,
         advance_headless_automation.in_set(crate::gameplay::GameplaySet::Finalize),
+    )
+    .add_systems(
+        Update,
+        automation::finish_product_match_smoke
+            .after(send_match_command)
+            .before(disconnect_rejected_client)
+            .in_set(ClientSessionSet::MatchCommands),
     );
 }
 
@@ -217,7 +242,6 @@ fn configure_network_session_systems(app: &mut App) {
             drive_match_loading_check_in,
             process_match_command_outcomes,
             send_match_command,
-            finish_product_match_smoke,
             disconnect_rejected_client,
         )
             .chain()

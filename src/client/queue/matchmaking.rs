@@ -98,6 +98,7 @@ impl ClientQueueModel {
         self.membership.as_ref()
     }
 
+    #[cfg(feature = "automation")]
     #[must_use]
     pub(super) fn last_accepted_game_type_id(&self) -> Option<&crate::lobby::GameTypeId> {
         self.last_accepted_game_type_id.as_ref()

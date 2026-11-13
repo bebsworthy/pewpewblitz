@@ -2,6 +2,7 @@
 //! `asset_src/player-shell/icons/build_icons.py`, which owns geometry, style and provenance.
 
 /// Square navigation, action and Map Maker pictograms (128 px).
+#[cfg(any(test, feature = "automation"))]
 pub(crate) const PICTOGRAMS: [&str; 26] = [
     "chevron-left",
     "chevron-right",
@@ -32,12 +33,14 @@ pub(crate) const PICTOGRAMS: [&str; 26] = [
 ];
 
 /// Ultimate and passive family badges on the shared hexagon emblem (240x200 px).
+#[cfg(any(test, feature = "automation"))]
 pub(crate) const BADGES: [&str; 16] = [
     "dash", "sentry", "cloak", "scan", "field", "blast", "cold", "fire", "poison", "heal", "blob",
     "feather", "shield", "pulse", "target", "cycle",
 ];
 
 /// Weapon part family illustrations (288x240 px).
+#[cfg(any(test, feature = "automation"))]
 pub(crate) const PARTS: [&str; 5] = [
     "part-magazine",
     "part-ammunition",

@@ -183,10 +183,18 @@ impl VfxGeometry {
 pub(crate) enum VfxPresentationIdentity {
     Neutral(u64),
     CombatEvent(u64),
-    Attack { attack_id: u64, delivery_index: u8 },
+    Attack {
+        attack_id: u64,
+        delivery_index: u8,
+    },
     ReplicatedField(u64),
-    NetworkEntity { network_id: u64, generation: u64 },
+    NetworkEntity {
+        network_id: u64,
+        generation: u64,
+    },
     Deployable(u64),
+    /// Fixed identity chosen by the offline `VfxLab` fixture.
+    #[cfg(feature = "automation")]
     Explicit(u64),
 }
 
@@ -280,8 +288,9 @@ impl CombatVisualSignature {
             VfxPresentationIdentity::Neutral(value)
             | VfxPresentationIdentity::CombatEvent(value)
             | VfxPresentationIdentity::ReplicatedField(value)
-            | VfxPresentationIdentity::Deployable(value)
-            | VfxPresentationIdentity::Explicit(value) => value,
+            | VfxPresentationIdentity::Deployable(value) => value,
+            #[cfg(feature = "automation")]
+            VfxPresentationIdentity::Explicit(value) => value,
             VfxPresentationIdentity::Attack {
                 attack_id,
                 delivery_index,

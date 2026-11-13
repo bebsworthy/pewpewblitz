@@ -4,6 +4,7 @@
 pub(crate) mod theme;
 
 pub(crate) mod controls;
+#[cfg(feature = "automation")]
 pub(crate) mod gallery;
 pub(crate) mod icons;
 

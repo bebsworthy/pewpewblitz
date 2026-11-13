@@ -19,10 +19,10 @@ client:
 # Open the development-only read-only production VFX viewer.
 # Native production-control review surface (no server needed).
 ui-gallery:
-    cargo run --locked --no-default-features --features client --bin brawler-ui-gallery
+    cargo run --locked --no-default-features --features client,automation --bin brawler-ui-gallery
 
 vfx-lab args="":
-    cargo run --locked --no-default-features --features client --bin brawler-vfx-lab -- {{args}}
+    cargo run --locked --no-default-features --features client,automation --bin brawler-vfx-lab -- {{args}}
 
 # Run the routed server and exactly N interactive clients.
 run clients:
@@ -33,10 +33,10 @@ fmt:
     cargo fmt --all
 
 # Check every independently buildable role.
-check: _check-routing _check-client _check-server _check-network _check-balance-lab
+check: _check-routing _check-client _check-automation _check-server _check-network _check-balance-lab
 
-# Run formatting, Clippy, and dedicated-server isolation checks.
-lint: _fmt-check _balance-lab-web _clippy-routing _clippy-client _clippy-server _clippy-network _clippy-balance-lab _server-features _v3-world-presentation _map-cleanup
+# Run formatting, Clippy, dedicated-server isolation, and player-client automation-exclusion checks.
+lint: _fmt-check _balance-lab-web _clippy-routing _clippy-client _clippy-automation _clippy-server _clippy-network _clippy-balance-lab _server-features _client-features _v3-world-presentation _map-cleanup
 
 # Run all deterministic Rust test suites, including the performance gates.
 test: _test-routing _test-client _test-server _test-balance-lab _test-network _test-performance
@@ -86,6 +86,9 @@ _fmt-check:
 _check-client:
     cargo check --locked --no-default-features --features client --all-targets
 
+_check-automation:
+    cargo check --locked --no-default-features --features client,automation --all-targets
+
 _check-server:
     cargo check --locked --no-default-features --features server --all-targets
 
@@ -109,6 +112,9 @@ _clippy-routing:
 _clippy-client:
     cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings
 
+_clippy-automation:
+    cargo clippy --locked --no-default-features --features client,automation --all-targets -- -D warnings
+
 _clippy-server:
     cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings
 
@@ -121,14 +127,18 @@ _clippy-balance-lab:
 _server-features:
     ./scripts/check-server-features.sh
 
+_client-features:
+    ./scripts/check-client-features.sh
+
 _v3-world-presentation:
     ./scripts/check-v3-world-presentation.sh
 
 _map-cleanup:
     ./scripts/check-v8-map-cleanup.sh
 
+# Client unit tests run with automation so the scripted-driver tests run beside player tests.
 _test-client:
-    cargo test --locked --no-default-features --features client --all-targets
+    cargo test --locked --no-default-features --features client,automation --all-targets
 
 _test-server:
     cargo test --locked --no-default-features --features server --all-targets

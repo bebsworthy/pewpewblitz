@@ -27,6 +27,7 @@ mod camera_rig;
 mod combat;
 mod contact_shadow;
 pub(crate) mod coordinates;
+#[cfg(feature = "automation")]
 mod diagnostics;
 pub(crate) mod environment_assets;
 mod fighter_character;
@@ -44,10 +45,13 @@ pub(super) use camera::cursor_ground_point;
 use camera::{CAMERA_VERTICAL_FOV_RADIANS, camera_offset, follow_3d_camera};
 pub(super) use camera_rig::{ArenaAimCameras, arena_aim_view};
 pub(super) use combat::collect_vfx_evidence_snapshot;
+#[cfg(feature = "automation")]
 pub(in crate::client) use combat::{
-    CombatEffect3d, MAX_ACTIVE_PARTICLE_EMITTERS, PendingCombatEffect,
-    VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, VfxParticleAdapterPlugin,
-    VfxParticleDiagnostics, VfxParticleEmitter3d, VfxTransientDiagnostics,
+    CombatEffect3d, MAX_ACTIVE_PARTICLE_EMITTERS, VfxLabLifecyclePresentationPlugin,
+    VfxLabLifecycleSet, VfxParticleDiagnostics, VfxParticleEmitter3d,
+};
+pub(in crate::client) use combat::{
+    PendingCombatEffect, VfxParticleAdapterPlugin, VfxTransientDiagnostics,
     animate_combat_effect_layers, cleanup_combat_effects, materialize_combat_effects,
     resolve_vfx_requests,
 };
@@ -62,9 +66,12 @@ pub(in crate::client) use map_editor::{
     MapEditorPointerMode, MapEditorPreview, MapEditorPreviewOptions,
 };
 use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_health_ui};
+#[cfg(feature = "automation")]
 pub(in crate::client) use toon::install as install_toon_shading;
 use toon::{RimRelation, ShadedMaterial, ToonMaterial, ToonScene, ToonShading};
-pub(in crate::client) use world_look::{WorldLookCatalog, install as install_world_look};
+pub(in crate::client) use world_look::WorldLookCatalog;
+#[cfg(feature = "automation")]
+pub(in crate::client) use world_look::install as install_world_look;
 
 const WALL_HEIGHT: f32 = 32.0;
 // Kenney's Mini Characters (the Zombie-mode NPC) face local +Z, while Brawler roots face local +X.
@@ -346,6 +353,8 @@ impl Plugin for WorldPresentationPlugin {
         reason = "the plugin build method is the visible composition point for six documented presentation phases"
     )]
     fn build(&self, app: &mut App) {
+        // Automation-only native render report (`scripts/v3-render-evidence.sh`).
+        #[cfg(feature = "automation")]
         if let Some(config) = app
             .world()
             .resource::<ClientNetworkConfig>()

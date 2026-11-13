@@ -21,7 +21,9 @@ mod status_style;
 mod sticky_blob;
 mod straight_projectile_style;
 
-use bevy::prelude::{App, IntoScheduleConfigs, Plugin, PostUpdate, SystemSet, Update};
+use bevy::prelude::{App, IntoScheduleConfigs, SystemSet, Update};
+#[cfg(feature = "automation")]
+use bevy::prelude::{Plugin, PostUpdate};
 
 pub(super) use aim_preview::{reconcile_aim_preview_visuals, update_aim_preview};
 pub(super) use concealment_style::animate_concealment_style;
@@ -30,9 +32,11 @@ pub(super) use cone_spray::{
     reconcile_cone_spray_visuals, update_cone_spray_visuals,
 };
 pub(super) use dash_style::DashTrailMaterialPlugin;
+#[cfg(feature = "automation")]
+pub(in crate::client) use effects::CombatEffect3d;
 pub(super) use effects::animate_attack_acceptance;
 pub(in crate::client) use effects::{
-    CombatEffect3d, PendingCombatEffect, VfxTransientDiagnostics, animate_combat_effect_layers,
+    PendingCombatEffect, VfxTransientDiagnostics, animate_combat_effect_layers,
     cleanup_combat_effects, collect_vfx_evidence_snapshot, materialize_combat_effects,
     resolve_vfx_requests,
 };
@@ -81,12 +85,14 @@ pub(super) use straight_projectile_style::{
 };
 
 /// Schedule seam used only by the offline `VfxLab` to run production lifecycle materializers.
+#[cfg(feature = "automation")]
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(in crate::client) struct VfxLabLifecycleSet;
 
 /// Installs the production materializers needed by isolated lifecycle fixtures.
 ///
 /// The Lab supplies replicated-shape fixture facts but never duplicates their visual construction.
+#[cfg(feature = "automation")]
 pub(in crate::client) struct VfxLabLifecyclePresentationPlugin;
 
 pub(super) fn add_retained_material_animation_systems<S>(app: &mut App, set: S)
@@ -111,6 +117,7 @@ where
     );
 }
 
+#[cfg(feature = "automation")]
 impl Plugin for VfxLabLifecyclePresentationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((

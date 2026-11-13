@@ -226,6 +226,7 @@ impl VfxRegistry {
         builder.seal(catalog)
     }
 
+    #[cfg(any(test, feature = "automation"))]
     pub(crate) fn registrations(&self) -> &[VfxRequestRegistration] {
         &self.registrations
     }
