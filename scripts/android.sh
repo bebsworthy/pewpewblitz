@@ -24,7 +24,8 @@ esac
 
 export ANDROID_HOME=${ANDROID_HOME:-$HOME/Library/Android/sdk}
 export ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/$ndk_version}
-if [[ -z "${JAVA_HOME:-}" && -d /opt/homebrew/opt/openjdk@21 ]]; then
+# A stale JAVA_HOME (for example a removed Android Studio JBR) falls back to Homebrew's JDK 21.
+if [[ ! -x "${JAVA_HOME:-}/bin/java" && -x /opt/homebrew/opt/openjdk@21/bin/java ]]; then
     export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 fi
 
@@ -34,7 +35,7 @@ missing=()
     missing+=("SDK platform android-37.0")
 command -v cargo-ndk >/dev/null || missing+=("cargo-ndk (cargo install cargo-ndk --locked)")
 command -v gradle >/dev/null || missing+=("gradle (brew install gradle)")
-[[ -n "${JAVA_HOME:-}" ]] || missing+=("a JDK 17+ via JAVA_HOME (brew install openjdk@21)")
+[[ -x "${JAVA_HOME:-}/bin/java" ]] || missing+=("a JDK 17+ via JAVA_HOME (brew install openjdk@21)")
 if ((${#missing[@]})); then
     printf 'brawler android: missing prerequisite: %s\n' "${missing[@]}" >&2
     printf '%s\n' 'brawler android: see the Android section of README.md' >&2

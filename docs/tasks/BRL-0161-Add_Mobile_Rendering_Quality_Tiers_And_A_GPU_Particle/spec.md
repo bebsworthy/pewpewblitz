@@ -41,3 +41,11 @@ Desktop quality settings beyond sharing the same tier model.
 - Pixel 10 GPU: Imagination PowerVR DXT-48-1536 (Tensor G5), Vulkan 1.3 at launch, Imagination 25.x /
   Vulkan 1.4 driver reported from Android 16 QPR3. bevy_hanabi compute particles and HDR/bloom are the
   first things to check on device; record `AdapterInfo` from logcat.
+
+# Device data from BRL-0159 (2026-11-13; the connected phone was a Pixel 8a, not the Pixel 10)
+- Pixel 8a, Android 17 (API 37): Mali-G715, driver v1.r54p3, Vulkan backend. The shell and the 3D fighter
+  preview render correctly.
+- Process memory on the Dashboard: about 1.55 GB PSS. Total memory is 7.4 GiB.
+- APK is 119 MB: `libbrawler_android.so` is 113.5 MB stripped (82 MB of code) under the `android`
+  profile with opt-level 3 and thin LTO. Consider opt-level "s"/"z", codegen-units 1, or fat LTO, and
+  fewer Bevy features, as part of mobile tiers.

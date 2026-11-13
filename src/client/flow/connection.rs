@@ -276,6 +276,13 @@ pub(super) fn start_initial_connection(
     mut next_flow: ResMut<NextState<ClientFlow>>,
     mut overlay: ResMut<ClientOverlay>,
 ) {
+    // Android 17 asks for local-network access when the activity resumes (MainActivity). A
+    // Startup connection would race that prompt and fail, so Android starts at Server Select
+    // with the address prefilled and connects only when the player presses Connect.
+    if cfg!(target_os = "android") {
+        next_flow.set(ClientFlow::ServerSelect);
+        return;
+    }
     let target = match validate_target(&model.address, &model.name) {
         Ok(target) => target,
         Err(error) => {

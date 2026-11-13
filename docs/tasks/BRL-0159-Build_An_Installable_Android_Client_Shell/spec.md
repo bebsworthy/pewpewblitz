@@ -236,3 +236,56 @@ Report the `AdapterInfo` logcat line, any visual corruption (particles), and fra
   reached Active). Rust sources were unchanged by this update (Java/Gradle/manifest/script/README only).
 - Still blocked by the denied `sdkmanager --licenses` run: no NDK/platform/adb, so no Android compile,
   APK, 16 KB alignment check, `adb devices`, or device smoke yet.
+
+# Android build and device smoke (2026-11-13)
+- The owner installed platform-tools, platforms/android-37.0, build-tools 37.0.0 and NDK 29.0.14206865.
+  sdkmanager reported "--licenses is no longer needed", so q-000021 was moot; it is now resolved. Any
+  later `android`/`sdkmanager` call should pass `--no-metrics`.
+- First `just android-build` failure: the environment's `JAVA_HOME` pointed at a missing Android Studio
+  JBR. Fix: `scripts/android.sh` now falls back to Homebrew `openjdk@21` whenever `$JAVA_HOME/bin/java`
+  is not executable.
+- `just android-build 192.168.31.47:5000`: **pass**. The Rust build takes about 4 minutes; Gradle
+  `assembleRelease` takes about 30 seconds and warns about Gradle 10 deprecations.
+  - APK: `packages/brawler-android/android/app/build/outputs/apk/release/app-release.apk`, **119 MB**.
+  - `lib/arm64-v8a/libbrawler_android.so` is 113.5 MB, stored uncompressed. The rest is 5.7 MB
+    classes.dex plus the assets.
+  - Signed with the Android Debug certificate (APK v2 scheme); `apksigner verify` passes.
+- **16 KB alignment: pass.** `llvm-readelf -lW` shows every LOAD segment `Align 0x4000`, and
+  `zipalign -c -P 16 -v 4` reports every entry OK.
+- **Device: Pixel 8a**, not the Pixel 10 the spec names (serial 45171JEKB03025). `ro.product.model` is
+  Pixel 8a, Android 17 / SDK 37, build CP3A.261005.005. After the owner allowed USB debugging, the adb
+  daemon on macOS 27 crashed repeatedly ("invalid compact unwind encoding") but restarted automatically.
+- `just android-install 192.168.31.47:5000`: Success.
+  - Logcat: `AdapterInfo { name: "Mali-G715", driver_info: "v1.r54p3-00eac0…", backend: Vulkan }`.
+  - Logcat: `SystemInfo "Android 17 on Pixel 8a", 7.4 GiB`.
+  - AAudio stream opened.
+  - No panics or FATAL entries. Expected noise: `bevy_gilrs` "does not support current platform", and
+    winit TODO warnings for onStart/onStop/Insets.
+- **Bug found and fixed:** the shell's Startup auto-connect fired before the local-network prompt and
+  failed with "routed UDP send failed".
+  - Fix in `src/client/flow/connection.rs`: `start_initial_connection` sends Android to Server Select
+    (`cfg!(target_os = "android")`). The player presses Connect after the prompt.
+  - Desktop is unchanged.
+  - After reinstalling: the system prompt "Allow PewPew Blitz to … nearby devices?" appeared over
+    Server Select, with no connection attempt behind it.
+- After the owner tapped Allow (`ACCESS_LOCAL_NETWORK: granted=true`), tapping Connect (sent with
+  `adb input tap`) connected over the LAN.
+  - Device log: "connected", then "lobby client accepted player_id=1".
+  - Server log: new netcode connection.
+  - The phone reached Create Brawler. Back led to Brawlers, and Back again led to the **Dashboard**
+    ("Create your first brawler"). The 3D fighter rendered correctly.
+- Home → 15 s → relaunch: same process, surface recreated, **no crash**. The lobby connection timed out
+  about 10 s after resume, and the shell showed "Connection lost … Retry" (expected; BRL-0162 owns
+  keeping sessions alive). Audio pause/resume was not checked by ear.
+- Dashboard memory: about 1.55 GB PSS.
+- Not done: creating a brawler and joining a Practice match on the phone (no touch gameplay yet), and
+  the denial dialog path ("Don't allow") on a device.
+- Observed layout issues are filed as BRL-0196 (related, parent BRL-0171):
+  - Server Select fields show no values.
+  - The Dashboard and the error panel are clipped on the 914x411 logical viewport.
+- APK size and memory notes were appended to BRL-0161.
+- Screenshots are in the agent scratchpad only and are not kept in the repo.
+- The server ran with `BRAWLER_ROUTED_BIND=0.0.0.0:5000` and a scratch `BRAWLER_DEV_DATA_DIR`. It is
+  stopped, and `data/` and `config/` are untouched.
+- Rust changed again (connection.rs), so `just lint`, `just test` and `just e2e 2` were re-run; results
+  are recorded in the handback because the run was still in progress when this was written.

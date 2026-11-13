@@ -5,16 +5,16 @@ status: doing
 theme: core
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-11-13T16:17:53Z
+modified: 2026-11-13T16:50:45Z
 closed:
 status_changed: 2026-11-13T15:28:26Z
 history:
 - backlog@2026-10-23T13:19:14Z
 - todo@2026-11-12T20:15:04Z
 - doing@2026-11-13T15:28:26Z
-revision: f8952da6031fa8ff
+revision: ea4539f79bc59385
 blocks: [BRL-0160, BRL-0161, BRL-0162]
-related: [BRL-0165, BRL-0195]
+related: [BRL-0165, BRL-0195, BRL-0196]
 parent: BRL-0171
 ---
 

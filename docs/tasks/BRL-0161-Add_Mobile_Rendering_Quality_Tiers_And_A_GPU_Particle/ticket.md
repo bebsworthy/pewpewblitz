@@ -5,13 +5,13 @@ status: todo
 theme: core
 release:
 created: 2026-10-23T13:19:03Z
-modified: 2026-11-13T15:54:29Z
+modified: 2026-11-13T16:50:22Z
 closed:
 status_changed: 2026-11-12T20:15:04Z
 history:
 - backlog@2026-10-23T13:19:05Z
 - todo@2026-11-12T20:15:04Z
-revision: 99026990860925d1
+revision: f8156581e95663d9
 blocks: []
 related: [BRL-0180]
 parent: BRL-0171
