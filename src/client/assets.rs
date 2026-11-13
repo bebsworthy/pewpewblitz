@@ -48,8 +48,7 @@ impl ClientAssetHandles {
             .collect();
         Self {
             audio,
-            character: asset_server
-                .load("brawler/models/kenney/mini-characters/character-male-a.glb"),
+            character: asset_server.load(presentation_3d::RIFF_ASSET_PATH),
             zombie_character: asset_server
                 .load("brawler/models/kenney/mini-characters/character-male-d.glb"),
             blaster: asset_server.load("brawler/models/kenney/blaster-kit/blaster-a.glb"),
@@ -87,7 +86,7 @@ impl ClientAssetHandles {
             .collect();
         states.extend([
             (
-                "model.character_male_a",
+                "model.riff",
                 false,
                 dependency_aware_state(asset_server, &self.character),
             ),

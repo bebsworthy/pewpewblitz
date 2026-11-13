@@ -29,6 +29,7 @@ mod contact_shadow;
 pub(crate) mod coordinates;
 mod diagnostics;
 pub(crate) mod environment_assets;
+mod fighter_character;
 mod floor_tiles;
 mod hit_feedback;
 mod map;
@@ -51,6 +52,11 @@ pub(in crate::client) use combat::{
     resolve_vfx_requests,
 };
 use coordinates::{ground_point, ground_position, ground_rotation};
+pub(in crate::client) use fighter_character::{
+    DASHBOARD_RIFF_SCALE, RIFF_ASSET_PATH, blaster_attachment, find_socket_and_player,
+    riff_scene_transform,
+};
+use fighter_character::{V3CharacterScene, character_is_visually_defeated};
 use map::{GeneratedMapMesh, Presented3dMap};
 pub(in crate::client) use map_editor::{
     MapEditorPointerMode, MapEditorPreview, MapEditorPreviewOptions,
@@ -61,10 +67,8 @@ use toon::{RimRelation, ShadedMaterial, ToonMaterial, ToonScene, ToonShading};
 pub(in crate::client) use world_look::{WorldLookCatalog, install as install_world_look};
 
 const WALL_HEIGHT: f32 = 32.0;
-// Kenney's Mini Characters face local +Z, while Brawler fighter roots face local +X.
+// Kenney's Mini Characters (the Zombie-mode NPC) face local +Z, while Brawler roots face local +X.
 pub(crate) const KENNEY_CHARACTER_FORWARD_CORRECTION: f32 = core::f32::consts::FRAC_PI_2;
-// Blaster Kit barrels also point local +Z, so the corrected character hierarchy needs no extra yaw.
-pub(crate) const KENNEY_BLASTER_GRIP_ROTATION: f32 = 0.0;
 // Keep a straight shot nearly on its authoritative plane. A larger lift produces a strong
 // screen-space parallax offset under the tilted orthographic camera and makes it miss the muzzle.
 const STRAIGHT_PROJECTILE_HEIGHT: f32 = 4.0;
@@ -82,13 +86,11 @@ const GROUND_AREA_HEIGHT: f32 = 1.0;
 const FIGHTER_FACING_TIP_RADIUS: f32 = crate::map::MAP_CELL_SIZE_WORLD * 0.5;
 const FIGHTER_FACING_HALF_ANGLE: f32 = 0.22;
 const FIGHTER_FACING_ARC_SEGMENTS: u16 = 4;
-/// Reviewed maximum bind-pose ground radius of the promoted Kenney body/head mesh AABBs.
+/// Reviewed maximum bind-pose ground radius of the Kenney body/head mesh AABBs (Zombie NPC).
 const KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS: f32 = 0.420_55;
-/// Reviewed bind-pose height of the promoted Kenney character mesh.
-const KENNEY_CHARACTER_SOURCE_HEIGHT: f32 = 0.671_325;
 const KENNEY_CHARACTER_HEIGHT_WORLD_SCALE: f32 = 64.0;
-const KENNEY_CHARACTER_WORLD_HEIGHT: f32 =
-    KENNEY_CHARACTER_SOURCE_HEIGHT * KENNEY_CHARACTER_HEIGHT_WORLD_SCALE;
+/// Visual height that projected overhead UI and hit numbers anchor to (the Riff fighter).
+const FIGHTER_VISUAL_HEIGHT_WORLD: f32 = fighter_character::RIFF_VISUAL_HEIGHT_WORLD;
 const HEIST_IDOL_FOOTPRINT_WIDTH: f32 = 96.0;
 const HEIST_IDOL_FOOTPRINT_DEPTH: f32 = 64.0;
 // HDR glow colors (linear, max channel above the bloom threshold). Unlit materials ignore
@@ -256,40 +258,12 @@ struct V3FallbackVisual {
     owner: Entity,
 }
 
-#[derive(Component)]
-struct V3CharacterScene {
-    owner: Entity,
-    visual_root: Entity,
-}
-
-#[derive(Component)]
-struct V3CharacterRuntime {
-    owner: Entity,
-    visual_root: Entity,
-    player: Entity,
-    current: CharacterMotion,
-    bind_pose: Vec<(Entity, Transform)>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CharacterMotion {
-    Idle,
-    Holding,
-    Walk,
-    Shoot,
-    Defeated,
-}
-
 #[derive(Resource)]
 pub(crate) struct Imported3dAssets {
     pub(crate) character_scene: Handle<WorldAsset>,
     pub(crate) blaster_scene: Handle<WorldAsset>,
     pub(crate) animation_graph: Handle<AnimationGraph>,
-    pub(crate) idle: AnimationNodeIndex,
-    walk: AnimationNodeIndex,
-    pub(crate) holding: AnimationNodeIndex,
-    shoot: AnimationNodeIndex,
-    defeated: AnimationNodeIndex,
+    pub(crate) clips: fighter_character::FighterClips,
 }
 
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -515,7 +489,7 @@ impl Plugin for WorldPresentationPlugin {
                     combat::animate_elemental_motion_accents,
                     combat::update_aim_preview,
                     animate_combat_effect_layers,
-                    update_character_animation,
+                    fighter_character::update_character_animation,
                     zombie::update_zombie_animation,
                     tint_3d_zone,
                 )
@@ -554,7 +528,7 @@ impl Plugin for WorldPresentationPlugin {
                     .after(CameraUpdateSystems)
                     .before(UiSystems::Prepare),
             )
-            .add_observer(setup_imported_character)
+            .add_observer(fighter_character::setup_imported_character)
             .add_observer(zombie::setup_imported_zombie);
     }
 }
@@ -2389,6 +2363,7 @@ fn prepare_imported_assets(
     handles: Option<Res<ClientAssetHandles>>,
     asset_server: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
+    animation_clips: Res<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     prepared: Option<Res<Imported3dAssets>>,
     fallback_policy: Res<ImportedWorldFallbackPolicy>,
@@ -2422,41 +2397,24 @@ fn prepare_imported_assets(
     else {
         return;
     };
-    let required = [
-        "idle",
-        "walk",
-        "holding-right",
-        "holding-right-shoot",
-        "die",
-    ];
-    let Some(clips) = required
-        .iter()
-        .map(|name| character.named_animations.get(*name).cloned())
-        .collect::<Option<Vec<_>>>()
+    let Some((graph, clips)) =
+        fighter_character::FighterClips::from_gltf(character, &animation_clips)
     else {
-        warn!("Mini Characters GLB is missing the M01 named animation contract; using fallback");
-        return;
-    };
-    let (graph, nodes) = AnimationGraph::from_clips(clips);
-    let [idle, walk_node, holding, shoot, defeated] = nodes.as_slice() else {
+        warn!("Riff GLB is missing the BRL-0154 named clip contract; using fallback");
         return;
     };
     let (Some(character_scene), Some(blaster_scene)) = (
         character.default_scene.clone(),
         blaster.default_scene.clone(),
     ) else {
-        warn!("selected Kenney GLB lacks a default scene; using primitive fallbacks");
+        warn!("Riff or blaster GLB lacks a default scene; using primitive fallbacks");
         return;
     };
     commands.insert_resource(Imported3dAssets {
         character_scene,
         blaster_scene,
         animation_graph: graphs.add(graph),
-        idle: *idle,
-        walk: *walk_node,
-        holding: *holding,
-        shoot: *shoot,
-        defeated: *defeated,
+        clips,
     });
     commands.remove_resource::<Presented3dMap>();
     info!("curated V3 GLB dependencies and named clips are ready");
@@ -2470,7 +2428,6 @@ fn prepare_imported_assets(
 fn upgrade_fighters_to_imported_models(
     mut commands: Commands,
     imported: Option<Res<Imported3dAssets>>,
-    metrics: Res<FighterPresentationMetrics>,
     fighters: Query<
         (Entity, &CombatVisualOwner),
         (With<V3FighterVisual>, Without<V3CharacterScene>),
@@ -2488,192 +2445,14 @@ fn upgrade_fighters_to_imported_models(
                 },
                 ToonScene,
                 WorldAssetRoot(imported.character_scene.clone()),
-                Transform {
-                    rotation: Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION),
-                    scale: gameplay_character_scale(*metrics),
-                    ..default()
-                },
-                Name::new("V3 imported fighter"),
+                fighter_character::gameplay_riff_transform(),
+                Name::new("V3 imported Riff fighter"),
             ));
         });
         commands.entity(visual_root).insert(V3CharacterScene {
             owner: owner.0,
             visual_root,
         });
-    }
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::too_many_arguments,
-    reason = "the scene-ready observer validates and installs one bounded imported hierarchy"
-)]
-fn setup_imported_character(
-    ready: On<WorldInstanceReady>,
-    mut commands: Commands,
-    imported: Res<Imported3dAssets>,
-    scene_roots: Query<&V3CharacterScene>,
-    children: Query<&Children>,
-    names: Query<&Name>,
-    transforms: Query<&Transform>,
-    mut players: Query<&mut AnimationPlayer>,
-    mut fallbacks: Query<(&V3FallbackVisual, &mut Visibility)>,
-) {
-    let Ok(scene) = scene_roots.get(ready.entity) else {
-        return;
-    };
-    let descendants = children.iter_descendants(ready.entity).collect::<Vec<_>>();
-    let arm = descendants.iter().copied().find(|entity| {
-        names
-            .get(*entity)
-            .is_ok_and(|name| name.as_str() == "arm-right")
-    });
-    let player = descendants
-        .iter()
-        .copied()
-        .find(|entity| players.get(*entity).is_ok());
-    let (Some(arm), Some(player)) = (arm, player) else {
-        warn!(owner = ?scene.owner, "imported fighter hierarchy misses arm-right or AnimationPlayer; retaining fallback");
-        return;
-    };
-    let bind_pose = descendants
-        .iter()
-        .filter_map(|entity| {
-            transforms
-                .get(*entity)
-                .ok()
-                .map(|transform| (*entity, *transform))
-        })
-        .collect();
-    commands.entity(arm).with_children(|parent| {
-        parent.spawn((
-            ToonScene,
-            WorldAssetRoot(imported.blaster_scene.clone()),
-            Transform {
-                translation: Vec3::new(0.08, 0.0, 0.0),
-                rotation: Quat::from_rotation_y(KENNEY_BLASTER_GRIP_ROTATION),
-                ..default()
-            },
-            Name::new("V3 attached blaster-a"),
-        ));
-    });
-    if let Ok(mut animation_player) = players.get_mut(player) {
-        let mut transitions = AnimationTransitions::new();
-        transitions
-            .play(&mut animation_player, imported.idle, Duration::ZERO)
-            .repeat();
-        commands
-            .entity(player)
-            .insert(AnimationGraphHandle(imported.animation_graph.clone()))
-            .insert(transitions);
-    }
-    commands.entity(ready.entity).insert(V3CharacterRuntime {
-        owner: scene.owner,
-        visual_root: scene.visual_root,
-        player,
-        current: CharacterMotion::Idle,
-        bind_pose,
-    });
-    for (fallback, mut visibility) in &mut fallbacks {
-        if fallback.owner == scene.owner {
-            *visibility = Visibility::Hidden;
-        }
-    }
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters own render-time animation state"
-)]
-fn update_character_animation(
-    imported: Option<Res<Imported3dAssets>>,
-    time: Res<Time>,
-    mut runtimes: Query<&mut V3CharacterRuntime>,
-    owners: Query<
-        (
-            &crate::combat::CurrentHealth,
-            Option<&crate::combat::Defeated>,
-        ),
-        With<Fighter>,
-    >,
-    mut visuals: Query<&mut V3FighterVisual>,
-    mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
-    mut transforms: Query<&mut Transform>,
-) {
-    let Some(imported) = imported else {
-        return;
-    };
-    for mut runtime in &mut runtimes {
-        let Ok((health, defeated)) = owners.get(runtime.owner) else {
-            continue;
-        };
-        let Ok(mut visual) = visuals.get_mut(runtime.visual_root) else {
-            continue;
-        };
-        visual.shoot_seconds = (visual.shoot_seconds - time.delta_secs()).max(0.0);
-        let next = if character_is_visually_defeated(health.0, defeated.is_some()) {
-            CharacterMotion::Defeated
-        } else if visual.shoot_seconds > 0.0 {
-            CharacterMotion::Shoot
-        } else if visual.moving {
-            CharacterMotion::Walk
-        } else {
-            CharacterMotion::Holding
-        };
-        if next == runtime.current {
-            continue;
-        }
-        if runtime.current == CharacterMotion::Defeated && next != CharacterMotion::Defeated {
-            for (entity, bind_transform) in &runtime.bind_pose {
-                if let Ok(mut transform) = transforms.get_mut(*entity) {
-                    restore_bind_transform(&mut transform, bind_transform);
-                }
-            }
-        }
-        let Ok((mut player, mut transitions)) = players.get_mut(runtime.player) else {
-            continue;
-        };
-        let node = match next {
-            CharacterMotion::Idle => imported.idle,
-            CharacterMotion::Holding => imported.holding,
-            CharacterMotion::Walk => imported.walk,
-            CharacterMotion::Shoot => imported.shoot,
-            CharacterMotion::Defeated => imported.defeated,
-        };
-        play_character_motion(&mut player, &mut transitions, node, runtime.current, next);
-        runtime.current = next;
-    }
-}
-
-fn restore_bind_transform(transform: &mut Transform, bind_transform: &Transform) {
-    transform.clone_from(bind_transform);
-}
-
-fn character_is_visually_defeated(current_health: u16, has_defeated_marker: bool) -> bool {
-    has_defeated_marker && current_health == 0
-}
-
-fn play_character_motion(
-    player: &mut AnimationPlayer,
-    transitions: &mut AnimationTransitions,
-    node: AnimationNodeIndex,
-    previous: CharacterMotion,
-    next: CharacterMotion,
-) {
-    let recovered_from_defeat =
-        previous == CharacterMotion::Defeated && next != CharacterMotion::Defeated;
-    if recovered_from_defeat {
-        player.stop_all();
-        *transitions = AnimationTransitions::new();
-    }
-    let duration = if recovered_from_defeat {
-        Duration::ZERO
-    } else {
-        Duration::from_millis(100)
-    };
-    let animation = transitions.play(player, node, duration);
-    if !matches!(next, CharacterMotion::Shoot | CharacterMotion::Defeated) {
-        animation.repeat();
     }
 }
 
@@ -2867,7 +2646,7 @@ mod tests {
     }
 
     #[test]
-    fn imported_character_front_aligns_with_fighter_root_facing() {
+    fn imported_zombie_front_aligns_with_its_root_facing() {
         let corrected_front = Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION) * Vec3::Z;
 
         assert!(corrected_front.abs_diff_eq(Vec3::X, 1e-5));
@@ -2990,59 +2769,6 @@ mod tests {
                 .abs()
                 < 1e-4
         );
-        assert!((KENNEY_CHARACTER_WORLD_HEIGHT - 42.965).abs() < 0.001);
         assert!((KENNEY_CHARACTER_HEIGHT_WORLD_SCALE - 64.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn attached_blaster_remains_aligned_with_fighter_root_facing() {
-        let corrected_barrel = Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION)
-            * Quat::from_rotation_y(KENNEY_BLASTER_GRIP_ROTATION)
-            * Vec3::Z;
-
-        assert!(corrected_barrel.abs_diff_eq(Vec3::X, 1e-5));
-    }
-
-    #[test]
-    fn respawn_stops_defeated_pose_before_starting_live_loop() {
-        let defeated = AnimationNodeIndex::new(0);
-        let holding = AnimationNodeIndex::new(1);
-        let mut player = AnimationPlayer::default();
-        let mut transitions = AnimationTransitions::new();
-        transitions.play(&mut player, defeated, Duration::ZERO);
-
-        play_character_motion(
-            &mut player,
-            &mut transitions,
-            holding,
-            CharacterMotion::Defeated,
-            CharacterMotion::Holding,
-        );
-
-        assert!(!player.is_playing_animation(defeated));
-        assert!(player.is_playing_animation(holding));
-        assert_eq!(transitions.get_main_animation(), Some(holding));
-        assert!(!player.animation(holding).unwrap().is_finished());
-    }
-
-    #[test]
-    fn respawn_restores_bind_channels_missing_from_the_live_clip() {
-        let bind_transform = Transform::from_translation(Vec3::new(0.0, 1.0, 0.0));
-        let mut transform = Transform {
-            translation: Vec3::new(0.0, -0.5, 0.4),
-            rotation: Quat::from_rotation_x(core::f32::consts::FRAC_PI_2),
-            ..default()
-        };
-
-        restore_bind_transform(&mut transform, &bind_transform);
-
-        assert_eq!(transform, bind_transform);
-    }
-
-    #[test]
-    fn restored_health_is_a_recovery_signal_if_marker_removal_arrives_late() {
-        assert!(character_is_visually_defeated(0, true));
-        assert!(!character_is_visually_defeated(100, true));
-        assert!(!character_is_visually_defeated(0, false));
     }
 }

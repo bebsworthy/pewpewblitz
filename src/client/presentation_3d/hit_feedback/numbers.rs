@@ -6,7 +6,7 @@
 
 use super::*;
 
-const FIGHTER_BODY_WORLD_HEIGHT: f32 = KENNEY_CHARACTER_WORLD_HEIGHT;
+const FIGHTER_BODY_WORLD_HEIGHT: f32 = FIGHTER_VISUAL_HEIGHT_WORLD;
 /// Deterministic lateral pattern, in stack-offset units, for numbers that cannot merge.
 const LATERAL_PATTERN: [f32; 5] = [0.0, 1.0, -1.0, 2.0, -2.0];
 /// Above the overhead plates (120-123) so a number is never hidden behind a plate.

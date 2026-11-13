@@ -483,13 +483,10 @@ fn spawn_imported_character(
         parent.spawn((
             DashboardImportedScene::Character,
             WorldAssetRoot(imported.character_scene.clone()),
-            Transform {
-                rotation: Quat::from_rotation_y(
-                    super::presentation_3d::KENNEY_CHARACTER_FORWARD_CORRECTION - 0.12,
-                ),
-                scale: Vec3::splat(112.0),
-                ..default()
-            },
+            super::presentation_3d::riff_scene_transform(
+                -0.12,
+                super::presentation_3d::DASHBOARD_RIFF_SCALE,
+            ),
             layer,
             Name::new("Dashboard imported brawler"),
         ));
@@ -551,37 +548,20 @@ fn setup_dashboard_imported_scene(
     let Some(imported) = imported else {
         return;
     };
-    let arm = descendants.iter().copied().find(|entity| {
-        names
-            .get(*entity)
-            .is_ok_and(|name| name.as_str() == "arm-right")
-    });
-    let player = descendants
-        .iter()
-        .copied()
-        .find(|entity| players.get(*entity).is_ok());
-    let (Some(arm), Some(player)) = (arm, player) else {
+    let Some((socket, player)) =
+        super::presentation_3d::find_socket_and_player(&descendants, &names, &players)
+    else {
         return;
     };
-    commands.entity(arm).with_children(|parent| {
-        parent.spawn((
-            DashboardImportedScene::Blaster,
-            WorldAssetRoot(imported.blaster_scene.clone()),
-            Transform {
-                translation: Vec3::new(0.08, 0.0, 0.0),
-                rotation: Quat::from_rotation_y(
-                    super::presentation_3d::KENNEY_BLASTER_GRIP_ROTATION,
-                ),
-                scale: Vec3::splat(0.72),
-            },
-            layer,
-            Name::new("Dashboard attached blaster-a"),
-        ));
-    });
+    commands.entity(socket).with_child((
+        DashboardImportedScene::Blaster,
+        super::presentation_3d::blaster_attachment(imported.blaster_scene.clone()),
+        layer,
+    ));
     if let Ok(mut animation_player) = players.get_mut(player) {
         let mut transitions = AnimationTransitions::new();
         transitions
-            .play(&mut animation_player, imported.holding, Duration::ZERO)
+            .play(&mut animation_player, imported.clips.idle, Duration::ZERO)
             .repeat();
         commands
             .entity(player)

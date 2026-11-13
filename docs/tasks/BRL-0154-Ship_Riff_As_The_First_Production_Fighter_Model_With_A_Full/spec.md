@@ -118,3 +118,74 @@ reduced motion. The primitive world is unchanged.
   removed from `assets/` and the manifest.
 - Per-brawler model selection, per-family weapon meshes, left-hand IK, reload clips, and other roster
   characters are follow-up work.
+
+
+# Implementation record (2026-11-13)
+
+## Delivered
+
+- `asset_src/characters/riff/build_riff.py`: production V3 builder (head x1.45 about the neck,
+  ears ~1.16x, 15 clips keyed on every deform bone, joined vertex-coloured runtime mesh, export
+  self-validation, review renders). `just riff-asset` wraps it. Two consecutive builds produced a
+  byte-identical GLB (md5 `eee7d77f…`).
+- Runtime GLB `assets/brawler/models/original/characters/riff/chr_riff.glb`: 617,948 bytes, 9,688
+  triangles, one mesh/primitive/material/skin, `COLOR_0`, no normals (Bevy rebuilds flat
+  normals), 7 sockets, 15 clips. Head share of crown height 0.462. Budget raised to 700 KB in the
+  builder and test because the per-channel glTF JSON (15 clips x 114 channels) is ~266 KB.
+- `src/client/presentation_3d/fighter_character.rs` (+ `tests.rs`): asset contract, `WeaponFamily`,
+  `FighterClips`, pure `select_motion`, cue windows (shot restart, `DamageApplied`, Ready-to-active
+  ultimate, dash end), squash/stretch, scene-ready setup. Character code moved out of `mod.rs`.
+- Dashboard / brawler-screen preview shows Riff (idle, blaster on the socket, PBR as before).
+- Overhead plates and hit numbers anchor to the 51.2-unit visual height.
+- Kenney `character-male-a.glb` and its manifest row removed; zombies keep `character-male-d`.
+- Root V1 working export `asset_src/characters/riff/chr_riff.glb` and stale `riff-run-pose.png`
+  removed; `riff.blend` and previews regenerated; README and docs/11 updated.
+
+## Verification
+
+- Focused: `cargo test --features client --lib -- presentation_3d dashboard assets` pass (225).
+- `just lint` (real ripgrep first on PATH): pass.
+- `just test`: pass, 2180 tests, 0 failed (incl. performance gates).
+- `just e2e 2`: pass (1v1 roster reached Active).
+- Render evidence (`scripts/v3-render-evidence.sh`, `BRAWLER_RENDER_COMBAT=1`, 2560x1440, frames
+  300/480/660), all `result=pass`, no panics. p50/p95/p99 ms vs BRL-0149 `after-169-*`:
+  - theme 1 Feature Yard 1v1: 16.649/17.508/18.649 -> 16.665/17.685/18.907 (vsync 60 Hz)
+  - theme 2 Powderline Vault Heist Practice 3v3: 8.332/8.526/8.649 -> 8.332/8.540/8.662
+  - theme 3 Verdant Crossfire Practice 3v3: 8.335/8.582/8.717 -> 8.333/8.559/8.666
+    (a first r1 run showed 16.6 p50 here; the r2 rerun is back at 120 Hz, treated as a display
+    refresh fluke).
+  - Mesh-entity high water 333/668/580 -> 329/651/571 (one joined body mesh per fighter).
+- Evidence: `target/brl0154/r2-theme{1-combat,2-practice,3-practice}.txt.captures` (r1 = first
+  pass with the lower 1h hold). Blender review: `asset_src/characters/riff/previews/`
+  (front/side ortho, three-quarter, gameplay-camera, animation sheet); export round-trip re-import
+  render checked the clips survive glTF.
+- Capture review: Riff renders on all themes with outline, rim, contact shadow, plates; side and
+  back views read as the rabbit (ears trail while running). At the 55-degree camera the big head
+  hides most of the torso and the held blaster when Riff faces sideways or away.
+- Not natively captured: Dashboard/brawler-screen preview, victory, ko, ultimate, dash, hit, and
+  non-1h families in game (no harness selector); covered by unit tests and the Blender sheet.
+
+## Playtest request
+
+Run `just run 2` (or `just client` with `just server`) and Practice 3v3 on each theme. Check:
+Riff appeal and readability at gameplay scale (face on approach, ears, team rings); whether the
+1h blaster is visible enough when facing sideways (possible follow-up: larger weapon or lower
+head scale); run cadence and footfall squash; recoil on fire; hit flinch; dash lean; ultimate
+pose; ko and respawn landing; victory hop at match end; Dashboard and brawler-card preview framing
+(scale 32, ears may crowd the top). Known limits: one shared blaster for every family (BRL-0184),
+no per-brawler model (BRL-0185), no left-hand IK or reload.
+
+## Learn from errors
+
+- Mistake: first 1h hold kept the blaster near the hip; the pose numbers looked right but the
+  short arms needed a near-horizontal upper arm. Prevention: judge held poses on the rendered
+  animation sheet, not the angles.
+- Mistake: misread a back-view capture as a broken rig. Prevention: before debugging Bevy, re-import
+  the GLB in Blender (round-trip render) to separate exporter from runtime problems; it took one
+  command.
+- Mistake: assumed a 600 KB budget without measuring; exporting normals and float colours doubled
+  vertex data and per-channel JSON dominated. Prevention: measure buffer-view/JSON breakdown first.
+- A single r1 perf outlier was a refresh-rate fluke; always rerun before attributing a regression.
+
+# Feedback (2026-11-13)
+- Head and ears hide most of the body and blaster at the gameplay camera: user deferred to BRL-0186 ("ticket for later").

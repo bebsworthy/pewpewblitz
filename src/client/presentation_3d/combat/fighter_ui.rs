@@ -7,7 +7,7 @@ use bevy::{
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-const FIGHTER_BODY_WORLD_HEIGHT: f32 = KENNEY_CHARACTER_WORLD_HEIGHT;
+const FIGHTER_BODY_WORLD_HEIGHT: f32 = FIGHTER_VISUAL_HEIGHT_WORLD;
 const OVERHEAD_WORLD_HEIGHT: f32 = FIGHTER_BODY_WORLD_HEIGHT + 12.0;
 // Logical-pixel plate sized for the BRL-0148 framing, where a fighter stands about 80 px tall at
 // the 720 px reference height: a bold 22 px bar with the health number inside it.
@@ -858,7 +858,7 @@ mod tests {
         }
         assert!((overhead_height(false) - OVERHEAD_HEALTH_HEIGHT).abs() < f32::EPSILON);
         assert!(overhead_height(false) < overhead_height(true));
-        assert!((FIGHTER_BODY_WORLD_HEIGHT - KENNEY_CHARACTER_WORLD_HEIGHT).abs() < f32::EPSILON);
+        assert!((FIGHTER_BODY_WORLD_HEIGHT - FIGHTER_VISUAL_HEIGHT_WORLD).abs() < f32::EPSILON);
         assert!((OVERHEAD_WORLD_HEIGHT - FIGHTER_BODY_WORLD_HEIGHT - 12.0).abs() < f32::EPSILON);
         let health_left = (OVERHEAD_WIDTH - HEALTH_BAR_WIDTH) * 0.5;
         let pie_right = health_left - COLD_PIE_GAP;

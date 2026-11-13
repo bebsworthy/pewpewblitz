@@ -36,6 +36,11 @@ tickets tune them through native review but do not change the direction.
   authoritative radius and its ground ring (see [Fighter identity](#fighter-identity)).
 - Expressive motion: idle, run, per-family hold and shoot with recoil, hit reaction, dash, defeat,
   and victory, plus procedural squash and stretch on footfalls, firing, and landing.
+- Riff is built by checked-in procedural Blender scripts (`asset_src/characters/riff/build_riff.py`,
+  `just riff-asset`), and his runtime GLB lives under
+  `assets/brawler/models/original/characters/riff/`. For a long-eared character the head share is
+  measured against the crown height (ears excluded) and the 1.6-cell visual height includes the
+  ears. The source README owns the export contract and clip list.
 
 ### World shading
 
@@ -104,7 +109,7 @@ the previous presentation for that area:
 | Fighter outlines | BRL-0151 (adopted) |
 | Contact shadows / AO | BRL-0152 (adopted) |
 | One environment kit per theme | BRL-0153 |
-| Riff and the character animation set | BRL-0154 |
+| Riff and the character animation set | BRL-0154 (adopted) |
 | Touch-first HUD | BRL-0155 |
 | Shell surfaces, palette, motion | BRL-0156 |
 | Icon set | BRL-0157 |
@@ -330,16 +335,24 @@ bursts from becoming an unbounded entity or channel lifecycle.
 - imported materials, environment themes, and future skins may not override these relation cues.
 
 The imported character's model-space forward direction is corrected once at its visual root. The
-weapon attaches inside that corrected hierarchy, and animation-specific transforms remain below
-it. The standard fighter has one canonical 14-unit authoritative radius: its circular hitbox,
-28-unit imported torso/feet footprint, exact outer ground-ring edge, and fallback sphere agree.
-The imported model scales X/Z to that footprint but uses an independent reviewed Y scale, producing
-an approximately 43-unit-tall readable silhouette without enlarging planar collision. That leaves
-two units of clearance on each side of a 32-unit map-cell passage. Attached weapons and animated
-limbs may cross the ground circle, but must not make the visible ground occupancy contradict it.
-Projected overhead placement derives from the corrected visual height rather than an obsolete
-fixed 86-unit anchor. The matching sphere remains the deterministic fallback and a
-geometry-verification aid.
+weapon attaches to the character's `socket_weapon_r` node inside that corrected hierarchy, and
+animation-specific transforms remain below it. The standard fighter has one canonical 14-unit
+authoritative radius: its circular hitbox, exact outer ground-ring edge, and fallback sphere agree.
+Riff is scaled uniformly from his reviewed source height so he stands 1.6 map cells (51.2 units)
+including ears; that scale does not depend on the radius, and a test keeps his bind-pose feet,
+hands, and torso (about 12.6 units from the center) inside the 14-unit ring. Attached weapons and
+animated limbs may cross the ground circle, but must not make the visible ground occupancy
+contradict it. Projected overhead placement and hit numbers derive from that visual height. The
+matching sphere remains the deterministic fallback and a geometry-verification aid. The Zombie-mode
+NPC keeps the Kenney mini-character with its separate footprint fit.
+
+Character motion is chosen per frame by one priority over replicated state and cues only: defeated,
+then victory (the fighter's team won the completed match), dash (ability phase Dashing), ultimate
+(a Ready-to-active ability transition), attack (the existing shot trigger, per weapon family),
+hit reaction (`DamageApplied` on that fighter), run (moving), and the weapon family's ready loop.
+The family comes from the replicated primary weapon delivery. A presentation-only,
+volume-preserving squash on the imported scene root marks run footfalls, firing, and landing from a
+dash or respawn; reduced motion disables it, and it never moves the gameplay pose or camera.
 
 ### Overhead information
 
@@ -769,7 +782,9 @@ specific runtime use is accepted.
 
 Every redistributed third-party file must have exact provenance in the manifest and retained
 license text where required. Original replacements should also preserve their source masters and
-document the export pipeline needed to reproduce runtime derivatives.
+document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
+under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
+its README (for Riff, `asset_src/characters/riff/README.md`), not a manifest row.
 
 ## Asset admission checklist
 

@@ -1,80 +1,81 @@
 # Riff character source
 
-This directory owns the original Riff character prototype described by `spec.md` and
-`orthographic_sheet.png`.
+Riff is PewPew Blitz's first production fighter (BRL-0154). He is an original project asset built
+entirely by checked-in procedural Blender scripts from the brief in `spec.md` and the reference
+`orthographic_sheet.png`. No commissioned, generated, or hand-edited model data is involved.
 
 ## Files
 
-- `riff.blend` — canonical Blender 5.2 source with separated geometry, armature, actions, and review rig.
-- `chr_riff.glb` — game-facing character export; it excludes the review camera, lights, ground, and weapons.
-- `build_riff.py` — deterministic Blender build/export script.
-- `previews/riff-front.png` — front silhouette and outfit check.
-- `previews/riff-three-quarter.png` — three-quarter appeal and accessory check.
-- `previews/riff-gameplay.png` — elevated gameplay-camera readability check.
-- `previews/riff-run-pose.png` — rig/deformation check rendered from the `run` action.
-- `versions/v1/` — frozen first-version source, export, previews, and orthographic comparison.
-
-The current root `riff.blend` and `chr_riff.glb` remain the V1 working copies until a later version
-is explicitly started. The immutable V1 copies are `versions/v1/riff-v1.blend` and
-`versions/v1/chr_riff-v1.glb`.
-
-The complete front/side/back review is recorded in
-`versions/v1/comparison/comparison.md`, with side-by-side boards for each view.
-
-`versions/v2/` contains the separate orthographic-correction pass. V2 does not replace either the
-root V1 working files or the frozen V1 snapshot until it is explicitly accepted.
-
-## Asset contract
-
-- Up axis: `+Z`
-- Front axis: `-Y`
-- Ground: `Z = 0`
-- Source geometry: 63 named `GEO_*` objects retained separately for iteration
-- Source triangle count: 7,816
-- Armature: `RIG__riff`, 38 bones
-- Runtime export: `chr_riff.glb`, approximately 7,900 triangles after round-trip import
-- Weapon mesh: intentionally absent
-
-Required socket bones:
-
-```text
-socket_weapon_r
-socket_weapon_l
-socket_head
-socket_chest
-socket_back
-socket_fx_center
-socket_fx_ground
-```
-
-Animation actions:
-
-```text
-idle
-run
-hit_front
-ko
-victory
-combat_idle_1h
-attack_1h
-combat_idle_rifle
-attack_rifle
-combat_idle_heavy
-attack_heavy
-```
-
-The ears use three-bone chains with blended weights. Scarf sections are assigned across the
-three-bone scarf chain. Remaining prototype parts use deliberately rigid single-bone weights to
-preserve the chunky low-poly forms.
+- `build_riff.py` — the production (V3) builder and exporter. It loads the frozen V2 geometry
+  (`versions/v2/build_riff_v2.py`, which loads the V1 helpers) and applies the production deltas:
+  chibi head proportions, the gameplay animation set, and one joined vertex-coloured runtime mesh.
+- `riff.blend` — the generated source master: separated `GEO__riff` parts with their materials, the
+  `RIG__riff` armature with every action, the joined `EXPORT__riff` runtime mesh, and the
+  `REVIEW__riff` camera, lights, ground, and review-only blaster.
+- `previews/` — generated review renders: `riff-front.png` and `riff-side.png` (orthographic),
+  `riff-three-quarter.png`, `riff-gameplay.png` (55-degree gameplay elevation, 1h hold), and
+  `riff-animation-sheet.png` (key poses of every clip).
+- `versions/v1/`, `versions/v2/` — frozen earlier passes; never edited.
+- Runtime derivative (not in this directory):
+  `assets/brawler/models/original/characters/riff/chr_riff.glb`.
 
 ## Rebuild
 
-Open Blender with the MCP connection enabled and execute `build_riff.py` inside Blender. The script
-establishes `riff.blend` as the active filepath before clearing the scene, rebuilds the source,
-renders review images, and exports `chr_riff.glb`.
+From the repository root:
 
-## Prototype boundary
+```sh
+just riff-asset
+# equivalent to
+/Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
+  -P asset_src/characters/riff/build_riff.py
+```
 
-The model, materials, armature, sockets, weights, and first animation set are present. Final
-production approval still requires in-game scale/lighting checks and the five weapon compatibility
-tests named in `spec.md`; those weapon assets are not duplicated into this character source.
+Built and verified with Blender 5.2.3 LTS. Pass `-- --no-renders` after the script to skip the
+review renders. The run prints a `RIFF_BUILD_REPORT` JSON line and fails if the export breaks the
+contract below. Never hand-edit the GLB: change the builder and rebuild. The runtime constants in
+`src/client/presentation_3d/fighter_character.rs` (source ground and top, socket rest rotation,
+body planar reach) mirror the build report; update them and their tests if a rebuild changes them.
+
+## Provenance
+
+Riff is original work of the PewPew Blitz project, so it is not a row in the third-party
+`assets/manifest.ron`. The source of truth is this directory: the builder scripts, the frozen
+versions they derive from, and the brief. The runtime GLB is reproducible from them with the
+command above. The review-only blaster is the CC0 Kenney Blaster Kit `blaster-a.glb` already
+shipped under `assets/` (manifest id `model.blaster_a`); it is not part of the Riff export.
+
+## Runtime contract
+
+- Up axis `+Z`, front `-Y`, soles at `Z = 0.04`; ear tip at `Z = 2.506` (source units).
+- Head block (chin to crown, ears excluded) is about 46% of the crown height; ears are about 1.16x
+  their V2 length. The client scales Riff uniformly to 1.6 map cells including ears; collision is
+  unaffected.
+- One skinned mesh, one primitive, one material, flat per-face palette in `COLOR_0`, no normals
+  (Bevy rebuilds flat normals), no UVs or textures. 9,688 triangles; about 620 KB.
+- Armature `RIG__riff`: 38 bones including the seven sockets `socket_weapon_r`, `socket_weapon_l`,
+  `socket_head`, `socket_chest`, `socket_back`, `socket_fx_center`, `socket_fx_ground`.
+- No weapon, camera, light, or review geometry in the export. The game attaches its weapon to
+  `socket_weapon_r`; held poses keep that socket's rest frame so the weapon points forward.
+- Clips (24 fps, in place). Every clip keys every deform bone, so no clip leaks a channel into the
+  next:
+
+| Clip | Use | Loop |
+|---|---|---|
+| `idle` | Dashboard and brawler-screen preview | yes |
+| `run` | moving; footfalls at phase 0 and 0.5 | yes |
+| `dash` | ability phase Dashing | yes |
+| `hit_front` | `DamageApplied` on this fighter | no |
+| `ko` | defeated (holds the last frame) | no |
+| `victory` | own team won the completed match | yes |
+| `ultimate` | Ready-to-active ultimate transition | no |
+| `combat_idle_<family>` | standing with the weapon ready | yes |
+| `attack_<family>` | each accepted shot, with recoil | no |
+
+Weapon families come from the primary weapon's delivery: `1h` (Straight, StickyStraight),
+`heavy` (ConeSpray), `throwable` (Lobbed, Splash), `melee` (MeleeArc).
+
+## Known limits
+
+The single shared blaster stands in for every family's weapon, there is no left-hand IK or reload
+clip, and only Riff exists. Those, per-brawler model selection, and the five weapon compatibility
+checks in `spec.md` are follow-up work.

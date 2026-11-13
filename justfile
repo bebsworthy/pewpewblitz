@@ -57,6 +57,10 @@ practice-e2e game_type="wipeout-1v1":
 v3-render-evidence report="target/v3-render-evidence.txt":
     ./scripts/v3-render-evidence.sh {{report}}
 
+# Rebuild Riff's source master, review renders, and runtime GLB with Blender 5.2 LTS (headless).
+riff-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
+    {{blender}} -b --factory-startup -P asset_src/characters/riff/build_riff.py
+
 # Run the complete automated gate, including 2/4/6-client product matches and all Practice types.
 ci: lint test _e2e-matrix _practice-e2e-matrix
 
