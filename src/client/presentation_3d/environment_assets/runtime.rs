@@ -1,15 +1,18 @@
 //! Runtime handles, material preparation/tinting, imported-scene readiness, and fitting admission.
 
 use super::*;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::fitting::{SceneBounds, fit_scene_to_footprint, world_asset_scene_bounds};
 
 impl MapVisualCatalog {
+    /// Toon materials for each theme's generated world surfaces (BRL-0150).
     pub(in crate::client::presentation_3d) fn build_theme_materials(
         &self,
-        materials: &mut Assets<StandardMaterial>,
+        materials: &mut Assets<ToonMaterial>,
+        shading: &ToonShading,
     ) -> BTreeMap<crate::map::MapPresentationThemeId, EnvironmentThemeMaterials> {
+        let mut add = |material: StandardMaterial| materials.add(shading.material(material));
         let matte = |color: Color| StandardMaterial {
             base_color: color,
             perceptual_roughness: 0.82,
@@ -19,7 +22,7 @@ impl MapVisualCatalog {
         self.themes
             .iter()
             .map(|(id, theme)| {
-                let destructible_cover = materials.add(StandardMaterial {
+                let destructible_cover = add(StandardMaterial {
                     double_sided: true,
                     cull_mode: None,
                     ..matte(tuple_color(theme.destructible_cover))
@@ -28,24 +31,24 @@ impl MapVisualCatalog {
                     *id,
                     EnvironmentThemeMaterials {
                         // Floor tones live in the tile mesh's vertex colours (BRL-0147).
-                        floor: materials.add(matte(Color::WHITE)),
-                        floor_accent: materials.add(matte(tuple_color(theme.ground_accent))),
-                        outer_ground: materials.add(matte(tuple_color(theme.outer_ground))),
-                        wall: materials.add(matte(tuple_color(theme.fallback_wall))),
-                        perimeter: materials.add(matte(tuple_color(theme.fallback_perimeter))),
+                        floor: add(matte(Color::WHITE)),
+                        floor_accent: add(matte(tuple_color(theme.ground_accent))),
+                        outer_ground: add(matte(tuple_color(theme.outer_ground))),
+                        wall: add(matte(tuple_color(theme.fallback_wall))),
+                        perimeter: add(matte(tuple_color(theme.fallback_perimeter))),
                         destructible_cover,
-                        water: materials.add(StandardMaterial {
+                        water: add(StandardMaterial {
                             base_color: tuple_color(theme.water),
                             metallic: 0.05,
                             perceptual_roughness: 0.25,
                             ..default()
                         }),
-                        vegetation: materials.add(StandardMaterial {
+                        vegetation: add(StandardMaterial {
                             double_sided: true,
                             cull_mode: None,
                             ..matte(tuple_color(theme.vegetation))
                         }),
-                        rubble: materials.add(matte(tuple_color(theme.rubble))),
+                        rubble: add(matte(tuple_color(theme.rubble))),
                     },
                 )
             })
@@ -55,15 +58,15 @@ impl MapVisualCatalog {
 
 #[derive(Clone)]
 pub(crate) struct EnvironmentThemeMaterials {
-    pub(crate) floor: Handle<StandardMaterial>,
-    pub(crate) floor_accent: Handle<StandardMaterial>,
-    pub(crate) outer_ground: Handle<StandardMaterial>,
-    pub(crate) wall: Handle<StandardMaterial>,
-    pub(crate) perimeter: Handle<StandardMaterial>,
-    pub(crate) destructible_cover: Handle<StandardMaterial>,
-    pub(crate) water: Handle<StandardMaterial>,
-    pub(crate) vegetation: Handle<StandardMaterial>,
-    pub(crate) rubble: Handle<StandardMaterial>,
+    pub(in crate::client) floor: Handle<ToonMaterial>,
+    pub(in crate::client) floor_accent: Handle<ToonMaterial>,
+    pub(in crate::client) outer_ground: Handle<ToonMaterial>,
+    pub(in crate::client) wall: Handle<ToonMaterial>,
+    pub(in crate::client) perimeter: Handle<ToonMaterial>,
+    pub(in crate::client) destructible_cover: Handle<ToonMaterial>,
+    pub(in crate::client) water: Handle<ToonMaterial>,
+    pub(in crate::client) vegetation: Handle<ToonMaterial>,
+    pub(in crate::client) rubble: Handle<ToonMaterial>,
 }
 
 #[derive(Resource, Clone)]
@@ -90,15 +93,13 @@ pub(in crate::client::presentation_3d) struct EnvironmentAssetHandles {
     handles: BTreeMap<crate::map::MapVisualProfileId, Handle<Gltf>>,
 }
 
+/// Authored profile tint for an imported environment instance; such instances are toon shaded and
+/// the toon conversion applies the tint.
 #[derive(Component, Clone, Copy)]
+#[require(ToonScene)]
 pub(in crate::client::presentation_3d) struct EnvironmentMaterialTint(
     pub(in crate::client::presentation_3d) [f32; 3],
 );
-
-#[derive(Resource, Default)]
-pub(in crate::client::presentation_3d) struct EnvironmentTintedMaterials {
-    handles: HashMap<(AssetId<StandardMaterial>, [u32; 3]), Handle<StandardMaterial>>,
-}
 
 #[derive(Clone)]
 struct EnvironmentImportedScene {
@@ -157,12 +158,13 @@ pub(in crate::client::presentation_3d) fn load_environment_assets(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     maps: Res<crate::map::MapCatalogResource>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<ToonMaterial>>,
+    shading: Res<ToonShading>,
 ) {
     let map_visuals =
         MapVisualCatalog::embedded(&maps.0).expect("embedded client map catalogs are valid");
     let theme_materials = EnvironmentThemeMaterialCatalog {
-        materials: map_visuals.build_theme_materials(&mut materials),
+        materials: map_visuals.build_theme_materials(&mut materials, &shading),
     };
     let mut handles = BTreeMap::new();
     for (id, profile) in &map_visuals.profiles {
@@ -175,56 +177,6 @@ pub(in crate::client::presentation_3d) fn load_environment_assets(
     commands.insert_resource(EnvironmentAssetHandles { handles });
     commands.init_resource::<EnvironmentImportedScenes>();
     commands.init_resource::<EnvironmentAssetReadiness>();
-    commands.init_resource::<EnvironmentTintedMaterials>();
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the Bevy observer owns its triggered world-instance event"
-)]
-pub(in crate::client::presentation_3d) fn tint_environment_instance(
-    ready: On<WorldInstanceReady>,
-    roots: Query<&EnvironmentMaterialTint>,
-    children: Query<&Children>,
-    mut scene_materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut tinted: ResMut<EnvironmentTintedMaterials>,
-) {
-    let Ok(tint) = roots.get(ready.entity) else {
-        return;
-    };
-    let tint_key = tint.0.map(f32::to_bits);
-    if tint_key == [1.0_f32.to_bits(); 3] {
-        return;
-    }
-    for entity in children.iter_descendants(ready.entity) {
-        let Ok(mut scene_material) = scene_materials.get_mut(entity) else {
-            continue;
-        };
-        let source = scene_material.0.clone();
-        let key = (source.id(), tint_key);
-        if let Some(handle) = tinted.handles.get(&key) {
-            scene_material.0 = handle.clone();
-            continue;
-        }
-        let Some(mut material) = materials.get(&source).cloned() else {
-            continue;
-        };
-        material.base_color = multiply_color(material.base_color, tint.0);
-        let handle = materials.add(material);
-        tinted.handles.insert(key, handle.clone());
-        scene_material.0 = handle;
-    }
-}
-
-fn multiply_color(color: Color, tint: [f32; 3]) -> Color {
-    let color = color.to_srgba();
-    Color::srgba(
-        color.red * tint[0],
-        color.green * tint[1],
-        color.blue * tint[2],
-        color.alpha,
-    )
 }
 
 fn admit_loaded_environment_scenes(
@@ -394,19 +346,4 @@ fn validate_scene_against_owned_map_assets(
         )?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn material_tint_preserves_alpha_and_scales_color_channels() {
-        let tinted = multiply_color(Color::srgba(0.8, 0.6, 0.4, 0.5), [0.5, 0.75, 1.0]).to_srgba();
-
-        assert!((tinted.red - 0.4).abs() < 0.001);
-        assert!((tinted.green - 0.45).abs() < 0.001);
-        assert!((tinted.blue - 0.4).abs() < 0.001);
-        assert!((tinted.alpha - 0.5).abs() < 0.001);
-    }
 }

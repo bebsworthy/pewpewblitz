@@ -363,6 +363,8 @@ mod tests {
                 Assets<super::super::straight_projectile_style::StraightProjectileTrailMaterial>,
             >()
             .init_resource::<crate::builds::BuildCatalogResource>()
+            .init_resource::<Assets<ToonMaterial>>()
+            .insert_resource(ToonShading::embedded().unwrap())
             .add_systems(Startup, setup_3d_foundation);
         configure_world_presentation_schedule(&mut app);
         super::super::add_retained_material_animation_systems(

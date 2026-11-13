@@ -95,7 +95,7 @@ the previous presentation for that area:
 | Tile floor | BRL-0147 (adopted) |
 | Camera framing re-evaluation | BRL-0148 |
 | Overhead plates and aim lane | BRL-0149 |
-| Toon material and rim | BRL-0150 |
+| Toon material and rim | BRL-0150 (adopted) |
 | Fighter outlines | BRL-0151 |
 | Contact shadows / AO | BRL-0152 |
 | One environment kit per theme | BRL-0153 |
@@ -197,6 +197,24 @@ the strength of a darkening that fades over two cell corners from the arena edge
 player-blocking walls. Destructible cover does not darken the floor, because the floor is built once
 per map generation. Tones are carried in vertex colors on a white matte material, so the floor stays
 an ordinary lit surface below the bloom knee and works unchanged in the primitive world.
+
+Fighters and the world share one toon material (`presentation_3d/toon.rs`,
+`assets/shaders/toon.wgsl`, tuned by the client-only `assets/catalogs/toon_shading.ron`). It
+extends `StandardMaterial`, so textures, vertex colors, alpha, and emissive keep working, and
+replaces PBR direct light with a two-band ramp on the directional light: the shadow band (back
+faces and cast shadows) is a hue-shifted fraction of the key light, so shadow sides never crush to
+black, and the lit band keeps a little N·L so top and side faces stay distinct. There is no
+specular. A lit-side rim on side silhouettes mixes toward the fighter's relationship color (green
+local, blue ally, red enemy, chosen per mesh by a `MeshTag` that follows the ground ring); it mixes
+rather than adds, so no lit surface exceeds a lit white surface and the bloom knee holds. World
+props carry no rim by default, because under the high gameplay camera whole side faces are grazing.
+Fighters ignore received shadow maps (they still cast), so faces stay in the lit band and fighters
+stay readable inside wall shadows. Imported glTF instances are converted once when their scene is
+ready, under a `ToonScene` root (fighters, blasters, zombies, every environment kit instance, and
+the Map Maker palette preview), and the generated theme surfaces, primitive fighters, and the
+primitive barrel are built as toon materials. Hit flash and concealment variants work on both
+material families. VFX, rings, markers, and status visuals keep their own materials; the Dashboard
+brawler and weapon previews keep PBR until their light rig is reworked.
 
 Presentation reads authoritative or replicated facts and resolves stable presentation identities.
 Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or

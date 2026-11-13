@@ -1,0 +1,28 @@
+// Client-only toon shading tuning (BRL-0150). Presentation only: nothing here feeds simulation or
+// the gameplay content fingerprint. Validation bounds live in
+// `src/client/presentation_3d/toon.rs`; the shader is `assets/shaders/toon.wgsl`.
+(
+    schema_version: 1,
+    // Two-band light ramp on N·L of the directional light (the shadow map also selects the shadow
+    // band). `flat_level` is the light both bands share; `lit_gradient` mixes some N·L back into
+    // the lit band so top and side faces stay distinguishable.
+    ramp: (threshold: 0.12, softness: 0.03, flat_level: 0.75, lit_gradient: 0.5),
+    // Shadow band multiplier on albedo: about 0.65× and hue-shifted toward blue/purple.
+    shadow_tint: (0.62, 0.60, 0.80),
+    // Lit-side rim on side silhouettes: 1 − N·V between `start` and `end`, limited to normals that
+    // turn left or right on screen (`side_start`..`side_end`), because under the high gameplay
+    // camera whole camera-facing faces are grazing. It mixes toward the colour at full key light
+    // rather than adding, so it never makes a surface brighter than a lit white surface. Fighters
+    // use the relationship colours of their ground ring. World props carry no rim by default: flat
+    // kit side faces are grazing as a whole and a rim washes them out (BRL-0150 captures).
+    rim: (
+        start: 0.4,
+        end: 0.7,
+        side_start: 0.5,
+        side_end: 0.85,
+        world: (color: (1.0, 0.96, 0.88), strength: 0.0),
+        local: (color: (0.18, 0.95, 0.36), strength: 0.35),
+        ally: (color: (0.12, 0.72, 0.96), strength: 0.35),
+        enemy: (color: (1.0, 0.18, 0.14), strength: 0.35),
+    ),
+)

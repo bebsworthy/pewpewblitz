@@ -14,6 +14,5 @@ pub(in crate::client::presentation_3d) use catalog::{
 pub(in crate::client::presentation_3d) use runtime::{
     EnvironmentAssetReadiness, EnvironmentImportedScenes, EnvironmentMaterialTint,
     FittedEnvironmentScene, load_environment_assets, prepare_environment_scenes,
-    tint_environment_instance,
 };
 pub(crate) use runtime::{EnvironmentThemeMaterialCatalog, EnvironmentThemeMaterials};

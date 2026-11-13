@@ -331,16 +331,24 @@ fn feedback_app() -> App {
             FRAME,
         )))
         .init_resource::<Assets<StandardMaterial>>()
+        .init_resource::<Assets<ToonMaterial>>()
         .insert_resource(catalog)
         .insert_resource(FloatingNumberBook::with_capacity(
             catalog.numbers.pool_capacity,
         ))
         .init_resource::<HitFlashMaterials>()
+        .init_resource::<HitFlashMaterials<ToonMaterial>>()
         .add_message::<DeduplicatedCombatCue>()
         .add_message::<crate::matchplay::ReceivedHeistObjectiveCue>()
         .add_systems(
             Update,
-            (collect_hit_feedback, apply_hit_flash_materials).chain(),
+            (
+                collect_hit_feedback,
+                apply_hit_flash_materials::<StandardMaterial>,
+                apply_hit_flash_materials::<ToonMaterial>,
+                tick_hit_flashes,
+            )
+                .chain(),
         );
     app
 }
@@ -477,10 +485,11 @@ fn ecs_cues_about_unreplicated_targets_leak_nothing() {
 #[test]
 fn ecs_flash_and_concealment_share_the_body_material_without_fighting() {
     let mut app = feedback_app();
-    app.init_resource::<combat::ConcealedMaterialVariants>()
+    app.init_resource::<combat::ConcealedMaterialVariants<StandardMaterial>>()
         .add_systems(
             Update,
-            combat::update_fighter_concealment_visuals.before(apply_hit_flash_materials),
+            combat::update_fighter_concealment_visuals::<StandardMaterial>
+                .before(apply_hit_flash_materials::<StandardMaterial>),
         );
     spawn_presented_fighter(&mut app, 1, true);
     let (_, _, body, base) = spawn_presented_fighter(&mut app, 2, false);
@@ -505,4 +514,56 @@ fn ecs_flash_and_concealment_share_the_body_material_without_fighting() {
         app.update();
     }
     assert_eq!(body_material(&app, body), base);
+}
+
+#[test]
+fn ecs_toon_body_flashes_with_a_toon_variant_and_restores_it() {
+    let mut app = feedback_app();
+    spawn_presented_fighter(&mut app, 1, true);
+    let (_, root, standard_body, _) = spawn_presented_fighter(&mut app, 2, false);
+    let toon_base = app.world_mut().resource_mut::<Assets<ToonMaterial>>().add(
+        ToonShading::embedded().unwrap().material(StandardMaterial {
+            base_color: Color::srgb(0.2, 0.3, 0.9),
+            ..default()
+        }),
+    );
+    let toon_body = app
+        .world_mut()
+        .spawn((MeshMaterial3d(toon_base.clone()), ChildOf(root)))
+        .id();
+    app.update();
+
+    app.world_mut()
+        .write_message(DeduplicatedCombatCue(damage(1, 1, 2, 35)));
+    app.update();
+    let toon_material = |app: &App| {
+        app.world()
+            .get::<MeshMaterial3d<ToonMaterial>>(toon_body)
+            .unwrap()
+            .0
+            .clone()
+    };
+    let flashed = toon_material(&app);
+    let variants = app.world().resource::<HitFlashMaterials<ToonMaterial>>();
+    assert!(variants.is_flash(&flashed), "toon meshes flash too");
+    let materials = app.world().resource::<Assets<ToonMaterial>>();
+    let flash = materials.get(&flashed).unwrap();
+    let base = materials.get(&toon_base).unwrap();
+    assert_eq!(
+        flash.extension, base.extension,
+        "the flash stays toon shaded"
+    );
+    assert!(flash.base.emissive.red >= catalog().flash.emissive);
+    assert!(
+        app.world()
+            .resource::<HitFlashMaterials>()
+            .is_flash(&body_material(&app, standard_body)),
+        "both material families flash on the same frame"
+    );
+
+    for _ in 0..30 {
+        app.update();
+    }
+    assert_eq!(toon_material(&app), toon_base);
+    assert!(app.world().get::<HitFlash>(root).is_none());
 }

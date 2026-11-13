@@ -12,14 +12,23 @@ const DASH_WAKE_WIDTH: f32 = 38.0;
 const DASH_WAKE_REDUCED_WIDTH: f32 = 30.0;
 
 #[derive(Component)]
-pub(in super::super) struct FighterConcealmentMaterial {
-    normal: Handle<StandardMaterial>,
-    concealed: Handle<StandardMaterial>,
+pub(in super::super) struct FighterConcealmentMaterial<M: ShadedMaterial> {
+    normal: Handle<M>,
+    concealed: Handle<M>,
 }
 
-#[derive(Resource, Default)]
-pub(in super::super) struct ConcealedMaterialVariants {
-    handles: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,
+/// Cached translucent variants of fighter body materials, per shaded material family.
+#[derive(Resource)]
+pub(in super::super) struct ConcealedMaterialVariants<M: ShadedMaterial> {
+    handles: HashMap<AssetId<M>, Handle<M>>,
+}
+
+impl<M: ShadedMaterial> Default for ConcealedMaterialVariants<M> {
+    fn default() -> Self {
+        Self {
+            handles: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -129,7 +138,7 @@ type DashFighterQuery<'w, 's> = Query<
     clippy::type_complexity,
     reason = "the presentation pass discovers material-bearing descendants across imported and fallback fighter hierarchies and reads the hit-flash variant map so the two body-material writers agree"
 )]
-pub(in super::super) fn update_fighter_concealment_visuals(
+pub(in super::super) fn update_fighter_concealment_visuals<M: ShadedMaterial>(
     mut commands: Commands,
     roots: Query<(Entity, &CombatVisualOwner), With<V3FighterVisual>>,
     children: Query<&Children>,
@@ -145,14 +154,14 @@ pub(in super::super) fn update_fighter_concealment_visuals(
     mut body_materials: Query<
         (
             Entity,
-            &mut MeshMaterial3d<StandardMaterial>,
-            Option<&FighterConcealmentMaterial>,
+            &mut MeshMaterial3d<M>,
+            Option<&FighterConcealmentMaterial<M>>,
         ),
         Without<FighterGroundMarker3d>,
     >,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut variants: ResMut<ConcealedMaterialVariants>,
-    flash: Res<hit_feedback::HitFlashMaterials>,
+    mut materials: ResMut<Assets<M>>,
+    mut variants: ResMut<ConcealedMaterialVariants<M>>,
+    flash: Res<hit_feedback::HitFlashMaterials<M>>,
 ) {
     let controlled_team = fighters
         .iter()
@@ -217,23 +226,24 @@ fn fighter_is_visually_concealed(
     })
 }
 
-fn concealed_material_variant(
-    source: &Handle<StandardMaterial>,
-    materials: &mut Assets<StandardMaterial>,
-    variants: &mut ConcealedMaterialVariants,
-) -> Option<Handle<StandardMaterial>> {
+fn concealed_material_variant<M: ShadedMaterial>(
+    source: &Handle<M>,
+    materials: &mut Assets<M>,
+    variants: &mut ConcealedMaterialVariants<M>,
+) -> Option<Handle<M>> {
     if let Some(handle) = variants.handles.get(&source.id()) {
         return Some(handle.clone());
     }
     let mut material = materials.get(source)?.clone();
-    let color = material.base_color.to_srgba();
-    material.base_color = Color::srgba(
+    let standard = material.standard_mut();
+    let color = standard.base_color.to_srgba();
+    standard.base_color = Color::srgba(
         color.red,
         color.green,
         color.blue,
         color.alpha * CONCEALED_FIGHTER_ALPHA,
     );
-    material.alpha_mode = AlphaMode::Blend;
+    standard.alpha_mode = AlphaMode::Blend;
     let handle = materials.add(material);
     variants.handles.insert(source.id(), handle.clone());
     Some(handle)
@@ -1014,7 +1024,7 @@ mod tests {
             base_color: Color::srgba(0.2, 0.4, 0.8, 0.9),
             ..default()
         });
-        let mut variants = ConcealedMaterialVariants::default();
+        let mut variants = ConcealedMaterialVariants::<StandardMaterial>::default();
         let concealed = concealed_material_variant(&source, &mut materials, &mut variants).unwrap();
         let color = materials.get(&concealed).unwrap().base_color.to_srgba();
         assert!((color.red - 0.2).abs() < f32::EPSILON);
@@ -1029,6 +1039,23 @@ mod tests {
             concealed_material_variant(&source, &mut materials, &mut variants).unwrap(),
             concealed
         );
+    }
+
+    #[test]
+    fn concealed_toon_material_keeps_toon_shading_and_blends_its_base() {
+        let shading = ToonShading::embedded().unwrap();
+        let mut materials = Assets::<ToonMaterial>::default();
+        let source = materials.add(shading.material(StandardMaterial {
+            base_color: Color::srgb(0.2, 0.4, 0.8),
+            ..default()
+        }));
+        let mut variants = ConcealedMaterialVariants::<ToonMaterial>::default();
+        let concealed = concealed_material_variant(&source, &mut materials, &mut variants).unwrap();
+        let toon = materials.get(&concealed).unwrap();
+        assert_eq!(toon.extension, materials.get(&source).unwrap().extension);
+        assert_eq!(toon.base.alpha_mode, AlphaMode::Blend);
+        let alpha = toon.base.base_color.alpha();
+        assert!((alpha - CONCEALED_FIGHTER_ALPHA).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1092,9 +1119,12 @@ mod tests {
     fn fighter_body_restores_its_exact_material_during_reveal() {
         let mut app = App::new();
         app.init_resource::<Assets<StandardMaterial>>()
-            .init_resource::<ConcealedMaterialVariants>()
+            .init_resource::<ConcealedMaterialVariants<StandardMaterial>>()
             .init_resource::<hit_feedback::HitFlashMaterials>()
-            .add_systems(Update, update_fighter_concealment_visuals);
+            .add_systems(
+                Update,
+                update_fighter_concealment_visuals::<StandardMaterial>,
+            );
         let normal = app
             .world_mut()
             .resource_mut::<Assets<StandardMaterial>>()

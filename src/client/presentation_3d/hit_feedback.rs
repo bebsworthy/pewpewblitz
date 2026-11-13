@@ -18,7 +18,7 @@ mod flash;
 mod numbers;
 
 pub(super) use flash::HitFlashMaterials;
-use flash::{HitFlash, apply_hit_flash_materials};
+use flash::{HitFlash, apply_hit_flash_materials, tick_hit_flashes};
 use numbers::{FloatingNumberBook, ensure_floating_number_pool, project_floating_numbers};
 
 const HIT_FEEDBACK_CATALOG: &str = include_str!("../../../assets/catalogs/hit_feedback.ron");
@@ -522,7 +522,8 @@ pub(super) fn install(app: &mut App) {
         .insert_resource(FloatingNumberBook::with_capacity(
             catalog.numbers.pool_capacity,
         ))
-        .init_resource::<HitFlashMaterials>()
+        .init_resource::<HitFlashMaterials<StandardMaterial>>()
+        .init_resource::<HitFlashMaterials<ToonMaterial>>()
         .add_message::<DeduplicatedCombatCue>()
         .add_message::<crate::matchplay::ReceivedHeistObjectiveCue>()
         .add_systems(
@@ -533,8 +534,14 @@ pub(super) fn install(app: &mut App) {
                 collect_hit_feedback
                     .before(vfx::VfxRequestSet)
                     .in_set(WorldPresentationSet::ConsumeCues),
-                apply_hit_flash_materials
-                    .after(combat::update_fighter_concealment_visuals)
+                (
+                    apply_hit_flash_materials::<StandardMaterial>,
+                    apply_hit_flash_materials::<ToonMaterial>,
+                    tick_hit_flashes,
+                )
+                    .chain()
+                    .after(combat::update_fighter_concealment_visuals::<StandardMaterial>)
+                    .after(combat::update_fighter_concealment_visuals::<ToonMaterial>)
                     .after(update_damageable_map_visuals)
                     .after(update_heist_safe_status_visuals)
                     .in_set(WorldPresentationSet::Animate),

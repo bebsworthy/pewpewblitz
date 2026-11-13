@@ -1258,6 +1258,8 @@ mod tests {
                 Assets<super::super::straight_projectile_style::StraightProjectileTrailMaterial>,
             >()
             .init_resource::<crate::builds::BuildCatalogResource>()
+            .init_resource::<Assets<ToonMaterial>>()
+            .insert_resource(ToonShading::embedded().unwrap())
             .insert_resource(registry)
             .add_message::<VfxRequest>()
             .add_message::<PendingCombatEffect>()

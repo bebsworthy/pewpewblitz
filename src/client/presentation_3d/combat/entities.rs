@@ -1090,7 +1090,7 @@ fn spawn_fighter(
         parent.spawn((
             V3FallbackVisual { owner },
             Mesh3d(primitives.fighter.clone()),
-            MeshMaterial3d(team_material(identity.team, materials)),
+            MeshMaterial3d(fighter_body_material(identity.team, materials)),
             Transform::from_xyz(0.0, fighter_radius, 0.0),
             Name::new("V3 fighter fallback"),
         ));
@@ -1638,6 +1638,8 @@ mod tests {
                 Assets<super::super::straight_projectile_style::StraightProjectileTrailMaterial>,
             >()
             .init_resource::<crate::builds::BuildCatalogResource>()
+            .init_resource::<Assets<ToonMaterial>>()
+            .insert_resource(ToonShading::embedded().unwrap())
             .init_resource::<vfx::VfxSignatureCache>()
             .add_message::<crate::combat::client::DeduplicatedCombatCue>()
             .add_systems(Startup, setup_3d_foundation)

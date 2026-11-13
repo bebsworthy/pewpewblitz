@@ -34,6 +34,7 @@ mod map;
 mod map_editor;
 mod map_palette_preview;
 mod object_health;
+mod toon;
 mod world_look;
 mod zombie;
 
@@ -54,6 +55,8 @@ pub(in crate::client) use map_editor::{
     MapEditorPointerMode, MapEditorPreview, MapEditorPreviewOptions,
 };
 use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_health_ui};
+pub(in crate::client) use toon::install as install_toon_shading;
+use toon::{RimRelation, ShadedMaterial, ToonMaterial, ToonScene, ToonShading};
 pub(in crate::client) use world_look::{WorldLookCatalog, install as install_world_look};
 
 const WALL_HEIGHT: f32 = 32.0;
@@ -224,8 +227,11 @@ pub(crate) struct Material3dAssets {
     pub(crate) sentry_armor_dark: Handle<StandardMaterial>,
     pub(crate) lobbed_shadow: Handle<StandardMaterial>,
     pub(crate) dash: Handle<StandardMaterial>,
-    pub(crate) barrel: Handle<StandardMaterial>,
-    pub(crate) barrel_damaged: Handle<StandardMaterial>,
+    pub(in crate::client) barrel: Handle<ToonMaterial>,
+    pub(in crate::client) barrel_damaged: Handle<ToonMaterial>,
+    /// Primitive fighter bodies, toon shaded like imported fighters.
+    pub(in crate::client) fighter_body_blue: Handle<ToonMaterial>,
+    pub(in crate::client) fighter_body_red: Handle<ToonMaterial>,
     pub(crate) pickup_glow: Handle<StandardMaterial>,
 }
 
@@ -383,6 +389,7 @@ impl Plugin for WorldPresentationPlugin {
         map_palette_preview::install(app);
         hit_feedback::install(app);
         world_look::install(app);
+        toon::install(app);
         app.add_plugins((
             vfx::ProductionVfxPlugin,
             VfxParticleAdapterPlugin,
@@ -401,7 +408,8 @@ impl Plugin for WorldPresentationPlugin {
             .init_resource::<VfxTransientDiagnostics>()
             .init_resource::<combat::MeleeArcMeshCache>()
             .init_resource::<combat::LocalProjectileHandoffs>()
-            .init_resource::<combat::ConcealedMaterialVariants>()
+            .init_resource::<combat::ConcealedMaterialVariants<StandardMaterial>>()
+            .init_resource::<combat::ConcealedMaterialVariants<ToonMaterial>>()
             .init_resource::<crate::combat::client::AimTraceBlockerIndex>()
             .init_resource::<DamageableObjectHealthUiIndex>()
             .init_resource::<camera_rig::CameraRig>()
@@ -484,7 +492,9 @@ impl Plugin for WorldPresentationPlugin {
                 (
                     update_heist_safe_status_visuals,
                     update_damageable_map_visuals,
-                    combat::update_fighter_concealment_visuals,
+                    combat::update_fighter_concealment_visuals::<StandardMaterial>,
+                    combat::update_fighter_concealment_visuals::<ToonMaterial>,
+                    combat::tag_fighter_rim_relation,
                     combat::update_fighter_overhead_state,
                     combat::reconcile_status_visuals,
                     combat::reconcile_dash_trails,
@@ -533,8 +543,7 @@ impl Plugin for WorldPresentationPlugin {
                     .before(UiSystems::Prepare),
             )
             .add_observer(setup_imported_character)
-            .add_observer(zombie::setup_imported_zombie)
-            .add_observer(environment_assets::tint_environment_instance);
+            .add_observer(zombie::setup_imported_zombie);
     }
 }
 
@@ -1120,7 +1129,7 @@ fn update_damageable_map_visuals(
         ),
         With<crate::map::DamageableWorldObject>,
     >,
-    mut visuals: Query<(Ref<DynamicMapVisual>, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut visuals: Query<(Ref<DynamicMapVisual>, &mut MeshMaterial3d<ToonMaterial>)>,
 ) {
     for (visual, mut material) in &mut visuals {
         if visual.asset_id != crate::map::OIL_BARREL_ASSET {
@@ -1161,6 +1170,8 @@ pub(in crate::client) fn setup_3d_foundation(
         Assets<combat::StraightProjectileTrailMaterial>,
     >,
     splash_area_materials: Option<ResMut<Assets<combat::SplashAreaMaterial>>>,
+    mut toon_materials: ResMut<Assets<ToonMaterial>>,
+    toon_shading: Res<ToonShading>,
     asset_server: Option<Res<AssetServer>>,
 ) {
     let fighter_radius = builds.0.fighter_body.radius;
@@ -1550,8 +1561,13 @@ pub(in crate::client) fn setup_3d_foundation(
             unlit: true,
             ..default()
         }),
-        barrel: materials.add(matte(Color::srgb(0.92, 0.38, 0.06))),
-        barrel_damaged: materials.add(matte(Color::srgb(0.34, 0.12, 0.04))),
+        barrel: toon_materials.add(toon_shading.material(matte(Color::srgb(0.92, 0.38, 0.06)))),
+        barrel_damaged: toon_materials
+            .add(toon_shading.material(matte(Color::srgb(0.34, 0.12, 0.04)))),
+        fighter_body_blue: toon_materials
+            .add(toon_shading.material(matte(Color::srgb(0.12, 0.72, 0.96)))),
+        fighter_body_red: toon_materials
+            .add(toon_shading.material(matte(Color::srgb(1.0, 0.42, 0.12)))),
         pickup_glow: materials.add(StandardMaterial {
             base_color: Color::LinearRgba(GLOW_PICKUP),
             alpha_mode: AlphaMode::Blend,
@@ -2321,6 +2337,18 @@ fn team_material(
     }
 }
 
+/// The toon-shaded primitive fighter body for `team`.
+fn fighter_body_material(
+    team: crate::combat::TeamId,
+    materials: &Material3dAssets,
+) -> Handle<ToonMaterial> {
+    if team.0 == 1 {
+        materials.fighter_body_red.clone()
+    } else {
+        materials.fighter_body_blue.clone()
+    }
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
@@ -2428,6 +2456,7 @@ fn upgrade_fighters_to_imported_models(
                     owner: owner.0,
                     visual_root,
                 },
+                ToonScene,
                 WorldAssetRoot(imported.character_scene.clone()),
                 Transform {
                     rotation: Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION),
@@ -2488,6 +2517,7 @@ fn setup_imported_character(
         .collect();
     commands.entity(arm).with_children(|parent| {
         parent.spawn((
+            ToonScene,
             WorldAssetRoot(imported.blaster_scene.clone()),
             Transform {
                 translation: Vec3::new(0.08, 0.0, 0.0),

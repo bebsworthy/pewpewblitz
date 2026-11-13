@@ -1,8 +1,9 @@
 //! The short white hit flash on a damaged presentation root.
 //!
-//! The flash swaps each descendant `StandardMaterial` for a cached white/emissive variant of the
-//! material it currently shows, so a concealed (translucent) fighter flashes translucent, and
-//! restores the base when the flash ends. It runs after every other material writer each frame.
+//! The flash swaps each descendant material for a cached white/emissive variant of the material it
+//! currently shows, so a concealed (translucent) fighter flashes translucent, and restores the base
+//! when the flash ends. It runs after every other material writer each frame, once per shaded
+//! material family (`StandardMaterial` and the toon material).
 
 use super::super::combat::FighterGroundMarker3d;
 use super::*;
@@ -33,22 +34,33 @@ impl HitFlash {
 }
 
 /// Cached flash variants keyed by source material, and the reverse map back to each base.
-#[derive(Resource, Default)]
-pub(in crate::client::presentation_3d) struct HitFlashMaterials {
-    variants: HashMap<(AssetId<StandardMaterial>, bool), Handle<StandardMaterial>>,
-    bases: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,
+#[derive(Resource)]
+pub(in crate::client::presentation_3d) struct HitFlashMaterials<
+    M: ShadedMaterial = StandardMaterial,
+> {
+    variants: HashMap<(AssetId<M>, bool), Handle<M>>,
+    bases: HashMap<AssetId<M>, Handle<M>>,
 }
 
-impl HitFlashMaterials {
+impl<M: ShadedMaterial> Default for HitFlashMaterials<M> {
+    fn default() -> Self {
+        Self {
+            variants: HashMap::new(),
+            bases: HashMap::new(),
+        }
+    }
+}
+
+impl<M: ShadedMaterial> HitFlashMaterials<M> {
     /// The material a flash variant was derived from, or the handle itself when it is not one.
     pub(in crate::client::presentation_3d) fn base_of<'a>(
         &'a self,
-        handle: &'a Handle<StandardMaterial>,
-    ) -> &'a Handle<StandardMaterial> {
+        handle: &'a Handle<M>,
+    ) -> &'a Handle<M> {
         self.bases.get(&handle.id()).unwrap_or(handle)
     }
 
-    pub(super) fn is_flash(&self, handle: &Handle<StandardMaterial>) -> bool {
+    pub(super) fn is_flash(&self, handle: &Handle<M>) -> bool {
         self.bases.contains_key(&handle.id())
     }
 
@@ -59,18 +71,19 @@ impl HitFlashMaterials {
 
     fn variant(
         &mut self,
-        source: &Handle<StandardMaterial>,
+        source: &Handle<M>,
         reduced: bool,
         tuning: &FlashTuning,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> Option<Handle<StandardMaterial>> {
+        materials: &mut Assets<M>,
+    ) -> Option<Handle<M>> {
         if let Some(handle) = self.variants.get(&(source.id(), reduced)) {
             return Some(handle.clone());
         }
         if self.variants.len() >= MAX_HIT_FLASH_VARIANTS {
             return None;
         }
-        let material = flash_material(materials.get(source)?, tuning, reduced);
+        let mut material = materials.get(source)?.clone();
+        *material.standard_mut() = flash_material(material.standard(), tuning, reduced);
         let handle = materials.add(material);
         self.variants.insert((source.id(), reduced), handle.clone());
         self.bases.insert(handle.id(), source.clone());
@@ -108,25 +121,22 @@ pub(super) fn flash_material(
     material
 }
 
-/// Count down active flashes and keep every descendant material of a flashing root on its flash
-/// variant; restore the base materials on the frame a flash ends.
+/// Keep every descendant material of a flashing root on its flash variant, and restore the base
+/// materials on the frame a flash ends. Runs once per shaded material family, before
+/// [`tick_hit_flashes`].
 #[allow(
     clippy::needless_pass_by_value,
-    clippy::too_many_arguments,
-    reason = "one flash pass owns the flash lifecycle, the descendant material swap, and its bounded variant cache"
+    reason = "one flash pass owns the descendant material swap and its bounded variant cache"
 )]
-pub(in crate::client::presentation_3d) fn apply_hit_flash_materials(
-    mut commands: Commands,
-    time: Res<Time>,
+pub(in crate::client::presentation_3d) fn apply_hit_flash_materials<M: ShadedMaterial>(
     catalog: Res<HitFeedbackCatalog>,
-    mut flashes: Query<(Entity, &mut HitFlash)>,
+    flashes: Query<(Entity, &HitFlash)>,
     children: Query<&Children>,
-    mut meshes: Query<&mut MeshMaterial3d<StandardMaterial>, Without<FighterGroundMarker3d>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut variants: ResMut<HitFlashMaterials>,
+    mut meshes: Query<&mut MeshMaterial3d<M>, Without<FighterGroundMarker3d>>,
+    mut materials: ResMut<Assets<M>>,
+    mut variants: ResMut<HitFlashMaterials<M>>,
 ) {
-    let delta = time.delta_secs();
-    for (root, mut flash) in &mut flashes {
+    for (root, flash) in &flashes {
         let active = flash.remaining_seconds > 0.0;
         for entity in core::iter::once(root).chain(children.iter_descendants(root)) {
             let Ok(mut material) = meshes.get_mut(entity) else {
@@ -146,7 +156,23 @@ pub(in crate::client::presentation_3d) fn apply_hit_flash_materials(
                 material.0 = base;
             }
         }
-        if active {
+    }
+}
+
+/// Count down active flashes after every material family has been swapped; a flash whose time ran
+/// out (and whose bases were restored this frame) is removed.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are passed by value"
+)]
+pub(in crate::client::presentation_3d) fn tick_hit_flashes(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut flashes: Query<(Entity, &mut HitFlash)>,
+) {
+    let delta = time.delta_secs();
+    for (root, mut flash) in &mut flashes {
+        if flash.remaining_seconds > 0.0 {
             flash.remaining_seconds -= delta;
         } else {
             commands.entity(root).remove::<HitFlash>();

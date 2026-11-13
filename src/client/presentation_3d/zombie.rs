@@ -187,6 +187,7 @@ pub(super) fn reconcile_zombie_mode_visuals(
             if let Some(scene) = zombie_scene.as_ref() {
                 parent.spawn((
                     ZombieImportedScene { owner },
+                    ToonScene,
                     WorldAssetRoot(scene.clone()),
                     Transform {
                         rotation: Quat::from_rotation_y(KENNEY_CHARACTER_FORWARD_CORRECTION),
