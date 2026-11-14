@@ -362,3 +362,8 @@ No change was felt. When walking into a wall, the fighter visibly "vibrates" as 
 - Avian scales `skin_width` (and depenetration thresholds) by `PhysicsLengthUnit`; a value that
   reads as 0.01 is 1 world unit here. Any client-side mirror of Avian contact must use the scaled
   clearance.
+
+
+## Owner playtest acceptance (2026-11-14, after eba755e9)
+
+The owner confirmed there is no vibration against walls and no bounce-back on stop. Feedback item 2 is implemented and accepted. Open-space smoothing was accepted earlier. Dash stepping is deferred to BRL-0217, and the first-walk-tick correction to BRL-qmqw.

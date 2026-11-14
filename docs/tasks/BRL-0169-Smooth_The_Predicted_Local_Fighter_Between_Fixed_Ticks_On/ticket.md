@@ -3,9 +3,9 @@ id: BRL-0169
 
 title: Smooth the predicted local fighter between fixed ticks on high-refresh displays
 
-status: doing
-closed:
-status_changed: 2026-11-14T06:08:03Z
+status: done
+closed: 2026-11-14T08:40:43Z
+status_changed: 2026-11-14T08:40:43Z
 
 theme: core
 
@@ -19,7 +19,7 @@ related: [BRL-0141, BRL-0217, BRL-qmqw]
 
 parent: BRL-0171
 
-rank: 12648448
+rank:
 ---
 
 # Description
