@@ -11,7 +11,8 @@ use bevy::prelude::*;
 #[derive(Clone, Copy)]
 pub(super) enum ChoiceArt {
     Fighter,
-    Weapon,
+    /// The held model of this weapon family (`dashboard/weapon_preview.rs`).
+    Weapon(crate::presentation_3d::WeaponFamily),
     Icon(&'static str),
 }
 pub(super) struct ChoiceCards<'a> {
@@ -156,9 +157,9 @@ impl ChoiceCards<'_> {
                     },
                 ));
             }
-            ChoiceArt::Weapon => {
+            ChoiceArt::Weapon(family) => {
                 art.spawn((
-                    crate::flow::WeaponPreviewHost,
+                    crate::flow::WeaponPreviewHost(family),
                     Node {
                         width: percent(85),
                         height: percent(100),

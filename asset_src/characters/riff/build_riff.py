@@ -11,6 +11,10 @@ frozen V1 helpers). This script applies the production deltas owned by BRL-0154:
 - the gameplay animation set (idle, run, dash, hit_front, ko, victory, ultimate, and per weapon
   family `combat_idle_<family>` / `attack_<family>`), keyed on every deform bone so clips never
   leak channels into each other;
+- two-handed family clips (BRL-q29d) that place the family's weapon and bake both arms onto it with
+  a two-bone IK solve per frame: the weapon hand onto `grip_primary` and the support hand onto the
+  weapon's `grip_secondary`, read from the shipped weapon GLBs named by
+  `assets/catalogs/fighter_weapons.ron` (build them first with `just weapon-assets`);
 - one joined, flat-shaded, vertex-coloured runtime mesh with a single material.
 
 It writes the source master `riff.blend`, review renders under `previews/`, and the runtime
@@ -23,6 +27,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import re
 import struct
 import sys
 from pathlib import Path
@@ -38,7 +43,12 @@ V2_SCRIPT = HERE / "versions" / "v2" / "build_riff_v2.py"
 BLEND_PATH = HERE / "riff.blend"
 PREVIEW_DIR = HERE / "previews"
 GLB_PATH = REPOSITORY / "assets" / "brawler" / "models" / "original" / "characters" / "riff" / "chr_riff.glb"
-REVIEW_BLASTER = REPOSITORY / "assets" / "brawler" / "models" / "kenney" / "blaster-kit" / "blaster-a.glb"
+# The client's per-family weapon catalog; its family -> model rows are the single source of which
+# weapon each family clip is authored against.
+WEAPON_CATALOG = REPOSITORY / "assets" / "catalogs" / "fighter_weapons.ron"
+CATALOG_FAMILIES = {"OneHanded": "1h", "Heavy": "heavy", "Throwable": "throwable", "Melee": "melee"}
+# A baked hand may miss its weapon anchor by at most this much (source units; a hand is ~0.15).
+GRIP_TOLERANCE = 0.02
 
 FPS = 24
 # Head block (chin to crown) is scaled about the neck joint; ears scale less so they stay a
@@ -47,8 +57,6 @@ NECK_PIVOT = Vector((0.0, 0.0, 0.94))
 HEAD_SCALE = 1.45
 EAR_LENGTH_SCALE = 0.80  # applied after HEAD_SCALE, so ears end up about 1.16x V2 length
 EAR_BASES = {"l": Vector((-0.19, 0.01, 1.46)), "r": Vector((0.19, -0.04, 1.46))}
-# Review-only weapon scale relative to Riff source units (the runtime scale lives in Rust).
-REVIEW_BLASTER_SCALE = 0.78
 
 TRIANGLE_BUDGET = 10_000
 GLB_BYTE_BUDGET = 700_000
@@ -68,6 +76,29 @@ v2 = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(v2)
 v1 = v2.v1
+
+
+def family_weapons() -> dict[str, tuple[Path, Vector | None]]:
+    """Each family's weapon GLB (from the client catalog) and its `grip_secondary` anchor.
+
+    The anchor is converted from the exported glTF frame (+Y up, +Z forward) back to the weapon's
+    Blender frame (+Z up, -Y forward), relative to `weapon_root` on the weapon hand's socket.
+    """
+    rows = re.findall(r'family:\s*(\w+),\s*model:\s*"([^"]+)"', WEAPON_CATALOG.read_text())
+    weapons = {}
+    for family, model in rows:
+        path = REPOSITORY / "assets" / model
+        document, _ = read_glb(path)
+        anchor = next((node for node in document["nodes"] if node.get("name") == "grip_secondary"),
+                      None)
+        secondary = None
+        if anchor is not None:
+            x, y, z = anchor.get("translation", (0.0, 0.0, 0.0))
+            secondary = Vector((x, -z, y))
+        weapons[CATALOG_FAMILIES[family]] = (path, secondary)
+    if sorted(weapons) != sorted(FAMILIES) or len(rows) != len(FAMILIES):
+        raise SystemExit(f"RIFF BUILD: {WEAPON_CATALOG} must name one weapon per family {FAMILIES}")
+    return weapons
 
 
 # --------------------------------------------------------------------------------------------
@@ -132,6 +163,9 @@ class Poser:
         self.arm = arm
         self.bones = deform_bones(arm)
         self.rest = {bone.name: bone.matrix_local.to_quaternion() for bone in arm.data.bones}
+        self.grip_error = 0.0
+        # Worst hand-to-anchor miss per clip that holds a placed weapon.
+        self.grip_errors: dict[str, float] = {}
 
     def local_rotation(self, bone: str, degrees) -> Quaternion:
         world = Euler(tuple(math.radians(value) for value in degrees), "XYZ").to_quaternion()
@@ -152,6 +186,7 @@ class Poser:
             pb.rotation_quaternion = self.local_rotation(bone, pose.get(bone, (0, 0, 0)))
             pb.location = self.local_location(bone, pose.get(f"{bone}@", (0, 0, 0)))
             pb.scale = (1, 1, 1)
+        self.grip_error = 0.0
         for side in ("r", "l"):
             if f"aim_{side}" not in pose:
                 continue
@@ -164,13 +199,82 @@ class Poser:
             desired.translation = pb.matrix.translation
             pb.matrix = desired
         bpy.context.view_layer.update()
+        if "weapon" in pose:
+            self.hold_weapon(pose["weapon"], pose.get("grip_secondary"))
         for bone in self.bones:
             pb = self.arm.pose.bones[bone]
             values[bone] = (pb.rotation_quaternion.copy(), pb.location.copy())
         return values
 
+    def weapon_matrix(self, placement) -> Matrix:
+        """The weapon's armature-space frame for a `weapon` placement authored in the rest chest
+        frame: (x, y, z, pitch up, yaw toward the weapon side, roll) in source units and degrees.
+        It follows the posed chest, so breathing, recoil, and twists carry the weapon."""
+        x, y, z, pitch, yaw, roll = placement
+        rotation = (Matrix.Rotation(math.radians(yaw), 4, "Z")
+                    @ Matrix.Rotation(math.radians(-pitch), 4, "X")
+                    @ Matrix.Rotation(math.radians(roll), 4, "Y"))
+        chest = (self.arm.pose.bones["chest"].matrix
+                 @ self.arm.data.bones["chest"].matrix_local.inverted())
+        return chest @ Matrix.Translation((x, y, z)) @ rotation
+
+    def point(self, pb, direction: Vector) -> None:
+        """Swings a posed bone about its head so its Y axis points along `direction`."""
+        current = pb.matrix.copy()
+        swing = current.col[1].xyz.normalized().rotation_difference(direction.normalized())
+        pointed = (swing.to_matrix() @ current.to_3x3()).to_4x4()
+        pointed.translation = current.translation
+        pb.matrix = pointed
+        bpy.context.view_layer.update()
+
+    def reach(self, side: str, palm: Vector, rotation: Matrix) -> float:
+        """Two-bone IK: bends the arm so the hand, turned by `rotation` from its rest frame, puts
+        its weapon socket on `palm`. Elbows bend down, out, and back. Returns the miss distance."""
+        bones = self.arm.data.bones
+        offset = bones[f"socket_weapon_{side}"].head_local - bones[f"hand_{side}"].head_local
+        wrist = palm - rotation @ offset
+        upper = self.arm.pose.bones[f"upperarm_{side}"]
+        fore = self.arm.pose.bones[f"forearm_{side}"]
+        hand = self.arm.pose.bones[f"hand_{side}"]
+        shoulder = upper.head.copy()
+        upper_length = (fore.head - upper.head).length
+        fore_length = (hand.head - fore.head).length
+        to_wrist = wrist - shoulder
+        distance = min(max(to_wrist.length, abs(upper_length - fore_length) + 1e-4),
+                       (upper_length + fore_length) * 0.999)
+        direction = to_wrist.normalized()
+        pole = Vector((0.7 if side == "r" else -0.7, 0.35, -1.0))
+        bend = (pole - direction * pole.dot(direction)).normalized()
+        cosine = (upper_length ** 2 + distance ** 2 - fore_length ** 2) / (2 * upper_length * distance)
+        elbow = shoulder + upper_length * (direction * cosine
+                                           + bend * math.sqrt(max(0.0, 1.0 - cosine ** 2)))
+        self.point(upper, elbow - shoulder)
+        self.point(fore, shoulder + direction * distance - elbow)
+        turned = (rotation @ bones[f"hand_{side}"].matrix_local.to_3x3()).to_4x4()
+        turned.translation = hand.head
+        hand.matrix = turned
+        bpy.context.view_layer.update()
+        return (self.arm.pose.bones[f"socket_weapon_{side}"].head - palm).length
+
+    def hold_weapon(self, placement, secondary) -> None:
+        """Places the weapon, then bakes the weapon hand onto `grip_primary` and, for a
+        two-handed weapon, the support hand onto its `grip_secondary`."""
+        bpy.context.view_layer.update()
+        weapon = self.weapon_matrix(placement)
+        rotation = weapon.to_3x3()
+        errors = [self.reach("r", weapon.translation.copy(), rotation)]
+        if secondary is not None:
+            errors.append(self.reach("l", weapon @ Vector(secondary), rotation))
+        self.grip_error = max(errors)
+
     def action(self, name: str, keys: list[tuple[int, dict]], loop: bool) -> bpy.types.Action:
-        solved = [(frame, self.solve(pose)) for frame, pose in keys]
+        solved = []
+        worst = 0.0
+        for frame, pose in keys:
+            solved.append((frame, self.solve(pose)))
+            worst = max(worst, self.grip_error)
+        if any("weapon" in pose for _frame, pose in keys):
+            self.grip_errors[name] = round(worst, 4)
         action = bpy.data.actions.new(name=name)
         action.use_fake_user = True
         self.arm.animation_data.action = action
@@ -197,6 +301,31 @@ def merged(*poses: dict) -> dict:
     for pose in poses:
         result.update(pose)
     return result
+
+
+def blend(first: dict, second: dict, t: float) -> dict:
+    """Interpolates two poses value by value. A missing joint value is its zero rest offset; a
+    missing weapon placement, grip, or aim is held from the other pose."""
+    result = {}
+    for key in first.keys() | second.keys():
+        held = key in ("weapon", "grip_secondary") or key.startswith("aim_")
+        other = second.get(key, first.get(key))
+        a = first.get(key, other if held else (0.0,) * len(other))
+        b = second.get(key, a if held else (0.0,) * len(a))
+        result[key] = tuple(x + (y - x) * t for x, y in zip(a, b))
+    return result
+
+
+def sampled(keys: list[tuple[int, dict]]) -> list[tuple[int, dict]]:
+    """One eased key per frame between the authored keys, so a per-frame IK solve keeps both hands
+    on a placed weapon throughout the clip instead of drifting between keys."""
+    frames = []
+    for (start, first), (end, second) in zip(keys, keys[1:]):
+        for frame in range(start, end):
+            t = (frame - start) / (end - start)
+            frames.append((frame, blend(first, second, t * t * (3.0 - 2.0 * t))))
+    frames.append(keys[-1])
+    return frames
 
 
 def mirror(pose: dict) -> dict:
@@ -233,20 +362,33 @@ FAMILY_HOLD = {
     # One-handed blaster held forward at chest height; off hand loose and ready.
     "1h": {"upperarm_r": (-80, 0, 8), "forearm_r": (-14, 0, 0), "aim_r": (0, 0),
            "upperarm_l": (-18, 0, 0), "forearm_l": (-30, 0, 0), "chest": (3, 0, 4)},
-    # Heavy sprayer braced low with both hands, wide stance, leaning into it.
-    "heavy": {"upperarm_r": (-48, 0, 12), "forearm_r": (-38, 0, 0), "aim_r": (0, 0),
-              "upperarm_l": (-58, 0, -30), "forearm_l": (-46, 0, -20), "chest": (8, 0, 10),
+    # Two-handed families place the weapon (`weapon`: x, y, z in the rest chest frame, then pitch
+    # up, yaw toward the weapon side, roll, in degrees) and bake both hands onto it.
+    # A chibi support arm is short, so two-handed weapons sit centred in front of the belly with
+    # the body turned about 30 degrees into the weapon side, the support shoulder pushed forward,
+    # and the head turned back to the front.
+    # Heavy sprayer braced low, wide stance.
+    "heavy": {"weapon": (0.04, -0.29, 0.63, 2, -32, 0), "spine_02": (4, 0, 12), "chest": (6, 0, 18),
+              "head": (0, 0, -26), "clavicle_l": (0, 0, 25), "clavicle_r": (0, 0, -8),
               "thigh_l": (0, 9, 0), "thigh_r": (0, -9, 0), "pelvis@": (0, 0, -0.03)},
-    # Lobber cocked back over the shoulder, off hand pointing at the target.
-    "throwable": {"upperarm_r": (24, -110, 0), "forearm_r": (-70, 0, 0), "aim_r": (28, 0),
-                  "upperarm_l": (-62, 0, -10), "forearm_l": (-10, 0, 0), "chest": (-2, 0, 14)},
-    # Melee: weapon drawn back to the side, body coiled for a swing.
-    "melee": {"upperarm_r": (10, -55, 0), "forearm_r": (-55, 0, 0), "aim_r": (-10, 35),
-              "upperarm_l": (-30, 0, 0), "forearm_l": (-40, 0, 0), "chest": (6, 0, 20)},
+    # Lobber held at chest height with the muzzle tipped up for the arc.
+    "throwable": {"weapon": (0.04, -0.30, 0.64, 20, -32, 0), "spine_02": (0, 0, 12),
+                  "chest": (2, 0, 18), "head": (0, 0, -26), "clavicle_l": (0, 0, 25),
+                  "clavicle_r": (0, 0, -8)},
+    # Impact blade held up on the weapon side in a two-handed guard, body coiled.
+    "melee": {"weapon": (0.06, -0.30, 0.66, 42, 30, -25), "spine_02": (0, 0, 8), "chest": (6, 0, 14),
+              "head": (0, 0, -20), "clavicle_l": (0, 0, 25), "clavicle_r": (0, 0, -8),
+              "thigh_l": (0, 6, 0), "thigh_r": (0, -6, 0)},
 }
 
 
-def build_actions(arm) -> None:
+def placed(pose: dict, dx=0.0, dy=0.0, dz=0.0, pitch=0.0, yaw=0.0, roll=0.0, **joints) -> dict:
+    """A pose whose weapon placement is offset from `pose`'s, with joint overrides merged in."""
+    x, y, z, p, w, r = pose["weapon"]
+    return merged(pose, {"weapon": (x + dx, y + dy, z + dz, p + pitch, w + yaw, r + roll)}, joints)
+
+
+def build_actions(arm, weapons) -> Poser:
     poser = Poser(arm)
     arm.animation_data_create()
 
@@ -352,12 +494,20 @@ def build_actions(arm) -> None:
     poser.action("ultimate", [(1, RELAXED), (5, wind), (9, burst), (13, merged(burst, {"chest": (-8, 0, 0)})),
                               (18, RELAXED)], loop=False)
 
-    # Weapon families: a calm ready loop plus a short one-shot attack with recoil.
+    # Weapon families: a calm ready loop plus a short one-shot attack with recoil. Two-handed
+    # families carry their weapon's support-grip anchor and are sampled every frame.
+    holds = {}
     for family, hold in FAMILY_HOLD.items():
+        secondary = weapons[family][1]
+        if "weapon" in hold:
+            hold = merged(hold, {"grip_secondary": tuple(secondary)})
+        holds[family] = hold
         breathe = merged(hold, {"pelvis@": (hold.get("pelvis@", (0, 0, 0))[0], 0,
                                             hold.get("pelvis@", (0, 0, 0))[2] - 0.012),
-                                "head": (2, 0, 0), "ear_l_02": (3, 0, 0), "ear_r_02": (-2, 0, 0)})
-        poser.action(f"combat_idle_{family}", [(1, hold), (17, breathe), (33, hold)], loop=True)
+                                "head": (2, 0, hold.get("head", (0, 0, 0))[2]),
+                                "ear_l_02": (3, 0, 0), "ear_r_02": (-2, 0, 0)})
+        keys = [(1, hold), (17, breathe), (33, hold)]
+        poser.action(f"combat_idle_{family}", sampled(keys) if "weapon" in hold else keys, loop=True)
     recoil_ears = {"ear_l_01": (-14, 3, 0), "ear_r_01": (-12, -3, 0)}
     poser.action("attack_1h", [
         (1, FAMILY_HOLD["1h"]),
@@ -366,36 +516,37 @@ def build_actions(arm) -> None:
                                                     "pelvis@": (0, 0.025, 0)})),
         (7, FAMILY_HOLD["1h"]),
     ], loop=False)
-    poser.action("attack_heavy", [
-        (1, FAMILY_HOLD["heavy"]),
-        (2, merged(FAMILY_HOLD["heavy"], recoil_ears, {"chest": (-4, 0, 10), "upperarm_r": (-40, 0, 12),
-                                                       "upperarm_l": (-50, 0, -30), "aim_r": (6, 0),
-                                                       "pelvis@": (0, 0.04, -0.03)})),
-        (4, merged(FAMILY_HOLD["heavy"], {"chest": (4, 0, 10), "pelvis@": (0, 0.02, -0.03)})),
-        (8, FAMILY_HOLD["heavy"]),
-    ], loop=False)
-    poser.action("attack_throwable", [
-        (1, FAMILY_HOLD["throwable"]),
-        (3, merged(FAMILY_HOLD["throwable"], {"upperarm_r": (-150, -20, 0), "forearm_r": (-20, 0, 0),
-                                              "aim_r": (-30, 0), "chest": (14, 0, -10), "head": (4, 0, 0)})),
-        (6, merged(FAMILY_HOLD["throwable"], recoil_ears, {"upperarm_r": (-70, 0, 0), "forearm_r": (-10, 0, 0),
-                                                           "aim_r": (-10, 0), "chest": (16, 0, -14)})),
-        (11, FAMILY_HOLD["throwable"]),
-    ], loop=False)
-    poser.action("attack_melee", [
-        (1, FAMILY_HOLD["melee"]),
-        (3, merged(FAMILY_HOLD["melee"], {"upperarm_r": (-70, -20, -60), "forearm_r": (-20, 0, 0),
-                                          "aim_r": (0, -30), "chest": (6, 0, -26), "spine_02": (0, 0, -10)})),
-        (6, merged(FAMILY_HOLD["melee"], recoil_ears, {"upperarm_r": (-50, 10, -80), "forearm_r": (-10, 0, 0),
-                                                       "aim_r": (0, -60), "chest": (8, 0, -34),
-                                                       "spine_02": (0, 0, -14)})),
-        (10, FAMILY_HOLD["melee"]),
-    ], loop=False)
+    heavy = holds["heavy"]
+    poser.action("attack_heavy", sampled([
+        (1, heavy),
+        (2, merged(placed(heavy, dy=0.05, dz=0.01, pitch=5), recoil_ears,
+                   {"chest": (-2, 0, 12), "pelvis@": (0, 0.04, -0.03)})),
+        (4, merged(placed(heavy, dy=0.02, pitch=2), {"pelvis@": (0, 0.02, -0.03)})),
+        (8, heavy),
+    ]), loop=False)
+    throwable = holds["throwable"]
+    poser.action("attack_throwable", sampled([
+        (1, throwable),
+        (3, merged(placed(throwable, dy=0.07, dz=-0.01, pitch=9), recoil_ears,
+                   {"chest": (-8, 0, 12), "head": (-6, 0, -12), "pelvis@": (0, 0.03, 0)})),
+        (6, placed(throwable, dy=0.03, pitch=4)),
+        (11, throwable),
+    ]), loop=False)
+    melee = holds["melee"]
+    poser.action("attack_melee", sampled([
+        (1, melee),
+        (3, placed(melee, dx=0.04, dy=0.06, dz=0.04, pitch=10, yaw=20,
+                   chest=(4, 0, 24), spine_02=(0, 0, 10))),
+        (6, merged(placed(melee, dx=-0.08, dy=-0.06, dz=-0.06, pitch=-52, yaw=-40, roll=10),
+                   recoil_ears, {"chest": (10, 0, -8), "spine_02": (2, 0, -6), "head": (0, 0, 0)})),
+        (10, melee),
+    ]), loop=False)
 
     for pb in arm.pose.bones:
         pb.rotation_mode = "QUATERNION"
         pb.rotation_quaternion = (1, 0, 0, 0)
         pb.location = (0, 0, 0)
+    return poser
 
 
 # --------------------------------------------------------------------------------------------
@@ -558,27 +709,41 @@ def validate_export() -> dict:
 # Review renders
 # --------------------------------------------------------------------------------------------
 
-def attach_review_blaster(arm, collection):
-    before = set(bpy.data.objects)
-    bpy.ops.import_scene.gltf(filepath=str(REVIEW_BLASTER))
-    imported = [obj for obj in bpy.data.objects if obj not in before]
-    root = bpy.data.objects.new("REVIEW_blaster", None)
-    collection.objects.link(root)
-    for obj in imported:
-        v1.move_to_collection(obj, collection)
-        if obj.parent is None:
-            obj.parent = root
+def attach_review_weapons(arm, collection, weapons) -> dict[str, bpy.types.Object]:
+    """Imports each family's shipped weapon GLB onto `socket_weapon_r` exactly as the client
+    attaches it: `weapon_root` on the socket head in the hand's posed frame, at runtime scale 1."""
+    roots = {}
     socket = arm.data.bones["socket_weapon_r"]
-    root.parent = arm
-    root.parent_type = "BONE"
-    root.parent_bone = "socket_weapon_r"
-    root.matrix_parent_inverse = Matrix.Identity(4)
-    bpy.context.view_layer.update()
-    # The glTF importer already turns the blaster's +Z barrel into Blender -Y (Riff's forward), so
-    # keep its world orientation at the socket head; hand aiming keeps that frame in held poses.
-    root.matrix_world = (Matrix.Translation(arm.matrix_world @ socket.head_local)
-                         @ Matrix.Scale(REVIEW_BLASTER_SCALE, 4))
-    return root
+    for family, (path, _secondary) in weapons.items():
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=str(path))
+        imported = [obj for obj in bpy.data.objects if obj not in before]
+        root = bpy.data.objects.new(f"REVIEW_weapon_{family}", None)
+        collection.objects.link(root)
+        for obj in imported:
+            v1.move_to_collection(obj, collection)
+            if obj.parent is None:
+                obj.parent = root
+        root.parent = arm
+        root.parent_type = "BONE"
+        root.parent_bone = "socket_weapon_r"
+        root.matrix_parent_inverse = Matrix.Identity(4)
+        bpy.context.view_layer.update()
+        # The glTF importer turns the weapon's +Z forward into Blender -Y (Riff's forward), so
+        # keep its world orientation at the socket head; hand aiming keeps that frame when posed.
+        root.matrix_world = Matrix.Translation(arm.matrix_world @ socket.head_local)
+        roots[family] = root
+    return roots
+
+
+def show_weapon(roots: dict[str, bpy.types.Object], family: str) -> None:
+    for name, root in roots.items():
+        for obj in [root, *root.children_recursive]:
+            obj.hide_render = name != family
+
+
+def clip_family(action: str) -> str:
+    return next((family for family in FAMILIES if action.endswith(f"_{family}")), "1h")
 
 
 def render(camera, path: Path, location, target, lens=None, ortho=None, size=(700, 700)):
@@ -596,15 +761,18 @@ def render(camera, path: Path, location, target, lens=None, ortho=None, size=(70
     bpy.ops.render.render(write_still=True)
 
 
-def contact_sheet(arm, camera, cells: list[tuple[str, int]], path: Path, columns: int = 6) -> None:
+def contact_sheet(arm, camera, cells: list[tuple[str, int]], path: Path, weapons,
+                  columns: int = 6, view=((3.4, -4.2, 2.2), (0, 0, 0.95), 50)) -> None:
     tile = 320
     scratch = PREVIEW_DIR / "_tile.png"
     rows = math.ceil(len(cells) / columns)
     sheet = np.zeros((rows * tile, columns * tile, 4), dtype=np.float32)
+    location, target, lens = view
     for index, (action, frame) in enumerate(cells):
         arm.animation_data.action = bpy.data.actions[action]
+        show_weapon(weapons, clip_family(action))
         bpy.context.scene.frame_set(frame)
-        render(camera, scratch, (3.4, -4.2, 2.2), (0, 0, 0.95), lens=50, size=(tile, tile))
+        render(camera, scratch, location, target, lens=lens, size=(tile, tile))
         image = bpy.data.images.load(str(scratch))
         pixels = np.array(image.pixels[:], dtype=np.float32).reshape(tile, tile, 4)
         bpy.data.images.remove(image)
@@ -621,10 +789,11 @@ def contact_sheet(arm, camera, cells: list[tuple[str, int]], path: Path, columns
     arm.animation_data.action = None
 
 
-def review_renders(arm, mats) -> None:
+def review_renders(arm, mats, weapons) -> None:
     review = v1.make_collection("REVIEW__riff")
     camera = v1.setup_review(review, mats)
-    attach_review_blaster(arm, review)
+    roots = attach_review_weapons(arm, review, weapons)
+    show_weapon(roots, "1h")
     scene = bpy.context.scene
     scene.render.fps = FPS
     scene.view_settings.view_transform = "AgX"
@@ -652,7 +821,18 @@ def review_renders(arm, mats) -> None:
         ("run", 1), ("run", 5), ("run", 9), ("run", 13), ("dash", 1), ("hit_front", 3),
         ("ko", 7), ("ko", 16), ("ko", 32), ("victory", 1), ("victory", 13), ("ultimate", 9),
     ]
-    contact_sheet(arm, camera, cells, PREVIEW_DIR / "riff-animation-sheet.png")
+    contact_sheet(arm, camera, cells, PREVIEW_DIR / "riff-animation-sheet.png", roots)
+    # Every family weapon in its hold and attack peak from the gameplay elevation (BRL-q29d).
+    weapon_cells = [
+        ("combat_idle_1h", 1), ("attack_1h", 2), ("combat_idle_heavy", 1), ("attack_heavy", 2),
+        ("combat_idle_throwable", 1), ("attack_throwable", 3), ("combat_idle_melee", 1),
+        ("attack_melee", 3), ("attack_melee", 6), ("run", 5), ("idle", 1), ("combat_idle_heavy", 17),
+    ]
+    contact_sheet(arm, camera, weapon_cells, PREVIEW_DIR / "riff-weapons-gameplay.png", roots,
+                  view=((2.6, -4.6, 5.4), (0, -0.15, 0.75), 45))
+    contact_sheet(arm, camera, weapon_cells, PREVIEW_DIR / "riff-weapons-front.png", roots,
+                  view=((1.2, -5.2, 1.6), (0, -0.15, 0.9), 50))
+    show_weapon(roots, "1h")
     review.hide_render = True
 
 
@@ -700,7 +880,8 @@ def main() -> None:
 
     arm, parts = v2.build_character(geo, rig_collection, mats)
     apply_production_proportions(arm, parts)
-    build_actions(arm)
+    weapons = family_weapons()
+    poser = build_actions(arm, weapons)
     runtime_mesh = build_runtime_mesh(arm, parts, export_collection)
     geo.hide_render = True
     geo.hide_viewport = True
@@ -713,6 +894,7 @@ def main() -> None:
     ear_z = max((obj.matrix_world @ vertex.co).z for obj, _ in parts if obj.name.startswith("GEO_ear_")
                 for vertex in obj.data.vertices)
     crown = max(head_z)
+    report["two_handed_grip_error"] = poser.grip_errors
     report.update({
         "source_min_z": round(min(heights), 4), "source_crown_z": round(crown, 4),
         "source_top_z": round(max(heights), 4), "ear_top_z": round(ear_z, 4),
@@ -724,7 +906,11 @@ def main() -> None:
     })
 
     if "--no-renders" not in sys.argv:
-        review_renders(arm, mats)
+        review_renders(arm, mats, weapons)
+    # Checked after the review renders so a failing pose can be inspected in them.
+    misses = {clip: error for clip, error in poser.grip_errors.items() if error > GRIP_TOLERANCE}
+    if misses:
+        raise SystemExit(f"RIFF BUILD: hands miss their weapon anchors (> {GRIP_TOLERANCE}): {misses}")
     bpy.ops.wm.save_as_mainfile(filepath=str(BLEND_PATH), check_existing=False)
     print("RIFF_BUILD_REPORT " + json.dumps(report, sort_keys=True))
 

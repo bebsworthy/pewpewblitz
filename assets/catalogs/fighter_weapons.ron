@@ -1,0 +1,20 @@
+// Client-only held-weapon presentation per animation family (BRL-q29d). Presentation only: nothing
+// here feeds simulation or the gameplay content fingerprint. The family comes from the replicated
+// primary weapon delivery (Straight/StickyStraight -> OneHanded, ConeSpray -> Heavy,
+// Lobbed/Splash -> Throwable, MeleeArc -> Melee). Validation bounds live in
+// `packages/brawler-client/src/presentation_3d/fighter_weapons.rs`.
+//
+// Models are original GLBs built by `asset_src/weapons/build_weapons.py` (`just weapon-assets`).
+// Riff's builder (`just riff-asset`) reads this file to bake the support hand of each two-handed
+// family onto that model's `grip_secondary`, so rebuild Riff after changing a model here.
+(
+    schema_version: 1,
+    weapons: [
+        // `preview_scale` and `preview_center` (model source units, glTF frame: +Z forward, +Y up)
+        // frame each model in the shell weapon preview at about the same on-screen length.
+        (family: OneHanded, model: "brawler/models/original/weapons/wpn_blaster.glb", preview_scale: 1.05, preview_center: (0.0, 0.02, 0.15)),
+        (family: Heavy, model: "brawler/models/original/weapons/wpn_sprayer.glb", preview_scale: 0.72, preview_center: (0.0, 0.1, 0.26)),
+        (family: Throwable, model: "brawler/models/original/weapons/wpn_lobber.glb", preview_scale: 0.88, preview_center: (0.0, 0.1, 0.25)),
+        (family: Melee, model: "brawler/models/original/weapons/wpn_blade.glb", preview_scale: 0.58, preview_center: (0.0, 0.0, 0.39)),
+    ],
+)

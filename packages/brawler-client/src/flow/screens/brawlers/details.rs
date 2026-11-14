@@ -536,7 +536,12 @@ impl DetailsView<'_> {
                 })
                 .with_children(|frame| {
                     frame.spawn((
-                        crate::flow::WeaponPreviewHost,
+                        crate::flow::WeaponPreviewHost(
+                            crate::presentation_3d::advertised_weapon_family(
+                                self.catalog,
+                                self.brawler.weapon_base_id,
+                            ),
+                        ),
                         Node {
                             width: percent(100),
                             height: percent(100),

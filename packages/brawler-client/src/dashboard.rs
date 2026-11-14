@@ -69,7 +69,7 @@ struct DashboardImportedSpawned;
 #[derive(Component, Clone, Copy)]
 enum DashboardImportedScene {
     Character,
-    Blaster,
+    Weapon,
 }
 
 pub(super) struct ClientDashboardPlugin;
@@ -94,6 +94,7 @@ impl Plugin for ClientDashboardPlugin {
                     ensure_brawler_card_target,
                     bind_brawler_card_previews,
                     upgrade_dashboard_preview,
+                    sync_dashboard_preview_weapon,
                 )
                     .chain()
                     .run_if(
@@ -542,7 +543,7 @@ fn setup_dashboard_imported_scene(
     for descendant in &descendants {
         commands.entity(*descendant).insert(layer.clone());
     }
-    if matches!(scene, DashboardImportedScene::Blaster) {
+    if matches!(scene, DashboardImportedScene::Weapon) {
         return;
     }
     let Some(imported) = imported else {
@@ -553,12 +554,10 @@ fn setup_dashboard_imported_scene(
     else {
         return;
     };
-    commands.entity(socket).with_child((
-        DashboardImportedScene::Blaster,
-        super::presentation_3d::player_preview_toon_scene(),
-        super::presentation_3d::blaster_attachment(imported.blaster_scene.clone()),
-        layer,
-    ));
+    // `sync_dashboard_preview_weapon` attaches the selected brawler's weapon family.
+    commands
+        .entity(ready.entity)
+        .insert(super::presentation_3d::HeldWeapon::new(socket));
     if let Ok(mut animation_player) = players.get_mut(player) {
         let mut transitions = AnimationTransitions::new();
         transitions
@@ -571,6 +570,40 @@ fn setup_dashboard_imported_scene(
     }
     for mut visibility in &mut fallbacks {
         *visibility = Visibility::Hidden;
+    }
+}
+
+/// Keeps the preview brawler holding the selected saved brawler's primary weapon family model.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are passed by value"
+)]
+fn sync_dashboard_preview_weapon(
+    mut commands: Commands,
+    imported: Option<Res<super::presentation_3d::Imported3dAssets>>,
+    memberships: Query<&super::ClientLobbyMembership>,
+    mut held_weapons: Query<&mut super::presentation_3d::HeldWeapon, With<DashboardImportedScene>>,
+) {
+    let Some(imported) = imported else {
+        return;
+    };
+    let family = memberships.iter().next().map_or(
+        super::presentation_3d::WeaponFamily::OneHanded,
+        super::presentation_3d::selected_weapon_family,
+    );
+    for mut held in &mut held_weapons {
+        if let Some(socket) = held.begin_swap(&mut commands, family) {
+            let weapon = commands
+                .spawn((
+                    DashboardImportedScene::Weapon,
+                    super::presentation_3d::player_preview_toon_scene(),
+                    super::presentation_3d::weapon_attachment(&imported, family),
+                    RenderLayers::layer(DASHBOARD_RENDER_LAYER),
+                    ChildOf(socket),
+                ))
+                .id();
+            held.attached(family, weapon);
+        }
     }
 }
 

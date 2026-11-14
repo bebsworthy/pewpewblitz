@@ -11,10 +11,11 @@ entirely by checked-in procedural Blender scripts from the brief in `spec.md` an
   chibi head proportions, the gameplay animation set, and one joined vertex-coloured runtime mesh.
 - `riff.blend` — the generated source master: separated `GEO__riff` parts with their materials, the
   `RIG__riff` armature with every action, the joined `EXPORT__riff` runtime mesh, and the
-  `REVIEW__riff` camera, lights, ground, and review-only blaster.
+  `REVIEW__riff` camera, lights, ground, and the four review-only family weapons.
 - `previews/` — generated review renders: `riff-front.png` and `riff-side.png` (orthographic),
   `riff-three-quarter.png`, `riff-gameplay.png` (55-degree gameplay elevation, 1h hold), and
-  `riff-animation-sheet.png` (key poses of every clip).
+  `riff-animation-sheet.png` (key poses of every clip, each family clip with its weapon), and
+  `riff-weapons-gameplay.png` / `riff-weapons-front.png` (every family's hold and attack peak).
 - `versions/v1/`, `versions/v2/` — frozen earlier passes; never edited.
 - Runtime derivative (not in this directory):
   `assets/brawler/models/original/characters/riff/chr_riff.glb`.
@@ -23,7 +24,10 @@ entirely by checked-in procedural Blender scripts from the brief in `spec.md` an
 
 From the repository root:
 
+Riff's two-handed clips are baked against the shipped weapon GLBs, so build those first:
+
 ```sh
+just weapon-assets
 just riff-asset
 # equivalent to
 /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
@@ -41,8 +45,8 @@ body planar reach) mirror the build report; update them and their tests if a reb
 Riff is original work of the PewPew Blitz project, so it is not a row in the third-party
 `assets/manifest.ron`. The source of truth is this directory: the builder scripts, the frozen
 versions they derive from, and the brief. The runtime GLB is reproducible from them with the
-command above. The review-only blaster is the CC0 Kenney Blaster Kit `blaster-a.glb` already
-shipped under `assets/` (manifest id `model.blaster_a`); it is not part of the Riff export.
+command above. The review-only weapons are the original family weapons from `asset_src/weapons/`
+(BRL-q29d); they are not part of the Riff export.
 
 ## Runtime contract
 
@@ -54,8 +58,14 @@ shipped under `assets/` (manifest id `model.blaster_a`); it is not part of the R
   (Bevy rebuilds flat normals), no UVs or textures. 9,688 triangles; about 620 KB.
 - Armature `RIG__riff`: 38 bones including the seven sockets `socket_weapon_r`, `socket_weapon_l`,
   `socket_head`, `socket_chest`, `socket_back`, `socket_fx_center`, `socket_fx_ground`.
-- No weapon, camera, light, or review geometry in the export. The game attaches its weapon to
-  `socket_weapon_r`; held poses keep that socket's rest frame so the weapon points forward.
+- No weapon, camera, light, or review geometry in the export. The game attaches the primary weapon
+  family's model (`assets/catalogs/fighter_weapons.ron`) to `socket_weapon_r` at unit scale; the
+  one-handed hold keeps that socket's rest frame so the weapon points forward.
+- Two-handed family clips (`heavy`, `throwable`, `melee`, BRL-q29d) place the family's weapon in
+  the chest frame and bake both arms onto it with a per-frame two-bone IK solve: the weapon hand
+  onto `grip_primary` and the left hand onto the weapon's `grip_secondary`, read from the GLB the
+  catalog names. The build fails if a hand misses its anchor by more than 0.02 units and reports
+  the worst miss per clip as `two_handed_grip_error`.
 - Clips (24 fps, in place). Every clip keys every deform bone, so no clip leaks a channel into the
   next:
 
@@ -76,6 +86,8 @@ Weapon families come from the primary weapon's delivery: `1h` (Straight, StickyS
 
 ## Known limits
 
-The single shared blaster stands in for every family's weapon, there is no left-hand IK or reload
-clip, and only Riff exists. Those, per-brawler model selection, and the five weapon compatibility
-checks in `spec.md` are follow-up work.
+Run, dash, idle, and the other non-family clips carry every weapon one-handed by the grip. The
+support hand is baked into the clips rather than solved at runtime, so a weapon whose
+`grip_secondary` moves needs a Riff rebuild. There is no reload clip, and only Riff exists.
+Per-brawler model selection and the remaining weapon compatibility checks in `spec.md` (rifle,
+rocket launcher, bow, magic wand) are follow-up work.

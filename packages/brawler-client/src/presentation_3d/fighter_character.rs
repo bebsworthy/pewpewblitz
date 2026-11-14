@@ -1,7 +1,7 @@
 //! Riff, the production fighter model (BRL-0154).
 //!
 //! Owns the imported character's asset contract (scale, facing, weapon socket, clip names), the
-//! weapon-family hold/attack clips, the pure priority that maps replicated state and cues to one
+//! weapon-family hold/attack clips and held weapon model (`fighter_weapons.rs`), the pure priority that maps replicated state and cues to one
 //! motion, and a presentation-only squash-and-stretch layer. Nothing here feeds simulation: the
 //! visual height is independent of the authoritative radius, and squash only scales the imported
 //! scene root below the fighter's visual root.
@@ -9,6 +9,7 @@
 //! The GLB is a derivative of `asset_src/characters/riff/build_riff.py`; regenerate it with
 //! `just riff-asset` rather than editing it.
 
+use super::fighter_weapons::HeldWeapon;
 #[allow(
     clippy::wildcard_imports,
     reason = "the world-renderer submodule consumes the presentation_3d composition surface"
@@ -28,18 +29,17 @@ pub(crate) const RIFF_VISUAL_HEIGHT_WORLD: f32 = brawler::map::MAP_CELL_SIZE_WOR
 const RIFF_GAMEPLAY_SCALE: f32 = RIFF_VISUAL_HEIGHT_WORLD / (RIFF_SOURCE_TOP - RIFF_SOURCE_GROUND);
 /// Dashboard and brawler-screen preview scale: the same framing height the Kenney preview had.
 pub(crate) const DASHBOARD_RIFF_SCALE: f32 = 32.0;
-/// The shared weapon attaches to this non-deforming socket node.
+/// The held weapon's `weapon_root` attaches to this non-deforming socket node.
 const RIFF_WEAPON_SOCKET: &str = "socket_weapon_r";
 /// The exported socket's rest frame is a half turn about (0, 1, 1)/√2 from the scene frame; the
-/// same half turn maps the blaster's +Z barrel and +Y top onto Riff's forward and up.
-const RIFF_BLASTER_GRIP: Quat = Quat::from_xyzw(
+/// same half turn maps a weapon's +Z forward and +Y up onto Riff's forward and up. Weapons are
+/// authored in Riff's source units, so they attach at unit scale (BRL-q29d).
+const RIFF_WEAPON_GRIP: Quat = Quat::from_xyzw(
     0.0,
     core::f32::consts::FRAC_1_SQRT_2,
     core::f32::consts::FRAC_1_SQRT_2,
     0.0,
 );
-/// Blaster scale inside Riff's source units: about 1.5x a plausible pistol for his hand.
-const RIFF_BLASTER_SCALE: f32 = 0.78;
 /// Run clip footfalls are authored at phase 0 and 0.5 of the loop.
 const RUN_FOOTFALL_PHASES: [f32; 2] = [0.0, 0.5];
 const RUN_FOOTFALL_WIDTH: f32 = 0.12;
@@ -69,8 +69,9 @@ const CLIP_NAMES: [&str; 15] = [
     "attack_melee",
 ];
 
-/// Animation family of the primary weapon, from its replicated delivery method.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Animation family of the primary weapon, from its replicated delivery method. It selects both the
+/// hold/attack clips and the held weapon model (`assets/catalogs/fighter_weapons.ron`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 pub(crate) enum WeaponFamily {
     OneHanded,
     Heavy,
@@ -79,6 +80,8 @@ pub(crate) enum WeaponFamily {
 }
 
 impl WeaponFamily {
+    pub(crate) const ALL: [Self; 4] = [Self::OneHanded, Self::Heavy, Self::Throwable, Self::Melee];
+
     pub(crate) const fn of(delivery: &DeliveryMethod) -> Self {
         match delivery {
             DeliveryMethod::Straight { .. } | DeliveryMethod::StickyStraight { .. } => {
@@ -90,7 +93,17 @@ impl WeaponFamily {
         }
     }
 
-    const fn index(self) -> usize {
+    /// Stable readiness ID of this family's held weapon model.
+    pub(crate) const fn asset_id(self) -> &'static str {
+        match self {
+            Self::OneHanded => "model.weapon_1h",
+            Self::Heavy => "model.weapon_heavy",
+            Self::Throwable => "model.weapon_throwable",
+            Self::Melee => "model.weapon_melee",
+        }
+    }
+
+    pub(crate) const fn index(self) -> usize {
         match self {
             Self::OneHanded => 0,
             Self::Heavy => 1,
@@ -183,16 +196,12 @@ pub(super) fn gameplay_riff_transform() -> Transform {
     riff_scene_transform(0.0, RIFF_GAMEPLAY_SCALE)
 }
 
-/// The shared blaster, posed for a child of Riff's weapon socket.
-pub(crate) fn blaster_attachment(blaster_scene: Handle<WorldAsset>) -> impl Bundle {
+/// One family's weapon model, posed for a child of Riff's weapon socket.
+pub(crate) fn weapon_attachment(imported: &Imported3dAssets, family: WeaponFamily) -> impl Bundle {
     (
-        WorldAssetRoot(blaster_scene),
-        Transform {
-            rotation: RIFF_BLASTER_GRIP,
-            scale: Vec3::splat(RIFF_BLASTER_SCALE),
-            ..default()
-        },
-        Name::new("Riff attached blaster-a"),
+        WorldAssetRoot(imported.weapon_scenes[family.index()].clone()),
+        Transform::from_rotation(RIFF_WEAPON_GRIP),
+        Name::new(format!("Riff held weapon {family:?}")),
     )
 }
 
@@ -398,10 +407,6 @@ pub(super) fn setup_imported_character(
                 .map(|transform| (*entity, *transform))
         })
         .collect();
-    commands.entity(socket).with_child((
-        ToonScene,
-        blaster_attachment(imported.blaster_scene.clone()),
-    ));
     if let Ok(mut animation_player) = players.get_mut(player) {
         let mut transitions = AnimationTransitions::new();
         transitions
@@ -415,6 +420,9 @@ pub(super) fn setup_imported_character(
     let base_scale = transforms
         .get(ready.entity)
         .map_or(Vec3::ONE, |transform| transform.scale);
+    commands
+        .entity(ready.entity)
+        .insert(HeldWeapon::new(socket));
     commands.entity(ready.entity).insert(V3CharacterRuntime {
         owner: scene.owner,
         visual_root: scene.visual_root,
@@ -549,6 +557,45 @@ impl V3CharacterRuntime {
     }
 }
 
+fn fighter_family(loadout: Option<&brawler::builds::ResolvedMatchLoadout>) -> WeaponFamily {
+    loadout.map_or(WeaponFamily::OneHanded, |loadout| {
+        WeaponFamily::of(&loadout.primary_weapon.recipe.delivery)
+    })
+}
+
+/// Keeps each imported fighter holding its primary weapon family's model, including when the
+/// replicated loadout arrives after the scene is ready.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are passed by value"
+)]
+pub(super) fn sync_held_weapons(
+    mut commands: Commands,
+    imported: Option<Res<Imported3dAssets>>,
+    mut fighters: Query<(&V3CharacterRuntime, &mut HeldWeapon)>,
+    loadouts: Query<Option<&brawler::builds::ResolvedMatchLoadout>, With<Fighter>>,
+) {
+    let Some(imported) = imported else {
+        return;
+    };
+    for (runtime, mut held) in &mut fighters {
+        let Ok(loadout) = loadouts.get(runtime.owner) else {
+            continue;
+        };
+        let family = fighter_family(loadout);
+        if let Some(socket) = held.begin_swap(&mut commands, family) {
+            let weapon = commands
+                .spawn((
+                    ToonScene,
+                    weapon_attachment(&imported, family),
+                    ChildOf(socket),
+                ))
+                .id();
+            held.attached(family, weapon);
+        }
+    }
+}
+
 fn damaged_fighters(
     cues: &mut MessageReader<DeduplicatedCombatCue>,
     network_ids: &Query<(Entity, &NetworkEntityId), With<Fighter>>,
@@ -602,9 +649,7 @@ pub(super) fn update_character_animation(
         };
         visual.shoot_seconds = (visual.shoot_seconds - delta).max(0.0);
         let facts = FighterFacts {
-            family: loadout.map_or(WeaponFamily::OneHanded, |loadout| {
-                WeaponFamily::of(&loadout.primary_weapon.recipe.delivery)
-            }),
+            family: fighter_family(loadout),
             defeated: character_is_visually_defeated(health.0, defeated.is_some()),
             victorious: phase.is_some_and(|phase| team_won(phase, *team)),
             moving: visual.moving,

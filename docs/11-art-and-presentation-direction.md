@@ -41,6 +41,13 @@ tickets tune them through native review but do not change the direction.
   `assets/brawler/models/original/characters/riff/`. For a long-eared character the head share is
   measured against the crown height (ears excluded) and the 1.6-cell visual height includes the
   ears. The source README owns the export contract and clip list.
+- Each primary-weapon animation family has its own original held weapon (BRL-q29d): a one-handed
+  blaster (`1h`), a two-handed heavy sprayer (`heavy`), a two-handed lobber (`throwable`), and a
+  two-handed impact blade (`melee`), built by `asset_src/weapons/build_weapons.py`
+  (`just weapon-assets`) under `assets/brawler/models/original/weapons/`. The authored client
+  catalog `assets/catalogs/fighter_weapons.ron` maps family to model and shell-preview framing;
+  nothing branches on built-in weapon IDs. Two-handed holds are baked into Riff's family clips with
+  the support hand on each weapon's `grip_secondary` anchor; no IK runs at runtime.
 
 ### World shading
 
@@ -295,12 +302,12 @@ rather than adds, so no lit surface exceeds a lit white surface and the bloom kn
 props carry no rim by default, because under the high gameplay camera whole side faces are grazing.
 Fighters ignore received shadow maps (they still cast), so faces stay in the lit band and fighters
 stay readable inside wall shadows. Imported glTF instances are converted once when their scene is
-ready, under a `ToonScene` root (fighters, blasters, zombies, every environment kit instance, and
+ready, under a `ToonScene` root (fighters, held weapons, zombies, every environment kit instance, and
 the Map Maker palette preview), and the generated theme surfaces, primitive fighters, and the
 primitive barrel are built as toon materials. Hit flash and concealment variants work on both
 material families. VFX, rings, markers, and status visuals keep their own materials. The Dashboard
 brawler, brawler card, and weapon previews convert through the same `ToonScene` path and cached
-materials (BRL-0179). The brawler and its attached blaster wear the local (green) rim, because they
+materials (BRL-0179). The brawler and its held weapon wear the local (green) rim, because they
 show the player's own brawler; the standalone weapon close-up uses the world rim, because at that
 scale a side rim reads as a coloured fringe.
 
@@ -417,8 +424,11 @@ bursts from becoming an unbounded entity or channel lifecycle.
 - imported materials, environment themes, and future skins may not override these relation cues.
 
 The imported character's model-space forward direction is corrected once at its visual root. The
-weapon attaches to the character's `socket_weapon_r` node inside that corrected hierarchy, and
-animation-specific transforms remain below it. The standard fighter has one canonical 14-unit
+primary weapon family's model attaches to the character's `socket_weapon_r` node inside that
+corrected hierarchy at unit scale, and animation-specific transforms remain below it. The model
+follows the replicated loadout, so a loadout that arrives after the scene is ready swaps it; the
+Dashboard brawler holds the selected saved brawler's family, and each shell weapon preview shows
+its own weapon's family. The standard fighter has one canonical 14-unit
 authoritative radius: its circular hitbox, exact outer ground-ring edge, and fallback sphere agree.
 Riff is scaled uniformly from his reviewed source height so he stands 1.6 map cells (51.2 units)
 including ears; that scale does not depend on the radius, and a test keeps his bind-pose feet,
@@ -906,9 +916,10 @@ Every redistributed third-party file must have exact provenance in the manifest 
 license text where required. Original replacements should also preserve their source masters and
 document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
-its README (for Riff, `asset_src/characters/riff/README.md`; for environment kits,
-`asset_src/environment/<kit>/README.md`), not a manifest row.
-`assets/licenses/pewpew-blitz-original-environment.txt` points at the environment kit sources.
+its README (for Riff, `asset_src/characters/riff/README.md`; for the held weapons,
+`asset_src/weapons/README.md`; for environment kits, `asset_src/environment/<kit>/README.md`),
+not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt` and
+`pewpew-blitz-original-weapons.txt` point at the environment kit and weapon sources.
 The shell icon set under `assets/brawler/ui/icons/` is likewise original generated artwork:
 `asset_src/player-shell/icons/` holds the generator, editable SVG sources and README, and
 `assets/licenses/pewpew-blitz-original-icons.txt` points at them.

@@ -139,8 +139,9 @@ pub(in crate::flow) fn keep_weapon_equipment_focus_visible(
     );
 }
 
+/// A shell viewport showing one weapon family's held model (`dashboard/weapon_preview.rs`).
 #[derive(Component)]
-pub(crate) struct WeaponPreviewHost;
+pub(crate) struct WeaponPreviewHost(pub(crate) crate::presentation_3d::WeaponFamily);
 
 #[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
 pub(in crate::flow) fn present_weapon_equipment(
@@ -547,7 +548,10 @@ impl EquipmentView<'_> {
                 );
             });
             body.spawn((
-                WeaponPreviewHost,
+                WeaponPreviewHost(crate::presentation_3d::advertised_weapon_family(
+                    catalog,
+                    saved.weapon_base_id,
+                )),
                 Node {
                     width: percent(48),
                     height: percent(100),

@@ -26,7 +26,8 @@ pub(crate) struct ClientAssetHandles {
     audio: BTreeMap<String, Handle<AudioSource>>,
     pub character: Handle<Gltf>,
     pub zombie_character: Handle<Gltf>,
-    pub blaster: Handle<Gltf>,
+    /// One held weapon per weapon family, in `WeaponFamily::index` order (BRL-q29d).
+    pub weapons: [Handle<Gltf>; 4],
     pub loading_logo: Handle<Image>,
     pub wordmark: Handle<Image>,
     pub dashboard_logo: Handle<Image>,
@@ -49,7 +50,12 @@ impl ClientAssetHandles {
             character: asset_server.load(presentation_3d::RIFF_ASSET_PATH),
             zombie_character: asset_server
                 .load("brawler/models/kenney/mini-characters/character-male-d.glb"),
-            blaster: asset_server.load("brawler/models/kenney/blaster-kit/blaster-a.glb"),
+            weapons: {
+                let catalog = presentation_3d::FighterWeaponCatalog::embedded()
+                    .expect("embedded fighter weapon catalog is valid");
+                presentation_3d::WeaponFamily::ALL
+                    .map(|family| asset_server.load(catalog.model(family).model.clone()))
+            },
             loading_logo: asset_server.load("brawler/ui/branding/pewpew-blitz-lockup.png"),
             wordmark: asset_server.load("brawler/ui/branding/pewpew-blitz-wordmark.png"),
             dashboard_logo: asset_server.load("brawler/ui/shell/logo.png"),
@@ -88,11 +94,6 @@ impl ClientAssetHandles {
                 dependency_aware_state(asset_server, &self.zombie_character),
             ),
             (
-                "model.blaster_a",
-                false,
-                dependency_aware_state(asset_server, &self.blaster),
-            ),
-            (
                 "font.dashboard_display",
                 false,
                 asset_server.load_state(&self.dashboard_font),
@@ -112,6 +113,18 @@ impl ClientAssetHandles {
             ]
             .into_iter()
             .map(|(name, handle)| (name, false, asset_server.load_state(handle))),
+        );
+        states.extend(
+            presentation_3d::WeaponFamily::ALL
+                .into_iter()
+                .zip(&self.weapons)
+                .map(|(family, handle)| {
+                    (
+                        family.asset_id(),
+                        false,
+                        dependency_aware_state(asset_server, handle),
+                    )
+                }),
         );
         states.extend(
             self.dashboard_icons
@@ -515,7 +528,6 @@ mod tests {
             .filter(|path| {
                 path.starts_with("brawler/models/")
                     && !path.starts_with("brawler/models/kenney/mini-characters/")
-                    && !path.starts_with("brawler/models/kenney/blaster-kit/")
             })
             .collect::<Vec<_>>();
         assert!(
@@ -528,6 +540,7 @@ mod tests {
             "kenney-mini-forest.txt",
             "kenney-graveyard-kit.txt",
             "kaykit-block-bits.txt",
+            "kenney-blaster-kit.txt",
         ] {
             assert!(
                 !std::path::Path::new(REPOSITORY_ROOT)

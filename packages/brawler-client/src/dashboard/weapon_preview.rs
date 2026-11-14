@@ -1,5 +1,9 @@
-//! A separate render layer keeps the weapon viewport independent of the dashboard fighter.
+//! Shell weapon previews: one offscreen camera and render layer per weapon family on screen, so
+//! each preview host shows its own primary weapon family's model (BRL-q29d).
 use crate::flow::WeaponPreviewHost;
+use crate::presentation_3d::{
+    FighterWeaponCatalog, Imported3dAssets, ToonScene, WeaponFamily, WorldLookCatalog,
+};
 use bevy::{
     asset::RenderAssetUsages,
     camera::{ClearColorConfig, RenderTarget, visibility::RenderLayers},
@@ -8,20 +12,39 @@ use bevy::{
     ui::widget::ViewportNode,
     world_serialization::{WorldAssetRoot, WorldInstanceReady},
 };
-const LAYER: usize = 28;
+
+/// One private render layer per family, clear of the dashboard (29), HUD (31), and map palette
+/// preview (18..=24) layers.
+const LAYERS: [usize; 4] = [28, 30, 32, 33];
+
+/// The preview model root; its scene descendants join the family's render layer when ready.
 #[derive(Component)]
-struct WeaponScene;
+struct WeaponScene(WeaponFamily);
+
+/// One family's preview camera, light, and model.
 #[derive(Component)]
-struct WeaponOwned;
-#[derive(Resource)]
+struct WeaponOwned(WeaponFamily);
+
 struct Target {
     image: Handle<Image>,
     camera: Entity,
     host: Entity,
 }
+
+/// The live preview target of each family, indexed by `WeaponFamily::index`.
+#[derive(Resource, Default)]
+struct Targets([Option<Target>; 4]);
+
 pub(super) fn install(app: &mut App) {
-    app.add_systems(Update, update).add_observer(ready);
+    app.init_resource::<Targets>()
+        .add_systems(Update, update)
+        .add_observer(ready);
 }
+
+fn layer(family: WeaponFamily) -> RenderLayers {
+    RenderLayers::layer(LAYERS[family.index()])
+}
+
 #[allow(
     clippy::too_many_arguments,
     clippy::type_complexity,
@@ -30,51 +53,75 @@ pub(super) fn install(app: &mut App) {
 )]
 fn update(
     mut commands: Commands,
-    hosts: Query<Entity, With<WeaponPreviewHost>>,
-    thumbnails: Query<
-        Entity,
-        (
-            With<WeaponPreviewHost>,
-            Without<ImageNode>,
-            Without<ViewportNode>,
-        ),
-    >,
-    target: Option<Res<Target>>,
-    owned: Query<Entity, With<WeaponOwned>>,
+    hosts: Query<(Entity, &WeaponPreviewHost)>,
+    thumbnails: Query<(), (Without<ImageNode>, Without<ViewportNode>)>,
+    mut targets: ResMut<Targets>,
+    owned: Query<(Entity, &WeaponOwned)>,
     mut images: ResMut<Assets<Image>>,
-    imported: Option<Res<super::super::presentation_3d::Imported3dAssets>>,
-    look: Res<super::super::presentation_3d::WorldLookCatalog>,
+    imported: Option<Res<Imported3dAssets>>,
+    weapons: Res<FighterWeaponCatalog>,
+    look: Res<WorldLookCatalog>,
 ) {
-    let host = hosts.iter().next();
-    if let Some(target) = target {
-        if let Some(host) = host {
-            for other in thumbnails.iter().filter(|e| *e != host) {
-                commands
-                    .entity(other)
-                    .insert(ImageNode::new(target.image.clone()));
+    for family in WeaponFamily::ALL {
+        let mut family_hosts = hosts
+            .iter()
+            .filter(|(_, host)| host.0 == family)
+            .map(|(entity, _)| entity);
+        let host = family_hosts.next();
+        let slot = &mut targets.0[family.index()];
+        match (slot.as_mut(), host) {
+            (Some(target), Some(host)) => {
+                // The first host shows the live viewport; any other host of the same family
+                // shows a copy of its image.
+                for other in family_hosts.filter(|entity| thumbnails.contains(*entity)) {
+                    commands
+                        .entity(other)
+                        .insert(ImageNode::new(target.image.clone()));
+                }
+                if host != target.host {
+                    commands
+                        .entity(host)
+                        .insert(ViewportNode::new(target.camera));
+                    target.host = host;
+                }
             }
-            if host != target.host {
-                commands
-                    .entity(host)
-                    .insert(ViewportNode::new(target.camera));
-                commands.insert_resource(Target {
-                    image: target.image.clone(),
-                    camera: target.camera,
-                    host,
-                });
+            (Some(_), None) => {
+                for (entity, owner) in &owned {
+                    if owner.0 == family {
+                        commands.entity(entity).despawn();
+                    }
+                }
+                if let Some(target) = slot.take() {
+                    images.remove(target.image.id());
+                }
             }
-        } else {
-            for e in &owned {
-                commands.entity(e).despawn();
+            (None, Some(host)) => {
+                if let Some(imported) = imported.as_deref() {
+                    *slot = Some(spawn_preview(
+                        &mut commands,
+                        &mut images,
+                        imported,
+                        &weapons,
+                        &look,
+                        family,
+                        host,
+                    ));
+                }
             }
-            images.remove(target.image.id());
-            commands.remove_resource::<Target>();
+            (None, None) => {}
         }
-        return;
     }
-    let (Some(host), Some(imported)) = (host, imported) else {
-        return;
-    };
+}
+
+fn spawn_preview(
+    commands: &mut Commands,
+    images: &mut Assets<Image>,
+    imported: &Imported3dAssets,
+    weapons: &FighterWeaponCatalog,
+    look: &WorldLookCatalog,
+    family: WeaponFamily,
+    host: Entity,
+) -> Target {
     let mut image = Image::new_uninit(
         default(),
         TextureDimension::D2,
@@ -86,7 +133,7 @@ fn update(
     let image = images.add(image);
     let camera = commands
         .spawn((
-            WeaponOwned,
+            WeaponOwned(family),
             Camera3d::default(),
             Camera {
                 order: -3,
@@ -101,45 +148,64 @@ fn update(
             look.preview_camera_look(),
             look.preview_ambient_light(),
             Transform::from_xyz(0.8, 0.32, 0.9).looking_at(Vec3::new(0.0, -0.05, 0.0), Vec3::Y),
-            RenderLayers::layer(LAYER),
+            layer(family),
         ))
         .id();
     commands.entity(host).insert(ViewportNode::new(camera));
-    commands.insert_resource(Target {
+    commands.spawn((
+        WeaponOwned(family),
+        WeaponScene(family),
+        // Arena toon material without a relationship rim: at this close-up a side rim reads as a
+        // coloured fringe on the weapon rather than a silhouette accent (BRL-0179 captures).
+        ToonScene,
+        WorldAssetRoot(imported.weapon_scenes[family.index()].clone()),
+        weapons.preview_transform(family),
+        layer(family),
+    ));
+    // One catalog key light: the toon material bands directional light, so a back fill would put
+    // the whole weapon in the lit band (BRL-0179).
+    commands.spawn((
+        WeaponOwned(family),
+        look.preview_key_light(),
+        Transform::from_xyz(2.0, 4.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        layer(family),
+    ));
+    Target {
         image,
         camera,
         host,
-    });
-    commands.spawn((
-        WeaponOwned,
-        WeaponScene,
-        // Arena toon material without a relationship rim: at this close-up a side rim reads as a
-        // coloured fringe on the blaster rather than a silhouette accent (BRL-0179 captures).
-        super::super::presentation_3d::ToonScene,
-        WorldAssetRoot(imported.blaster_scene.clone()),
-        Transform::default(),
-        RenderLayers::layer(LAYER),
-    ));
-    // One catalog key light: the toon material bands directional light, so a back fill would put
-    // the whole blaster in the lit band (BRL-0179).
-    commands.spawn((
-        WeaponOwned,
-        look.preview_key_light(),
-        Transform::from_xyz(2.0, 4.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
-        RenderLayers::layer(LAYER),
-    ));
+    }
 }
+
 #[allow(clippy::needless_pass_by_value)]
 fn ready(
     event: On<WorldInstanceReady>,
     mut commands: Commands,
-    roots: Query<(), With<WeaponScene>>,
+    roots: Query<&WeaponScene>,
     children: Query<&Children>,
 ) {
-    if roots.get(event.entity).is_err() {
+    let Ok(scene) = roots.get(event.entity) else {
         return;
-    }
+    };
     for e in children.iter_descendants(event.entity) {
-        commands.entity(e).insert(RenderLayers::layer(LAYER));
+        commands.entity(e).insert(layer(scene.0));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn family_preview_layers_are_distinct_and_clear_of_shell_layers() {
+        let mut layers = LAYERS.to_vec();
+        layers.sort_unstable();
+        layers.dedup();
+        assert_eq!(layers.len(), WeaponFamily::ALL.len());
+        for layer in LAYERS {
+            assert!(!(18..=24).contains(&layer), "map palette preview layers");
+            assert_ne!(layer, super::super::DASHBOARD_RENDER_LAYER);
+            assert_ne!(layer, 31, "world HUD camera layer");
+        }
     }
 }

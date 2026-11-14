@@ -5,7 +5,9 @@ Reproducible sources for the BRL-0140 reference board, which is attached to the 
 owns the direction itself; these scripts only produce proof images.
 
 - `render_look.py` renders `world.png` (gameplay-camera look target) and `hero.png` (transparent
-  shell hero) from the real `characters/riff/chr_riff.glb` and the shipped Kenney blaster. It uses
+  shell hero) from the real `characters/riff/chr_riff.glb` and the shipped Kenney blaster. It is a
+  historical BRL-0140 proof: both inputs were later retired (the V1 Riff export in BRL-0154, the
+  Kenney blaster in BRL-q29d), so it no longer runs unmodified. It uses
   the decided two-band toon ramp, rim light, navy inverted-hull outline, two-tone tile floor, and
   relationship rings.
 - `compose.py` builds the board from those renders, the decided shell tokens, Lilita One, the

@@ -12,7 +12,6 @@ builder and the `pewpew-blitz-original-*.txt` notes in this directory.
 | Pack | Version | Author | License | Source | License text |
 |---|---|---|---|---|---|
 | Mini Characters | 1.0 | Kenney | CC0-1.0 | https://kenney.nl/assets/mini-characters | `kenney-mini-characters.txt` |
-| Blaster Kit | 2.1 | Kenney | CC0-1.0 | https://kenney.nl/assets/blaster-kit | `kenney-blaster-kit.txt` |
 | Sci-Fi Sounds | 1.0 | Kenney | CC0-1.0 | https://kenney.nl/assets/sci-fi-sounds | `kenney-sci-fi-sounds.txt` |
 | Impact Sounds | 1.0 | Kenney | CC0-1.0 | https://kenney.nl/assets/impact-sounds | `kenney-impact-sounds.txt` |
 | Interface Sounds | 1.0 | Kenney | CC0-1.0 | https://kenney.nl/assets/interface-sounds | `kenney-interface-sounds.txt` |
@@ -27,8 +26,6 @@ Paths are relative to `assets/`; originals are relative to the unpacked pack.
 |---|---|---|---|
 | `brawler/models/kenney/mini-characters/character-male-d.glb` | Mini Characters | `Models/GLB format/character-male-d.glb` | Zombie-mode NPC |
 | `brawler/models/kenney/mini-characters/Textures/colormap.png` | Mini Characters | `Models/GLB format/Textures/colormap.png` | Zombie-mode NPC texture |
-| `brawler/models/kenney/blaster-kit/blaster-a.glb` | Blaster Kit | `Models/GLB format/blaster-a.glb` | Blaster held by Riff |
-| `brawler/models/kenney/blaster-kit/Textures/colormap.png` | Blaster Kit | `Models/GLB format/Textures/colormap.png` | Blaster texture |
 | `brawler/audio/fire.ogg` | Sci-Fi Sounds | `Audio/laserSmall_000.ogg` | Fire cue |
 | `brawler/audio/defeat.ogg` | Sci-Fi Sounds | `Audio/explosionCrunch_000.ogg` | Defeat cue |
 | `brawler/audio/impact.ogg` | Impact Sounds | `Audio/impactMetal_light_000.ogg` | Impact cue |
@@ -45,6 +42,8 @@ license texts were removed when the last shipped file was retired.
 - Kenney Mini Arena, Mini Dungeon, Mini Forest 1.0, Graveyard Kit 5.0 and KayKit Block Bits 1.0:
   retired environment packs, replaced by the original kits in BRL-0153, BRL-0187 and BRL-0188.
 - Kenney Game Icons: retired by the original icon set in BRL-0157.
+- Kenney Blaster Kit 2.1: the held blaster, retired by the original per-family fighter weapons in
+  BRL-q29d.
 - Kenney Emotes Pack, Mini Arcade, Pirate Kit and Furniture Kit: evaluated, never shipped.
 
 ## Re-acquiring a source pack
@@ -54,7 +53,7 @@ directory, which nothing in the build, tests, scripts or `asset_src/` reads. The
 script, because the pack pages above are not stable direct-download URLs. To re-acquire one:
 
 1. Open the pack's source URL and download it (Kenney packs are free; donating is optional).
-2. Unzip it into `external_assets/` (for example `external_assets/kenney_blaster-kit_2.1/`).
+2. Unzip it into `external_assets/` (for example `external_assets/kenney_mini-characters_1.0/`).
 3. Check that the pack's `License.txt` version matches the table above. If the version changed,
    compare the original file from the table byte-for-byte with the shipped copy before replacing
    anything, and update `assets/manifest.ron` and this file together.

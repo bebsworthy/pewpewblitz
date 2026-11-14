@@ -1,4 +1,5 @@
 //! Creation draft and fullscreen catalog choices; profile reducer owns submission.
+use super::choice_cards::ChoiceArt;
 use super::{
     BrawlerBrowserArt, BrawlerCreationDraft, BrawlerCreationRoot, BrawlerListScrollArea,
     BrawlerScreenUi, CreationPicker, advertised_fighter_name, advertised_weapon_name,
@@ -196,8 +197,7 @@ impl CreationView<'_> {
                         "FIGHTER",
                         advertised_fighter_name(self.catalog, self.draft.fighter_profile_id),
                         "Health · Speed · Reveal range",
-                        CreationPicker::Fighter,
-                        None,
+                        ChoiceArt::Fighter,
                         columns,
                         height,
                     );
@@ -208,8 +208,10 @@ impl CreationView<'_> {
                         "WEAPON",
                         advertised_weapon_name(self.catalog, self.draft.weapon_base_id),
                         "Customizable parts",
-                        CreationPicker::Weapon,
-                        None,
+                        ChoiceArt::Weapon(crate::presentation_3d::advertised_weapon_family(
+                            self.catalog,
+                            self.draft.weapon_base_id,
+                        )),
                         columns,
                         height,
                     );
@@ -220,8 +222,11 @@ impl CreationView<'_> {
                         "ULTIMATE",
                         ultimate_name(self.catalog, self.draft.ultimate),
                         "Change anytime",
-                        CreationPicker::Ultimate,
-                        self.catalog.ultimate(self.draft.ultimate).map(|u| u.kind),
+                        ChoiceArt::Icon(
+                            self.catalog
+                                .ultimate(self.draft.ultimate)
+                                .map_or("pulse", |u| details::art::ultimate_icon(u.kind)),
+                        ),
                         columns,
                         height,
                     );
@@ -318,12 +323,11 @@ impl CreationView<'_> {
         category: &str,
         name: &str,
         description: &str,
-        kind: CreationPicker,
-        ultimate: Option<brawler::builds::UltimateKind>,
+        art: ChoiceArt,
         columns: usize,
         height: f32,
     ) {
-        use super::choice_cards::{ChoiceArt, ChoiceCards};
+        use super::choice_cards::ChoiceCards;
         ChoiceCards {
             server: self.server,
             handles: self.handles,
@@ -338,13 +342,7 @@ impl CreationView<'_> {
             category,
             name,
             description,
-            match kind {
-                CreationPicker::Fighter => ChoiceArt::Fighter,
-                CreationPicker::Weapon => ChoiceArt::Weapon,
-                CreationPicker::Ultimate => {
-                    ChoiceArt::Icon(ultimate.map_or("pulse", details::art::ultimate_icon))
-                }
-            },
+            art,
             columns,
             height,
         );
@@ -365,8 +363,7 @@ impl CreationView<'_> {
                             f.stats.movement_speed,
                             f.stats.reveal_proximity_radius
                         ),
-                        kind,
-                        None,
+                        ChoiceArt::Fighter,
                         columns,
                         300.,
                     );
@@ -381,8 +378,9 @@ impl CreationView<'_> {
                         "",
                         &w.display_name,
                         weapon_description(&w.configuration),
-                        kind,
-                        None,
+                        ChoiceArt::Weapon(crate::presentation_3d::WeaponFamily::of(
+                            &w.configuration.recipe.delivery,
+                        )),
                         columns,
                         300.,
                     );
@@ -397,8 +395,7 @@ impl CreationView<'_> {
                         "",
                         &u.display_name,
                         ultimate_description(u.kind),
-                        kind,
-                        Some(u.kind),
+                        ChoiceArt::Icon(details::art::ultimate_icon(u.kind)),
                         columns,
                         300.,
                     );

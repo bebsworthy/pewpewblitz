@@ -60,10 +60,10 @@ fn riff_visual_height_is_one_point_six_cells_and_independent_of_collision() {
 }
 
 #[test]
-fn riff_and_its_blaster_face_the_fighter_root_forward() {
+fn riff_and_its_held_weapon_face_the_fighter_root_forward() {
     let facing = Quat::from_rotation_y(RIFF_FORWARD_CORRECTION);
     assert!((facing * Vec3::Z).abs_diff_eq(Vec3::X, 1e-5));
-    let grip = RIFF_SOCKET_REST * RIFF_BLASTER_GRIP;
+    let grip = RIFF_SOCKET_REST * RIFF_WEAPON_GRIP;
     assert!((facing * grip * Vec3::Z).abs_diff_eq(Vec3::X, 1e-5));
     assert!((facing * grip * Vec3::Y).abs_diff_eq(Vec3::Y, 1e-5));
 }

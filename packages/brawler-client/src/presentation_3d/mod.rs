@@ -34,6 +34,7 @@ pub(crate) mod coordinates;
 mod diagnostics;
 pub(crate) mod environment_assets;
 mod fighter_character;
+mod fighter_weapons;
 mod floor_decals;
 mod floor_tiles;
 mod hit_feedback;
@@ -62,10 +63,13 @@ pub(crate) use combat::{
 };
 use coordinates::{ground_point, ground_position, ground_rotation};
 pub(crate) use fighter_character::{
-    DASHBOARD_RIFF_SCALE, RIFF_ASSET_PATH, blaster_attachment, find_socket_and_player,
-    riff_scene_transform,
+    DASHBOARD_RIFF_SCALE, RIFF_ASSET_PATH, WeaponFamily, find_socket_and_player,
+    riff_scene_transform, weapon_attachment,
 };
 use fighter_character::{V3CharacterScene, character_is_visually_defeated};
+pub(crate) use fighter_weapons::{
+    FighterWeaponCatalog, HeldWeapon, advertised_weapon_family, selected_weapon_family,
+};
 use map::{GeneratedMapMesh, Presented3dMap};
 pub(crate) use map_editor::{MapEditorPointerMode, MapEditorPreview, MapEditorPreviewOptions};
 use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_health_ui};
@@ -243,7 +247,7 @@ pub(crate) struct Material3dAssets {
     /// Primitive fighter bodies, toon shaded like imported fighters.
     pub(crate) fighter_body_blue: Handle<ToonMaterial>,
     pub(crate) fighter_body_red: Handle<ToonMaterial>,
-    /// The primitive blaster of the offscreen brawler preview, toon shaded like imported blasters.
+    /// The primitive weapon of the offscreen brawler preview, toon shaded like imported weapons.
     pub(crate) preview_blaster: Handle<ToonMaterial>,
     pub(crate) pickup_glow: Handle<StandardMaterial>,
 }
@@ -271,7 +275,8 @@ struct V3FallbackVisual {
 #[derive(Resource)]
 pub(crate) struct Imported3dAssets {
     pub(crate) character_scene: Handle<WorldAsset>,
-    pub(crate) blaster_scene: Handle<WorldAsset>,
+    /// One held weapon scene per [`WeaponFamily`], in `WeaponFamily::index` order.
+    pub(crate) weapon_scenes: [Handle<WorldAsset>; 4],
     pub(crate) animation_graph: Handle<AnimationGraph>,
     pub(crate) clips: fighter_character::FighterClips,
 }
@@ -408,6 +413,10 @@ impl Plugin for WorldPresentationPlugin {
                 camera_rig::CameraRigCatalog::embedded()
                     .expect("the embedded camera rig catalog must be valid"),
             )
+            .insert_resource(
+                FighterWeaponCatalog::embedded()
+                    .expect("the embedded fighter weapon catalog must be valid"),
+            )
             .insert_resource(GlobalAmbientLight {
                 color: Color::srgb(0.72, 0.78, 0.9),
                 brightness: 160.0,
@@ -503,7 +512,10 @@ impl Plugin for WorldPresentationPlugin {
                     combat::animate_elemental_motion_accents,
                     combat::update_aim_preview,
                     animate_combat_effect_layers,
-                    fighter_character::update_character_animation,
+                    (
+                        fighter_character::sync_held_weapons,
+                        fighter_character::update_character_animation,
+                    ),
                     zombie::update_zombie_animation,
                     tint_3d_zone,
                     environment_assets::sway_foliage,
@@ -2389,11 +2401,14 @@ fn prepare_imported_assets(
         return;
     };
     let load_report = format!(
-        "character={:?}/{:?} blaster={:?}/{:?}",
+        "character={:?}/{:?} weapons={:?}",
         asset_server.load_state(&handles.character),
         asset_server.recursive_dependency_load_state(&handles.character),
-        asset_server.load_state(&handles.blaster),
-        asset_server.recursive_dependency_load_state(&handles.blaster),
+        handles
+            .weapons
+            .iter()
+            .map(|weapon| asset_server.recursive_dependency_load_state(weapon))
+            .collect::<Vec<_>>(),
     );
     if *last_load_report != load_report {
         info!(state = %load_report, "V3 imported asset load state changed");
@@ -2401,13 +2416,14 @@ fn prepare_imported_assets(
     }
     if prepared.is_some()
         || !asset_server.is_loaded_with_dependencies(&handles.character)
-        || !asset_server.is_loaded_with_dependencies(&handles.blaster)
+        || !handles
+            .weapons
+            .iter()
+            .all(|weapon| asset_server.is_loaded_with_dependencies(weapon))
     {
         return;
     }
-    let (Some(character), Some(blaster)) =
-        (gltfs.get(&handles.character), gltfs.get(&handles.blaster))
-    else {
+    let Some(character) = gltfs.get(&handles.character) else {
         return;
     };
     let Some((graph, clips)) =
@@ -2416,16 +2432,25 @@ fn prepare_imported_assets(
         warn!("Riff GLB is missing the BRL-0154 named clip contract; using fallback");
         return;
     };
-    let (Some(character_scene), Some(blaster_scene)) = (
-        character.default_scene.clone(),
-        blaster.default_scene.clone(),
-    ) else {
-        warn!("Riff or blaster GLB lacks a default scene; using primitive fallbacks");
+    let weapon_scenes = handles
+        .weapons
+        .iter()
+        .map(|weapon| {
+            gltfs
+                .get(weapon)
+                .and_then(|gltf| gltf.default_scene.clone())
+        })
+        .collect::<Option<Vec<_>>>()
+        .and_then(|scenes| <[Handle<WorldAsset>; 4]>::try_from(scenes).ok());
+    let (Some(character_scene), Some(weapon_scenes)) =
+        (character.default_scene.clone(), weapon_scenes)
+    else {
+        warn!("Riff or a held weapon GLB lacks a default scene; using primitive fallbacks");
         return;
     };
     commands.insert_resource(Imported3dAssets {
         character_scene,
-        blaster_scene,
+        weapon_scenes,
         animation_graph: graphs.add(graph),
         clips,
     });
