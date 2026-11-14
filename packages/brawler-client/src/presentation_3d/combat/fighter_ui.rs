@@ -12,7 +12,8 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 const FIGHTER_BODY_WORLD_HEIGHT: f32 = FIGHTER_VISUAL_HEIGHT_WORLD;
-const OVERHEAD_WORLD_HEIGHT: f32 = FIGHTER_BODY_WORLD_HEIGHT + 12.0;
+/// World height of the overhead plate's bottom-center anchor above the fighter's feet.
+pub(in super::super) const OVERHEAD_WORLD_HEIGHT: f32 = FIGHTER_BODY_WORLD_HEIGHT + 12.0;
 // Logical-pixel plate sized for the BRL-0148 framing, where a fighter stands about 80 px tall at
 // the 720 px reference height: a bold 22 px bar with the health number inside it.
 const OVERHEAD_WIDTH: f32 = 140.0;
@@ -25,7 +26,9 @@ const HEALTH_AMOUNT_FONT_SIZE: f32 = 18.0;
 const AMMO_ROW_GAP: f32 = 3.0;
 const AMMO_ROW_HEIGHT: f32 = 9.0;
 const OVERHEAD_HEALTH_HEIGHT: f32 = PLAYER_NAME_HEIGHT + HEALTH_BAR_HEIGHT;
-const OVERHEAD_AMMO_HEIGHT: f32 = OVERHEAD_HEALTH_HEIGHT + AMMO_ROW_GAP + AMMO_ROW_HEIGHT;
+/// UI height of the local fighter's overhead (name, health bar, and ammunition row).
+pub(in super::super) const OVERHEAD_AMMO_HEIGHT: f32 =
+    OVERHEAD_HEALTH_HEIGHT + AMMO_ROW_GAP + AMMO_ROW_HEIGHT;
 const OVERHEAD_STACK_GAP: f32 = 2.0;
 const COLD_PIE_SIZE: f32 = 18.0;
 const COLD_PIE_GAP: f32 = 3.0;

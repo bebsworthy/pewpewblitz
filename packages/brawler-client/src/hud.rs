@@ -16,6 +16,7 @@ mod plate;
 mod screen_tests;
 
 pub(crate) use layout::HudControlLayout;
+pub(crate) use plate::PLATE_BOTTOM as HUD_PLATE_BOTTOM;
 use plate::{PlateState, TeamStripRow};
 
 /// HUD colors: observer relations match the overhead plates and ground rings.

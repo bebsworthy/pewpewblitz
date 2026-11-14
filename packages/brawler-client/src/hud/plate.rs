@@ -14,7 +14,14 @@ use brawler::combat::TeamId;
 /// Most teammates a Zombie roster can hold (three-fighter co-op).
 pub(super) const TEAM_STRIP_ROWS: usize = 3;
 const PLATE_TOP: f32 = 10.0;
+const PLATE_PADDING: f32 = 6.0;
+const PLATE_BORDER: f32 = 3.0;
 const CHIP_WIDTH: f32 = 84.0;
+const CHIP_HEIGHT: f32 = 54.0;
+/// Bottom edge of the score plate in UI units (multiply by `UiScale` for logical pixels). The
+/// plate's fixed-height chips set its height; the gameplay camera keeps the local fighter's
+/// overhead below this band (BRL-fwtg).
+pub(crate) const PLATE_BOTTOM: f32 = PLATE_TOP + 2.0 * (PLATE_BORDER + PLATE_PADDING) + CHIP_HEIGHT;
 const STRIP_BAR_WIDTH: f32 = 96.0;
 /// Team strip inset from the left edge, or from the touch menu button while it is shown.
 const STRIP_LEFT: f32 = 16.0;
@@ -224,7 +231,7 @@ pub(super) fn spawn_plate(commands: &mut Commands, font: &Handle<Font>, parent: 
             Node {
                 min_width: px(CHIP_WIDTH),
                 padding: UiRect::horizontal(px(8.0)),
-                height: px(54.0),
+                height: px(CHIP_HEIGHT),
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
@@ -247,8 +254,8 @@ pub(super) fn spawn_plate(commands: &mut Commands, font: &Handle<Font>, parent: 
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
                 column_gap: px(10.0),
-                padding: UiRect::all(px(6.0)),
-                border: UiRect::all(px(3.0)),
+                padding: UiRect::all(px(PLATE_PADDING)),
+                border: UiRect::all(px(PLATE_BORDER)),
                 border_radius: BorderRadius::all(px(14.0)),
                 ..default()
             },

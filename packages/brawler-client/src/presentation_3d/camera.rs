@@ -3,6 +3,7 @@
 use super::camera_rig::{
     ArenaCameraShake, CameraRig, CameraRigCatalog, CameraRigFrameInput, weapon_reach,
 };
+use super::combat::{OVERHEAD_AMMO_HEIGHT, OVERHEAD_WORLD_HEIGHT};
 #[allow(
     clippy::wildcard_imports,
     reason = "the world-renderer submodule consumes the presentation_3d composition surface"
@@ -15,6 +16,9 @@ pub(super) const CAMERA_VERTICAL_FOV_RADIANS: f32 = 30.0_f32.to_radians();
 pub(super) const CAMERA_ELEVATION_RADIANS: f32 = 55.0_f32.to_radians();
 /// Keeps approximately twelve map cells visible vertically (BRL-0148).
 pub(super) const CAMERA_DISTANCE: f32 = 566.0;
+
+/// UI-unit gap between the top HUD score plate and the local fighter's overhead (BRL-fwtg).
+const TOP_HUD_OVERHEAD_GAP: f32 = 6.0;
 
 /// Margin past the farthest visible ground so the top screen edge never sits on the cascade's
 /// hard cutoff (camera shake is at most a few units; one map cell is ample).
@@ -78,6 +82,7 @@ pub(super) struct CameraRigParams<'w> {
     catalog: Res<'w, CameraRigCatalog>,
     pending: Option<Res<'w, PendingLocalActions>>,
     settings: Option<Res<'w, ClientShellSettings>>,
+    ui_scale: Option<Res<'w, UiScale>>,
 }
 
 #[allow(
@@ -179,6 +184,7 @@ pub(super) fn follow_3d_camera(
             reduced_motion: settings.reduced_motion,
             reduced_effects: settings.reduced_combat_effects,
             shake_scale: settings.camera_shake_scale(),
+            ui_scale: rig.ui_scale.as_deref().map_or(1.0, |scale| scale.0),
         },
     );
     let target = ground_position(frame.center);
@@ -325,6 +331,34 @@ impl GroundView {
     }
 }
 
+/// Farthest ground offset ahead of the look target (toward the top of the screen) at which the
+/// local fighter's overhead still sits below the top-center HUD score plate (BRL-fwtg). The band
+/// is the plate's bottom edge, a small gap, and the overhead's own height, all UI units scaled by
+/// the effective `UiScale` (the phone viewport fit times the player's UI-scale setting).
+pub(super) fn top_hud_fighter_limit(viewport: Vec2, ui_scale: f32) -> f32 {
+    let height = if viewport.is_finite() && viewport.y > 0.0 {
+        viewport.y
+    } else {
+        DEFAULT_GAMEPLAY_VIEWPORT.y
+    };
+    let scale = if ui_scale.is_finite() && ui_scale > 0.0 {
+        ui_scale
+    } else {
+        1.0
+    };
+    let band = (hud::HUD_PLATE_BOTTOM + TOP_HUD_OVERHEAD_GAP + OVERHEAD_AMMO_HEIGHT) * scale;
+    let sin_elevation = CAMERA_ELEVATION_RADIANS.sin();
+    let cos_elevation = CAMERA_ELEVATION_RADIANS.cos();
+    let vertical_tangent = (camera_vertical_fov(viewport_aspect(viewport)) * 0.5).tan();
+    // A point `y` ahead of the look target and `h` above the ground sits `h cos + y sin` above
+    // the view axis at depth `D - h sin + y cos`; its screen row is that ratio over the tangent.
+    // Solve for the `y` whose overhead anchor lands `band` pixels below the top edge.
+    let limit = (1.0 - 2.0 * band / height) * vertical_tangent;
+    let anchor = OVERHEAD_WORLD_HEIGHT;
+    (limit * (CAMERA_DISTANCE - anchor * sin_elevation) - anchor * cos_elevation)
+        / (sin_elevation - limit * cos_elevation)
+}
+
 pub(super) fn ground_view(aspect: f32) -> GroundView {
     let aspect = valid_aspect(aspect);
     let sin_elevation = CAMERA_ELEVATION_RADIANS.sin();
@@ -420,6 +454,46 @@ mod tests {
                 "{aspect}"
             );
         }
+    }
+
+    #[test]
+    fn top_hud_limit_puts_the_local_overhead_just_below_the_score_plate() {
+        // Project through Bevy's own camera pose and perspective rather than the closed form.
+        let camera = Transform::from_translation(camera_offset()).looking_at(Vec3::ZERO, Vec3::Y);
+        let view_from_world = camera.to_matrix().inverse();
+        for viewport in [
+            Vec2::new(1280.0, 720.0),
+            Vec2::new(914.0, 411.0),
+            Vec2::new(868.0, 411.0),
+            Vec2::new(1920.0, 1080.0),
+            Vec2::new(2560.0, 720.0),
+        ] {
+            let aspect = viewport_aspect(viewport);
+            let clip_from_view =
+                Mat4::perspective_rh(camera_vertical_fov(aspect), aspect, 1.0, 5_000.0);
+            let fit = ui::viewport::viewport_fit(viewport.y);
+            for setting in [0.8, 1.0, 1.4] {
+                let scale = fit * setting;
+                let limit = top_hud_fighter_limit(viewport, scale);
+                let anchor =
+                    ground_position(Vec2::new(0.0, limit)) + Vec3::Y * OVERHEAD_WORLD_HEIGHT;
+                let ndc = (clip_from_view * view_from_world).project_point3(anchor);
+                let overhead_top = (1.0 - ndc.y) * 0.5 * viewport.y - OVERHEAD_AMMO_HEIGHT * scale;
+                let plate_bottom = hud::HUD_PLATE_BOTTOM * scale;
+                assert_approximately(overhead_top, plate_bottom + TOP_HUD_OVERHEAD_GAP * scale);
+                // The band costs real view depth but leaves an idle fighter (at the look target)
+                // clear at the default scale, so open-field framing never needs it.
+                let view = ground_view(aspect);
+                assert!(limit < view.far_y, "{viewport} {setting}");
+                if (setting - 1.0).abs() < f32::EPSILON {
+                    assert!(limit > 0.0, "{viewport}: {limit}");
+                }
+            }
+        }
+        // A larger UI reserves more of the screen.
+        let phone = Vec2::new(914.0, 411.0);
+        assert!(top_hud_fighter_limit(phone, 0.9) < top_hud_fighter_limit(phone, 0.6));
+        assert!(top_hud_fighter_limit(phone, f32::NAN).is_finite());
     }
 
     #[test]

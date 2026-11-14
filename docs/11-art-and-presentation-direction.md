@@ -196,7 +196,14 @@ times the maximum lean so a mouse cursor, which is measured through the leaning 
 the view after it. The combined follow lag and look-ahead keeps the fighter at least an authored
 safe margin (1 cell, code minimum 1) inside every screen edge, and the result then passes through
 the unchanged per-axis framing clamp, so it never reveals space the framing contract forbids and a
-fit axis stays locked to the map center.
+fit axis stays locked to the map center. The one exception is a top HUD band (BRL-fwtg): when that
+clamp holds the camera south of the rig's framing at the map's north edge, the camera may pass the
+edge, over the outer dressing, by just enough to keep the local fighter's overhead (name, health,
+and ammunition) below the top-center score plate. The band is the plate's bottom edge plus the
+overhead height in UI units times the effective UI scale (phone viewport fit and the player's
+setting), so it follows both. It never moves the camera further north than the unclamped framing,
+so open-field framing and the look-ahead lean are unchanged; a strong south lean can still carry
+the overhead under the plate.
 A trauma-based shake fed by local fire, local damage and defeat, and distance-scaled nearby lob
 landings, barrel explosions, and defeats adds a ground-plane translation of at most a quarter cell
 after framing. Local fire trauma is authored per primary-weapon delivery family with a spread-pattern

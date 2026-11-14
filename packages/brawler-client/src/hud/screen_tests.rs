@@ -205,6 +205,18 @@ fn assert_layout(app: &mut App, width: u16, height: u16, expect_strip: bool) {
         elements.iter().any(|(label, _)| label == "plate"),
         "{width}x{height}: plate hidden"
     );
+    // The camera's top HUD band (BRL-fwtg) is the plate's laid-out bottom edge.
+    let scale = app.world().resource::<UiScale>().0;
+    let plate_bottom = elements
+        .iter()
+        .find(|(label, _)| label == "plate")
+        .map(|(_, rect)| rect.max.y)
+        .expect("plate rect");
+    assert!(
+        (plate_bottom - HUD_PLATE_BOTTOM * scale).abs() < 1.0,
+        "{width}x{height}: plate bottom {plate_bottom} vs band {}",
+        HUD_PLATE_BOTTOM * scale
+    );
 
     for (label, rect) in &elements {
         assert!(

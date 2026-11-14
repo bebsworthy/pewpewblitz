@@ -31,6 +31,7 @@ fn input(fighter: Vec2, bounds: AxisAlignedMapRect) -> CameraRigFrameInput {
         reduced_motion: false,
         reduced_effects: false,
         shake_scale: 1.0,
+        ui_scale: 1.0,
     }
 }
 
@@ -265,8 +266,21 @@ fn look_ahead_keeps_the_fighter_visible_at_every_edge_aspect_and_reach() {
                         let center =
                             settled_center(fighter, bounds, viewport, (direction, None), reach);
                         // The framed center is a fixed point of the unchanged framing clamp, so
-                        // the look-ahead never reveals space the clamp forbids.
-                        assert_eq!(clamp_3d_camera_center(center, bounds, viewport), center);
+                        // the look-ahead never reveals space the clamp forbids, except that the
+                        // top HUD band may pass the north edge to keep the overhead clear.
+                        let clamped = clamp_3d_camera_center(center, bounds, viewport);
+                        assert!((clamped.x - center.x).abs() < 1e-3);
+                        let top_limit = top_hud_fighter_limit(viewport, 1.0);
+                        if center.y > clamped.y + EPSILON {
+                            // At most as far as the band needs (less when the unclamped
+                            // framing itself stops short of it).
+                            assert!(
+                                fighter.y - center.y >= top_limit - EPSILON,
+                                "{fighter} at {aspect}: band past the needed limit"
+                            );
+                        } else {
+                            assert_eq!(clamped, center);
+                        }
                         let offset = fighter - center;
                         assert!(
                             view.contains(offset, -EPSILON),
@@ -274,7 +288,8 @@ fn look_ahead_keeps_the_fighter_visible_at_every_edge_aspect_and_reach() {
                         );
                         // Framing is 1-Lipschitz per axis, so the lean ceiling bounds the
                         // framed offset from the rigid view.
-                        let rigid = clamp_3d_camera_center(fighter, bounds, viewport);
+                        let mut rigid = clamp_3d_camera_center(fighter, bounds, viewport);
+                        rigid.y = top_hud_band_center(rigid.y, fighter.y, fighter.y, top_limit);
                         assert!(center.distance(rigid) <= max_lean + EPSILON);
                         if fighter == Vec2::ZERO && bounds == open_arena {
                             // Away from map edges the fighter keeps its safe margin.
@@ -288,6 +303,79 @@ fn look_ahead_keeps_the_fighter_visible_at_every_edge_aspect_and_reach() {
             }
         }
     }
+}
+
+/// The phone viewport (after its cutout strip and full) and two desktop shapes.
+const TOP_BAND_VIEWPORTS: [Vec2; 4] = [
+    Vec2::new(1280.0, 720.0),
+    Vec2::new(868.0, 411.0),
+    Vec2::new(914.0, 411.0),
+    Vec2::new(1920.0, 1080.0),
+];
+
+#[test]
+fn north_edge_keeps_the_local_overhead_below_the_top_hud_band() {
+    let bounds = centered_map(25.0, 37.0);
+    // Standing against the north wall, idle and aiming north (the clamp binds hardest).
+    let fighter = Vec2::new(40.0, bounds.max.y - MAP_CELL_SIZE_WORLD * 0.5);
+    for viewport in TOP_BAND_VIEWPORTS {
+        let fit = ui::viewport::viewport_fit(viewport.y);
+        for setting in [0.8, 1.0, 1.4] {
+            let ui_scale = fit * setting;
+            let top_limit = top_hud_fighter_limit(viewport, ui_scale);
+            for aim in [None, Some((Vec2::Y, None)), Some((Vec2::X, None))] {
+                let catalog = catalog();
+                let mut rig = CameraRig::default();
+                let mut center = Vec2::ZERO;
+                for _ in 0..180 {
+                    center = rig
+                        .step(
+                            &catalog,
+                            CameraRigFrameInput {
+                                aim,
+                                reach: Some(PULSE_REACH),
+                                viewport,
+                                ui_scale,
+                                ..input(fighter, bounds)
+                            },
+                        )
+                        .center;
+                }
+                let offset = fighter - center;
+                assert!(
+                    offset.y <= top_limit + EPSILON,
+                    "{viewport} x{setting} {aim:?}: fighter {offset} above {top_limit}"
+                );
+                // It passes the clamp only as far as the band needs.
+                assert!(
+                    (offset.y - top_limit).abs() < EPSILON,
+                    "{viewport}: {offset}"
+                );
+                let clamped = clamp_3d_camera_center(center, bounds, viewport);
+                assert!((clamped.x - center.x).abs() < 1e-3);
+            }
+        }
+    }
+}
+
+#[test]
+fn top_hud_band_never_moves_open_field_or_south_edge_framing() {
+    let bounds = centered_map(25.0, 37.0);
+    let viewport = Vec2::new(914.0, 411.0);
+    let ui_scale = ui::viewport::viewport_fit(viewport.y);
+    let top_limit = top_hud_fighter_limit(viewport, ui_scale);
+    for fighter in [Vec2::ZERO, Vec2::new(0.0, bounds.min.y + 16.0)] {
+        for direction in aim_directions() {
+            let framed = settled_center(fighter, bounds, viewport, (direction, None), None);
+            let clamped = clamp_3d_camera_center(framed, bounds, viewport);
+            assert_eq!(framed, clamped, "{fighter} {direction}");
+        }
+    }
+    // The pure rule: no band when the clamp did not hold the camera south of the fighter's need,
+    // and never further north than the unclamped framing.
+    assert!((top_hud_band_center(10.0, 50.0, 0.0, top_limit) - 10.0).abs() < 1e-3);
+    assert!((top_hud_band_center(-500.0, -490.0, 0.0, top_limit) + 490.0).abs() < 1e-3);
+    assert!((top_hud_band_center(-500.0, 900.0, 0.0, top_limit) + top_limit).abs() < 1e-3);
 }
 
 #[test]

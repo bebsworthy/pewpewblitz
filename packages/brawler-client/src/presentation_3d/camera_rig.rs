@@ -6,10 +6,13 @@
 //! ([`arena_aim_view`]), so shake never moves aim, targeting, input, or gameplay state. The aim
 //! lean grows with the commanded reach and the view's depth in the aim direction (BRL-vptw), the
 //! combined lead keeps the fighter inside a safe frame of the visible ground, and the result
-//! always passes through the unchanged per-axis framing clamp; shake is a bounded transient
-//! offset applied after it.
+//! always passes through the unchanged per-axis framing clamp. At the map's north edge the clamp
+//! may yield just enough of a top HUD band to keep the local overhead below the score plate
+//! (BRL-fwtg); shake is a bounded transient offset applied after it.
 
-use super::camera::{GroundView, clamp_3d_camera_center, ground_view, viewport_aspect};
+use super::camera::{
+    GroundView, clamp_3d_camera_center, ground_view, top_hud_fighter_limit, viewport_aspect,
+};
 #[allow(
     clippy::wildcard_imports,
     reason = "the world-renderer submodule consumes the presentation_3d composition surface"
@@ -413,6 +416,8 @@ pub(super) struct CameraRigFrameInput {
     pub(super) reduced_effects: bool,
     /// The player's camera shake intensity in [0, 1]; scales the shake amplitude only.
     pub(super) shake_scale: f32,
+    /// Effective `UiScale`; sizes the top HUD band the local fighter's overhead stays below.
+    pub(super) ui_scale: f32,
 }
 
 /// The framed camera center and the transient shake applied on top of it.
@@ -496,7 +501,13 @@ impl CameraRig {
             .step(look_target, catalog.look_ahead.smooth_seconds, dt);
         // The fighter sits at `-lead` from the look target; keep it inside the safe frame.
         let lead = -view.clamp(anchor - (follow + look_ahead), safe_margin);
-        let center = clamp_3d_camera_center(anchor + lead, input.bounds, input.viewport);
+        let framed = anchor + lead;
+        let mut center = clamp_3d_camera_center(framed, input.bounds, input.viewport);
+        if input.fighter.is_some() {
+            let top_limit = top_hud_fighter_limit(input.viewport, input.ui_scale)
+                .clamp(view.near_y + safe_margin, view.far_y - safe_margin);
+            center.y = top_hud_band_center(center.y, framed.y, anchor.y, top_limit);
+        }
 
         self.trauma = (self.trauma - catalog.shake.decay_per_second * dt).max(0.0);
         if input.reduced_motion || input.reduced_effects {
@@ -518,6 +529,15 @@ impl CameraRig {
         };
         CameraRigFrame { center, shake }
     }
+}
+
+/// Top HUD safe band (BRL-fwtg): where the map clamp holds the camera south of the rig's framing
+/// (the map's north edge), the camera may still pass that edge by just enough to keep the local
+/// fighter at most `top_limit` ahead of the look target, so its overhead clears the top-center
+/// score plate. It never goes further north than the unclamped framing, so open-field framing
+/// and the look-ahead lean are unchanged.
+pub(super) fn top_hud_band_center(clamped: f32, framed: f32, fighter: f32, top_limit: f32) -> f32 {
+    clamped.max((fighter - top_limit).min(framed))
 }
 
 /// The aim lean: at least `distance_cells`, more when the reach (plus margin) would otherwise run
