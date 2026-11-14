@@ -75,6 +75,11 @@ const REPORT_FIELDS: &[&str] = &[
     "map_recipe_id",
     "mode_definition_id",
     "presentation_theme_id",
+    "owner_moving_frames",
+    "owner_stalled_frames",
+    "owner_speed_ratio_p05",
+    "owner_speed_ratio_p50",
+    "owner_speed_ratio_p95",
     "result",
     "first_failure",
 ];
@@ -138,7 +143,60 @@ struct RenderMeasurementState {
     current: HighWater,
     measured_map: Option<MeasuredMap>,
     context: Option<RenderMeasurementContext>,
+    owner_motion: OwnerMotionSamples,
     written: bool,
+}
+
+/// Per-frame presented owner motion during the measurement window (BRL-0169).
+///
+/// For each rendered frame whose predicted step is moving, the presented planar speed is divided
+/// by the predicted step speed. Fixed-tick stepping on a high-refresh display shows as stalled
+/// frames (ratio near 0) alternating with catch-up frames (ratio near 2 at 120 Hz); smooth
+/// presentation keeps the ratio near 1.
+#[derive(Default)]
+struct OwnerMotionSamples {
+    previous: Option<(Entity, Vec2)>,
+    stalled: usize,
+    ratios: Vec<f32>,
+}
+
+/// Presented-to-predicted speed ratio below which a moving frame counts as stalled.
+const OWNER_STALLED_RATIO: f32 = 0.05;
+/// Predicted step speed below which the owner is treated as standing still.
+const OWNER_MOVING_SPEED: f32 = 1.0;
+
+impl OwnerMotionSamples {
+    fn sample(&mut self, owner: Option<(Entity, Vec2, Vec2)>, delta_seconds: f32) {
+        let Some((entity, presented, step_velocity)) = owner else {
+            self.previous = None;
+            return;
+        };
+        let previous = self.previous.replace((entity, presented));
+        let Some((previous_entity, previous_position)) = previous else {
+            return;
+        };
+        let expected = step_velocity.length();
+        if previous_entity != entity || delta_seconds <= 0.0 || expected < OWNER_MOVING_SPEED {
+            return;
+        }
+        let ratio = presented.distance(previous_position) / delta_seconds / expected;
+        if self.ratios.len() < SAMPLE_CAPACITY {
+            if ratio < OWNER_STALLED_RATIO {
+                self.stalled += 1;
+            }
+            self.ratios.push(ratio);
+        }
+    }
+
+    fn percentiles(&self) -> [f64; 3] {
+        let mut sorted = self
+            .ratios
+            .iter()
+            .map(|ratio| f64::from(*ratio))
+            .collect::<Vec<_>>();
+        sorted.sort_by(f64::total_cmp);
+        [5, 50, 95].map(|percentage| percentile(&sorted, percentage))
+    }
 }
 
 type DashboardOwnedFilter = Or<(With<flow::DashboardRoot>, With<dashboard::DashboardOwned>)>;
@@ -177,9 +235,13 @@ impl Plugin for RenderMeasurementPlugin {
             current: HighWater::default(),
             measured_map: None,
             context: None,
+            owner_motion: OwnerMotionSamples::default(),
             written: false,
         })
-        .add_systems(Last, sample_and_finalize_render_measurement);
+        .add_systems(
+            Last,
+            (sample_owner_motion, sample_and_finalize_render_measurement).chain(),
+        );
     }
 }
 
@@ -296,6 +358,34 @@ fn sample_and_finalize_render_measurement(
     }
 }
 
+/// Sample the presented owner pose once per rendered frame inside the measurement window.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+fn sample_owner_motion(
+    mut state: ResMut<RenderMeasurementState>,
+    real: Res<Time<Real>>,
+    time: Res<Time>,
+    owners: Query<
+        (Entity, &Position, &prediction::OwnerPrediction),
+        (With<Fighter>, With<Controlled>),
+    >,
+) {
+    let Some(ready_at) = state.ready_at else {
+        return;
+    };
+    if state.written || real.elapsed().saturating_sub(ready_at) < state.config.warmup {
+        return;
+    }
+    let owner = owners
+        .iter()
+        .next()
+        .map(|(entity, position, prediction)| (entity, position.0, prediction.step_velocity()));
+    state.owner_motion.sample(owner, time.delta_secs());
+}
+
 fn update_high_water(high: &mut HighWater, current: HighWater) {
     high.entities = high.entities.max(current.entities);
     high.mesh_entities = high.mesh_entities.max(current.mesh_entities);
@@ -378,8 +468,9 @@ fn compose_report(
         measured_map.map_or_else(|| "unknown".to_string(), |value| format!("{:?}", value.2));
     let theme_id = measured_map.map_or(0, |value| value.3.0);
     let context = state.context.unwrap_or_default().name();
+    let owner_ratios = state.owner_motion.percentiles();
     format!(
-        "schema=3\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nresult={}\nfirst_failure={}\n",
+        "schema=4\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nowner_moving_frames={}\nowner_stalled_frames={}\nowner_speed_ratio_p05={:.3}\nowner_speed_ratio_p50={:.3}\nowner_speed_ratio_p95={:.3}\nresult={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -437,6 +528,11 @@ fn compose_report(
         recipe_id,
         mode_id,
         theme_id,
+        state.owner_motion.ratios.len(),
+        state.owner_motion.stalled,
+        owner_ratios[0],
+        owner_ratios[1],
+        owner_ratios[2],
         if failed.is_none() { "pass" } else { "fail" },
         failed.unwrap_or("none"),
     )
@@ -491,6 +587,39 @@ mod tests {
         assert!(percentile(&[], 95).abs() < f64::EPSILON);
         assert!((percentile(&[1.0, 2.0, 3.0, 4.0], 50) - 3.0).abs() < f64::EPSILON);
         assert!((percentile(&[1.0, 2.0, 3.0, 4.0], 95) - 4.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn owner_motion_separates_tick_stepping_from_smooth_frames() {
+        let owner = Entity::from_raw_u32(7).expect("valid entity index");
+        let velocity = Vec2::new(120.0, 0.0);
+        let frame = 1.0 / 120.0;
+        // 60 Hz stepping on a 120 Hz display: every other frame repeats the pose.
+        let mut stepped = OwnerMotionSamples::default();
+        let mut x = 0.0;
+        for frame_index in 0..9 {
+            if frame_index % 2 == 0 {
+                x += 2.0;
+            }
+            stepped.sample(Some((owner, Vec2::new(x, 0.0), velocity)), frame);
+        }
+        assert_eq!(stepped.ratios.len(), 8);
+        assert_eq!(stepped.stalled, 4);
+        let [p05, _, p95] = stepped.percentiles();
+        assert!(p05 < 0.01 && (p95 - 2.0).abs() < 1e-3, "{p05} {p95}");
+        // Smooth presentation advances every frame by one frame of travel.
+        let mut smooth = OwnerMotionSamples::default();
+        for frame_index in 0..9_u8 {
+            let x = f32::from(frame_index) * velocity.x * frame;
+            smooth.sample(Some((owner, Vec2::new(x, 0.0), velocity)), frame);
+        }
+        assert_eq!(smooth.stalled, 0);
+        let [p05, p50, p95] = smooth.percentiles();
+        assert!((p05 - 1.0).abs() < 1e-3 && (p50 - 1.0).abs() < 1e-3 && (p95 - 1.0).abs() < 1e-3);
+        // Standing still or losing the owner records nothing.
+        smooth.sample(Some((owner, Vec2::ZERO, Vec2::ZERO)), frame);
+        smooth.sample(None, frame);
+        assert_eq!(smooth.ratios.len(), 8);
     }
 
     #[test]

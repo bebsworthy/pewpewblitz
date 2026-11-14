@@ -349,3 +349,230 @@ fn suspended_and_frozen_owners_do_not_integrate_input() {
         );
     }
 }
+
+#[test]
+fn presented_pose_extrapolates_the_newest_step_and_is_exact_at_tick_boundaries() {
+    let tuning = OwnerPredictionTuning::default();
+    let prediction = predicted_walk(Vec2::ZERO, 100, 5, Vec2::X);
+    assert_eq!(prediction.step_velocity(), Vec2::X / DT);
+    assert_eq!(
+        prediction.presented_position_at(0.0, DT, tuning),
+        prediction.presented_position(),
+        "a tick boundary presents the committed prediction exactly"
+    );
+    let half = prediction.presented_position_at(DT / 2.0, DT, tuning);
+    assert!((half - Vec2::new(5.5, 0.0)).length() < 1e-4);
+    let full = prediction.presented_position_at(DT, DT, tuning);
+    assert!(
+        (full - Vec2::new(6.0, 0.0)).length() < 1e-4,
+        "a full overstep meets the next step"
+    );
+    assert_eq!(
+        prediction.presented_position_at(3.0 * DT, DT, tuning),
+        full,
+        "a stalled fixed loop never extrapolates beyond one tick of travel"
+    );
+}
+
+#[test]
+fn presented_correction_decays_continuously_across_a_tick() {
+    let tuning = OwnerPredictionTuning::default();
+    let mut prediction = OwnerPrediction::from_pose(Vec2::ZERO, 0.0);
+    prediction.record_step(Tick(1), Vec2::ZERO, None, tuning, DT);
+    prediction.correction_offset = Vec2::new(4.0, 0.0);
+    let before_tick = prediction.presented_position_at(DT, DT, tuning);
+    prediction.record_step(Tick(2), Vec2::ZERO, None, tuning, DT);
+    let after_tick = prediction.presented_position_at(0.0, DT, tuning);
+    assert!((before_tick - after_tick).length() < 1e-4);
+    assert!(before_tick.x < 4.0 && before_tick.x > 0.0);
+}
+
+#[test]
+fn following_authority_presents_without_extrapolation() {
+    let tuning = OwnerPredictionTuning::default();
+    let mut prediction = OwnerPrediction::from_pose(Vec2::ZERO, 0.0);
+    prediction.following_authority = true;
+    prediction.record_step(Tick(1), Vec2::new(20.0, 0.0), None, tuning, DT);
+    assert_eq!(prediction.step_velocity(), Vec2::ZERO);
+    assert_eq!(
+        prediction.presented_position_at(DT / 2.0, DT, tuning),
+        Vec2::new(20.0, 0.0)
+    );
+}
+
+/// One rendered frame of `delta`: Bevy's fixed main loop followed by Update.
+fn render_frame(app: &mut App, delta: core::time::Duration) -> usize {
+    app.world_mut()
+        .resource_mut::<Time<Fixed>>()
+        .accumulate_overstep(delta);
+    let mut ticks = 0;
+    while app.world().resource::<Time<Fixed>>().overstep() >= crate::timing::SIMULATION_TICK {
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .discard_overstep(crate::timing::SIMULATION_TICK);
+        fixed_tick(app);
+        ticks += 1;
+    }
+    app.world_mut().run_schedule(Update);
+    ticks
+}
+
+fn walking_owner_app() -> (App, Entity, f32) {
+    let mut app = plugin_app();
+    app.world_mut()
+        .resource_mut::<Time<Fixed>>()
+        .set_timestep(crate::timing::SIMULATION_TICK);
+    app.add_systems(
+        Update,
+        overwrite_with_interpolated_pose.in_set(InterpolationSystems::Interpolate),
+    );
+    let loadout = loadout();
+    let speed = loadout.fighter_stats.movement_speed;
+    let owner = app
+        .world_mut()
+        .spawn((
+            Fighter,
+            Controlled,
+            AuthoritativePose {
+                position: crate::combat::WorldPoint::from(Vec2::ZERO),
+                facing: 0.0,
+                tick: 50,
+            },
+            ActionState(FighterInput::from_axes(Vec2::X, None, 0)),
+            loadout,
+            Position(Vec2::ZERO),
+            Rotation::default(),
+        ))
+        .id();
+    fixed_tick(&mut app);
+    app.world_mut()
+        .get_mut::<OwnerPrediction>(owner)
+        .expect("attached")
+        .server_clock = Some((Tick(1), 50));
+    (app, owner, speed)
+}
+
+fn presented_x(app: &App, owner: Entity) -> f32 {
+    app.world().get::<Position>(owner).expect("pose").0.x
+}
+
+/// Two 120 Hz frames that land exactly on a tick, then 144, 90, 240, and 90 Hz frames; the
+/// cycle spans exactly three fixed ticks, so every cycle starts on a tick boundary.
+const VARYING_FRAMES_NANOS: [u64; 6] = [
+    8_333_333, 8_333_333, 6_944_444, 11_111_111, 4_166_666, 11_111_111,
+];
+
+#[test]
+fn varying_frame_deltas_present_continuous_owner_motion_between_ticks() {
+    let (mut app, owner, speed) = walking_owner_app();
+    // The first moving tick: the render clock now sits exactly on its boundary.
+    fixed_tick(&mut app);
+    let start = app
+        .world()
+        .get::<OwnerPrediction>(owner)
+        .expect("attached")
+        .position
+        .x;
+    let mut elapsed = 0.0_f64;
+    let mut previous = presented_x(&app, owner);
+    let mut saw_tickless_frame = false;
+    let mut saw_exact_boundary = false;
+    for frame in 0..120 {
+        let delta = core::time::Duration::from_nanos(
+            VARYING_FRAMES_NANOS[frame % VARYING_FRAMES_NANOS.len()],
+        );
+        elapsed += delta.as_secs_f64();
+        let ticks = render_frame(&mut app, delta);
+        saw_tickless_frame |= ticks == 0;
+        let presented = presented_x(&app, owner);
+        assert!(
+            presented > previous,
+            "frame {frame}: the owner advances on every rendered frame ({previous} -> {presented})"
+        );
+        // A steady walk extrapolates exactly onto the continuous path through every tick.
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "a two-second test walk stays far inside f32 range"
+        )]
+        let continuous = start + speed * elapsed as f32;
+        assert!(
+            (presented - continuous).abs() < 1e-2,
+            "frame {frame}: presented {presented} vs continuous {continuous}"
+        );
+        let overstep = app.world().resource::<Time<Fixed>>().overstep();
+        if overstep.is_zero() {
+            saw_exact_boundary = true;
+            let prediction = app.world().get::<OwnerPrediction>(owner).expect("attached");
+            assert!(
+                (presented - prediction.presented_position().x).abs() <= f32::EPSILON,
+                "frame {frame}: a tick boundary presents the committed prediction exactly"
+            );
+        }
+        previous = presented;
+    }
+    assert!(saw_tickless_frame && saw_exact_boundary);
+}
+
+#[test]
+fn releasing_input_withdraws_at_most_one_partial_step_and_corrections_do_not_snap() {
+    let (mut app, owner, speed) = walking_owner_app();
+    let frame = core::time::Duration::from_nanos(6_944_444);
+    let frame_seconds = frame.as_secs_f32();
+    for _ in 0..30 {
+        render_frame(&mut app, frame);
+    }
+    // A small authoritative correction for an in-flight tick blends instead of jumping.
+    let tick = {
+        let prediction = app.world().get::<OwnerPrediction>(owner).expect("attached");
+        prediction.history[prediction.history.len() - 3].tick
+    };
+    let predicted_then = app
+        .world()
+        .get::<OwnerPrediction>(owner)
+        .expect("attached")
+        .history[app
+        .world()
+        .get::<OwnerPrediction>(owner)
+        .expect("attached")
+        .history
+        .len()
+        - 3]
+    .position;
+    let tuning = *app.world().resource::<OwnerPredictionTuning>();
+    let before = presented_x(&app, owner);
+    let outcome = app
+        .world_mut()
+        .get_mut::<OwnerPrediction>(owner)
+        .expect("attached")
+        .reconcile(sample(tick.0, predicted_then - Vec2::new(3.0, 0.0)), tuning);
+    assert_eq!(outcome, Reconciliation::Smoothed { error: 3.0 });
+    let mut previous = before;
+    for _ in 0..120 {
+        render_frame(&mut app, frame);
+        let presented = presented_x(&app, owner);
+        let step = presented - previous;
+        assert!(
+            (-1e-3..=speed * frame_seconds + 0.6).contains(&step),
+            "the correction blends below one frame of travel plus its decay ({step})"
+        );
+        previous = presented;
+    }
+    // Releasing the input withdraws only the extrapolated partial step, then holds still.
+    app.world_mut()
+        .get_mut::<ActionState<FighterInput>>(owner)
+        .expect("input")
+        .0 = FighterInput::default();
+    let mut lowest = previous;
+    for _ in 0..30 {
+        render_frame(&mut app, frame);
+        lowest = lowest.min(presented_x(&app, owner));
+    }
+    let settled = presented_x(&app, owner);
+    assert!(
+        previous - lowest <= speed / 60.0 + 1e-3,
+        "withdrawal {} stays within one tick of travel",
+        previous - lowest
+    );
+    let prediction = app.world().get::<OwnerPrediction>(owner).expect("attached");
+    assert!((settled - prediction.presented_position().x).abs() < 1e-3);
+}

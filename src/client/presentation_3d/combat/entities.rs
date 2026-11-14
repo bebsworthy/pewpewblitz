@@ -1368,6 +1368,9 @@ fn spawn_sentry(
         ));
     });
 }
+/// Presented planar speed above which a fighter animates as running (0.5 units per 60 Hz frame).
+const FIGHTER_MOVING_SPEED: f32 = 30.0;
+
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Time is a Bevy system resource parameter"
@@ -1379,7 +1382,11 @@ pub(in super::super) fn write_fighter_visual_poses(
 ) {
     for (owner, mut visual, mut transform) in &mut fighter_visuals {
         if let Ok((position, rotation)) = fighter_owners.get(owner.0) {
-            visual.moving = visual.last_position.distance_squared(position.0) > 0.25;
+            // A speed, not a per-frame distance, so high-refresh frames still read as running.
+            let moving_distance = FIGHTER_MOVING_SPEED * time.delta_secs();
+            visual.moving = time.delta_secs() > 0.0
+                && visual.last_position.distance_squared(position.0)
+                    > moving_distance * moving_distance;
             visual.last_position = position.0;
             let recoil = Vec2::from_angle(rotation.as_radians())
                 * -fighter_recoil_offset(visual.recoil_seconds);

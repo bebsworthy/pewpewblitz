@@ -100,6 +100,9 @@ pub struct OwnerPrediction {
     pub facing: f32,
     /// Presented minus predicted position; decays toward zero after a small correction.
     pub correction_offset: Vec2,
+    /// Realized (post-collision) velocity of the newest predicted step; zero while following
+    /// authority. Presentation extrapolates it across the fixed-step overstep.
+    step_velocity: Vec2,
     history: VecDeque<PredictedStep>,
     /// Whether the newest predicted step suspended local movement.
     following_authority: bool,
@@ -116,6 +119,7 @@ impl OwnerPrediction {
             position,
             facing,
             correction_offset: Vec2::ZERO,
+            step_velocity: Vec2::ZERO,
             history: VecDeque::with_capacity(OWNER_PREDICTION_HISTORY),
             following_authority: false,
             last_sample_tick: None,
@@ -123,10 +127,40 @@ impl OwnerPrediction {
         }
     }
 
-    /// The pose the client presents for its own fighter.
+    /// The pose the client presents for its own fighter at a fixed-tick boundary.
     #[must_use]
     pub fn presented_position(&self) -> Vec2 {
         self.position + self.correction_offset
+    }
+
+    /// The pose presented `overstep` after the newest predicted tick: a partial-tick
+    /// extrapolation of the newest step plus the correction offset decayed for that time.
+    ///
+    /// Presentation only. `overstep` is clamped to one `fixed_step`, so a stalled fixed loop
+    /// never extrapolates further than one tick of travel; at zero it equals
+    /// [`Self::presented_position`] exactly.
+    #[must_use]
+    pub fn presented_position_at(
+        &self,
+        overstep: f32,
+        fixed_step: f32,
+        tuning: OwnerPredictionTuning,
+    ) -> Vec2 {
+        let overstep = overstep.clamp(0.0, fixed_step.max(0.0));
+        if overstep <= 0.0 {
+            return self.presented_position();
+        }
+        let half_life = tuning.correction_half_life_seconds.max(f32::EPSILON);
+        self.position
+            + self.step_velocity * overstep
+            + self.correction_offset * 0.5_f32.powf(overstep / half_life)
+    }
+
+    /// Realized velocity of the newest predicted step (zero while following authority).
+    #[cfg(any(test, feature = "automation"))]
+    #[must_use]
+    pub(crate) const fn step_velocity(&self) -> Vec2 {
+        self.step_velocity
     }
 
     /// Estimated server simulation tick for a local input tick, once a sample has arrived.
@@ -235,6 +269,11 @@ impl OwnerPrediction {
         tuning: OwnerPredictionTuning,
         delta_seconds: f32,
     ) {
+        self.step_velocity = if self.following_authority || delta_seconds <= 0.0 {
+            Vec2::ZERO
+        } else {
+            (position - self.position) / delta_seconds
+        };
         self.position = position;
         if let Some(aim) = aim {
             self.facing = aim.y.atan2(aim.x);
@@ -522,18 +561,27 @@ fn predict_owner_movement(
 }
 
 /// Present the predicted owner pose in place of the interpolated one.
+///
+/// Runs every rendered frame after the fixed loop, so `Time<Fixed>::overstep` is the time since
+/// the newest predicted tick; the partial-tick extrapolation keeps the owner (and the camera that
+/// follows it) moving on frames without a fixed tick, without delaying the input tick's motion.
 #[allow(
+    clippy::needless_pass_by_value,
     clippy::type_complexity,
-    reason = "the query declares this system's complete world view inline at its schedule boundary"
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
 fn present_owner_prediction(
+    time: Res<Time<Fixed>>,
+    tuning: Res<OwnerPredictionTuning>,
     mut owners: Query<
         (&OwnerPrediction, &mut Position, &mut Rotation),
         (With<Fighter>, With<Controlled>),
     >,
 ) {
+    let overstep = time.overstep().as_secs_f32();
+    let fixed_step = time.timestep().as_secs_f32();
     for (prediction, mut position, mut rotation) in &mut owners {
-        position.0 = prediction.presented_position();
+        position.0 = prediction.presented_position_at(overstep, fixed_step, *tuning);
         *rotation = Rotation::radians(prediction.facing);
     }
 }
