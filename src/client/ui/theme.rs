@@ -80,3 +80,85 @@ pub(crate) fn display_font_has_glyph(character: char) -> bool {
         .map(character)
         .is_some()
 }
+
+#[cfg(test)]
+mod tests {
+    use parley::{
+        FontFamily, LayoutContext, PositionedLayoutItem, StyleProperty,
+        fontique::{Blob, FontInfoOverride},
+    };
+
+    /// BRL-0168: player names are free-form Unicode, but Lilita One covers ASCII and Latin-1
+    /// only. Every other glyph must fall back to an OS font (Bevy's `system_font_discovery`)
+    /// rather than render `.notdef` boxes. Fallback depends on the platform's installed fonts,
+    /// so this checks the macOS development/CI target.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn names_outside_the_display_font_fall_back_to_real_glyphs() {
+        const NAMES: &[&str] = &[
+            "Łukasz Żółć",
+            "Nguyễn Văn An",
+            "Αλέξης",
+            "Жора Кот",
+            "李小雷",
+            "さくらちゃん",
+            "김민준",
+            "Pew🎮🔥",
+        ];
+        const ALIAS: &str = "brl-0168-display";
+        let display_font = Blob::from(
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/brawler/ui/fonts/lilita-one-regular.ttf"
+            ))
+            .to_vec(),
+        );
+        // Bevy's own default context: it only discovers system fonts when the client enables
+        // `bevy/system_font_discovery`, so this fails if that feature is dropped.
+        let mut font_cx = bevy::text::FontCx::default();
+        // Registered under an alias, as `bevy_text` does for a `Handle<Font>`.
+        font_cx.collection.register_fonts(
+            display_font.clone(),
+            Some(FontInfoOverride {
+                family_name: Some(ALIAS),
+                ..Default::default()
+            }),
+        );
+        let mut layout_cx = LayoutContext::<()>::new();
+
+        for name in NAMES {
+            assert!(
+                crate::lobby::normalize_proposed_display_name(name).is_ok(),
+                "{name} is a valid display name"
+            );
+            assert!(
+                !name.chars().all(super::display_font_has_glyph),
+                "{name} needs a glyph outside Lilita One"
+            );
+            let text = format!("Bot {name}");
+            let mut builder = layout_cx.ranged_builder(&mut font_cx.context, &text, 1.0, true);
+            builder.push_default(StyleProperty::FontFamily(FontFamily::named(ALIAS)));
+            builder.push_default(StyleProperty::FontSize(24.0));
+            let mut layout = builder.build(&text);
+            layout.break_all_lines(None);
+
+            let mut display_font_glyphs = 0;
+            for line in layout.lines() {
+                for item in line.items() {
+                    let PositionedLayoutItem::GlyphRun(run) = item else {
+                        continue;
+                    };
+                    let from_display_font = run.run().font().data.id() == display_font.id();
+                    for glyph in run.glyphs() {
+                        assert_ne!(glyph.id, 0, "{name} rendered a missing-glyph box");
+                        display_font_glyphs += usize::from(from_display_font);
+                    }
+                }
+            }
+            assert!(
+                display_font_glyphs >= "Bot".len(),
+                "{name}: Latin text keeps Lilita One"
+            );
+        }
+    }
+}

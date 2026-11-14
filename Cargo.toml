@@ -83,6 +83,8 @@ bevy-client = [
   "bevy/bevy_winit",
   "bevy/bevy_window",
   "bevy/default_font",
+  # BRL-0168: per-script fallback to the OS fonts for glyphs Lilita One lacks (player names).
+  "bevy/system_font_discovery",
   "bevy/gamepad",
   "bevy/gltf_animation",
   "bevy/png",
@@ -136,6 +138,8 @@ arboard = { version = "3.6", default-features = false, optional = true }
 [dev-dependencies]
 # Glyph-coverage tests read the shipped display font's character map.
 skrifa = "=0.44.0"
+# Display-name fallback tests lay text out through the same parley version as `bevy_text`.
+parley = { version = "=0.9.0", default-features = false, features = ["std"] }
 
 [[bin]]
 name = "brawler-client"

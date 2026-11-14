@@ -84,6 +84,10 @@ tickets tune them through native review but do not change the direction.
 - The shell uses a saturated blue gradient, indigo panels, a single orange primary action, and a
   cyan accent. White Lilita One type with a navy stroke is used everywhere, including the in-match
   HUD.
+- Lilita One covers ASCII and Latin-1 only. The client enables Bevy's `system_font_discovery`, so
+  any other glyph (extended Latin, Greek, Cyrillic, CJK, emoji) in a player name or other text
+  falls back per script to the platform's own font instead of a missing-glyph box. No fallback font
+  is bundled, so APK size is unaffected.
 - Surfaces read as pressable: a vertical gradient, a light top band, and a darker bottom lip.
 - Motion is energetic and always optional under reduced-motion settings.
 - [Player-shell design](design/player-shell/README.md) owns the tokens, compositions, and motion
