@@ -53,3 +53,8 @@ Run `just ui-gallery` (scroll to the bottom of ICON SET) and `just run 1`: Dashb
 # Follow-ups
 
 - BRL-4jdx (backlog): retire the unreferenced Sharp-exported shell chrome PNGs (panel-*, game-card*, practice-card*) and move surviving exports off Sharp.
+
+
+# Owner sign-off (2026-11-14)
+
+Owner reviewed the pennants in `just ui-gallery` and approved them ("nice. approved"). Single orange body with per-mode emblems kept; per-mode body tones not requested.

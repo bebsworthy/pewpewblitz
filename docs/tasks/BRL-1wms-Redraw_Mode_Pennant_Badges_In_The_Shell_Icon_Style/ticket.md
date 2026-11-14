@@ -4,9 +4,9 @@ was: BRL-0191
 
 title: Redraw mode pennant badges in the shell icon style
 
-status: doing
-closed:
-status_changed: 2026-11-14T19:42:11Z
+status: done
+closed: 2026-11-14T20:57:48Z
+status_changed: 2026-11-14T20:57:48Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-4jdx, BRL-nzre]
 
 parent: BRL-q5c4
 
-rank: 13434880
+rank:
 ---
 
 # Description
