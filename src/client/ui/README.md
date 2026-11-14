@@ -20,6 +20,10 @@ Bevy entities, not a separate widget runtime.
 - `scroll`: viewport clamping and focus-reveal geometry, shared by screens and gallery, plus the
   generic touch drag-scroll for every vertical `Overflow::scroll_y` area (past the press
   drag-cancel distance).
+- `slider`: `SliderPointer`, one adjustment list per frame for slider owners: the unchanged mouse
+  samples plus the touch gesture (sideways drag follows the finger, vertical drag is left to
+  scrolling, an undragged tap sets the tapped position on release). Owners keep range, step,
+  units and save deferral.
 - `viewport`: the small-window fit. Below 640 logical pixels of height the effective `UiScale` is
   the player's setting times `height / 640` (floor 0.5), so landscape phones get the authored
   wide layouts on a 640-pixel-tall virtual canvas; taller windows are unchanged.
@@ -69,7 +73,7 @@ production components, including shell Back/actions/cards/panels and selected+fo
 disabled and inactive examples beside switches/sliders/bindings.
 
 Up/Down, D-pad or left stick moves focus. Left/Right adjusts sliders; Enter/South toggles demo
-values. Pointer clicks and slider dragging work; wheel and focus reveal scroll smaller windows.
+values. Pointer clicks and slider dragging (mouse or touch) work; wheel and focus reveal scroll smaller windows.
 Columns stack below 1000 logical pixels. Demo action labels do not perform product actions.
 
 BRL-0123 owns adoption and visual acceptance. Verify actual native wide/compact screens against

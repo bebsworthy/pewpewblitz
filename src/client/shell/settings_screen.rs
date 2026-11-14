@@ -8,7 +8,8 @@ use super::{
 use crate::client::presentation_3d::render_quality::RenderCapabilities;
 use crate::client::settings::persistence::GraphicsQuality;
 use crate::client::ui::{
-    controls::{ControlState, ControlValue, SliderTrack, slider_fraction, spawn_control},
+    controls::{ControlState, ControlValue, spawn_control},
+    slider::{SliderPointer, SliderTouch},
     theme,
 };
 use bevy::ui::RelativeCursorPosition;
@@ -701,6 +702,7 @@ pub(super) fn autosave(
     path: Res<ClientSettingsPath>,
     mut page: ResMut<SettingsPage>,
     mouse: Res<ButtonInput<MouseButton>>,
+    touch: Option<Res<SliderTouch>>,
 ) {
     let mut candidate = draft.as_ref().map_or(*active, |draft| draft.0);
     if let Some((previous, _)) = page.display_change {
@@ -727,7 +729,9 @@ pub(super) fn autosave(
         *active = candidate;
         page.pending_save = true;
     }
-    if page.defer_save && mouse.pressed(MouseButton::Left) {
+    let slider_held =
+        mouse.pressed(MouseButton::Left) || touch.as_deref().is_some_and(SliderTouch::held);
+    if page.defer_save && slider_held {
         return;
     }
     page.defer_save = false;
@@ -744,41 +748,34 @@ pub(super) fn autosave(
 
 #[allow(clippy::needless_pass_by_value, reason = "Bevy slider input resources")]
 pub(super) fn pointer_sliders(
-    mouse: Res<ButtonInput<MouseButton>>,
+    pointer: SliderPointer,
     overlay: Res<ClientOverlay>,
-    tracks: Query<(&SliderTrack, &RelativeCursorPosition)>,
     buttons: Query<&ShellButton>,
     draft: Option<ResMut<ShellSettingsDraft>>,
     mut page: ResMut<SettingsPage>,
 ) {
-    if *overlay != ClientOverlay::Settings
-        || !(mouse.pressed(MouseButton::Left)
-            || mouse.just_pressed(MouseButton::Left)
-            || mouse.just_released(MouseButton::Left))
-    {
+    if *overlay != ClientOverlay::Settings {
         return;
     }
     let Some(mut draft) = draft else {
         return;
     };
-    for (track, cursor) in &tracks {
-        let Some(fraction) = slider_fraction(cursor) else {
-            continue;
-        };
-        let Ok(button) = buttons.get(track.0) else {
+    for adjust in pointer.adjustments() {
+        let Ok(button) = buttons.get(adjust.owner) else {
             continue;
         };
         match button.id {
             ShellControlId::UiScaleUp => {
-                page.defer_save = mouse.pressed(MouseButton::Left);
+                page.defer_save = adjust.held;
                 draft.0.ui_scale =
-                    ((MIN_UI_SCALE + fraction * (MAX_UI_SCALE - MIN_UI_SCALE)) * 10.0).round()
+                    ((MIN_UI_SCALE + adjust.fraction * (MAX_UI_SCALE - MIN_UI_SCALE)) * 10.0)
+                        .round()
                         / 10.0;
             }
             id => {
                 if let Some(volume) = volume_field(&mut draft.0, id) {
-                    page.defer_save = mouse.pressed(MouseButton::Left);
-                    *volume = volume_from_fraction(fraction);
+                    page.defer_save = adjust.held;
+                    *volume = volume_from_fraction(adjust.fraction);
                 }
             }
         }
@@ -1008,6 +1005,7 @@ fn adjust_preference(action: ShellAction, settings: &mut ClientShellSettings) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::ui::controls::SliderTrack;
 
     #[test]
     fn display_page_cycles_graphics_quality_and_shows_the_auto_tier() {
@@ -1102,6 +1100,7 @@ mod tests {
         app.insert_resource(mouse)
             .insert_resource(ClientOverlay::Settings)
             .init_resource::<SettingsPage>()
+            .init_resource::<SliderTouch>()
             .insert_resource(ShellSettingsDraft(ClientShellSettings::default()))
             .add_systems(Update, pointer_sliders);
         let owner = app

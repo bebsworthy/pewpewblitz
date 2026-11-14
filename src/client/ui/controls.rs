@@ -49,6 +49,13 @@ struct ValueLabel(Entity);
 #[derive(Component)]
 pub(crate) struct SliderTrack(pub(crate) Entity);
 
+/// The slider knob overhangs each end of its track by this many UI pixels.
+pub(crate) const SLIDER_KNOB_RADIUS: f32 = 12.0;
+
+/// Slider rows are touch targets: 76 UI px is at least 48 dp at the landscape-phone fit
+/// (411 / 640 of the default 100% UI scale, BRL-0201). Other rows keep the 56 px desktop height.
+pub(crate) const SLIDER_ROW_MIN_HEIGHT: f32 = 76.0;
+
 /// Bevy reports the track center as zero, with edges at -0.5 and +0.5.
 pub(crate) fn slider_fraction(cursor: &RelativeCursorPosition) -> Option<f32> {
     cursor
@@ -117,7 +124,7 @@ pub(crate) fn spawn_control(
         value,
         Node {
             width: percent(100),
-            min_height: px(56),
+            min_height: px(if slider { SLIDER_ROW_MIN_HEIGHT } else { 56.0 }),
             flex_shrink: 0.0,
             padding: UiRect::axes(px(16), px(10)),
             border: UiRect::all(px(2)),
@@ -230,11 +237,11 @@ fn spawn_slider(parent: &mut ChildSpawnerCommands, owner: Entity) {
                     position_type: PositionType::Absolute,
                     top: px(4),
                     left: percent(0),
-                    margin: UiRect::left(px(-12)),
-                    width: px(24),
-                    height: px(24),
+                    margin: UiRect::left(px(-SLIDER_KNOB_RADIUS)),
+                    width: px(SLIDER_KNOB_RADIUS * 2.0),
+                    height: px(SLIDER_KNOB_RADIUS * 2.0),
                     border: UiRect::all(px(3)),
-                    border_radius: BorderRadius::all(px(12)),
+                    border_radius: BorderRadius::all(px(SLIDER_KNOB_RADIUS)),
                     ..default()
                 },
                 BackgroundColor(TEXT),

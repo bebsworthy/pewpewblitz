@@ -1153,6 +1153,66 @@ mod tests {
         assert!((scroll - 400.0).abs() < f32::EPSILON, "{scroll}");
     }
 
+    /// BRL-0201: on the phone layout a finger drag and a tap set a slider; saving waits for the
+    /// finger to lift.
+    #[test]
+    fn phone_touch_drag_and_tap_set_sliders_and_save_on_release() {
+        use crate::client::ui::{controls::SliderTrack, layout_harness};
+        use bevy::input::touch::TouchPhase;
+        let dir =
+            std::env::temp_dir().join(format!("brawler-brl0201-touch-{}", std::process::id()));
+        let path = dir.join("settings.ron");
+        let mut app = shell_test_app(path.clone());
+        layout_harness::add_layout(&mut app, 868, 411);
+        app.update();
+        request_settings(&mut app);
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::AudioCategory);
+        for _ in 0..4 {
+            app.update();
+        }
+        let track = |app: &mut App, id: ShellControlId| {
+            let mut tracks = app.world_mut().query::<(Entity, &SliderTrack)>();
+            let entity = tracks
+                .iter(app.world())
+                .find(|(_, track)| {
+                    app.world()
+                        .get::<ShellButton>(track.0)
+                        .is_some_and(|button| button.id == id)
+                })
+                .map(|(entity, _)| entity)
+                .expect("slider track");
+            layout_harness::node_rect(app.world(), entity).expect("laid-out track")
+        };
+        let along = |rect: Rect, fraction: f32| {
+            Vec2::new(rect.min.x + rect.width() * fraction, rect.center().y)
+        };
+        let master = track(&mut app, ShellControlId::VolumeUp);
+        layout_harness::touch(&mut app, TouchPhase::Started, along(master, 0.9));
+        layout_harness::touch(&mut app, TouchPhase::Moved, along(master, 0.6));
+        layout_harness::touch(&mut app, TouchPhase::Moved, along(master, 0.3));
+        assert_eq!(
+            app.world().resource::<ClientShellSettings>().master_volume,
+            30
+        );
+        assert!(!path.exists(), "saving waits for the finger to lift");
+        layout_harness::touch(&mut app, TouchPhase::Ended, along(master, 0.3));
+        app.update();
+        assert!(path.exists());
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("master_volume: 30"), "{saved}");
+
+        let music = track(&mut app, ShellControlId::MusicVolumeUp);
+        layout_harness::tap(&mut app, along(music, 0.5));
+        assert_eq!(
+            app.world().resource::<ClientShellSettings>().music_volume,
+            50
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// BRL-0198: the platform Back request closes Settings and Credits like Esc.
     #[test]
     fn platform_back_closes_settings_and_credits() {

@@ -9,6 +9,12 @@ use bevy::{input::touch::Touches, prelude::*, ui::UiSystems, window::PrimaryWind
 /// Logical pixels a held pointer may travel before the press becomes a drag.
 pub(crate) const DRAG_CANCEL_DISTANCE: f32 = 12.0;
 
+/// A drag that has passed the cancel distance belongs to horizontal controls (sliders, carousels)
+/// when it travelled mostly sideways, and to vertical scrolling otherwise.
+pub(crate) fn is_sideways(travelled: Vec2) -> bool {
+    travelled.x.abs() > travelled.y.abs()
+}
+
 /// A press in progress: how it started and whether it has become a drag.
 #[derive(Clone, Copy, Debug)]
 struct HeldPress {
@@ -70,18 +76,20 @@ impl ReleaseActivation {
     }
 }
 
-/// Installs the shared release tracker and touch drag-scrolling once, whichever shell owner
-/// composes first; both share the press/drag distance policy.
+/// Installs the shared release tracker, touch drag-scrolling and touch slider gesture once,
+/// whichever shell owner composes first; all three share the press/drag distance policy.
 pub(crate) struct ReleaseActivationPlugin;
 
 impl Plugin for ReleaseActivationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<super::scroll::TouchDragScroll>()
+            .init_resource::<super::slider::SliderTouch>()
             .add_systems(
                 PreUpdate,
                 (
                     track_release_activation,
                     super::scroll::drag_scroll_by_touch,
+                    super::slider::track_touch_sliders,
                 )
                     .after(UiSystems::Focus),
             );

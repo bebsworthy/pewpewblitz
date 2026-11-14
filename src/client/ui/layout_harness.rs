@@ -159,21 +159,26 @@ pub(crate) fn on_screen(world: &mut World, entity: Entity) -> bool {
 /// A finger tap at a logical window position (down, up, and one frame to release), through the
 /// real touch input and UI focus path.
 pub(crate) fn tap(app: &mut App, position: Vec2) {
+    for phase in [TouchPhase::Started, TouchPhase::Ended, TouchPhase::Ended] {
+        touch(app, phase, position);
+    }
+}
+
+/// One finger touch event at a logical window position, followed by one frame.
+pub(crate) fn touch(app: &mut App, phase: TouchPhase, position: Vec2) {
     let window = app
         .world_mut()
         .query_filtered::<Entity, With<PrimaryWindow>>()
         .single(app.world())
         .expect("primary window");
-    for phase in [TouchPhase::Started, TouchPhase::Ended, TouchPhase::Ended] {
-        app.world_mut().write_message(TouchInput {
-            phase,
-            position,
-            window,
-            force: None,
-            id: 11,
-        });
-        app.update();
-    }
+    app.world_mut().write_message(TouchInput {
+        phase,
+        position,
+        window,
+        force: None,
+        id: 11,
+    });
+    app.update();
 }
 
 /// Physical-pixel rectangle of a laid-out node.

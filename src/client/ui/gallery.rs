@@ -1,7 +1,7 @@
 //! Standalone development surface; never installed in the player application.
 
 use super::{
-    controls::{self, ControlState, ControlValue, SliderTrack, spawn_control},
+    controls::{self, ControlState, ControlValue, spawn_control},
     scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible},
     surface::Surface,
     theme,
@@ -9,7 +9,7 @@ use super::{
 use bevy::input::mouse::MouseWheel;
 use bevy::{
     prelude::*,
-    ui::{InteractionDisabled, RelativeCursorPosition, ScrollPosition, UiScale, UiSystems},
+    ui::{InteractionDisabled, ScrollPosition, UiScale, UiSystems},
     window::PrimaryWindow,
 };
 
@@ -308,8 +308,7 @@ fn heading(parent: &mut ChildSpawnerCommands, font: &TextFont, label: &str) {
 )]
 fn interact(
     keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    tracks: Query<(&SliderTrack, &RelativeCursorPosition)>,
+    pointer: super::slider::SliderPointer,
     pads: Query<&Gamepad>,
     mut focus: ResMut<GalleryFocus>,
     mut controls: Query<(
@@ -320,19 +319,13 @@ fn interact(
         &mut ControlValue,
     )>,
 ) {
-    if mouse.pressed(MouseButton::Left)
-        || mouse.just_pressed(MouseButton::Left)
-        || mouse.just_released(MouseButton::Left)
-    {
-        for (track, cursor) in &tracks {
-            if let Some(position) = controls::slider_fraction(cursor)
-                && let Ok((item, _, _, _, mut value)) = controls.get_mut(track.0)
-                && let ControlValue::Slider { fraction, label } = &mut *value
-            {
-                *fraction = position;
-                *label = format!("{:.0}%", 80.0 + *fraction * 40.0);
-                focus.index = item.0;
-            }
+    for adjust in pointer.adjustments() {
+        if let Ok((item, _, _, _, mut value)) = controls.get_mut(adjust.owner)
+            && let ControlValue::Slider { fraction, label } = &mut *value
+        {
+            *fraction = adjust.fraction;
+            *label = format!("{:.0}%", 80.0 + *fraction * 40.0);
+            focus.index = item.0;
         }
     }
     let pressed = |button| pads.iter().any(|pad| pad.just_pressed(button));
@@ -525,7 +518,9 @@ fn surface_example(
 
 #[cfg(test)]
 mod tests {
+    use super::super::controls::SliderTrack;
     use super::*;
+    use bevy::ui::RelativeCursorPosition;
 
     #[test]
     fn short_track_click_adjusts_without_a_held_frame() {
@@ -536,6 +531,7 @@ mod tests {
         app.insert_resource(mouse)
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<GalleryFocus>()
+            .init_resource::<super::super::slider::SliderTouch>()
             .add_systems(Update, interact);
         let owner = app
             .world_mut()

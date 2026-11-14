@@ -9,9 +9,8 @@ use crate::client::settings::{
     binding_edit::{BindingProposal, BindingTarget},
     calibration::{NeutralMeasurement, Recommendation},
 };
-use crate::client::ui::controls::{SliderTrack, slider_fraction};
+use crate::client::ui::slider::SliderPointer;
 use bevy::prelude::*;
-use bevy::ui::RelativeCursorPosition;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::client::shell) enum InputPage {
@@ -406,29 +405,22 @@ pub(in crate::client::shell) fn sample_sticks(
     reason = "Settings analog slider input"
 )]
 pub(in crate::client::shell) fn pointer_sliders(
-    mouse: Res<ButtonInput<MouseButton>>,
+    pointer: SliderPointer,
     overlay: Res<ClientOverlay>,
-    tracks: Query<(&SliderTrack, &RelativeCursorPosition)>,
     buttons: Query<&ShellButton>,
     draft: Option<ResMut<InputSettingsDraft>>,
     mut page: ResMut<SettingsPage>,
     mut state: ResMut<ControlsState>,
 ) {
-    if *overlay != ClientOverlay::Settings
-        || !(mouse.pressed(MouseButton::Left)
-            || mouse.just_pressed(MouseButton::Left)
-            || mouse.just_released(MouseButton::Left))
-    {
+    if *overlay != ClientOverlay::Settings {
         return;
     }
     let Some(mut draft) = draft else {
         return;
     };
-    for (track, cursor) in &tracks {
-        let Some(fraction) = slider_fraction(cursor) else {
-            continue;
-        };
-        let Ok(button) = buttons.get(track.0) else {
+    for adjust in pointer.adjustments() {
+        let fraction = adjust.fraction;
+        let Ok(button) = buttons.get(adjust.owner) else {
             continue;
         };
         if !allows(button.id, &state) {
@@ -453,7 +445,7 @@ pub(in crate::client::shell) fn pointer_sliders(
                 draft.0.adjust_calibration(field, value - current);
                 page.rebuild |= state.recommendation.take().is_some() | state.undo.take().is_some();
             }
-            page.defer_save = mouse.pressed(MouseButton::Left);
+            page.defer_save = adjust.held;
         }
     }
 }

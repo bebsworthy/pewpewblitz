@@ -11,7 +11,7 @@ use bevy::{
 };
 use std::ops::Range;
 
-use super::press::DRAG_CANCEL_DISTANCE;
+use super::press::{DRAG_CANCEL_DISTANCE, is_sideways};
 
 /// One finger held on the shell: where it started, the scroll area under it, and whether it has
 /// travelled far enough to become a scroll drag (which also cancels release activation).
@@ -114,7 +114,7 @@ pub(crate) fn drag_scroll_by_touch(
     if drag.applied.is_none() && travelled.length() <= DRAG_CANCEL_DISTANCE {
         return;
     }
-    if drag.applied.is_none() && travelled.x.abs() > travelled.y.abs() {
+    if drag.applied.is_none() && is_sideways(travelled) {
         // A sideways gesture (slider drag, carousel swipe) never scrolls vertically.
         drag.target = None;
     }

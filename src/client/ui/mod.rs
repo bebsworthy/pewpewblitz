@@ -14,6 +14,8 @@ pub(crate) mod press;
 
 pub(crate) mod scroll;
 
+pub(crate) mod slider;
+
 pub(crate) mod surface;
 
 pub(crate) mod viewport;

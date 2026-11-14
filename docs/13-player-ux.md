@@ -454,7 +454,12 @@ Display, Audio, Accessibility and Controls navigation. Display exposes borderles
 VSync; Audio exposes master, effects and music volume and focus-loss mute; Accessibility exposes
 UI scale, reduced motion and reduced combat effects. These ordinary preferences apply and save on change. A failed
 save retains the active session value and presents an inline retry. Pointer sliders save when the
-interaction ends; keyboard/gamepad adjustments save directly. Fullscreen changes preview for 15
+interaction ends; keyboard/gamepad adjustments save directly. On touch (BRL-0201) a finger that goes
+down on a slider track waits for the press drag-cancel distance: a mostly sideways drag then follows
+the finger (even if it drifts off the row), a vertical drag scrolls the page without changing the
+value, and an undragged tap sets the value at the tapped position when the finger lifts. The track
+geometry is captured at touch-down, so a live UI-scale change cannot feed back into the drag.
+Slider rows are at least 48 dp tall at the landscape-phone fit. Fullscreen changes preview for 15
 seconds and require Keep display; timeout, Revert, or leaving Settings restores the previous mode.
 Each page has scoped Reset and Undo reset, preserving unrelated preferences.
 
