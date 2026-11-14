@@ -3,9 +3,9 @@ id: BRL-0175
 
 title: Retain Map Maker UI nodes for discrete value-only edits
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-12T22:17:30Z
+status_changed: 2026-11-14T12:06:03Z
 
 theme: quality
 
@@ -19,7 +19,7 @@ related: [BRL-0163]
 
 parent: BRL-0171
 
-rank: 851968
+rank: 12910592
 ---
 
 # Description
