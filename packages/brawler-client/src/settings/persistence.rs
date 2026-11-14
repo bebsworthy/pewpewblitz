@@ -24,6 +24,9 @@ pub struct ClientShellSettings {
     pub ui_scale: f32,
     pub reduced_motion: bool,
     pub reduced_combat_effects: bool,
+    /// Camera shake intensity in percent (BRL-0173), independent of the reduced-motion and
+    /// reduced-combat-effects toggles, which still disable shake entirely.
+    pub camera_shake: u8,
     pub master_volume: u8,
     /// Combat, match, and interface one-shots, as a share of the master volume.
     pub effects_volume: u8,
@@ -78,6 +81,7 @@ impl GraphicsQuality {
 
 pub const DEFAULT_EFFECTS_VOLUME: u8 = 100;
 pub const DEFAULT_MUSIC_VOLUME: u8 = 70;
+pub const DEFAULT_CAMERA_SHAKE: u8 = 100;
 
 impl Default for ClientShellSettings {
     fn default() -> Self {
@@ -85,6 +89,7 @@ impl Default for ClientShellSettings {
             ui_scale: 1.0,
             reduced_motion: false,
             reduced_combat_effects: false,
+            camera_shake: DEFAULT_CAMERA_SHAKE,
             master_volume: 100,
             effects_volume: DEFAULT_EFFECTS_VOLUME,
             music_volume: DEFAULT_MUSIC_VOLUME,
@@ -114,7 +119,17 @@ impl ClientShellSettings {
                 ));
             }
         }
+        if self.camera_shake > 100 || !self.camera_shake.is_multiple_of(10) {
+            return Err("Camera shake must be between 0 and 100 in steps of 10".to_string());
+        }
         Ok(())
+    }
+
+    /// Camera shake amplitude scale in [0, 1]. Reduced motion and reduced combat effects are
+    /// applied separately by the camera rig.
+    #[must_use]
+    pub fn camera_shake_scale(self) -> f32 {
+        f32::from(self.camera_shake.min(100)) / 100.0
     }
 }
 
@@ -158,6 +173,9 @@ pub struct SettingsFile {
     pub ui_scale: f32,
     pub reduced_motion: bool,
     pub reduced_combat_effects: bool,
+    /// Added by BRL-0173; defaulted so earlier settings files still load at full shake.
+    #[serde(default = "default_camera_shake")]
+    pub camera_shake: u8,
     pub master_volume: u8,
     /// Added by BRL-0158. Defaulted so a settings file saved before the audio categories existed
     /// still loads instead of being rejected with every binding; unknown fields stay rejected.
@@ -179,6 +197,10 @@ const fn default_effects_volume() -> u8 {
 
 const fn default_music_volume() -> u8 {
     DEFAULT_MUSIC_VOLUME
+}
+
+const fn default_camera_shake() -> u8 {
+    DEFAULT_CAMERA_SHAKE
 }
 
 const fn default_touch_deadzone() -> f32 {
@@ -208,6 +230,7 @@ impl SettingsFile {
             ui_scale: shell.ui_scale,
             reduced_motion: shell.reduced_motion,
             reduced_combat_effects: shell.reduced_combat_effects,
+            camera_shake: shell.camera_shake,
             master_volume: shell.master_volume,
             effects_volume: shell.effects_volume,
             music_volume: shell.music_volume,
@@ -239,6 +262,7 @@ impl SettingsFile {
             ui_scale: self.ui_scale,
             reduced_motion: self.reduced_motion,
             reduced_combat_effects: self.reduced_combat_effects,
+            camera_shake: self.camera_shake,
             master_volume: self.master_volume,
             effects_volume: self.effects_volume,
             music_volume: self.music_volume,
@@ -437,6 +461,47 @@ mod tests {
         fs::write(&path, legacy).unwrap();
         let (_, shell) = load_settings(&path).unwrap().unwrap();
         assert_eq!(shell.graphics_quality, GraphicsQuality::Auto);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn camera_shake_round_trips_validates_and_older_files_load_at_full_shake() {
+        let dir = test_path("pre-camera-shake");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.ron");
+        let low = ClientShellSettings {
+            camera_shake: 30,
+            ..ClientShellSettings::default()
+        };
+        save_settings(&path, ClientInputSettings::default(), low).unwrap();
+        let current = fs::read_to_string(&path).unwrap();
+        let (_, shell) = load_settings(&path).unwrap().unwrap();
+        assert_eq!(shell, low);
+        assert!((shell.camera_shake_scale() - 0.3).abs() < 1e-6);
+
+        let legacy = current
+            .lines()
+            .filter(|line| !line.contains("camera_shake"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_ne!(legacy, current);
+        fs::write(&path, legacy).unwrap();
+        let (_, shell) = load_settings(&path).unwrap().unwrap();
+        assert_eq!(shell.camera_shake, DEFAULT_CAMERA_SHAKE);
+        assert!((shell.camera_shake_scale() - 1.0).abs() < f32::EPSILON);
+
+        for invalid_value in [35, 110] {
+            let mut invalid = SettingsFile::from_active(
+                ClientInputSettings::default(),
+                ClientShellSettings::default(),
+            );
+            invalid.camera_shake = invalid_value;
+            fs::write(&path, ron::to_string(&invalid).unwrap()).unwrap();
+            assert!(matches!(
+                load_settings(&path),
+                Err(SettingsLoadError::Rejected(_))
+            ));
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 

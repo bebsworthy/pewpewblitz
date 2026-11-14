@@ -177,9 +177,14 @@ look-ahead is capped at three cells and then passes through the unchanged per-ax
 it never reveals space the framing contract forbids and a fit axis stays locked to the map center.
 A trauma-based shake fed by local fire, local damage and defeat, and distance-scaled nearby lob
 landings, barrel explosions, and defeats adds a ground-plane translation of at most a quarter cell
-after framing. Aim and viewport auto-aim project through the unshaken view, so shake never moves aim,
-targeting, input, or gameplay. Reduced motion disables shake and look-ahead and shortens follow
-smoothing; reduced combat effects also disables shake. The map editor camera bypasses the rig.
+after framing. Local fire trauma is authored per primary-weapon delivery family with a spread-pattern
+multiplier, so heavy weapons shake more than light, fast ones and player-authored weapons inherit
+their family's value; local damage trauma scales with the hit's share of maximum health. Aim and
+viewport auto-aim project through the unshaken view, so shake never moves aim, targeting, input, or
+gameplay. The persisted Camera shake setting (Accessibility, 0–100% in 10% steps) scales only the
+shake amplitude. Reduced motion disables shake and look-ahead and shortens follow smoothing; reduced
+combat effects also disables shake; both override the intensity setting. The map editor camera
+bypasses the rig.
 
 Hit feedback (`presentation_3d/hit_feedback.rs`, tuned by the client-only
 `assets/catalogs/hit_feedback.ron`) reads only authoritative replicated cues: fighter and deployable

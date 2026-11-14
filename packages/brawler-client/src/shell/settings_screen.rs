@@ -439,13 +439,19 @@ pub(super) fn control(
 
 fn category_rows(category: Category) -> &'static [ShellControlId] {
     use ShellControlId::{
-        EffectsVolumeUp, GraphicsQuality, MusicVolumeUp, ToggleFocusMute, ToggleFullscreen,
-        ToggleReducedEffects, ToggleReducedMotion, ToggleVsync, UiScaleUp, VolumeUp,
+        CameraShakeUp, EffectsVolumeUp, GraphicsQuality, MusicVolumeUp, ToggleFocusMute,
+        ToggleFullscreen, ToggleReducedEffects, ToggleReducedMotion, ToggleVsync, UiScaleUp,
+        VolumeUp,
     };
     match category {
         Category::Display => &[ToggleFullscreen, ToggleVsync, GraphicsQuality],
         Category::Audio => &[VolumeUp, EffectsVolumeUp, MusicVolumeUp, ToggleFocusMute],
-        Category::Accessibility => &[UiScaleUp, ToggleReducedMotion, ToggleReducedEffects],
+        Category::Accessibility => &[
+            UiScaleUp,
+            ToggleReducedMotion,
+            ToggleReducedEffects,
+            CameraShakeUp,
+        ],
         Category::Controls => &[],
     }
 }
@@ -458,6 +464,7 @@ fn action(id: ShellControlId) -> ShellAction {
         ShellControlId::VolumeUp => ShellAction::VolumeUp,
         ShellControlId::EffectsVolumeUp => ShellAction::EffectsVolumeUp,
         ShellControlId::MusicVolumeUp => ShellAction::MusicVolumeUp,
+        ShellControlId::CameraShakeUp => ShellAction::CameraShakeUp,
         ShellControlId::ToggleFocusMute => ShellAction::ToggleFocusMute,
         ShellControlId::UiScaleUp => ShellAction::UiScaleUp,
         ShellControlId::ToggleReducedMotion => ShellAction::ToggleReducedMotion,
@@ -502,6 +509,10 @@ fn description(id: ShellControlId) -> (&'static str, &'static str) {
             "Reduced combat effects",
             "Reduce combat effects while keeping gameplay information visible.",
         ),
+        ShellControlId::CameraShakeUp => (
+            "Camera shake",
+            "Adjust how strongly the camera shakes from shots, hits and explosions. Reduced motion or reduced combat effects turn it off.",
+        ),
         _ => ("", ""),
     }
 }
@@ -515,6 +526,9 @@ pub(super) fn slider_actions(id: ShellControlId) -> Option<(ShellAction, ShellAc
         }
         ShellControlId::MusicVolumeUp => {
             Some((ShellAction::MusicVolumeDown, ShellAction::MusicVolumeUp))
+        }
+        ShellControlId::CameraShakeUp => {
+            Some((ShellAction::CameraShakeDown, ShellAction::CameraShakeUp))
         }
         ShellControlId::Input(id) => super::controls::slider_actions(id),
         _ => None,
@@ -545,6 +559,7 @@ fn value(
         ShellControlId::VolumeUp => volume_slider(settings.master_volume),
         ShellControlId::EffectsVolumeUp => volume_slider(settings.effects_volume),
         ShellControlId::MusicVolumeUp => volume_slider(settings.music_volume),
+        ShellControlId::CameraShakeUp => volume_slider(settings.camera_shake),
         _ => ControlValue::Action,
     }
 }
@@ -564,7 +579,7 @@ fn volume_slider(volume: u8) -> ControlValue {
     }
 }
 
-/// The nearest 10% step to a pointer position along a volume slider.
+/// The nearest 10% step to a pointer position along a percentage (volume or camera shake) slider.
 fn volume_from_fraction(fraction: f32) -> u8 {
     (0_u8..=10)
         .min_by(|left, right| {
@@ -576,12 +591,13 @@ fn volume_from_fraction(fraction: f32) -> u8 {
         * 10
 }
 
-/// The persisted volume a volume slider row owns.
+/// The persisted percentage a 10%-step slider row (volumes, camera shake) owns.
 fn volume_field(settings: &mut ClientShellSettings, id: ShellControlId) -> Option<&mut u8> {
     match id {
         ShellControlId::VolumeUp => Some(&mut settings.master_volume),
         ShellControlId::EffectsVolumeUp => Some(&mut settings.effects_volume),
         ShellControlId::MusicVolumeUp => Some(&mut settings.music_volume),
+        ShellControlId::CameraShakeUp => Some(&mut settings.camera_shake),
         _ => None,
     }
 }
@@ -953,6 +969,7 @@ fn reset_category(
             settings.ui_scale = source.ui_scale;
             settings.reduced_motion = source.reduced_motion;
             settings.reduced_combat_effects = source.reduced_combat_effects;
+            settings.camera_shake = source.camera_shake;
         }
         Category::Controls => {}
     }
@@ -985,6 +1002,12 @@ fn adjust_preference(action: ShellAction, settings: &mut ClientShellSettings) ->
         }
         ShellAction::MusicVolumeUp => {
             settings.music_volume = settings.music_volume.saturating_add(10).min(100);
+        }
+        ShellAction::CameraShakeDown => {
+            settings.camera_shake = settings.camera_shake.saturating_sub(10);
+        }
+        ShellAction::CameraShakeUp => {
+            settings.camera_shake = settings.camera_shake.saturating_add(10).min(100);
         }
         ShellAction::ToggleFocusMute => {
             settings.mute_when_unfocused = !settings.mute_when_unfocused;
@@ -1089,6 +1112,48 @@ mod tests {
             slider_actions(ShellControlId::MusicVolumeUp),
             Some((ShellAction::MusicVolumeDown, ShellAction::MusicVolumeUp))
         );
+    }
+
+    #[test]
+    fn accessibility_page_owns_a_camera_shake_slider_independent_of_reduced_motion() {
+        assert_eq!(
+            category_rows(Category::Accessibility),
+            [
+                ShellControlId::UiScaleUp,
+                ShellControlId::ToggleReducedMotion,
+                ShellControlId::ToggleReducedEffects,
+                ShellControlId::CameraShakeUp,
+            ]
+        );
+        assert_eq!(
+            slider_actions(ShellControlId::CameraShakeUp),
+            Some((ShellAction::CameraShakeDown, ShellAction::CameraShakeUp))
+        );
+        let mut settings = ClientShellSettings::default();
+        assert_eq!(settings.camera_shake, 100);
+        assert!(adjust_preference(ShellAction::CameraShakeUp, &mut settings));
+        assert_eq!(settings.camera_shake, 100);
+        for _ in 0..12 {
+            adjust_preference(ShellAction::CameraShakeDown, &mut settings);
+        }
+        assert_eq!(settings.camera_shake, 0);
+        assert!(!settings.reduced_motion && !settings.reduced_combat_effects);
+        let ControlValue::Slider { label, .. } =
+            value(ShellControlId::CameraShakeUp, settings, None)
+        else {
+            panic!("camera shake is a slider");
+        };
+        assert_eq!(label, "0%");
+        assert_eq!(
+            volume_field(&mut settings, ShellControlId::CameraShakeUp).copied(),
+            Some(0)
+        );
+        reset_category(
+            Category::Accessibility,
+            &mut settings,
+            ClientShellSettings::default(),
+        );
+        assert_eq!(settings, ClientShellSettings::default());
     }
 
     #[test]

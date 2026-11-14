@@ -1,9 +1,9 @@
-// Client-only gameplay camera rig tuning (BRL-0143). Presentation only: none of these values
+// Client-only gameplay camera rig tuning (BRL-0143; per-weapon and per-hit shake, BRL-0173). Presentation only: none of these values
 // feed aim, targeting, input, or simulation. Code-owned ceilings live in
 // `packages/brawler-client/src/presentation_3d/camera_rig.rs`; framing (FOV, elevation, distance) stays in
 // `camera.rs`.
 (
-    schema_version: 1,
+    schema_version: 2,
     follow: (
         // Critically damped follow of the presented (predicted) local fighter pose.
         smooth_seconds: 0.11,
@@ -25,8 +25,26 @@
         decay_per_second: 1.8,
         exponent: 2.0,
         triggers: (
-            local_fire: 0.14,
-            local_damage: 0.42,
+            // Local fire by the primary weapon's delivery family: heavy weapons shake more than
+            // light, fast ones. Player-authored weapons share their family's value.
+            local_fire: (
+                straight: 0.12,
+                sticky_straight: 0.16,
+                lobbed: 0.22,
+                melee_arc: 0.16,
+                cone_spray: 0.08,
+                splash: 0.14,
+                // A spread pattern (Scatter Cannon) is one blast of several pellets.
+                spread_scale: 1.75,
+            ),
+            local_ultimate: 0.14,
+            // Damage taken scales with the hit's share of maximum health; a hit of at least
+            // `full_strength_health_fraction` reaches `maximum`.
+            local_damage: (
+                minimum: 0.2,
+                maximum: 0.6,
+                full_strength_health_fraction: 0.3,
+            ),
             local_defeat: 0.7,
             nearby_explosion: 0.6,
             nearby_defeat: 0.3,

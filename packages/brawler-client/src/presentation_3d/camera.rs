@@ -137,6 +137,7 @@ pub(super) fn follow_3d_camera(
             dt,
             reduced_motion: settings.reduced_motion,
             reduced_effects: settings.reduced_combat_effects,
+            shake_scale: settings.camera_shake_scale(),
         },
     );
     let target = ground_position(frame.center);

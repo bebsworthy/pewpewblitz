@@ -13,14 +13,16 @@ use super::camera::clamp_3d_camera_center;
     reason = "the world-renderer submodule consumes the presentation_3d composition surface"
 )]
 use super::*;
-use crate::local_attack::{LocalAttackLedger, LocalAttackPresented};
+use crate::local_attack::{LocalAttackKind, LocalAttackLedger, LocalAttackPresented};
+use brawler::builds::ResolvedMatchLoadout;
 use brawler::combat::client::DeduplicatedCombatCue;
+use brawler::combat::{DeliveryMethod, FiringPattern, WeaponRecipe};
 use brawler::map::{AxisAlignedMapRect, MAP_CELL_SIZE_WORLD};
 use serde::Deserialize;
 use std::collections::VecDeque;
 
 const CAMERA_RIG_CATALOG: &str = include_str!("../../../../assets/catalogs/camera_rig.ron");
-const CAMERA_RIG_SCHEMA_VERSION: u16 = 1;
+const CAMERA_RIG_SCHEMA_VERSION: u16 = 2;
 /// Largest distance the rig may lead or trail the fighter before framing. Inside the conservative
 /// view's nearest extent (about 4.9 cells below the look target, 7.1 above, 8.8 to each side at
 /// the reference aspect), so the fighter always stays visible.
@@ -32,6 +34,8 @@ const MAX_SMOOTH_SECONDS: f32 = 1.0;
 /// A long hitch is integrated as one bounded step instead of a large spring jump.
 const MAX_RIG_STEP_SECONDS: f32 = 0.1;
 const MAX_SEEN_WORLD_OBJECT_CUES: usize = 32;
+/// A spread weapon's fire trauma may at most quadruple its delivery family's value.
+const MAX_SPREAD_FIRE_SCALE: f32 = 4.0;
 /// Noise phase wraps on a whole multiple of every component period (eighths of a cycle).
 const NOISE_PHASE_WRAP: f32 = 1_024.0;
 
@@ -73,12 +77,71 @@ pub(super) struct ShakeTuning {
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ShakeTriggers {
-    pub(super) local_fire: f32,
-    pub(super) local_damage: f32,
+    pub(super) local_fire: LocalFireTrauma,
+    pub(super) local_ultimate: f32,
+    pub(super) local_damage: LocalDamageTrauma,
     pub(super) local_defeat: f32,
     pub(super) nearby_explosion: f32,
     pub(super) nearby_defeat: f32,
     pub(super) falloff_radius_cells: f32,
+}
+
+/// Local fire trauma by the controlled fighter's primary weapon delivery family (BRL-0173), so
+/// heavy weapons shake more than light ones. Player-authored weapons share their family's value.
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LocalFireTrauma {
+    pub(super) straight: f32,
+    pub(super) sticky_straight: f32,
+    pub(super) lobbed: f32,
+    pub(super) melee_arc: f32,
+    pub(super) cone_spray: f32,
+    pub(super) splash: f32,
+    /// Multiplier for a spread firing pattern (one blast of several deliveries).
+    pub(super) spread_scale: f32,
+}
+
+impl LocalFireTrauma {
+    /// Trauma of one local shot. An unknown weapon (loadout not yet replicated) uses the
+    /// straight-shot value, matching the fire-sound fallback.
+    pub(super) fn for_weapon(&self, recipe: Option<&WeaponRecipe>) -> f32 {
+        let Some(recipe) = recipe else {
+            return self.straight;
+        };
+        let family = match recipe.delivery {
+            DeliveryMethod::Straight { .. } => self.straight,
+            DeliveryMethod::StickyStraight { .. } => self.sticky_straight,
+            DeliveryMethod::Lobbed { .. } => self.lobbed,
+            DeliveryMethod::MeleeArc { .. } => self.melee_arc,
+            DeliveryMethod::ConeSpray { .. } => self.cone_spray,
+            DeliveryMethod::Splash { .. } => self.splash,
+        };
+        match recipe.firing {
+            FiringPattern::Single => family,
+            FiringPattern::Spread { .. } => (family * self.spread_scale).min(1.0),
+        }
+    }
+}
+
+/// Local damage-taken trauma scaled by the hit's share of the fighter's maximum health
+/// (BRL-0173): a hit of at least `full_strength_health_fraction` reaches `maximum`.
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LocalDamageTrauma {
+    pub(super) minimum: f32,
+    pub(super) maximum: f32,
+    pub(super) full_strength_health_fraction: f32,
+}
+
+impl LocalDamageTrauma {
+    /// Trauma of one damage cue. Unknown maximum health uses the minimum.
+    pub(super) fn for_hit(&self, amount: u16, maximum_health: Option<u16>) -> f32 {
+        let fraction = maximum_health
+            .filter(|maximum| *maximum > 0)
+            .map_or(0.0, |maximum| f32::from(amount) / f32::from(maximum));
+        let strength = (fraction / self.full_strength_health_fraction).clamp(0.0, 1.0);
+        self.minimum + (self.maximum - self.minimum) * strength
+    }
 }
 
 /// Validated client-only camera rig tuning, embedded from `assets/catalogs/camera_rig.ron`.
@@ -162,15 +225,44 @@ impl CameraRigCatalog {
         check_range("shake.frequency_hz", shake.frequency_hz, 0.5, 60.0)?;
         check_range("shake.decay_per_second", shake.decay_per_second, 0.1, 20.0)?;
         check_range("shake.exponent", shake.exponent, 1.0, 4.0)?;
+        let fire = triggers.local_fire;
+        let damage = triggers.local_damage;
         for (name, value) in [
-            ("shake.triggers.local_fire", triggers.local_fire),
-            ("shake.triggers.local_damage", triggers.local_damage),
+            ("shake.triggers.local_fire.straight", fire.straight),
+            (
+                "shake.triggers.local_fire.sticky_straight",
+                fire.sticky_straight,
+            ),
+            ("shake.triggers.local_fire.lobbed", fire.lobbed),
+            ("shake.triggers.local_fire.melee_arc", fire.melee_arc),
+            ("shake.triggers.local_fire.cone_spray", fire.cone_spray),
+            ("shake.triggers.local_fire.splash", fire.splash),
+            ("shake.triggers.local_ultimate", triggers.local_ultimate),
+            ("shake.triggers.local_damage.minimum", damage.minimum),
             ("shake.triggers.local_defeat", triggers.local_defeat),
             ("shake.triggers.nearby_explosion", triggers.nearby_explosion),
             ("shake.triggers.nearby_defeat", triggers.nearby_defeat),
         ] {
             check_range(name, value, 0.0, 1.0)?;
         }
+        check_range(
+            "shake.triggers.local_fire.spread_scale",
+            fire.spread_scale,
+            1.0,
+            MAX_SPREAD_FIRE_SCALE,
+        )?;
+        check_range(
+            "shake.triggers.local_damage.maximum",
+            damage.maximum,
+            damage.minimum,
+            1.0,
+        )?;
+        check_range(
+            "shake.triggers.local_damage.full_strength_health_fraction",
+            damage.full_strength_health_fraction,
+            0.01,
+            1.0,
+        )?;
         check_range(
             "shake.triggers.falloff_radius_cells",
             triggers.falloff_radius_cells,
@@ -275,6 +367,8 @@ pub(super) struct CameraRigFrameInput {
     pub(super) dt: f32,
     pub(super) reduced_motion: bool,
     pub(super) reduced_effects: bool,
+    /// The player's camera shake intensity in [0, 1]; scales the shake amplitude only.
+    pub(super) shake_scale: f32,
 }
 
 /// The framed camera center and the transient shake applied on top of it.
@@ -363,7 +457,13 @@ impl CameraRig {
         }
         self.noise_phase =
             (self.noise_phase + dt * catalog.shake.frequency_hz).rem_euclid(NOISE_PHASE_WRAP);
-        let amplitude = catalog.shake.max_offset_world * self.trauma.powf(catalog.shake.exponent);
+        let shake_scale = if input.shake_scale.is_finite() {
+            input.shake_scale.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let amplitude =
+            catalog.shake.max_offset_world * self.trauma.powf(catalog.shake.exponent) * shake_scale;
         let shake = if amplitude > 0.0 {
             shake_noise(self.noise_phase) * amplitude
         } else {
@@ -419,22 +519,31 @@ pub(super) fn accumulate_camera_trauma(
     mut cues: MessageReader<DeduplicatedCombatCue>,
     ledger: Option<Res<LocalAttackLedger>>,
     world_objects: Option<Res<brawler::map::ReceivedWorldObjectCues>>,
-    controlled: Query<(&NetworkEntityId, &Position), (With<Fighter>, With<Controlled>)>,
+    controlled: Query<
+        (&NetworkEntityId, &Position, Option<&ResolvedMatchLoadout>),
+        (With<Fighter>, With<Controlled>),
+    >,
 ) {
     let triggers = catalog.shake.triggers;
     let radius = triggers.falloff_radius_cells * MAP_CELL_SIZE_WORLD;
-    let local = controlled
-        .iter()
-        .next()
-        .map(|(id, position)| (*id, position.0));
+    let controlled = controlled.iter().next();
+    let local = controlled.map(|(id, position, _)| (*id, position.0));
+    let loadout = controlled.and_then(|(_, _, loadout)| loadout);
+    let local_fire = triggers
+        .local_fire
+        .for_weapon(loadout.map(|loadout| &loadout.primary_weapon.recipe));
+    let maximum_health = loadout.map(|loadout| loadout.fighter_stats.maximum_health);
     let nearby = |amount: f32, position: Vec2| {
         local.map_or(0.0, |(_, origin)| {
             falloff(amount, origin.distance(position), radius)
         })
     };
     let mut trauma = 0.0;
-    for _ in local_attacks.read() {
-        trauma += triggers.local_fire;
+    for local_attack in local_attacks.read() {
+        trauma += match local_attack.kind {
+            LocalAttackKind::PrimaryFire(_) => local_fire,
+            LocalAttackKind::Ultimate { .. } => triggers.local_ultimate,
+        };
     }
     for DeduplicatedCombatCue(cue) in cues.read() {
         let is_local = |id: &NetworkEntityId| local.is_some_and(|(local, _)| local == *id);
@@ -446,10 +555,12 @@ pub(super) fn accumulate_camera_trauma(
                     .as_deref()
                     .is_some_and(|ledger| ledger.is_echo(*attack_id)) =>
             {
-                triggers.local_fire
+                local_fire
             }
-            brawler::combat::CombatCue::DamageApplied { target, .. } if is_local(target) => {
-                triggers.local_damage
+            brawler::combat::CombatCue::DamageApplied { target, amount, .. }
+                if is_local(target) =>
+            {
+                triggers.local_damage.for_hit(*amount, maximum_health)
             }
             brawler::combat::CombatCue::FighterDefeated { target, .. } if is_local(target) => {
                 triggers.local_defeat

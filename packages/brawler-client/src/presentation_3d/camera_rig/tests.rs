@@ -29,6 +29,7 @@ fn input(fighter: Vec2, bounds: AxisAlignedMapRect) -> CameraRigFrameInput {
         dt: FRAME,
         reduced_motion: false,
         reduced_effects: false,
+        shake_scale: 1.0,
     }
 }
 
@@ -54,7 +55,11 @@ fn embedded_catalog_is_valid_and_ceilings_fail_closed() {
     assert!(CameraRigCatalog::from_ron(&oversized_lead).is_err());
     let unknown = CAMERA_RIG_CATALOG.replace("exponent: 2.0,", "exponent: 2.0, roll: 1.0,");
     assert!(CameraRigCatalog::from_ron(&unknown).is_err());
-    let schema = CAMERA_RIG_CATALOG.replace("schema_version: 1", "schema_version: 2");
+    let oversized_spread = CAMERA_RIG_CATALOG.replace("spread_scale: 1.75", "spread_scale: 9.0");
+    assert!(CameraRigCatalog::from_ron(&oversized_spread).is_err());
+    let inverted_damage = CAMERA_RIG_CATALOG.replace("maximum: 0.6", "maximum: 0.1");
+    assert!(CameraRigCatalog::from_ron(&inverted_damage).is_err());
+    let schema = CAMERA_RIG_CATALOG.replace("schema_version: 2", "schema_version: 1");
     assert!(CameraRigCatalog::from_ron(&schema).is_err());
 }
 
@@ -405,7 +410,8 @@ fn ecs_local_fire_and_damage_shake_then_decay_to_rest() {
             )),
         }));
     app.update();
-    let expected = catalog.shake.triggers.local_fire + catalog.shake.triggers.nearby_defeat * 0.5
+    let expected = catalog.shake.triggers.local_fire.for_weapon(None)
+        + catalog.shake.triggers.nearby_defeat * 0.5
         - catalog.shake.decay_per_second * FRAME;
     let trauma = app.world().resource::<CameraRig>().trauma();
     assert!((trauma - expected).abs() < 1e-3, "{trauma} vs {expected}");
@@ -494,4 +500,231 @@ fn ecs_framing_writes_the_aspect_fair_field_of_view() {
     let expected =
         camera::camera_vertical_fov(DEFAULT_GAMEPLAY_VIEWPORT.x / DEFAULT_GAMEPLAY_VIEWPORT.y);
     assert!((perspective.fov - expected).abs() < 1e-6);
+}
+
+fn preset_loadout(preset: u16) -> ResolvedMatchLoadout {
+    let builds = brawler::builds::BuildCatalog::embedded().expect("embedded build catalog");
+    let weapons = brawler::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
+    brawler::builds::resolve_build_recipe(
+        &builds,
+        &weapons,
+        brawler::builds::BrawlerBuildRecipe {
+            weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(preset)),
+            ultimate: brawler::builds::UltimateDefinitionId(1),
+            passives: [
+                brawler::builds::PassiveDefinitionId(1),
+                brawler::builds::PassiveDefinitionId(6),
+            ],
+        },
+    )
+    .expect("preset loadout resolves")
+}
+
+fn preset_fire_trauma(preset: u16) -> f32 {
+    catalog()
+        .shake
+        .triggers
+        .local_fire
+        .for_weapon(Some(&preset_loadout(preset).primary_weapon.recipe))
+}
+
+#[test]
+fn heavy_weapons_shake_more_than_light_ones() {
+    let pulse_sidearm = preset_fire_trauma(1);
+    let scatter_cannon = preset_fire_trauma(2);
+    let arc_launcher = preset_fire_trauma(3);
+    let spray = preset_fire_trauma(6);
+    assert!(
+        scatter_cannon > pulse_sidearm,
+        "{scatter_cannon} vs {pulse_sidearm}"
+    );
+    assert!(
+        arc_launcher > pulse_sidearm,
+        "{arc_launcher} vs {pulse_sidearm}"
+    );
+    assert!(spray < pulse_sidearm, "{spray} vs {pulse_sidearm}");
+    let fire = catalog().shake.triggers.local_fire;
+    assert!((fire.for_weapon(None) - fire.straight).abs() < f32::EPSILON);
+    assert!((scatter_cannon - fire.straight * fire.spread_scale).abs() < 1e-6);
+    for preset in 1..=7 {
+        let trauma = preset_fire_trauma(preset);
+        assert!((0.0..=1.0).contains(&trauma), "preset {preset}: {trauma}");
+    }
+}
+
+#[test]
+fn damage_trauma_scales_with_the_hit_share_of_maximum_health() {
+    let damage = catalog().shake.triggers.local_damage;
+    let light = damage.for_hit(10, Some(1_000));
+    let heavy = damage.for_hit(400, Some(1_000));
+    assert!(light < heavy, "{light} vs {heavy}");
+    assert!((damage.for_hit(0, Some(1_000)) - damage.minimum).abs() < f32::EPSILON);
+    assert!(
+        (heavy - damage.maximum).abs() < f32::EPSILON,
+        "saturates at full strength"
+    );
+    assert!((damage.for_hit(u16::MAX, Some(1)) - damage.maximum).abs() < f32::EPSILON);
+    assert!((damage.for_hit(500, None) - damage.minimum).abs() < f32::EPSILON);
+    assert!((damage.for_hit(500, Some(0)) - damage.minimum).abs() < f32::EPSILON);
+}
+
+#[test]
+fn shake_intensity_scales_amplitude_and_zero_turns_it_off() {
+    let catalog = catalog();
+    let bounds = centered_map(50.0, 50.0);
+    let shaken = |scale: f32| {
+        let mut rig = CameraRig::default();
+        rig.step(&catalog, input(Vec2::ZERO, bounds));
+        rig.add_trauma(1.0);
+        let frame = rig.step(
+            &catalog,
+            CameraRigFrameInput {
+                shake_scale: scale,
+                ..input(Vec2::ZERO, bounds)
+            },
+        );
+        (frame.shake, rig.trauma())
+    };
+    let (full, full_trauma) = shaken(1.0);
+    let (half, half_trauma) = shaken(0.5);
+    let (off, off_trauma) = shaken(0.0);
+    assert!(full.length() > 0.0);
+    assert!(half.abs_diff_eq(full * 0.5, 1e-4), "{half} vs {full}");
+    assert_eq!(off, Vec2::ZERO);
+    assert_eq!(shaken(f32::NAN).0, Vec2::ZERO);
+    assert!(
+        shaken(4.0).0.abs_diff_eq(full, 1e-4),
+        "scale is clamped to 1"
+    );
+    // The intensity is an output scale: trauma decays identically at every setting.
+    assert!((full_trauma - half_trauma).abs() < f32::EPSILON);
+    assert!((full_trauma - off_trauma).abs() < f32::EPSILON);
+
+    for (reduced_motion, reduced_effects) in [(true, false), (false, true)] {
+        let mut rig = CameraRig::default();
+        rig.add_trauma(1.0);
+        let frame = rig.step(
+            &catalog,
+            CameraRigFrameInput {
+                reduced_motion,
+                reduced_effects,
+                shake_scale: 1.0,
+                ..input(Vec2::ZERO, bounds)
+            },
+        );
+        assert_eq!(
+            frame.shake,
+            Vec2::ZERO,
+            "reduced settings override intensity"
+        );
+    }
+}
+
+#[test]
+fn ecs_local_fire_follows_the_loadout_and_damage_follows_the_hit() {
+    let mut app = rig_app();
+    let loadout = preset_loadout(3);
+    let maximum_health = loadout.fighter_stats.maximum_health;
+    let fighter = app
+        .world_mut()
+        .spawn((
+            Fighter,
+            Controlled,
+            NetworkEntityId(7),
+            Position(Vec2::ZERO),
+            loadout,
+        ))
+        .id();
+    app.update();
+    app.update();
+    let catalog = catalog();
+    let triggers = catalog.shake.triggers;
+    let decay = catalog.shake.decay_per_second * FRAME;
+    let trauma_after = |app: &mut App, kind: LocalAttackKind, damage: Option<u16>| {
+        app.world_mut().resource_mut::<CameraRig>().reset();
+        app.world_mut().write_message(LocalAttackPresented {
+            fighter,
+            owner: NetworkEntityId(7),
+            team: TeamId(0),
+            kind,
+            origin: Vec2::ZERO,
+            facing: 0.0,
+            simulation_tick: 10,
+        });
+        if let Some(amount) = damage {
+            app.world_mut()
+                .write_message(DeduplicatedCombatCue(CombatCue::DamageApplied {
+                    event_id: CombatEventId(20),
+                    tick: 10,
+                    attack_id: AttackId(21),
+                    source: brawler::combat::DamageSource::HostileNpc {
+                        npc_id: NetworkEntityId(99),
+                        definition_id: 1,
+                    },
+                    target: NetworkEntityId(7),
+                    position: WorldPoint::from(Vec2::ZERO),
+                    amount,
+                    health_after: maximum_health.saturating_sub(amount),
+                    distance_band: brawler::combat::DistanceBand::Close,
+                }));
+        }
+        app.update();
+        app.world().resource::<CameraRig>().trauma()
+    };
+    let lobbed = trauma_after(&mut app, LocalAttackKind::PrimaryFire(LocalShotId(1)), None);
+    assert!(
+        (lobbed - (triggers.local_fire.lobbed - decay)).abs() < 1e-4,
+        "{lobbed}"
+    );
+    let ultimate = trauma_after(
+        &mut app,
+        LocalAttackKind::Ultimate {
+            kind: brawler::builds::UltimateKind::Dash,
+            cast: local_attack::LocalCastId(1),
+        },
+        None,
+    );
+    assert!(
+        (ultimate - (triggers.local_ultimate - decay)).abs() < 1e-4,
+        "{ultimate}"
+    );
+    let heavy_hit = trauma_after(
+        &mut app,
+        LocalAttackKind::PrimaryFire(LocalShotId(2)),
+        Some(maximum_health),
+    );
+    let expected = (triggers.local_fire.lobbed + triggers.local_damage.maximum).min(1.0) - decay;
+    assert!(
+        (heavy_hit - expected).abs() < 1e-4,
+        "{heavy_hit} vs {expected}"
+    );
+}
+
+#[test]
+fn ecs_camera_shake_setting_scales_the_applied_offset() {
+    let mut peaks = Vec::new();
+    for intensity in [100, 50, 0] {
+        let mut app = rig_app();
+        app.insert_resource(ClientShellSettings {
+            camera_shake: intensity,
+            ..Default::default()
+        });
+        app.world_mut().spawn((
+            Fighter,
+            Controlled,
+            NetworkEntityId(7),
+            Position(Vec2::ZERO),
+        ));
+        app.update();
+        app.world_mut().resource_mut::<CameraRig>().add_trauma(1.0);
+        let mut peak: f32 = 0.0;
+        for _ in 0..30 {
+            app.update();
+            peak = peak.max(camera_shake(&mut app).length());
+        }
+        peaks.push(peak);
+    }
+    assert!(peaks[0] > 0.0);
+    assert!((peaks[1] - peaks[0] * 0.5).abs() < 1e-3, "{peaks:?}");
+    assert!(peaks[2].abs() < f32::EPSILON, "{peaks:?}");
 }
