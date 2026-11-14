@@ -1,5 +1,5 @@
 //! Presentation-only hit feedback: a short white flash on whatever was damaged and pooled floating
-//! damage/healing numbers.
+//! damage/healing numbers, including healing recovered outside healing cues (`recovery`).
 //!
 //! Every flash and number comes from an authoritative replicated cue (`DeduplicatedCombatCue`,
 //! `ReceivedWorldObjectCues`, `ReceivedHeistObjectiveCue`); nothing here computes damage or writes
@@ -20,10 +20,12 @@ use std::collections::HashMap;
 
 mod flash;
 mod numbers;
+mod recovery;
 
 pub(super) use flash::HitFlashMaterials;
 use flash::{HitFlash, apply_hit_flash_materials, tick_hit_flashes};
 use numbers::{FloatingNumberBook, ensure_floating_number_pool, project_floating_numbers};
+use recovery::{HealthRecoveryLedger, collect_recovery_numbers};
 
 const HIT_FEEDBACK_CATALOG: &str = include_str!("../../../../assets/catalogs/hit_feedback.ron");
 const HIT_FEEDBACK_SCHEMA_VERSION: u16 = 1;
@@ -528,6 +530,7 @@ pub(super) fn install(app: &mut App) {
         ))
         .init_resource::<HitFlashMaterials<StandardMaterial>>()
         .init_resource::<HitFlashMaterials<ToonMaterial>>()
+        .init_resource::<HealthRecoveryLedger>()
         .add_message::<DeduplicatedCombatCue>()
         .add_message::<brawler::matchplay::ReceivedHeistObjectiveCue>()
         .add_systems(
@@ -537,6 +540,11 @@ pub(super) fn install(app: &mut App) {
                 // Reads the world-object inbox before the VFX producer drains it.
                 collect_hit_feedback
                     .before(vfx::VfxRequestSet)
+                    .in_set(WorldPresentationSet::ConsumeCues),
+                // Pickup and replicated-health recovery numbers; reads this frame's pickup inbox.
+                collect_recovery_numbers
+                    .after(collect_hit_feedback)
+                    .after(brawler::map::ClientPickupCueSet)
                     .in_set(WorldPresentationSet::ConsumeCues),
                 (
                     apply_hit_flash_materials::<StandardMaterial>,

@@ -197,7 +197,14 @@ dealt (by the local player or its deployables), taken, healing (`+N`), and muted
 hits of one style on one target merge into one re-popping number for a bounded window, so spray and
 field ticks stay legible; when the pool is full the oldest number is recycled. A cue whose target is
 not replicated to this observer (such as a concealed enemy, which the server already withholds)
-produces neither flash nor number. Reduced motion removes the number pop and rise; reduced combat
+produces neither flash nor number. Health recovered outside healing cues also shows `+N`
+(BRL-0174): a restoration pickup from the amount in its `PickupCue::Collected` (an anonymized,
+concealed collector shows nothing), and passive regeneration or a Zombie boost from increases of
+the fighter's replicated `CurrentHealth`. Each increase is first matched against healing already
+numbered from a cue for that fighter; only the unexplained rest is held for a 250 ms attribution
+window so a late cue can still claim it. Increases while the fighter is defeated, respawning,
+spawn-protected, at previous health 0, or while the match is not Active are lifecycle resets and
+never show a number, and decreases are never read as healing. Reduced motion removes the number pop and rise; reduced combat
 effects uses a dimmer, shorter flash. Defeat feedback stays on the shared request path: the authored
 `defeat` recipe adds a smoke puff and a brief ground marker at the defeat point, and every defeat
 plays the defeat sound.
@@ -827,7 +834,8 @@ do not enter the gameplay content fingerprint or dedicated-server dependency gra
 Since BRL-0158 every registered cue key maps to its own distinct clip (a catalog test enforces
 it): per weapon delivery family fire (`fire-straight`, `fire-sticky`, `fire-lobbed`,
 `fire-splash`, `fire-melee`, `fire-spray`) and impact sounds, `hit-dealt`/`hit-taken` relative to
-the controlled fighter, per-ultimate activation, objective, pickup, match start/score and
+the controlled fighter (spaced at least 4 ticks apart per kind, 12 under reduced combat effects,
+which thins but never mutes them), per-ultimate activation, objective, pickup, match start/score and
 victory/defeat/draw stings, and `ui-click`/`ui-confirm`/`ui-back` from the shared release-activation
 press model by surface role. The same catalog owns two looping music tracks selected by semantic
 key (`menu` everywhere except `match` during a match); a client music adapter crossfades between

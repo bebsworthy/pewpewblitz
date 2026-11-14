@@ -567,3 +567,136 @@ fn ecs_toon_body_flashes_with_a_toon_variant_and_restores_it() {
     assert_eq!(toon_material(&app), toon_base);
     assert!(app.world().get::<HitFlash>(root).is_none());
 }
+
+fn recovery_app() -> App {
+    let mut app = feedback_app();
+    app.init_resource::<HealthRecoveryLedger>()
+        .init_resource::<brawler::map::ReceivedPickupCues>()
+        .add_systems(Update, collect_recovery_numbers.after(collect_hit_feedback));
+    app
+}
+
+fn collected(event: u64, collector: Option<u64>, applied: u16) -> brawler::map::PickupCue {
+    brawler::map::PickupCue::Collected {
+        event_id: CombatEventId(event),
+        tick: event,
+        identity: brawler::map::RestorationPickupIdentity {
+            generation: brawler::map::MapDynamicGeneration {
+                map_instance_id: brawler::map::MapInstanceId(7),
+                generation: 1,
+            },
+            source_placement_id: brawler::map::MapPlacementId(11),
+        },
+        position: WorldPoint { x: 5.0, y: 5.0 },
+        collector: collector.map(NetworkEntityId),
+        applied_restoration: applied,
+    }
+}
+
+fn healing_numbers(app: &App) -> Vec<(Entity, u32)> {
+    let book = app.world().resource::<FloatingNumberBook>();
+    (0..book.capacity())
+        .filter_map(|slot| book.get(slot))
+        .filter(|entry| entry.style == HitStyle::Healing)
+        .map(|entry| (entry.subject, entry.amount))
+        .collect()
+}
+
+fn set_health(app: &mut App, fighter: Entity, health: u16) {
+    app.world_mut()
+        .entity_mut(fighter)
+        .insert(brawler::combat::CurrentHealth(health));
+}
+
+#[test]
+fn ecs_pickup_and_regeneration_show_healing_numbers_without_double_counting() {
+    let mut app = recovery_app();
+    let (me, ..) = spawn_presented_fighter(&mut app, 1, true);
+    let (enemy, ..) = spawn_presented_fighter(&mut app, 2, false);
+    set_health(&mut app, me, 50);
+    set_health(&mut app, enemy, 50);
+    app.update();
+
+    // My pickup: numbered from the cue on its frame, and the replicated increase is explained.
+    app.world_mut()
+        .resource_mut::<brawler::map::ReceivedPickupCues>()
+        .0 = vec![collected(1, Some(1), 20), collected(2, None, 30)];
+    set_health(&mut app, me, 70);
+    app.update();
+    assert_eq!(healing_numbers(&app), vec![(me, 20)]);
+    app.world_mut()
+        .resource_mut::<brawler::map::ReceivedPickupCues>()
+        .0
+        .clear();
+
+    // Enemy regeneration has no cue: it appears once the attribution hold passes.
+    set_health(&mut app, enemy, 52);
+    app.update();
+    set_health(&mut app, enemy, 53);
+    for _ in 0..30 {
+        app.update();
+    }
+    let numbers = healing_numbers(&app);
+    assert!(numbers.contains(&(enemy, 3)), "{numbers:?}");
+    assert_eq!(
+        numbers.iter().filter(|(subject, _)| *subject == me).count(),
+        1,
+        "the pickup increase never shows twice"
+    );
+
+    // A healing cue that arrives after its replicated increase still claims it.
+    set_health(&mut app, me, 90);
+    app.update();
+    app.world_mut()
+        .write_message(DeduplicatedCombatCue(healing(3, 2, 1, 20)));
+    for _ in 0..30 {
+        app.update();
+    }
+    let mine: Vec<_> = healing_numbers(&app)
+        .into_iter()
+        .filter(|(subject, _)| *subject == me)
+        .collect();
+    // Numbers do not age without the projection system, so the cue heal merges into the pickup
+    // number: 20 + 20, with no recovery echo of either increase.
+    assert_eq!(mine, vec![(me, 40)]);
+}
+
+#[test]
+fn ecs_respawn_and_protected_resets_show_no_healing() {
+    let mut app = recovery_app();
+    let (me, ..) = spawn_presented_fighter(&mut app, 1, true);
+    set_health(&mut app, me, 0);
+    app.world_mut()
+        .entity_mut(me)
+        .insert(brawler::combat::Defeated {
+            event_id: CombatEventId(9),
+        });
+    app.update();
+    app.world_mut()
+        .entity_mut(me)
+        .remove::<brawler::combat::Defeated>()
+        .insert(brawler::matchplay::SpawnProtection {
+            expires_at_tick: 99,
+        });
+    set_health(&mut app, me, 100);
+    for _ in 0..30 {
+        app.update();
+    }
+    // Restart reset whose protection lands a frame after the health.
+    app.world_mut()
+        .entity_mut(me)
+        .remove::<brawler::matchplay::SpawnProtection>();
+    set_health(&mut app, me, 40);
+    app.update();
+    set_health(&mut app, me, 100);
+    app.update();
+    app.world_mut()
+        .entity_mut(me)
+        .insert(brawler::matchplay::SpawnProtection {
+            expires_at_tick: 199,
+        });
+    for _ in 0..30 {
+        app.update();
+    }
+    assert!(healing_numbers(&app).is_empty());
+}

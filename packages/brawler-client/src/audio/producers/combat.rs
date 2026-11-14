@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use lightyear::prelude::Controlled;
 
 use crate::{
+    ClientShellSettings,
     audio::{
         registry::{AudioProducerRegistration, AudioProducerRegistrationAppExt},
         request::{AudioCueKey, AudioRequest, AudioRequestOrder, cue_keys},
@@ -45,6 +46,8 @@ const COMBAT_KEYS: &[AudioCueKey] = &[
 /// Minimum authoritative ticks between two hit confirmations of the same kind, so a spray or a
 /// multi-target splash reads as one confirmation instead of a buzz.
 const HIT_SPACING_TICKS: u64 = 4;
+/// Reduced combat effects keep hit confirmations (they are required feedback) but thin repeats.
+const REDUCED_HIT_SPACING_TICKS: u64 = 12;
 
 pub(super) fn register(app: &mut App) {
     app.add_message::<LocalAttackPresented>();
@@ -84,10 +87,28 @@ const fn local_ultimate_activation_cue(kind: UltimateKind) -> Option<AudioCueKey
 }
 
 /// Presentation-only memory for hit-confirmation spacing; never gameplay truth.
-#[derive(Default)]
 pub(super) struct HitAudioMemory {
     last_dealt_tick: Option<u64>,
     last_taken_tick: Option<u64>,
+    spacing_ticks: u64,
+}
+
+impl Default for HitAudioMemory {
+    fn default() -> Self {
+        Self {
+            last_dealt_tick: None,
+            last_taken_tick: None,
+            spacing_ticks: HIT_SPACING_TICKS,
+        }
+    }
+}
+
+fn hit_spacing_ticks(settings: Option<&ClientShellSettings>) -> u64 {
+    if settings.is_some_and(|settings| settings.reduced_combat_effects) {
+        REDUCED_HIT_SPACING_TICKS
+    } else {
+        HIT_SPACING_TICKS
+    }
 }
 
 type CombatAudioFighters<'w, 's> = Query<
@@ -106,7 +127,7 @@ type CombatAudioFighters<'w, 's> = Query<
 /// of a locally presented shot and the activation cue echo of a locally presented cast are
 /// skipped.
 /// Fire sounds follow the shooter's replicated weapon delivery family; hit confirmations are
-/// relative to the controlled fighter.
+/// relative to the controlled fighter and spaced further apart under reduced combat effects.
 #[allow(
     clippy::needless_pass_by_value,
     reason = "the ledger is a read-only Bevy system resource"
@@ -116,10 +137,12 @@ pub(super) fn produce_combat_audio_requests(
     mut cues: MessageReader<DeduplicatedCombatCue>,
     ledger: Option<Res<LocalAttackLedger>>,
     fighters: CombatAudioFighters,
+    settings: Option<Res<ClientShellSettings>>,
     mut requests: MessageWriter<AudioRequest>,
-    mut sequence: Local<AudioProducerSequence>,
-    mut hits: Local<HitAudioMemory>,
+    mut memory: Local<(AudioProducerSequence, HitAudioMemory)>,
 ) {
+    let (sequence, hits) = &mut *memory;
+    hits.spacing_ticks = hit_spacing_ticks(settings.as_deref());
     for local in local_attacks.read() {
         match local.kind {
             LocalAttackKind::PrimaryFire(shot) => {
@@ -162,13 +185,8 @@ pub(super) fn produce_combat_audio_requests(
                 .find(|(network_id, ..)| **network_id == source)
                 .map(|(_, loadout, _)| loadout.primary_weapon.recipe.delivery)
         };
-        let request = combat_audio_request(
-            cue,
-            controlled,
-            delivery,
-            &mut hits,
-            sequence.next(COMBAT_RANK),
-        );
+        let request =
+            combat_audio_request(cue, controlled, delivery, hits, sequence.next(COMBAT_RANK));
         if let Some(request) = request {
             requests.write(request);
         }
@@ -232,7 +250,7 @@ fn combat_audio_request(
             } else {
                 return None;
             };
-            if last.is_some_and(|last| *tick < last.saturating_add(HIT_SPACING_TICKS)) {
+            if last.is_some_and(|last| *tick < last.saturating_add(hits.spacing_ticks)) {
                 return None;
             }
             *last = Some(*tick);
@@ -457,5 +475,39 @@ mod tests {
         // Bystander damage is silent, and nothing plays before a fighter is controlled.
         assert_eq!(hit(&damage(200, 11, 2, 3)), None);
         assert_eq!(request(&damage(300, 12, 1, 2), None), None);
+    }
+
+    #[test]
+    fn reduced_combat_effects_thin_hit_confirmations_without_muting_them() {
+        let reduced = ClientShellSettings {
+            reduced_combat_effects: true,
+            ..ClientShellSettings::default()
+        };
+        assert_eq!(hit_spacing_ticks(None), HIT_SPACING_TICKS);
+        assert_eq!(
+            hit_spacing_ticks(Some(&ClientShellSettings::default())),
+            HIT_SPACING_TICKS
+        );
+        let me = Some(NetworkEntityId(1));
+        let mut memory = HitAudioMemory {
+            spacing_ticks: hit_spacing_ticks(Some(&reduced)),
+            ..HitAudioMemory::default()
+        };
+        let mut hit = |cue: &CombatCue| combat_audio_request(cue, me, |_| None, &mut memory, ORDER);
+        assert_eq!(
+            hit(&damage(100, 7, 1, 2)).map(|request| request.cue_key),
+            Some(cue_keys::HIT_DEALT)
+        );
+        // A hit the normal spacing would confirm is thinned under reduced effects.
+        assert_eq!(hit(&damage(104, 8, 1, 2)), None);
+        assert_eq!(hit(&damage(111, 9, 1, 2)), None);
+        assert_eq!(
+            hit(&damage(112, 10, 1, 2)).map(|request| request.cue_key),
+            Some(cue_keys::HIT_DEALT)
+        );
+        assert_eq!(
+            hit(&damage(113, 11, 2, 1)).map(|request| request.cue_key),
+            Some(cue_keys::HIT_TAKEN)
+        );
     }
 }
