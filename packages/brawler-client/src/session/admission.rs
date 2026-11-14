@@ -1,3 +1,4 @@
+use super::automation_hooks::AutomationHooks;
 use super::{
     AppExit, Client, ClientJoinPhase, ClientJoinStatus, ClientLobbyFailure, ClientLobbyIdentity,
     ClientLobbyMembership, ClientNetworkConfig, ClientProfileIdentityState, Commands, Connected,
@@ -17,6 +18,7 @@ use brawler::protocol::LobbyJoinRejection;
 )]
 pub(super) fn send_client_hello(
     config: Res<ClientNetworkConfig>,
+    automation: AutomationHooks,
     fingerprint: Res<ProtocolFingerprint>,
     content_fingerprint: Res<brawler::content::GameplayContentFingerprint>,
     time: Res<Time<Real>>,
@@ -73,22 +75,7 @@ pub(super) fn send_client_hello(
             if routed_session.is_some_and(|session| session.kind == RoutedClientSessionKind::Match)
                 && let Some(request_id) = routed.current_request_id
             {
-                // This marker intentionally contains only stable correlation IDs. It is emitted
-                // at the Lightyear Connected boundary for the fresh match session; capabilities,
-                // player identities, and manifests are never logged.
-                let timestamp_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |duration| duration.as_millis());
-                let marker = format!(
-                    "brawler-client timing handoff-connected client_id={} request_id={} ts_ms={}\n",
-                    config.client_id,
-                    request_id.get(),
-                    timestamp_ms,
-                );
-                // Both verification clients inherit one stderr file descriptor. Format the whole
-                // bounded marker first and issue one write so process output cannot splice stable
-                // IDs into an unparsable half-line.
-                let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), marker.as_bytes());
+                automation.report_handoff_connected(config.client_id, request_id.get());
             }
         }
     }
@@ -262,15 +249,12 @@ pub(crate) fn join_rejection_category(
 /// `BRAWLER_FAILURE_REPORT` control selects one, so client failures keep the same stable
 /// categories the dedicated server already records.
 pub(super) fn record_client_failure(
-    diagnostics: Option<&Res<brawler::diagnostics::ProcessDiagnosticsSettings>>,
     classification: &mut brawler::diagnostics::ProcessExitClassification,
     category: brawler::diagnostics::FailureCategory,
     message: String,
 ) {
     classification.record_error_exit(category.into());
-    if let Some(settings) = diagnostics
-        && let Some(path) = settings.failure_record_path()
-    {
+    if let Some(path) = brawler::diagnostics::failure_record_path() {
         brawler::diagnostics::write_failure_record(
             &path,
             &brawler::diagnostics::ProcessFailureRecordV1::new(category, message),
@@ -298,8 +282,8 @@ pub(super) fn process_join_outcome(
         (With<Client>, Without<PendingClientConnect>),
     >,
     config: Res<ClientNetworkConfig>,
+    automation: AutomationHooks,
     routed: Res<RoutedClientLifecycle>,
-    diagnostics: Option<Res<brawler::diagnostics::ProcessDiagnosticsSettings>>,
     mut classification: ResMut<brawler::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
@@ -318,8 +302,8 @@ pub(super) fn process_join_outcome(
                 &mut receiver,
                 &mut status,
                 &config,
+                &automation,
                 &routed,
-                diagnostics.as_ref(),
                 &mut classification,
                 &mut app_exit,
             );
@@ -338,7 +322,7 @@ pub(super) fn process_join_outcome(
             lobby_identity,
             &mut commands,
             &config,
-            diagnostics.as_ref(),
+            &automation,
             &mut classification,
             &mut app_exit,
         );
@@ -350,8 +334,8 @@ fn process_match_join_outcomes(
     receiver: &mut MessageReceiver<MatchJoinOutcome>,
     status: &mut ClientJoinStatus,
     config: &ClientNetworkConfig,
+    automation: &AutomationHooks,
     routed: &RoutedClientLifecycle,
-    diagnostics: Option<&Res<brawler::diagnostics::ProcessDiagnosticsSettings>>,
     classification: &mut brawler::diagnostics::ProcessExitClassification,
     app_exit: &mut MessageWriter<AppExit>,
 ) {
@@ -360,7 +344,7 @@ fn process_match_join_outcomes(
             MatchJoinOutcome::Accepted {
                 player_id,
                 network_entity_id,
-            } => accept_match_join(status, config, player_id, network_entity_id),
+            } => accept_match_join(status, config, automation, player_id, network_entity_id),
             MatchJoinOutcome::Rejected { reason }
                 if routed_join_rejection_is_stale(config, routed) =>
             {
@@ -372,7 +356,6 @@ fn process_match_join_outcomes(
             MatchJoinOutcome::Rejected { reason } => {
                 warn!(?reason, "brawler client rejected");
                 record_client_failure(
-                    diagnostics,
                     classification,
                     join_rejection_category(&reason),
                     format!("join rejected: {reason:?}"),
@@ -387,6 +370,7 @@ fn process_match_join_outcomes(
 fn accept_match_join(
     status: &mut ClientJoinStatus,
     config: &ClientNetworkConfig,
+    automation: &AutomationHooks,
     player_id: PlayerId,
     network_entity_id: NetworkEntityId,
 ) {
@@ -395,14 +379,7 @@ fn accept_match_join(
         network_entity_id = network_entity_id.0,
         "brawler client accepted"
     );
-    if config.render_measurement.is_some() {
-        eprintln!(
-            "brawler-client timing match-accepted client_id={} player_id={} ts_ms={}",
-            config.client_id,
-            player_id.0,
-            brawler::diagnostics::unix_micros_now() / 1_000
-        );
-    }
+    automation.report_match_accepted(config.client_id, player_id.0);
     status.phase = ClientJoinPhase::Active {
         player_id,
         network_entity_id,
@@ -486,7 +463,7 @@ fn process_lobby_join_outcomes(
     lobby_identity: Option<&ClientLobbyIdentity>,
     commands: &mut Commands,
     config: &ClientNetworkConfig,
-    diagnostics: Option<&Res<brawler::diagnostics::ProcessDiagnosticsSettings>>,
+    automation: &AutomationHooks,
     classification: &mut brawler::diagnostics::ProcessExitClassification,
     app_exit: &mut MessageWriter<AppExit>,
 ) {
@@ -538,7 +515,6 @@ fn process_lobby_join_outcomes(
                         status,
                         commands,
                         config,
-                        diagnostics,
                         classification,
                         app_exit,
                     );
@@ -552,7 +528,7 @@ fn process_lobby_join_outcomes(
                 accepted_this_batch = Some(accepted);
                 status.phase = ClientJoinPhase::LobbyActive { player_id };
                 info!(player_id = player_id.0, "brawler lobby client accepted");
-                if config.exit_after_lobby_welcome {
+                if automation.exits_after_lobby_welcome() {
                     app_exit.write(AppExit::Success);
                 }
             }
@@ -569,7 +545,6 @@ fn process_lobby_join_outcomes(
                     status,
                     commands,
                     config,
-                    diagnostics,
                     classification,
                     app_exit,
                 );
@@ -584,7 +559,6 @@ fn reject_invalid_lobby_welcome(
     status: &mut ClientJoinStatus,
     commands: &mut Commands,
     config: &ClientNetworkConfig,
-    diagnostics: Option<&Res<brawler::diagnostics::ProcessDiagnosticsSettings>>,
     classification: &mut brawler::diagnostics::ProcessExitClassification,
     app_exit: &mut MessageWriter<AppExit>,
 ) {
@@ -595,7 +569,6 @@ fn reject_invalid_lobby_welcome(
         status.phase = ClientJoinPhase::Disconnected;
     } else {
         record_client_failure(
-            diagnostics,
             classification,
             brawler::diagnostics::FailureCategory::ProtocolMismatch,
             "lobby advertised an invalid or conflicting welcome".to_string(),
@@ -628,7 +601,6 @@ fn reject_lobby_join(
     status: &mut ClientJoinStatus,
     commands: &mut Commands,
     config: &ClientNetworkConfig,
-    diagnostics: Option<&Res<brawler::diagnostics::ProcessDiagnosticsSettings>>,
     classification: &mut brawler::diagnostics::ProcessExitClassification,
     app_exit: &mut MessageWriter<AppExit>,
 ) {
@@ -639,7 +611,6 @@ fn reject_lobby_join(
         status.phase = ClientJoinPhase::Disconnected;
     } else {
         record_client_failure(
-            diagnostics,
             classification,
             brawler::diagnostics::FailureCategory::ProtocolMismatch,
             format!("lobby join rejected: {reason:?}"),

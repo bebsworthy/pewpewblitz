@@ -20,7 +20,7 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
     let mut harness = Harness::new(1);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(1);
     harness.step_until(|harness| harness.client_is_active(0) && harness.loadout_is_ready(0));
     let server_entity = {
@@ -109,11 +109,11 @@ fn active_sentry_fixture() -> (Harness, Entity, brawler::abilities::SentryIdenti
     let mut harness = Harness::new_match(2);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(3);
     harness.clients[1]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(1);
     harness.step_until(|harness| {
         (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
@@ -303,11 +303,11 @@ fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
     let mut harness = Harness::new_match(2);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(1);
     harness.clients[1]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(3);
     harness.step_until(|harness| {
         (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
@@ -807,7 +807,7 @@ fn dash_shape_cast_truncates_before_map_collision_and_blocks_primary_fire() {
     for client in &mut harness.clients {
         client
             .world_mut()
-            .resource_mut::<ClientNetworkConfig>()
+            .resource_mut::<ClientAutomationConfig>()
             .weapon_preset = Some(1);
     }
     harness.step_until(|harness| {

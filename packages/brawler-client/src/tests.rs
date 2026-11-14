@@ -39,37 +39,18 @@ fn headless_client_builder_explicitly_installs_content_gameplay_and_session_plug
     assert!(app.is_plugin_added::<ClientProfilePlugin>());
     assert!(app.is_plugin_added::<ClientNetworkPlugin>());
     assert!(!app.is_plugin_added::<ClientPresentationPlugin>());
-}
-
-#[test]
-fn automatic_match_ready_waits_for_the_requested_roster() {
-    let mut config = ClientNetworkConfig::new(1);
-    config.headless = true;
-    config.headless_simulation_ticks = Some(2_000);
-    config.exit_after_roster = Some(4);
-    assert!(!automatic_match_command_enabled(&config, 2));
-    assert!(automatic_match_command_enabled(&config, 4));
-}
-
-#[test]
-fn windowed_combat_demo_automatically_readies_the_match() {
-    let mut config = ClientNetworkConfig::new(1);
-    config.windowed_combat_demo = Some(brawler::config::WindowedCombatDemo);
-    assert!(automatic_match_command_enabled(&config, 2));
-}
-
-#[test]
-fn render_measurement_automatically_readies_without_injecting_combat_input() {
-    let mut config = ClientNetworkConfig::new(1);
-    config.render_measurement = Some(brawler::config::RenderMeasurementConfig {
-        report_path: "target/report.txt".into(),
-        warmup: Duration::from_secs(10),
-        measurement: Duration::from_secs(30),
-        reduced_effects: false,
-    });
-    assert!(automatic_match_command_enabled(&config, 2));
-    assert!(config.windowed_combat_demo.is_none());
-    assert!(!config.headless_fire);
+    // Legacy combat evidence and process closeout/window sampling are automation-only.
+    let automation = cfg!(feature = "automation");
+    assert_eq!(
+        app.is_plugin_added::<brawler::combat::ClientCombatEvidencePlugin>(),
+        automation
+    );
+    assert_eq!(
+        app.is_plugin_added::<brawler::diagnostics::ProcessDiagnosticsPlugin>(),
+        automation
+    );
+    #[cfg(feature = "automation")]
+    assert!(app.world().contains_resource::<HeadlessAutomation>());
 }
 
 #[test]
@@ -90,11 +71,10 @@ fn headless_match_command_rearms_during_countdown_for_waiting_retry() {
 }
 
 #[test]
-fn client_config_defaults_to_loopback_and_validates_roster_target() {
-    let mut config = ClientNetworkConfig::new(1);
+fn client_config_defaults_to_loopback_and_validates() {
+    let config = ClientNetworkConfig::new(1);
+    assert_eq!(config.server_addr.ip().to_string(), "127.0.0.1");
     assert!(config.validate().is_ok());
-    config.exit_after_roster = Some(0);
-    assert!(config.validate().is_err());
 }
 
 #[test]
@@ -113,31 +93,8 @@ fn gameplay_window_defaults_to_reference_aspect_and_preserves_override() {
 }
 
 #[test]
-fn headless_weapon_preset_and_window_size_are_bounded() {
+fn window_size_is_bounded() {
     let mut config = ClientNetworkConfig::new(1);
-    config.headless = true;
-    config.weapon_preset = Some(5);
-    assert!(config.validate().is_ok());
-    config.weapon_preset = Some(6);
-    assert!(config.validate().is_ok());
-    // The bound follows the build catalog's costed weapons, including Splash.
-    let catalog = brawler::builds::BuildCatalog::embedded().expect("embedded build catalog");
-    for cost in &catalog.weapon_costs {
-        config.weapon_preset = Some(cost.weapon_id.0);
-        assert!(config.validate().is_ok(), "weapon {}", cost.weapon_id.0);
-    }
-    let unknown = catalog
-        .weapon_costs
-        .iter()
-        .map(|cost| cost.weapon_id.0)
-        .max()
-        .expect("costed weapons")
-        + 1;
-    config.weapon_preset = Some(unknown);
-    assert!(config.validate().is_err());
-    config.weapon_preset = Some(0);
-    assert!(config.validate().is_err());
-    config.weapon_preset = Some(4);
     config.window_size = Some((960, 540));
     assert!(config.validate().is_ok());
     config.window_size = Some((639, 540));
@@ -1823,18 +1780,19 @@ fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
     );
 }
 
+#[cfg(feature = "automation")]
 #[test]
 fn routed_headless_return_exit_requires_a_fresh_lobby_generation() {
     fn app_for(generation: u64) -> App {
-        let mut config = ClientNetworkConfig::new(1);
-        config.headless = true;
-        config.transport = NetworkTransport::RoutedUdp;
-        config.exit_after_roster = Some(2);
-        config.exit_after_lobby_return = true;
+        let automation = ClientAutomationConfig {
+            exit_after_roster: Some(2),
+            exit_after_lobby_return: true,
+            ..ClientAutomationConfig::default()
+        };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AppExit>()
-            .insert_resource(config)
+            .insert_resource(automation)
             .add_systems(Update, observe_fresh_lobby_return);
         app.world_mut().spawn((
             Client,

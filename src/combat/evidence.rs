@@ -899,7 +899,6 @@ pub fn capture_client_combat_checkpoints(
 pub fn record_headless_combat_observation(
     mut observation: ResMut<ClientCombatObservation>,
     mut status: ResMut<ClientCombatEvidenceStatus>,
-    config: Res<crate::config::ClientNetworkConfig>,
     automation: Res<crate::config::HeadlessAutomation>,
     fighters: Query<
         (
@@ -922,7 +921,7 @@ pub fn record_headless_combat_observation(
         return;
     }
     if !observation.wrote_ready && observation.waiting_reported_at_tick.is_none() {
-        let required = config
+        let required = automation
             .weapon_preset
             .map(required_client_checkpoints)
             .unwrap_or_default();
@@ -960,7 +959,7 @@ pub fn record_headless_combat_observation(
     if observation.wrote_ready
         || !observation.saw_defeat
         || !observation.saw_reset
-        || config.weapon_preset.is_some_and(|preset| {
+        || automation.weapon_preset.is_some_and(|preset| {
             required_client_checkpoints(preset)
                 .iter()
                 .any(|checkpoint| !observation.checkpoints.contains_key(*checkpoint))

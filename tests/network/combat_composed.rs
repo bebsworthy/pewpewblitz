@@ -11,7 +11,7 @@ fn launcher_uses_bounded_focal_distance_instead_of_always_using_maximum_range() 
     let mut harness = Harness::new(1);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(3);
     harness.step_until(|harness| {
         harness.client_is_active(0)
@@ -59,7 +59,7 @@ fn launcher_explosion_does_not_damage_or_knock_back_its_owner() {
     let mut harness = Harness::new(1);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(3);
     harness.step_until(|harness| {
         harness.client_is_active(0)
@@ -121,7 +121,7 @@ fn launcher_replication_preserves_flight_deadline_and_durable_slow_state() {
     let mut harness = Harness::new(1);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(3);
     harness.step_until(|harness| {
         harness.client_is_active(0)

@@ -178,11 +178,11 @@ fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
     let mut harness = Harness::new_feature_yard(2);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(2);
     harness.clients[1]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(1);
     harness.step_until(|harness| {
         harness.client_is_active(0)
@@ -346,7 +346,7 @@ fn concealment_field_is_public_hides_at_range_and_confirmation_does_not_fire() {
     let mut harness = Harness::new_feature_yard(2);
     harness.clients[1]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(3);
     harness.step_until(|harness| {
         harness.client_is_active(0)

@@ -8,7 +8,8 @@ mod failure;
 mod process;
 
 pub use failure::{
-    FailureCategory, ProcessFailureRecordV1, install_panic_failure_hook, write_failure_record,
+    FailureCategory, ProcessFailureRecordV1, failure_record_path, install_panic_failure_hook,
+    write_failure_record,
 };
 #[cfg(feature = "server")]
 pub(crate) use process::ProcessDiagnosticsState;

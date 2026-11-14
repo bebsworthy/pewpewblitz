@@ -7,7 +7,7 @@ fn splash_lands_as_a_replicated_stationary_area_with_repeated_server_damage() {
     let mut harness = Harness::new(1);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(7);
     harness.step_until(|harness| {
         harness.client_is_active(0)

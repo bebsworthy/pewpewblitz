@@ -8,11 +8,11 @@ use super::{
     ClientMatchLoadingModel, ClientMatchResultContext, ClientMatchResultState, ClientNetworkConfig,
     ClientPlayableGate, ClientProfileIdentityState, ClientSettingsUiSet, ClientShutdown, Commands,
     Component, Connect, Connected, Connecting, Controlled, Disconnect, Disconnected, Duration,
-    Entity, FallbackErrorHandler, Fighter, FixedPreUpdate, Has, HeadlessAutomation,
-    InputDeviceActivity, InputSettingsSelection, InputSystems, IntoScheduleConfigs, Last, Link,
-    LinkMtu, LiveInputTrace, LobbyHello, LobbyJoinOutcome, LobbyServerIdentity, LocalAddr,
-    MatchCommand, MatchCommandOutcome, MatchCommandRequest, MatchCommandState, MatchHello,
-    MatchJoinOutcome, MatchJoinRejection, MatchLoadingClientAction, MatchLoadingClientMessage,
+    Entity, FallbackErrorHandler, Fighter, FixedPreUpdate, Has, InputDeviceActivity,
+    InputSettingsSelection, InputSystems, IntoScheduleConfigs, Last, Link, LinkMtu, LiveInputTrace,
+    LobbyHello, LobbyJoinOutcome, LobbyServerIdentity, LocalAddr, MatchCommand,
+    MatchCommandOutcome, MatchCommandRequest, MatchCommandState, MatchHello, MatchJoinOutcome,
+    MatchJoinRejection, MatchLoadingClientAction, MatchLoadingClientMessage,
     MatchLoadingServerMessage, MatchLoadingStatus, MatchParticipant, MatchPhase, MatchRoot,
     MatchRouteGrant, MatchState, MessageReceiver, MessageSender, MessageWriter, Messages, Name,
     NetcodeClient, NetcodeConfig, NetworkEntityId, NetworkTransport, PeerAddr, PendingLocalActions,
@@ -36,6 +36,7 @@ use super::{FixedUpdate, Gamepad, GamepadAxis, GamepadButton, Position, Vec2};
 mod admission;
 #[cfg(feature = "automation")]
 mod automation;
+mod automation_hooks;
 mod connection;
 mod match_commands;
 mod observation;
@@ -62,10 +63,10 @@ use routing::{
 
 #[cfg(test)]
 pub(super) use admission::join_rejection_category;
+#[cfg(feature = "automation")]
+pub(super) use automation::observe_fresh_lobby_return;
 #[cfg(test)]
-pub(super) use match_commands::{
-    automatic_match_command_enabled, should_rearm_headless_match_command,
-};
+pub(super) use match_commands::should_rearm_headless_match_command;
 pub(super) use observation::{
     finish_client_shutdown, forward_app_exit_to_client_disconnect, observe_client_lifecycle,
 };
@@ -73,7 +74,6 @@ pub(super) use observation::{
 use routing::owns_automatic_routed_recovery;
 pub(super) use routing::{
     drive_routed_transition, enforce_routed_timeout, observe_completed_match,
-    observe_fresh_lobby_return,
 };
 
 /// Installs client connection, compatibility-handshake, session, input, and status systems.
@@ -148,7 +148,6 @@ fn install_session_state(app: &mut App) {
         .init_resource::<ClientShutdown>()
         .init_resource::<PendingLocalActions>()
         .init_resource::<LiveInputTrace>()
-        .init_resource::<HeadlessAutomation>()
         .init_resource::<InputDeviceActivity>()
         .init_resource::<super::touch::TouchControls>()
         .init_resource::<ClientInputContext>()
@@ -163,6 +162,8 @@ fn install_session_state(app: &mut App) {
         .init_resource::<ClientMatchResultState>()
         .init_resource::<ClientProfileIdentityState>()
         .init_resource::<brawler::diagnostics::ProcessExitClassification>();
+    #[cfg(feature = "automation")]
+    super::automation::install_automation_state(app);
 }
 
 fn configure_input_and_automation(app: &mut App) {
@@ -215,6 +216,14 @@ fn configure_automation_drivers(app: &mut App) {
     )
     .add_systems(
         Update,
+        // Former Handshake chain position: right after the join outcome, before the next grant.
+        observe_fresh_lobby_return
+            .after(process_join_outcome)
+            .before(process_match_route_grant)
+            .in_set(ClientSessionSet::Handshake),
+    )
+    .add_systems(
+        Update,
         automation::finish_product_match_smoke
             .after(send_match_command)
             .before(disconnect_rejected_client)
@@ -236,7 +245,6 @@ fn configure_network_session_systems(app: &mut App) {
             ApplyDeferred,
             send_client_hello,
             process_join_outcome,
-            observe_fresh_lobby_return,
             process_match_route_grant,
             observe_completed_match,
         )

@@ -29,7 +29,7 @@ pub(super) enum HeadlessRequeueSmokeStage {
 #[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
 pub(super) fn drive_headless_requeue_smoke(
     time: Res<Time<Real>>,
-    config: Res<crate::ClientNetworkConfig>,
+    config: Res<crate::ClientAutomationConfig>,
     lobbies: Query<(&ClientLobbyMembership, &RoutedClientSession), With<Client>>,
     mut model: ResMut<ClientQueueModel>,
     mut stage: ResMut<HeadlessRequeueSmokeStage>,
@@ -63,7 +63,7 @@ pub(super) fn drive_headless_requeue_smoke(
 )]
 pub(super) fn drive_headless_queue_smoke(
     time: Res<Time<Real>>,
-    config: Res<crate::ClientNetworkConfig>,
+    config: Res<crate::ClientAutomationConfig>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut model: ResMut<ClientQueueModel>,
     mut practice: ResMut<ClientPracticeModel>,
@@ -148,7 +148,7 @@ pub(super) fn drive_headless_queue_smoke(
 }
 
 fn start_headless_product_request(
-    config: &crate::ClientNetworkConfig,
+    config: &crate::ClientAutomationConfig,
     lobby: &ClientLobbyMembership,
     queue: &mut ClientQueueModel,
     practice: &mut ClientPracticeModel,

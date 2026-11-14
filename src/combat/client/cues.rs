@@ -114,7 +114,7 @@ impl FromWorld for ClientCombatObservation {
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn receive_combat_cues(
     mut recent: ResMut<RecentCombatEvents>,
-    mut observation: ResMut<ClientCombatObservation>,
+    mut observation: Option<ResMut<ClientCombatObservation>>,
     mut capture: Option<ResMut<CaptureCombatCues>>,
     mut presented_cues: MessageWriter<DeduplicatedCombatCue>,
     mut receivers: Query<
@@ -128,14 +128,8 @@ pub(crate) fn receive_combat_cues(
         };
         let cues: Vec<_> = receiver.receive().collect();
         for cue in cues {
-            match &cue {
-                CombatCue::Defeat { .. } | CombatCue::FighterDefeated { .. } => {
-                    observation.saw_defeat = true;
-                }
-                CombatCue::Reset { .. } | CombatCue::FighterReset { .. } => {
-                    observation.saw_reset = true;
-                }
-                _ => {}
+            if let Some(observation) = observation.as_mut() {
+                observe_defeat_and_reset(observation, &cue);
             }
             let event_id = match &cue {
                 CombatCue::AttackAccepted { event_id, .. }
@@ -171,28 +165,8 @@ pub(crate) fn receive_combat_cues(
                     capture.dropped_cues = capture.dropped_cues.saturating_add(1);
                 }
             }
-            if observation.ready_file.is_some() {
-                if observation.cue_stream.len() < MAX_COMBAT_EVIDENCE_EVENTS {
-                    observation.cue_stream.push(cue.clone());
-                } else {
-                    observation.dropped_cue_stream =
-                        observation.dropped_cue_stream.saturating_add(1);
-                }
-                let timestamp = match &cue {
-                    CombatCue::Muzzle { shot_id, .. } => Some(*shot_id),
-                    CombatCue::AttackAccepted { attack_id, .. } => Some(ShotId(attack_id.0)),
-                    _ => None,
-                };
-                if let Some(shot_id) = timestamp {
-                    if observation.cue_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS {
-                        observation
-                            .cue_timestamps
-                            .push((shot_id, unix_epoch_micros()));
-                    } else {
-                        observation.dropped_cue_timestamps =
-                            observation.dropped_cue_timestamps.saturating_add(1);
-                    }
-                }
+            if let Some(observation) = observation.as_mut() {
+                record_cue_evidence(observation, &cue);
             }
             if matches!(
                 &cue,
@@ -205,6 +179,49 @@ pub(crate) fn receive_combat_cues(
                 continue;
             }
             presented_cues.write(DeduplicatedCombatCue(cue.clone()));
+        }
+    }
+}
+
+/// Legacy direct-UDP evidence (automation only): note authoritative defeat/reset cues.
+#[cfg(feature = "client")]
+fn observe_defeat_and_reset(observation: &mut ClientCombatObservation, cue: &CombatCue) {
+    match cue {
+        CombatCue::Defeat { .. } | CombatCue::FighterDefeated { .. } => {
+            observation.saw_defeat = true;
+        }
+        CombatCue::Reset { .. } | CombatCue::FighterReset { .. } => {
+            observation.saw_reset = true;
+        }
+        _ => {}
+    }
+}
+
+/// Legacy direct-UDP evidence (automation only): keep the bounded cue stream and shot timestamps
+/// when a ready file was requested.
+#[cfg(feature = "client")]
+fn record_cue_evidence(observation: &mut ClientCombatObservation, cue: &CombatCue) {
+    if observation.ready_file.is_none() {
+        return;
+    }
+    if observation.cue_stream.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+        observation.cue_stream.push(cue.clone());
+    } else {
+        observation.dropped_cue_stream = observation.dropped_cue_stream.saturating_add(1);
+    }
+    let timestamp = match cue {
+        CombatCue::Muzzle { shot_id, .. } => Some(*shot_id),
+        CombatCue::AttackAccepted { attack_id, .. } => Some(ShotId(attack_id.0)),
+        _ => None,
+    };
+    if let Some(shot_id) = timestamp {
+        if observation.cue_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS {
+            observation
+                .cue_timestamps
+                .push((shot_id, unix_epoch_micros()));
+        } else {
+            observation.dropped_cue_timestamps =
+                observation.dropped_cue_timestamps.saturating_add(1);
         }
     }
 }

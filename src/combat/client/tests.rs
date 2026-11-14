@@ -157,21 +157,24 @@ fn named_client_combat_sets_preserve_the_locked_update_order() {
     }
 
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, ClientCombatPlugin))
-        .insert_resource(crate::config::ClientNetworkConfig::new(1))
-        .init_resource::<crate::config::HeadlessAutomation>()
-        .init_resource::<SetTrace>()
-        .add_systems(
-            Update,
-            (
-                probe("ingest").in_set(CombatClientSet::Ingest),
-                probe("ensure").in_set(CombatClientSet::Ensure),
-                probe("sync").in_set(CombatClientSet::Sync),
-                probe("hud").in_set(CombatClientSet::HudAndStatus),
-                probe("effects").in_set(CombatClientSet::Effects),
-                probe("evidence").in_set(CombatClientSet::Evidence),
-            ),
-        );
+    app.add_plugins((
+        MinimalPlugins,
+        ClientCombatPlugin,
+        ClientCombatEvidencePlugin,
+    ))
+    .init_resource::<crate::config::HeadlessAutomation>()
+    .init_resource::<SetTrace>()
+    .add_systems(
+        Update,
+        (
+            probe("ingest").in_set(CombatClientSet::Ingest),
+            probe("ensure").in_set(CombatClientSet::Ensure),
+            probe("sync").in_set(CombatClientSet::Sync),
+            probe("hud").in_set(CombatClientSet::HudAndStatus),
+            probe("effects").in_set(CombatClientSet::Effects),
+            probe("evidence").in_set(CombatClientSet::Evidence),
+        ),
+    );
     crate::test_app::reject_owned_schedule_ambiguities(&mut app, Update);
     app.update();
     let trace = app.world().resource::<SetTrace>().0.clone();

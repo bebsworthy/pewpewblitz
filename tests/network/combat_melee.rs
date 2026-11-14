@@ -7,7 +7,7 @@ fn impact_blade_emits_without_a_projectile_and_damages_the_target() {
     let mut harness = Harness::new(1);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(4);
     harness.step_until(|harness| {
         harness.client_is_active(0)

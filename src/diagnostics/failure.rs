@@ -137,6 +137,13 @@ impl ProcessFailureRecordV1 {
 ///
 /// Appending (not truncating) preserves earlier records from repeated failures inside one
 /// scripted scenario; callers keep the file bounded by using one file per run.
+/// Local failure-record path selected by the `BRAWLER_FAILURE_REPORT` control, if any. Failure
+/// records benefit players too, so this does not depend on the opt-in process diagnostics.
+#[must_use]
+pub fn failure_record_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("BRAWLER_FAILURE_REPORT").map(std::path::PathBuf::from)
+}
+
 pub fn write_failure_record(path: &std::path::Path, record: &ProcessFailureRecordV1) {
     use std::io::Write;
     let mut contents = record.to_report_lines().join("\n") + "\n\n";

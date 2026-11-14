@@ -139,7 +139,7 @@ fn measured_map(map: &brawler::map::ResolvedMapSnapshot) -> MeasuredMap {
 
 #[derive(Resource)]
 struct RenderMeasurementState {
-    config: brawler::config::RenderMeasurementConfig,
+    config: RenderMeasurementConfig,
     ready_at: Option<Duration>,
     last_measurement: Option<Instant>,
     samples: Vec<f64>,
@@ -259,7 +259,7 @@ struct RenderEvidenceQueries<'w, 's> {
     dashboard_owned: Query<'w, 's, (), DashboardOwnedFilter>,
 }
 
-pub(super) struct RenderMeasurementPlugin(pub(crate) brawler::config::RenderMeasurementConfig);
+pub(super) struct RenderMeasurementPlugin(pub(crate) RenderMeasurementConfig);
 
 impl Plugin for RenderMeasurementPlugin {
     fn build(&self, app: &mut App) {

@@ -7,7 +7,7 @@ fn spray_is_a_stationary_replicated_volume_with_repeated_server_damage() {
     let mut harness = Harness::new(1);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(6);
     harness.step_until(|harness| {
         harness.client_is_active(0)

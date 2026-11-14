@@ -7,7 +7,7 @@ fn sticky_blomb_attaches_replicates_and_detonates_from_the_authoritative_fuse() 
     let mut harness = Harness::new(1);
     harness.clients[0]
         .world_mut()
-        .resource_mut::<ClientNetworkConfig>()
+        .resource_mut::<ClientAutomationConfig>()
         .weapon_preset = Some(5);
     harness.step_until(|harness| {
         harness.client_is_active(0)

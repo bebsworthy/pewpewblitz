@@ -1,35 +1,11 @@
 use super::{
-    AppExit, Client, ClientJoinPhase, ClientJoinStatus, ClientMatchResultContext,
-    ClientMatchResultState, ClientNetworkConfig, Commands, Disconnect, Disconnected, Entity,
-    Fighter, MatchPhase, MatchRoot, MatchRouteGrant, MatchState, MessageReceiver, MessageWriter,
-    NetworkTransport, PlayerId, Query, Real, Res, ResMut, Result, RoutedClientLifecycle,
-    RoutedClientPhase, RoutedClientSession, RoutedClientSessionKind, RoutedTransitionDeadline,
-    RoutedUdpIo, SelectedGameType, Time, ToOwned, Unlink, UnlinkReason, Unlinked, With, hud, info,
-    spawn_client_entity, warn,
+    Client, ClientJoinPhase, ClientJoinStatus, ClientMatchResultContext, ClientMatchResultState,
+    ClientNetworkConfig, Commands, Disconnect, Disconnected, Entity, Fighter, MatchPhase,
+    MatchRoot, MatchRouteGrant, MatchState, MessageReceiver, NetworkTransport, PlayerId, Query,
+    Real, Res, ResMut, Result, RoutedClientLifecycle, RoutedClientPhase, RoutedClientSession,
+    RoutedClientSessionKind, RoutedTransitionDeadline, RoutedUdpIo, SelectedGameType, Time,
+    ToOwned, Unlink, UnlinkReason, Unlinked, With, hud, info, spawn_client_entity, warn,
 };
-
-/// Finish the routed process smoke only after the match session has completed, its routes have
-/// been revoked, and the client has authenticated one fresh lobby generation. Generation one is
-/// the initial lobby and generation two is the match; a generation of three or greater therefore
-/// cannot be satisfied by an initial lobby retry.
-#[allow(clippy::needless_pass_by_value)]
-pub(crate) fn observe_fresh_lobby_return(
-    config: Res<ClientNetworkConfig>,
-    mut app_exit: MessageWriter<AppExit>,
-    query: Query<(&RoutedClientSession, &ClientJoinStatus), With<Client>>,
-) {
-    if !config.exit_after_lobby_return {
-        return;
-    }
-    if query.iter().any(|(session, status)| {
-        session.kind == RoutedClientSessionKind::Lobby
-            && session.generation >= 3
-            && matches!(status.phase, ClientJoinPhase::LobbyActive { .. })
-    }) {
-        info!("brawler client authenticated a fresh lobby after match completion");
-        app_exit.write(AppExit::Success);
-    }
-}
 
 /// Accept one authenticated lobby grant and begin the explicit unlink boundary. A stale or
 /// duplicate grant is ignored; it cannot replace the capability already selected for this

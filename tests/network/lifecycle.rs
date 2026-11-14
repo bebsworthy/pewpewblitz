@@ -30,9 +30,14 @@ fn active_client_with_incomplete_roster_times_out() {
     let mut harness = Harness::new(1);
     harness.step_until(|harness| harness.client_is_active(0) && harness.server_ids().len() == 1);
     let client = &mut harness.clients[0];
-    let mut config = client.world_mut().resource_mut::<ClientNetworkConfig>();
-    config.exit_after_roster = Some(99);
-    config.connect_timeout = std::time::Duration::from_millis(50);
+    client
+        .world_mut()
+        .resource_mut::<ClientAutomationConfig>()
+        .exit_after_roster = Some(99);
+    client
+        .world_mut()
+        .resource_mut::<ClientNetworkConfig>()
+        .connect_timeout = std::time::Duration::from_millis(50);
 
     for _ in 0..20 {
         harness.step();

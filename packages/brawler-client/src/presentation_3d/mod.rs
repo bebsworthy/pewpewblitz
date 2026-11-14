@@ -365,9 +365,8 @@ impl Plugin for WorldPresentationPlugin {
         #[cfg(feature = "automation")]
         if let Some(config) = app
             .world()
-            .resource::<ClientNetworkConfig>()
-            .render_measurement
-            .clone()
+            .get_resource::<ClientAutomationConfig>()
+            .and_then(|automation| automation.render_measurement.clone())
         {
             if config.reduced_effects {
                 app.insert_resource(ClientShellSettings {

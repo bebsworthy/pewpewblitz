@@ -59,7 +59,7 @@ impl ProcessDiagnosticsSettings {
     /// Local failure-record path selected by the `BRAWLER_FAILURE_REPORT` control, if any.
     #[must_use]
     pub fn failure_record_path(&self) -> Option<PathBuf> {
-        std::env::var_os("BRAWLER_FAILURE_REPORT").map(PathBuf::from)
+        crate::diagnostics::failure_record_path()
     }
 }
 

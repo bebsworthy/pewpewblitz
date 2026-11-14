@@ -58,8 +58,6 @@ pub enum CombatClientSet {
 impl Plugin for ClientCombatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RecentCombatEvents>()
-            .init_resource::<ClientCombatObservation>()
-            .init_resource::<ClientCombatEvidenceStatus>()
             .add_message::<DeduplicatedCombatCue>()
             .configure_sets(
                 Update,
@@ -77,14 +75,39 @@ impl Plugin for ClientCombatPlugin {
                 Update,
                 (
                     cues::receive_combat_cues.in_set(CombatClientSet::Ingest),
-                    receive_combat_evidence_checkpoints.in_set(CombatClientSet::Ingest),
                     cues::rumble_spray_feedback.in_set(CombatClientSet::Effects),
-                    capture_client_combat_checkpoints.in_set(CombatClientSet::Evidence),
-                    record_headless_combat_observation.in_set(CombatClientSet::Evidence),
                 )
-                    // The chain retains every implicit deferred boundary the milestone
-                    // locked; no demonstrated-independent edge is relaxed.
                     .chain(),
+            );
+    }
+}
+
+/// Legacy direct-UDP client combat evidence (`BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE`): checkpoint
+/// reproduction, the ready-file report, and the closeout evidence it feeds. Only `brawler-client`'s
+/// `automation` feature installs it, after [`ClientCombatPlugin`]; the player client never does.
+/// It reads the automation-inserted [`crate::config::HeadlessAutomation`].
+pub struct ClientCombatEvidencePlugin;
+
+#[cfg(feature = "client")]
+impl Plugin for ClientCombatEvidencePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ClientCombatObservation>()
+            .init_resource::<ClientCombatEvidenceStatus>()
+            .add_systems(
+                Update,
+                (
+                    // Former chain positions: checkpoint ingestion right after cue ingestion,
+                    // checkpoint capture then the ready report last. None defers commands.
+                    receive_combat_evidence_checkpoints
+                        .in_set(CombatClientSet::Ingest)
+                        .after(cues::receive_combat_cues),
+                    (
+                        capture_client_combat_checkpoints,
+                        record_headless_combat_observation,
+                    )
+                        .chain()
+                        .in_set(CombatClientSet::Evidence),
+                ),
             );
     }
 }

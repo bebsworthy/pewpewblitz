@@ -1,3 +1,4 @@
+use super::automation_hooks::AutomationHooks;
 use super::{
     ACTION_INTERACT, AuthoritativeTick, Client, ClientMatchLoadingModel, ClientNetworkConfig,
     ClientPlayableGate, Controlled, Duration, Fighter, MatchCommand, MatchCommandOutcome,
@@ -38,6 +39,7 @@ type MatchLoadingCorrelation = (u64, u128, u128);
 )]
 pub(super) fn drive_match_loading_check_in(
     config: Res<ClientNetworkConfig>,
+    automation: AutomationHooks,
     time: Res<Time<Real>>,
     mut routed: ResMut<RoutedClientLifecycle>,
     playable: Res<ClientPlayableGate>,
@@ -94,13 +96,8 @@ pub(super) fn drive_match_loading_check_in(
             continue;
         }
         send_match_loading_action(&mut sender, correlation, MatchLoadingClientAction::Ready);
-        if config.render_measurement.is_some() && state.ready_sent_for != Some(correlation) {
-            eprintln!(
-                "brawler-client timing match-ready client_id={} request_id={} ts_ms={}",
-                config.client_id,
-                correlation.0,
-                brawler::diagnostics::unix_micros_now() / 1_000
-            );
+        if state.ready_sent_for != Some(correlation) {
+            automation.report_match_ready(config.client_id, correlation.0);
         }
         state.ready_sent_for = Some(correlation);
         state.ready_last_sent_at = Some(time.elapsed());
@@ -192,6 +189,7 @@ fn match_loading_ready_to_send(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn send_match_command(
     config: Res<ClientNetworkConfig>,
+    automation: AutomationHooks,
     routed: Res<RoutedClientLifecycle>,
     mut state: ResMut<MatchCommandState>,
     pending: Res<PendingLocalActions>,
@@ -216,9 +214,9 @@ pub(super) fn send_match_command(
     if product_routed {
         return;
     }
-    let automatic = automatic_match_command_enabled(&config, roster.iter().count());
+    let automatic = automation.automatic_match_commands(roster.iter().count());
     if should_rearm_headless_match_command(
-        config.headless_simulation_ticks.is_some(),
+        automation.rearms_match_commands(),
         state.sent_for_phase,
         match_state.match_id,
         match_state.phase,
@@ -251,7 +249,7 @@ pub(super) fn send_match_command(
     let Some(command) = command else {
         return;
     };
-    if config.headless_simulation_ticks.is_some()
+    if automation.rearms_match_commands()
         && state.sent_for_phase == Some((match_state.match_id, match_state.phase))
     {
         return;
@@ -276,19 +274,6 @@ pub(crate) fn should_rearm_headless_match_command(
     automation_enabled
         && matches!(phase, MatchPhase::Countdown { .. })
         && sent_for_phase == Some((match_id, MatchPhase::Waiting))
-}
-
-pub(crate) fn automatic_match_command_enabled(
-    config: &ClientNetworkConfig,
-    roster_count: usize,
-) -> bool {
-    (config.headless_simulation_ticks.is_some()
-        || config.windowed_combat_demo.is_some()
-        || config.windowed_controller_demo.is_some()
-        || config.render_measurement.is_some())
-        && config
-            .exit_after_roster
-            .is_none_or(|target| roster_count >= target)
 }
 
 #[cfg(test)]

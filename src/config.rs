@@ -265,9 +265,10 @@ impl ServerNetworkConfig {
     }
 }
 
-/// Runtime configuration for one client process.
+/// Runtime configuration for one client process. Automation-only settings (smoke drivers,
+/// scripted input, demos, scheduled captures, render reports) live in `brawler-client`'s
+/// `ClientAutomationConfig`, which exists only with that package's `automation` feature.
 #[derive(Resource, Clone, Debug, PartialEq, Eq)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct ClientNetworkConfig {
     pub server_addr: SocketAddr,
     pub local_addr: SocketAddr,
@@ -284,90 +285,13 @@ pub struct ClientNetworkConfig {
     pub expected_build_version: String,
     pub connect_timeout: Duration,
     pub impairment_profile: NetworkImpairmentProfile,
+    /// Run without a window, presentation, or product shell (automation and separate-App tests).
     pub headless: bool,
-    /// Connect immediately instead of presenting the windowed product shell.
+    /// Connect immediately instead of presenting the windowed product shell. Automation sets it
+    /// for every non-interactive run, including the windowed combat and controller demos.
     pub auto_connect: bool,
-    pub exit_after_roster: Option<usize>,
-    /// In routed headless automation, wait for the completed match to tear down and a fresh
-    /// lobby session to be accepted before exiting successfully.
-    pub exit_after_lobby_return: bool,
-    /// Headless M03 boundary: exit successfully after one authenticated lobby welcome.
-    pub exit_after_lobby_welcome: bool,
-    /// Headless M04 evidence: join one advertised pool, observe the fresh count, cancel, observe
-    /// the resulting fresh count, and exit without requesting worker allocation.
-    pub product_queue_smoke: bool,
-    /// Headless M05 evidence: join an exact product pool and exit only after authoritative Active.
-    pub product_match_smoke: bool,
-    /// Headless V11 evidence: start Practice for one exact advertised game and exit only after
-    /// the ordinary routed match reaches authoritative Active.
-    pub product_practice_smoke: bool,
-    /// Headless M06 evidence: complete a product match, return through Results, submit Queue Again,
-    /// and exit only after the fresh queue Join is accepted.
-    pub product_requeue_smoke: bool,
-    /// Headless BRL-0162 evidence: during the Practice match, drop all traffic for a few seconds,
-    /// move to a new local source port, and exit only after the same match session resumes.
-    pub product_network_change_smoke: bool,
-    pub product_match_players_per_team: u8,
-    pub product_match_game_type: Option<crate::lobby::GameTypeId>,
-    pub headless_move: Option<(i8, i8)>,
-    pub headless_aim: Option<(i8, i8)>,
-    pub headless_aim_at_dummy: bool,
-    pub headless_fire: bool,
-    pub headless_ultimate: bool,
-    pub headless_simulation_ticks: Option<u32>,
-    pub weapon_preset: Option<u16>,
-    pub windowed_combat_demo: Option<WindowedCombatDemo>,
-    pub windowed_controller_demo: Option<WindowedControllerDemo>,
     pub render_profile: RenderProfile,
     pub window_size: Option<(u16, u16)>,
-    pub screenshot_schedule: Option<ScreenshotSchedule>,
-    pub render_measurement: Option<RenderMeasurementConfig>,
-}
-
-/// Enables the reproducible, windowed aim-at-dummy/fire smoke scenario.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WindowedCombatDemo;
-
-/// In-process paired frame/state capture plan for windowed visual verification. Frames are read
-/// from the render surface, so no operating-system screen-recording permission is needed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScreenshotSchedule {
-    pub dir: std::path::PathBuf,
-    pub first_update: u32,
-    pub interval: u32,
-    pub count: u32,
-}
-
-/// Bounded, opt-in native render evidence. Normal clients leave this absent.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RenderMeasurementConfig {
-    pub report_path: std::path::PathBuf,
-    pub warmup: Duration,
-    pub measurement: Duration,
-    /// Exercises the persisted accessibility policy in non-interactive native evidence runs.
-    pub reduced_effects: bool,
-}
-
-/// Accepts only a weapon ID a saved brawler can select: the costed weapons in the embedded
-/// `content/catalogs/builds.ron`, so the bound follows the catalog instead of a literal.
-fn validate_selectable_weapon_preset(preset: u16) -> Result<(), String> {
-    let catalog = crate::builds::BuildCatalog::embedded()?;
-    if catalog
-        .weapon_costs
-        .iter()
-        .any(|cost| cost.weapon_id.0 == preset)
-    {
-        return Ok(());
-    }
-    let ids = catalog
-        .weapon_costs
-        .iter()
-        .map(|cost| cost.weapon_id.0.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(format!(
-        "--weapon-preset must be a weapon ID from the build catalog ({ids})"
-    ))
 }
 
 /// Draws a nonzero client identity from operating-system entropy.
@@ -383,10 +307,6 @@ pub fn random_nonzero_client_id() -> Result<u64, String> {
     }
     Err("OS entropy repeatedly produced a zero client identity".to_string())
 }
-
-/// Enables a reproducible windowed smoke scenario through the native gamepad input path.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WindowedControllerDemo;
 
 impl ClientNetworkConfig {
     /// The interactive product shell shared by the desktop player binary and the Android library:
@@ -425,176 +345,22 @@ impl ClientNetworkConfig {
             impairment_profile: NetworkImpairmentProfile::from_env(),
             headless: false,
             auto_connect: false,
-            exit_after_roster: None,
-            exit_after_lobby_return: false,
-            exit_after_lobby_welcome: false,
-            product_queue_smoke: false,
-            product_match_smoke: false,
-            product_practice_smoke: false,
-            product_requeue_smoke: false,
-            product_network_change_smoke: false,
-            product_match_players_per_team: 2,
-            product_match_game_type: None,
-            headless_move: None,
-            headless_aim: None,
-            headless_aim_at_dummy: false,
-            headless_fire: false,
-            headless_ultimate: false,
-            headless_simulation_ticks: None,
-            weapon_preset: None,
-            windowed_combat_demo: None,
-            windowed_controller_demo: None,
             render_profile: RenderProfile::from_env(),
             window_size: None,
-            screenshot_schedule: None,
-            render_measurement: None,
         }
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.exit_after_roster.is_some_and(|count| count == 0) {
-            return Err("--exit-after-roster must be greater than zero".to_string());
-        }
-        if self.exit_after_lobby_return && !self.headless {
-            return Err("--exit-after-lobby-return requires --headless".to_string());
-        }
-        if self.exit_after_lobby_welcome && !self.headless {
-            return Err("--exit-after-lobby-welcome requires --headless".to_string());
-        }
-        if self.exit_after_lobby_welcome && self.transport != NetworkTransport::RoutedUdp {
-            return Err("--exit-after-lobby-welcome requires --transport routed-udp".to_string());
-        }
-        if self.product_queue_smoke && !self.headless {
-            return Err("--product-queue-smoke requires --headless".to_string());
-        }
-        if self.product_queue_smoke && self.transport != NetworkTransport::RoutedUdp {
-            return Err("--product-queue-smoke requires --transport routed-udp".to_string());
-        }
-        if self.product_queue_smoke && self.exit_after_lobby_welcome {
-            return Err(
-                "--product-queue-smoke conflicts with --exit-after-lobby-welcome".to_string(),
-            );
-        }
-        if self.product_match_smoke && !self.headless && self.render_measurement.is_none() {
-            return Err(
-                "--product-match-smoke requires --headless or a bounded render report".to_string(),
-            );
-        }
-        if self.product_match_smoke && self.transport != NetworkTransport::RoutedUdp {
-            return Err("--product-match-smoke requires --transport routed-udp".to_string());
-        }
-        if self.product_match_smoke && !matches!(self.product_match_players_per_team, 1..=3) {
-            return Err("product match smoke requires 1v1, 2v2, or 3v3".to_string());
-        }
-        self.validate_product_game_type()?;
-        if self.product_match_smoke && self.product_queue_smoke {
-            return Err("product queue and match smokes are mutually exclusive".to_string());
-        }
-        if self.product_requeue_smoke && !self.product_match_smoke {
-            return Err("--product-requeue-smoke requires product match automation".to_string());
-        }
-        if self.exit_after_lobby_return && self.transport != NetworkTransport::RoutedUdp {
-            return Err("--exit-after-lobby-return requires --transport routed-udp".to_string());
-        }
-        if self
-            .headless_simulation_ticks
-            .is_some_and(|ticks| ticks == 0)
-        {
-            return Err("--simulation-ticks must be greater than zero".to_string());
-        }
-        if let Some(preset) = self.weapon_preset {
-            validate_selectable_weapon_preset(preset)?;
-        }
         if self.window_size.is_some_and(|(width, height)| {
             !(640..=3_840).contains(&width) || !(360..=2_160).contains(&height)
         }) {
             return Err("--window-size must be between 640x360 and 3840x2160".to_string());
         }
-        let automation_enabled = self.headless
-            || self.windowed_combat_demo.is_some()
-            || self.windowed_controller_demo.is_some()
-            || self.render_measurement.is_some();
-        let automation_requirement = "requires --headless, --combat-demo, or --render-report";
-        if self.headless_move.is_some() && !automation_enabled {
-            return Err(format!("--move-axis {automation_requirement}"));
-        }
-        if self.headless_aim.is_some() && !automation_enabled {
-            return Err(format!("--aim-axis {automation_requirement}"));
-        }
-        if self.headless_fire && !automation_enabled {
-            return Err(format!("--fire {automation_requirement}"));
-        }
-        if self.headless_ultimate && !automation_enabled {
-            return Err(format!("--ultimate {automation_requirement}"));
-        }
-        if self.headless_aim_at_dummy && !automation_enabled {
-            return Err(format!("--aim-dummy {automation_requirement}"));
-        }
-        if self.headless_simulation_ticks.is_some() && !automation_enabled {
-            return Err(format!("--simulation-ticks {automation_requirement}"));
-        }
         if self.connect_timeout.is_zero() {
             return Err("client connect timeout must be greater than zero".to_string());
         }
-        if self.headless && self.windowed_controller_demo.is_some() {
-            return Err("--controller-demo requires a windowed client".to_string());
-        }
-        if self.windowed_combat_demo.is_some() && self.windowed_controller_demo.is_some() {
-            return Err("--combat-demo and --controller-demo cannot be combined".to_string());
-        }
         if self.expected_build_version.is_empty() {
             return Err("expected build version must not be empty".to_string());
-        }
-        self.validate_screenshot_schedule()?;
-        self.validate_render_measurement()?;
-        Ok(())
-    }
-
-    fn validate_product_game_type(&self) -> Result<(), String> {
-        if self.product_match_game_type.is_some() && !self.product_match_smoke {
-            return Err("--product-game-type requires match automation".to_string());
-        }
-        if self.product_practice_smoke && !self.product_match_smoke {
-            return Err("--product-practice-smoke requires product match automation".to_string());
-        }
-        if self.product_network_change_smoke && !self.product_practice_smoke {
-            return Err("--product-network-change-smoke requires Practice automation".to_string());
-        }
-        Ok(())
-    }
-
-    fn validate_screenshot_schedule(&self) -> Result<(), String> {
-        let Some(schedule) = &self.screenshot_schedule else {
-            return Ok(());
-        };
-        if self.headless {
-            return Err("--screenshot-dir requires a windowed client".to_string());
-        }
-        if schedule.interval == 0 || schedule.count == 0 {
-            return Err("screenshot interval and count must be greater than zero".to_string());
-        }
-        Ok(())
-    }
-
-    fn validate_render_measurement(&self) -> Result<(), String> {
-        let Some(measurement) = &self.render_measurement else {
-            return Ok(());
-        };
-        if self.headless {
-            return Err("--render-report requires a windowed client".to_string());
-        }
-        if measurement.report_path.as_os_str().is_empty() {
-            return Err("--render-report requires a non-empty path".to_string());
-        }
-        let maximum = Duration::from_mins(2);
-        if measurement.warmup.is_zero()
-            || measurement.measurement.is_zero()
-            || measurement.warmup > maximum
-            || measurement.measurement > maximum
-        {
-            return Err(
-                "render warm-up and measurement must be between 1 and 120 seconds".to_string(),
-            );
         }
         Ok(())
     }
@@ -602,10 +368,7 @@ impl ClientNetworkConfig {
     /// Whether startup must create a Lightyear client entity immediately.
     #[must_use]
     pub const fn connects_on_startup(&self) -> bool {
-        self.headless
-            || self.auto_connect
-            || self.windowed_combat_demo.is_some()
-            || self.windowed_controller_demo.is_some()
+        self.headless || self.auto_connect
     }
 
     /// Whether the windowed process should present the offline product shell.
@@ -615,10 +378,12 @@ impl ClientNetworkConfig {
     }
 }
 
-/// Runtime state of the configured headless client automation (BRL-0170: owned here so the
-/// shared combat evidence adapter and the `brawler-client` input driver read one resource).
+/// Runtime state of the configured client automation, owned here so the shared legacy combat
+/// evidence adapter and the `brawler-client` drivers read one resource. Only `brawler-client`'s
+/// `automation` feature inserts it, from its `ClientAutomationConfig`; the player client never
+/// has it.
 #[cfg(feature = "client")]
-#[derive(bevy::prelude::Resource, Clone, Copy, Debug, PartialEq)]
+#[derive(bevy::prelude::Resource, Clone, Copy, Debug, Default, PartialEq)]
 pub struct HeadlessAutomation {
     pub move_axis: bevy::math::Vec2,
     pub aim_axis: Option<bevy::math::Vec2>,
@@ -627,27 +392,9 @@ pub struct HeadlessAutomation {
     pub ultimate: bool,
     pub simulation_ticks: Option<u32>,
     pub elapsed_ticks: u32,
-}
-
-#[cfg(feature = "client")]
-impl bevy::prelude::FromWorld for HeadlessAutomation {
-    fn from_world(world: &mut bevy::prelude::World) -> Self {
-        use bevy::math::Vec2;
-        let config = world.resource::<ClientNetworkConfig>();
-        Self {
-            move_axis: config
-                .headless_move
-                .map_or(Vec2::ZERO, |(x, y)| Vec2::new(f32::from(x), f32::from(y))),
-            aim_axis: config
-                .headless_aim
-                .map(|(x, y)| Vec2::new(f32::from(x), f32::from(y))),
-            aim_at_dummy: config.headless_aim_at_dummy,
-            fire: config.headless_fire,
-            ultimate: config.headless_ultimate,
-            simulation_ticks: config.headless_simulation_ticks,
-            elapsed_ticks: 0,
-        }
-    }
+    /// Requested automation weapon (a build-catalog weapon ID), copied when the client is
+    /// composed; the legacy combat evidence report derives its required checkpoints from it.
+    pub weapon_preset: Option<u16>,
 }
 
 #[cfg(test)]
@@ -733,15 +480,6 @@ mod tests {
     }
 
     #[test]
-    fn windowed_combat_demo_allows_native_automation_flags() {
-        let mut config = ClientNetworkConfig::new(1);
-        config.windowed_combat_demo = Some(WindowedCombatDemo);
-        config.headless_aim_at_dummy = true;
-        config.headless_fire = true;
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
     fn render_profiles_parse_all_visual_smoke_modes() {
         assert_eq!(RenderProfile::parse("native"), Some(RenderProfile::Native));
         assert_eq!(
@@ -758,50 +496,6 @@ mod tests {
     }
 
     #[test]
-    fn render_measurement_is_windowed_and_bounded() {
-        let mut config = ClientNetworkConfig::new(1);
-        config.render_measurement = Some(RenderMeasurementConfig {
-            report_path: "render.txt".into(),
-            warmup: Duration::from_secs(10),
-            measurement: Duration::from_secs(30),
-            reduced_effects: false,
-        });
-        config.headless_move = Some((1, 0));
-        assert!(config.validate().is_ok());
-        config.headless = true;
-        assert!(
-            config
-                .validate()
-                .is_err_and(|error| error.contains("windowed"))
-        );
-        config.headless = false;
-        config.render_measurement.as_mut().unwrap().measurement = Duration::from_secs(121);
-        assert!(config.validate().is_err_and(|error| error.contains("120")));
-    }
-
-    #[test]
-    fn controller_demo_is_windowed_and_mutually_exclusive_with_combat_demo() {
-        let mut config = ClientNetworkConfig::new(1);
-        config.windowed_controller_demo = Some(WindowedControllerDemo);
-        assert!(config.validate().is_ok());
-
-        config.windowed_combat_demo = Some(WindowedCombatDemo);
-        assert!(
-            config
-                .validate()
-                .is_err_and(|error| error.contains("cannot be combined"))
-        );
-
-        config.windowed_combat_demo = None;
-        config.headless = true;
-        assert!(
-            config
-                .validate()
-                .is_err_and(|error| error.contains("windowed client"))
-        );
-    }
-
-    #[test]
     fn product_shell_and_startup_connection_are_mutually_exclusive() {
         let mut config = ClientNetworkConfig::new(1);
         assert!(config.presents_product_shell());
@@ -812,33 +506,8 @@ mod tests {
         assert!(config.connects_on_startup());
 
         config.auto_connect = false;
-        config.windowed_combat_demo = Some(WindowedCombatDemo);
-        assert!(!config.presents_product_shell());
-        assert!(config.connects_on_startup());
-
-        config.windowed_combat_demo = None;
-        config.windowed_controller_demo = Some(WindowedControllerDemo);
-        assert!(!config.presents_product_shell());
-        assert!(config.connects_on_startup());
-
-        config.windowed_controller_demo = None;
         config.headless = true;
         assert!(!config.presents_product_shell());
         assert!(config.connects_on_startup());
-    }
-
-    #[test]
-    fn explicit_product_game_type_is_scoped_to_match_automation() {
-        let mut config = ClientNetworkConfig::new(1);
-        config.product_match_game_type =
-            Some(crate::lobby::GameTypeId::new("hot-zone-2v2").unwrap());
-        assert!(config.validate().is_err());
-        config.product_match_smoke = true;
-        config.transport = NetworkTransport::RoutedUdp;
-        config.headless = true;
-        assert!(config.validate().is_ok());
-
-        config.product_practice_smoke = true;
-        assert!(config.validate().is_ok());
     }
 }

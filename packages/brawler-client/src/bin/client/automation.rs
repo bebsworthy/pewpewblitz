@@ -3,9 +3,10 @@
 //! product contract in `client.rs` instead.
 
 use super::{default_local_addr, parse_transport, parse_window_size, random_nonzero_client_id};
-use brawler::config::{
-    ClientNetworkConfig, NetworkTransport, RenderMeasurementConfig, ScreenshotSchedule,
-    WindowedCombatDemo, WindowedControllerDemo,
+use brawler::config::{ClientNetworkConfig, NetworkTransport};
+use brawler_client::{
+    ClientAutomationConfig, RenderMeasurementConfig, ScreenshotSchedule, WindowedCombatDemo,
+    WindowedControllerDemo,
 };
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
@@ -42,7 +43,7 @@ fn parse_axis(flag: &str, value: Option<String>) -> Result<(i8, i8), String> {
     clippy::too_many_lines,
     reason = "the executable's bounded flag parser keeps its complete CLI contract visible"
 )]
-pub(super) fn parse_args() -> Result<ClientNetworkConfig, String> {
+pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfig), String> {
     let mut args = env::args().skip(1);
     let mut client_id = None;
     let mut server = None;
@@ -226,56 +227,53 @@ pub(super) fn parse_args() -> Result<ClientNetworkConfig, String> {
     config.headless = headless;
     config.auto_connect =
         auto_connect || headless || windowed_combat_demo || windowed_controller_demo;
-    config.exit_after_roster = exit_after_roster;
-    config.exit_after_lobby_return = exit_after_lobby_return;
-    config.exit_after_lobby_welcome = exit_after_lobby_welcome;
-    config.product_queue_smoke = product_queue_smoke;
-    config.product_match_smoke = product_match_smoke;
-    config.product_practice_smoke = product_practice_smoke;
-    config.product_requeue_smoke = product_requeue_smoke;
-    config.product_network_change_smoke = product_network_change_smoke;
-    config.product_match_players_per_team = product_match_players_per_team;
-    config.product_match_game_type = product_match_game_type;
     if product_match_smoke {
         // Six debug clients can contend during simultaneous local startup. Keep the automation
         // connection budget inside M05's loading deadline without weakening the normal product
         // shell's five-second feedback bound.
         config.connect_timeout = Duration::from_secs(10);
     }
-    config.headless_move = headless_move;
-    config.headless_aim = headless_aim;
-    config.headless_aim_at_dummy = headless_aim_at_dummy;
-    config.headless_fire = headless_fire;
-    config.headless_ultimate = headless_ultimate;
-    config.headless_simulation_ticks = headless_simulation_ticks;
-    config.weapon_preset = weapon_preset;
-    config.windowed_combat_demo = windowed_combat_demo.then_some(WindowedCombatDemo);
-    config.windowed_controller_demo = windowed_controller_demo.then_some(WindowedControllerDemo);
     config.window_size = window_size;
-    if let Some(dir) = screenshot_dir {
-        config.screenshot_schedule = Some(ScreenshotSchedule {
+    if render_report.is_none() && render_reduced_effects {
+        return Err("--render-reduced-effects requires --render-report".to_string());
+    }
+    let automation = ClientAutomationConfig {
+        exit_after_roster,
+        exit_after_lobby_return,
+        exit_after_lobby_welcome,
+        product_queue_smoke,
+        product_match_smoke,
+        product_practice_smoke,
+        product_requeue_smoke,
+        product_network_change_smoke,
+        product_match_players_per_team,
+        product_match_game_type,
+        headless_move,
+        headless_aim,
+        // The windowed combat demo aims at the dummy and fires through the scripted input path.
+        headless_aim_at_dummy: headless_aim_at_dummy || windowed_combat_demo,
+        headless_fire: headless_fire || windowed_combat_demo,
+        headless_ultimate,
+        headless_simulation_ticks,
+        weapon_preset,
+        windowed_combat_demo: windowed_combat_demo.then_some(WindowedCombatDemo),
+        windowed_controller_demo: windowed_controller_demo.then_some(WindowedControllerDemo),
+        screenshot_schedule: screenshot_dir.map(|dir| ScreenshotSchedule {
             dir,
             first_update: screenshot_first,
             interval: screenshot_every,
             count: screenshot_count,
-        });
-    }
-    if let Some(report_path) = render_report {
-        config.render_measurement = Some(RenderMeasurementConfig {
+        }),
+        render_measurement: render_report.map(|report_path| RenderMeasurementConfig {
             report_path,
             warmup: Duration::from_secs(render_warmup_seconds),
             measurement: Duration::from_secs(render_measure_seconds),
             reduced_effects: render_reduced_effects,
-        });
-    } else if render_reduced_effects {
-        return Err("--render-reduced-effects requires --render-report".to_string());
-    }
-    if windowed_combat_demo {
-        config.headless_aim_at_dummy = true;
-        config.headless_fire = true;
-    }
+        }),
+    };
     config
         .validate()
+        .and_then(|()| automation.validate(&config))
         .map_err(|error| format!("invalid client configuration: {error}"))?;
-    Ok(config)
+    Ok((config, automation))
 }

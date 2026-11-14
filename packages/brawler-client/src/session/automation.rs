@@ -2,9 +2,10 @@
 //! product-match smoke exit. Compiled only with the `automation` feature.
 
 use super::{
-    AppExit, ClientNetworkConfig, Commands, Component, Controlled, Fighter, Gamepad, GamepadAxis,
-    GamepadButton, MatchPhase, MatchRoot, MatchState, MessageWriter, NetworkEntityId, Position,
-    Query, Res, Vec2, With, info,
+    AppExit, Client, ClientJoinPhase, ClientJoinStatus, Commands, Component, Controlled, Fighter,
+    Gamepad, GamepadAxis, GamepadButton, MatchPhase, MatchRoot, MatchState, MessageWriter,
+    NetworkEntityId, Position, Query, Res, RoutedClientSession, RoutedClientSessionKind, Vec2,
+    With, info,
 };
 
 /// Marker for the reproducible, windowed controller smoke path.
@@ -17,7 +18,7 @@ pub(super) struct ControllerDemoGamepad;
 )]
 pub(super) fn spawn_controller_demo_gamepad(
     mut commands: Commands,
-    config: Res<ClientNetworkConfig>,
+    config: Res<crate::ClientAutomationConfig>,
 ) {
     if config.windowed_controller_demo.is_some() {
         commands.spawn((Gamepad::default(), ControllerDemoGamepad));
@@ -32,7 +33,7 @@ pub(super) fn spawn_controller_demo_gamepad(
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
 pub(super) fn update_controller_demo_gamepad(
-    config: Res<ClientNetworkConfig>,
+    config: Res<crate::ClientAutomationConfig>,
     mut gamepads: Query<&mut Gamepad, With<ControllerDemoGamepad>>,
     controlled: Query<&Position, (With<Fighter>, With<Controlled>)>,
     fighters: Query<(&NetworkEntityId, &Position), With<Fighter>>,
@@ -64,7 +65,7 @@ pub(super) fn update_controller_demo_gamepad(
 /// Headless M05 evidence: exit successfully once the joined product match reaches Active.
 #[allow(clippy::needless_pass_by_value)]
 pub(super) fn finish_product_match_smoke(
-    config: Res<ClientNetworkConfig>,
+    config: Res<crate::ClientAutomationConfig>,
     roots: Query<&MatchState, With<MatchRoot>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -124,7 +125,7 @@ const NETWORK_CHANGE_RESUMED_TICKS: u64 = brawler::timing::SIMULATION_TICK_HZ;
     reason = "one automation coordinator reads the schedule-owned session state it verifies"
 )]
 pub(super) fn drive_network_change_smoke(
-    config: Res<ClientNetworkConfig>,
+    config: Res<crate::ClientAutomationConfig>,
     time: Res<bevy::prelude::Time<bevy::prelude::Real>>,
     mut smoke: bevy::prelude::ResMut<NetworkChangeSmoke>,
     lifecycle: Res<crate::RoutedClientLifecycle>,
@@ -132,12 +133,12 @@ pub(super) fn drive_network_change_smoke(
     ticks: Query<&brawler::combat::AuthoritativeTick>,
     mut clients: Query<
         (
-            &crate::RoutedClientSession,
-            &crate::ClientJoinStatus,
+            &RoutedClientSession,
+            &ClientJoinStatus,
             &mut crate::routed_udp::RoutedUdpIo,
             &lightyear::prelude::LocalAddr,
         ),
-        With<lightyear::prelude::client::Client>,
+        With<Client>,
     >,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -153,7 +154,7 @@ pub(super) fn drive_network_change_smoke(
         }
         return;
     };
-    let match_session = session.kind == crate::RoutedClientSessionKind::Match
+    let match_session = session.kind == RoutedClientSessionKind::Match
         && lifecycle.phase == crate::RoutedClientPhase::Match;
     match smoke.stage {
         NetworkChangeStage::AwaitingActive => {
@@ -209,7 +210,7 @@ pub(super) fn drive_network_change_smoke(
         } => {
             let same_session = match_session
                 && session.generation == generation
-                && matches!(status.phase, crate::ClientJoinPhase::Active { .. });
+                && matches!(status.phase, ClientJoinPhase::Active { .. });
             if !same_session {
                 bevy::log::error!(
                     generation = session.generation,
@@ -240,5 +241,28 @@ pub(super) fn drive_network_change_smoke(
         NetworkChangeStage::Settling { .. }
         | NetworkChangeStage::Outage { .. }
         | NetworkChangeStage::Finished => {}
+    }
+}
+
+/// Finish the routed process smoke only after the match session has completed, its routes have
+/// been revoked, and the client has authenticated one fresh lobby generation. Generation one is
+/// the initial lobby and generation two is the match; a generation of three or greater therefore
+/// cannot be satisfied by an initial lobby retry.
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn observe_fresh_lobby_return(
+    config: Res<crate::ClientAutomationConfig>,
+    mut app_exit: MessageWriter<AppExit>,
+    query: Query<(&RoutedClientSession, &ClientJoinStatus), With<Client>>,
+) {
+    if !config.exit_after_lobby_return {
+        return;
+    }
+    if query.iter().any(|(session, status)| {
+        session.kind == RoutedClientSessionKind::Lobby
+            && session.generation >= 3
+            && matches!(status.phase, ClientJoinPhase::LobbyActive { .. })
+    }) {
+        info!("brawler client authenticated a fresh lobby after match completion");
+        app_exit.write(AppExit::Success);
     }
 }

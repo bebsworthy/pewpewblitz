@@ -315,8 +315,14 @@ The packages' feature graphs express compile-time execution roles:
   `just client`, `just run`, `just balance-lab`, the macOS bundle, and the Android shell;
 - `brawler-client/automation` (non-default) adds the scripted client surface: smoke, headless,
   demo, scheduled-capture, and render-report CLI flags and their drivers, the native render report,
-  and the developer-only VfxLab and UI gallery binaries. Every E2E, evidence, and dev-tool script
-  enables it; `scripts/check-client-features.sh` (in `just lint`) proves the player build excludes it;
+  and the developer-only VfxLab and UI gallery binaries. Its settings live in
+  `brawler_client::ClientAutomationConfig`, a resource beside the shared `ClientNetworkConfig`;
+  product session systems reach it only through the session `AutomationHooks` parameter, whose
+  player-build answers are constants. The feature also installs the shared crate's legacy
+  direct-UDP `ClientCombatEvidencePlugin` and client process closeout/window sampling
+  (`ProcessDiagnosticsPlugin`); failure records stay in the player build. Every E2E, evidence, and
+  dev-tool script enables it; `scripts/check-client-features.sh` (in `just lint`) proves the player
+  binary excludes it;
 - `brawler/server` enables the dedicated-server and worker surface without Bevy presentation
   features;
 - `brawler/network-test` combines the shared crate's client/server roles and in-process transports;

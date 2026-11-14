@@ -8,12 +8,17 @@
 )]
 use super::*;
 
+mod config;
+
+pub use config::{
+    ClientAutomationConfig, RenderMeasurementConfig, ScreenshotSchedule, WindowedCombatDemo,
+    WindowedControllerDemo,
+};
+pub(crate) use config::{automatic_match_command_enabled, install_automation_state};
+
 const HEADLESS_FIRE_DURATION_TICKS: u32 = 6_000;
 
-pub(super) fn install_scheduled_screenshots(
-    app: &mut App,
-    schedule: brawler::config::ScreenshotSchedule,
-) {
+pub(super) fn install_scheduled_screenshots(app: &mut App, schedule: ScreenshotSchedule) {
     std::fs::create_dir_all(&schedule.dir).expect("screenshot directory is creatable");
     app.insert_resource(ScheduledScreenshots {
         dir: schedule.dir,

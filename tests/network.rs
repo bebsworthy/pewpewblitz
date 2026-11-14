@@ -51,8 +51,8 @@ use brawler::{
     timing::{SIMULATION_TICK, SimulationTick},
 };
 use brawler_client::{
-    ClientJoinPhase, ClientJoinStatus, ClientNetworkPlugin, PendingLocalActions,
-    testing::spawn_crossbeam_client,
+    ClientAutomationConfig, ClientJoinPhase, ClientJoinStatus, ClientNetworkPlugin,
+    PendingLocalActions, testing::spawn_crossbeam_client,
 };
 use lightyear::prelude::client::{Client, Connected, Disconnect, Disconnected, Remote};
 use lightyear::prelude::server::{NetcodeServer, ServerPlugins, Stopped};

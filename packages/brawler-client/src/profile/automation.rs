@@ -27,7 +27,7 @@ pub(super) enum AutomationBrawlerStep {
 /// saved brawler already carries the requested primary weapon.
 #[must_use]
 pub(crate) fn automation_brawler_ready(
-    config: &brawler::config::ClientNetworkConfig,
+    config: &crate::ClientAutomationConfig,
     brawler: &SavedBrawler,
 ) -> bool {
     config
@@ -102,12 +102,13 @@ fn automation_draft(
 
 #[allow(clippy::needless_pass_by_value)]
 pub(super) fn prepare_automation_brawler(
-    config: Res<brawler::config::ClientNetworkConfig>,
+    network: Res<brawler::config::ClientNetworkConfig>,
+    config: Res<crate::ClientAutomationConfig>,
     mut model: ResMut<ClientProfileModel>,
     mut requests: Local<u8>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if !(config.headless || config.render_measurement.is_some())
+    if !(network.headless || config.render_measurement.is_some())
         || model.pending()
         || *requests > MAX_AUTOMATION_PROFILE_REQUESTS
     {
@@ -264,8 +265,10 @@ mod tests {
             plan_automation_brawler(Some(scatter), &catalog, &selected),
             None
         );
-        let mut config = brawler::config::ClientNetworkConfig::new(1);
-        config.weapon_preset = Some(scatter.0);
+        let mut config = crate::ClientAutomationConfig {
+            weapon_preset: Some(scatter.0),
+            ..crate::ClientAutomationConfig::default()
+        };
         assert!(automation_brawler_ready(&config, &selected.brawlers[3]));
         assert!(!automation_brawler_ready(&config, &selected.brawlers[0]));
         config.weapon_preset = None;

@@ -3,6 +3,12 @@
 //! BRL-0170: this package is the client half of the former single `brawler` package. It builds on
 //! the shared gameplay crate's `client` feature and never on `server`.
 
+#[cfg(feature = "automation")]
+pub use automation::{
+    ClientAutomationConfig, RenderMeasurementConfig, ScreenshotSchedule, WindowedCombatDemo,
+    WindowedControllerDemo,
+};
+#[cfg(feature = "automation")]
 pub use brawler::config::HeadlessAutomation;
 pub use brawler::map::ClientPlayableGate;
 
@@ -131,7 +137,11 @@ pub struct ClientReplicatedGameplayPlugin;
 
 impl Plugin for ClientReplicatedGameplayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ClientCombatPlugin).add_plugins((
+        app.add_plugins(ClientCombatPlugin);
+        // Legacy direct-UDP combat evidence is automation-only (BRL-3p70).
+        #[cfg(feature = "automation")]
+        app.add_plugins(brawler::combat::ClientCombatEvidencePlugin);
+        app.add_plugins((
             brawler::map::ClientMapPlugin,
             brawler::map::MapPresentationPlugin,
             ClientQueuePlugin,
@@ -543,12 +553,30 @@ struct ScoreboardOverlay;
 
 /// Build the windowed or headless client application.
 pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
+    compose_client_app(App::new(), config)
+}
+
+/// Build an automation client: the same composition plus the automation configuration that the
+/// smoke, demo, capture, and render-report drivers read.
+#[cfg(feature = "automation")]
+pub fn build_automation_app(
+    config: ClientNetworkConfig,
+    automation: ClientAutomationConfig,
+) -> App {
+    let mut app = App::new();
+    app.insert_resource(automation);
+    compose_client_app(app, config)
+}
+
+fn compose_client_app(mut app: App, config: ClientNetworkConfig) -> App {
     let headless = config.headless;
     let render_profile = config.render_profile;
     let window_size = config.window_size;
     #[cfg(feature = "automation")]
-    let screenshot_schedule = config.screenshot_schedule.clone();
-    let mut app = App::new();
+    let screenshot_schedule = app
+        .world()
+        .get_resource::<ClientAutomationConfig>()
+        .and_then(|automation| automation.screenshot_schedule.clone());
     app.insert_resource(config);
     if headless {
         app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
@@ -593,12 +621,13 @@ pub fn build_app_with_config(config: ClientNetworkConfig) -> App {
         AvianNetworkPlugin,
         ClientReplicatedGameplayPlugin,
         ClientNetworkPlugin,
-        brawler::diagnostics::ProcessDiagnosticsPlugin,
         diagnostics_overlay::ClientDiagnosticsOverlayPlugin,
     ));
-    if let Some(path) =
-        brawler::diagnostics::ProcessDiagnosticsSettings::default().failure_record_path()
-    {
+    // Client process closeout and window sampling (`BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE`,
+    // `BRAWLER_DIAGNOSTICS_WINDOW_FILE`) serve only the automation scripts (BRL-3p70).
+    #[cfg(feature = "automation")]
+    app.add_plugins(brawler::diagnostics::ProcessDiagnosticsPlugin);
+    if let Some(path) = brawler::diagnostics::failure_record_path() {
         // Parity with the dedicated server: a panic appends a bounded local failure record
         // before terminating, so client crashes keep the same category evidence.
         brawler::diagnostics::install_panic_failure_hook(path);

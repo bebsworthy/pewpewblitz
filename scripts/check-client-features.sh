@@ -4,7 +4,11 @@
 #   1. `brawler-client` owns the `automation` feature, unreachable from its default, and the shared
 #      `brawler` crate has no automation feature;
 #   2. automation-owned module declarations stay behind `#[cfg(feature = "automation")]`;
-#   3. the built player binary contains none of the automation marker strings.
+#   3. the built player binary contains none of the automation marker strings, including the
+#      automation-only configuration validation, the legacy direct-UDP client combat evidence, and
+#      client process closeout/window sampling that live in the shared crate (BRL-3p70).
+# Set BRAWLER_CLIENT_FEATURES_POSITIVE_CONTROL=1 to also build the automation client and assert
+# that it contains every marker, proving the markers are real.
 set -euo pipefail
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -62,8 +66,8 @@ for entry in "${gated_declarations[@]}"; do
 done
 
 # Literal strings owned by automation-only code reachable from brawler-client (verified present
-# in a `-p brawler-client --features automation` build). Each must still exist in the source so a rename cannot
-# silently turn this check into a no-op.
+# in a `-p brawler-client --features automation` build). Each must still exist in the source so a
+# rename cannot silently turn this check into a no-op.
 markers=(
     "[--combat-demo | --controller-demo]"
     "brawler product queue smoke"
@@ -72,10 +76,15 @@ markers=(
     "Automation Brawler"
     "frame_p95_ms"
     "capturing scheduled frame + client state"
+    "--product-practice-smoke requires product match automation"
+    "timing handoff-connected"
+    "headless client is extending its run until combat evidence completes"
+    "BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE"
+    "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE"
 )
 for marker in "${markers[@]}"; do
-    if ! grep -rqF -- "$marker" packages/brawler-client/src; then
-        printf 'player client: marker %s no longer exists in packages/brawler-client/src; update this check\n' "$marker" >&2
+    if ! grep -rqF -- "$marker" packages/brawler-client/src src; then
+        printf 'player client: marker %s no longer exists in packages/brawler-client/src or src; update this check\n' "$marker" >&2
         exit 1
     fi
 done
@@ -89,5 +98,17 @@ for marker in "${markers[@]}"; do
         exit 1
     fi
 done
+
+if [[ "${BRAWLER_CLIENT_FEATURES_POSITIVE_CONTROL:-0}" == 1 ]]; then
+    cargo build --locked -p brawler-client --features automation --bin brawler-client
+    binary_strings="$(strings -a "$binary")"
+    for marker in "${markers[@]}"; do
+        if ! grep -qF -- "$marker" <<< "$binary_strings"; then
+            printf 'automation client binary lacks marker %s; it no longer proves exclusion\n' "$marker" >&2
+            exit 1
+        fi
+    done
+    echo "automation client build contains every marker (positive control)"
+fi
 
 echo "player client build excludes automation and evidence tooling"

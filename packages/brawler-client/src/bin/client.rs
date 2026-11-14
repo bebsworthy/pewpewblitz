@@ -13,6 +13,7 @@ use brawler::config::ClientNetworkConfig;
 use brawler::config::NetworkTransport;
 #[cfg(feature = "automation")]
 use brawler::config::random_nonzero_client_id;
+#[cfg(not(feature = "automation"))]
 use brawler_client::build_app_with_config;
 #[cfg(feature = "automation")]
 use core::net::SocketAddr;
@@ -97,8 +98,8 @@ fn parse_window_size(flag: &str, value: Option<String>) -> Result<(u16, u16), St
 }
 
 fn main() -> AppExit {
-    let config = match parse_args() {
-        Ok(config) => config,
+    let parsed = match parse_args() {
+        Ok(parsed) => parsed,
         Err(error) => {
             eprintln!("brawler-client: {error}");
             usage();
@@ -114,5 +115,9 @@ fn main() -> AppExit {
             process::exit(2);
         }
     };
-    build_app_with_config(config).run()
+    #[cfg(not(feature = "automation"))]
+    let mut app = build_app_with_config(parsed);
+    #[cfg(feature = "automation")]
+    let mut app = brawler_client::build_automation_app(parsed.0, parsed.1);
+    app.run()
 }
