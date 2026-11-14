@@ -4,9 +4,9 @@ was: BRL-0165
 
 title: Exclude automation and evidence code from the player client build
 
-status: doing
-closed:
-status_changed: 2026-11-13T13:48:37Z
+status: done
+closed: 2026-11-14T21:10:40Z
+status_changed: 2026-11-14T21:10:40Z
 
 theme: quality
 
@@ -20,7 +20,7 @@ related: [BRL-3p70, BRL-zj53]
 
 parent: BRL-q5c4
 
-rank: 11796480
+rank:
 ---
 
 # Description

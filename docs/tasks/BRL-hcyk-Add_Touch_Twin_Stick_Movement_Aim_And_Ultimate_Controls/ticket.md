@@ -4,9 +4,9 @@ was: BRL-0160
 
 title: 'Add touch twin-stick movement, aim, and ultimate controls'
 
-status: doing
-closed:
-status_changed: 2026-11-13T17:36:32Z
+status: done
+closed: 2026-11-14T21:10:40Z
+status_changed: 2026-11-14T21:10:40Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-094c, BRL-2dv1, BRL-3zas]
 
 parent: BRL-q5c4
 
-rank: 11927552
+rank:
 ---
 
 # Description

@@ -4,9 +4,9 @@ was: BRL-0198
 
 title: Navigate back from every shell screen by touch and the Android Back gesture
 
-status: doing
-closed:
-status_changed: 2026-11-14T01:49:41Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-094c, BRL-30za, BRL-wr0s]
 
 parent: BRL-q5c4
 
-rank: 12320768
+rank:
 ---
 
 # Description

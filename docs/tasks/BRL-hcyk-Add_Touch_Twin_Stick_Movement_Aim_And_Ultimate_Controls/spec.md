@@ -182,3 +182,8 @@ Known limitations:
 
 
 Correction to the playtest setup: the phone is now bound to the logical server in `/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/devdata` for `192.168.31.47:5001`. That directory also holds the brawler "Brawler 1". Use `BRAWLER_DEV_DATA_DIR=/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/devdata` with port 5001. A fresh data dir on :5001 hits the same "different logical server" rejection until saved bindings can be forgotten (BRL-30za observation).
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

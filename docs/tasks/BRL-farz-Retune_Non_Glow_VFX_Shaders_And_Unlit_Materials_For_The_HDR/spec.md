@@ -157,3 +157,8 @@ identity grading, so they are darker than in-match (BRL-1cnh).
 
 - BRL-3ebg (backlog): tonemap custom VFX shaders on the non-HDR Low quality tier.
 - BRL-1cnh (backlog): give the VFX lab a representative theme grading.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

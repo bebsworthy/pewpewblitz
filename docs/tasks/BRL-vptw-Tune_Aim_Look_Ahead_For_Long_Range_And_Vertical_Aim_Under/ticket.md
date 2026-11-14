@@ -4,9 +4,9 @@ was: BRL-0181
 
 title: Tune aim look-ahead for long-range and vertical aim under the 12-cell framing
 
-status: doing
-closed:
-status_changed: 2026-11-14T16:15:09Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-e4xj, BRL-wegn, BRL-xyj7]
 
 parent: BRL-q5c4
 
-rank: 13238272
+rank:
 ---
 
 # Description

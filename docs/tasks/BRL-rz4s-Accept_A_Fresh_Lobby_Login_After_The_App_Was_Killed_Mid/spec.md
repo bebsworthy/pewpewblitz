@@ -177,3 +177,8 @@ Please report whether the 2 s silence bound feels right.
   `clients` broke a test that pushes into `clients` directly. **Prevention:** derive optional
   per-client harness flags with `.get(index)` defaults, or extend every construction path, and run
   the whole network suite, not only the new tests.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

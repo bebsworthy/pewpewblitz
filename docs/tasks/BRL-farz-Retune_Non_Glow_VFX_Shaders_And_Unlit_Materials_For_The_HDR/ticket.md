@@ -4,9 +4,9 @@ was: BRL-0176
 
 title: Retune non-glow VFX shaders and unlit materials for the HDR bloom pipeline
 
-status: doing
-closed:
-status_changed: 2026-11-14T12:37:21Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-1cnh, BRL-3ebg, BRL-m10f, BRL-tpd8]
 
 parent: BRL-q5c4
 
-rank: 12976128
+rank:
 ---
 
 # Description

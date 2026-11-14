@@ -78,3 +78,8 @@ Run `just run` (or `just server` + `just client`), open Map Maker, create/open a
 
 # Playtest feedback (2026-11-13)
 - Gameplay playtest accepted for the other plan tickets; the Map Maker was not exercised yet. Ticket stays `doing` awaiting the Map Maker pan/zoom check.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

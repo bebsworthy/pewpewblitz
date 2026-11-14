@@ -91,3 +91,8 @@ Report any visual difference from before.
 
 - BRL-kgba (backlog, parent BRL-q5c4, related BRL-cwm9): keep palette cards and preview viewports when only the selected asset changes.
 - BRL-yaa4 (backlog, parent BRL-q5c4, related BRL-cwm9): remove or restore the unspawned cursor/rotation readout (owner decision).
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

@@ -85,3 +85,8 @@ Known limitations: mode pennant badges keep the earlier style (BRL-1wms).
 - Reusable: Chrome headless (`--screenshot`) renders SVG/PNG contact sheets for quick parity and small-size checks without image libraries; a signed-distance rasterizer in stdlib Python is fast enough (multiprocessing) for a full UI icon set.
 
 - Deferred: BRL-1wms (mode pennant badges in the icon style).
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

@@ -300,3 +300,8 @@ Report the `AdapterInfo` logcat line, any visual corruption (particles), and fra
 
 # Playtest feedback (2026-11-13)
 - Owner: "can't test creating a brawler because dashboard and UX is not sized for mobile and buttons are inaccessible on most pages". Phone playtest of the remaining items is blocked on BRL-30za (fit the player shell to phone-sized landscape viewports), now prioritized next.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

@@ -103,3 +103,8 @@ The win is small because Bevy/wgpu/dependencies dominate and the linker already 
 - Mistake: tightened a type's visibility while `just test` was compiling other feature sets; the network-test build saw a private type in a `pub(super)` system signature. Cause: editing source during a multi-config gate. Prevention: never edit sources while a canonical gate runs; compile every feature set after visibility changes.
 - Mistake: first binary markers were weak — a CLI match-arm literal is not stored contiguously, and a validation string also lives in the lib. Prevention: pick markers from automation-only log/usage literals and verify each against a positive-control automation binary.
 - Lesson: a ticket scope line ("evidence capture") can conflict with durable player UX docs; check `docs/13-player-ux.md` before gating anything with a player binding, and raise a question instead of removing player behavior.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

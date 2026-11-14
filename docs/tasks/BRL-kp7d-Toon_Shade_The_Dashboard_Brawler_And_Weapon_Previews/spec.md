@@ -128,3 +128,8 @@ outlines in previews (BRL-y3hb); preview MSAA ignores the tier (BRL-1gkv).
 - BRL-y3hb (backlog): outline the Dashboard brawler and card previews.
 - BRL-1gkv (backlog): apply the tier MSAA to offscreen preview cameras.
 - BRL-pqzt (backlog): automation capture path for shell previews.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

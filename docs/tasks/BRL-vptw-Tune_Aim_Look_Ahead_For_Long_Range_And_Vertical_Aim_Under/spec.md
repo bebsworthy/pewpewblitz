@@ -140,3 +140,8 @@ body rises toward the top edge.
   section.
 - Making the lean depend on mouse distance creates a feedback loop, because that distance is
   measured through the leaning view. The bound has to be code-owned and covered by a test.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

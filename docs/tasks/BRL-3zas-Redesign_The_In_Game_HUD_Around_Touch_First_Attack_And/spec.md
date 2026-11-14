@@ -211,3 +211,8 @@ The touch input implementation itself (touch controls ticket); this ticket provi
 - **The pre-existing Zombie roster health was always unknown** because the HUD queried a component that is not replicated. Action: check that a component is replicated (or that another client reader uses it) before a presenter depends on it.
 - **The adb daemon on this Mac dies between calls.** Use the retrying `adbr` wrapper. Screencaps can also come back truncated, so convert them to JPEG to inspect, and retake any partial frame.
 - **Never `rm -rf` a computed path.** The safety check blocked it. Write captures to fresh directory names instead.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

@@ -4,9 +4,9 @@ was: BRL-0201
 
 title: Make settings sliders adjustable by touch on Android
 
-status: doing
-closed:
-status_changed: 2026-11-14T03:24:53Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-q148, BRL-ynt5]
 
 parent: BRL-q5c4
 
-rank: 12451840
+rank:
 ---
 
 # Description

@@ -75,3 +75,8 @@ Known limitations: barrel and environment damage to the local fighter is still n
 
 - In a test, a loop variable named `camera_shake` shadowed the existing `camera_shake(&mut App)` test helper and caused E0618. My first fix was a pointless wrapper function; the right fix was to rename the binding. Lesson: name loop bindings after their role (`intensity`), not after a field or helper name already in scope.
 - The background `cargo test | tail` hid a compile error behind a successful pipeline exit. Lesson: grep the log for `error` and `test result` lines, not just the exit status of the pipeline.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

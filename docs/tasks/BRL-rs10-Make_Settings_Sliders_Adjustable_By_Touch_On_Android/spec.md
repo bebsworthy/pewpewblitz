@@ -134,3 +134,8 @@ Install with `just android-install <mac-lan-ip>:5001`; open Settings from Select
   `Res<T>` to a shared helper, grep every consumer's hand-built test apps.
 - Clippy `too_many_arguments` on the Controls owner was resolved by a real `SliderPointer`
   SystemParam that every owner now uses, not an allow.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

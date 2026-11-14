@@ -254,3 +254,8 @@ with `--lib` / `--all-targets --no-run`):
   that must not touch the owner's `target/` needs scripts that honor it.
 - Check type-name-sensitive fingerprints (Lightyear registry hashes type paths) before choosing
   which side of a split keeps the original crate name.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

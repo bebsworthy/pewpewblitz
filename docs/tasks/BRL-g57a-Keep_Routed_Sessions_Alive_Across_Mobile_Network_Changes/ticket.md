@@ -4,9 +4,9 @@ was: BRL-0162
 
 title: Keep routed sessions alive across mobile network changes
 
-status: doing
-closed:
-status_changed: 2026-11-14T00:40:10Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-ptaq, BRL-rz4s, BRL-sqz0, BRL-yyeg, BRL-zvqd, BRL-zy4b]
 
 parent: BRL-q5c4
 
-rank: 12189696
+rank:
 ---
 
 # Description

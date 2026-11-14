@@ -4,9 +4,9 @@ was: BRL-0190
 
 title: 'Add shell reward bursts, background motif drift, and per-screen motion review'
 
-status: doing
-closed:
-status_changed: 2026-11-14T18:58:54Z
+status: done
+closed: 2026-11-14T21:10:42Z
+status_changed: 2026-11-14T21:10:42Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-drny, BRL-pw9k]
 
 parent: BRL-q5c4
 
-rank: 13369344
+rank:
 ---
 
 # Description

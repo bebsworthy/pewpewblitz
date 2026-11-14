@@ -4,9 +4,9 @@ was: BRL-0159
 
 title: Build an installable Android client shell
 
-status: doing
-closed:
-status_changed: 2026-11-13T15:28:26Z
+status: done
+closed: 2026-11-14T21:10:40Z
+status_changed: 2026-11-14T21:10:40Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-06pz, BRL-30za, BRL-zv4x]
 
 parent: BRL-q5c4
 
-rank: 11862016
+rank:
 ---
 
 # Description

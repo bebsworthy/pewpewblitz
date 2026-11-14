@@ -70,3 +70,8 @@ Per-brawler character selection, cosmetics.
 ## Open for the owner
 
 Visual acceptance of the four weapons and the two-handed holds across three themes, and the Dashboard and weapon previews. The ticket stays in `doing`.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

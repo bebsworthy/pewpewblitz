@@ -4,9 +4,9 @@ was: BRL-0172
 
 title: 'Present the local player''s ultimate activation sound and effect on the input frame'
 
-status: doing
-closed:
-status_changed: 2026-11-14T10:26:46Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-crdt, BRL-evqm, BRL-qq36]
 
 parent: BRL-q5c4
 
-rank: 12713984
+rank:
 ---
 
 # Description

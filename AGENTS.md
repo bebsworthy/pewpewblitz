@@ -347,8 +347,9 @@ Use the repository's `ticket` CLI and its installed skill for every new task:
   owns scope, decisions, acceptance criteria, implementation constraints, verification, playtest
   needs, feedback disposition, and closeout learning.
 - Use the actual Ticket statuses: `idea`, `backlog`, `todo`, `doing`, `done`, and `canceled`. Move a
-  ticket to `doing` when implementation starts and to `done` only when its acceptance criteria and
-  required evidence are satisfied.
+  ticket to `doing` when implementation starts and to `done` once the agent has done everything it
+  can and verified it as well as it is able. `todo` is work still to do. The owner and other testers
+  test `done` work and reopen the ticket or file a new one when something must change.
 - Record material scope or architecture changes in the ticket spec before implementing them. If a
   required choice exceeds the user's existing direction, add a Ticket question and wait for its
   answer; resolve answered questions after incorporating the decision.
@@ -374,13 +375,15 @@ For active work:
 5. Run focused and canonical verification proportional to risk. Record commands, results, and any
    intentionally manual or unavailable evidence in the ticket.
 6. When native or subjective playtesting is required, provide the run path, controls, scenario,
-   known limitations, and requested observations. Keep the ticket in `doing` while required
-   feedback or corrections remain.
+   known limitations, and requested observations in the spec. Do not hold the ticket in `doing`
+   waiting for that playtest; keep it in `doing` only while agent-side work or a check the agent
+   can still run remains.
 7. Record every feedback item as implemented, deferred to another ticket, rejected with rationale,
    or awaiting evidence. Re-run affected verification after accepted corrections.
 8. Perform a learn-from-errors review for substantial work. Record mistakes, causes, prevention,
    and reusable lessons in the ticket; create or improve a skill only when the learning genuinely
    recurs.
-9. Move the ticket to `done` only when its acceptance criteria, verification, feedback disposition,
-   durable documentation, and required learning are complete. Run `ticket sync` and report the
-   ticket ID in the handoff.
+9. Move the ticket to `done` when the implementation, the agent's verification, durable
+   documentation, and required learning are complete; record any open owner decisions in the spec.
+   Owner feedback on `done` work reopens the ticket or creates a new one. Run `ticket sync` and
+   report the ticket ID in the handoff.

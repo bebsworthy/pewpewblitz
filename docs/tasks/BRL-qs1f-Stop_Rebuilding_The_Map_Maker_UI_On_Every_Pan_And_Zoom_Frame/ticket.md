@@ -4,9 +4,9 @@ was: BRL-0163
 
 title: Stop rebuilding the Map Maker UI on every pan and zoom frame
 
-status: doing
-closed:
-status_changed: 2026-11-12T22:11:51Z
+status: done
+closed: 2026-11-14T21:10:40Z
+status_changed: 2026-11-14T21:10:40Z
 
 theme: quality
 
@@ -20,7 +20,7 @@ related: [BRL-6vjz, BRL-cwm9]
 
 parent: BRL-q5c4
 
-rank: 11534336
+rank:
 ---
 
 # Description

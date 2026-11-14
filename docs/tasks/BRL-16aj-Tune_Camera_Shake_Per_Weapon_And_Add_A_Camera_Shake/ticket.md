@@ -4,9 +4,9 @@ was: BRL-0173
 
 title: Tune camera shake per weapon and add a camera shake intensity setting
 
-status: doing
-closed:
-status_changed: 2026-11-14T11:00:59Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-75dh, BRL-e4xj]
 
 parent: BRL-q5c4
 
-rank: 12779520
+rank:
 ---
 
 # Description

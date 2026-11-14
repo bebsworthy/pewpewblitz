@@ -4,9 +4,9 @@ was: BRL-0178
 
 title: Add sparse wall-adjacent floor decals per theme
 
-status: doing
-closed:
-status_changed: 2026-11-14T13:21:24Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-005q, BRL-dq06, BRL-k4n1]
 
 parent: BRL-q5c4
 
-rank: 13041664
+rank:
 ---
 
 # Description

@@ -4,9 +4,9 @@ was: BRL-0161
 
 title: Add mobile rendering quality tiers and a GPU-particle fallback
 
-status: doing
-closed:
-status_changed: 2026-11-13T22:50:41Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-5k0g, BRL-hkj4, BRL-m4eh, BRL-rs10, BRL-xb54]
 
 parent: BRL-q5c4
 
-rank: 12124160
+rank:
 ---
 
 # Description

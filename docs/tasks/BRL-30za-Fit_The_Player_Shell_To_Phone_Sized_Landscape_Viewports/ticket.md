@@ -4,9 +4,9 @@ was: BRL-0196
 
 title: Fit the player shell to phone-sized landscape viewports
 
-status: doing
-closed:
-status_changed: 2026-11-13T20:49:51Z
+status: done
+closed: 2026-11-14T21:10:40Z
+status_changed: 2026-11-14T21:10:40Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-h088, BRL-zj53, BRL-zy4b]
 
 parent: BRL-q5c4
 
-rank: 11993088
+rank:
 ---
 
 # Description

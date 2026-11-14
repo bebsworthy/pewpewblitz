@@ -189,3 +189,8 @@ Report the following:
 - Lesson: at targetSdk 36 and later, Android Back is not a key event. Handle it at the activity
   dispatcher and bridge it through JNI. The relaunch hang was the native loop's one-per-process
   limit (winit `RecreationAttempt`), not a Back bug.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

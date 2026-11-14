@@ -161,3 +161,8 @@ Known limitations: one shared atlas tinted per theme (no per-theme sprite shapes
 - Baseline captures were taken before any compiled source edit, and new files were written only as
   unreferenced modules until the baseline builds finished (the evidence script rebuilds from the
   working tree), following the BRL-m10f/0147/0176 lesson.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

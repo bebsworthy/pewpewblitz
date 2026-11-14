@@ -81,3 +81,8 @@ One cast, exactly one activation echo, zero unmatched, server Cloaked. Server-re
 # Learn-from-errors review
 - Mistake: first version confirmed any pending cast once the replicated charge left full; the rejection harness (authority spends the charge) showed this would mark a refused cast as confirmed. Cause: treating "charge spent" as equivalent to "activated". Prevention: confirm only from the kind's own activation signal; use the state only to release the re-cast guard (and for the one kind with no signal). Reusable: write the server-rejection network scenario before trusting a state-derived confirmation.
 - Observed during design: BRL-qq36's ultimate gate could present twice on a quick re-press inside one RTT (stale full charge); fixed with `ultimate_outstanding`.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

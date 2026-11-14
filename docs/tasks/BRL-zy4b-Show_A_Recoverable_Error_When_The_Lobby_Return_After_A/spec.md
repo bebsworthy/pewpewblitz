@@ -36,3 +36,8 @@ Server), never a dead screen.
   Dashboard without restarting the app. The scenario was a lost match, not a completed one.
 - Not done: no automatic retry before the panel; the first Retry can fail while Android settles
   the network. A device check of the completed-match variant was not run.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

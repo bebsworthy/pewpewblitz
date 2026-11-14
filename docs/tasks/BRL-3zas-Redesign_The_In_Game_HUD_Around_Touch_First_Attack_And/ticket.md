@@ -4,9 +4,9 @@ was: BRL-0155
 
 title: Redesign the in-game HUD around touch-first attack and ultimate controls
 
-status: doing
-closed:
-status_changed: 2026-11-13T22:00:07Z
+status: done
+closed: 2026-11-14T21:10:40Z
+status_changed: 2026-11-14T21:10:40Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-fwtg, BRL-hcyk, BRL-jysc]
 
 parent: BRL-q5c4
 
-rank: 12058624
+rank:
 ---
 
 # Description

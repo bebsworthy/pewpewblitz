@@ -4,9 +4,9 @@ was: BRL-0197
 
 title: Open the match menu by touch and the Android Back gesture
 
-status: doing
-closed:
-status_changed: 2026-11-14T02:34:59Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-ejag, BRL-h088, BRL-hcyk]
 
 parent: BRL-q5c4
 
-rank: 12386304
+rank:
 ---
 
 # Description

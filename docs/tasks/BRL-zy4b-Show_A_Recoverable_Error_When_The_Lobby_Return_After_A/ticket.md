@@ -4,9 +4,9 @@ was: BRL-0199
 
 title: Show a recoverable error when the lobby return after a match fails
 
-status: doing
-closed:
-status_changed: 2026-11-14T01:49:36Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-30za, BRL-g57a]
 
 parent: BRL-q5c4
 
-rank: 12255232
+rank:
 ---
 
 # Description

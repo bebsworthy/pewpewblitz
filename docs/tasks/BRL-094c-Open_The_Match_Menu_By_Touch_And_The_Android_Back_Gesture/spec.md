@@ -160,3 +160,8 @@ Shell-screen Back navigation, unless it needs the same key handling.
 - Lesson: a full-screen Bevy UI `Button` with `ReleaseActivation` is the wrong tool for a HUD
   control that coexists with touch sticks (first-touch pointer, mouse also sampled as fire); owning
   it in the touch sampler with layout-shared geometry keeps it per-finger and drift-free.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

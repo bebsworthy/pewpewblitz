@@ -238,3 +238,8 @@ Desktop quality settings beyond sharing the same tier model.
   every new settings control on the phone before measuring.
 - Changing `CARGO_PROFILE_ANDROID_STRIP` for profiling rebuilds every dependency (~10 min); keep a
   separate profiling build directory or accept one profiling build per investigation.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

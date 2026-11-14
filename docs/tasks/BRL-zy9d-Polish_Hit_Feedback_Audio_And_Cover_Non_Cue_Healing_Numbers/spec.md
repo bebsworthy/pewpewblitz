@@ -159,3 +159,8 @@ Awaiting owner playtest (BRL-jgj4 hit-audio feedback also still pending there).
 - Reusable: before deriving presentation from replicated state, enumerate every authoritative
   writer of that component (here: heals, pickups, regen, boosts, respawn, restart, Balance Lab) and
   map each to an observable client signal.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.

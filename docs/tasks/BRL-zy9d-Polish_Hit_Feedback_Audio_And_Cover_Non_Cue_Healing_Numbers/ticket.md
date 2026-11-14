@@ -4,9 +4,9 @@ was: BRL-0174
 
 title: Polish hit feedback audio and cover non-cue healing numbers
 
-status: doing
-closed:
-status_changed: 2026-11-14T11:31:03Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-wfmj]
 
 parent: BRL-q5c4
 
-rank: 12845056
+rank:
 ---
 
 # Description

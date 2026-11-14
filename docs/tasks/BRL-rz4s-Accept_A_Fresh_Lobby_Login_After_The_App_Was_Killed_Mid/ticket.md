@@ -4,9 +4,9 @@ was: BRL-0208
 
 title: Accept a fresh lobby login after the app was killed mid-session
 
-status: doing
-closed:
-status_changed: 2026-11-14T04:03:17Z
+status: done
+closed: 2026-11-14T21:10:41Z
+status_changed: 2026-11-14T21:10:41Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-g57a, BRL-thwh]
 
 parent: BRL-q5c4
 
-rank: 12517376
+rank:
 ---
 
 # Description

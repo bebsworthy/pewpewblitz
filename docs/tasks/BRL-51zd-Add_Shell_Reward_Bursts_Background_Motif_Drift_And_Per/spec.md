@@ -66,3 +66,8 @@ Run `just ui-gallery`, then `just run 1` (or `just server` + `just client`).
 # Follow-ups
 
 - BRL-pw9k (backlog): automation path that opens each shell screen for native capture.
+
+
+# Closeout (2026-11-14)
+
+Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.
