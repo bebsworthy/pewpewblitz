@@ -120,3 +120,8 @@ references remain in `docs/11-art-and-presentation-direction.md` and
 - The ticket premise (100 MB tracked) came from a review that looked at the working tree, not the
   index. Check `git ls-files` and `git check-ignore` before scoping "remove from the repository"
   work.
+
+
+## Owner correction (2026-11-14)
+
+There is no "no AI-generated assets" rule, and none should be implied: the whole game is AI-generated. The logo's AI-generated refinement is acceptable provenance. No ticket is needed. The "no AI-generated pixels/audio" wording in the original-asset license notes and READMEs is only a factual description of how those particular script-built assets were produced. It is not a project policy, and future work must not treat it as one.
