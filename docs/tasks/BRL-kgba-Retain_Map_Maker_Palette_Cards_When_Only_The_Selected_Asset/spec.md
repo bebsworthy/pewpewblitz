@@ -4,7 +4,7 @@ Selecting or cycling to another asset on the same palette page updates the selec
 
 # Context
 
-- BRL-0175 retained the grid/symmetry/search/status labels and made rotation, search toggling and non-filtering search keystrokes rebuild-free.
+- BRL-cwm9 retained the grid/symmetry/search/status labels and made rotation, search toggling and non-filtering search keystrokes rebuild-free.
 - `MapMakerSelectAsset` and `MapMakerCycleAsset` still call `bump_render`. `palette_item_button` spawns the selected border and badge only on the selected card, so the selection is structural today.
 - Each rebuild with the drawer open respawns about 97 UI nodes, including 6 `MapPalettePreviewHost` nodes. `presentation_3d/map_palette_preview.rs` gives each new host a fresh render-target image, `Camera3d`, light and visual scene. Clicking a card or wheeling over the palette therefore recreates 6 offscreen cameras.
 
@@ -21,4 +21,4 @@ Selecting or cycling to another asset on the same palette page updates the selec
 
 # Out of scope
 
-Map Maker feature work (BRL-0037, BRL-0139).
+Map Maker feature work (BRL-6vjz, BRL-tztp).

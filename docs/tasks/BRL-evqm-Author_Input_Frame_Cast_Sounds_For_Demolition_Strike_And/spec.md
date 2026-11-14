@@ -1,12 +1,12 @@
 # Outcome
 
-Casting Demolition Strike or Big Blob gives immediate audio feedback on the press, like the other ultimates since BRL-0172.
+Casting Demolition Strike or Big Blob gives immediate audio feedback on the press, like the other ultimates since BRL-1w27.
 
 # Context
 
-- BRL-0172 plays the activation sound on the input frame only for ultimates whose activation sound is a launch (`brawler_client::local_attack::presents_activation_sound_locally`).
+- BRL-1w27 plays the activation sound on the input frame only for ultimates whose activation sound is a launch (`brawler_client::local_attack::presents_activation_sound_locally`).
 - Demolition Strike's only sound is `ultimate-strike`, its explosion at the target (an area outcome that stays authoritative from `DemolitionStrikeActivated`). Big Blob has no activation sound at all.
-- Both already get the local shoot motion, recoil, and launch flash from BRL-0142/BRL-0172.
+- Both already get the local shoot motion, recoil, and launch flash from BRL-qq36/BRL-1w27.
 
 # Scope
 
@@ -24,4 +24,4 @@ Casting Demolition Strike or Big Blob gives immediate audio feedback on the pres
 
 # Source
 
-Deferred from BRL-0172 (2026-11-14).
+Deferred from BRL-1w27 (2026-11-14).

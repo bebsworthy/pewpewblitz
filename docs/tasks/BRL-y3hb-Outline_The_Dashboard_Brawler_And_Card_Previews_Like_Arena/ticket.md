@@ -15,13 +15,13 @@ created: 2026-11-14T14:54:40Z
 
 blocks: []
 
-related: [BRL-0179]
+related: [BRL-kp7d]
 
-parent: BRL-0171
+parent: BRL-q5c4
 
 rank: 13369344
 ---
 
 # Description
 
-The Dashboard brawler and brawler-card previews draw the BRL-0151 silhouette outline, so the shell fighter matches the arena fighter.
+The Dashboard brawler and brawler-card previews draw the BRL-14x6 silhouette outline, so the shell fighter matches the arena fighter.

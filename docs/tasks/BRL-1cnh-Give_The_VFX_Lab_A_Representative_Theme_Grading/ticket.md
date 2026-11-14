@@ -15,9 +15,9 @@ created: 2026-11-14T13:03:19Z
 
 blocks: []
 
-related: [BRL-0176]
+related: [BRL-farz]
 
-parent: BRL-0171
+parent: BRL-q5c4
 
 rank: 13172736
 ---

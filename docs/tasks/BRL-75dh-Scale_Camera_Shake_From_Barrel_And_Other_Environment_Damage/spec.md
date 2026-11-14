@@ -1,10 +1,10 @@
 # Outcome
 
-Taking environment damage (oil barrel blasts, future damaging world objects) shakes the local camera in proportion to the damage, the same way weapon hits do since BRL-0173.
+Taking environment damage (oil barrel blasts, future damaging world objects) shakes the local camera in proportion to the damage, the same way weapon hits do since BRL-16aj.
 
 # Context
 
-BRL-0173 scales local damage-taken shake by `DamageApplied.amount / maximum_health` (authored `shake.triggers.local_damage` in `assets/catalogs/camera_rig.ron`). Environment damage emits only legacy cues that `DeduplicatedCombatCue` filters out, so a barrel blast that hits the local fighter shakes only through the distance-scaled `WorldObjectCue::Exploded` trigger, independent of the damage dealt (noted in BRL-0143 and BRL-0173).
+BRL-16aj scales local damage-taken shake by `DamageApplied.amount / maximum_health` (authored `shake.triggers.local_damage` in `assets/catalogs/camera_rig.ron`). Environment damage emits only legacy cues that `DeduplicatedCombatCue` filters out, so a barrel blast that hits the local fighter shakes only through the distance-scaled `WorldObjectCue::Exploded` trigger, independent of the damage dealt (noted in BRL-e4xj and BRL-16aj).
 
 # Scope
 

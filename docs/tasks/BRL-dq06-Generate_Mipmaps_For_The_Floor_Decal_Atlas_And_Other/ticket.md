@@ -15,13 +15,13 @@ created: 2026-11-14T14:02:55Z
 
 blocks: []
 
-related: [BRL-0178]
+related: [BRL-23q3]
 
-parent: BRL-0171
+parent: BRL-q5c4
 
 rank: 13303808
 ---
 
 # Description
 
-Minified client textures (starting with the BRL-0178 floor decal atlas) sample a mip chain, so they stay stable on small or zoomed-out views.
+Minified client textures (starting with the BRL-23q3 floor decal atlas) sample a mip chain, so they stay stable on small or zoomed-out views.

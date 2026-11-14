@@ -1,7 +1,7 @@
 # Context
-BRL-0179 needed before/after captures of the shell previews. `ui_gallery` shows widgets only and
+BRL-kp7d needed before/after captures of the shell previews. `ui_gallery` shows widgets only and
 the `layout_harness` is headless without rendering; `--auto-connect` disables the product shell, so
-the existing `--screenshot-*` schedule cannot reach these screens. BRL-0179 used a scratch-only
+the existing `--screenshot-*` schedule cannot reach these screens. BRL-kp7d used a scratch-only
 patched copy: a system queues `FlowUiAction`s (`ConfirmCreateBrawler`, `OpenWeaponEquipment`,
 `BackToBrawlerList`, `CloseBrawlerList`) through `PendingFlowActions.ordinary` and saves a
 primary-window screenshot after each, against a scratch supervisor (`--data-directory`, ephemeral

@@ -1,12 +1,12 @@
 # Outcome
 
-Client textures that can be drawn smaller than their pixel size (first the BRL-0178 floor decal
+Client textures that can be drawn smaller than their pixel size (first the BRL-23q3 floor decal
 atlas, `assets/brawler/textures/original/environment/floor-decals.png`) carry mipmaps, so they never
 shimmer or alias on phones, low resolution scales, or zoomed-out map framing.
 
 # Context
 
-- Bevy 0.19 loads PNGs without mipmaps; the client's default sampler is nearest. BRL-0178 loads the
+- Bevy 0.19 loads PNGs without mipmaps; the client's default sampler is nearest. BRL-23q3 loads the
   decal atlas with a linear sampler and keeps its art soft, which is enough at today's desktop
   framing (a cell spans roughly 60-140 physical pixels), but there is no mip chain.
 - Options: ship KTX2 with baked mips (needs the `ktx2`/`zstd` Bevy features), build the mip chain

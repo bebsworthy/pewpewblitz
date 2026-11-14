@@ -15,13 +15,13 @@ created: 2026-11-14T10:00:33Z
 
 blocks: []
 
-related: [BRL-0170]
+related: [BRL-qrb8]
 
-parent: BRL-0171
+parent: BRL-q5c4
 
 rank: 14352384
 ---
 
 # Description
 
-Land the cheaper dev profile that BRL-0170's spec assumed was already in place (`debug = "line-tables-only"` for workspace crates, `debug = false` for dependencies) and a `just sweep` stale-artifact recipe, then re-measure incremental rebuild time and `target/` size against the BRL-0170 tables.
+Land the cheaper dev profile that BRL-qrb8's spec assumed was already in place (`debug = "line-tables-only"` for workspace crates, `debug = false` for dependencies) and a `just sweep` stale-artifact recipe, then re-measure incremental rebuild time and `target/` size against the BRL-qrb8 tables.

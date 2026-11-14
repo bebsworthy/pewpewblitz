@@ -3,7 +3,7 @@
 `scripts/v3-render-evidence.sh` reports include a per-frame GPU-time distribution (p50/p95/p99)
 next to the frame interval, so a render change's cost is visible on a fast desktop.
 
-# Context (BRL-0180, 2026-11-14)
+# Context (BRL-hkj4, 2026-11-14)
 
 On the Apple M6 MacBook Pro the frame interval is vsync-bound at 120 Hz (8.33 ms p50) for every
 variant, even with `BRAWLER_RENDER_PROFILE=uncapped` and vsync off (the macOS compositor paces the

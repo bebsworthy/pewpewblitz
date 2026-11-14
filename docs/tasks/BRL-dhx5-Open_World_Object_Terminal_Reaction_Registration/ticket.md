@@ -1,0 +1,28 @@
+---
+id: BRL-dhx5
+was: BRL-0075
+
+title: Open world-object terminal reaction registration
+
+status: done
+closed: 2026-08-30T21:22:23Z
+status_changed: 2026-08-30T21:22:23Z
+
+theme:
+
+release:
+
+created: 2026-08-30T21:00:03Z
+
+blocks: []
+
+related: [BRL-4ms7]
+
+parent:
+
+rank:
+---
+
+# Description
+
+Replace the centrally installed world-object terminal reaction table with a bounded Bevy plugin registration seam finalized against authored map content. Keep explosion and restoration-pickup behavior unchanged, expose stable reaction identity from authored terminal behavior, and prevent extension handlers from receiving unrestricted `World` access.

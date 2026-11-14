@@ -4,8 +4,8 @@ No dead retained-UI code remains for the Map Maker cursor readout. If the readou
 
 # Context
 
-- Found during BRL-0175. `MapMakerCursorCopy` and `update_map_editor_cursor_copy` (`packages/brawler-client/src/flow/screens/map_maker.rs`) still run every Map Editor frame. No code spawns a `MapMakerCursorCopy` entity any more, so the "90° · SYMMETRY · CELL x,y" readout never shows.
-- Placement rotation (R in Place mode) is visible only in the 3D pointer preview. BRL-0175 therefore made it a rebuild-free value-only edit.
+- Found during BRL-cwm9. `MapMakerCursorCopy` and `update_map_editor_cursor_copy` (`packages/brawler-client/src/flow/screens/map_maker.rs`) still run every Map Editor frame. No code spawns a `MapMakerCursorCopy` entity any more, so the "90° · SYMMETRY · CELL x,y" readout never shows.
+- Placement rotation (R in Place mode) is visible only in the 3D pointer preview. BRL-cwm9 therefore made it a rebuild-free value-only edit.
 
 # Decision needed
 

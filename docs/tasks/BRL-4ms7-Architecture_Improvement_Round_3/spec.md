@@ -1,0 +1,417 @@
+# BRL-4ms7 technical specification — architecture improvement round 3
+
+## Outcome
+
+Complete the next architecture-remediation round identified by the current-source audit at `077dde6`: preserve Brawler's server-authoritative, deterministic, role-isolated design while making remaining balance policy authored and making semantic behavior families locally extensible through typed Bevy plugins, resources, components, messages, and focused transactions.
+
+Completion means that existing content instances remain data-only, audited semantic families have real plugin-owned registration seams, authoritative coordinators are split into independently testable plan/commit stages, duplicate combat authority paths are removed, and ownership-heavy modules are decomposed without hiding schedule order.
+
+BRL-4ms7 is the coordination and end-state ticket. Each independently reviewable implementation slice must be tracked by a linked BRL ticket before its code changes begin. BRL-4ms7 remains `doing` until every acceptance criterion is implemented here or explicitly deferred to a linked backlog ticket with rationale.
+
+## Baseline
+
+The current code already provides strict client/server feature isolation, one global protocol compatibility handshake, explicit authoritative fixed-tick phases, validated and fingerprinted RON catalogs, focused resolved runtime projections, staged combat effect application, and data-only addition of content instances composed from existing typed primitives.
+
+This round does not repeat completed BRL-9rbf/BRL-0ef0 work. It addresses the remaining live-source findings:
+
+- private/static mode, bot behavior, terminal reaction, tile behavior, and presentation-family inventories;
+- retired build-point machinery already owned by BRL-01c8, plus code-owned concealment timing, diagnostic loadout, formation timing, and duplicated tick conversions;
+- monolithic match admission and duplicated human/Practice fighter assembly;
+- map explosions directly committing combatant damage and defeat beside combat effects;
+- manually closed gameplay-content fingerprint composition;
+- broad projectile, client-flow, Balance Lab, lobby, and presentation coordinators where ownership differs.
+
+BRL-01c8 remains the sole owner of deleting retired point costs, budget, over-budget outcomes, and total-point reporting. BRL-4ms7 must not externalize or otherwise preserve that obsolete model.
+
+## Governing constraints
+
+1. Preserve dedicated-server authority. Clients continue to send intent only.
+2. Preserve the global compatibility handshake, routed topology, stable wire identities, and process isolation.
+3. Routed mode-ID migration is out of scope. Local mode registration must project to the existing wire enum; a wire migration needs a separate architecture decision and ticket.
+4. Keep typed, bounded schemas. Do not use opaque `Any`, untyped payload maps, stringly typed effect blobs, or executable data.
+5. Preserve deterministic ordering, stable IDs, bounded collections, capacity rejection, event-ID reservation, fixed-tick phases, `ApplyDeferred` boundaries, restart transactions, telemetry, and evidence.
+6. Keep authoritative mutation atomic. Planning helpers may be pure, but health, defeat, map terminal state, facts, and cues commit in one explicitly ordered transaction.
+7. Prefer Bevy plugins, resources, components, messages, observers, schedules, `QueryData`, and stable-ID function registries over trait-object or dependency-injection frameworks.
+8. Keep plugin selection and schedule ordering visible in `mod.rs` and role roots; move owned implementation behind them.
+9. Preserve public module paths and wire contracts unless a child-ticket decision explicitly approves a compatible change.
+10. Preserve player-visible values when moving them into data. A schema/fingerprint bump changes the source of truth, not balance.
+11. Engine ceilings, packet/serialization bounds, protocol versions, stable identity formats, and overflow policy remain code-owned.
+12. Use synthetic registration tests instead of adding speculative gameplay families.
+13. Split files only for ownership, role, phase, lifecycle, or independent testability—not line count.
+14. Preserve unrelated user worktree changes.
+
+## Target architecture
+
+```text
+authored RON/operator configuration
+        |
+        v
+content plugins register validated definitions + fingerprint contributions
+        |
+        v
+resolved immutable definitions/capabilities
+        +--> behavior plugins register handlers/producers by stable ID
+        |
+        v
+focused ECS runtime components/resources
+        |
+        v
+authoritative phase coordinator
+  collect -> validate -> plan -> commit -> publish
+        |
+        v
+facts/messages/replication -> presentation requests -> renderer/audio registries
+```
+
+Open/Closed has two levels:
+
+- **Authored instances:** a new weapon, map, object, bot policy, or presentation profile using existing mechanics is data-only.
+- **Semantic families:** a new supported behavior family needs one typed schema addition plus a focused plugin/handler and owned projections; unrelated coordinators do not gain another built-in-ID branch.
+
+Wire schemas remain deliberately closed and versioned.
+
+## Implementation plan
+
+### Stage 1 — residual policy data and shared timing
+
+1. Keep retired build-point removal in linked BRL-01c8 and ensure BRL-4ms7 adds no new budget dependency.
+2. Add validated, fingerprinted concealment rules for attack- and damage-reveal ticks; preserve values `90` and `120` and make authority consume the resource.
+3. Replace hardcoded direct-diagnostic fighter/weapon/ultimate/passive selection with a validated authored starter/diagnostic recipe independent of catalog ordering.
+4. Introduce or reuse tick conversion helpers based on `SIMULATION_TICK_HZ`; remove audited literal `60` conversions in Balance Lab/HUD/flow paths.
+5. Consolidate lobby match-formation deadlines in one validated/operator-owned `MatchFormationTiming` source so advertised and enforced values cannot drift.
+
+### Stage 2 — plugin-populated behavior registries and semantic projections
+
+1. Promote `BotBehaviorRegistry` to a Bevy resource populated by behavior plugins or an `App` extension. Registrations own stable ID, contributor function, deterministic metadata, and fallback capability.
+2. Validate `bots.ron` policy against the finalized registry rather than a duplicate static ID array. Reject duplicates, missing policy/handler, excessive count, and absent fallback.
+3. Add a synthetic behavior test proving another registration participates without editing the reducer.
+4. Replace bot object asset-ID recognition with semantic attackable/objective/valuable/defending-team projections. Mode plugins publish a bounded mode-neutral `BotObjectiveView`.
+5. Make `TerminalReactionRegistry` crate-visible and plugin-populated. Authored objects resolve to a stable reaction ID and typed parameters/profile. Explosion and pickup plugins own registration.
+6. Narrow terminal extension handlers to typed plans or an explicit bounded context. Arbitrary `&mut World` remains only at the transaction commit boundary.
+7. Test duplicate, missing, capacity, deterministic-order, fallback, and synthetic registrations.
+
+### Stage 3 — admission planning and authoritative fighter assembly
+
+1. Characterize rejection precedence, routed/direct admission, identifier allocation, team/spawn selection, idempotence, diagnostics, and replication ownership.
+2. Extract `validate_match_hello`, `resolve_join_loadout`, and `plan_match_join`, returning `FighterJoinPlan` or `MatchJoinRejection`.
+3. Introduce `AuthoritativeFighterSpawnSpec` and one `spawn_authoritative_fighter` path shared by human and Practice creation where component contracts overlap.
+4. Leave `process_client_hellos` responsible only for deterministic message ordering, plan invocation, commit, outcome send, and session transition.
+5. Preserve fail-closed admission, allocation order, clearance, physics, replication/interpolation, loadout projection, and map/match membership.
+
+### Stage 4 — one combatant damage authority path
+
+1. Characterize weapon/environment damage for fighters and deployables, including lineage, credit, friendly/self policy, protection, modifiers, defeat cleanup, facts, cues, telemetry, and ordering.
+2. Keep map authority responsible for object health, terminal state, chain-reaction targeting, and map transitions.
+3. Route explosion combatant damage through typed environment payload/damage plans consumed by combat effects, or one shared combat-owned `CombatDamageCommitPlan`.
+4. Remove direct map-owned combatant health, defeat, collision, active-effect, combat-fact, and combat-cue mutation.
+5. Build bounded identity/entity snapshots once per batch instead of repeated full-world scans.
+
+### Stage 5 — local mode, tile, content, and presentation seams
+
+1. Add a startup-built local `ModeRegistry` populated by mode plugins. Registrations own local ID mapping, topology, rule validation/resolution, map compatibility, installer, advertised summary, bot objective, and HUD projections as applicable.
+2. Preserve routed/wire `GameMode`; central wire conversion may remain exhaustive, but local consumers use registry projections rather than duplicate mode switches.
+3. Resolve effect tiles into focused movement multiplier, periodic damage, healing block, traversal cost, and presentation capabilities. Consumers query capabilities rather than concrete tile variants.
+4. Add a sorted `GameplayContentFingerprintRegistry` of stable domain ID, schema version, and canonical material. Reject duplicate IDs and missing required domains.
+5. Introduce stable-key `VfxRequest` and `AudioRequest`; feature presentation plugins translate domain facts while renderer/audio plugins resolve profiles and renderer keys.
+6. Add synthetic local mode, tile, fingerprint, and presentation registrations proving reuse without a new central built-in branch.
+
+### Stage 6 — coordinator and ownership decomposition
+
+1. Refactor projectile execution around a per-tick `DeliveryWorldSnapshot` and focused straight/sticky, lob/splash, and melee planners. Retain deterministic coordination and commit/publication; do not add a trait per weapon.
+2. Split client-flow ownership into connection/shell, brawler/profile, equipment, matchmaking/Practice, and results/navigation reducers. Retain one small precedence and `FlowCommit` coordinator.
+3. Co-locate Balance Lab tuning metadata with typed schema families using small descriptors or a narrow macro, not general reflection.
+4. Split Balance Lab apply into prepare/validate, persist, authoritative commit, and restart publication while preserving fail-closed rollback.
+5. Split lobby, 3D presentation, and brawler-screen implementations only along demonstrated ownership boundaries.
+6. Use named `QueryData` views and focused snapshots for stable broad query shapes; do not create mega-components.
+
+## Verification
+
+Per child ticket:
+
+- Add characterization or contract tests before authoritative changes.
+- Run focused domain tests under applicable feature sets.
+- Run `cargo fmt --all` and `git diff --check`.
+- Run `just check` after plugin, feature, module, or import changes.
+- Run catalog/fingerprint and Balance Lab tests after schema/data changes.
+- Run separate-App/network tests after admission, combat, map, mode, or replication changes.
+- Record exact commands, results, unavailable evidence, and feedback disposition in the child ticket and BRL-4ms7.
+
+Final gates:
+
+- `just check`
+- `just test`
+- `just lint`
+- `just ci`
+- `git diff --check`
+
+Native evidence is required for player-visible presentation, audio, HUD, tile-feedback, timing, or control changes. Exercise affected normal/reduced presentation, relevant delivery families, all modes, and Practice behaviors. Record every observation as accepted, corrected, deferred, rejected with rationale, or awaiting evidence.
+
+## Acceptance criteria
+
+### Data and balance
+
+- Retired point machinery is removed through BRL-01c8; BRL-4ms7 adds no new dependency on it.
+- Concealment timing, diagnostic loadout, formation deadlines, and audited tick conversions have one validated authored or canonical source.
+- Player-visible values remain unchanged unless separately approved.
+- Schema/fingerprint changes reject stale or invalid content deterministically.
+- Engine/protocol safety limits remain code-owned and are not mislabeled as balance.
+
+### ECS and authority
+
+- Client/server role isolation and complete composition remain intact.
+- Admission planning is independently testable and `process_client_hellos` no longer owns loadout, spawn, and fighter-bundle algorithms inline.
+- Human and Practice fighters share invariant authoritative assembly where their contracts match.
+- Map explosions no longer implement combatant damage/defeat beside combat effects.
+- Facts, cues, telemetry, replication, capacity behavior, and fixed-tick order remain deterministic and bounded.
+
+### Extensibility
+
+- Bot behavior and terminal reaction inventories are plugin-populated resources with duplicate, coverage, fallback, and capacity validation.
+- AI consumes semantic object/mode capabilities rather than exact reusable asset IDs.
+- Local mode gameplay/presentation installation is registry-owned while wire IDs remain compatible.
+- Effect-tile consumers query resolved capabilities rather than exhaustively matching authored variants.
+- Gameplay fingerprinting is contributor-based and cannot silently omit an installed catalog.
+- Presentation producers request stable VFX/audio profiles without knowing renderer/material families.
+- Synthetic extension tests prove each supported seam accepts an additional registration without a central built-in branch.
+
+### Organization and closeout
+
+- Composition roots retain visible plugin and schedule relationships.
+- Large implementations split only across documented ownership/lifecycle boundaries.
+- Public paths and wire contracts remain compatible unless separately approved.
+- Focused and final automated gates pass.
+- Required native evidence and feedback disposition are recorded.
+- Durable documentation describes resulting data and extension contracts.
+- A learn-from-errors review records regressions, causes, prevention, and reusable lessons.
+- Deferred audit items have linked backlog tickets and rationale.
+- `ticket sync` completes without conflict before `done`.
+
+## Non-goals
+
+- Dynamic executable mod ABI or runtime-loaded Rust plugins.
+- Opaque payload schemas.
+- Routed mode protocol migration.
+- Per-message compatibility versions or decoders.
+- General dependency-injection, service-locator, DDD, or hexagonal framework.
+- Speculative content solely to exercise abstractions.
+- Balance changes beyond source-of-truth migration.
+- File splits driven only by line count.
+
+## Delivery sequence
+
+1. Residual policy sources and timing, excluding budget machinery owned by BRL-01c8.
+2. Bot behavior registry and semantic AI projections.
+3. Terminal reaction registration.
+4. Admission/spawn decomposition.
+5. Environment damage unification.
+6. Local registries/capability projections.
+7. Coordinator/module decomposition.
+8. Full gates, native evidence where required, documentation, learning review, and sync.
+
+Create and link only the next independently reviewable child ticket when its implementation is ready to begin.
+
+
+## Progress record — 2026-08-30
+
+- Linked BRL-1jb5 completed the first implementation slice: concealment attack/damage reveal timing is validated, fingerprinted gameplay data with preserved 90/120 values; focused tests and `just check` pass.
+- Planning found that BRL-01c8 already owns removal of the retired build-point model. BRL-4ms7 was corrected not to externalize or preserve that obsolete budget and is linked to BRL-01c8.
+
+
+## Implementation progress — BRL-9wbf complete
+
+The Practice bot behavior extension seam is implemented and closed under linked ticket BRL-9wbf. The static complete behavior slice and duplicate registered-ID inventory were replaced by a bounded server-only registry populated by plugins and sealed during Bevy plugin finalization. Shared `BotCatalog` validation/fingerprinting is now handler-independent through `BotCatalogResource`; exact policy/handler coverage remains a fail-closed server invariant. A synthetic eighth behavior proves extension through one plugin registration plus one authored policy entry without arbiter changes. Focused bot/content/protocol tests, role-specific checks, formatting, diff validation, and `just check` pass.
+
+
+BRL-9wbf's final organization keeps registry build/finalization ownership in `src/bots/registry.rs` and behavior algorithms/arbitration in `src/bots/behaviors.rs`; verification was rerun after that extraction.
+
+
+## Implementation progress — BRL-zj4q complete
+
+Linked ticket BRL-zj4q moved direct-diagnostic fallback loadout ownership from server admission literals into one validated `BuildCatalog` policy authored in `content/catalogs/builds.ron`. The stable ordered weapon rotation is now data-owned and resolved through the ordinary saved-brawler path by a focused server API. Build catalog schema 17 and the global gameplay-content fingerprint cover the policy, while unchanged player recipe fingerprints remain byte-compatible. Focused build/content/network tests and `just check` pass; no native evidence was required because accepted values and behavior are unchanged.
+
+
+## Implementation progress — BRL-tjkh complete
+
+Linked ticket BRL-tjkh completed Stage 1 residual timing ownership. Shared simulation conversion APIs now drive Balance Lab and game-selection presentation without literal 60 Hz assumptions. Operator catalog schema 5 owns validated 30-second loading and 10-second route-grant formation timing; one resolved value drives Practice/product advertisement and server enforcement while public protocol shapes and the public game-type catalog revision remain unchanged. Focused timing/catalog/Practice/client/Balance Lab tests and `just check` pass; no native evidence was required because accepted timing and copy are unchanged.
+
+
+## Implementation progress — BRL-dhx5 complete
+
+Linked ticket BRL-dhx5 completed the terminal-reaction portion of Stage 2. Shared authored terminal behaviors now project stable reaction IDs; a crate-visible, plugin-populated registry seals deterministic bounded registrations against authored map content. Explosion and restoration-pickup plugins own registration, and handlers receive a bounded transaction context rather than arbitrary `World` access. Synthetic registration, all existing barrel/chest runtime behavior, client/server role graphs, `just check`, and `just lint` pass. The lint gate also prompted a focused cleanup of the prior diagnostic-policy test and bounded fractional timing helper.
+
+
+## Stage 2 progress — semantic AI projections complete
+
+- `BRL-2qxk` moved Practice AI from concrete barrel/chest IDs and mode-specific state inspection to terminal-plugin object semantics, defending-team objective components, and mode-plugin-owned `BotObjectiveView` projections.
+- Real-schedule Practice workers for Wipeout, Hot Zone, and Heist preserve directed input; role, authority, network, and performance gates are green.
+
+## Round 3 progress (2026-08-31)
+
+BRL-qkbg completed the admission/fighter-assembly phase: match hello validation and planning are pure, shared fighter construction is controller-neutral, connected and Practice ownership remain explicit, and canonical verification passed. One timing-sensitive performance sample was transient; all 12 isolated performance gates passed immediately afterward.
+
+## BRL-ddcq phase completion
+
+Completed the environment-combat authority phase. Barrel explosion combatant damage now flows through one combat-owned atomic transaction shared with damage tiles; map code owns only deterministic selection, LOS, world-object chaining/reactions, and map telemetry. The previously inert authored chain limit is effective. Focused, role, lint, canonical, full network, and performance verification passed. Child BRL-ddcq is complete; the next planned slice is focused effect-tile capability projection.
+
+## BRL-7hk3 phase completion
+
+Completed the focused effect-tile capability projection phase. Authored Speed, Slow, Damage, and None remain the closed catalog/editor vocabulary, while production map, movement, bot, recovery predicate, and presentation paths consume orthogonal resolved capabilities. A composite-capability test and two-client authoritative damage-tile scenario prove the extension seam without schema or protocol changes. All focused, role, lint, canonical, network, and performance gates passed after a package-scoped Cargo artifact cleanup resolved host disk exhaustion. Child BRL-7hk3 is complete; plugin-populated tile registration or the larger ModeRegistry lifecycle remains the next Stage 5 decision.
+
+## BRL-wknz phase completion
+
+Completed the contributory gameplay-content compatibility phase. Seven shared content domains now register stable IDs, domain-owned schema versions, and read-only live-World canonical material through their owning headless-safe plugins; deterministic sorted envelope 27 framing rejects duplicate, missing, excessive, invalid, or unavailable contributions. Routing identity, worker validation, and Startup installation use the same evaluator, closing the weapon-part/combat-condition embedded-reload gap while preserving the one global handshake and Balance Lab exclusion. Focused, role, lint, canonical, all 97 network, and all 12 performance gates passed. Child BRL-wknz is complete; the local ModeRegistry lifecycle is the next justified Stage 5 slice, while a tile-handler registry remains deferred until a second active tile mechanic exists.
+
+## BRL-n2qz phase completion
+
+Completed the process-local mode registration and installation lifecycle. Wipeout, Hot Zone, and Heist now own registration metadata, operator-rule resolution, and authoritative installation; a bounded Bevy registry seals deterministically during plugin finalization, while pure pre-App consumers use the same mode-owned constants. Synthetic local registration proves extension without inventing routed identity, and the stable protocol/routing surface remains intentionally closed. Exact catalog digest, rejection precedence, map topology, role isolation, all focused suites, `just check`, `just lint`, all 97 network cases, and all 12 performance gates passed. Child BRL-n2qz is ready to close; coordinator/module decomposition is the next delivery-sequence phase.
+
+## Phase completion: BRL-az3n VFX request boundary
+
+BRL-az3n completed the next architecture-improvement phase. Client gameplay/domain systems now emit registered stable-key VFX requests, while the generic renderer exclusively owns authored profile resolution and concrete Bevy materialization. The closed `VfxCueFamily` inventory was removed, exact presentation values and authority/protocol boundaries were preserved, final automated/native evidence passed, and independent review corrections were incorporated.
+
+The next planned child is the separate audio request/playback boundary. Audio will reuse the proven bounded registration and feature-owned producer pattern but remain a sibling implementation because its occurrence deduplication, asset readiness, playback reservations, speed/volume policy, and one-shot lifecycle are not VFX renderer concerns.
+
+
+## Completed phase — BRL-k7r7 audio request/playback separation
+
+BRL-k7r7 is complete. Client audio now uses feature-owned stable-key request producers, a bounded sealed registry, schema-3 authored mappings, validated producer-rank/local-sequence ordering, and one generic playback adapter. All focused/canonical/native gates passed, independent review is clean, and dedicated-server isolation is preserved. The next implementation phase is the authoritative projectile sweep decomposition previously audited for BRL-4ms7.
+
+## BRL-asna phase completion
+
+BRL-asna completed the authoritative composed-projectile sweep decomposition. The server sweep now collects one owned immutable projectile/target batch, produces a complete deterministic action vector, and sequentially applies decision-free commits. Sticky cap/chaining uses a local planning ledger, and lob/sticky area selection shares one deterministic fighter/object policy. Schedule and ApplyDeferred placement, protocol, balance, telemetry/tracker settlement, splash oversubscription semantics, and object/Heist authority remain unchanged.
+
+Independent review rejected the initial shallow extraction and verified the corrected three-phase boundary with no remaining P0/P1 finding. Canonical checks, lint, full tests, 97 network cases, and 12 performance gates pass; isolated lob-heavy and 200-projectile p95 measurements are 1.050125 ms and 1.171416 ms. No native rerun was required for this organization-only phase.
+
+The next coordinator-decomposition slice will be selected from the remaining audited client-flow, Balance Lab apply, lobby, and presentation ownership hotspots after a focused current-source boundary audit; it will receive its own linked ticket before implementation.
+
+## BRL-086r phase completion
+
+BRL-086r completed the Balance Lab authoritative Apply/Restore decomposition. One unchanged FixedUpdate/MatchRestartSet::Prepare system now coordinates explicit normalize, immutable prepare, persist, infallible authoritative commit, same-tick restart staging, and publication phases through a private transaction module and named fighter QueryData.
+
+Rollback coverage now proves filesystem failure and precondition rejection cannot mutate catalogs, resolved map, condition/Heist rules, fighter projections, restart state/policy, match identity allocation, or runtime/published applied revisions. Roster planning is stable by PlayerId while preserving historical per-fighter rejection precedence and exact manifest coverage. Restore baseline rebuilding and Prepare -> ModeReset -> EnvironmentReset -> Commit visibility are characterized.
+
+Independent review is clean. Focused tests, combined Balance Lab/network smoke, canonical checks/lint, all 97 network cases, and all 12 performance gates pass. No native evidence was required because schemas, tuning, schedule timing, UI, and player-visible behavior are unchanged.
+
+The next Stage 6 slice is the lower-risk client customization reducer extraction: move brawler/profile and weapon-equipment action ownership into private helper modules while retaining the single resolve_flow_action precedence coordinator and existing FlowCommit/schedule pipeline.
+
+## BRL-3ymp phase completion
+
+BRL-3ymp completed the client customization reducer extraction. `resolve_flow_action` remains the sole schedule-facing coordinator with exact profile-decision, explicit, session, and ordinary precedence and the existing `FlowCommit`/ApplyDeferred pipeline. Private profile and equipment modules now own their cohesive action families, pending-decision reconciliation, drafts, exact notices/errors, locks, and overlay/focus outcomes without changing protocol, UI, schedule, or player-visible behavior.
+
+Independent review is clean after exact accepted/rejected create/edit characterization was completed. Focused flow tests, strict client Clippy, canonical check/lint/test, all 97 routed network cases, and all 12 performance gates pass. No native rerun was required for this organization-only phase.
+
+The next Stage 6 slice is the server lobby profile-transaction adapter currently embedded in `src/server/lobby/mod.rs`: extract Hello-to-profile-load admission and authenticated profile-command/result bridging into one private module while preserving load-before-command polling, queue lock semantics, and the exact trailing ApplyDeferred visibility boundary.
+
+## BRL-g4w7 phase completion
+
+BRL-g4w7 completed the server lobby profile-transaction adapter extraction. One private module now owns profile-backed Hello admission, pending-load correlation, the single load/mutation result pump, and authenticated profile-command submission/mapping. The lobby root retains plugin composition, startup, queue/match ownership, cleanup, and publication.
+
+The outer lobby set chain and inner result -> command -> ApplyDeferred chain remain exact, preserving load-before-command processing, deferred LobbyClient visibility, existing-ticket queue locks, and profile-before-new-Join same-tick policy. Exhaustive request-ID and rejection/decision mapping tests were added. Independent review found no P0/P1/P2 issue; focused, role, lint, canonical, all 97 routed network, and all 12 performance gates pass. No native rerun was required.
+
+The next Stage 6 slice is the smaller projected damageable-object health presentation boundary in `client::presentation_3d`: isolate its screen-space UI/index lifecycle while leaving dynamic map reconciliation, Heist safe visuals, and the PostUpdate schedule composition in their current owners.
+
+## BRL-xddk phase completion
+
+Completed the final justified Stage 6 extraction. Projected damageable-map-object and Heist-safe health UI now has one private `client::presentation_3d::object_health` owner while `WorldPresentationPlugin` retains visible resource initialization and direct PostUpdate registration. Stable keys, distinct map/Heist health policies, deterministic reconciliation, deferred Commands behavior, projection, styling, and schedule relations are unchanged. Independent review found no P0/P1/P2 issue; focused, role, lint, canonical, exact cross-feature, all 97 routed network, and all 12 performance gates pass. No native rerun was required.
+
+A fresh audit rejected the proposed equipment-only extraction from `client::flow::screens::brawlers`: BRL-3ymp already removed the distinct reducer ownership, while the remaining equipment UI shares one Dashboard/overlay presentation lifecycle, navigation contract, shell, helpers, and schedule with the other brawler screens. Moving its large builder unchanged would be line-count relocation with additional facade and ordering risk, contrary to this ticket's organization rules. It is therefore not a BRL-4ms7 blocker; a later behavior-driven screen refactor would require a concrete independent lifecycle or real shared presentation use.
+
+## Deferred and rejected residuals
+
+- BRL-01c8 remains the linked backlog owner for removing retired build point-cost machinery. It is a compatibility/persistence/product-model cleanup with its own verification and migration scope; BRL-4ms7 introduced no new dependency on that machinery and does not absorb it.
+- BRL-ssdh now records the deliberately deferred plugin-populated effect-tile handler registry. BRL-7hk3 delivered the supported authored-enum-to-orthogonal-capability seam and composite-capability extension evidence; executable handler registration is not justified until a second real tile mechanic establishes the reusable runtime shape.
+- The equipment-only brawler-screen extraction is rejected, not deferred implementation work: the fresh audit found one cohesive presentation lifecycle and no independent runtime owner. A future behavior-driven refactor may be planned only if a concrete new lifecycle or shared consumer appears.
+
+## BRL-sngq phase completion
+
+Completed the remaining demonstrated client-flow reducer boundary. Private `client::flow::reducer::match_flow` now owns game selection, queue/Practice, loading, Results, fresh-lobby return, and replay reduction; the root remains the single profile-first and explicit -> session -> ordinary precedence coordinator plus connection/server-selection shell, teardown, and deferred commit owner. Five grouped characterization tests cover moved transitions, including competing-generation replay and one-shot match-failure return. Independent review found no P0/P1 drift; both P2 evidence gaps were corrected. Focused, role, lint, canonical, exact cross-feature, all 97 routed network, and all 12 performance gates pass. No native rerun was required.
+
+A fresh ownership audit confirms the remaining connection/server-selection reducer root is cohesive with `flow::connection` attempt mechanics and should not be split solely by size. Stage 6.2 is complete.
+
+## Phase BRL-34r0 — passive Balance Lab metadata pilot
+
+Completed and independently reviewed. Passive numeric bounds now have one crate-private authoritative owner shared by validation and Balance Lab projection; passive-only editor projection is private and exhaustive; 12 numeric leaves have bidirectional coverage and an independent literal serialized parity oracle. All focused and canonical `check`, `lint`, and `test` gates pass. No player-visible, schema, protocol, role, or public-API changes occurred.
+
+The initially reported resistance-minimum mismatch was an audit error caught by parity evidence; BRL-16w6 was canceled without implementation. The remaining ultimate/weapon-family follow-up is being decided from a separate evidence audit under the repository's demonstrated-use rule.
+
+## Follow-up decision — weapon metadata
+
+The BRL-34r0 follow-up audit found two live weapon descriptor/validator mismatches and pervasive wildcard omission risk, so deferral would leave a known operator defect. BRL-qhyh owns the correction and private exhaustive weapon projection. It proceeds before the ultimate exact-output phase because its manifest output is already wrong: Lobbed/Splash flight time advertises 1 tick instead of the authored 6-tick minimum, and Splash Heal advertises 65,535 instead of the authoritative 1,000 maximum.
+
+## Phase BRL-qhyh — weapon Balance Lab metadata
+
+Completed and independently reviewed. Weapon projection is now private and exhaustive; embedded 87-leaf plus synthetic absent-topology coverage prevents silent omission. The editor manifest alone advances to schema 10 to correct two live UI/authority mismatches: Lobbed/Splash flight minimum is the authored 6 ticks (0.10 s), and Heal maximum is the effective 1,000-health policy/engine ceiling. Authoritative gameplay/content, snapshot 19, persistence 13, weapon catalog 11, fingerprint 9, protocol, and public APIs remain unchanged.
+
+Focused suites, web build/tests, role checks, `just check`, `just lint`, `just test`, all 97 network cases, and all 12 performance gates pass. Live routed Balance Lab evidence confirmed unchanged canonical Arc/Splash values, corrected input attributes, exact 0.09/0.10 and 1,000/1,001 inline rejection, and disabled Apply for invalid drafts. Independent review findings were corrected and follow-up review is clean.
+
+The ultimate-family exact-output follow-up remains the last demonstrated Stage 6.3 implementation phase before final BRL-4ms7 CI/native closeout.
+
+## Follow-up decision — ultimate metadata
+
+The post-passive audit found the same demonstrated maintenance failure in ultimate metadata: bounds are duplicated between build validation and the Balance Lab adapter, all eight parameter projections use wildcard matches, and current one-way coverage cannot detect a newly added numeric field. BRL-ey0s owns an exact-output typed-bounds/exhaustive-projection phase with 11-definition/68-leaf bidirectional coverage. No schema or behavior change is authorized.
+
+
+## BRL-ey0s phase completion
+
+BRL-ey0s completed the last demonstrated Stage 6.3 phase. Crate-private typed ultimate bounds now live beside `UltimateParameters`; authoritative build validation and the deliberately partial advertised-profile validator consume the same owners without changing their distinct semantics. Private `editor::ultimates` exhaustively projects all eleven definitions and 68 numeric leaves. Exact bidirectional coverage, an independently literal ordered digest, isolated per-leaf boundary mutations, compatibility/relational tests, and partial-validator characterization protect the unchanged 215-field manifest and schema revisions. Independent review corrections are complete with no remaining P0/P1/P2 finding. The phase was committed as `03fe7ea`.
+
+## Final acceptance crosswalk — 2026-08-31
+
+### Data and balance
+
+- BRL-1jb5 moved concealment reveal timing into validated fingerprinted content.
+- BRL-zj4q authored the direct-diagnostic loadout through the ordinary build catalog; BRL-tjkh centralized shared tick conversions and operator-owned formation deadlines.
+- BRL-34r0, BRL-qhyh, and BRL-ey0s co-located passive, weapon, and ultimate Balance Lab bounds with typed owners and exhaustive private projection adapters. Player-visible values, stable wire shapes, and schema revisions stayed unchanged except BRL-qhyh's separately evidenced correction of UI limits to pre-existing authoritative weapon policy.
+- Engine/protocol capacities remain code-owned. BRL-4ms7 introduced no dependency on retired point-cost machinery; its independent cleanup remains explicitly owned by linked backlog ticket BRL-01c8.
+
+### ECS, authority, and deterministic scheduling
+
+- BRL-qkbg separated pure admission planning from commit; BRL-ddcq routed environment damage through the one combat authority path. Human and Practice assembly share the supported invariant fighter construction.
+- BRL-asna decomposed projectile sweep into immutable collection/planning and sequential decision-free commit while preserving ordering and deferred boundaries.
+- BRL-086r explicitly owns Balance Lab normalize -> immutable prepare -> persist -> infallible authoritative commit/publication, rollback, same-tick restart visibility, and named `BalanceLabFighterRuntime` `QueryData`. A final source audit confirmed Stage 6.4 and 6.6 require no additional ticket.
+- Role isolation, stable IDs, bounded state, facts/cues/telemetry, replication, and fixed-tick behavior remain covered by final role, network, and performance gates.
+
+### Open/Closed extension seams
+
+- BRL-9wbf and BRL-dhx5 delivered bounded plugin-populated bot-behavior and object-reaction registries with duplicate, capacity, coverage, fallback, and synthetic-extension tests.
+- BRL-2qxk projected semantic AI objects/objectives; BRL-7hk3 resolved authored effect tiles into orthogonal runtime capabilities.
+- BRL-wknz made gameplay fingerprints contributor-registered; BRL-n2qz made local mode installation registry-owned while intentionally retaining closed stable wire IDs.
+- BRL-az3n and BRL-k7r7 separated feature-owned stable VFX/audio requests from generic materialization/playback.
+- Linked BRL-ssdh deliberately defers executable effect-tile handler registration until a second real mechanic demonstrates a reusable handler shape. Linked BRL-hheg is separate new player-visible layered-VFX product scope and is not a BRL-4ms7 residual.
+
+### Organization
+
+- BRL-3ymp, BRL-g4w7, BRL-xddk, and BRL-sngq extracted demonstrated client customization, lobby profile transaction, projected object-health, and match-flow ownership boundaries. Composition roots retain visible schedule/plugin relationships.
+- A proposed equipment-screen split was rejected because it would only relocate a cohesive builder by line count. The remaining connection reducer root was likewise retained after ownership audit.
+- `docs/15-balance-lab.md` now documents all eleven ultimate definitions plus the shared typed-bound and private passive/weapon/ultimate adapter ownership.
+
+## Final verification and native evidence
+
+Final-tree commands passed:
+
+- `just check`
+- `just ci`, including formatting, all strict Clippy/role-isolation gates, web tests/build, all client/server/Balance Lab/package suites, 97 routed network scenarios, 12 performance gates, real-process 2/4/6-client product matches, and all nine Wipeout/Hot Zone/Heist Practice game types
+- `git diff --check`
+
+The cumulative native matrix is complete:
+
+- BRL-az3n: normal Wipeout and reduced-effects Heist VFX request/materialization evidence accepted.
+- BRL-k7r7: routed Wipeout audio request/playback evidence accepted.
+- BRL-qhyh: live routed Balance Lab editor/validation evidence accepted, including exact corrected weapon limits and disabled Apply on invalid drafts.
+- BRL-4ms7 closeout: `BRAWLER_RENDER_MODE=hot-zone BRAWLER_RENDER_COMBAT=1 BRAWLER_RENDER_PRACTICE=1 BRAWLER_RENDER_WARMUP_SECONDS=5 BRAWLER_RENDER_MEASURE_SECONDS=20 just v3-render-evidence target/brl-0070-hot-zone-practice-final.txt` passed on Metal at 2560x1440. The report observed four fighters, projectile and effect activity, 1,201 samples, p50 16.673 ms, p95 16.972 ms, p99 17.191 ms, maximum 17.751 ms, zero frames over 25/50/100 ms, and `result=pass`.
+
+Two prior Hot Zone attempts are diagnosed rather than hidden: the default 40-second sample outlived the bounded Practice automation, and a 10-second sample produced only 601 frames against the locked minimum. The accepted 20-second sample met the threshold before automation exit. The later clean `just ci` Hot Zone 1v1/2v2/3v3 Practice runs confirm the normal routed lifecycle. No gameplay correction was indicated.
+
+All review and native observations are either corrected or accepted. There is no feedback item awaiting evidence. BRL-16w6 was canceled because independent literal parity evidence proved its supposed resistance-bound mismatch was an audit error, not a product defect.
+
+## Learn-from-errors review
+
+- A shallow file move is not decomposition. BRL-asna's first extraction was rejected until immutable collection/planning and decision-free commit became real testable phases. Future coordinator work must name state ownership and mutation boundaries before moving code.
+- Validation precedence is behavior. Admission, Balance Lab transactions, reducers, and profile adapters needed characterization around both accepted and rejected paths before extraction; refactors must preserve which error wins, not merely the final success state.
+- Registration order and runtime order are separate contracts. Registries should seal deterministically by stable identity, while request playback and authoritative commits retain explicit producer/event ordering.
+- Presentation evidence needs an action driver. VFX/audio/native checks must cause the relevant combat or mode transitions rather than only opening a window and measuring idle frames.
+- Independently literal adapter tests prevent shared mistakes. Calling production bound, descriptor, or hash helpers from parity tests can make both sides wrong together; exact external literals plus bidirectional leaf coverage caught real UI-policy drift and disproved the false BRL-16w6 mismatch.
+- Exhaustive endpoints are insufficient when one fixture violates multiple fields. The BRL-ey0s review required one isolated mutation per numeric leaf and explicit characterization of what a deliberately partial secondary validator does not own.
+- Native harness durations are part of the evidence contract. Measurement windows must satisfy locked sample minima while completing before bounded automation exits; failures from those competing constraints should be retained and classified rather than mistaken for gameplay regressions.
+
+The reusable prevention rule for future architecture rounds is: prove a demonstrated ownership or extension cost, preserve explicit ECS/authority ordering, and use independent exact evidence at every adapter boundary. No new general framework, crate, protocol abstraction, or line-count-only split was introduced.
