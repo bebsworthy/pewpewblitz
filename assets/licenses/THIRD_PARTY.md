@@ -59,4 +59,7 @@ script, because the pack pages above are not stable direct-download URLs. To re-
    anything, and update `assets/manifest.ron` and this file together.
 
 Adding a new third-party file requires a `assets/manifest.ron` row, the pack's license text in
-this directory, a row in the tables above, and a Credits update.
+this directory, a row in the tables above, and a matching entry in the Credits list
+(`packages/brawler-client/src/shell/credits.rs`), whose tests fail until Credits, this table and
+the license files in this directory agree. A new `pewpew-blitz-original-*.txt` note likewise needs
+an original-work Credits entry.

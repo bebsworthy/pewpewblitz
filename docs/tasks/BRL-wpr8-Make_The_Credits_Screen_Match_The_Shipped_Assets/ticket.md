@@ -4,9 +4,9 @@ was: BRL-0189
 
 title: Make the Credits screen match the shipped assets
 
-status: doing
-closed:
-status_changed: 2026-11-14T18:27:18Z
+status: done
+closed: 2026-11-14T18:58:49Z
+status_changed: 2026-11-14T18:58:49Z
 
 theme: core
 
@@ -16,11 +16,11 @@ created: 2026-11-13T10:23:15Z
 
 blocks: []
 
-related: [BRL-1tdg]
+related: [BRL-1tdg, BRL-ztpa]
 
 parent: BRL-q5c4
 
-rank: 13369344
+rank:
 ---
 
 # Description

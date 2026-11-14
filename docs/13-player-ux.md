@@ -136,7 +136,7 @@ remain explicit.
 | Results | Completed-match decision | Keeps the authoritative outcome visible and offers exact replay or Dashboard |
 | Dashboard Menu | Connected utility overlay | Owns Settings, Credits, favorite-server action, Change Server, and Quit; saved-brawler navigation starts from the Dashboard card |
 | Settings | Local settings surface | Returns to its explicit product-flow or match-menu origin |
-| Credits | Attribution surface | Reached from Dashboard Menu; required attribution derives from the asset manifest |
+| Credits | Attribution surface | Reached from Dashboard Menu; required attribution mirrors `assets/licenses/THIRD_PARTY.md` and the original-work license notes, guarded by drift tests |
 | Confirmations | Small contextual overlays | Preserve their invoking screen visibly underneath and restore it deterministically |
 | Error | Contextual or full-screen recovery surface | Presents a factual category and only actions valid for the underlying session state; connection loss uses Retry, Change Server, and Quit |
 

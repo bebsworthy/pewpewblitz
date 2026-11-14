@@ -28,10 +28,10 @@ use bevy::{
 };
 
 mod controls;
+mod credits;
 mod settings_screen;
 
 const ENTRANCE_SECONDS: f32 = 0.16;
-const CREDITS: &str = "PewPew Blitz 0.1.0\n\nBuilt with Bevy 0.19 (MIT OR Apache-2.0).\nLilita One: Juan Montoreano, SIL OFL 1.1.\nDefault Fira Mono font: Mozilla Foundation / Telefonica, SIL OFL 1.1.\nIcons: original PewPew Blitz artwork.\nFighters and sounds: Kenney, CC0 1.0.\nFacility tiles: Murphy's Dad / HaywardMorihara, CC0 1.0.\n\nFull license texts ship in assets/licenses/.";
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 struct ShellSettingsDraft(ClientShellSettings);
@@ -368,7 +368,7 @@ fn spawn_settings(commands: &mut Commands) {
 fn spawn_credits(commands: &mut Commands) {
     spawn_overlay(commands, "CREDITS", |panel| {
         panel.spawn((
-            Text::new(CREDITS),
+            Text::new(credits::credits_text()),
             TextFont::from_font_size(16.0),
             TextColor(super::ui::theme::TEXT),
             TextLayout::new(Justify::Center, LineBreak::WordBoundary),
@@ -1153,6 +1153,36 @@ mod tests {
         app.update();
         let scroll = app.world().get::<ScrollPosition>(area).unwrap().0.y;
         assert!((scroll - 400.0).abs() < f32::EPSILON, "{scroll}");
+    }
+
+    /// BRL-wpr8: the longer Credits text keeps BACK reachable on a landscape phone and desktop.
+    #[test]
+    fn credits_back_is_reachable_on_phone_and_desktop() {
+        for (width, height) in [(868, 411), (1280, 720)] {
+            let path = std::env::temp_dir().join(format!(
+                "brawler-brlwpr8-credits-{width}-{}-settings.ron",
+                std::process::id()
+            ));
+            let mut app = shell_test_app(path);
+            crate::ui::layout_harness::add_layout(&mut app, width, height);
+            app.update();
+            *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Credits;
+            for _ in 0..4 {
+                app.update();
+            }
+            let mut texts = app.world_mut().query::<&Text>();
+            assert!(
+                texts
+                    .iter(app.world())
+                    .any(|text| text.0.contains("THIRD-PARTY ASSETS")),
+                "Credits text spawned"
+            );
+            let unreachable = crate::ui::layout_harness::unreachable_buttons(app.world_mut());
+            assert!(
+                unreachable.is_empty(),
+                "{width}x{height}: unreachable controls: {unreachable:?}"
+            );
+        }
     }
 
     /// BRL-0201: on the phone layout a finger drag and a tap set a slider; saving waits for the
