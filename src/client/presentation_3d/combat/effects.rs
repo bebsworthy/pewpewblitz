@@ -1,3 +1,4 @@
+use super::super::render_quality::{ActiveRenderQuality, ParticleBackend};
 use super::super::*;
 use super::{
     MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, RetainedProjectileSmoke3d,
@@ -165,7 +166,7 @@ fn resolved_effect(
     recipe: &ResolvedVfxRecipe,
     primitives: &Primitive3dAssets,
     materials: &Material3dAssets,
-    particle_assets: Option<&VfxParticleAssets>,
+    particles: Option<(&VfxParticleAssets, ParticleBackend)>,
     mut meshes: Option<&mut Assets<Mesh>>,
     melee_meshes: &mut super::melee_style::MeleeArcMeshCache,
 ) -> PendingCombatEffect {
@@ -215,7 +216,7 @@ fn resolved_effect(
         .collect();
     let mut particle_layers = Vec::new();
     if particle_layers_enabled(request.signature.variant)
-        && let Some(assets) = particle_assets
+        && let Some((assets, particle_backend)) = particles
     {
         for (occurrence, layer) in recipe.particle_layers.iter().enumerate() {
             if let Some(pending) = assets.pending(
@@ -225,6 +226,7 @@ fn resolved_effect(
                 &recipe.id,
                 request.order.event_id,
                 u8::try_from(occurrence).expect("validated particle layer count fits u8"),
+                particle_backend,
             ) {
                 lifetime = lifetime.max(layer.lifetime());
                 particle_layers.push(pending);
@@ -455,9 +457,13 @@ pub(in crate::client) fn resolve_vfx_requests(
     settings: Option<Res<ClientShellSettings>>,
     fallback: Option<Res<ImportedWorldFallbackPolicy>>,
     particle_assets: Option<Res<VfxParticleAssets>>,
+    quality: Option<Res<ActiveRenderQuality>>,
     mut meshes: Option<ResMut<Assets<Mesh>>>,
     mut melee_meshes: Option<ResMut<super::melee_style::MeleeArcMeshCache>>,
 ) {
+    let particle_backend = quality
+        .as_deref()
+        .map_or(ParticleBackend::Gpu, ActiveRenderQuality::particle_backend);
     let reduced = settings.is_some_and(|value| value.reduced_combat_effects);
     let primitive = fallback
         .as_deref()
@@ -479,7 +485,9 @@ pub(in crate::client) fn resolve_vfx_requests(
             &recipe,
             &primitives,
             &materials,
-            particle_assets.as_deref(),
+            particle_assets
+                .as_deref()
+                .map(|assets| (assets, particle_backend)),
             meshes.as_deref_mut(),
             melee_meshes,
         ));
@@ -811,6 +819,29 @@ mod tests {
         let diagnostics = world.resource::<VfxTransientDiagnostics>();
         assert_eq!(diagnostics.root_high_water, MAX_EFFECTS);
         assert_eq!(diagnostics.evicted_roots, 4);
+    }
+
+    #[test]
+    fn fallback_particles_spawn_a_bounded_burst_under_a_budgeted_emitter() {
+        let mut app = effect_allocation_app();
+        let mut pending = pending_effect("fallback family", Duration::from_secs(1));
+        pending
+            .particle_layers
+            .push(PendingVfxParticleLayer::test_cpu_layer(
+                "fallback_sparks",
+                40,
+            ));
+        app.world_mut().write_message(pending);
+
+        app.update();
+
+        let world = app.world_mut();
+        assert_eq!(component_count::<VfxParticleEmitter3d>(world), 1);
+        assert_eq!(
+            component_count::<super::super::cpu_particles::CpuParticle3d>(world),
+            usize::from(super::super::cpu_particles::MAX_CPU_PARTICLES_PER_BURST)
+        );
+        assert_eq!(world.resource::<VfxParticleDiagnostics>().active, 1);
     }
 
     #[test]

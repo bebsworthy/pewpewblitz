@@ -10,11 +10,20 @@ pub(in crate::client) struct CombatVfxContext<'w> {
     cache: Res<'w, crate::client::vfx::VfxSignatureCache>,
     settings: Option<Res<'w, crate::client::settings::persistence::ClientShellSettings>>,
     fallback: Option<Res<'w, super::super::ImportedWorldFallbackPolicy>>,
+    quality: Option<Res<'w, super::super::render_quality::ActiveRenderQuality>>,
 }
 
 impl CombatVfxContext<'_> {
     pub(super) fn cache(&self) -> &crate::client::vfx::VfxSignatureCache {
         &self.cache
+    }
+
+    /// The active tier's particle backend; without a tier, GPU particles when installed.
+    pub(super) fn particle_backend(&self) -> super::super::render_quality::ParticleBackend {
+        self.quality.as_deref().map_or(
+            super::super::render_quality::ParticleBackend::Gpu,
+            super::super::render_quality::ActiveRenderQuality::particle_backend,
+        )
     }
 
     pub(super) fn variant(&self) -> crate::client::vfx::VfxPresentationVariant {

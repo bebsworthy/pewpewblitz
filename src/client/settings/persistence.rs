@@ -32,6 +32,48 @@ pub struct ClientShellSettings {
     pub mute_when_unfocused: bool,
     pub fullscreen: bool,
     pub vsync: bool,
+    /// Requested presentation quality tier (BRL-0161); `Auto` lets the client pick for the GPU.
+    pub graphics_quality: GraphicsQuality,
+}
+
+/// The player's presentation quality preference. The client resolves `Auto` to a concrete tier
+/// from detected GPU capability; the tier contents are client-only authored data.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GraphicsQuality {
+    #[default]
+    Auto,
+    Low,
+    Medium,
+    High,
+}
+
+impl GraphicsQuality {
+    /// Stable settings-row order: the automatic choice first, then ascending cost.
+    pub const ORDER: [Self; 4] = [Self::Auto, Self::Low, Self::Medium, Self::High];
+
+    #[must_use]
+    pub fn index(self) -> usize {
+        Self::ORDER
+            .iter()
+            .position(|quality| *quality == self)
+            .unwrap_or_default()
+    }
+
+    /// The next preference in [`Self::ORDER`], wrapping from `High` back to `Auto`.
+    #[must_use]
+    pub fn next(self) -> Self {
+        Self::ORDER[(self.index() + 1) % Self::ORDER.len()]
+    }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "AUTO",
+            Self::Low => "LOW",
+            Self::Medium => "MEDIUM",
+            Self::High => "HIGH",
+        }
+    }
 }
 
 pub const DEFAULT_EFFECTS_VOLUME: u8 = 100;
@@ -49,6 +91,7 @@ impl Default for ClientShellSettings {
             mute_when_unfocused: true,
             fullscreen: false,
             vsync: true,
+            graphics_quality: GraphicsQuality::Auto,
         }
     }
 }
@@ -125,6 +168,9 @@ pub struct SettingsFile {
     pub mute_when_unfocused: bool,
     pub fullscreen: bool,
     pub vsync: bool,
+    /// Added by BRL-0161; defaulted so earlier settings files still load.
+    #[serde(default)]
+    pub graphics_quality: GraphicsQuality,
 }
 
 const fn default_effects_volume() -> u8 {
@@ -168,6 +214,7 @@ impl SettingsFile {
             mute_when_unfocused: shell.mute_when_unfocused,
             fullscreen: shell.fullscreen,
             vsync: shell.vsync,
+            graphics_quality: shell.graphics_quality,
         }
     }
 
@@ -198,6 +245,7 @@ impl SettingsFile {
             mute_when_unfocused: self.mute_when_unfocused,
             fullscreen: self.fullscreen,
             vsync: self.vsync,
+            graphics_quality: self.graphics_quality,
         };
         shell.validate()?;
         Ok((input, shell))
@@ -363,6 +411,32 @@ mod tests {
             load_settings(&path),
             Err(SettingsLoadError::Rejected(_))
         ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn graphics_quality_round_trips_and_older_files_load_as_auto() {
+        let dir = test_path("pre-quality");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.ron");
+        let low = ClientShellSettings {
+            graphics_quality: GraphicsQuality::Low,
+            ..ClientShellSettings::default()
+        };
+        save_settings(&path, ClientInputSettings::default(), low).unwrap();
+        let current = fs::read_to_string(&path).unwrap();
+        let (_, shell) = load_settings(&path).unwrap().unwrap();
+        assert_eq!(shell, low);
+
+        let legacy = current
+            .lines()
+            .filter(|line| !line.contains("graphics_quality"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_ne!(legacy, current);
+        fs::write(&path, legacy).unwrap();
+        let (_, shell) = load_settings(&path).unwrap().unwrap();
+        assert_eq!(shell.graphics_quality, GraphicsQuality::Auto);
         fs::remove_dir_all(dir).unwrap();
     }
 

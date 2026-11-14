@@ -37,16 +37,22 @@ impl FoliageSway {
 pub(in crate::client::presentation_3d) fn sway_foliage(
     time: Res<Time>,
     settings: Option<Res<ClientShellSettings>>,
+    quality: Option<Res<render_quality::ActiveRenderQuality>>,
     mut pivots: Query<(&FoliageSway, &mut Transform)>,
 ) {
-    let still = settings.is_some_and(|settings| settings.reduced_combat_effects);
+    let still = settings.is_some_and(|settings| settings.reduced_combat_effects)
+        || !render_quality::foliage_sway_enabled(quality.as_deref());
     let seconds = time.elapsed_secs();
     for (sway, mut transform) in &mut pivots {
-        transform.rotation = if still {
+        let rotation = if still {
             Quat::IDENTITY
         } else {
             sway.rotation(seconds)
         };
+        // A still bush stays unchanged, so it costs no transform propagation.
+        if transform.rotation != rotation {
+            transform.rotation = rotation;
+        }
     }
 }
 

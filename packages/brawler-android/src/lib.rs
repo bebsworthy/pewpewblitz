@@ -1,6 +1,6 @@
-//! Android entry point for the PewPew Blitz player client.
+//! Android entry point for the `PewPew Blitz` player client.
 //!
-//! `#[bevy_main]` exports the `android_main` symbol that GameActivity calls and stores the
+//! `#[bevy_main]` exports the `android_main` symbol that `GameActivity` calls and stores the
 //! `AndroidApp` handle that Bevy's windowing, assets, and the client's storage paths use. The
 //! application itself is the shared desktop player shell; only the configuration source differs
 //! because Android has no command line.
@@ -18,8 +18,16 @@ fn main() {
         .map(str::to_string);
     match ClientNetworkConfig::product_shell(server_prefill, None) {
         Ok(config) => {
-            build_app_with_config(config).run();
+            #[cfg(target_os = "android")]
+            frame_pacing::configure_task_pools();
+            let mut app = build_app_with_config(config);
+            #[cfg(target_os = "android")]
+            frame_pacing::install(&mut app);
+            app.run();
         }
         Err(error) => error!("PewPew Blitz could not start: {error}"),
     }
 }
+
+#[cfg(target_os = "android")]
+mod frame_pacing;

@@ -5,6 +5,8 @@ use super::{
     OverlayRoot, PendingActions, ShellAction, ShellButton, ShellControlId, ShellLayer,
     ShellScrollArea, ShellSettingsDraft, despawn_overlays, save_settings,
 };
+use crate::client::presentation_3d::render_quality::RenderCapabilities;
+use crate::client::settings::persistence::GraphicsQuality;
 use crate::client::ui::{
     controls::{ControlState, ControlValue, SliderTrack, slider_fraction, spawn_control},
     theme,
@@ -372,7 +374,11 @@ fn spawn_options(
                         description(*id).0,
                         *id,
                         action(*id),
-                        ControlValue::Toggle(false),
+                        if *id == ShellControlId::GraphicsQuality {
+                            ControlValue::Binding(String::new())
+                        } else {
+                            ControlValue::Toggle(false)
+                        },
                     );
                     // Sliders need their native track children at creation time.
                     options.commands().entity(entity).insert(Preference);
@@ -432,11 +438,11 @@ pub(super) fn control(
 
 fn category_rows(category: Category) -> &'static [ShellControlId] {
     use ShellControlId::{
-        EffectsVolumeUp, MusicVolumeUp, ToggleFocusMute, ToggleFullscreen, ToggleReducedEffects,
-        ToggleReducedMotion, ToggleVsync, UiScaleUp, VolumeUp,
+        EffectsVolumeUp, GraphicsQuality, MusicVolumeUp, ToggleFocusMute, ToggleFullscreen,
+        ToggleReducedEffects, ToggleReducedMotion, ToggleVsync, UiScaleUp, VolumeUp,
     };
     match category {
-        Category::Display => &[ToggleFullscreen, ToggleVsync],
+        Category::Display => &[ToggleFullscreen, ToggleVsync, GraphicsQuality],
         Category::Audio => &[VolumeUp, EffectsVolumeUp, MusicVolumeUp, ToggleFocusMute],
         Category::Accessibility => &[UiScaleUp, ToggleReducedMotion, ToggleReducedEffects],
         Category::Controls => &[],
@@ -447,6 +453,7 @@ fn action(id: ShellControlId) -> ShellAction {
     match id {
         ShellControlId::ToggleFullscreen => ShellAction::ToggleFullscreen,
         ShellControlId::ToggleVsync => ShellAction::ToggleVsync,
+        ShellControlId::GraphicsQuality => ShellAction::CycleGraphicsQuality,
         ShellControlId::VolumeUp => ShellAction::VolumeUp,
         ShellControlId::EffectsVolumeUp => ShellAction::EffectsVolumeUp,
         ShellControlId::MusicVolumeUp => ShellAction::MusicVolumeUp,
@@ -467,6 +474,10 @@ fn description(id: ShellControlId) -> (&'static str, &'static str) {
         ShellControlId::ToggleVsync => (
             "VSync",
             "Synchronize presentation with the display refresh to reduce screen tearing.",
+        ),
+        ShellControlId::GraphicsQuality => (
+            "Graphics quality",
+            "Tap to cycle Auto, Low, Medium and High. Auto picks a tier for this device; lower tiers trade anti-aliasing, glow, shadows and particle detail for a steadier frame rate.",
         ),
         ShellControlId::VolumeUp => ("Master volume", "Adjust the volume of all game audio."),
         ShellControlId::EffectsVolumeUp => (
@@ -509,8 +520,16 @@ pub(super) fn slider_actions(id: ShellControlId) -> Option<(ShellAction, ShellAc
     }
 }
 
-fn value(id: ShellControlId, settings: ClientShellSettings) -> ControlValue {
+/// `auto_tier` is the tier `Auto` currently resolves to, shown beside it.
+fn value(
+    id: ShellControlId,
+    settings: ClientShellSettings,
+    auto_tier: Option<&str>,
+) -> ControlValue {
     match id {
+        ShellControlId::GraphicsQuality => {
+            graphics_quality_value(settings.graphics_quality, auto_tier)
+        }
         ShellControlId::ToggleFullscreen => ControlValue::Toggle(settings.fullscreen),
         ShellControlId::ToggleVsync => ControlValue::Toggle(settings.vsync),
         ShellControlId::ToggleFocusMute => ControlValue::Toggle(settings.mute_when_unfocused),
@@ -527,6 +546,14 @@ fn value(id: ShellControlId, settings: ClientShellSettings) -> ControlValue {
         ShellControlId::MusicVolumeUp => volume_slider(settings.music_volume),
         _ => ControlValue::Action,
     }
+}
+
+/// The preference chip, showing the resolved tier beside `Auto`.
+fn graphics_quality_value(quality: GraphicsQuality, auto_tier: Option<&str>) -> ControlValue {
+    ControlValue::Binding(match (quality, auto_tier) {
+        (GraphicsQuality::Auto, Some(tier)) => format!("AUTO ({tier})"),
+        _ => quality.label().to_string(),
+    })
 }
 
 fn volume_slider(volume: u8) -> ControlValue {
@@ -595,7 +622,8 @@ pub(super) fn choose_category(
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
-    reason = "Bevy presentation queries"
+    clippy::too_many_arguments,
+    reason = "Bevy presentation queries; the graphics row also reads detected render capability"
 )]
 pub(super) fn present(
     page: Res<SettingsPage>,
@@ -603,6 +631,7 @@ pub(super) fn present(
     draft: Option<Res<ShellSettingsDraft>>,
     input: Res<super::controls::ControlsState>,
     input_draft: Option<Res<InputSettingsDraft>>,
+    capabilities: Option<Res<RenderCapabilities>>,
     mut controls: Query<(
         Entity,
         &ShellButton,
@@ -613,6 +642,7 @@ pub(super) fn present(
     )>,
     mut details: Query<&mut Text, (With<Details>, Without<SaveError>)>,
 ) {
+    let auto_tier = capabilities.map(|capabilities| capabilities.auto_tier().0.label());
     let mut detail = category_rows(page.category).first().copied();
     let mut input_detail = None;
     for (entity, button, mut state, mut current, tab, preference) in &mut controls {
@@ -629,7 +659,7 @@ pub(super) fn present(
                 detail = Some(button.id);
             }
             if let Some(draft) = &draft {
-                *current = value(button.id, draft.0);
+                *current = value(button.id, draft.0, auto_tier);
             }
         }
     }
@@ -914,6 +944,7 @@ fn reset_category(
         Category::Display => {
             settings.fullscreen = source.fullscreen;
             settings.vsync = source.vsync;
+            settings.graphics_quality = source.graphics_quality;
         }
         Category::Audio => {
             settings.master_volume = source.master_volume;
@@ -962,6 +993,9 @@ fn adjust_preference(action: ShellAction, settings: &mut ClientShellSettings) ->
             settings.mute_when_unfocused = !settings.mute_when_unfocused;
         }
         ShellAction::ToggleVsync => settings.vsync = !settings.vsync,
+        ShellAction::CycleGraphicsQuality => {
+            settings.graphics_quality = settings.graphics_quality.next();
+        }
         ShellAction::ToggleReducedMotion => settings.reduced_motion = !settings.reduced_motion,
         ShellAction::ToggleReducedEffects => {
             settings.reduced_combat_effects = !settings.reduced_combat_effects;
@@ -974,6 +1008,47 @@ fn adjust_preference(action: ShellAction, settings: &mut ClientShellSettings) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_page_cycles_graphics_quality_and_shows_the_auto_tier() {
+        assert!(category_rows(Category::Display).contains(&ShellControlId::GraphicsQuality));
+        // A tap-to-cycle chip rather than a slider, so touch screens can change it.
+        assert!(slider_actions(ShellControlId::GraphicsQuality).is_none());
+        let mut settings = ClientShellSettings::default();
+        let ControlValue::Binding(label) =
+            value(ShellControlId::GraphicsQuality, settings, Some("MEDIUM"))
+        else {
+            panic!("graphics quality is a value chip");
+        };
+        assert_eq!(label, "AUTO (MEDIUM)");
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            assert!(adjust_preference(
+                ShellAction::CycleGraphicsQuality,
+                &mut settings
+            ));
+            seen.push(settings.graphics_quality);
+        }
+        assert_eq!(
+            seen,
+            [
+                GraphicsQuality::Low,
+                GraphicsQuality::Medium,
+                GraphicsQuality::High,
+                GraphicsQuality::Auto
+            ]
+        );
+        let mut changed = ClientShellSettings {
+            graphics_quality: GraphicsQuality::High,
+            ..ClientShellSettings::default()
+        };
+        reset_category(
+            Category::Display,
+            &mut changed,
+            ClientShellSettings::default(),
+        );
+        assert_eq!(changed.graphics_quality, GraphicsQuality::Auto);
+    }
 
     #[test]
     fn audio_page_owns_master_effects_and_music_volume_sliders() {

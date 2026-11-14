@@ -220,7 +220,7 @@ pub(super) fn hud_camera_look() -> (Hdr, Tonemapping, ColorGrading) {
     (Hdr, Tonemapping::None, ColorGrading::default())
 }
 
-/// Keeps bloom on the arena camera only while reduced effects is off.
+/// Keeps bloom on the arena camera only while reduced effects is off and the quality tier keeps it.
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are passed by value"
@@ -229,9 +229,11 @@ pub(super) fn sync_arena_bloom(
     mut commands: Commands,
     catalog: Res<WorldLookCatalog>,
     settings: Option<Res<ClientShellSettings>>,
+    quality: Option<Res<render_quality::ActiveRenderQuality>>,
     cameras: Query<(Entity, Has<Bloom>), With<ArenaCamera>>,
 ) {
-    let wanted = !settings.is_some_and(|settings| settings.reduced_combat_effects);
+    let wanted = !settings.is_some_and(|settings| settings.reduced_combat_effects)
+        && render_quality::bloom_enabled(quality.as_deref());
     for (camera, has_bloom) in &cameras {
         if wanted && !has_bloom {
             commands.entity(camera).try_insert(catalog.bloom.bloom());

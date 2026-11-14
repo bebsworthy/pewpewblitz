@@ -1,3 +1,4 @@
+use super::super::render_quality::ParticleBackend;
 use super::super::*;
 use super::common::{
     CombatVfxContext, GROUND_EFFECT_HEIGHT, GroundMarkerRelation, ground_marker_material,
@@ -333,7 +334,10 @@ pub(in super::super) fn reconcile_projectile_visuals(
                 }
             }
         }
-        let wants_smoke = lobbed.is_some()
+        // The rate-based smoke trail is decorative: the CPU particle fallback skips it.
+        let gpu_particles = vfx.particle_backend() == ParticleBackend::Gpu;
+        let wants_smoke = gpu_particles
+            && lobbed.is_some()
             && signature.accents.contains(&Some(vfx::VfxAccent::Fire))
             && signature.variant == vfx::VfxPresentationVariant::Normal;
         let (_, spawned_smoke) = spawn_projectile(
@@ -341,7 +345,7 @@ pub(in super::super) fn reconcile_projectile_visuals(
             &primitives,
             &materials,
             particle_assets.as_deref(),
-            particle_budget > 0,
+            gpu_particles && particle_budget > 0,
             owner,
             position.0,
             source.team_id,

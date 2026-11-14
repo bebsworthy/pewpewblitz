@@ -1,6 +1,16 @@
 //! Bounded Hanabi adapter for optional decorative VFX recipe layers.
+//!
+//! Hanabi needs compute shaders and storage buffers, so it is installed only in `finish`, after
+//! the render device exists and [`RenderCapabilities`] says the GPU can run it (BRL-0161). Without
+//! it, or when the quality tier selects the CPU backend, burst layers use the mesh-particle
+//! fallback in `cpu_particles` instead.
 
+use super::super::render_quality::{ParticleBackend, RenderCapabilities};
 use super::super::{Primitive3dAssets, ground_position};
+use super::cpu_particles::{
+    CpuParticleMaterials, burst_particles, particle_aligns_to_velocity, particle_is_additive,
+    particle_mesh, simulate_cpu_particles, spawn_burst_children,
+};
 use crate::client::vfx::{
     VfxParticleLayer, VfxParticleProfile, VfxParticleSpawn, VfxRegistry, vfx_counter_sample,
 };
@@ -26,10 +36,12 @@ pub(in crate::client) struct VfxParticleDiagnostics {
     pub(in crate::client) suppressed: u64,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub(in crate::client) struct VfxParticleAssets {
+    /// Compiled Hanabi effects; empty when Hanabi is not installed.
     effects: BTreeMap<String, Handle<EffectAsset>>,
     layers: BTreeMap<String, VfxParticleLayer>,
+    cpu_materials: CpuParticleMaterials,
 }
 
 #[derive(Component)]
@@ -71,7 +83,7 @@ impl PendingParticleBurst {
 }
 
 pub(in crate::client) struct PendingVfxParticleLayer {
-    handle: Handle<EffectAsset>,
+    backend: PendingParticleBackend,
     mesh: Option<Handle<Mesh>>,
     transform: Transform,
     layer_id: String,
@@ -81,20 +93,50 @@ pub(in crate::client) struct PendingVfxParticleLayer {
     seed: u32,
 }
 
+enum PendingParticleBackend {
+    Gpu(Handle<EffectAsset>),
+    /// The fallback's starting particles and their shared material.
+    Cpu {
+        particles: Vec<(Vec3, super::cpu_particles::CpuParticle3d)>,
+        material: Handle<StandardMaterial>,
+    },
+}
+
 impl PendingVfxParticleLayer {
     pub(in crate::client) fn spawn(&self, parent: &mut ChildSpawnerCommands<'_>, root: Entity) {
-        let mut particle_effect = ParticleEffect::new(self.handle.clone());
+        let emitter = VfxParticleEmitter3d {
+            root,
+            layer_id: self.layer_id.clone(),
+            profile: self.profile,
+            capacity: self.capacity,
+            spawn: VfxParticleSpawn::Burst(self.burst_count),
+            seed: self.seed,
+        };
+        let handle = match &self.backend {
+            PendingParticleBackend::Gpu(handle) => handle.clone(),
+            PendingParticleBackend::Cpu {
+                particles,
+                material,
+            } => {
+                let mesh = self.mesh.clone().unwrap_or_default();
+                parent
+                    .spawn((
+                        emitter,
+                        self.transform,
+                        Visibility::default(),
+                        Name::new(format!("VFX fallback particles / {}", self.layer_id)),
+                    ))
+                    .with_children(|burst| {
+                        spawn_burst_children(burst, particles.clone(), &mesh, material);
+                    });
+                return;
+            }
+        };
+        let mut particle_effect = ParticleEffect::new(handle);
         particle_effect.prng_seed = Some(self.seed);
         let settings = particle_spawner_settings(self.burst_count);
         let mut entity = parent.spawn((
-            VfxParticleEmitter3d {
-                root,
-                layer_id: self.layer_id.clone(),
-                profile: self.profile,
-                capacity: self.capacity,
-                spawn: VfxParticleSpawn::Burst(self.burst_count),
-                seed: self.seed,
-            },
+            emitter,
             particle_effect,
             EffectSpawner::new(&settings),
             PendingParticleBurst::default(),
@@ -106,10 +148,35 @@ impl PendingVfxParticleLayer {
         }
     }
 
+    /// A fallback burst with the authored test layer's starting particles.
+    #[cfg(test)]
+    pub(in crate::client) fn test_cpu_layer(id: &str, burst_count: u16) -> Self {
+        let mut layer = Self::test_layer(id);
+        let source = VfxParticleLayer {
+            id: id.to_string(),
+            profile: layer.profile,
+            capacity: layer.capacity,
+            spawn: VfxParticleSpawn::Burst(burst_count),
+            lifetime_millis: 400,
+            spawn_radius: 4.0,
+            speed_min: 10.0,
+            speed_max: 20.0,
+            size_start: 3.0,
+            size_end: 0.0,
+            anchor_height: 5.0,
+        };
+        layer.burst_count = burst_count;
+        layer.backend = PendingParticleBackend::Cpu {
+            particles: burst_particles(&source, burst_count, layer.seed),
+            material: Handle::default(),
+        };
+        layer
+    }
+
     #[cfg(test)]
     pub(in crate::client) fn test_layer(id: &str) -> Self {
         Self {
-            handle: Handle::default(),
+            backend: PendingParticleBackend::Gpu(Handle::default()),
             mesh: None,
             transform: Transform::default(),
             layer_id: id.to_string(),
@@ -122,6 +189,10 @@ impl PendingVfxParticleLayer {
 }
 
 impl VfxParticleAssets {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one burst layer resolves against its recipe identity, position, and backend"
+    )]
     pub(in crate::client) fn pending(
         &self,
         layer: &VfxParticleLayer,
@@ -130,24 +201,22 @@ impl VfxParticleAssets {
         recipe_id: &str,
         presentation_identity: u64,
         occurrence: u8,
+        backend: ParticleBackend,
     ) -> Option<PendingVfxParticleLayer> {
         let VfxParticleSpawn::Burst(burst_count) = layer.spawn else {
             return None;
         };
         let seed = particle_seed(presentation_identity, recipe_id, &layer.id, occurrence);
+        let backend = match (backend, self.effects.get(&layer.id)) {
+            (ParticleBackend::Gpu, Some(handle)) => PendingParticleBackend::Gpu(handle.clone()),
+            _ => PendingParticleBackend::Cpu {
+                particles: burst_particles(layer, burst_count, seed),
+                material: self.cpu_materials.get(layer.profile),
+            },
+        };
         Some(PendingVfxParticleLayer {
-            handle: self.effects.get(&layer.id)?.clone(),
-            mesh: Some(match layer.profile {
-                VfxParticleProfile::ColdFragments => primitives.unit_cuboid.clone(),
-                VfxParticleProfile::NeutralSparks
-                | VfxParticleProfile::FireEmbers
-                | VfxParticleProfile::ExplosionSparks => primitives.fire_tongue.clone(),
-                VfxParticleProfile::PoisonBubbles => primitives.effect_sphere.clone(),
-                VfxParticleProfile::RestorationPetals => primitives.vitality_spark.clone(),
-                VfxParticleProfile::ExplosionSmoke | VfxParticleProfile::ProjectileSmoke => {
-                    primitives.effect_sphere.clone()
-                }
-            }),
+            backend,
+            mesh: Some(particle_mesh(layer.profile, primitives)),
             transform: Transform::from_translation(
                 ground_position(position) + Vec3::Y * layer.anchor_height,
             ),
@@ -227,9 +296,9 @@ pub(in crate::client) struct VfxParticleAdapterPlugin;
 
 impl Plugin for VfxParticleAdapterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(HanabiPlugin)
-            .init_resource::<VfxParticleDiagnostics>()
+        app.init_resource::<VfxParticleDiagnostics>()
             .add_systems(Startup, prepare_vfx_particle_assets)
+            .add_systems(Update, simulate_cpu_particles)
             .add_systems(
                 PostUpdate,
                 (
@@ -238,6 +307,22 @@ impl Plugin for VfxParticleAdapterPlugin {
                 )
                     .before(EffectSystems::TickSpawners),
             );
+    }
+
+    /// Installs Hanabi only for a GPU that can run it. Bevy finishes plugins in registration
+    /// order and does not finish plugins added during this pass, so Hanabi is finished here.
+    fn finish(&self, app: &mut App) {
+        let capabilities = app
+            .world()
+            .get_resource::<RenderCapabilities>()
+            .copied()
+            .unwrap_or_else(|| RenderCapabilities::detect(app.world()));
+        if capabilities.gpu_particles {
+            app.add_plugins(HanabiPlugin);
+            HanabiPlugin.finish(app);
+        } else {
+            info!("GPU particles unavailable; decorative particles use the CPU fallback");
+        }
     }
 }
 
@@ -319,19 +404,23 @@ fn particle_spawner_for_layer(layer: &VfxParticleLayer) -> SpawnerSettings {
 fn prepare_vfx_particle_assets(
     mut commands: Commands,
     registry: Res<VfxRegistry>,
-    mut effects: ResMut<Assets<EffectAsset>>,
+    effects: Option<ResMut<Assets<EffectAsset>>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let layers = registry
         .particle_layers()
         .map(|layer| (layer.id.clone(), layer.clone()))
         .collect::<BTreeMap<_, _>>();
-    let compiled = layers
-        .iter()
-        .map(|(id, layer)| (id.clone(), effects.add(build_effect_asset(layer))))
-        .collect();
+    let compiled = effects.map_or_else(BTreeMap::new, |mut effects| {
+        layers
+            .iter()
+            .map(|(id, layer)| (id.clone(), effects.add(build_effect_asset(layer))))
+            .collect()
+    });
     commands.insert_resource(VfxParticleAssets {
         effects: compiled,
         layers,
+        cpu_materials: CpuParticleMaterials::new(&mut materials),
     });
 }
 
@@ -360,38 +449,16 @@ fn build_effect_asset(layer: &VfxParticleLayer) -> EffectAsset {
             .expr(),
     );
     let age = SetAttributeModifier::new(Attribute::AGE, writer.lit(0.0).expr());
-    let acceleration = match layer.profile {
-        VfxParticleProfile::NeutralSparks => Vec3::new(0.0, -38.0, 0.0),
-        VfxParticleProfile::ColdFragments => Vec3::new(0.0, -24.0, 0.0),
-        VfxParticleProfile::FireEmbers => Vec3::new(0.0, -14.0, 0.0),
-        VfxParticleProfile::PoisonBubbles => Vec3::new(0.0, 7.0, 0.0),
-        VfxParticleProfile::RestorationPetals => Vec3::new(0.0, 2.0, 0.0),
-        VfxParticleProfile::ExplosionSparks => Vec3::new(0.0, -72.0, 0.0),
-        VfxParticleProfile::ExplosionSmoke => Vec3::new(0.0, 6.0, 0.0),
-        VfxParticleProfile::ProjectileSmoke => Vec3::new(0.0, 4.0, 0.0),
-    };
-    let acceleration = AccelModifier::new(writer.lit(acceleration).expr());
-    let orientation = match layer.profile {
-        VfxParticleProfile::NeutralSparks
-        | VfxParticleProfile::ColdFragments
-        | VfxParticleProfile::ExplosionSparks => OrientMode::AlongVelocity,
-        VfxParticleProfile::FireEmbers
-        | VfxParticleProfile::PoisonBubbles
-        | VfxParticleProfile::RestorationPetals
-        | VfxParticleProfile::ExplosionSmoke
-        | VfxParticleProfile::ProjectileSmoke => OrientMode::FaceCameraPosition,
-    };
-
-    let alpha_mode = if matches!(
-        layer.profile,
-        VfxParticleProfile::PoisonBubbles
-            | VfxParticleProfile::RestorationPetals
-            | VfxParticleProfile::ExplosionSmoke
-            | VfxParticleProfile::ProjectileSmoke
-    ) {
-        HanabiAlphaMode::Blend
+    let acceleration = AccelModifier::new(writer.lit(particle_acceleration(layer.profile)).expr());
+    let orientation = if particle_aligns_to_velocity(layer.profile) {
+        OrientMode::AlongVelocity
     } else {
+        OrientMode::FaceCameraPosition
+    };
+    let alpha_mode = if particle_is_additive(layer.profile) {
         HanabiAlphaMode::Add
+    } else {
+        HanabiAlphaMode::Blend
     };
 
     EffectAsset::new(
@@ -408,7 +475,7 @@ fn build_effect_asset(layer: &VfxParticleLayer) -> EffectAsset {
     .init(age)
     .update(acceleration)
     .render(OrientModifier::new(orientation))
-    .render(ColorOverLifetimeModifier::new(color_gradient(
+    .render(ColorOverLifetimeModifier::new(particle_color_gradient(
         layer.profile,
     )))
     .render(SizeOverLifetimeModifier {
@@ -417,7 +484,22 @@ fn build_effect_asset(layer: &VfxParticleLayer) -> EffectAsset {
     })
 }
 
-fn color_gradient(profile: VfxParticleProfile) -> HanabiGradient<Vec4> {
+/// Constant acceleration per profile, shared by the Hanabi and CPU backends.
+pub(super) const fn particle_acceleration(profile: VfxParticleProfile) -> Vec3 {
+    match profile {
+        VfxParticleProfile::NeutralSparks => Vec3::new(0.0, -38.0, 0.0),
+        VfxParticleProfile::ColdFragments => Vec3::new(0.0, -24.0, 0.0),
+        VfxParticleProfile::FireEmbers => Vec3::new(0.0, -14.0, 0.0),
+        VfxParticleProfile::PoisonBubbles => Vec3::new(0.0, 7.0, 0.0),
+        VfxParticleProfile::RestorationPetals => Vec3::new(0.0, 2.0, 0.0),
+        VfxParticleProfile::ExplosionSparks => Vec3::new(0.0, -72.0, 0.0),
+        VfxParticleProfile::ExplosionSmoke => Vec3::new(0.0, 6.0, 0.0),
+        VfxParticleProfile::ProjectileSmoke => Vec3::new(0.0, 4.0, 0.0),
+    }
+}
+
+/// Color over lifetime per profile, shared by the Hanabi and CPU backends.
+pub(super) fn particle_color_gradient(profile: VfxParticleProfile) -> HanabiGradient<Vec4> {
     let mut gradient = HanabiGradient::new();
     match profile {
         VfxParticleProfile::NeutralSparks => {
@@ -466,8 +548,8 @@ fn color_gradient(profile: VfxParticleProfile) -> HanabiGradient<Vec4> {
     gradient
 }
 
-fn size_gradient(layer: &VfxParticleLayer) -> HanabiGradient<Vec3> {
-    let mut gradient = HanabiGradient::new();
+/// Start and end particle size, shared by the Hanabi and CPU backends.
+pub(super) fn particle_size_endpoints(layer: &VfxParticleLayer) -> (Vec3, Vec3) {
     let start = match layer.profile {
         VfxParticleProfile::ColdFragments => Vec3::new(
             layer.size_start,
@@ -485,9 +567,15 @@ fn size_gradient(layer: &VfxParticleLayer) -> HanabiGradient<Vec3> {
             layer.size_start * 0.22,
         ),
     };
+    (start, Vec3::splat(layer.size_end))
+}
+
+fn size_gradient(layer: &VfxParticleLayer) -> HanabiGradient<Vec3> {
+    let (start, end) = particle_size_endpoints(layer);
+    let mut gradient = HanabiGradient::new();
     gradient.add_key(0.0, start);
     gradient.add_key(0.72, start * 0.7);
-    gradient.add_key(1.0, Vec3::splat(layer.size_end));
+    gradient.add_key(1.0, end);
     gradient
 }
 

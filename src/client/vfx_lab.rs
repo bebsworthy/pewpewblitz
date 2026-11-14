@@ -746,7 +746,10 @@ pub fn build_vfx_lab_app(config: VfxLabConfig) -> App {
     .add_plugins(VfxParticleAdapterPlugin)
     .add_plugins(VfxLabLifecyclePresentationPlugin)
     .add_plugins(ClientEvidenceCapturePlugin)
-    .add_plugins(VfxLabPlugin { config });
+    .add_plugins(VfxLabPlugin { config })
+    // Hanabi itself is installed in `finish` only on a compute-capable GPU (BRL-0161); the lab's
+    // particle clock exists either way so pausing works before and without it.
+    .init_resource::<Time<EffectSimulation>>();
     if initially_paused {
         app.world_mut()
             .resource_mut::<Time<EffectSimulation>>()

@@ -4,6 +4,7 @@ mod aim_preview;
 mod common;
 mod concealment_style;
 mod cone_spray;
+mod cpu_particles;
 mod dash_style;
 mod effects;
 mod elemental_style;

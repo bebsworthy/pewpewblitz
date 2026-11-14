@@ -209,6 +209,20 @@ target without tonemapping, grading, or bloom, so HUD colors are exact. Offscree
 grading without HDR or bloom. Unlit materials ignore `emissive`, so unlit glows carry their HDR
 value in `base_color`.
 
+**Quality tiers (BRL-0161).** The world presentation runs at one of three tiers authored in
+`assets/catalogs/render_quality.ron` (client-only, outside the gameplay fingerprint): `High` is the
+look described above (MSAA 4, HDR, bloom, arena shadow maps, foliage sway, Hanabi particles);
+`Medium` turns off MSAA, bloom, and shadow maps; `Low` also drops HDR (tonemapping and grading then
+run in the material shaders), foliage sway, and GPU particles. Outlines, the toon material, and
+contact shadows stay on in every tier because they carry readability. The player's Settings >
+Display > Graphics quality chip cycles Auto/Low/Medium/High; Auto resolves from capability detected
+once the render device exists: no compute-capable GPU particles selects `Low`, Android selects
+`Medium`, anything else `High`. The selected tier and its reason are logged. Code owns the ceilings
+(MSAA at most 4 samples, bloom requires HDR). On Android the entry crate additionally votes 60 Hz for
+the game surface, limits Bevy's compute pool to two workers, and reports each frame to an Android
+Dynamic Performance Framework hint session (16.7 ms target), which is what lets the Pixel 8a hold
+60 FPS; see BRL-0161 for the measurements.
+
 The playable floor (`presentation_3d/floor_tiles.rs`) is one generated mesh with one quad per
 authoritative map cell, so tile seams always coincide with the gameplay grid. Each theme's `floor`
 block in `assets/catalogs/map_presentation_themes.ron` sets two close tones (validated to differ by
@@ -571,6 +585,15 @@ bursts. Fire lobbed projectiles additionally demonstrate the bounded rate-emitte
 spawn at the moving projectile in global simulation space, remain behind to expand and fade, stop
 emitting when the projectile disappears, and retain the emitter only for the authored particle
 lifetime. Both modes share the global emitter cap and deterministic CPU seed contract.
+
+Hanabi needs compute shaders, vertex-stage storage buffers, and indirect execution, so the adapter
+installs it in `Plugin::finish` only when the detected GPU supports them (never on GL).
+Otherwise, or when the quality tier selects the CPU backend, burst layers use a non-compute
+fallback behind the same recipe boundary: at most ten seeded mesh particles per burst with the
+layer's mesh, a flat profile color, acceleration, lifetime, and size curve, simulated on the CPU and
+despawned with their effect root, counted against the same emitter cap. The decorative rate-based
+smoke trail is skipped in the fallback. `BRAWLER_FORCE_PARTICLE_FALLBACK=1` exercises the
+incapable-GPU path on a desktop for verification.
 
 Lobbed landings retain the largest authored area-target radius with the cached attack style. The
 landing cue projects that radius into a circle signature and selects a carrier-specific explosion

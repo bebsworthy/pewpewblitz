@@ -19,6 +19,11 @@ bevy = { version = "=0.19.1", default-features = false, features = [
   "android-game-activity",
   "touch",
 ] }
+# `ANativeWindow_setFrameRate` for the 60 FPS cap (BRL-0161). Already in the graph through
+# android-activity; this only enables the native-window API at the shell's minimum SDK (31).
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"
+ndk = { version = "=0.9.0", default-features = false, features = ["nativewindow", "api-level-30"] }
 
 [lints.rust]
 unused_qualifications = "warn"

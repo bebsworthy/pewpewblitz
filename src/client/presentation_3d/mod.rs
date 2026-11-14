@@ -37,6 +37,7 @@ mod map;
 mod map_editor;
 mod map_palette_preview;
 mod object_health;
+pub(in crate::client) mod render_quality;
 mod toon;
 mod world_look;
 mod zombie;
@@ -378,6 +379,8 @@ impl Plugin for WorldPresentationPlugin {
         contact_shadow::install(app);
         app.add_plugins((
             vfx::ProductionVfxPlugin,
+            // Detects capability in `finish` before the particle adapter decides on Hanabi.
+            render_quality::RenderQualityPlugin,
             VfxParticleAdapterPlugin,
             combat::FireAreaMaterialPlugin,
             combat::ElementalSupportAreaMaterialPlugin,
@@ -1619,6 +1622,7 @@ pub(in crate::client) fn setup_3d_foundation(
             ..default()
         },
         world_look::hud_camera_look(),
+        render_quality::WorldHudCamera,
         RenderLayers::layer(31),
     ));
     commands.spawn((
