@@ -212,3 +212,6 @@ Awaiting owner playtest.
 # Owner feedback (2026-11-14)
 
 UI sounds accepted: the owner said "all UI sounds are ok" after a `just client` playtest. Per-weapon combat sounds and music still need owner feedback before this ticket closes.
+
+
+Owner closed the ticket on 2026-11-14 ("mark it done"), accepting the per-weapon combat sounds and music as shipped.

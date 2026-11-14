@@ -4,9 +4,9 @@ was: BRL-0158
 
 title: 'Expand audio to per-weapon combat sounds, UI sounds, and music'
 
-status: doing
-closed:
-status_changed: 2026-11-13T13:06:23Z
+status: done
+closed: 2026-11-14T21:08:11Z
+status_changed: 2026-11-14T21:08:11Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-ek8p]
 
 parent: BRL-q5c4
 
-rank: 11730944
+rank:
 ---
 
 # Description
