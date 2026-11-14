@@ -210,10 +210,14 @@ pub(in crate::client) fn drive_routed_transition(
                 time.elapsed().saturating_add(config.connect_timeout),
             ));
             commands.trigger(Disconnect { entity });
-        } else if disconnected.is_some() && status.disconnect_requested {
+        } else if disconnected.is_some() {
             // Netcode's `Disconnect` deliberately leaves the underlying Link established. Wait
             // one frame so its disconnect datagrams can flush through PostUpdate, then close the
             // routed socket and expose `Unlinked` to the deferred teardown observer below.
+            // A session that was already lost (Netcode keep-alive timeout after a network gap,
+            // BRL-0162) has no requested disconnect; it must still reach `Unlinked`, or the
+            // product shell would wait forever for the fresh lobby generation.
+            status.disconnect_requested = true;
             commands.trigger(Unlink {
                 entity,
                 reason: UnlinkReason::UserRequested(None),
@@ -283,6 +287,7 @@ pub(super) fn advance_routed_transition(
                 &mut commands,
                 config,
                 time.elapsed(),
+                super::ROUTED_SESSION_TIMEOUT,
                 Some((
                     io,
                     RoutedClientSession {
@@ -304,6 +309,7 @@ pub(super) fn advance_routed_transition(
                 &mut commands,
                 config,
                 time.elapsed(),
+                super::ROUTED_SESSION_TIMEOUT,
                 Some((
                     RoutedUdpIo::lobby(config.server_addr),
                     RoutedClientSession {
@@ -425,6 +431,50 @@ mod transition_tests {
     use bevy::{ecs::system::RunSystemOnce, prelude::*};
     use brawler_routing::{AllocationId, MatchId, PeerId, RequestId, RouteId};
     use lightyear::prelude::PeerAddr;
+
+    #[derive(Resource, Default)]
+    struct UnlinkCount(usize);
+
+    /// BRL-0162: a match session lost to the Netcode keep-alive timeout was never asked to
+    /// disconnect. The return-to-lobby transition must still close its link so the fresh lobby
+    /// generation can start.
+    #[test]
+    fn timed_out_match_session_is_unlinked_for_the_lobby_return() {
+        let mut config = ClientNetworkConfig::new(7);
+        config.transport = NetworkTransport::RoutedUdp;
+        let mut world = World::new();
+        world.insert_resource(config);
+        world.insert_resource(Time::<Real>::default());
+        world.insert_resource(RoutedClientLifecycle {
+            phase: RoutedClientPhase::AwaitingMatchUnlink,
+            ..RoutedClientLifecycle::default()
+        });
+        world.init_resource::<UnlinkCount>();
+        world.add_observer(|_: On<Unlink>, mut count: ResMut<UnlinkCount>| count.0 += 1);
+        let entity = world
+            .spawn((
+                RoutedClientSession {
+                    generation: 2,
+                    kind: RoutedClientSessionKind::Match,
+                },
+                ClientJoinStatus {
+                    phase: ClientJoinPhase::Disconnected,
+                    started_at: core::time::Duration::ZERO,
+                    disconnect_requested: false,
+                },
+                Disconnected::default(),
+            ))
+            .id();
+        world.run_system_once(drive_routed_transition).unwrap();
+        world.flush();
+        assert_eq!(world.resource::<UnlinkCount>().0, 1);
+        assert!(
+            world
+                .get::<ClientJoinStatus>(entity)
+                .unwrap()
+                .disconnect_requested
+        );
+    }
 
     #[test]
     fn product_handoff_and_return_keep_runtime_endpoint_and_identity() {

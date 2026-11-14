@@ -639,7 +639,10 @@ fn match_failure_and_fresh_lobby_return_preserve_result_and_one_shot_error_paths
     assert_eq!(commit.overlay, Some(OverlayCommit::Clear));
     let error = commit.error.as_ref().unwrap();
     assert_eq!(error.kind, FlowErrorKind::Connection);
-    assert_eq!(error.message, "The match server stopped unexpectedly");
+    assert_eq!(
+        error.message,
+        "The connection to the match was lost, and the match could not be resumed."
+    );
     assert_eq!(error.return_flow, ClientFlow::Dashboard);
     assert_eq!(error.actions, [Some(FlowErrorAction::Back), None]);
     assert_eq!(
@@ -3431,4 +3434,81 @@ fn player_path_screens_keep_every_control_reachable_on_a_landscape_phone() {
     inject_action(&mut app, FlowUiAction::CancelGameType);
     inject_action(&mut app, FlowUiAction::OpenPracticeMaps);
     assert_phone_reachable(&mut app, "Practice maps");
+}
+
+/// BRL-0199 / BRL-0162: after a completed or lost match the client opens a fresh lobby session
+/// while the match screen is still presented. If that lobby attempt fails, the real observation
+/// path must leave MATCH COMPLETE for the recoverable connection error (Retry / Change Server).
+#[test]
+fn failed_lobby_return_during_match_presentation_shows_recoverable_connection_error() {
+    for (match_lost, expected) in [
+        (
+            false,
+            "Could not reconnect to the lobby after the match. Check your network, then retry.",
+        ),
+        (
+            true,
+            "The connection to the match was lost and the lobby could not be reached. Check your network, then retry.",
+        ),
+    ] {
+        let mut app = flow_test_app_with(|app| {
+            app.init_resource::<crate::client::ClientInputContext>();
+        });
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Match);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<ClientFlow>>().get(),
+            ClientFlow::Match
+        );
+        app.world_mut().resource_mut::<MatchFailureNotice>().0 = match_lost;
+        let generation = {
+            let mut routed = app.world_mut().resource_mut::<RoutedClientLifecycle>();
+            routed.start_lobby();
+            routed.start_lobby();
+            routed.start_lobby();
+            routed.generation
+        };
+        let lobby = app
+            .world_mut()
+            .spawn((
+                Client,
+                RoutedClientSession {
+                    generation,
+                    kind: super::super::RoutedClientSessionKind::Lobby,
+                },
+                ClientJoinStatus {
+                    phase: ClientJoinPhase::Disconnected,
+                    started_at: Duration::ZERO,
+                    disconnect_requested: false,
+                },
+            ))
+            .id();
+        app.update();
+        app.update();
+
+        let ClientOverlay::Error(error) = app.world().resource::<ClientOverlay>().clone() else {
+            panic!("a failed lobby return must show the connection error");
+        };
+        assert_eq!(error.kind, FlowErrorKind::Connection);
+        assert_eq!(error.message, expected);
+        assert_eq!(
+            error.actions,
+            [
+                Some(FlowErrorAction::RetryConnection),
+                Some(FlowErrorAction::Back),
+            ]
+        );
+        assert_eq!(
+            *app.world().resource::<State<ClientFlow>>().get(),
+            ClientFlow::ServerSelect
+        );
+        assert!(app.world().get_entity(lobby).is_err());
+        assert_eq!(
+            app.world().resource::<RoutedClientLifecycle>().phase,
+            RoutedClientPhase::Disabled
+        );
+        assert!(!app.world().resource::<MatchFailureNotice>().0);
+    }
 }

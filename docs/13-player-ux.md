@@ -554,7 +554,10 @@ The Tab/menu scoreboard and the waiting and results panels remain on-demand over
 Errors map structured causes to the nearest honest action:
 
 - invalid address, display name, or local file → correct locally or restore safe defaults;
-- DNS or transport timeout → retry the same server or use Server Select;
+- DNS or transport timeout → retry the same server or use Server Select; a no-reply failure also
+  says that some networks block the UDP traffic the game uses;
+- network gap during a session → keep the same session for up to the 10 s routed session bound
+  (see [network-change continuity](./14-multiplayer-server-architecture.md#network-change-continuity));
 - protocol or content mismatch → explain incompatibility without automatic retry loops;
 - server full or game type temporarily unavailable → preserve a valid lobby and return to the
   invoking Dashboard or Results context;
@@ -564,7 +567,8 @@ Errors map structured causes to the nearest honest action:
 - formation or check-in failure → explain whether the ticket was restored or removed before
   changing presentation;
 - match disconnect → explain that the match cannot currently resume, then attempt a fresh lobby or
-  offer Server Select;
+  offer Server Select; if that fresh lobby attempt also fails while the match is still presented,
+  show the recoverable connection error (Retry / Change Server) rather than staying on the match;
 - server shutdown or lost lobby → clear connected state and return to Server Select without treating
   the event as an application crash.
 

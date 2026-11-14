@@ -40,6 +40,7 @@ mod connection;
 mod match_commands;
 mod observation;
 mod routing;
+mod suspension;
 
 use admission::{
     process_join_outcome, process_lobby_server_identity, record_client_failure, send_client_hello,
@@ -105,6 +106,14 @@ fn configure_client_session_schedule(app: &mut App) {
     );
 }
 
+/// Keep-alive bound for routed sessions created by a routed transition (the match session and
+/// the fresh lobby after it). It equals the supervisor's idle revocation of an active capability,
+/// so a network gap shorter than this keeps the same Netcode session, fighter, and route, and a
+/// longer gap is declared lost by every party at about the same time. This is the agreed
+/// mobile network-change bound (BRL-0162).
+pub(super) const ROUTED_SESSION_TIMEOUT: Duration =
+    Duration::from_millis(brawler_routing::CAPABILITY_IDLE_MILLIS);
+
 /// Deadline for an intentional routed session teardown. A normal teardown reaches `Unlinked`
 /// quickly; if lifecycle markers never arrive, this bounded fallback lets the next generation
 /// recover instead of leaving the client permanently in an awaiting phase.
@@ -149,6 +158,8 @@ fn install_session_state(app: &mut App) {
         .init_resource::<ClientInputSettings>()
         .init_resource::<InputSettingsSelection>()
         .init_resource::<RoutedClientLifecycle>()
+        .init_resource::<suspension::SuspendedSince>()
+        .add_message::<bevy::window::AppLifecycle>()
         .init_resource::<ClientMatchResultState>()
         .init_resource::<ClientProfileIdentityState>()
         .init_resource::<crate::diagnostics::ProcessExitClassification>();
@@ -197,6 +208,11 @@ fn configure_automation_drivers(app: &mut App) {
         FixedUpdate,
         advance_headless_automation.in_set(crate::gameplay::GameplaySet::Finalize),
     )
+    .init_resource::<automation::NetworkChangeSmoke>()
+    .add_systems(
+        Update,
+        automation::drive_network_change_smoke.in_set(ClientSessionSet::Observe),
+    )
     .add_systems(
         Update,
         automation::finish_product_match_smoke
@@ -239,7 +255,12 @@ fn configure_network_session_systems(app: &mut App) {
     )
     .add_systems(
         Update,
-        enforce_routed_timeout.in_set(ClientSessionSet::EnforceTransition),
+        (
+            suspension::expire_sessions_after_long_suspension,
+            enforce_routed_timeout,
+        )
+            .chain()
+            .in_set(ClientSessionSet::EnforceTransition),
     )
     .add_systems(
         Update,

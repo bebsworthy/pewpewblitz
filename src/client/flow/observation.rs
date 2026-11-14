@@ -55,14 +55,24 @@ fn take_global_observation(
     }
 }
 
+/// State of the fresh lobby session that follows a completed or lost match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LobbyReturn {
+    NotObserved,
+    Accepted,
+    Failed,
+}
+
 fn observe_match_scope(
     flow: ClientFlow,
-    fresh_lobby_return: bool,
+    lobby_return: LobbyReturn,
     match_failed: bool,
     countdown_observed: bool,
 ) -> ObservationScope {
-    if flow == ClientFlow::Match && fresh_lobby_return {
+    if flow == ClientFlow::Match && lobby_return == LobbyReturn::Accepted {
         ObservationScope::Complete(Some(SessionObservation::FreshLobbyReturn))
+    } else if flow == ClientFlow::Match && lobby_return == LobbyReturn::Failed {
+        ObservationScope::Complete(Some(SessionObservation::LobbyReturnFailed))
     } else if flow == ClientFlow::Match && match_failed {
         ObservationScope::Complete(Some(SessionObservation::MatchFailed))
     } else if flow == ClientFlow::MatchLoading {
@@ -180,9 +190,21 @@ pub(super) fn observe_session(
                 | crate::matchplay::MatchPhase::Completed { .. }
         )
     });
+    let lobby_disconnected_for_generation = statuses.iter().any(|(status, session)| {
+        session.kind == RoutedClientSessionKind::Lobby
+            && session.generation == routed.generation
+            && matches!(status.phase, ClientJoinPhase::Disconnected)
+    });
+    let lobby_return = if memberships.iter().next().is_some() && lobby_active_for_generation {
+        LobbyReturn::Accepted
+    } else if routed.phase == RoutedClientPhase::Lobby && lobby_disconnected_for_generation {
+        LobbyReturn::Failed
+    } else {
+        LobbyReturn::NotObserved
+    };
     match observe_match_scope(
         *flow.get(),
-        memberships.iter().next().is_some() && lobby_active_for_generation,
+        lobby_return,
         routed.phase == RoutedClientPhase::Match
             && result_state.context.is_none()
             && match_disconnected_for_generation,
@@ -204,11 +226,6 @@ pub(super) fn observe_session(
         return;
     }
 
-    let lobby_disconnected_for_generation = statuses.iter().any(|(status, session)| {
-        session.kind == RoutedClientSessionKind::Lobby
-            && session.generation == routed.generation
-            && matches!(status.phase, ClientJoinPhase::Disconnected)
-    });
     match observe_lobby_scope(*flow.get(), lobby_disconnected_for_generation, &mut queue) {
         ObservationScope::Continue => {}
         ObservationScope::Complete(observation) => {
@@ -251,12 +268,29 @@ mod tests {
     #[test]
     fn match_observation_prefers_fresh_lobby_return_over_match_failure() {
         assert!(matches!(
-            observe_match_scope(ClientFlow::Match, true, true, false),
+            observe_match_scope(ClientFlow::Match, LobbyReturn::Accepted, true, false),
             ObservationScope::Complete(Some(SessionObservation::FreshLobbyReturn))
         ));
         assert!(matches!(
-            observe_match_scope(ClientFlow::MatchLoading, false, false, false),
+            observe_match_scope(
+                ClientFlow::MatchLoading,
+                LobbyReturn::NotObserved,
+                false,
+                false
+            ),
             ObservationScope::Complete(None)
+        ));
+    }
+
+    #[test]
+    fn failed_lobby_return_during_match_presentation_is_observed_before_match_failure() {
+        assert!(matches!(
+            observe_match_scope(ClientFlow::Match, LobbyReturn::Failed, true, false),
+            ObservationScope::Complete(Some(SessionObservation::LobbyReturnFailed))
+        ));
+        assert!(matches!(
+            observe_match_scope(ClientFlow::Dashboard, LobbyReturn::Failed, false, false),
+            ObservationScope::Continue
         ));
     }
 

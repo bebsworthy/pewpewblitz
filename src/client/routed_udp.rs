@@ -14,7 +14,7 @@ use std::{
 use bevy::{
     app::{App, Plugin, PostUpdate, PreUpdate},
     ecs::prelude::*,
-    log::warn,
+    log::{info, warn},
 };
 use brawler_routing::{PUBLIC_MAX_DATAGRAM_BYTES, PublicEnvelope, ROUTED_LINK_MTU, RouteSelector};
 use lightyear::prelude::LocalAddr;
@@ -37,6 +37,28 @@ const MAX_RECEIVED_DATAGRAMS_PER_UPDATE: usize = 64;
 /// remain.
 const MAX_PENDING_SEND_PAYLOADS: usize = 128;
 
+/// Socket errors that mean "the local network cannot carry this datagram right now" rather than
+/// "this socket is broken". Mobile network changes (Wi-Fi off, handover to cellular, address
+/// changes) surface as these on send or receive; they are treated as UDP packet loss so the
+/// Netcode session can ride out the gap and the supervisor's capability rebind can follow a new
+/// source address. Netcode's keep-alive timeout remains the authority for declaring loss.
+fn is_transient_network_error(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::NetworkUnreachable
+            | ErrorKind::HostUnreachable
+            | ErrorKind::NetworkDown
+            | ErrorKind::AddrNotAvailable
+            | ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::NotConnected
+            | ErrorKind::PermissionDenied
+            | ErrorKind::TimedOut
+            | ErrorKind::Interrupted
+    )
+}
+
 fn routed_link() -> Link {
     Link::default().with_mtu(LinkMtu::new(ROUTED_LINK_MTU))
 }
@@ -54,17 +76,27 @@ pub struct RoutedUdpIo {
     public_peer: SocketAddr,
     selector: RouteSelector,
     pending_sends: VecDeque<SendPayload>,
+    /// True while the local network refuses datagrams. Only used to log one warning per outage
+    /// and one recovery line; Netcode's keep-alive timeout still decides whether the session is
+    /// lost.
+    network_unavailable: bool,
+    /// Automation-only rehearsal of a dead network: every datagram is dropped at the socket.
+    #[cfg(feature = "automation")]
+    simulated_outage: bool,
 }
 
 impl fmt::Debug for RoutedUdpIo {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut formatter = formatter.debug_struct("RoutedUdpIo");
         formatter
-            .debug_struct("RoutedUdpIo")
             .field("public_peer", &self.public_peer)
             .field("selector", &self.selector)
             .field("bound", &self.socket.is_some())
             .field("pending_sends", &self.pending_sends.len())
-            .finish()
+            .field("network_unavailable", &self.network_unavailable);
+        #[cfg(feature = "automation")]
+        formatter.field("simulated_outage", &self.simulated_outage);
+        formatter.finish()
     }
 }
 
@@ -92,6 +124,9 @@ impl RoutedUdpIo {
             public_peer,
             selector,
             pending_sends: VecDeque::new(),
+            network_unavailable: false,
+            #[cfg(feature = "automation")]
+            simulated_outage: false,
         }
     }
 
@@ -118,6 +153,54 @@ impl RoutedUdpIo {
         self.socket
             .as_ref()
             .and_then(|socket| socket.local_addr().ok())
+    }
+
+    /// Record a transient network failure; the first one of an outage is logged.
+    fn note_network_unavailable(&mut self, operation: &str, error: &std::io::Error) {
+        if !self.network_unavailable {
+            self.network_unavailable = true;
+            warn!(
+                operation,
+                %error,
+                "routed UDP network unavailable; keeping the session while Netcode waits"
+            );
+        }
+    }
+
+    fn note_network_available(&mut self) {
+        if core::mem::take(&mut self.network_unavailable) {
+            info!("routed UDP network available again");
+        }
+    }
+
+    /// Automation-only network-change rehearsal: drop every datagram in both directions, as a
+    /// phone between networks would.
+    #[cfg(feature = "automation")]
+    pub(crate) fn set_simulated_outage(&mut self, outage: bool) {
+        self.simulated_outage = outage;
+    }
+
+    /// Automation-only network-change rehearsal: replace the socket with a fresh one bound to the
+    /// same configured local address (port 0 yields a new source port), as a NAT rebinding or a
+    /// network switch would. The link and Netcode session are untouched.
+    #[cfg(feature = "automation")]
+    pub(crate) fn rebind_socket(&mut self, local_addr: SocketAddr) -> std::io::Result<SocketAddr> {
+        let socket = UdpSocket::bind(local_addr)?;
+        socket.set_nonblocking(true)?;
+        let bound = socket.local_addr()?;
+        self.socket = Some(socket);
+        Ok(bound)
+    }
+
+    #[cfg(feature = "automation")]
+    const fn outage_simulated(&self) -> bool {
+        self.simulated_outage
+    }
+
+    #[cfg(not(feature = "automation"))]
+    #[allow(clippy::unused_self)]
+    const fn outage_simulated(&self) -> bool {
+        false
     }
 
     #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
@@ -207,15 +290,20 @@ impl RoutedUdpIo {
                         let Ok(envelope) = PublicEnvelope::decode(&buffer[..length]) else {
                             continue;
                         };
-                        if envelope.selector() != &selector {
+                        if envelope.selector() != &selector || routed.outage_simulated() {
                             continue;
                         }
                         // BufferToLink runs before LinkPlugin's conditioner stage.  Pushing
                         // through `push` preserves configured delay/loss semantics.
                         link.recv
                             .push(RecvPayload::from(envelope.payload()), Instant::now());
+                        routed.note_network_available();
                     }
                     Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                    Err(error) if is_transient_network_error(error.kind()) => {
+                        routed.note_network_unavailable("receive", &error);
+                        break;
+                    }
                     Err(error) => {
                         warn!("routed UDP receive failed: {error}");
                         commands.trigger(Unlink {
@@ -243,6 +331,9 @@ impl RoutedUdpIo {
                 continue;
             };
             let dropped = Self::absorb_post_netcode_payloads(&mut link, &mut routed.pending_sends);
+            if routed.outage_simulated() {
+                routed.pending_sends.clear();
+            }
             if dropped > 0 {
                 warn!(
                     dropped,
@@ -266,8 +357,15 @@ impl RoutedUdpIo {
                         routed.pending_sends.push_front(payload);
                         break;
                     }
-                    Ok(_) => {}
-                    Err(_) => {
+                    Ok(_) => routed.note_network_available(),
+                    Err(error) if is_transient_network_error(error.kind()) => {
+                        // UDP loss semantics: drop this datagram and keep the socket, link, and
+                        // Netcode session. Later payloads are still attempted every frame so
+                        // the session resumes as soon as the network carries them again.
+                        routed.note_network_unavailable("send", &error);
+                    }
+                    Err(error) => {
+                        warn!("routed UDP send failed: {error}");
                         commands.trigger(Unlink {
                             entity,
                             reason: UnlinkReason::TransportError(
@@ -542,6 +640,58 @@ mod tests {
         assert_eq!(pending.len(), MAX_PENDING_SEND_PAYLOADS);
         assert_eq!(pending.front().unwrap().as_ref(), &[0, 1]);
         assert_eq!(pending.back().unwrap().as_ref(), &max_pending.to_be_bytes());
+    }
+
+    #[test]
+    fn transient_network_errors_are_packet_loss_and_others_are_fatal() {
+        for kind in [
+            ErrorKind::NetworkUnreachable,
+            ErrorKind::HostUnreachable,
+            ErrorKind::NetworkDown,
+            ErrorKind::AddrNotAvailable,
+            ErrorKind::ConnectionRefused,
+            ErrorKind::PermissionDenied,
+            ErrorKind::TimedOut,
+        ] {
+            assert!(is_transient_network_error(kind), "{kind:?}");
+        }
+        for kind in [
+            ErrorKind::InvalidInput,
+            ErrorKind::AddrInUse,
+            ErrorKind::Unsupported,
+            ErrorKind::WouldBlock,
+        ] {
+            assert!(!is_transient_network_error(kind), "{kind:?}");
+        }
+    }
+
+    /// macOS reports EADDRNOTAVAIL when the route to the peer disappears for the bound address,
+    /// the same class of failure a phone sees while its network is switching. The session must
+    /// keep its socket and link and keep attempting later payloads.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn unreachable_peer_keeps_socket_and_link_through_send_failures() {
+        let peer = "192.0.2.1:9".parse().unwrap();
+        let (mut app, entity) = app_with_link_at(
+            "127.0.0.1:0".parse().unwrap(),
+            peer,
+            RouteSelector::DefaultLobby,
+        );
+        let local = bound_addr(&app, entity);
+        for value in 0..3_u8 {
+            app.world_mut()
+                .get_mut::<Link>(entity)
+                .unwrap()
+                .send
+                .push(SendPayload::from(vec![value]));
+            app.update();
+        }
+        assert!(app.world().get::<Unlinked>(entity).is_none());
+        assert!(app.world().get::<Linked>(entity).is_some());
+        let io = app.world().get::<RoutedUdpIo>(entity).unwrap();
+        assert_eq!(io.local_addr(), Some(local));
+        assert!(io.network_unavailable);
+        assert!(io.pending_sends.is_empty());
     }
 
     #[test]

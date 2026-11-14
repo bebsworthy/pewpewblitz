@@ -143,6 +143,9 @@ pub(super) enum SessionObservation {
     CountdownObserved,
     FreshLobbyReturn,
     MatchFailed,
+    /// The fresh lobby session after a completed or lost match failed while the flow still
+    /// presents the match.
+    LobbyReturnFailed,
     PracticeRejected(crate::lobby::PracticeStartRejection),
 }
 

@@ -61,6 +61,10 @@ zombie-e2e players="2":
 practice-e2e game_type="wipeout-1v1":
     ./scripts/e2e-practice.sh {{game_type}}
 
+# Keep one routed Practice match session alive across a 4 s outage and a new client source port.
+network-change-e2e game_type="wipeout-1v1":
+    ./scripts/e2e-network-change.sh {{game_type}}
+
 # Record one bounded routed release-client render report plus paired PNG/JSON captures at 1280x720.
 v3-render-evidence report="target/v3-render-evidence.txt":
     ./scripts/v3-render-evidence.sh {{report}}

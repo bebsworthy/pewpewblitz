@@ -5,14 +5,14 @@ status: todo
 theme:
 release:
 created: 2026-11-13T21:52:36Z
-modified: 2026-11-13T21:52:44Z
+modified: 2026-11-14T01:48:54Z
 closed:
 status_changed: 2026-11-13T21:52:36Z
 history:
 - todo@2026-11-13T21:52:36Z
-revision: 62d6a59788935ec7
+revision: 6708a5224837574a
 blocks: []
-related: [BRL-0196]
+related: [BRL-0162, BRL-0196]
 parent: BRL-0171
 ---
 

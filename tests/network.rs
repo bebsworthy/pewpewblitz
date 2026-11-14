@@ -110,5 +110,7 @@ mod movement_input;
 mod prediction;
 #[path = "network/queue.rs"]
 mod queue;
+#[path = "network/session_continuity.rs"]
+mod session_continuity;
 #[path = "network/soaks.rs"]
 mod soaks;

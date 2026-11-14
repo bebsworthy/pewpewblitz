@@ -104,6 +104,26 @@ later fails. Capabilities therefore require scope, expiry, revocation, replay po
 rate limits. Compromise of both routing and Netcode credentials is outside the protection offered
 by this separation.
 
+## Network-change continuity
+
+A phone that changes networks or briefly loses connectivity keeps its existing session rather
+than reconnecting. The client transport treats transient socket errors (unreachable network or
+host, network down, address unavailable, refused/reset, permission denied, timed out) as UDP
+packet loss and keeps its wildcard-bound socket and Lightyear link. When traffic resumes, the OS
+selects the new source address and the supervisor's capability rebind (at most two source changes
+per 10 s; the newest source receives outbound traffic) follows it, while the match worker keys the
+peer by route and peer identity, never by address. Lobby routes are keyed by source address, so a
+lobby session survives a gap at the same address but not an address change.
+
+Routed sessions created by a routed transition use a 10 s Netcode connect-token timeout, equal to
+the supervisor's idle revocation of an active capability (`CAPABILITY_IDLE_MILLIS`). Netcode applies
+the token timeout on both ends, so a gap shorter than 10 s keeps the same session, fighter, and
+route, and a longer gap (including app suspension) is declared lost by every party at about the
+same time. A lost match session returns the client to a fresh lobby and Dashboard with an
+explanation; a match session is not resumed after that bound. Returning to a previously seen
+source address, post-timeout match rejoin, and a non-UDP fallback transport are not part of this
+contract.
+
 ## Routed packet transport
 
 Lightyear 0.29 exposes `Link` as its transport-neutral boundary: concrete IO pushes opaque received

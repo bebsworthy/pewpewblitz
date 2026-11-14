@@ -300,6 +300,9 @@ pub struct ClientNetworkConfig {
     /// Headless M06 evidence: complete a product match, return through Results, submit Queue Again,
     /// and exit only after the fresh queue Join is accepted.
     pub product_requeue_smoke: bool,
+    /// Headless BRL-0162 evidence: during the Practice match, drop all traffic for a few seconds,
+    /// move to a new local source port, and exit only after the same match session resumes.
+    pub product_network_change_smoke: bool,
     pub product_match_players_per_team: u8,
     pub product_match_game_type: Option<crate::lobby::GameTypeId>,
     pub headless_move: Option<(i8, i8)>,
@@ -402,6 +405,7 @@ impl ClientNetworkConfig {
             product_match_smoke: false,
             product_practice_smoke: false,
             product_requeue_smoke: false,
+            product_network_change_smoke: false,
             product_match_players_per_team: 2,
             product_match_game_type: None,
             headless_move: None,
@@ -528,6 +532,9 @@ impl ClientNetworkConfig {
         }
         if self.product_practice_smoke && !self.product_match_smoke {
             return Err("--product-practice-smoke requires product match automation".to_string());
+        }
+        if self.product_network_change_smoke && !self.product_practice_smoke {
+            return Err("--product-network-change-smoke requires Practice automation".to_string());
         }
         Ok(())
     }

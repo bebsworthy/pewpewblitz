@@ -31,6 +31,7 @@ pub(super) fn spawn_client_connection(
             &mut commands,
             &config,
             time.elapsed(),
+            config.connect_timeout,
             Some((
                 RoutedUdpIo::lobby(config.server_addr),
                 RoutedClientSession {
@@ -54,7 +55,13 @@ pub(super) fn spawn_client_connection(
     if config.transport != NetworkTransport::Udp {
         return Ok(());
     }
-    spawn_client_entity(&mut commands, &config, time.elapsed(), None)?;
+    spawn_client_entity(
+        &mut commands,
+        &config,
+        time.elapsed(),
+        config.connect_timeout,
+        None,
+    )?;
     info!(
         mode = "client",
         version = VERSION,
@@ -68,10 +75,15 @@ pub(super) fn spawn_client_connection(
 
 /// Spawn exactly one fresh Lightyear client entity. `routed` is either a lobby/match adapter and
 /// generation marker or `None` for the unchanged direct-UDP baseline.
+///
+/// `netcode_timeout` becomes the connect token's timeout. With manual authentication Netcode
+/// applies that value on both ends, so it is the keep-alive bound after which a silent session
+/// (for example a phone between networks) is declared lost by client and server alike.
 pub(super) fn spawn_client_entity(
     commands: &mut Commands,
     config: &ClientNetworkConfig,
     started_at: Duration,
+    netcode_timeout: Duration,
     routed: Option<(RoutedUdpIo, RoutedClientSession)>,
 ) -> Result<Entity> {
     let auth = Authentication::Manual {
@@ -80,14 +92,14 @@ pub(super) fn spawn_client_entity(
         private_key: crate::protocol::DEVELOPMENT_PRIVATE_KEY,
         protocol_id: config.network_protocol_id,
     };
-    let netcode_config =
-        NetcodeConfig {
-            client_timeout_secs: config.connect_timeout.as_secs().try_into().map_err(
-                |_| "client connect timeout does not fit in Netcode's i32 seconds field",
-            )?,
-            token_expire_secs: -1,
-            ..default()
-        };
+    let netcode_config = NetcodeConfig {
+        client_timeout_secs: netcode_timeout
+            .as_secs()
+            .try_into()
+            .map_err(|_| "client connect timeout does not fit in Netcode's i32 seconds field")?,
+        token_expire_secs: -1,
+        ..default()
+    };
     let netcode = NetcodeClient::new(auth, netcode_config)?;
     let status = ClientJoinStatus {
         phase: ClientJoinPhase::Connecting,
@@ -194,6 +206,7 @@ pub(in crate::client) fn spawn_product_lobby_connection(
         commands,
         &attempt_config,
         attempt.started_at,
+        attempt_config.connect_timeout,
         Some((
             RoutedUdpIo::lobby(attempt.server_addr),
             RoutedClientSession {

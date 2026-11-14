@@ -94,7 +94,9 @@ pub(super) fn resolve_observation(
             if core::mem::take(&mut match_failure.0) {
                 commit.error = Some(FlowError {
                     kind: FlowErrorKind::Connection,
-                    message: "The match server stopped unexpectedly".to_string(),
+                    message:
+                        "The connection to the match was lost, and the match could not be resumed."
+                            .to_string(),
                     return_flow: ClientFlow::Dashboard,
                     actions: [Some(FlowErrorAction::Back), None],
                 });

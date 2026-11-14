@@ -102,6 +102,25 @@ fn impair_packets(
     }
 }
 
+/// Marks a client entity or server link whose inbound datagrams are dropped, rehearsing a phone
+/// whose network has gone away. Marking both ends of one connection is a full two-way outage.
+#[derive(bevy::prelude::Component)]
+pub(super) struct LinkBlackout;
+
+fn drop_blackout_packets(mut links: Query<&mut Link, With<LinkBlackout>>) {
+    for mut link in &mut links {
+        link.recv.drain().for_each(drop);
+    }
+}
+
+fn blackout_systems() -> bevy::ecs::schedule::ScheduleConfigs<bevy::ecs::system::ScheduleSystem> {
+    // Netcode decrypts and timestamps inbound datagrams in ConnectionSystems::Receive, so the
+    // outage must drop them before that stage.
+    drop_blackout_packets
+        .after(LinkSystems::Receive)
+        .before(lightyear::connection::ConnectionSystems::Receive)
+}
+
 #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 fn activate_legacy_test_fighters(
     mut commands: bevy::prelude::Commands,
@@ -464,6 +483,7 @@ impl Harness {
             HarnessMode::HotZone => server.add_plugins(brawler::matchplay::HotZoneModePlugin),
             HarnessMode::Heist => server.add_plugins(brawler::matchplay::HeistModePlugin),
         };
+        server.add_systems(PreUpdate, blackout_systems());
         server.add_systems(
             bevy::prelude::Update,
             activate_legacy_test_fighters
@@ -543,6 +563,7 @@ impl Harness {
                         .after(LinkSystems::Receive)
                         .before(TransportSystems::Receive)
                         .before(MessageSystems::Receive),
+                    blackout_systems(),
                 ),
             );
         client.insert_resource(CaptureCombatCues::default());
@@ -641,6 +662,31 @@ impl Harness {
 
     /// Advance only the authoritative server after a client stops producing input.
     /// This models a lost-input interval while keeping the fixed simulation running.
+    /// Start or end a full two-way outage of one client's connection.
+    pub(super) fn set_link_blackout(&mut self, index: usize, blackout: bool) {
+        let client = self.client_entities[index];
+        let link = self.server_links[index];
+        if blackout {
+            self.clients[index]
+                .world_mut()
+                .entity_mut(client)
+                .insert(LinkBlackout);
+            self.server
+                .world_mut()
+                .entity_mut(link)
+                .insert(LinkBlackout);
+        } else {
+            self.clients[index]
+                .world_mut()
+                .entity_mut(client)
+                .remove::<LinkBlackout>();
+            self.server
+                .world_mut()
+                .entity_mut(link)
+                .remove::<LinkBlackout>();
+        }
+    }
+
     pub(super) fn step_server_only(&mut self) {
         self.now += SIMULATION_TICK;
         self.server

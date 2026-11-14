@@ -13,6 +13,7 @@ game_type=${BRAWLER_PRODUCT_GAME_TYPE:-}
 headless=${BRAWLER_NETWORK_HEADLESS:-1}
 requeue_smoke=${BRAWLER_PRODUCT_REQUEUE_SMOKE:-0}
 practice_smoke=${BRAWLER_PRODUCT_PRACTICE_SMOKE:-0}
+network_change_smoke=${BRAWLER_PRODUCT_NETWORK_CHANGE_SMOKE:-0}
 case "$headless" in
     0 | 1) ;;
     *)
@@ -31,6 +32,20 @@ case "$practice_smoke" in
     0 | 1) ;;
     *)
         echo "brawler product match: BRAWLER_PRODUCT_PRACTICE_SMOKE must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+case "$network_change_smoke" in
+    0) practice_flag=--product-practice-smoke ;;
+    1)
+        [ "$practice_smoke" = 1 ] || {
+            echo "brawler product match: BRAWLER_PRODUCT_NETWORK_CHANGE_SMOKE requires Practice smoke" >&2
+            exit 2
+        }
+        practice_flag=--product-network-change-smoke
+        ;;
+    *)
+        echo "brawler product match: BRAWLER_PRODUCT_NETWORK_CHANGE_SMOKE must be 0 or 1" >&2
         exit 2
         ;;
 esac
@@ -152,7 +167,7 @@ while [ "$index" -le "$client_count" ]; do
                 --transport routed-udp \
                 --auto-connect \
                 --headless \
-                --product-practice-smoke \
+                "$practice_flag" \
                 --product-game-type "$game_type" \
                 --weapon-preset 1 &
         elif [ "$requeue_smoke" = 1 ]; then
@@ -245,7 +260,9 @@ wait "$supervisor_pid"
 supervisor_pid=
 if [ "$headless" = 1 ]; then
     roster_count=$((client_count / roster_size))
-    if [ "$practice_smoke" = 1 ]; then
+    if [ "$network_change_smoke" = 1 ]; then
+        echo "brawler product match: Practice $game_type kept its match session across an outage and source-port change"
+    elif [ "$practice_smoke" = 1 ]; then
         echo "brawler product match: Practice $game_type reached Active with one human"
     elif [ "$requeue_smoke" = 1 ]; then
         echo "brawler product match: Results -> Queue Again received a fresh Joined outcome"

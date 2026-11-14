@@ -105,6 +105,35 @@ fn resolve_session_observation(
     local_failures: ClientLocalLoadFailures,
     commit: &mut FlowCommit,
 ) {
+    if matches!(observation, SessionObservation::LobbyReturnFailed) {
+        // BRL-0199: the fresh lobby after a match failed while the match was still presented.
+        // Leave the dead match screen for the recoverable connection error (Retry reconnects
+        // to the same server).
+        let message = if core::mem::take(&mut match_failure.0) {
+            MATCH_LOST_LOBBY_UNREACHABLE
+        } else {
+            "Could not reconnect to the lobby after the match. Check your network, then retry."
+        };
+        resolve_connection_observation(
+            SessionObservation::UnexpectedLoss,
+            membership,
+            pending,
+            path,
+            model,
+            persistence,
+            selection,
+            game_draft,
+            dashboard_focus,
+            dashboard_notice,
+            result_state,
+            local_failures,
+            commit,
+        );
+        if let Some(error) = commit.error.as_mut() {
+            error.message = message.to_string();
+        }
+        return;
+    }
     match observation {
         observation @ (SessionObservation::Accepted
         | SessionObservation::ResolverCompleted { .. }
@@ -227,12 +256,7 @@ fn resolve_connection_observation(
             {
                 commit.advance_candidate = true;
             } else {
-                let message = if matches!(observation, SessionObservation::CandidateFailed) {
-                    "Could not contact the server"
-                } else {
-                    "The lobby handshake timed out"
-                };
-                fail_to_server_select(commit, message.to_string(), true);
+                fail_to_server_select(commit, no_reply_message(&observation), true);
             }
         }
         SessionObservation::DnsTimedOut => {
@@ -253,7 +277,7 @@ fn resolve_connection_observation(
         }
         SessionObservation::TimedOut => {
             commit.teardown = true;
-            fail_to_server_select(commit, "The connection attempt timed out".to_string(), true);
+            fail_to_server_select(commit, no_reply_message(&observation), true);
         }
         SessionObservation::Rejected(reason) => {
             commit.teardown = true;
@@ -496,6 +520,7 @@ pub(super) fn resolve_flow_action(
         if matches!(
             observation,
             SessionObservation::UnexpectedLoss
+                | SessionObservation::LobbyReturnFailed
                 | SessionObservation::TimedOut
                 | SessionObservation::Rejected(_)
         ) {
@@ -720,6 +745,23 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::MapMakerFitView => {}
     }
     let _ = flow;
+}
+
+/// Shown when a match session was lost (network gap beyond the routed session bound, app
+/// suspension, or a worker failure) and the fresh lobby session after it also failed.
+const MATCH_LOST_LOBBY_UNREACHABLE: &str = "The connection to the match was lost and the lobby could not be reached. Check your network, then retry.";
+
+/// Copy for a failed connection attempt that received no reply. A network that blocks UDP looks
+/// exactly like this, so the player gets the actionable hint without a diagnosis we cannot make.
+const NO_REPLY_HINT: &str = "Check the address and that the server is running. Some networks block the UDP traffic the game uses; if so, try another network.";
+
+fn no_reply_message(observation: &SessionObservation) -> String {
+    let headline = match observation {
+        SessionObservation::CandidateFailed => "Could not contact the server",
+        SessionObservation::CandidateTimedOut => "The server did not answer in time",
+        _ => "The connection attempt timed out",
+    };
+    format!("{headline}. {NO_REPLY_HINT}")
 }
 
 fn fail_to_server_select(commit: &mut FlowCommit, message: String, retryable: bool) {
