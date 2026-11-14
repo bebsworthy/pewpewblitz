@@ -5,6 +5,7 @@
 
 use super::harness::Harness;
 use bevy::prelude::{Vec2, With};
+use brawler::builds::{AbilityPhase, AbilityState, ResolvedMatchLoadout};
 use brawler::combat::{CombatTelemetry, WeaponPhase, WeaponState};
 use brawler::matchplay::{MatchPhase, MatchRoot as MatchRootMarker, MatchState};
 use brawler::protocol::{Fighter, FighterInput, MatchCommand, MatchCommandRequest, PlayerId};
@@ -15,11 +16,17 @@ const PROFILES: [(&str, usize); 3] = [("local", 0), ("rtt-60ms", 4), ("rtt-120ms
 
 /// Two clients in an active Wipeout match with settled prediction; client 0 has the delay.
 fn active_harness(delay: usize) -> Harness {
+    active_harness_with(delay, |_| {})
+}
+
+/// [`active_harness`] with a loadout setup applied before the match starts.
+fn active_harness_with(delay: usize, setup: impl FnOnce(&mut Harness)) -> Harness {
     let mut harness = Harness::new_match(2);
     harness.set_replication_delay(0, delay);
     harness.step_until(|harness| {
         (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
+    setup(&mut harness);
     let match_id = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
@@ -237,6 +244,187 @@ fn server_rejected_fire_is_rejected_locally_and_authority_is_unchanged() {
         assert_eq!(
             server_weapon(&mut harness).phase,
             empty.phase,
+            "[{profile}] authority unchanged by the local presentation"
+        );
+    }
+}
+
+/// Client 0 casts Self Cloak (ultimate 3), whose activation sound is a launch.
+fn cloak_harness(delay: usize) -> Harness {
+    let mut harness = active_harness_with(delay, |harness| {
+        harness.install_saved_brawler_loadout(0, 1, 3, [4, 6]);
+    });
+    set_server_ability(&mut harness, |maximum| AbilityState {
+        charge: maximum,
+        phase: AbilityPhase::Ready,
+    });
+    for _ in 0..20 + 2 * delay {
+        harness.step();
+    }
+    harness
+}
+
+fn set_server_ability(harness: &mut Harness, state: impl Fn(u16) -> AbilityState) {
+    let player = harness.controlled_player_id(0);
+    let world = harness.server.world_mut();
+    let mut query = world
+        .query_filtered::<(&PlayerId, &ResolvedMatchLoadout, &mut AbilityState), With<Fighter>>();
+    let (_, loadout, mut ability) = query
+        .iter_mut(world)
+        .find(|(id, ..)| **id == player)
+        .expect("the measured server fighter");
+    assert_eq!(
+        loadout.ultimate.kind,
+        brawler::builds::UltimateKind::SelfCloak
+    );
+    *ability = state(loadout.ultimate.charge_policy.maximum);
+}
+
+fn server_ability(harness: &mut Harness) -> AbilityState {
+    let player = harness.controlled_player_id(0);
+    let world = harness.server.world_mut();
+    let mut query = world.query_filtered::<(&PlayerId, &AbilityState), With<Fighter>>();
+    *query
+        .iter(world)
+        .find(|(id, _)| **id == player)
+        .expect("the measured server fighter")
+        .1
+}
+
+fn ultimate() -> FighterInput {
+    FighterInput::from_axes(Vec2::ZERO, None, FighterInput::ULTIMATE)
+}
+
+#[test]
+fn local_ultimate_is_presented_on_the_input_frame_and_its_activation_echo_pairs() {
+    for (profile, delay) in PROFILES {
+        let mut harness = cloak_harness(delay);
+        let start = stats(&harness);
+        harness.set_controlled_input(0, ultimate());
+        let mut presented = None;
+        let mut echoed = None;
+        for frame in 1..=90 {
+            harness.step();
+            if frame == 3 {
+                harness.set_controlled_input(0, FighterInput::default());
+            }
+            let now = stats(&harness);
+            if presented.is_none() && now.ultimates_presented > start.ultimates_presented {
+                presented = Some(frame);
+            }
+            if echoed.is_none() && now.ultimate_activation_echoes > start.ultimate_activation_echoes
+            {
+                echoed = Some(frame);
+            }
+        }
+        // Press again while the replicated charge is spent: nothing more is cast.
+        harness.set_controlled_input(0, ultimate());
+        for _ in 0..10 {
+            harness.step();
+        }
+        harness.set_controlled_input(0, FighterInput::default());
+        let stats = stats(&harness);
+        let presented = presented.expect("cast presented locally");
+        let echoed = echoed.expect("authoritative activation paired");
+        println!(
+            "local ultimate input-to-presented [{profile} delay={delay}]: local {presented} \
+             frame(s), authoritative activation cue {echoed} frame(s) (before: cue-driven)"
+        );
+        assert_eq!(
+            presented, 1,
+            "[{profile}] cast presented on the input frame"
+        );
+        assert!(
+            echoed > presented,
+            "[{profile}] local presentation leads the cue"
+        );
+        assert_eq!(
+            stats.ultimates_presented - start.ultimates_presented,
+            1,
+            "[{profile}] one cast"
+        );
+        assert_eq!(
+            stats.ultimate_activation_echoes - start.ultimate_activation_echoes,
+            1,
+            "[{profile}] the activation sound is suppressed once (no double playback)"
+        );
+        assert_eq!(
+            stats.unmatched_own_activations, start.unmatched_own_activations,
+            "[{profile}] no activation is presented late"
+        );
+        assert_eq!(stats.ultimates_rejected, start.ultimates_rejected);
+        assert!(
+            matches!(
+                server_ability(&mut harness).phase,
+                AbilityPhase::Cloaked { .. }
+            ),
+            "[{profile}] the server activated the cloak"
+        );
+    }
+}
+
+#[test]
+fn server_rejected_ultimate_is_rejected_locally_and_authority_is_unchanged() {
+    for (profile, delay) in PROFILES.into_iter().skip(1) {
+        let mut harness = cloak_harness(delay);
+        // Authority spends the charge; the client still sees the stale full charge.
+        let spent = AbilityState {
+            charge: 0,
+            phase: AbilityPhase::Charging,
+        };
+        set_server_ability(&mut harness, |_| spent);
+        let start = stats(&harness);
+        harness.set_controlled_input(0, ultimate());
+        harness.step();
+        harness.set_controlled_input(0, FighterInput::default());
+        let mut rejected_after = None;
+        let mut confirmed_after = None;
+        for frame in 2..=90 {
+            harness.step();
+            let now = stats(&harness);
+            if rejected_after.is_none() && now.ultimates_rejected > start.ultimates_rejected {
+                rejected_after = Some(frame);
+            }
+            if confirmed_after.is_none() && now.ultimates_confirmed > start.ultimates_confirmed {
+                confirmed_after = Some(frame);
+            }
+        }
+        let stats = stats(&harness);
+        println!(
+            "rejected ultimate [{profile} delay={delay}]: presented {}, rejected after {:?} \
+             frame(s), confirmed after {:?}",
+            stats.ultimates_presented - start.ultimates_presented,
+            rejected_after,
+            confirmed_after,
+        );
+        assert_eq!(
+            stats.ultimates_presented - start.ultimates_presented,
+            1,
+            "[{profile}] stale gate presents"
+        );
+        assert_eq!(
+            stats.ultimate_activation_echoes, start.ultimate_activation_echoes,
+            "[{profile}] no activation"
+        );
+        // A charge spent without an activation signal never confirms the cast; the transient
+        // launch flash has already ended when it is rejected.
+        assert_eq!(confirmed_after, None, "[{profile}] nothing confirmed");
+        let rejected_after = rejected_after.expect("the unanswered cast is rejected");
+        assert!(
+            rejected_after <= 2 * delay + 12,
+            "[{profile}] rejected within a bounded time"
+        );
+        assert!(
+            harness.clients[0]
+                .world()
+                .resource::<LocalAttackLedger>()
+                .ultimate_outstanding()
+                .eq(&false),
+            "[{profile}] the charge is not held by the rejected cast"
+        );
+        assert_eq!(
+            server_ability(&mut harness),
+            spent,
             "[{profile}] authority unchanged by the local presentation"
         );
     }

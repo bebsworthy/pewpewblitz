@@ -294,6 +294,132 @@ mod tests {
         );
     }
 
+    /// Stand-in for the local attack reconciler: the own cloak cue and own sentry spawn echo
+    /// local casts.
+    fn pair_ultimate_echoes(
+        mut ledger: ResMut<crate::local_attack::LocalAttackLedger>,
+        sentries: Query<(Entity, &brawler::abilities::SentryIdentity)>,
+    ) {
+        use crate::local_attack::UltimateActivationEcho;
+        use brawler::builds::UltimateKind;
+        ledger.record_cast(UltimateKind::SelfCloak, lightyear::prelude::Tick(1), 100);
+        ledger.observe_own_activation(
+            UltimateKind::SelfCloak,
+            100,
+            Some(UltimateActivationEcho::Cue(CombatEventId(31))),
+        );
+        for (entity, identity) in &sentries {
+            if identity.owner_network_id == NetworkEntityId(12) {
+                ledger.record_cast(UltimateKind::Sentry, lightyear::prelude::Tick(1), 100);
+                ledger.observe_own_activation(
+                    UltimateKind::Sentry,
+                    100,
+                    Some(UltimateActivationEcho::Spawned(entity)),
+                );
+            }
+        }
+    }
+
+    fn sentry(
+        owner: u64,
+    ) -> (
+        brawler::abilities::Sentry,
+        brawler::abilities::SentryIdentity,
+    ) {
+        (
+            brawler::abilities::Sentry,
+            brawler::abilities::SentryIdentity {
+                deployable_id: brawler::builds::DeployableId(owner),
+                owner_player_id: brawler::protocol::PlayerId(owner),
+                owner_network_id: NetworkEntityId(owner),
+                team_id: brawler::combat::TeamId(1),
+                ultimate_id: brawler::builds::UltimateDefinitionId(2),
+                match_id: MatchId(1),
+            },
+        )
+    }
+
+    #[test]
+    fn local_ultimate_sounds_on_the_input_frame_and_its_activation_echo_is_silent() {
+        use crate::local_attack::{
+            LocalAttackKind, LocalAttackLedger, LocalAttackPresented, LocalAttackSet, LocalCastId,
+        };
+        use brawler::builds::UltimateKind;
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<AudioRequest>()
+            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientPlayableGate(false))
+            .insert_resource(ClientMapReadiness::Ready)
+            .init_resource::<LocalAttackLedger>()
+            .init_resource::<ObservedRequests>()
+            .add_plugins(AudioRegistryPlugin)
+            .add_plugins(AudioProducersPlugin)
+            .add_systems(
+                Update,
+                pair_ultimate_echoes.in_set(LocalAttackSet::Reconcile),
+            )
+            .add_systems(Update, observe_requests.after(AudioProducerSet));
+        brawler::test_app::finalize(&mut app);
+
+        let local = |kind, cast| LocalAttackPresented {
+            fighter: Entity::PLACEHOLDER,
+            owner: NetworkEntityId(12),
+            team: brawler::combat::TeamId(1),
+            kind: LocalAttackKind::Ultimate { kind, cast },
+            origin: Vec2::ZERO,
+            facing: 0.0,
+            simulation_tick: 100,
+        };
+        // Launch-type casts sound locally; Demolition Strike's sound stays its outcome cue.
+        app.world_mut()
+            .write_message(local(UltimateKind::SelfCloak, LocalCastId(1)));
+        app.world_mut()
+            .write_message(local(UltimateKind::Sentry, LocalCastId(2)));
+        app.world_mut()
+            .write_message(local(UltimateKind::DemolitionStrike, LocalCastId(3)));
+        // Echoes arrive in the same frame, plus a teammate's cloak and sentry.
+        for (event_id, source) in [(31, 12), (32, 13)] {
+            app.world_mut()
+                .write_message(DeduplicatedCombatCue(CombatCue::SelfCloakActivated {
+                    event_id: CombatEventId(event_id),
+                    tick: 100,
+                    source: NetworkEntityId(source),
+                    generation: 1,
+                    expires_at_tick: 400,
+                }));
+        }
+        app.world_mut().spawn(sentry(12));
+        app.world_mut().spawn(sentry(13));
+        app.update();
+
+        let observed = &app.world().resource::<ObservedRequests>().0;
+        let count = |key| {
+            observed
+                .iter()
+                .filter(|request| request.cue_key == key)
+                .count()
+        };
+        assert_eq!(
+            count(cue_keys::ULTIMATE_CLOAK),
+            2,
+            "local cloak and the teammate's cloak, no replay: {observed:?}"
+        );
+        assert!(
+            observed
+                .iter()
+                .all(|request| request.occurrence != Some(31)),
+            "the own activation echo is silent"
+        );
+        assert_eq!(
+            count(cue_keys::SENTRY_SPAWN),
+            2,
+            "local sentry and the teammate's sentry, no replay: {observed:?}"
+        );
+        assert_eq!(count(cue_keys::ULTIMATE_STRIKE), 0);
+    }
+
     #[test]
     fn released_controls_request_their_surface_role_sound_and_disabled_controls_stay_silent() {
         use crate::ui::{press::ReleaseActivation, surface::Surface};

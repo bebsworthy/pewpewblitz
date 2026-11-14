@@ -239,15 +239,23 @@ projectiles, hits, damage, and objectives remain interpolated authoritative stat
 
 ### Local attack presentation
 
-Each client presents its own controlled fighter's attacks on the input frame (`client::local_attack`,
-BRL-0142). On local tick T it evaluates the server's fire gate against replicated, delayed state:
+Each client presents its own controlled fighter's attacks on the input frame
+(`brawler_client::local_attack`, BRL-0142, BRL-0172). On local tick T it evaluates the server's fire gate against replicated, delayed state:
 held primary fire with no targeted ultimate held, not defeated, dashing, frozen, or inactive, the
 replicated ammunition (plus a recovery due by the estimated server tick) minus its own unconfirmed
 shots, and the replicated plus locally tracked cooldown. The estimated server simulation tick comes
 from the owner-prediction server clock. When the gate passes, the shoot animation, a small
 presentation-only recoil, the muzzle `VfxRequest`, the fire `AudioRequest`, and, for straight-family
-recipes, cosmetic projectiles start immediately; an ultimate's rising edge with full replicated
-charge starts the animation and recoil only (Dash excluded). The later authoritative
+recipes, cosmetic projectiles start immediately. An ultimate's rising edge with full replicated
+charge and no earlier cast still unanswered (Dash excluded: its sound accompanies the
+authoritative dash motion) starts the animation, recoil, a short launch flash at the caster, and,
+when the activation sound is a launch (Self Cloak, Reveal Scan, Sentry, Concealment Field, the
+elemental fields), that sound. The authoritative activation signal of the same kind (the
+activation cue, or the replicated Sentry or Concealment Field, within the same tick window) is
+recorded as an activation echo whose sound the audio producers skip. Demolition Strike's sound is
+its explosion and Big Blob has none, so both stay authoritative; every area outcome, its effects,
+and cloak state stay cue- or replication-driven. An unanswered cast is rejected after the same
+confirmation margin and only frees the charge; its launch flash is a bounded transient. The later authoritative
 `AttackAccepted` from the same fighter is paired with the oldest local shot whose estimated tick
 lies within a small early/late window; paired attack ids are echoes that the animation, VFX, and
 audio producers skip, so nothing plays twice. A shot the server does not confirm is rejected once

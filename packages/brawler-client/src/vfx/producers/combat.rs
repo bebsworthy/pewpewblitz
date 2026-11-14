@@ -89,9 +89,65 @@ impl Plugin for CombatVfxProducerPlugin {
 
 /// Request identity of locally presented attacks; disjoint from server combat event ids.
 const LOCAL_ATTACK_VFX_IDENTITY: u64 = 1 << 63;
+/// Request identity of locally presented ultimate casts; disjoint from shots and server events.
+const LOCAL_ULTIMATE_VFX_IDENTITY: u64 = 3 << 62;
 
-/// Muzzle effect for the local player's own primary fire on its input frame. The later
-/// authoritative `AttackAccepted` for the same attack is an echo and is skipped below.
+/// Accent of the launch flash at the caster of a locally presented ultimate.
+const fn ultimate_launch_accent(kind: brawler::builds::UltimateKind) -> VfxAccent {
+    use brawler::builds::UltimateKind as K;
+    use brawler::combat::ElementalFieldKind as E;
+    match kind {
+        K::CryogenicField => accent_for_elemental_field(E::Cryogenic),
+        K::FireField => accent_for_elemental_field(E::Fire),
+        K::PoisonField => accent_for_elemental_field(E::Poison),
+        K::RestorationField => accent_for_elemental_field(E::Restoration),
+        K::RevealScan => VfxAccent::Reveal,
+        K::DemolitionStrike => VfxAccent::Demolition,
+        K::SelfCloak | K::ConcealmentField => VfxAccent::Concealment,
+        K::Dash | K::Sentry | K::BigBlob => VfxAccent::Neutral,
+    }
+}
+
+/// Short launch flash at the caster of a locally presented ultimate. It is a bounded transient
+/// with no authoritative counterpart: the area outcome effects stay cue-driven.
+fn local_ultimate_launch_request(
+    local: &LocalAttackPresented,
+    kind: brawler::builds::UltimateKind,
+    cast: crate::local_attack::LocalCastId,
+    ultimate_id: brawler::builds::UltimateDefinitionId,
+    cache: &VfxSignatureCache,
+) -> Option<VfxRequest> {
+    let identity = LOCAL_ULTIMATE_VFX_IDENTITY | cast.0;
+    let signature = CombatVisualSignature {
+        carrier: VfxCarrier::PointTransient,
+        phase: VfxPhase::Activation,
+        accents: [Some(ultimate_launch_accent(kind)), None],
+        relationship: cache.observer().relationship(local.owner, local.team),
+        context: Some(VfxContextOverride::Ultimate(ultimate_id)),
+        geometry: VfxGeometry::Point {
+            position: local.origin.to_array(),
+            normal: None,
+            direction: Some(Vec2::from_angle(local.facing).to_array()),
+        },
+        identity: VfxPresentationIdentity::Neutral(identity),
+        timing: VfxAuthoritativeTiming::instant(local.simulation_tick),
+        variant: VfxPresentationVariant::Normal,
+    };
+    VfxRequest::try_new(
+        COMBAT_MUZZLE_VFX,
+        VfxRequestOrder::new(COMBAT_VFX_PRODUCER_RANK, identity),
+        local.origin,
+        None,
+        None,
+        "local input-frame ultimate launch effect",
+    )
+    .and_then(|request| request.with_signature(signature))
+    .ok()
+}
+
+/// Muzzle effect for the local player's own primary fire, and a launch flash for its ultimate
+/// casts, on the input frame. The later authoritative `AttackAccepted` for the same attack is an
+/// echo and is skipped below.
 #[allow(
     clippy::needless_pass_by_value,
     reason = "the signature cache and variant settings are read-only Bevy system resources"
@@ -103,11 +159,19 @@ fn produce_local_attack_vfx_requests(
     loadouts: Query<&brawler::builds::ResolvedMatchLoadout>,
 ) {
     for local in local_attacks.read() {
-        let LocalAttackKind::PrimaryFire(shot) = local.kind else {
-            continue;
-        };
         let Ok(loadout) = loadouts.get(local.fighter) else {
             continue;
+        };
+        let shot = match local.kind {
+            LocalAttackKind::PrimaryFire(shot) => shot,
+            LocalAttackKind::Ultimate { kind, cast } => {
+                if let Some(request) =
+                    local_ultimate_launch_request(local, kind, cast, loadout.ultimate.id, &cache)
+                {
+                    requests.write(request);
+                }
+                continue;
+            }
         };
         let recipe = &loadout.primary_weapon.recipe;
         let identity = LOCAL_ATTACK_VFX_IDENTITY | shot.0;
@@ -956,6 +1020,86 @@ mod tests {
         assert!(
             captured.iter().any(|request| request.order.event_id == 21),
             "a remote attack still presents from its cue"
+        );
+    }
+
+    #[test]
+    fn local_ultimate_presents_one_launch_flash_and_its_area_outcome_stays_cue_driven() {
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<VfxRequest>()
+            .add_message::<LocalAttackPresented>()
+            .init_resource::<VfxSignatureCache>()
+            .init_resource::<CapturedRequests>()
+            .add_systems(
+                Update,
+                (
+                    (
+                        produce_combat_vfx_requests,
+                        produce_local_attack_vfx_requests,
+                    ),
+                    capture_requests,
+                )
+                    .chain(),
+            );
+        let mut ledger = LocalAttackLedger::default();
+        let cast = ledger.record_cast(
+            brawler::builds::UltimateKind::FireField,
+            lightyear::prelude::Tick(1),
+            100,
+        );
+        app.insert_resource(ledger);
+        let fighter = app.world_mut().spawn(preset_loadout()).id();
+        app.world_mut().write_message(LocalAttackPresented {
+            fighter,
+            owner: NetworkEntityId(12),
+            team: brawler::combat::TeamId(1),
+            kind: LocalAttackKind::Ultimate {
+                kind: brawler::builds::UltimateKind::FireField,
+                cast,
+            },
+            origin: Vec2::new(2.0, 3.0),
+            facing: 0.0,
+            simulation_tick: 100,
+        });
+        app.world_mut()
+            .write_message(DeduplicatedCombatCue(CombatCue::ElementalFieldActivated {
+                event_id: CombatEventId(40),
+                tick: 102,
+                source: NetworkEntityId(12),
+                field_id: brawler::combat::ElementalFieldId(1),
+                kind: brawler::combat::ElementalFieldKind::Fire,
+                center: WorldPoint { x: 50.0, y: 60.0 },
+                radius_milliunits: 150_000,
+                expires_at_tick: 400,
+            }));
+
+        app.update();
+
+        let captured = &app.world().resource::<CapturedRequests>().0;
+        assert_eq!(
+            captured.len(),
+            2,
+            "launch flash plus the authoritative field"
+        );
+        let launch = captured
+            .iter()
+            .find(|request| request.key == COMBAT_MUZZLE_VFX)
+            .expect("local launch flash");
+        assert_eq!(launch.position, Vec2::new(2.0, 3.0));
+        assert_eq!(launch.order.event_id, LOCAL_ULTIMATE_VFX_IDENTITY | cast.0);
+        assert_eq!(launch.signature.accents[0], Some(VfxAccent::Fire));
+        let catalog = crate::vfx::catalog::VfxCatalog::embedded().expect("embedded VFX catalog");
+        let recipe = catalog
+            .resolve(COMBAT_MUZZLE_VFX.as_str(), &launch.signature, false, false)
+            .expect("the launch flash resolves");
+        assert_eq!(recipe.id, "fire_muzzle");
+        assert!(
+            captured
+                .iter()
+                .any(|request| request.key == ELEMENTAL_FIELD_VFX
+                    && request.position == Vec2::new(50.0, 60.0)),
+            "the field outcome is presented from its cue at the authoritative center"
         );
     }
 

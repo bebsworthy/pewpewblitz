@@ -1,0 +1,27 @@
+---
+id: BRL-crdt
+
+title: Present the local Dash activation sound and trail on the input frame
+
+status: backlog
+closed:
+status_changed: 2026-11-14T10:47:48Z
+
+theme: core
+
+release:
+
+created: 2026-11-14T10:47:48Z
+
+blocks: []
+
+related: [BRL-0172, BRL-0217]
+
+parent: BRL-0171
+
+rank: 12845056
+---
+
+# Description
+
+Make the local Dash's activation sound and trail start on the press instead of one round trip later, once Dash motion itself is presented locally.

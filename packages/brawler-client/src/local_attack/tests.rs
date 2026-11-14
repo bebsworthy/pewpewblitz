@@ -439,7 +439,7 @@ fn ultimate_rising_edge_with_full_charge_presents_one_cast() {
             .resource::<Presented>()
             .0
             .iter()
-            .filter(|message| matches!(message.kind, LocalAttackKind::Ultimate(_)))
+            .filter(|message| matches!(message.kind, LocalAttackKind::Ultimate { .. }))
             .count();
         assert_eq!(
             casts, expected,
@@ -473,4 +473,329 @@ fn unconfirmed_fire_is_rejected_after_authority_passes_it() {
     app.world_mut().run_schedule(Update);
     let stats = app.world().resource::<LocalAttackStats>();
     assert_eq!((stats.presented, stats.rejected), (1, 1));
+}
+
+fn self_cloak_cue(event_id: u64, tick: u64, source: NetworkEntityId) -> DeduplicatedCombatCue {
+    DeduplicatedCombatCue(CombatCue::SelfCloakActivated {
+        event_id: CombatEventId(event_id),
+        tick,
+        source,
+        generation: 1,
+        expires_at_tick: tick + 360,
+    })
+}
+
+#[test]
+fn ultimate_activation_within_tolerance_echoes_the_local_cast_once() {
+    let mut ledger = LocalAttackLedger::default();
+    let cast = ledger.record_cast(UltimateKind::SelfCloak, Tick(10), 100);
+    assert!(
+        ledger.ultimate_outstanding(),
+        "a pending cast holds the charge"
+    );
+    // Another kind or a tick outside the late window never pairs.
+    let cue = UltimateActivationEcho::Cue(CombatEventId(5));
+    assert_eq!(
+        ledger.observe_own_activation(UltimateKind::RevealScan, 100, Some(cue)),
+        OwnActivationObservation::Unmatched
+    );
+    assert_eq!(
+        ledger.observe_own_activation(
+            UltimateKind::SelfCloak,
+            100 + MATCH_LATE_TOLERANCE_TICKS + 1,
+            Some(cue)
+        ),
+        OwnActivationObservation::Unmatched
+    );
+    assert_eq!(
+        ledger.observe_own_activation(UltimateKind::SelfCloak, 104, Some(cue)),
+        OwnActivationObservation::Matched(cast)
+    );
+    assert!(ledger.is_activation_echo_cue(CombatEventId(5)));
+    assert_eq!(ledger.cast_status(cast), Some(LocalCastStatus::Confirmed));
+    assert_eq!(
+        ledger.observe_own_activation(UltimateKind::SelfCloak, 104, Some(cue)),
+        OwnActivationObservation::Repeated
+    );
+    // A second activation signal for the same cast is not an echo (one sound per cast).
+    let other = UltimateActivationEcho::Cue(CombatEventId(6));
+    assert_eq!(
+        ledger.observe_own_activation(UltimateKind::SelfCloak, 104, Some(other)),
+        OwnActivationObservation::Unmatched
+    );
+    assert!(!ledger.is_activation_echo_cue(CombatEventId(6)));
+    assert!(
+        ledger.ultimate_outstanding(),
+        "confirmed while the replicated charge still reads full"
+    );
+    ledger.observe_charge_spent();
+    assert!(!ledger.ultimate_outstanding());
+}
+
+#[test]
+fn outcome_activations_confirm_the_cast_without_suppressing_their_sound() {
+    let mut ledger = LocalAttackLedger::default();
+    let cast = ledger.record_cast(UltimateKind::DemolitionStrike, Tick(10), 100);
+    let cue = UltimateActivationEcho::Cue(CombatEventId(9));
+    assert_eq!(
+        ledger.observe_own_activation(UltimateKind::DemolitionStrike, 100, Some(cue)),
+        OwnActivationObservation::Matched(cast)
+    );
+    assert!(
+        !ledger.is_activation_echo_cue(CombatEventId(9)),
+        "the strike's explosion sound is an outcome and stays authoritative"
+    );
+}
+
+#[test]
+fn unanswered_cast_is_rejected_and_a_late_activation_still_pairs() {
+    let mut ledger = LocalAttackLedger::default();
+    let cast = ledger.record_cast(UltimateKind::Sentry, Tick(10), 100);
+    assert_eq!(
+        ledger.expire_casts(Some(Tick(10) + (CONFIRMATION_MARGIN_TICKS - 1)), Tick(20)),
+        0
+    );
+    assert_eq!(
+        ledger.expire_casts(Some(Tick(10) + CONFIRMATION_MARGIN_TICKS), Tick(20)),
+        1
+    );
+    assert_eq!(ledger.cast_status(cast), Some(LocalCastStatus::Rejected));
+    assert!(
+        !ledger.ultimate_outstanding(),
+        "a rejected cast frees the charge"
+    );
+    let spawned = UltimateActivationEcho::Spawned(Entity::from_raw_u32(7).unwrap());
+    assert_eq!(
+        ledger.observe_own_activation(UltimateKind::Sentry, 103, Some(spawned)),
+        OwnActivationObservation::Matched(cast),
+        "a late activation of a rejected cast never plays twice"
+    );
+    assert!(ledger.is_activation_echo_entity(Entity::from_raw_u32(7).unwrap()));
+}
+
+#[test]
+fn spent_charge_confirms_a_cast_without_an_activation_signal_and_records_are_bounded() {
+    let mut ledger = LocalAttackLedger::default();
+    let cast = ledger.record_cast(UltimateKind::BigBlob, Tick(10), 100);
+    let signalled = ledger.record_cast(UltimateKind::SelfCloak, Tick(11), 101);
+    assert_eq!(ledger.observe_charge_spent(), 1);
+    assert_eq!(ledger.cast_status(cast), Some(LocalCastStatus::Confirmed));
+    assert_eq!(
+        ledger.cast_status(signalled),
+        Some(LocalCastStatus::Pending),
+        "a kind with an activation signal is confirmed only by that signal"
+    );
+    assert!(
+        ledger.ultimate_outstanding(),
+        "the pending cast still holds the charge"
+    );
+    for index in 0..10 {
+        ledger.record_cast(
+            UltimateKind::SelfCloak,
+            Tick(20 + index),
+            200 + u64::from(index),
+        );
+    }
+    assert_eq!(ledger.casts.len(), MAX_LOCAL_ULTIMATE_CASTS);
+    for index in 0..20 {
+        ledger
+            .ultimate_echoes
+            .push_back(UltimateActivationEcho::Cue(CombatEventId(index)));
+    }
+    let last = ledger.record_cast(UltimateKind::SelfCloak, Tick(90), 300);
+    assert_eq!(
+        ledger.observe_own_activation(
+            UltimateKind::SelfCloak,
+            300,
+            Some(UltimateActivationEcho::Cue(CombatEventId(99)))
+        ),
+        OwnActivationObservation::Matched(last)
+    );
+    assert_eq!(ledger.ultimate_echoes.len(), MAX_ULTIMATE_ACTIVATION_ECHOES);
+}
+
+#[test]
+fn only_launch_type_ultimates_present_their_activation_sound_locally() {
+    for kind in [
+        UltimateKind::SelfCloak,
+        UltimateKind::RevealScan,
+        UltimateKind::ConcealmentField,
+        UltimateKind::Sentry,
+        UltimateKind::CryogenicField,
+        UltimateKind::FireField,
+        UltimateKind::PoisonField,
+        UltimateKind::RestorationField,
+    ] {
+        assert!(presents_activation_sound_locally(kind), "{kind:?}");
+    }
+    for kind in [
+        UltimateKind::Dash,
+        UltimateKind::DemolitionStrike,
+        UltimateKind::BigBlob,
+    ] {
+        assert!(!presents_activation_sound_locally(kind), "{kind:?}");
+    }
+}
+
+/// A controlled Self Cloak fighter with full charge, pressing ULTIMATE.
+fn spawn_cloak_caster(app: &mut App) -> Entity {
+    let owner = spawn_owner(app, 0);
+    let loadout = loadout_with_ultimate(3);
+    let maximum = loadout.ultimate.charge_policy.maximum;
+    app.world_mut().entity_mut(owner).insert((
+        loadout,
+        AbilityState {
+            charge: maximum,
+            phase: AbilityPhase::Ready,
+        },
+    ));
+    owner
+}
+
+fn set_buttons(app: &mut App, owner: Entity, buttons: u8) {
+    app.world_mut()
+        .entity_mut(owner)
+        .insert(ActionState(FighterInput::from_axes(
+            Vec2::ZERO,
+            None,
+            buttons,
+        )));
+}
+
+fn presented_casts(app: &App) -> Vec<(UltimateKind, LocalCastId, u64)> {
+    app.world()
+        .resource::<Presented>()
+        .0
+        .iter()
+        .filter_map(|message| match message.kind {
+            LocalAttackKind::Ultimate { kind, cast } => Some((kind, cast, message.simulation_tick)),
+            LocalAttackKind::PrimaryFire(_) => None,
+        })
+        .collect()
+}
+
+#[test]
+fn repressing_while_the_cast_is_unanswered_does_not_cast_again() {
+    let mut app = plugin_app();
+    let owner = spawn_cloak_caster(&mut app);
+    app.world_mut().resource_mut::<Presented>().0.clear();
+    for buttons in [FighterInput::ULTIMATE, 0, FighterInput::ULTIMATE, 0] {
+        set_buttons(&mut app, owner, buttons);
+        fixed_tick(&mut app);
+    }
+    assert_eq!(
+        presented_casts(&app).len(),
+        1,
+        "the stale full charge cannot cast twice before the server answers"
+    );
+    // Authority passes the cast without activating: it is rejected and a new press casts.
+    let presented_at = app.world().resource::<LocalTimeline>().tick();
+    app.world_mut()
+        .get_mut::<OwnerPrediction>(owner)
+        .expect("attached")
+        .reconcile(
+            crate::prediction::AuthoritativeSample {
+                tick: presented_at + CONFIRMATION_MARGIN_TICKS,
+                position: Vec2::new(10.0, 20.0),
+                facing: 0.0,
+            },
+            crate::prediction::OwnerPredictionTuning::default(),
+        );
+    app.world_mut().run_schedule(Update);
+    assert_eq!(
+        app.world()
+            .resource::<LocalAttackStats>()
+            .ultimates_rejected,
+        1
+    );
+    set_buttons(&mut app, owner, FighterInput::ULTIMATE);
+    fixed_tick(&mut app);
+    assert_eq!(presented_casts(&app).len(), 2);
+}
+
+#[test]
+fn own_activation_cue_becomes_an_activation_echo_while_others_do_not() {
+    let mut app = plugin_app();
+    let owner = spawn_cloak_caster(&mut app);
+    app.world_mut().resource_mut::<Presented>().0.clear();
+    set_buttons(&mut app, owner, FighterInput::ULTIMATE);
+    fixed_tick(&mut app);
+    let [(kind, cast, simulation_tick)] = presented_casts(&app)[..] else {
+        panic!("one cast");
+    };
+    assert_eq!(kind, UltimateKind::SelfCloak);
+    // A teammate's cloak and the own cloak arrive together.
+    app.world_mut()
+        .write_message(self_cloak_cue(30, simulation_tick, NetworkEntityId(77)));
+    app.world_mut()
+        .write_message(self_cloak_cue(31, simulation_tick + 1, OWNER));
+    app.world_mut().run_schedule(Update);
+    let ledger = app.world().resource::<LocalAttackLedger>();
+    assert!(ledger.is_activation_echo_cue(CombatEventId(31)));
+    assert!(!ledger.is_activation_echo_cue(CombatEventId(30)));
+    assert_eq!(ledger.cast_status(cast), Some(LocalCastStatus::Confirmed));
+    let stats = app.world().resource::<LocalAttackStats>();
+    assert_eq!(
+        (
+            stats.ultimates_presented,
+            stats.ultimates_confirmed,
+            stats.ultimate_activation_echoes,
+            stats.unmatched_own_activations
+        ),
+        (1, 1, 1, 0)
+    );
+}
+
+#[test]
+fn own_sentry_spawn_becomes_an_activation_echo() {
+    let mut app = plugin_app();
+    let owner = spawn_owner(&mut app, 0);
+    let loadout = loadout_with_ultimate(2);
+    let maximum = loadout.ultimate.charge_policy.maximum;
+    let brawler::builds::UltimateParameters::Sentry { lifetime_ticks, .. } =
+        loadout.ultimate.parameters
+    else {
+        panic!("sentry ultimate");
+    };
+    app.world_mut().entity_mut(owner).insert((
+        loadout,
+        AbilityState {
+            charge: maximum,
+            phase: AbilityPhase::Ready,
+        },
+    ));
+    app.world_mut().resource_mut::<Presented>().0.clear();
+    set_buttons(&mut app, owner, FighterInput::ULTIMATE);
+    fixed_tick(&mut app);
+    let [(UltimateKind::Sentry, cast, simulation_tick)] = presented_casts(&app)[..] else {
+        panic!("one sentry cast");
+    };
+    let identity = |owner_network_id| brawler::abilities::SentryIdentity {
+        deployable_id: brawler::builds::DeployableId(1),
+        owner_player_id: brawler::protocol::PlayerId(1),
+        owner_network_id,
+        team_id: TeamId(1),
+        ultimate_id: brawler::builds::UltimateDefinitionId(2),
+        match_id: brawler::matchplay::MatchId(1),
+    };
+    let deadline = brawler::abilities::SentryDeadline {
+        expires_at_tick: simulation_tick + 2 + lifetime_ticks,
+    };
+    let own = app
+        .world_mut()
+        .spawn((brawler::abilities::Sentry, identity(OWNER), deadline))
+        .id();
+    let other = app
+        .world_mut()
+        .spawn((
+            brawler::abilities::Sentry,
+            identity(NetworkEntityId(77)),
+            deadline,
+        ))
+        .id();
+    app.world_mut().run_schedule(Update);
+    let ledger = app.world().resource::<LocalAttackLedger>();
+    assert!(ledger.is_activation_echo_entity(own));
+    assert!(!ledger.is_activation_echo_entity(other));
+    assert_eq!(ledger.cast_status(cast), Some(LocalCastStatus::Confirmed));
 }

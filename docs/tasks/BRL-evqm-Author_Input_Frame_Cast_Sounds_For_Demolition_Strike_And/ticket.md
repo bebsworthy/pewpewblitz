@@ -1,0 +1,27 @@
+---
+id: BRL-evqm
+
+title: Author input-frame cast sounds for Demolition Strike and Big Blob
+
+status: backlog
+closed:
+status_changed: 2026-11-14T10:47:48Z
+
+theme: core
+
+release:
+
+created: 2026-11-14T10:47:48Z
+
+blocks: []
+
+related: [BRL-0172]
+
+parent: BRL-0171
+
+rank: 12779520
+---
+
+# Description
+
+Give Demolition Strike and Big Blob a short cast sound that plays on the local input frame, since neither has a launch-type activation sound today.

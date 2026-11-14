@@ -9,7 +9,7 @@ use crate::{
     local_attack::{LocalAttackKind, LocalAttackLedger, LocalAttackPresented},
 };
 use brawler::{
-    builds::ResolvedMatchLoadout,
+    builds::{ResolvedMatchLoadout, UltimateKind},
     combat::{CombatCue, DeduplicatedCombatCue, DeliveryMethod},
     protocol::{Fighter, NetworkEntityId},
 };
@@ -58,6 +58,30 @@ pub(super) fn register(app: &mut App) {
 
 /// Fire-sound occurrence of a locally presented shot; disjoint from server attack ids.
 const LOCAL_ATTACK_AUDIO_OCCURRENCE: u64 = 1 << 63;
+/// Activation-sound occurrence of a locally presented ultimate cast; disjoint from server event
+/// ids and local shots.
+pub(super) const LOCAL_ULTIMATE_AUDIO_OCCURRENCE: u64 = 3 << 62;
+
+/// The combat producer's activation sound of a locally cast ultimate, when it is a launch.
+/// Sentry and Concealment Field spawn sounds belong to the ability producer.
+const fn local_ultimate_activation_cue(kind: UltimateKind) -> Option<AudioCueKey> {
+    if !crate::local_attack::presents_activation_sound_locally(kind) {
+        return None;
+    }
+    match kind {
+        UltimateKind::SelfCloak => Some(cue_keys::ULTIMATE_CLOAK),
+        UltimateKind::RevealScan => Some(cue_keys::ULTIMATE_SCAN),
+        UltimateKind::CryogenicField
+        | UltimateKind::FireField
+        | UltimateKind::PoisonField
+        | UltimateKind::RestorationField => Some(cue_keys::ULTIMATE_FIELD),
+        UltimateKind::Dash
+        | UltimateKind::Sentry
+        | UltimateKind::ConcealmentField
+        | UltimateKind::DemolitionStrike
+        | UltimateKind::BigBlob => None,
+    }
+}
 
 /// Presentation-only memory for hit-confirmation spacing; never gameplay truth.
 #[derive(Default)]
@@ -77,8 +101,10 @@ type CombatAudioFighters<'w, 's> = Query<
     With<Fighter>,
 >;
 
-/// Plays the local player's own fire sound on its input frame and every other combat cue as it
-/// arrives. The authoritative `AttackAccepted` echo of a locally presented shot is skipped.
+/// Plays the local player's own fire sound and launch-type ultimate activation sound on its
+/// input frame and every other combat cue as it arrives. The authoritative `AttackAccepted` echo
+/// of a locally presented shot and the activation cue echo of a locally presented cast are
+/// skipped.
 /// Fire sounds follow the shooter's replicated weapon delivery family; hit confirmations are
 /// relative to the controlled fighter.
 #[allow(
@@ -95,16 +121,27 @@ pub(super) fn produce_combat_audio_requests(
     mut hits: Local<HitAudioMemory>,
 ) {
     for local in local_attacks.read() {
-        if let LocalAttackKind::PrimaryFire(shot) = local.kind {
-            let delivery = fighters
-                .iter()
-                .find(|(network_id, ..)| **network_id == local.owner)
-                .map(|(_, loadout, _)| loadout.primary_weapon.recipe.delivery);
-            requests.write(AudioRequest::for_occurrence(
-                fire_cue(delivery),
-                LOCAL_ATTACK_AUDIO_OCCURRENCE | shot.0,
-                sequence.next(COMBAT_RANK),
-            ));
+        match local.kind {
+            LocalAttackKind::PrimaryFire(shot) => {
+                let delivery = fighters
+                    .iter()
+                    .find(|(network_id, ..)| **network_id == local.owner)
+                    .map(|(_, loadout, _)| loadout.primary_weapon.recipe.delivery);
+                requests.write(AudioRequest::for_occurrence(
+                    fire_cue(delivery),
+                    LOCAL_ATTACK_AUDIO_OCCURRENCE | shot.0,
+                    sequence.next(COMBAT_RANK),
+                ));
+            }
+            LocalAttackKind::Ultimate { kind, cast } => {
+                if let Some(cue_key) = local_ultimate_activation_cue(kind) {
+                    requests.write(AudioRequest::for_occurrence(
+                        cue_key,
+                        LOCAL_ULTIMATE_AUDIO_OCCURRENCE | cast.0,
+                        sequence.next(COMBAT_RANK),
+                    ));
+                }
+            }
         }
     }
     let controlled = fighters
@@ -113,10 +150,9 @@ pub(super) fn produce_combat_audio_requests(
         .map(|(network_id, ..)| *network_id)
         .min_by_key(|network_id| network_id.0);
     for DeduplicatedCombatCue(cue) in cues.read() {
-        if let CombatCue::AttackAccepted { attack_id, .. } = cue
-            && ledger
-                .as_deref()
-                .is_some_and(|ledger| ledger.is_echo(*attack_id))
+        if ledger
+            .as_deref()
+            .is_some_and(|ledger| is_local_presentation_echo(ledger, cue))
         {
             continue;
         }
@@ -136,6 +172,19 @@ pub(super) fn produce_combat_audio_requests(
         if let Some(request) = request {
             requests.write(request);
         }
+    }
+}
+
+/// Whether this cue's sound already played on the local input frame.
+fn is_local_presentation_echo(ledger: &LocalAttackLedger, cue: &CombatCue) -> bool {
+    match cue {
+        CombatCue::AttackAccepted { attack_id, .. } => ledger.is_echo(*attack_id),
+        CombatCue::SelfCloakActivated { event_id, .. }
+        | CombatCue::RevealScanActivated { event_id, .. }
+        | CombatCue::ElementalFieldActivated { event_id, .. } => {
+            ledger.is_activation_echo_cue(*event_id)
+        }
+        _ => false,
     }
 }
 

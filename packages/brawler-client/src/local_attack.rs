@@ -14,12 +14,22 @@
 //! with the state for T), which lets cosmetic projectiles fade within a bounded time. Rejected
 //! shots stay matchable so a late cue still cannot double-play. Nothing here is sent to the
 //! server or mutates authoritative state.
+//!
+//! Ultimate casts follow the same timeline. A non-Dash cast is announced on the ULTIMATE rising
+//! edge with full replicated charge; presentation plays the shoot motion, a short launch flash at
+//! the caster, and, for ultimates whose activation sound is a launch
+//! ([`presents_activation_sound_locally`]), the activation sound. The ledger pairs the cast with
+//! the authoritative activation signal of the same kind (its activation cue or the spawned
+//! sentry/concealment field, within the same tick tolerance) and records that signal as an
+//! activation echo, so the authoritative activation sound does not replay. Area outcomes (fields,
+//! scans, strikes, sentry placement, cloak state) and their effects stay authoritative.
 
 use crate::prediction::{OwnerPrediction, OwnerPredictionSet};
 use bevy::prelude::*;
 use brawler::builds::{AbilityPhase, AbilityState, ResolvedMatchLoadout, UltimateKind};
 use brawler::combat::{
-    ActiveEffects, AttackId, CombatCue, DeduplicatedCombatCue, TeamId, WeaponPhase, WeaponState,
+    ActiveEffects, AttackId, CombatCue, CombatEventId, DeduplicatedCombatCue, TeamId, WeaponPhase,
+    WeaponState,
 };
 use brawler::protocol::{Fighter, FighterInput, NetworkEntityId};
 use lightyear::prelude::input::native::ActionState;
@@ -40,16 +50,97 @@ pub const MATCH_LATE_TOLERANCE_TICKS: u64 = 6;
 pub const CONFIRMATION_MARGIN_TICKS: i32 = 8;
 /// Local ticks after which an unconfirmed shot is rejected even without new authoritative state.
 pub const ABSOLUTE_CONFIRMATION_TIMEOUT_TICKS: i32 = 90;
+/// Locally presented ultimate casts retained for matching (one charge allows one at a time).
+pub const MAX_LOCAL_ULTIMATE_CASTS: usize = 4;
+/// Authoritative activation signals retained as echoes for the presentation producers.
+pub const MAX_ULTIMATE_ACTIVATION_ECHOES: usize = 8;
 
 /// Client-local identity of one locally presented primary-fire shot. Never sent on the wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LocalShotId(pub u64);
 
+/// Client-local identity of one locally presented ultimate cast. Never sent on the wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LocalCastId(pub u64);
+
 /// What the local player started on this input tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocalAttackKind {
     PrimaryFire(LocalShotId),
-    Ultimate(UltimateKind),
+    Ultimate {
+        kind: UltimateKind,
+        cast: LocalCastId,
+    },
+}
+
+/// Whether an ultimate's activation sound is a launch the client may play on the input frame.
+///
+/// Self Cloak, Reveal Scan, the elemental fields, Sentry, and Concealment Field play their
+/// activation sound when the cast starts. Demolition Strike's sound is its explosion at the
+/// target (an area outcome) and Big Blob has no activation sound, so both stay authoritative.
+/// Dash is not cast locally at all: its sound accompanies the authoritative dash motion.
+#[must_use]
+pub const fn presents_activation_sound_locally(kind: UltimateKind) -> bool {
+    match kind {
+        UltimateKind::SelfCloak
+        | UltimateKind::RevealScan
+        | UltimateKind::CryogenicField
+        | UltimateKind::FireField
+        | UltimateKind::PoisonField
+        | UltimateKind::RestorationField
+        | UltimateKind::Sentry
+        | UltimateKind::ConcealmentField => true,
+        UltimateKind::Dash | UltimateKind::DemolitionStrike | UltimateKind::BigBlob => false,
+    }
+}
+
+/// Whether the server announces this ultimate's activation with a cue or a replicated entity the
+/// ledger can pair (Big Blob has neither; Dash is never cast locally).
+#[must_use]
+pub(crate) const fn has_activation_signal(kind: UltimateKind) -> bool {
+    !matches!(kind, UltimateKind::BigBlob | UltimateKind::Dash)
+}
+
+/// One authoritative activation signal of the local player's ultimate whose sound already
+/// played on the input frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UltimateActivationEcho {
+    /// An activation combat cue (Self Cloak, Reveal Scan, elemental field).
+    Cue(CombatEventId),
+    /// A replicated activation entity (Sentry, Concealment Field).
+    Spawned(Entity),
+}
+
+/// Server agreement with one locally presented ultimate cast.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalCastStatus {
+    Pending,
+    Confirmed,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LocalUltimateCast {
+    id: LocalCastId,
+    kind: UltimateKind,
+    local_tick: Tick,
+    simulation_tick: u64,
+    status: LocalCastStatus,
+    /// The authoritative activation signal was already paired with this cast.
+    echoed: bool,
+    /// Replicated ability state has not yet shown the charge spent since this cast.
+    awaiting_spent: bool,
+}
+
+/// How one authoritative own activation signal related to local presentation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OwnActivationObservation {
+    /// The signal echoes a locally presented cast; its activation sound must not replay.
+    Matched(LocalCastId),
+    /// The server activated without a matching local cast; the signal presents it as before.
+    Unmatched,
+    /// The signal was already observed.
+    Repeated,
 }
 
 /// The controlled fighter started an attack on this input tick (presentation only).
@@ -102,6 +193,9 @@ pub struct LocalAttackLedger {
     next_id: u64,
     last_shot_simulation_tick: Option<u64>,
     ultimate_was_held: bool,
+    casts: VecDeque<LocalUltimateCast>,
+    ultimate_echoes: VecDeque<UltimateActivationEcho>,
+    casts_confirmed: u64,
 }
 
 impl LocalAttackLedger {
@@ -111,6 +205,7 @@ impl LocalAttackLedger {
             *self = Self {
                 fighter: Some(fighter),
                 next_id: self.next_id,
+                casts_confirmed: self.casts_confirmed,
                 ..Self::default()
             };
         }
@@ -208,6 +303,132 @@ impl LocalAttackLedger {
         OwnAttackObservation::Matched(matched)
     }
 
+    #[must_use]
+    pub fn cast_status(&self, cast: LocalCastId) -> Option<LocalCastStatus> {
+        self.casts
+            .iter()
+            .find(|candidate| candidate.id == cast)
+            .map(|cast| cast.status)
+    }
+
+    /// Whether a previous cast still occupies the charge: the server has not answered it yet, or
+    /// it confirmed the activation while the replicated charge still reads full.
+    #[must_use]
+    pub fn ultimate_outstanding(&self) -> bool {
+        self.casts.iter().any(|cast| {
+            cast.status == LocalCastStatus::Pending
+                || (cast.status == LocalCastStatus::Confirmed && cast.awaiting_spent)
+        })
+    }
+
+    /// Whether an authoritative activation cue's sound already played on the input frame.
+    #[must_use]
+    pub fn is_activation_echo_cue(&self, event_id: CombatEventId) -> bool {
+        self.ultimate_echoes
+            .contains(&UltimateActivationEcho::Cue(event_id))
+    }
+
+    /// Whether a replicated activation entity's spawn sound already played on the input frame.
+    #[must_use]
+    pub fn is_activation_echo_entity(&self, entity: Entity) -> bool {
+        self.ultimate_echoes
+            .contains(&UltimateActivationEcho::Spawned(entity))
+    }
+
+    /// Record one locally presented ultimate cast.
+    pub(crate) fn record_cast(
+        &mut self,
+        kind: UltimateKind,
+        local_tick: Tick,
+        simulation_tick: u64,
+    ) -> LocalCastId {
+        let id = LocalCastId(self.next_id);
+        self.next_id = self.next_id.wrapping_add(1);
+        self.casts.push_back(LocalUltimateCast {
+            id,
+            kind,
+            local_tick,
+            simulation_tick,
+            status: LocalCastStatus::Pending,
+            echoed: false,
+            awaiting_spent: true,
+        });
+        while self.casts.len() > MAX_LOCAL_ULTIMATE_CASTS {
+            self.casts.pop_front();
+        }
+        id
+    }
+
+    /// Fold one authoritative activation signal of the local player's ultimate into the ledger.
+    /// `tick` is the authoritative activation tick; `echo` is the signal presentation skips.
+    pub(crate) fn observe_own_activation(
+        &mut self,
+        kind: UltimateKind,
+        tick: u64,
+        echo: Option<UltimateActivationEcho>,
+    ) -> OwnActivationObservation {
+        if echo.is_some_and(|echo| self.ultimate_echoes.contains(&echo)) {
+            return OwnActivationObservation::Repeated;
+        }
+        let matched = self.casts.iter_mut().find(|cast| {
+            cast.kind == kind
+                && !cast.echoed
+                && tick + MATCH_EARLY_TOLERANCE_TICKS >= cast.simulation_tick
+                && tick <= cast.simulation_tick + MATCH_LATE_TOLERANCE_TICKS
+        });
+        let Some(cast) = matched else {
+            return OwnActivationObservation::Unmatched;
+        };
+        cast.echoed = true;
+        if cast.status != LocalCastStatus::Confirmed {
+            cast.status = LocalCastStatus::Confirmed;
+            self.casts_confirmed = self.casts_confirmed.saturating_add(1);
+        }
+        let matched = cast.id;
+        if let Some(echo) = echo.filter(|_| presents_activation_sound_locally(kind)) {
+            self.ultimate_echoes.push_back(echo);
+            while self.ultimate_echoes.len() > MAX_ULTIMATE_ACTIVATION_ECHOES {
+                self.ultimate_echoes.pop_front();
+            }
+        }
+        OwnActivationObservation::Matched(matched)
+    }
+
+    /// Replicated ability state no longer reads a full, ready charge: no cast blocks a new one.
+    /// A pending cast of an ultimate without its own activation signal (Big Blob) is confirmed by
+    /// the spent charge; every other kind is confirmed only by its activation signal, so a charge
+    /// spent another way never confirms a rejected cast. Returns how many casts this confirmed.
+    pub(crate) fn observe_charge_spent(&mut self) -> u64 {
+        let mut confirmed = 0;
+        for cast in &mut self.casts {
+            cast.awaiting_spent = false;
+            if cast.status == LocalCastStatus::Pending && !has_activation_signal(cast.kind) {
+                cast.status = LocalCastStatus::Confirmed;
+                confirmed += 1;
+            }
+        }
+        self.casts_confirmed = self.casts_confirmed.saturating_add(confirmed);
+        confirmed
+    }
+
+    /// Reject pending casts the server has had time to confirm. Returns how many changed.
+    pub(crate) fn expire_casts(&mut self, confirmed_tick: Option<Tick>, now: Tick) -> u64 {
+        let mut rejected = 0;
+        for cast in &mut self.casts {
+            if cast.status != LocalCastStatus::Pending {
+                continue;
+            }
+            let confirmed_past = confirmed_tick
+                .is_some_and(|confirmed| confirmed - cast.local_tick >= CONFIRMATION_MARGIN_TICKS);
+            let timed_out = now - cast.local_tick >= ABSOLUTE_CONFIRMATION_TIMEOUT_TICKS;
+            if confirmed_past || timed_out {
+                cast.status = LocalCastStatus::Rejected;
+                rejected += 1;
+            }
+        }
+        rejected
+    }
+
     /// Reject pending shots the server has had time to confirm. Returns how many changed.
     pub(crate) fn expire(&mut self, confirmed_tick: Option<Tick>, now: Tick) -> u64 {
         let mut rejected = 0;
@@ -272,6 +493,15 @@ pub struct LocalAttackStats {
     pub presented: u64,
     /// Ultimate casts presented on their input tick.
     pub ultimates_presented: u64,
+    /// Ultimate casts the server activated.
+    pub ultimates_confirmed: u64,
+    /// Ultimate casts the server never activated.
+    pub ultimates_rejected: u64,
+    /// Authoritative activation signals paired with a local cast (their sound was suppressed
+    /// when the ultimate presents its activation sound locally).
+    pub ultimate_activation_echoes: u64,
+    /// Own ultimate activations observed without a matching local cast (presented as before).
+    pub unmatched_own_activations: u64,
     /// Shots the server confirmed (their cue was suppressed as an echo).
     pub confirmed: u64,
     /// Shots the server never confirmed.
@@ -383,9 +613,14 @@ fn present_local_attacks(
     let ultimate = loadout.ultimate;
     if ultimate_pressed
         && ultimate.kind != UltimateKind::Dash
+        && !ledger.ultimate_outstanding()
         && ability.is_some_and(|state| local_ultimate_ready(*state, ultimate.charge_policy.maximum))
     {
-        announce(LocalAttackKind::Ultimate(ultimate.kind));
+        let cast = ledger.record_cast(ultimate.kind, tick, simulation_tick);
+        announce(LocalAttackKind::Ultimate {
+            kind: ultimate.kind,
+            cast,
+        });
         stats.ultimates_presented = stats.ultimates_presented.saturating_add(1);
     }
     let targeted_ultimate_held = ultimate_held
@@ -414,7 +649,38 @@ fn present_local_attacks(
     stats.last_presented_tick = Some(tick.0);
 }
 
-/// Pair authoritative own-source attacks with local shots and reject unconfirmed ones.
+/// The controlled fighter's identity and replicated ultimate facts reconciliation reads.
+type ReconciledOwner<'a> = (
+    &'a NetworkEntityId,
+    &'a TeamId,
+    &'a OwnerPrediction,
+    Option<&'a ResolvedMatchLoadout>,
+    Option<&'a AbilityState>,
+);
+
+/// Authoritative activation entities spawned since the previous reconciliation.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct SpawnedActivations<'w, 's> {
+    sentries: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static brawler::abilities::SentryIdentity,
+            &'static brawler::abilities::SentryDeadline,
+        ),
+        Added<brawler::abilities::Sentry>,
+    >,
+    concealment_fields: Query<
+        'w,
+        's,
+        (Entity, &'static brawler::concealment::ConcealmentFieldState),
+        Added<brawler::concealment::ConcealmentFieldState>,
+    >,
+}
+
+/// Pair authoritative own-source attacks and ultimate activations with local presentations and
+/// reject unconfirmed ones.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -425,37 +691,135 @@ fn reconcile_local_attacks(
     mut ledger: ResMut<LocalAttackLedger>,
     mut stats: ResMut<LocalAttackStats>,
     mut cues: MessageReader<DeduplicatedCombatCue>,
-    owners: Query<(&NetworkEntityId, &OwnerPrediction), (With<Fighter>, With<Controlled>)>,
+    spawned: SpawnedActivations,
+    owners: Query<ReconciledOwner, (With<Fighter>, With<Controlled>)>,
 ) {
-    let Some((owner, prediction)) = owners.iter().next() else {
+    let Some((owner, team, prediction, loadout, ability)) = owners.iter().next() else {
         cues.clear();
         return;
     };
+    let ultimate = loadout.map(|loadout| loadout.ultimate);
+    let mut activations = Vec::new();
     for DeduplicatedCombatCue(cue) in cues.read() {
-        let CombatCue::AttackAccepted {
-            attack_id,
-            source,
-            tick,
-            ..
-        } = cue
-        else {
-            continue;
-        };
-        if source != owner {
+        match cue {
+            CombatCue::AttackAccepted {
+                attack_id,
+                source,
+                tick,
+                ..
+            } if source == owner => match ledger.observe_own_attack(*attack_id, *tick) {
+                OwnAttackObservation::Matched(_) => {
+                    stats.confirmed = stats.confirmed.saturating_add(1);
+                }
+                OwnAttackObservation::Unmatched => {
+                    stats.unmatched_own_attacks = stats.unmatched_own_attacks.saturating_add(1);
+                }
+                OwnAttackObservation::Repeated => {}
+            },
+            _ => {
+                if let Some(activation) = own_activation_cue(cue, *owner, *team) {
+                    activations.push(activation);
+                }
+            }
+        }
+    }
+    if let Some(ultimate) = ultimate {
+        for (entity, identity, deadline) in &spawned.sentries {
+            if identity.owner_network_id != *owner {
+                continue;
+            }
+            let brawler::builds::UltimateParameters::Sentry { lifetime_ticks, .. } =
+                ultimate.parameters
+            else {
+                continue;
+            };
+            activations.push((
+                UltimateKind::Sentry,
+                deadline.expires_at_tick.saturating_sub(lifetime_ticks),
+                Some(UltimateActivationEcho::Spawned(entity)),
+            ));
+        }
+        for (entity, field) in &spawned.concealment_fields {
+            if field.team == *team {
+                activations.push((
+                    UltimateKind::ConcealmentField,
+                    field.activated_at_tick,
+                    Some(UltimateActivationEcho::Spawned(entity)),
+                ));
+            }
+        }
+    }
+    for (kind, tick, echo) in activations {
+        // Teammates share team-scoped signals; only the local fighter's own kind can pair.
+        if ultimate.is_none_or(|ultimate| ultimate.kind != kind) {
             continue;
         }
-        match ledger.observe_own_attack(*attack_id, *tick) {
-            OwnAttackObservation::Matched(_) => {
-                stats.confirmed = stats.confirmed.saturating_add(1);
+        match ledger.observe_own_activation(kind, tick, echo) {
+            OwnActivationObservation::Matched(_) => {
+                stats.ultimate_activation_echoes =
+                    stats.ultimate_activation_echoes.saturating_add(1);
             }
-            OwnAttackObservation::Unmatched => {
-                stats.unmatched_own_attacks = stats.unmatched_own_attacks.saturating_add(1);
+            OwnActivationObservation::Unmatched => {
+                stats.unmatched_own_activations = stats.unmatched_own_activations.saturating_add(1);
             }
-            OwnAttackObservation::Repeated => {}
+            OwnActivationObservation::Repeated => {}
         }
+    }
+    if let (Some(ultimate), Some(ability)) = (ultimate, ability)
+        && !local_ultimate_ready(*ability, ultimate.charge_policy.maximum)
+    {
+        ledger.observe_charge_spent();
     }
     let rejected = ledger.expire(prediction.last_confirmed_tick(), timeline.tick());
     stats.rejected = stats.rejected.saturating_add(rejected);
+    let rejected_casts = ledger.expire_casts(prediction.last_confirmed_tick(), timeline.tick());
+    stats.ultimates_rejected = stats.ultimates_rejected.saturating_add(rejected_casts);
+    stats.ultimates_confirmed = ledger.casts_confirmed;
+}
+
+/// The ultimate kind, authoritative tick, and echo identity of an activation cue that may be the
+/// local fighter's own. Reveal Scan cues carry only the revealing team.
+fn own_activation_cue(
+    cue: &CombatCue,
+    owner: NetworkEntityId,
+    team: TeamId,
+) -> Option<(UltimateKind, u64, Option<UltimateActivationEcho>)> {
+    let echo = |event_id: &CombatEventId| Some(UltimateActivationEcho::Cue(*event_id));
+    match cue {
+        CombatCue::SelfCloakActivated {
+            event_id,
+            tick,
+            source,
+            ..
+        } if *source == owner => Some((UltimateKind::SelfCloak, *tick, echo(event_id))),
+        CombatCue::RevealScanActivated {
+            event_id,
+            tick,
+            revealing_team,
+            ..
+        } if *revealing_team == team => Some((UltimateKind::RevealScan, *tick, echo(event_id))),
+        CombatCue::ElementalFieldActivated {
+            event_id,
+            tick,
+            source,
+            kind,
+            ..
+        } if *source == owner => Some((elemental_ultimate_kind(*kind), *tick, echo(event_id))),
+        CombatCue::DemolitionStrikeActivated { tick, source, .. } if *source == owner => {
+            Some((UltimateKind::DemolitionStrike, *tick, None))
+        }
+        _ => None,
+    }
+}
+
+const fn elemental_ultimate_kind(kind: brawler::combat::ElementalFieldKind) -> UltimateKind {
+    use brawler::combat::ElementalFieldKind as K;
+    match kind {
+        K::Cryogenic => UltimateKind::CryogenicField,
+        K::Fire => UltimateKind::FireField,
+        K::Poison => UltimateKind::PoisonField,
+        K::Restoration => UltimateKind::RestorationField,
+    }
 }
 
 #[cfg(test)]

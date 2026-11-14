@@ -15,7 +15,7 @@ created: 2026-11-12T20:59:07Z
 
 blocks: []
 
-related: [BRL-0142]
+related: [BRL-0142, BRL-crdt, BRL-evqm]
 
 parent: BRL-0171
 

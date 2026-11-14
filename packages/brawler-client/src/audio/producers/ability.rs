@@ -3,13 +3,16 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use lightyear::prelude::Controlled;
 
-use crate::audio::{
-    registry::{AudioProducerRegistration, AudioProducerRegistrationAppExt},
-    request::{AudioCueKey, AudioRequest, cue_keys},
+use crate::{
+    audio::{
+        registry::{AudioProducerRegistration, AudioProducerRegistrationAppExt},
+        request::{AudioCueKey, AudioRequest, cue_keys},
+    },
+    local_attack::{LocalAttackKind, LocalAttackLedger, LocalAttackPresented},
 };
 use brawler::{
-    abilities::{Sentry, SentryIdentity},
-    builds::{AbilityPhase, AbilityState, PassiveRuntimeState},
+    abilities::Sentry,
+    builds::{AbilityPhase, AbilityState, PassiveRuntimeState, UltimateKind},
     combat::WeaponState,
     concealment::ConcealmentFieldState,
     protocol::Fighter,
@@ -46,11 +49,33 @@ pub(super) fn register_reload(app: &mut App) {
     .expect("reload audio producer registration must be valid");
 }
 
+/// Activation-sound occurrence of a locally presented ultimate cast (shared with the combat
+/// producer's disjoint local range).
+const LOCAL_ULTIMATE_AUDIO_OCCURRENCE: u64 = super::combat::LOCAL_ULTIMATE_AUDIO_OCCURRENCE;
+
+/// The ability producer's spawn sound of a locally cast ultimate, when it is a launch.
+const fn local_ultimate_spawn_cue(kind: UltimateKind) -> Option<AudioCueKey> {
+    if !crate::local_attack::presents_activation_sound_locally(kind) {
+        return None;
+    }
+    match kind {
+        UltimateKind::Sentry => Some(cue_keys::SENTRY_SPAWN),
+        UltimateKind::ConcealmentField => Some(cue_keys::CONCEALMENT_FIELD_SPAWN),
+        _ => None,
+    }
+}
+
+/// Ability transitions plus the local player's Sentry and Concealment Field spawn sounds on the
+/// input frame; a replicated spawn that echoes a locally presented cast stays silent.
 #[allow(
     clippy::type_complexity,
+    clippy::needless_pass_by_value,
+    clippy::too_many_arguments,
     reason = "the queries declare the producer's feature-owned transition inputs"
 )]
 pub(super) fn produce_ability_audio_requests(
+    mut local_attacks: MessageReader<LocalAttackPresented>,
+    ledger: Option<Res<LocalAttackLedger>>,
     abilities: Query<&AbilityState, (With<Fighter>, With<Controlled>, Changed<AbilityState>)>,
     passives: Query<
         &PassiveRuntimeState,
@@ -60,11 +85,27 @@ pub(super) fn produce_ability_audio_requests(
             Changed<PassiveRuntimeState>,
         ),
     >,
-    sentries: Query<&SentryIdentity, Added<Sentry>>,
-    concealment_fields: Query<&ConcealmentFieldState, Added<ConcealmentFieldState>>,
+    sentries: Query<Entity, Added<Sentry>>,
+    concealment_fields: Query<Entity, Added<ConcealmentFieldState>>,
     mut requests: MessageWriter<AudioRequest>,
     mut sequence: Local<AudioProducerSequence>,
 ) {
+    for local in local_attacks.read() {
+        if let LocalAttackKind::Ultimate { kind, cast } = local.kind
+            && let Some(cue_key) = local_ultimate_spawn_cue(kind)
+        {
+            requests.write(AudioRequest::for_occurrence(
+                cue_key,
+                LOCAL_ULTIMATE_AUDIO_OCCURRENCE | cast.0,
+                sequence.next(ABILITY_RANK),
+            ));
+        }
+    }
+    let echoed = |entity: Entity| {
+        ledger
+            .as_deref()
+            .is_some_and(|ledger| ledger.is_activation_echo_entity(entity))
+    };
     for ability in &abilities {
         let cue_key = match ability.phase {
             AbilityPhase::Dashing { .. } => Some(cue_keys::DASH),
@@ -88,13 +129,13 @@ pub(super) fn produce_ability_audio_requests(
             sequence.next(ABILITY_RANK),
         ));
     }
-    for _ in &sentries {
+    for _ in sentries.iter().filter(|entity| !echoed(*entity)) {
         requests.write(AudioRequest::once(
             cue_keys::SENTRY_SPAWN,
             sequence.next(ABILITY_RANK),
         ));
     }
-    for _ in &concealment_fields {
+    for _ in concealment_fields.iter().filter(|entity| !echoed(*entity)) {
         requests.write(AudioRequest::once(
             cue_keys::CONCEALMENT_FIELD_SPAWN,
             sequence.next(ABILITY_RANK),
