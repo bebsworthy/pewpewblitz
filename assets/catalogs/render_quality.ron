@@ -4,10 +4,10 @@
 // compute-capable GPU particles -> low, Android -> medium, otherwise high). Code-owned ceilings
 // (MSAA at most 4 samples, bloom needs HDR, CPU particle caps, the 60 FPS target) live in
 // `packages/brawler-client/src/presentation_3d/render_quality.rs`. Outlines, the toon material, and contact
-// shadows stay on in every tier because they carry readability. Floor decals (BRL-0178) are
-// decoration and are dropped on low.
+// shadows stay on in every tier because they carry readability. Floor decals (BRL-0178) and the
+// player-shell background motifs (BRL-51zd) are decoration and are dropped on low.
 (
-    schema_version: 2,
+    schema_version: 3,
     // The accepted desktop look: unchanged from before tiers existed.
     high: (
         msaa: Sample4,
@@ -18,6 +18,8 @@
         shadow_maps: true,
         foliage_sway: true,
         floor_decals: true,
+        // Sparse toy motifs over the shell background; their drift follows Reduced motion.
+        shell_motifs: true,
         particles: Gpu,
     ),
     // Mid-range phones (the Pixel 8a target).
@@ -28,6 +30,7 @@
         shadow_maps: false,
         foliage_sway: true,
         floor_decals: true,
+        shell_motifs: true,
         particles: Gpu,
     ),
     // Low-end phones and GPUs without compute-capable particles.
@@ -38,6 +41,7 @@
         shadow_maps: false,
         foliage_sway: false,
         floor_decals: false,
+        shell_motifs: false,
         particles: Cpu,
     ),
 )

@@ -11,7 +11,7 @@ use crate::{
     },
     hud::mode_score_text,
     ui::{
-        surface::{Surface, SurfaceState},
+        surface::{Surface, SurfaceBurst, SurfaceState},
         theme::{INK, TEXT, font, shell_background},
     },
 };
@@ -75,7 +75,9 @@ pub(in crate::flow) fn spawn_results(
     if roots.iter().any(|(_, old)| *old == key) {
         return;
     }
-    if roots.is_empty() {
+    // The first presentation of a result celebrates it once; resize/replay rebuilds stay still.
+    let celebrate = roots.is_empty();
+    if celebrate {
         navigation.selected = usize::from(replay);
     }
     for (e, _) in &roots {
@@ -86,6 +88,7 @@ pub(in crate::flow) fn spawn_results(
         assets: assets.handles.as_deref(),
         compact: size.x < 1000.,
         stacked: size.x < 700.,
+        celebrate,
     };
     painter.draw(&mut commands, key, assets.server.as_deref(), *purpose);
 }
@@ -95,8 +98,15 @@ struct ResultsPainter<'a> {
     assets: Option<&'a ClientAssetHandles>,
     compact: bool,
     stacked: bool,
+    /// Play the one results burst on the outcome and the local team (BRL-51zd).
+    celebrate: bool,
 }
 impl ResultsPainter<'_> {
+    fn burst(&self, p: &mut ChildSpawnerCommands, entity: Entity) {
+        if self.celebrate {
+            p.commands().entity(entity).insert(SurfaceBurst::default());
+        }
+    }
     fn draw(
         &self,
         commands: &mut Commands,
@@ -126,6 +136,7 @@ impl ResultsPainter<'_> {
             .with_children(|root| {
                 if let Some(server) = server {
                     root.spawn((
+                        crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
                         ImageNode {
                             image_mode: NodeImageMode::Stretch,
                             ..ImageNode::new(
@@ -215,7 +226,7 @@ impl ResultsPainter<'_> {
         });
     }
 
-    fn text(&self, p: &mut ChildSpawnerCommands, text: &str, size: f32) {
+    fn text(&self, p: &mut ChildSpawnerCommands, text: &str, size: f32) -> Entity {
         p.spawn((
             Text::new(text),
             font(self.assets, size),
@@ -226,15 +237,18 @@ impl ResultsPainter<'_> {
                 flex_shrink: 0.,
                 ..default()
             },
-        ));
+        ))
+        .id()
     }
     fn header(&self, p: &mut ChildSpawnerCommands) {
-        trophy(p, if self.compact { 0.6 } else { 0.85 });
-        self.text(
+        let cup = trophy(p, if self.compact { 0.6 } else { 0.85 });
+        self.burst(p, cup);
+        let headline = self.text(
             p,
             &outcome(self.context.result, self.context.local_team),
             if self.compact { 44. } else { 72. },
         );
+        self.burst(p, headline);
         let title = self.context.wipeout.as_ref().map_or_else(
             || {
                 self.context.objective.map_or_else(
@@ -312,6 +326,7 @@ impl ResultsPainter<'_> {
                         ..default()
                     },
                 ))
+                .insert_if(SurfaceBurst::default(), || ours && self.celebrate)
                 .with_children(|banner| {
                     self.text(
                         banner,
@@ -445,7 +460,9 @@ impl ResultsPainter<'_> {
         if disabled {
             e.insert(InteractionDisabled);
         }
-        e.with_children(|button| self.text(button, title, if self.compact { 23. } else { 30. }));
+        e.with_children(|button| {
+            self.text(button, title, if self.compact { 23. } else { 30. });
+        });
     }
 }
 fn outcome(result: MatchResult, local: Option<TeamId>) -> String {
@@ -469,7 +486,7 @@ fn outcome(result: MatchResult, local: Option<TeamId>) -> String {
         MatchResult::Overrun => "TEAM OVERRUN".to_owned(),
     }
 }
-fn trophy(p: &mut ChildSpawnerCommands, scale: f32) {
+fn trophy(p: &mut ChildSpawnerCommands, scale: f32) -> Entity {
     p.spawn(Node {
         width: px(88. * scale),
         height: px(80. * scale),
@@ -498,5 +515,6 @@ fn trophy(p: &mut ChildSpawnerCommands, scale: f32) {
                 BorderColor::all(INK),
             ));
         }
-    });
+    })
+    .id()
 }

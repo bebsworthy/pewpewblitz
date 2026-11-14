@@ -1,7 +1,7 @@
 //! Shared flow-screen roots, buttons, navigation, and interaction presentation.
 
 use super::{dashboard::DashboardButtonStyle, game_select::GameTypeSelectionDraft};
-use crate::ui::surface::{Surface, SurfaceState};
+use crate::ui::surface::{Surface, SurfaceBurst, SurfaceState};
 use crate::{
     ClientLobbyMembership,
     flow::{actions::FlowUiAction, input::overlay_allows_button, model::ClientOverlay},
@@ -16,6 +16,58 @@ pub(in crate::flow) struct FlowNavigation {
 
 #[derive(Component)]
 pub(in crate::flow) struct FlowRoot;
+
+/// Presentation-only request to burst the action that confirmed an accepted change (BRL-51zd).
+/// The owning screen may rebuild after the commit, so the request stays open briefly and bursts
+/// the matching action on whichever screen entity carries it. Navigation never waits for it.
+#[derive(Resource, Default)]
+pub(in crate::flow) struct FlowBurst {
+    index: Option<usize>,
+    since: Option<f32>,
+}
+
+impl FlowBurst {
+    pub(in crate::flow) fn request(&mut self, index: usize) {
+        self.index = Some(index);
+        self.since = None;
+    }
+
+    #[cfg(test)]
+    pub(in crate::flow) fn requested(&self) -> Option<usize> {
+        self.index
+    }
+}
+
+/// Long enough to cover the commit-frame rebuild, short enough that later rebuilds stay still.
+const FLOW_BURST_WINDOW_SECONDS: f32 = 0.25;
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "Bevy presentation system parameters"
+)]
+pub(in crate::flow) fn apply_flow_burst(
+    mut commands: Commands,
+    time: Res<Time>,
+    overlay: Res<ClientOverlay>,
+    mut burst: ResMut<FlowBurst>,
+    buttons: Query<(Entity, &FlowButton), (With<Surface>, Without<SurfaceBurst>)>,
+) {
+    let Some(index) = burst.index else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    let since = *burst.since.get_or_insert(now);
+    if now - since > FLOW_BURST_WINDOW_SECONDS {
+        *burst = FlowBurst::default();
+        return;
+    }
+    for (entity, button) in &buttons {
+        if button.index == index && overlay_allows_button(&overlay, button) {
+            commands.entity(entity).insert(SurfaceBurst::default());
+        }
+    }
+}
 
 #[derive(Component, Clone, Debug)]
 #[require(crate::ui::press::ReleaseActivation)]

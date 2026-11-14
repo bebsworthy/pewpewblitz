@@ -256,7 +256,8 @@ glow set. On the `Low` tier (no HDR) custom effect shaders write untonemapped va
 `assets/catalogs/render_quality.ron` (client-only, outside the gameplay fingerprint): `High` is the
 look described above (MSAA 4, HDR, bloom, arena cast shadows, foliage sway, Hanabi particles);
 `Medium` turns off MSAA, bloom, and shadow maps; `Low` also drops HDR (tonemapping and grading then
-run in the material shaders), foliage sway, floor decals, and GPU particles. Outlines, the toon
+run in the material shaders), foliage sway, floor decals, the player-shell background motifs
+(BRL-51zd), and GPU particles. Outlines, the toon
 material, and contact shadows stay on in every tier because they carry readability. The player's Settings >
 Display > Graphics quality chip cycles Auto/Low/Medium/High; Auto resolves from capability detected
 once the render device exists: no compute-capable GPU particles selects `Low`, Android selects

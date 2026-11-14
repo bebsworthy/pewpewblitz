@@ -174,6 +174,8 @@ pub(super) struct FlowCommit {
     pub(super) overlay: Option<OverlayCommit>,
     pub(super) refresh_server_select: Option<usize>,
     pub(super) focus_index: Option<usize>,
+    /// The focused action confirms an accepted change; presentation may play one burst on it.
+    pub(super) celebrate: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -120,10 +120,75 @@ impl UiMaterial for SurfaceMaterial {
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub(crate) struct PrimaryIdleMotion;
 
-/// Presentation-only motion policy. The client syncs it from reduced motion/effects.
-#[derive(Resource, Clone, Copy, Debug, Default)]
+/// Presentation-only motion policy. The client syncs `reduced` from reduced motion/effects and
+/// `motifs` from the render quality tier (BRL-0161: Low drops the background motif layer).
+#[derive(Resource, Clone, Copy, Debug)]
 pub(crate) struct SurfaceMotionPolicy {
     pub reduced: bool,
+    pub motifs: bool,
+}
+
+impl Default for SurfaceMotionPolicy {
+    fn default() -> Self {
+        Self {
+            reduced: false,
+            motifs: true,
+        }
+    }
+}
+
+/// One short celebratory burst on the element whose state just changed (BRL-51zd): a scale pop,
+/// one shine sweep and a brief face flash on surfaces, and the scale pop alone on other nodes.
+/// The owner inserts it once; it is inert after it finishes and never under reduced motion.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub(crate) struct SurfaceBurst {
+    elapsed: f32,
+}
+
+/// One frame of a running burst.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BurstFrame {
+    scale: f32,
+    shine: Option<f32>,
+    flash: f32,
+}
+
+impl SurfaceBurst {
+    /// Gallery reference: the burst at its scale peak when re-asserted every frame.
+    #[cfg(feature = "automation")]
+    pub(crate) const AT_PEAK: Self = Self {
+        elapsed: BURST_SECONDS * BURST_RISE,
+    };
+
+    /// Advances the burst; `None` once it has finished or when motion is reduced.
+    fn advance(&mut self, dt: f32, reduced: bool) -> Option<BurstFrame> {
+        if reduced {
+            self.elapsed = BURST_SECONDS;
+        }
+        if self.elapsed >= BURST_SECONDS {
+            return None;
+        }
+        let t = self.elapsed / BURST_SECONDS;
+        self.elapsed += dt;
+        Some(burst_frame(t))
+    }
+}
+
+/// Burst shape at normalized time `t` in `0..1`: a quick rise to the pop, then an ease-out-back
+/// settle; the shine crosses the face once and the flash decays.
+fn burst_frame(t: f32) -> BurstFrame {
+    let t = t.clamp(0.0, 1.0);
+    let scale = if t < BURST_RISE {
+        1.0 + BURST_POP * (1.0 - (1.0 - t / BURST_RISE).powi(2))
+    } else {
+        1.0 + BURST_POP * (1.0 - ease_out_back((t - BURST_RISE) / (1.0 - BURST_RISE)))
+    };
+    let sweep = t / BURST_SHINE_FRACTION;
+    BurstFrame {
+        scale,
+        shine: (sweep < 1.0).then_some(sweep),
+        flash: BURST_FLASH * (1.0 - t).powi(2),
+    }
 }
 
 /// When the active screen or overlay last changed. Surfaces created shortly afterwards play the
@@ -151,6 +216,13 @@ const BREATH_AMPLITUDE: f32 = 0.02;
 const BREATH_PERIOD_SECONDS: f32 = 1.6;
 const SHINE_PERIOD_SECONDS: f32 = 4.0;
 const SHINE_SWEEP_SECONDS: f32 = 0.7;
+/// Reward/confirmation burst: about 420 ms, a 7% pop reached at 25%, one shine over the first
+/// 60%, and a face flash that starts at 30% toward white (never above 1.0, so nothing blooms).
+const BURST_SECONDS: f32 = 0.42;
+const BURST_RISE: f32 = 0.25;
+const BURST_POP: f32 = 0.07;
+const BURST_SHINE_FRACTION: f32 = 0.6;
+const BURST_FLASH: f32 = 0.3;
 const DEFAULT_DETAILS: Vec4 = Vec4::new(8.0, 0.0, 6.0, 0.0);
 
 /// Per-surface presentation motion. Never read by input, navigation, or networking.
@@ -162,6 +234,8 @@ pub(crate) struct SurfaceMotion {
     /// Lip collapse fed to the shader, 0 at rest and 1 fully pressed.
     lip: f32,
     shine: Option<f32>,
+    /// Burst face flash fed to the shader, 0 at rest.
+    flash: f32,
 }
 
 fn ease_out_back(t: f32) -> f32 {
@@ -180,7 +254,15 @@ impl SurfaceMotion {
     }
 
     /// Advances one frame and returns the `(scale, downward offset)` to present.
-    fn step(&mut self, dt: f32, now: f32, held: bool, idle: bool, reduced: bool) -> (f32, f32) {
+    fn step(
+        &mut self,
+        dt: f32,
+        now: f32,
+        held: bool,
+        idle: bool,
+        reduced: bool,
+        burst: Option<BurstFrame>,
+    ) -> (f32, f32) {
         if reduced {
             *self = Self {
                 lip: f32::from(u8::from(held)),
@@ -216,6 +298,12 @@ impl SurfaceMotion {
             let sweep = now.rem_euclid(SHINE_PERIOD_SECONDS) / SHINE_SWEEP_SECONDS;
             self.shine = (sweep < 1.0).then_some(sweep);
         }
+        self.flash = 0.0;
+        if let Some(burst) = burst {
+            scale *= burst.scale;
+            self.shine = burst.shine.or(self.shine);
+            self.flash = burst.flash;
+        }
         self.lip = press_visual.clamp(0.0, 1.0);
         (scale, PRESS_DROP * press_visual)
     }
@@ -224,16 +312,25 @@ impl SurfaceMotion {
 pub(crate) struct SurfacePlugin;
 impl Plugin for SurfacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiMaterialPlugin::<SurfaceMaterial>::default())
-            .init_resource::<SurfaceMotionPolicy>()
-            .init_resource::<SurfaceEntrance>()
-            .add_systems(
-                PostUpdate,
-                (refresh_entrance_window, bind, animate, stroke_display_text)
-                    .chain()
-                    .before(UiSystems::Layout),
+        app.add_plugins((
+            UiMaterialPlugin::<SurfaceMaterial>::default(),
+            super::motifs::ShellMotifPlugin,
+        ))
+        .init_resource::<SurfaceMotionPolicy>()
+        .init_resource::<SurfaceEntrance>()
+        .add_systems(
+            PostUpdate,
+            (
+                refresh_entrance_window,
+                bind,
+                animate,
+                animate_node_bursts,
+                stroke_display_text,
             )
-            .add_systems(PostUpdate, present.after(UiSystems::Layout));
+                .chain()
+                .before(UiSystems::Layout),
+        )
+        .add_systems(PostUpdate, present.after(UiSystems::Layout));
     }
 }
 fn material() -> SurfaceMaterial {
@@ -384,18 +481,49 @@ fn animate(
         Has<PrimaryIdleMotion>,
         &mut SurfaceMotion,
         &mut UiTransform,
+        Option<&mut SurfaceBurst>,
     )>,
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
-    for (state, interaction, disabled, idle, mut motion, mut transform) in &mut surfaces {
+    for (state, interaction, disabled, idle, mut motion, mut transform, burst) in &mut surfaces {
         let state = state.copied().unwrap_or_default();
         let live = !disabled && !state.disabled && !state.inactive;
         let held = live && interaction == Some(&Interaction::Pressed);
-        let (scale, drop) = motion.step(dt, now, held, idle && live, policy.reduced);
+        let burst = burst.and_then(|mut burst| burst.advance(dt, policy.reduced));
+        let (scale, drop) = motion.step(dt, now, held, idle && live, policy.reduced, burst);
         transform.set_if_neq(UiTransform {
             translation: Val2::new(px(0), px(drop)),
             scale: Vec2::splat(scale),
+            ..*transform
+        });
+    }
+}
+
+/// Bursts on nodes without surface motion (for example a results header) only pop their scale.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy presentation-only motion"
+)]
+fn animate_node_bursts(
+    time: Res<Time>,
+    policy: Res<SurfaceMotionPolicy>,
+    mut nodes: Query<(&mut SurfaceBurst, &mut UiTransform), Without<SurfaceMotion>>,
+) {
+    let dt = time.delta_secs();
+    for (mut burst, mut transform) in &mut nodes {
+        let Some(frame) = burst.advance(dt, policy.reduced).or_else(|| {
+            // Settle exactly at rest on the frame after the burst ends.
+            (transform.scale != Vec2::ONE).then_some(BurstFrame {
+                scale: 1.0,
+                shine: None,
+                flash: 0.0,
+            })
+        }) else {
+            continue;
+        };
+        transform.set_if_neq(UiTransform {
+            scale: Vec2::splat(frame.scale),
             ..*transform
         });
     }
@@ -521,7 +649,7 @@ fn present(
             Vec4::new(style.cut, style.shadow_x, style.shadow_y, 0.0)
         });
         let motion = motion.copied().unwrap_or_default();
-        mat.motion = Vec4::new(motion.lip, motion.shine.unwrap_or(-1.0), 0.0, 0.0);
+        mat.motion = Vec4::new(motion.lip, motion.shine.unwrap_or(-1.0), motion.flash, 0.0);
     }
 }
 #[cfg(test)]
@@ -583,7 +711,10 @@ mod tests {
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
                 10,
             )))
-            .insert_resource(SurfaceMotionPolicy { reduced })
+            .insert_resource(SurfaceMotionPolicy {
+                reduced,
+                ..default()
+            })
             .add_systems(Update, animate);
         let entity = app
             .world_mut()
@@ -683,13 +814,83 @@ mod tests {
     }
 
     #[test]
+    fn burst_pops_shines_flashes_then_settles_at_rest() {
+        let (mut app, entity) = motion_app(false);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(SurfaceBurst::default());
+        let (mut peak, mut shone, mut flashed) = (1.0_f32, false, false);
+        for _ in 0..60 {
+            app.update();
+            peak = peak.max(transform(&app, entity).scale.x);
+            let motion = *app.world().get::<SurfaceMotion>(entity).unwrap();
+            shone |= motion.shine.is_some();
+            flashed |= motion.flash > 0.1;
+            assert!(
+                motion.flash <= BURST_FLASH + 1e-6,
+                "flash stays below white"
+            );
+        }
+        assert!(peak > 1.05 && peak <= 1.0 + BURST_POP + 1e-4, "pop {peak}");
+        assert!(shone && flashed);
+        assert_eq!(transform(&app, entity).scale, Vec2::ONE);
+        let motion = *app.world().get::<SurfaceMotion>(entity).unwrap();
+        assert!(motion.shine.is_none() && motion.flash.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn reduced_motion_suppresses_bursts_on_surfaces_and_plain_nodes() {
+        let (mut app, entity) = motion_app(true);
+        app.add_systems(Update, animate_node_bursts);
+        let node = app
+            .world_mut()
+            .spawn((SurfaceBurst::default(), UiTransform::IDENTITY))
+            .id();
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(SurfaceBurst::default());
+        for _ in 0..60 {
+            app.update();
+            assert_eq!(transform(&app, entity), UiTransform::IDENTITY);
+            assert_eq!(transform(&app, node), UiTransform::IDENTITY);
+            let motion = *app.world().get::<SurfaceMotion>(entity).unwrap();
+            assert!(motion.shine.is_none() && motion.flash.abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn plain_node_burst_pops_and_returns_to_identity() {
+        let (mut app, _) = motion_app(false);
+        app.add_systems(Update, animate_node_bursts);
+        let node = app
+            .world_mut()
+            .spawn((SurfaceBurst::default(), UiTransform::IDENTITY))
+            .id();
+        let mut peak = 1.0_f32;
+        for _ in 0..60 {
+            app.update();
+            peak = peak.max(transform(&app, node).scale.x);
+        }
+        assert!(peak > 1.05, "pop {peak}");
+        assert_eq!(transform(&app, node), UiTransform::IDENTITY);
+    }
+
+    #[test]
+    fn burst_shape_starts_and_ends_at_rest() {
+        assert!((burst_frame(0.0).scale - 1.0).abs() < 1e-6);
+        assert!((burst_frame(BURST_RISE).scale - (1.0 + BURST_POP)).abs() < 1e-6);
+        assert!((burst_frame(1.0).scale - 1.0).abs() < 1e-6);
+        assert!(burst_frame(1.0).shine.is_none());
+    }
+
+    #[test]
     fn entrance_scales_in_from_092_and_settles() {
         let mut motion = SurfaceMotion::entering();
-        let (first, _) = motion.step(0.0, 0.0, false, false, false);
+        let (first, _) = motion.step(0.0, 0.0, false, false, false, None);
         assert!((first - ENTRANCE_SCALE).abs() < 1e-4);
         let mut last = first;
         for _ in 0..25 {
-            (last, _) = motion.step(0.01, 0.0, false, false, false);
+            (last, _) = motion.step(0.01, 0.0, false, false, false, None);
         }
         assert!((last - 1.0).abs() < 1e-6);
         assert!(motion.entrance.is_none());

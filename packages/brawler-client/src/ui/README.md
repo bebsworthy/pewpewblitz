@@ -36,6 +36,9 @@ upright, and Bevy's rectangular button hit area remains generous around the visu
 Back is always `panel-raised` and gets shared label/arrow composition. Destination wording may
 vary. `SurfaceMotion` adds press squash, release overshoot, entrance scale-in and the opt-in
 `PrimaryIdleMotion` through `UiTransform`; `SurfaceMotionPolicy` disables it for reduced motion.
+`SurfaceBurst` is the one-shot reward/confirmation burst (pop, shine and face flash; pop only on
+plain nodes). `motifs::ShellBackdrop` adds the shared sparse motif layer (`shell_motifs.wgsl`) to a
+background node; it freezes under reduced motion and is hidden on the Low render tier.
 
 Semantic selection uses a `panel-raised` fill with a `play-highlight` rim. Focus uses an inset
 `accent` frame, `ink` keyline and `accent` triangle marker on every fill, including `play`. Disabled overrides interaction, and inactive

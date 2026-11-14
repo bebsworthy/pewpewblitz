@@ -54,6 +54,7 @@ pub fn build_ui_gallery_app() -> App {
             scroll_gallery,
             resize_gallery,
             sync_motion_demo,
+            (replay_burst_demo, hold_burst_peak_demo).after(interact),
         ),
     )
     .add_systems(PreUpdate, hold_press_demo.after(UiSystems::Focus))
@@ -80,7 +81,8 @@ fn fit_gallery_viewport(windows: Query<&Window, With<PrimaryWindow>>, mut scale:
 }
 
 /// Development evidence: save the settled top of the gallery to `BRAWLER_UI_GALLERY_CAPTURE`,
-/// then its scrolled bottom beside it (`<stem>-bottom.png`), then exit.
+/// then a scrolled middle (`<stem>-middle.png`) and bottom (`<stem>-bottom.png`) beside it, then
+/// exit.
 #[derive(Resource)]
 struct GalleryCapture {
     path: std::path::PathBuf,
@@ -97,33 +99,80 @@ fn capture_gallery(
 ) {
     use bevy::render::view::screenshot::{Screenshot, save_to_disk};
     capture.frame += 1;
-    let bottom = capture.path.with_file_name(format!(
-        "{}-bottom.png",
-        capture
-            .path
-            .file_stem()
-            .map_or("gallery".into(), |stem| stem.to_string_lossy())
-    ));
-    match capture.frame {
-        GALLERY_CAPTURE_FRAME => {
+    let sibling = |suffix: &str| {
+        capture.path.with_file_name(format!(
+            "{}-{suffix}.png",
+            capture
+                .path
+                .file_stem()
+                .map_or("gallery".into(), |stem| stem.to_string_lossy())
+        ))
+    };
+    let mut scroll_to = |offset: f32| {
+        for mut scroll in &mut roots {
+            scroll.0.y = offset;
+        }
+    };
+    match capture.frame.checked_sub(GALLERY_CAPTURE_FRAME) {
+        Some(0) => {
             commands
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(capture.path.clone()));
         }
-        frame if frame == GALLERY_CAPTURE_FRAME + 10 => {
-            for mut scroll in &mut roots {
-                scroll.0.y = 10_000.0;
-            }
-        }
-        frame if frame == GALLERY_CAPTURE_FRAME + 40 => {
+        // The middle shows the held-press and reward-burst references.
+        Some(10) => scroll_to(GALLERY_MIDDLE_SCROLL),
+        Some(40) => {
             commands
                 .spawn(Screenshot::primary_window())
-                .observe(save_to_disk(bottom));
+                .observe(save_to_disk(sibling("middle")));
         }
-        frame if frame == GALLERY_CAPTURE_FRAME + 70 => {
+        Some(50) => scroll_to(10_000.0),
+        Some(80) => {
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(sibling("bottom")));
+        }
+        Some(110) => {
             exit.write(AppExit::Success);
         }
         _ => {}
+    }
+}
+
+/// Logical scroll offset for the middle evidence capture.
+const GALLERY_MIDDLE_SCROLL: f32 = 700.0;
+
+/// Reference-only state: keeps one example at the peak of its reward burst.
+#[derive(Component)]
+struct BurstPeakDemo;
+
+fn hold_burst_peak_demo(mut commands: Commands, held: Query<Entity, With<BurstPeakDemo>>) {
+    for entity in &held {
+        commands
+            .entity(entity)
+            .insert(super::surface::SurfaceBurst::AT_PEAK);
+    }
+}
+
+/// The interactive burst example replays the production burst on each activation.
+#[derive(Component)]
+struct BurstDemo;
+
+#[allow(clippy::needless_pass_by_value, reason = "isolated gallery input")]
+fn replay_burst_demo(
+    mut commands: Commands,
+    demos: Query<(Entity, &super::press::ReleaseActivation), With<BurstDemo>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    focus: Res<GalleryFocus>,
+    items: Query<&GalleryItem, With<BurstDemo>>,
+) {
+    let keyed = keys.just_pressed(KeyCode::Enter) && items.iter().any(|item| item.0 == focus.index);
+    for (entity, release) in &demos {
+        if release.activated() || keyed {
+            commands
+                .entity(entity)
+                .insert(super::surface::SurfaceBurst::default());
+        }
     }
 }
 
@@ -159,6 +208,18 @@ struct GalleryItem(usize);
 #[allow(clippy::needless_pass_by_value, reason = "Bevy gallery setup")]
 fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn(Camera2d);
+    // Fixed backdrop with the shared motif layer (edges layout) behind the scrolling content.
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            ..default()
+        },
+        theme::shell_background(),
+        super::motifs::ShellBackdrop(super::motifs::MotifLayout::Edges),
+        GlobalZIndex(-1),
+    ));
     let font = TextFont {
         font: assets.load(theme::FONT_PATH).into(),
         font_size: FontSize::Px(24.0),
@@ -167,7 +228,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((GalleryRoot, ScrollPosition::default(), Node {
         width: percent(100), height: percent(100), padding: UiRect::all(px(32)),
         flex_direction: FlexDirection::Column, row_gap: px(24), overflow: Overflow::scroll_y(), ..default()
-    }, theme::shell_background())).with_children(|root| {
+    })).with_children(|root| {
         root.spawn((Text::new("UI GALLERY"), TextFont { font_size: FontSize::Px(42.0), ..font.clone() }, TextColor(theme::TEXT)));
         root.spawn((Text::new("Development preview · Up/Down or D-pad: focus · Left/Right: adjust · Enter/South: activate"),
             TextFont { font_size: FontSize::Px(18.0), ..font.clone() }, TextColor(theme::TEXT)));
@@ -193,12 +254,16 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                     (Surface::Card, "BRAWLER CARD\nPulse Sidearm", 220.),
                     (Surface::Panel, "WEAPON OVERVIEW\nFour attachment slots", 150.),
                     (Surface::Quiet, "RENAME", 64.),
+                    (Surface::Card, "REWARD BURST\nActivate to replay", 120.),
                 ].into_iter().enumerate() {
                     let entity=surface_example(left,&font,role,label,height);
                     left.commands().entity(entity).insert((GalleryItem(offset+5),ControlValue::Action,ControlState::default()));
                     if role == Surface::Primary {
                         // The Dashboard Play treatment: breathing and periodic shine.
                         left.commands().entity(entity).insert(super::surface::PrimaryIdleMotion);
+                    }
+                    if label.starts_with("REWARD BURST") {
+                        left.commands().entity(entity).insert(BurstDemo);
                     }
                 }
             });
@@ -220,12 +285,16 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                     ("Disabled action", ControlState::default(), true),
                     ("Inactive selected card", ControlState{selected:true,focused:true,inactive:true}, false),
                     ("Held press (squash, lip collapse)", ControlState::default(), false),
+                    ("Reward burst at peak (pop, shine, flash)", ControlState::default(), false),
                 ] {
                     let entity=surface_example(right,&font,Surface::Primary,label,100.);
                     right.commands().entity(entity).insert(state);
                     if disabled { right.commands().entity(entity).insert(InteractionDisabled); }
                     if label.starts_with("Held press") {
                         right.commands().entity(entity).insert(HeldPressDemo);
+                    }
+                    if label.starts_with("Reward burst") {
+                        right.commands().entity(entity).insert(BurstPeakDemo);
                     }
                 }
             });

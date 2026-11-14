@@ -3,7 +3,7 @@
 //! The player's [`GraphicsQuality`] preference resolves to one [`QualityTier`]; `Auto` picks from
 //! the capability detected once the render device exists. Each tier's contents are authored in
 //! `assets/catalogs/render_quality.ron`: MSAA, HDR, bloom, arena shadow maps, foliage sway, floor
-//! decals, and the particle backend. Code owns the ceilings (MSAA at most 4 samples, bloom needs HDR). Everything
+//! decals, shell background motifs, and the particle backend. Code owns the ceilings (MSAA at most 4 samples, bloom needs HDR). Everything
 //! here is client presentation: the server never sees a tier and gameplay facts never depend on it.
 
 #[allow(
@@ -23,7 +23,7 @@ use bevy::{
 use serde::Deserialize;
 
 const RENDER_QUALITY_CATALOG: &str = include_str!("../../../../assets/catalogs/render_quality.ron");
-const RENDER_QUALITY_SCHEMA_VERSION: u16 = 2;
+const RENDER_QUALITY_SCHEMA_VERSION: u16 = 3;
 /// Desktop verification override (like `BRAWLER_FORCE_PRIMITIVE_WORLD`): `1` treats the GPU as
 /// unable to run compute particles, so Hanabi is never installed and the CPU fallback is used.
 pub(crate) const PARTICLE_FALLBACK_ENV: &str = "BRAWLER_FORCE_PARTICLE_FALLBACK";
@@ -96,6 +96,8 @@ pub(crate) struct QualityProfile {
     pub(crate) foliage_sway: bool,
     /// Sparse wall-adjacent floor decals (BRL-0178).
     pub(crate) floor_decals: bool,
+    /// Sparse toy motifs over the player-shell background (BRL-51zd).
+    pub(crate) shell_motifs: bool,
     pub(crate) particles: ParticleBackend,
 }
 
@@ -353,6 +355,11 @@ pub(super) fn foliage_sway_enabled(quality: Option<&ActiveRenderQuality>) -> boo
 /// Whether the active tier keeps floor decals; absent quality keeps them.
 pub(super) fn floor_decals_enabled(quality: Option<&ActiveRenderQuality>) -> bool {
     quality.is_none_or(|quality| quality.profile.floor_decals)
+}
+
+/// Whether the active tier keeps the shell background motifs; absent quality keeps them.
+pub(crate) fn shell_motifs_enabled(quality: Option<&ActiveRenderQuality>) -> bool {
+    quality.is_none_or(|quality| quality.profile.shell_motifs)
 }
 
 /// Whether the active tier keeps bloom; absent quality keeps the authored look.

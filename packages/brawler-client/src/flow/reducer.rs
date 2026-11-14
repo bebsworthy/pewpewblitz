@@ -885,6 +885,7 @@ pub(super) fn commit_flow(
     mut next_flow: ResMut<NextState<ClientFlow>>,
     mut overlay: ResMut<ClientOverlay>,
     mut navigation: ResMut<FlowNavigation>,
+    burst: Option<ResMut<super::screens::shared::FlowBurst>>,
 ) {
     if let Some(error) = &commit.error {
         *overlay = ClientOverlay::Error(error.clone());
@@ -908,6 +909,12 @@ pub(super) fn commit_flow(
     }
     if let Some(index) = commit.focus_index {
         navigation.selected = index;
+        if commit.celebrate
+            && commit.error.is_none()
+            && let Some(mut burst) = burst
+        {
+            burst.request(index);
+        }
     }
     if let Some(target) = commit.start_target.clone()
         && let Err(error) = begin_connection_target(

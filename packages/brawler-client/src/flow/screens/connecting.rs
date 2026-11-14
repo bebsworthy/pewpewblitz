@@ -55,7 +55,7 @@ pub(in crate::flow) fn spawn_connecting(
         ))
         .with_children(|root| {
             spawn_background(root, server.as_deref());
-            spawn_logo(root, assets.as_deref(), 360.0);
+            spawn_logo(root, assets.as_deref(), server.as_deref(), 360.0);
             root.spawn((
                 Surface::Panel,
                 Node {

@@ -120,6 +120,7 @@ impl AbilityView<'_> {
     fn draw(&self, root: &mut ChildSpawnerCommands, scroll: ScrollPosition) {
         if let Some(server) = self.cards.server {
             root.spawn((
+                crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
                 ImageNode {
                     image_mode: NodeImageMode::Stretch,
                     ..ImageNode::new(server.load("brawler/ui/shell/game-selection-background.png"))

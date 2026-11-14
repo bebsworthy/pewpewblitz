@@ -23,19 +23,22 @@ fn high_tier_keeps_the_accepted_desktop_look() {
             shadow_maps: true,
             foliage_sway: true,
             floor_decals: true,
+            shell_motifs: true,
             particles: ParticleBackend::Gpu,
         }
     );
     let low = catalog().profile(QualityTier::Low);
     assert_eq!(low.particles, ParticleBackend::Cpu);
     assert!(!low.bloom);
+    assert!(!low.shell_motifs, "Low drops decorative shell motifs");
+    assert!(catalog().profile(QualityTier::Medium).shell_motifs);
 }
 
 #[test]
 fn catalog_rejects_unknown_fields_bad_schema_and_bloom_without_hdr() {
     let unknown = RENDER_QUALITY_CATALOG.replacen("hdr: true,", "hdr: true, ssao: true,", 1);
     assert!(RenderQualityCatalog::from_ron(&unknown).is_err());
-    let schema = RENDER_QUALITY_CATALOG.replace("schema_version: 2", "schema_version: 3");
+    let schema = RENDER_QUALITY_CATALOG.replace("schema_version: 3", "schema_version: 4");
     assert!(RenderQualityCatalog::from_ron(&schema).is_err());
     let ldr_bloom = RENDER_QUALITY_CATALOG.replacen(
         "msaa: Sample4,\n        hdr: true,",

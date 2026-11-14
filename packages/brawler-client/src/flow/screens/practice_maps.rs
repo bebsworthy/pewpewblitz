@@ -208,6 +208,7 @@ impl MapPickerView<'_> {
     fn header(&self, root: &mut ChildSpawnerCommands, game: &str) {
         if let Some(server) = self.server {
             root.spawn((
+                crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
                 ImageNode {
                     image_mode: NodeImageMode::Stretch,
                     ..ImageNode::new(server.load("brawler/ui/shell/game-selection-background.png"))

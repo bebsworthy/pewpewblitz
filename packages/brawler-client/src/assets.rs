@@ -21,6 +21,10 @@ const RETAINED_AUDIO_ASSET_IDS: [&str; 5] = [
     "audio.error",
 ];
 
+/// The branded lockup the connection screens show; also loaded directly by screens spawned before
+/// the handle resource exists.
+pub(crate) const LOADING_LOGO_PATH: &str = "brawler/ui/branding/pewpew-blitz-lockup.png";
+
 #[derive(Resource, Clone)]
 pub(crate) struct ClientAssetHandles {
     audio: BTreeMap<String, Handle<AudioSource>>,
@@ -56,7 +60,7 @@ impl ClientAssetHandles {
                 presentation_3d::WeaponFamily::ALL
                     .map(|family| asset_server.load(catalog.model(family).model.clone()))
             },
-            loading_logo: asset_server.load("brawler/ui/branding/pewpew-blitz-lockup.png"),
+            loading_logo: asset_server.load(LOADING_LOGO_PATH),
             wordmark: asset_server.load("brawler/ui/branding/pewpew-blitz-wordmark.png"),
             dashboard_logo: asset_server.load("brawler/ui/shell/logo.png"),
             dashboard_badges: ["wipeout", "hot-zone", "heist", "zombie"]

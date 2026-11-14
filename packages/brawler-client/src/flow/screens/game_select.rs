@@ -222,6 +222,7 @@ pub(in crate::flow) fn spawn_game_type_select(
 fn spawn_background(root: &mut ChildSpawnerCommands, server: Option<&AssetServer>) {
     if let Some(server) = server {
         root.spawn((
+            crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
             ImageNode {
                 image_mode: NodeImageMode::Stretch,
                 ..ImageNode::new(server.load("brawler/ui/shell/game-selection-background.png"))

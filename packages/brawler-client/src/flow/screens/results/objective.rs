@@ -63,6 +63,9 @@ impl ResultsPainter<'_> {
                             ..default()
                         },
                     ))
+                    .insert_if(crate::ui::surface::SurfaceBurst::default(), || {
+                        ours && self.celebrate
+                    })
                     .with_children(|card| {
                         self.text(
                             card,

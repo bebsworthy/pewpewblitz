@@ -160,6 +160,7 @@ fn ensure_dashboard_background(
         },
         MaterialNode(material.clone()),
         GlobalZIndex(409),
+        super::ui::motifs::ShellBackdrop(super::ui::motifs::MotifLayout::Dashboard),
     ));
     commands.insert_resource(DashboardBackgroundTarget(material));
 }
@@ -189,18 +190,22 @@ fn update_dashboard_background(
     material.time_motion.y = motion;
 }
 
-/// Shell surface motion follows the persisted reduced motion/effects preferences.
+/// Shell surface motion follows the persisted reduced motion/effects preferences; background
+/// motifs follow the active render quality tier.
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Bevy owns persisted settings as a system resource"
 )]
 fn sync_surface_motion_policy(
     settings: Res<super::ClientShellSettings>,
+    quality: Option<Res<super::presentation_3d::render_quality::ActiveRenderQuality>>,
     mut policy: ResMut<super::ui::surface::SurfaceMotionPolicy>,
 ) {
     let reduced = settings.reduced_motion || settings.reduced_combat_effects;
-    if policy.reduced != reduced {
+    let motifs = super::presentation_3d::render_quality::shell_motifs_enabled(quality.as_deref());
+    if policy.reduced != reduced || policy.motifs != motifs {
         policy.reduced = reduced;
+        policy.motifs = motifs;
     }
 }
 

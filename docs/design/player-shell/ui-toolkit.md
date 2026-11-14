@@ -99,7 +99,9 @@ Actions activate on pointer or touch release, not on press, and a drag beyond a 
 (12 logical px) cancels the activation so touch scrolling never triggers a control. Keyboard and
 gamepad activation are unchanged. Controls carry `ReleaseActivation` and owners read
 `activated()`; a press still moves navigation focus. Slider dragging remains a held-press
-interaction. Press, idle and entrance motion follow [motion](motion.md) and are presentation only.
+interaction. Press, idle and entrance motion follow [motion](motion.md) and are presentation only. A screen
+celebrates an accepted change by inserting `SurfaceBurst` on the changed element (or, from a flow
+reducer, by setting `FlowCommit::celebrate` with the focus index); it never waits for the burst.
 
 Focus is transient and selected state is persistent. Opening an overlay transfers input and focus
 to that overlay; the underlying screen cannot react to the same navigation event. Pointer hover or
@@ -140,8 +142,10 @@ real screen needs behavior that the existing values cannot express.
   not need an additional visible Back button when the approved flow deliberately omits it.
 
 The shared shell background is the `shell-bg-top` → `shell-bg-bottom` vertical gradient, with
-optional sparse, low-contrast toy-like motifs. Screen-specific scenery, doors, and staircases are
-not part of that background.
+sparse, low-contrast toy-like motifs. Mark a full-screen background node with
+`ui::motifs::ShellBackdrop` (`Dashboard` or `Edges` layout) to carry the shared motif layer; screens
+do not draw their own motifs. Screen-specific scenery, doors, and staircases are not part of that
+background.
 Product controls use input-neutral labels and do not add controller-specific button prompts or
 footer legends.
 
@@ -157,8 +161,8 @@ shader is presentation only and cannot become an authority or interaction depend
 The component gallery is a development review surface and is never installed in the player
 application. Run `just ui-gallery` for the wide state matrix and
 `BRAWLER_UI_GALLERY_COMPACT=1 just ui-gallery` for its compact layout. Set
-`BRAWLER_UI_GALLERY_CAPTURE=<path>.png` to save the settled top and scrolled bottom
-(`<path>-bottom.png`) and exit, for native evidence without OS screen capture. Its Reduced motion
+`BRAWLER_UI_GALLERY_CAPTURE=<path>.png` to save the settled top, a scrolled middle
+(`<path>-middle.png`) and the scrolled bottom (`<path>-bottom.png`) and exit, for native evidence without OS screen capture. Its Reduced motion
 demo switch drives the production surface motion policy. It supplements native
 screen review; it does not validate product flow or replace screen-level tests.
 

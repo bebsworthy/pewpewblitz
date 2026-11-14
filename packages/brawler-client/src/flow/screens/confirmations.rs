@@ -154,6 +154,7 @@ impl ConfirmationView<'_, '_, '_> {
     fn draw(&self, root: &mut ChildSpawnerCommands) {
         if let Some(server) = self.assets.server.as_deref() {
             root.spawn((
+                crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
                 ImageNode {
                     image_mode: NodeImageMode::Stretch,
                     ..ImageNode::new(server.load("brawler/ui/shell/game-selection-background.png"))

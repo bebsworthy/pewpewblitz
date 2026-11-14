@@ -156,6 +156,7 @@ impl LoadingView<'_> {
     fn background(&self, root: &mut ChildSpawnerCommands) {
         if let Some(s) = self.server {
             root.spawn((
+                crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
                 ImageNode {
                     image_mode: NodeImageMode::Stretch,
                     ..ImageNode::new(s.load("brawler/ui/shell/game-selection-background.png"))

@@ -156,7 +156,7 @@ pub(in crate::flow) fn spawn_server_select_root(
             })
             .with_children(|header| {
                 spawn_text(header, assets, "SELECT SERVER", 54.0);
-                spawn_logo(header, assets, 220.0);
+                spawn_logo(header, assets, server, 220.0);
             });
             root.spawn(Node {
                 width: percent(100),

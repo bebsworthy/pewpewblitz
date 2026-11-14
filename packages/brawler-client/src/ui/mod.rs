@@ -10,6 +10,8 @@ pub(crate) mod icons;
 #[cfg(test)]
 pub(crate) mod layout_harness;
 
+pub(crate) mod motifs;
+
 pub(crate) mod press;
 
 pub(crate) mod scroll;

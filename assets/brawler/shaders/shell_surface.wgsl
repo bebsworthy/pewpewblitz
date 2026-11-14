@@ -13,7 +13,8 @@
 @group(1) @binding(6) var<uniform> fill_top: vec4<f32>;
 // Persistent selection rim.
 @group(1) @binding(7) var<uniform> selection: vec4<f32>;
-// x press amount (collapses the lip), y shine sweep 0..1 or negative when idle.
+// x press amount (collapses the lip), y shine sweep 0..1 or negative when idle, z burst flash
+// toward white (0..0.3; colors stay at or below 1.0).
 @group(1) @binding(8) var<uniform> motion: vec4<f32>;
 fn edge(p: vec2<f32>, extent: vec2<f32>, inset: f32) -> f32 {
     let slope=geometry.z;
@@ -53,13 +54,15 @@ fn edge(p: vec2<f32>, extent: vec2<f32>, inset: f32) -> f32 {
     let band=1.-smoothstep(band_top+2.,band_top+3.,p.y);
     face=mix(face,mix(face,vec4<f32>(1.),0.4),band);
     if motion.y >= 0. {
-        // Diagonal shine sweep across the face for the primary idle action.
+        // Diagonal shine sweep across the face (primary idle action or a burst).
         let travel=extent.x+extent.y;
         let along=p.x+0.6*(extent.y-p.y);
         let center=-0.2*travel+motion.y*1.4*travel;
         let shine=1.-smoothstep(4.,16.,abs(along-center));
         face=mix(face,vec4<f32>(1.),shine*0.38);
     }
+    // Reward/confirmation burst flash (BRL-51zd).
+    face=mix(face,vec4<f32>(1.),clamp(motion.z,0.,0.5));
     var inner=face;
     if flags.z>0.5 {
         let rim=select(w+4.,w+9.,flags.x>0.5);

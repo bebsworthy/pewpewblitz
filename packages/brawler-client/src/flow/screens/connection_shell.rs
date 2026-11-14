@@ -30,6 +30,7 @@ pub(super) fn spawn_background(root: &mut ChildSpawnerCommands, server: Option<&
         return;
     };
     root.spawn((
+        crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
         ImageNode {
             image_mode: NodeImageMode::Stretch,
             ..ImageNode::new(server.load("brawler/ui/shell/game-selection-background.png"))
@@ -46,14 +47,21 @@ pub(super) fn spawn_background(root: &mut ChildSpawnerCommands, server: Option<&
     ));
 }
 
+/// The real logo lockup. A screen spawned before `ClientAssetHandles` exists (the first
+/// Connecting frame) loads it directly rather than drawing substitute text; only headless
+/// schedule tests without an asset server fall back to display-font text.
 pub(super) fn spawn_logo(
     parent: &mut ChildSpawnerCommands,
     assets: Option<&ClientAssetHandles>,
+    server: Option<&AssetServer>,
     width: f32,
 ) {
-    if let Some(assets) = assets {
+    let logo = assets
+        .map(|assets| assets.loading_logo.clone())
+        .or_else(|| server.map(|server| server.load(crate::assets::LOADING_LOGO_PATH)));
+    if let Some(logo) = logo {
         parent.spawn((
-            ImageNode::new(assets.loading_logo.clone()),
+            ImageNode::new(logo),
             Node {
                 width: px(width),
                 max_width: percent(70),
@@ -136,4 +144,29 @@ pub(super) fn action_node(width: Val, min_height: f32) -> Node {
 
 pub(super) fn root_background() -> impl Bundle {
     shell_background()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BRL-51zd: a connection screen spawned before `ClientAssetHandles` exists still shows the
+    /// real logo, never fallback text in the default font.
+    #[test]
+    fn logo_loads_directly_before_the_handle_resource_exists() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>();
+        let server = app.world().resource::<AssetServer>().clone();
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.world_mut()
+            .commands()
+            .entity(root)
+            .with_children(|parent| spawn_logo(parent, None, Some(&server), 300.0));
+        app.update();
+        let mut images = app.world_mut().query::<&ImageNode>();
+        assert_eq!(images.iter(app.world()).count(), 1);
+        let mut texts = app.world_mut().query::<&Text>();
+        assert_eq!(texts.iter(app.world()).count(), 0);
+    }
 }

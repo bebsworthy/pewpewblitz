@@ -130,6 +130,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<RoutedClientLifecycle>()
             .init_resource::<MatchFailureNotice>()
             .init_resource::<FlowNavigation>()
+            .init_resource::<screens::shared::FlowBurst>()
             .add_systems(
                 Startup,
                 (
@@ -284,6 +285,10 @@ impl Plugin for ClientFlowPlugin {
                 .run_if(in_state(ClientFlow::GameTypeSelect)),
         );
         app.add_systems(Update, begin_surface_entrance);
+        app.add_systems(
+            Update,
+            screens::shared::apply_flow_burst.after(ClientFlowSet::PresentFlow),
+        );
     }
 }
 

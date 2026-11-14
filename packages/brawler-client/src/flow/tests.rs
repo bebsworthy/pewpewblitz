@@ -961,6 +961,8 @@ fn equipment_actions_preserve_slot_conflict_draft_and_overlay_contracts() {
     assert!(!app.world().resource::<WeaponEquipmentDraft>().picker_open);
     assert!(!app.world().resource::<WeaponEquipmentDraft>().awaiting_save);
     assert!(app.world().resource::<DashboardNotice>().0.is_none());
+    let burst = app.world().resource::<screens::shared::FlowBurst>();
+    assert_eq!(burst.requested(), Some(1), "the accepted slot bursts");
     inject_action(&mut app, FlowUiAction::SelectEquipmentSlot(1));
     inject_action(&mut app, FlowUiAction::UnequipWeaponPart);
     assert!(app.world().resource::<WeaponEquipmentDraft>().awaiting_save);
@@ -1985,6 +1987,16 @@ fn results_disable_replay_when_the_exact_game_disappears() {
             .iter()
             .any(|text| text.contains("previous game is not available"))
     );
+    // BRL-51zd: the first presentation bursts the trophy and outcome headline once.
+    let bursts = |app: &mut App| {
+        app.world_mut()
+            .query::<&crate::ui::surface::SurfaceBurst>()
+            .iter(app.world())
+            .count()
+    };
+    assert_eq!(bursts(&mut app), 2);
+    app.update();
+    assert_eq!(bursts(&mut app), 2, "an unchanged result does not re-burst");
 }
 
 #[test]
@@ -3226,7 +3238,20 @@ fn delete_confirmation_waits_for_authority_and_retains_rejected_brawler() {
     let id = membership.profile.brawlers[0].id;
     let mut app = configured_customization_app(&membership);
     inject_action(&mut app, FlowUiAction::DeleteBrawler(id));
+    assert_eq!(
+        app.world()
+            .resource::<screens::shared::FlowBurst>()
+            .requested(),
+        None
+    );
     inject_action(&mut app, FlowUiAction::ConfirmDeleteBrawler);
+    assert_eq!(
+        app.world()
+            .resource::<screens::shared::FlowBurst>()
+            .requested(),
+        Some(1),
+        "the confirmed Delete bursts while authority decides"
+    );
     inject_action(&mut app, FlowUiAction::ConfirmDeleteBrawler);
     inject_action(&mut app, FlowUiAction::CancelDeleteBrawler);
     assert_eq!(
@@ -3775,4 +3800,62 @@ fn choose_game_and_practice_map_back_controls_are_on_screen_and_go_back() {
             );
         }
     }
+}
+
+/// BRL-51zd: the burst reaches the requested action on the active screen only, survives the
+/// commit-frame rebuild, and closes after its short window.
+#[test]
+fn flow_burst_targets_the_active_action_and_expires() {
+    use crate::ui::surface::SurfaceBurst;
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            Duration::from_millis(100),
+        ))
+        .insert_resource(ClientOverlay::WeaponEquipment)
+        .init_resource::<screens::shared::FlowBurst>()
+        .add_systems(Update, screens::shared::apply_flow_burst);
+    let button = |index, error_action| {
+        (
+            Surface::Card,
+            FlowButton {
+                index,
+                action: FlowUiAction::SelectEquipmentSlot(index),
+                error_action,
+            },
+        )
+    };
+    let target = app.world_mut().spawn(button(1, true)).id();
+    let other = app.world_mut().spawn(button(0, true)).id();
+    let behind = app.world_mut().spawn(button(1, false)).id();
+    app.world_mut()
+        .resource_mut::<screens::shared::FlowBurst>()
+        .request(1);
+    app.update();
+    assert!(app.world().get::<SurfaceBurst>(target).is_some());
+    assert!(app.world().get::<SurfaceBurst>(other).is_none());
+    assert!(
+        app.world().get::<SurfaceBurst>(behind).is_none(),
+        "the screen behind the overlay stays still"
+    );
+    // A rebuild inside the window bursts the new entity too.
+    app.world_mut().entity_mut(target).despawn();
+    let rebuilt = app.world_mut().spawn(button(1, true)).id();
+    app.update();
+    assert!(app.world().get::<SurfaceBurst>(rebuilt).is_some());
+    for _ in 0..4 {
+        app.update();
+    }
+    assert_eq!(
+        app.world()
+            .resource::<screens::shared::FlowBurst>()
+            .requested(),
+        None
+    );
+    let later = app.world_mut().spawn(button(1, true)).id();
+    app.update();
+    assert!(
+        app.world().get::<SurfaceBurst>(later).is_none(),
+        "later rebuilds do not replay the burst"
+    );
 }

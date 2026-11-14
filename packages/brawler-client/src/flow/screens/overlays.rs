@@ -176,7 +176,7 @@ fn spawn_connection_recovery(
         ))
         .with_children(|root| {
             spawn_background(root, server);
-            spawn_logo(root, assets, 330.0);
+            spawn_logo(root, assets, server, 330.0);
             root.spawn((
                 Surface::Panel,
                 Node {

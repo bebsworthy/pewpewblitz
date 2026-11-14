@@ -222,6 +222,7 @@ pub(in crate::flow) fn present_weapon_equipment(
         .with_children(|root| {
             if let Some(s) = view.server {
                 root.spawn((
+                    crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
                     ImageNode {
                         image_mode: NodeImageMode::Stretch,
                         ..ImageNode::new(s.load("brawler/ui/shell/game-selection-background.png"))

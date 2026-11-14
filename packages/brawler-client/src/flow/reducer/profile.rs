@@ -74,6 +74,7 @@ pub(super) fn resolve_profile_decision(
         equipment.picker_open = !accepted;
         commit.overlay = Some(OverlayCommit::WeaponEquipment);
         commit.focus_index = Some(if accepted { equipment.selected_slot } else { 0 });
+        commit.celebrate = accepted;
         return;
     }
     if accepted
@@ -210,8 +211,12 @@ pub(super) fn resolve_profile_action(
             commit.focus_index = Some(0);
         }
         FlowUiAction::ConfirmDeleteBrawler => {
-            if !profile_changes_blocked(queue, practice, profile) {
-                submit_brawler_deletion(overlay, profile, pending_deleted_brawler);
+            if !profile_changes_blocked(queue, practice, profile)
+                && submit_brawler_deletion(overlay, profile, pending_deleted_brawler)
+            {
+                // The confirmation stays while the server decides; its confirm action bursts.
+                commit.focus_index = Some(DELETE_CONFIRM_INDEX);
+                commit.celebrate = true;
             }
         }
         _ => unreachable!("flow action was routed to the wrong profile reducer"),
@@ -574,6 +579,7 @@ fn accept_brawler_edit(
         }
         commit.overlay = Some(OverlayCommit::BrawlerEditor);
         commit.focus_index = Some(ability_slot_index(picker));
+        commit.celebrate = true;
     } else {
         brawler_edit.inline_rename = false;
         brawler_edit.editing_name = false;
@@ -657,15 +663,20 @@ fn cancel_brawler_deletion(
     });
 }
 
+/// The confirmation's destructive action (after "keep").
+const DELETE_CONFIRM_INDEX: usize = 1;
+
 fn submit_brawler_deletion(
     overlay: &ClientOverlay,
     profile: &mut crate::ClientProfileModel,
     pending: &mut PendingDeletedBrawler,
-) {
+) -> bool {
     if let ClientOverlay::DeleteBrawlerConfirmation(id) = overlay
         && profile.delete(*id)
     {
         pending.id = Some(*id);
         pending.error = None;
+        return true;
     }
+    false
 }
