@@ -2,9 +2,6 @@
 
 # Questions · BRL-hkj4
 
-## q-bw4sn24 · open · by Boyd
+## Resolved
 
-Confirm the arena cast-shadow decision. Recommendation: Option A on the High tier only (one cascade over the visible ground; Medium and Low keep shadow maps off). On the Apple M6 it costs ~0.2 ms GPU vs off, is ~0.2 ms cheaper than today's empty 4-cascade pass, and every frame stays at 120 Hz; captures show clearer depth on all three themes with tiles, Hot Zone, rings and aim lanes unaffected (unlit). The working tree implements A. Choose A or B?
-
-- [ ] A on High only (recommended; keep the working tree)
-- [ ] B: shadow maps off on every tier (set High shadow_maps: false, drop arena_shadow_cascades)
+- q-bw4sn24

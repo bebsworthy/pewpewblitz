@@ -176,3 +176,8 @@ If the owner picks B instead: set `shadow_maps: false` on High in `render_qualit
   while submission-to-completion timing worked.
 - Derive presentation ranges such as shadow distance from the framing constants rather than
   literals, so the next framing change (as BRL-xyj7 did) cannot silently strand them.
+
+
+# Decision (2026-11-14)
+
+Owner chose Option A after reviewing the Switchback Basin A/B captures: the High tier keeps the single derived cascade (f637fa02); Medium and Low keep shadow maps off. Pixel 8a High-tier cost stays in BRL-xb54. Acceptance criteria met: decision recorded, captures on all three themes, frame cost measured before and after.

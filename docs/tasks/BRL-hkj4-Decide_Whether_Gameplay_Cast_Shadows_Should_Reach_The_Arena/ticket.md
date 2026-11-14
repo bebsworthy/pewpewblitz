@@ -4,9 +4,9 @@ was: BRL-0180
 
 title: Decide whether gameplay cast shadows should reach the arena view
 
-status: doing
-closed:
-status_changed: 2026-11-14T14:56:28Z
+status: done
+closed: 2026-11-14T16:39:51Z
+status_changed: 2026-11-14T16:39:51Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-89kq, BRL-kn5r, BRL-xb54, BRL-ynt5]
 
 parent: BRL-q5c4
 
-rank: 13172736
+rank:
 ---
 
 # Description
