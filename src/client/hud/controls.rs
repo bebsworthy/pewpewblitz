@@ -1,4 +1,5 @@
-//! Attack and ultimate buttons (both platforms) and the touch stick visuals (touch only).
+//! Attack and ultimate buttons (both platforms), and the touch stick visuals and menu button
+//! (touch only).
 //!
 //! Geometry comes from [`HudControlLayout`], the same circles the touch sampler hit-tests, and
 //! live stick state from the [`TouchControls`] seam. Everything here reads replicated fighter state
@@ -139,7 +140,7 @@ pub(crate) fn control_hints(
 }
 
 /// Touch visuals and hidden key hints apply on Android and once a touch reached gameplay.
-fn touch_mode(controls: &TouchControls) -> bool {
+pub(super) fn touch_mode(controls: &TouchControls) -> bool {
     controls.seen || cfg!(target_os = "android")
 }
 
@@ -155,6 +156,8 @@ pub(super) enum ControlPart {
     Hint(usize),
     HintText(usize),
     MoveHome,
+    /// The touch menu button; the touch sampler owns its hit square.
+    MenuButton,
     Stick(StickPart),
 }
 
@@ -262,7 +265,10 @@ pub(super) fn spawn_controls(
     commands.entity(group).add_children(&touch);
     let ultimate = spawn_ultimate_button(commands, font, icon("blast"));
     let attack = spawn_attack_button(commands, font, icon("crosshair"));
-    commands.entity(group).add_children(&[ultimate, attack]);
+    let menu = spawn_menu_button(commands, icon("menu"));
+    commands
+        .entity(group)
+        .add_children(&[ultimate, attack, menu]);
 }
 
 fn spawn_touch_visuals(commands: &mut Commands) -> Vec<Entity> {
@@ -302,6 +308,35 @@ fn spawn_touch_visuals(commands: &mut Commands) -> Vec<Entity> {
         );
     }
     touch
+}
+
+fn spawn_menu_button(commands: &mut Commands, icon: Handle<Image>) -> Entity {
+    commands
+        .spawn((
+            ControlPart::MenuButton,
+            Name::new("HUD menu button"),
+            Node {
+                position_type: PositionType::Absolute,
+                border: UiRect::all(px(3.0)),
+                border_radius: BorderRadius::all(percent(24.0)),
+                ..default()
+            },
+            BackgroundColor(palette::PLATE),
+            BorderColor::all(ui::theme::INK),
+            Visibility::Hidden,
+        ))
+        .with_child((
+            ImageNode::new(icon),
+            Node {
+                position_type: PositionType::Absolute,
+                left: percent(18.0),
+                top: percent(18.0),
+                width: percent(64.0),
+                height: percent(64.0),
+                ..default()
+            },
+        ))
+        .id()
 }
 
 fn spawn_attack_button(
@@ -412,6 +447,19 @@ fn set_circle(node: &mut Node, circle: ScreenCircle, scale: f32) {
     }
 }
 
+fn set_rect(node: &mut Node, rect: Rect, scale: f32) {
+    let left = px(rect.min.x / scale);
+    let top = px(rect.min.y / scale);
+    let width = px(rect.width() / scale);
+    let height = px(rect.height() / scale);
+    if node.left != left || node.top != top || node.width != width || node.height != height {
+        node.left = left;
+        node.top = top;
+        node.width = width;
+        node.height = height;
+    }
+}
+
 fn shown(visible: bool) -> Visibility {
     if visible {
         Visibility::Inherited
@@ -472,6 +520,11 @@ pub(super) fn place_controls(
         let circle = match *part {
             ControlPart::Group => {
                 visibility.set_if_neq(shown(active));
+                continue;
+            }
+            ControlPart::MenuButton => {
+                visibility.set_if_neq(shown(touch));
+                set_rect(&mut node, layout.menu, scale);
                 continue;
             }
             ControlPart::AttackButton => Some(layout.attack),

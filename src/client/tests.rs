@@ -1138,6 +1138,43 @@ fn fire_source_wins_same_frame_device_arbitration() {
 }
 
 #[test]
+fn platform_back_opens_and_closes_the_match_menu_like_the_pause_key() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .init_resource::<PendingLocalActions>()
+        .insert_resource(ClientInputContext::Gameplay)
+        .init_resource::<InputDeviceActivity>()
+        .init_resource::<ClientInputSettings>()
+        .add_systems(Update, sample_local_input);
+    back::add_back_input(&mut app);
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+    let press_back = |app: &mut App| {
+        app.world_mut().resource_mut::<BackInput>().request();
+        app.update();
+    };
+    let context = |app: &App| *app.world().resource::<ClientInputContext>();
+
+    press_back(&mut app);
+    assert_eq!(context(&app), ClientInputContext::Menu);
+    assert!(app.world().resource::<PendingLocalActions>().cancel_pressed);
+    app.update();
+    assert_eq!(
+        context(&app),
+        ClientInputContext::Menu,
+        "one press, one toggle"
+    );
+    assert!(!app.world().resource::<PendingLocalActions>().cancel_pressed);
+    press_back(&mut app);
+    assert_eq!(context(&app), ClientInputContext::Gameplay);
+
+    // Outside a match, Back belongs to the shell flow.
+    *app.world_mut().resource_mut::<ClientInputContext>() = ClientInputContext::Shell;
+    press_back(&mut app);
+    assert_eq!(context(&app), ClientInputContext::Shell);
+}
+
+#[test]
 fn controller_cancel_does_not_toggle_pause() {
     let mut context = ClientInputContext::Gameplay;
     let mut pending = PendingLocalActions {

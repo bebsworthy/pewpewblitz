@@ -184,7 +184,12 @@ Leaving requires confirmation and follows the server-owned forfeit and lobby-ret
 The menu is a fullscreen shell surface with Resume, Settings, Scoreboard, and Leave Match buttons.
 Resume starts focused and uses the `play` primary action; other actions use `panel`. Pointer,
 keyboard, and D-pad navigation share the same selected action. Settings and confirmation screens
-isolate the underlying menu; returning from the scoreboard restores the menu.
+isolate the underlying menu; returning from the scoreboard (cancel, or a tap or click anywhere)
+restores the menu.
+The platform Back request (the Android Back gesture or a keyboard Back key) acts as the keyboard
+pause binding: it opens and closes the menu, returns from the latched scoreboard, closes Settings
+back to the menu, and keeps playing from the Leave Match confirmation. Touch players open the menu
+from the HUD menu button and close it with Resume or Back.
 
 The scoreboard is separately held during play or latched from the in-match menu. Presentation must
 not accidentally turn it into a pause, a second primary flow, or an authority source.
@@ -531,13 +536,17 @@ or leaving gameplay (menu, shell, match end) cancels without acting. Touch dead 
 sensitivity (finger travel for full deflection) live on the Controls advanced page. The touch-first
 HUD draws the stick bases and knobs from the same touch-control state; they appear only after a
 touch reaches gameplay (always on Android), together with a faint movement-zone ring.
+In the same touch mode a menu button sits in the top-left corner. A touch that starts on it never
+feeds a stick, and lifting that finger over the button opens the in-match menu; the drawn button is
+exactly its touch square.
 
 The persistent in-match HUD (BRL-0155) has no text boxes:
 
 - Top center: a score and timer plate. The observer's team is on the left in ally blue and the
   opponent on the right in enemy red. It shows Wipeout kills and target, Hot Zone capture
   percentages and zone control, Heist idol health (DEFEND/ATTACK), or Zombie boosts and live
-  zombies. A teammate strip under it at top left covers Zombie.
+  zombies. A teammate strip under it at top left covers Zombie, right of the touch menu button
+  when that is shown.
 - Top right: a kill feed (at most four rows for four seconds). It is fed only by the defeat cues the
   server relays to that observer, so it never names a concealed fighter.
 - Bottom right on every platform: an attack button and an ultimate button. The attack button dims

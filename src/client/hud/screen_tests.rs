@@ -1,5 +1,5 @@
 //! Real HUD nodes laid out headlessly at the target viewports: every element stays on screen, no
-//! two elements collide, and the drawn buttons are exactly the touch hit circles.
+//! two elements collide, and the drawn buttons are exactly the touch hit areas.
 
 use super::controls::ControlPart;
 use super::kill_feed::KillFeedRoot;
@@ -155,6 +155,7 @@ fn control_rects(app: &mut App) -> Vec<(String, Rect)> {
             ControlPart::AttackButton => Some((entity, "attack")),
             ControlPart::UltimateButton => Some((entity, "ultimate")),
             ControlPart::MoveHome => Some((entity, "move zone")),
+            ControlPart::MenuButton => Some((entity, "menu")),
             _ => None,
         })
         .collect();
@@ -198,7 +199,7 @@ fn assert_layout(app: &mut App, width: u16, height: u16, expect_strip: bool) {
     );
     elements.extend(strip);
     let controls = control_rects(app);
-    assert_eq!(controls.len(), 3, "{width}x{height}: {controls:?}");
+    assert_eq!(controls.len(), 4, "{width}x{height}: {controls:?}");
     elements.extend(controls.iter().cloned());
     assert!(
         elements.iter().any(|(label, _)| label == "plate"),
@@ -237,6 +238,16 @@ fn assert_layout(app: &mut App, width: u16, height: u16, expect_strip: bool) {
             "{width}x{height}: {label} drawn at {rect:?}, hit circle {circle:?}"
         );
     }
+    let menu = controls
+        .iter()
+        .find(|(name, _)| name == "menu")
+        .map(|(_, rect)| *rect)
+        .unwrap();
+    assert!(
+        menu.min.distance(layout.menu.min) < 1.0 && menu.max.distance(layout.menu.max) < 1.0,
+        "{width}x{height}: menu drawn at {menu:?}, hit square {:?}",
+        layout.menu
+    );
 }
 
 #[test]

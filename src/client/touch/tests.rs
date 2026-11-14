@@ -391,3 +391,73 @@ fn auto_aimed_immediate_ultimate_sends_its_aim_one_fixed_tick_before_the_button(
     assert_ne!(pending.latched_buttons & FighterInput::ULTIMATE, 0);
     assert_eq!(pending.aim_axis, aim);
 }
+
+#[test]
+fn menu_button_tap_opens_the_match_menu_without_feeding_a_stick() {
+    let mut test = TouchApp::new(resolved_arc_launcher_loadout());
+    let menu = TouchLayout::new(VIEWPORT, &ClientInputSettings::default()).menu;
+    assert_eq!(
+        TouchLayout::new(VIEWPORT, &ClientInputSettings::default()).classify(menu.center()),
+        Some(TouchControlKind::Menu)
+    );
+    // A movement finger is already down when the other thumb taps the menu button.
+    test.touch(1, TouchPhase::Started, MOVE_START);
+    test.frame();
+    test.touch(1, TouchPhase::Moved, MOVE_START + Vec2::new(60.0, 0.0));
+    test.touch(2, TouchPhase::Started, menu.center());
+    let pending = test.frame();
+    assert_direction(Some(pending.move_axis), Vec2::X);
+    // A wobble that stays on the button neither moves nor aims.
+    test.touch(2, TouchPhase::Moved, menu.center() + Vec2::new(12.0, 12.0));
+    let pending = test.frame();
+    assert_direction(Some(pending.move_axis), Vec2::X);
+    assert_eq!(pending.aim_axis, None);
+    assert_eq!(test.controls().movement.map(|stick| stick.id), Some(1));
+    assert!(test.controls().attack.is_none());
+    assert_eq!(
+        *test.app.world().resource::<ClientInputContext>(),
+        ClientInputContext::Gameplay,
+        "pressing only arms the button"
+    );
+
+    test.touch(2, TouchPhase::Ended, menu.center() + Vec2::new(12.0, 12.0));
+    let pending = test.frame();
+    assert_eq!(pending.latched_buttons, 0);
+    assert_eq!(
+        *test.app.world().resource::<ClientInputContext>(),
+        ClientInputContext::Menu
+    );
+    test.frame();
+    assert!(
+        test.controls().movement.is_none(),
+        "the menu drops gestures"
+    );
+
+    // Closing the menu hands the screen back: the old finger owns nothing, a new one moves.
+    *test.app.world_mut().resource_mut::<ClientInputContext>() = ClientInputContext::Gameplay;
+    test.touch(1, TouchPhase::Ended, MOVE_START + Vec2::new(60.0, 0.0));
+    assert_eq!(test.frame().move_axis, Vec2::ZERO);
+    test.touch(3, TouchPhase::Started, MOVE_START);
+    test.frame();
+    test.touch(3, TouchPhase::Moved, MOVE_START + Vec2::new(0.0, -60.0));
+    assert_direction(Some(test.frame().move_axis), Vec2::Y);
+}
+
+#[test]
+fn menu_button_released_off_the_button_does_nothing() {
+    let mut test = TouchApp::new(resolved_arc_launcher_loadout());
+    let menu = TouchLayout::new(VIEWPORT, &ClientInputSettings::default()).menu;
+    test.touch(1, TouchPhase::Started, menu.center());
+    test.frame();
+    // Sliding off into the movement half still never becomes a stick.
+    test.touch(1, TouchPhase::Moved, MOVE_START);
+    assert_eq!(test.frame().move_axis, Vec2::ZERO);
+    test.touch(1, TouchPhase::Ended, MOVE_START);
+    let pending = test.frame();
+    assert_eq!(pending.move_axis, Vec2::ZERO);
+    assert_eq!(
+        *test.app.world().resource::<ClientInputContext>(),
+        ClientInputContext::Gameplay
+    );
+    assert!(test.controls().menu.is_none());
+}

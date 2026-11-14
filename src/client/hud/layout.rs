@@ -1,6 +1,7 @@
 //! Pure on-screen geometry of the touch-first controls, shared by the HUD visuals and the touch
 //! hit areas so the drawn buttons and the touch zones cannot drift apart.
 
+use bevy::math::Rect;
 use bevy::prelude::Vec2;
 
 /// Button geometry grows with the short side of the window up to this many logical pixels, so
@@ -14,6 +15,9 @@ const ULTIMATE_FROM_ATTACK: Vec2 = Vec2::new(-0.34, 0.08);
 const ULTIMATE_RADIUS: f32 = 0.11;
 /// Resting movement-zone ring center offset from the bottom-left corner, in control units.
 const MOVE_HOME_OFFSET: Vec2 = Vec2::new(0.30, 0.30);
+/// Touch menu button: a square in the top-left corner, side and corner inset in control units.
+const MENU_SIZE: f32 = 0.12;
+const MENU_INSET: f32 = 0.025;
 
 /// A circle in logical window pixels (y down).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -28,6 +32,8 @@ pub(crate) struct HudControlLayout {
     pub(crate) attack: ScreenCircle,
     pub(crate) ultimate: ScreenCircle,
     pub(crate) move_home: Vec2,
+    /// The touch menu button square; touches starting inside it open the match menu.
+    pub(crate) menu: Rect,
 }
 
 impl HudControlLayout {
@@ -48,6 +54,10 @@ impl HudControlLayout {
             move_home: Vec2::new(
                 MOVE_HOME_OFFSET.x * unit,
                 viewport.y - MOVE_HOME_OFFSET.y * unit,
+            ),
+            menu: Rect::from_corners(
+                Vec2::splat(MENU_INSET * unit),
+                Vec2::splat((MENU_INSET + MENU_SIZE) * unit),
             ),
         }
     }
@@ -87,6 +97,10 @@ mod tests {
                 - layout.ultimate.radius;
             assert!(gap > 8.0, "{viewport}: buttons {gap} px apart");
             assert!(layout.move_home.x < viewport.x * 0.5);
+            // The menu button stays in the top-left corner, above the movement zone's home.
+            assert!(layout.menu.min.min_element() > 0.0, "{viewport}");
+            assert!(layout.menu.max.x < viewport.x * 0.5, "{viewport}");
+            assert!(layout.menu.max.y < layout.move_home.y, "{viewport}");
         }
     }
 
@@ -96,6 +110,7 @@ mod tests {
         // 48 dp is the platform minimum touch target; logical px are dp on Android.
         assert!(phone.ultimate.radius * 2.0 >= 80.0);
         assert!(phone.attack.radius * 2.0 >= 110.0);
+        assert!(phone.menu.width() >= 48.0 && phone.menu.height() >= 48.0);
         let desktop = HudControlLayout::new(Vec2::new(2560.0, 1440.0));
         assert!((desktop.attack.radius - ATTACK_RADIUS * CONTROL_UNIT_MAX).abs() < 1e-3);
     }

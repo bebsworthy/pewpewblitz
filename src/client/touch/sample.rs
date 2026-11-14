@@ -38,7 +38,7 @@ type TouchFighterQuery<'w, 's> = Query<
 pub(in crate::client) fn apply_touch_controls(
     mut pending: ResMut<PendingLocalActions>,
     mut controls: ResMut<TouchControls>,
-    context: Res<ClientInputContext>,
+    mut context: ResMut<ClientInputContext>,
     playable: Res<ClientPlayableGate>,
     settings: Res<ClientInputSettings>,
     touches: Option<Res<Touches>>,
@@ -87,9 +87,14 @@ pub(in crate::client) fn apply_touch_controls(
         &direction,
     );
 
+    let mut open_menu = false;
     for (kind, release) in finished {
         let button = match kind {
             TouchControlKind::Move => continue,
+            TouchControlKind::Menu => {
+                open_menu |= release == GestureRelease::Tap;
+                continue;
+            }
             TouchControlKind::Attack => FighterInput::PRIMARY_FIRE,
             TouchControlKind::Ultimate => {
                 disarm(&mut pending, &mut controls);
@@ -138,6 +143,9 @@ pub(in crate::client) fn apply_touch_controls(
     }
 
     carry_held_release(&mut pending, &mut controls, fixed_elapsed);
+    // The same local pause request as the keyboard and controller pause bindings; the next frame
+    // outside Gameplay drops every gesture.
+    crate::client::apply_pause_request(&mut context, &mut pending, open_menu);
 }
 
 /// Writes movement and live aim for the sticks that are currently held.

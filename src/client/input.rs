@@ -61,6 +61,7 @@ pub(super) fn sample_local_input(
     logical_keyboard: Option<Res<ButtonInput<Key>>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     mouse_motion: Option<Res<AccumulatedMouseMotion>>,
+    back: Option<Res<BackInput>>,
     gamepads: Query<(Entity, &Gamepad)>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: presentation_3d::ArenaAimCameras,
@@ -210,7 +211,7 @@ pub(super) fn sample_local_input(
         action_gamepads.last().copied(),
     );
 
-    let (move_axis, aim_axis, aim_distance, gamepad_buttons, gamepad_pause, gamepad_interact) =
+    let (move_axis, aim_axis, aim_distance, gamepad_buttons, device_pause, gamepad_interact) =
         match (pending.active_device, gamepad_sample) {
             (ActiveInputDevice::Gamepad(active), Some((entity, left, right, gamepad)))
                 if active == entity =>
@@ -288,6 +289,10 @@ pub(super) fn sample_local_input(
             }
         };
 
+    // The platform Back request (Android Back gesture, a keyboard Back key) is the keyboard pause
+    // binding on every device: it opens and closes the match menu and cancels like Esc.
+    let back_pressed = back.is_some_and(|back| back.just_pressed());
+    let gamepad_pause = device_pause || back_pressed;
     // While the pause overlay is capturing the next binding press, local-only keys must not
     // also unpause, cancel, or latch actions in the middle of a rebind.
     let capturing_rebind = selection.is_some_and(|selection| {
@@ -300,7 +305,8 @@ pub(super) fn sample_local_input(
     pending.cancel_pressed = !capturing_rebind
         && (gamepad_sample
             .is_some_and(|(_, _, _, gamepad)| gamepad.just_pressed(settings.gamepad.cancel))
-            || keyboard.just_pressed(bindings.pause));
+            || keyboard.just_pressed(bindings.pause)
+            || back_pressed);
     pending.scoreboard_held = !capturing_rebind
         && (gamepad_sample
             .is_some_and(|(_, _, _, gamepad)| gamepad.pressed(settings.gamepad.scoreboard))

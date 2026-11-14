@@ -4,16 +4,21 @@
 //! into observer-relative chip content (own team left in ally blue, opponent right in enemy red)
 //! and writes the retained nodes only when that state changes.
 
-use super::{ModeScoreView, palette};
-use crate::client::ui;
+use super::{HudControlLayout, ModeScoreView, palette};
+use crate::client::{touch::TouchControls, ui};
 use crate::combat::TeamId;
 use bevy::prelude::*;
+use bevy::ui::UiScale;
+use bevy::window::PrimaryWindow;
 
 /// Most teammates a Zombie roster can hold (three-fighter co-op).
 pub(super) const TEAM_STRIP_ROWS: usize = 3;
 const PLATE_TOP: f32 = 10.0;
 const CHIP_WIDTH: f32 = 84.0;
 const STRIP_BAR_WIDTH: f32 = 96.0;
+/// Team strip inset from the left edge, or from the touch menu button while it is shown.
+const STRIP_LEFT: f32 = 16.0;
+const STRIP_MENU_GAP: f32 = 10.0;
 
 /// The color role of a plate element.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -293,7 +298,7 @@ fn spawn_team_strip(commands: &mut Commands, font: &Handle<Font>, parent: Entity
             Node {
                 position_type: PositionType::Absolute,
                 top: px(PLATE_TOP),
-                left: px(16.0),
+                left: px(STRIP_LEFT),
                 flex_direction: FlexDirection::Column,
                 row_gap: px(4.0),
                 ..default()
@@ -357,6 +362,37 @@ fn spawn_team_strip(commands: &mut Commands, font: &Handle<Font>, parent: Entity
             })
             .id();
         commands.entity(strip).add_child(row);
+    }
+}
+
+/// Keeps the teammate strip right of the touch menu button, which shares the top-left corner.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+pub(super) fn place_team_strip(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    scale: Option<Res<UiScale>>,
+    controls: Res<TouchControls>,
+    mut strips: Query<&mut Node, With<TeamStripRoot>>,
+) {
+    let Some(viewport) = windows
+        .iter()
+        .next()
+        .map(|window| Vec2::new(window.width(), window.height()))
+    else {
+        return;
+    };
+    let left = if super::controls::touch_mode(&controls) {
+        let scale = scale.map_or(1.0, |scale| scale.0).max(0.01);
+        HudControlLayout::new(viewport).menu.max.x / scale + STRIP_MENU_GAP
+    } else {
+        STRIP_LEFT
+    };
+    for mut node in &mut strips {
+        if node.left != px(left) {
+            node.left = px(left);
+        }
     }
 }
 

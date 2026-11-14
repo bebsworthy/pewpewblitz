@@ -149,6 +149,7 @@ impl Plugin for ClientReadinessHudPlugin {
                     (update_readiness_hud, plate::present_plate)
                         .chain()
                         .after(converge_heist_readiness),
+                    plate::place_team_strip,
                     (kill_feed::collect_kill_feed, kill_feed::present_kill_feed)
                         .chain()
                         .after(crate::combat::client::CombatClientSet::Ingest),

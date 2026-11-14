@@ -70,6 +70,25 @@ pub(super) fn clamp_camera_center(
     )
 }
 
+/// A finished tap or click, which dismisses the latched scoreboard.
+#[derive(bevy::ecs::system::SystemParam)]
+struct LatchedScoreboardDismiss<'w> {
+    touches: Option<Res<'w, Touches>>,
+    mouse: Option<Res<'w, ButtonInput<MouseButton>>>,
+}
+
+impl LatchedScoreboardDismiss<'_> {
+    fn released(&self) -> bool {
+        self.touches
+            .as_ref()
+            .is_some_and(|touches| touches.any_just_released())
+            || self
+                .mouse
+                .as_ref()
+                .is_some_and(|mouse| mouse.just_released(MouseButton::Left))
+    }
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
@@ -79,6 +98,7 @@ fn handle_match_menu_input(
     mut context: ResMut<ClientInputContext>,
     pending: Res<PendingLocalActions>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    pointer: LatchedScoreboardDismiss,
     gamepads: Query<&Gamepad>,
     mut menu: ResMut<MatchMenuState>,
     overlay: Option<ResMut<ClientOverlay>>,
@@ -90,7 +110,8 @@ fn handle_match_menu_input(
         &ui::press::ReleaseActivation,
     )>,
 ) {
-    if menu.scoreboard_latched && pending.cancel_pressed {
+    // Touch has no cancel key: a tap or click anywhere also leaves the latched scoreboard.
+    if menu.scoreboard_latched && (pending.cancel_pressed || pointer.released()) {
         menu.scoreboard_latched = false;
         *context = ClientInputContext::Menu;
     }
@@ -243,6 +264,7 @@ fn exit_on_close_requested(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::input::touch::{TouchPhase, touch_screen_input_system};
 
     #[test]
     fn pointer_menu_actions_are_isolated_from_product_overlays() {
@@ -323,5 +345,30 @@ mod tests {
             *app.world().resource::<ClientInputContext>(),
             ClientInputContext::Menu
         );
+
+        // Touch players have no cancel key: a finished tap leaves the latched scoreboard.
+        app.world_mut()
+            .resource_mut::<PendingLocalActions>()
+            .cancel_pressed = false;
+        app.world_mut()
+            .resource_mut::<MatchMenuState>()
+            .scoreboard_latched = true;
+        app.init_resource::<Touches>()
+            .add_message::<TouchInput>()
+            .add_systems(PreUpdate, touch_screen_input_system);
+        app.update();
+        assert!(app.world().resource::<MatchMenuState>().scoreboard_latched);
+        let window = app.world_mut().spawn_empty().id();
+        for phase in [TouchPhase::Started, TouchPhase::Ended] {
+            app.world_mut().write_message(TouchInput {
+                phase,
+                position: Vec2::new(10.0, 10.0),
+                window,
+                force: None,
+                id: 1,
+            });
+        }
+        app.update();
+        assert!(!app.world().resource::<MatchMenuState>().scoreboard_latched);
     }
 }

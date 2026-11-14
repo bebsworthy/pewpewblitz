@@ -2,6 +2,7 @@
 
 use crate::client::ClientInputSettings;
 use bevy::input::touch::Touches;
+use bevy::math::Rect;
 use bevy::prelude::{Resource, Vec2};
 
 /// Share of the viewport height at the top that stays reserved for the HUD.
@@ -21,6 +22,8 @@ pub(crate) enum TouchControlKind {
     Move,
     Attack,
     Ultimate,
+    /// The HUD menu button: it opens the match menu and never feeds a stick.
+    Menu,
 }
 
 /// Screen layout derived from the logical viewport and the player's touch settings.
@@ -33,6 +36,8 @@ pub(crate) struct TouchLayout {
     pub(crate) dead_fraction: f32,
     pub(crate) ultimate_center: Vec2,
     pub(crate) ultimate_radius: f32,
+    /// The menu button square the HUD draws.
+    pub(crate) menu: Rect,
     top_reserved: f32,
 }
 
@@ -55,6 +60,7 @@ impl TouchLayout {
             dead_fraction,
             ultimate_center: controls.ultimate.center,
             ultimate_radius: controls.ultimate.radius,
+            menu: controls.menu,
             top_reserved: viewport.y * TOP_RESERVED_FRACTION,
         }
     }
@@ -62,7 +68,13 @@ impl TouchLayout {
     /// Which control a touch starting at `point` (logical px, y down) belongs to.
     #[must_use]
     pub(crate) fn classify(&self, point: Vec2) -> Option<TouchControlKind> {
-        if !point.is_finite() || point.y < self.top_reserved {
+        if !point.is_finite() {
+            return None;
+        }
+        if self.menu.contains(point) {
+            return Some(TouchControlKind::Menu);
+        }
+        if point.y < self.top_reserved {
             return None;
         }
         if point.x < self.viewport.x * 0.5 {
@@ -169,6 +181,8 @@ pub(crate) struct TouchControls {
     pub(crate) movement: Option<TouchStick>,
     pub(crate) attack: Option<TouchStick>,
     pub(crate) ultimate: Option<TouchStick>,
+    /// The finger pressing the menu button; its knob is the latest position.
+    pub(crate) menu: Option<TouchStick>,
     /// A touch reached gameplay controls in this session, so touch visuals are relevant.
     pub(crate) seen: bool,
     pub(super) held_release: Option<HeldRelease>,
@@ -182,6 +196,7 @@ impl TouchControls {
             TouchControlKind::Move => &mut self.movement,
             TouchControlKind::Attack => &mut self.attack,
             TouchControlKind::Ultimate => &mut self.ultimate,
+            TouchControlKind::Menu => &mut self.menu,
         }
     }
 
@@ -191,6 +206,7 @@ impl TouchControls {
         self.movement = None;
         self.attack = None;
         self.ultimate = None;
+        self.menu = None;
     }
 
     /// Advance ownership from this frame's `Touches`, returning finished gestures.
@@ -211,7 +227,7 @@ impl TouchControls {
                 break;
             }
             self.seen = true;
-            let owned = [&self.movement, &self.attack, &self.ultimate]
+            let owned = [&self.movement, &self.attack, &self.ultimate, &self.menu]
                 .into_iter()
                 .flatten()
                 .any(|stick| stick.id == touch.id());
@@ -231,6 +247,7 @@ impl TouchControls {
             TouchControlKind::Move,
             TouchControlKind::Attack,
             TouchControlKind::Ultimate,
+            TouchControlKind::Menu,
         ] {
             let follow = kind == TouchControlKind::Move;
             let slot = self.slot(kind);
@@ -243,7 +260,16 @@ impl TouchControls {
             }
             let release = if let Some(touch) = touches.get_released(stick.id) {
                 stick.drag(touch.position(), layout, follow);
-                stick.release(layout)
+                if kind == TouchControlKind::Menu {
+                    // A button: it acts when the finger lifts over it, however it wobbled.
+                    if layout.menu.contains(stick.knob) {
+                        GestureRelease::Tap
+                    } else {
+                        GestureRelease::Canceled
+                    }
+                } else {
+                    stick.release(layout)
+                }
             } else {
                 GestureRelease::Canceled
             };
