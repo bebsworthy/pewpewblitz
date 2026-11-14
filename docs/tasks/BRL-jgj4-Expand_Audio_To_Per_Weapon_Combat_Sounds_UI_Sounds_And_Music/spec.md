@@ -207,3 +207,8 @@ Awaiting owner playtest.
 - Observation: the old focus/volume system overwrote each sink with the master volume, silently
   discarding authored profile volumes; centralizing mixing in one component-driven system fixed it.
 - Deferred: BRL-ek8p (keyboard/gamepad UI sounds). BRL-zy9d annotated: its audio half landed here.
+
+
+# Owner feedback (2026-11-14)
+
+UI sounds accepted: the owner said "all UI sounds are ok" after a `just client` playtest. Per-weapon combat sounds and music still need owner feedback before this ticket closes.
