@@ -9,6 +9,7 @@ use crate::presentation_3d::render_quality::RenderCapabilities;
 use crate::settings::persistence::GraphicsQuality;
 use crate::ui::{
     controls::{ControlState, ControlValue, spawn_control},
+    feedback::UiFeedback,
     slider::{SliderPointer, SliderTouch},
     theme,
 };
@@ -796,6 +797,50 @@ pub(super) fn pointer_sliders(
             }
         }
     }
+}
+
+/// Every slider-backed Settings value: UI scale, the four percentage sliders and the seven input
+/// calibration sliders, as exact bit patterns: a change between frames is a slider step,
+/// whichever input made it.
+fn slider_values(shell: &ClientShellSettings, input: &ClientInputSettings) -> [u32; 12] {
+    [
+        shell.ui_scale,
+        f32::from(shell.master_volume),
+        f32::from(shell.effects_volume),
+        f32::from(shell.music_volume),
+        f32::from(shell.camera_shake),
+        input.move_deadzone,
+        input.aim_deadzone,
+        input.aim_commit_threshold,
+        input.trigger_press,
+        input.trigger_release,
+        input.touch_deadzone,
+        input.touch_sensitivity,
+    ]
+    .map(f32::to_bits)
+}
+
+/// Publishes one [`UiFeedback::Stepped`] when an open Settings page's slider value changed this
+/// frame (keyboard/gamepad steps, mouse drags and the BRL-0201 touch gesture alike). Resets and
+/// undo also change values; they are activations, and the UI producer lets the press win.
+#[allow(clippy::needless_pass_by_value, reason = "Bevy system parameters")]
+pub(super) fn slider_step_feedback(
+    overlay: Res<ClientOverlay>,
+    shell: Option<Res<ShellSettingsDraft>>,
+    input: Option<Res<InputSettingsDraft>>,
+    mut previous: Local<Option<[u32; 12]>>,
+    mut feedback: MessageWriter<UiFeedback>,
+) {
+    let current = match (*overlay == ClientOverlay::Settings, shell, input) {
+        (true, Some(shell), Some(input)) => Some(slider_values(&shell.0, &input.0)),
+        _ => None,
+    };
+    if let (Some(before), Some(now)) = (*previous, current)
+        && before != now
+    {
+        feedback.write(UiFeedback::Stepped);
+    }
+    *previous = current;
 }
 
 #[allow(

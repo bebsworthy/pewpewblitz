@@ -111,7 +111,9 @@ fn handle_match_menu_input(
         &MatchMenuButton,
         Ref<Interaction>,
         &ui::press::ReleaseActivation,
+        Option<&ui::surface::Surface>,
     )>,
+    mut feedback: MessageWriter<ui::feedback::UiFeedback>,
 ) {
     // Touch has no cancel key: a tap or click anywhere also leaves the latched scoreboard.
     if menu.scoreboard_latched && (pending.cancel_pressed || pointer.released()) {
@@ -132,6 +134,7 @@ fn handle_match_menu_input(
         return;
     }
     let pad_pressed = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
+    let focus_before = menu.selected;
     if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
         || pad_pressed(GamepadButton::DPadDown)
     {
@@ -142,8 +145,11 @@ fn handle_match_menu_input(
     {
         menu.selected = menu.selected.saturating_sub(1);
     }
+    if menu.selected != focus_before {
+        feedback.write(ui::feedback::UiFeedback::Moved);
+    }
     let mut clicked = false;
-    for (button, interaction, release) in &buttons {
+    for (button, interaction, release, _) in &buttons {
         if interaction.is_changed()
             && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
         {
@@ -154,10 +160,18 @@ fn handle_match_menu_input(
             clicked = true;
         }
     }
-    let activate = clicked
-        || keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
-        || pad_pressed(GamepadButton::South);
-    if activate {
+    let keyed = !clicked
+        && (keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
+            || pad_pressed(GamepadButton::South));
+    if keyed {
+        // Pointer releases already sound through the shared press model.
+        let surface = buttons
+            .iter()
+            .find(|(button, ..)| button.0 == menu.selected)
+            .and_then(|(.., surface)| surface.copied());
+        feedback.write(ui::feedback::UiFeedback::Activated(surface));
+    }
+    if clicked || keyed {
         match menu.selected {
             0 => *context = ClientInputContext::Gameplay,
             1 => {
@@ -230,6 +244,7 @@ pub struct ClientPresentationPlugin;
 impl Plugin for ClientPresentationPlugin {
     fn build(&self, app: &mut App) {
         ui::press::add_release_activation(app);
+        ui::feedback::add_ui_feedback(app);
         app.init_resource::<ClientPresentation>()
             .init_resource::<MatchMenuState>()
             .add_systems(Startup, match_menu::spawn_pause_overlay)
@@ -279,6 +294,7 @@ mod tests {
             .init_resource::<MatchMenuState>()
             .init_resource::<ButtonInput<KeyCode>>()
             .add_plugins(ui::press::ReleaseActivationPlugin)
+            .add_message::<ui::feedback::UiFeedback>()
             .add_systems(Update, handle_match_menu_input);
         let button = app
             .world_mut()
@@ -321,6 +337,7 @@ mod tests {
             .init_resource::<PendingLocalActions>()
             .init_resource::<MatchMenuState>()
             .init_resource::<ButtonInput<KeyCode>>()
+            .add_message::<ui::feedback::UiFeedback>()
             .add_systems(Update, handle_match_menu_input);
 
         for _ in 0..2 {

@@ -48,6 +48,7 @@
         (cue_key: "ui-click", profile: "ui-click"),
         (cue_key: "ui-confirm", profile: "ui-confirm"),
         (cue_key: "ui-back", profile: "ui-back"),
+        (cue_key: "ui-move", profile: "ui-move"),
     ],
     profiles: [
         (id: "silent", asset: None, speed: 1.0, volume: 1.0, concurrency_cap: 24, fallback_profile: "silent"),
@@ -97,6 +98,7 @@
         (id: "ui-click", asset: Some("audio.original.ui-click"), speed: 1.0, volume: 1.0, concurrency_cap: 4, fallback_profile: "silent"),
         (id: "ui-confirm", asset: Some("audio.original.ui-confirm"), speed: 1.0, volume: 1.0, concurrency_cap: 4, fallback_profile: "silent"),
         (id: "ui-back", asset: Some("audio.original.ui-back"), speed: 1.0, volume: 1.0, concurrency_cap: 4, fallback_profile: "silent"),
+        (id: "ui-move", asset: Some("audio.original.ui-move"), speed: 1.0, volume: 1.0, concurrency_cap: 2, fallback_profile: "silent"),
     ],
     // Looping music: one track per semantic music key. `loop_seconds` is the authored loop
     // length; playback is trimmed to it so encoder padding cannot open a gap at the seam.

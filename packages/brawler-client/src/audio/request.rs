@@ -128,9 +128,10 @@ pub(crate) mod cue_keys {
     pub(crate) const UI_CLICK: AudioCueKey = AudioCueKey::new("ui-click");
     pub(crate) const UI_CONFIRM: AudioCueKey = AudioCueKey::new("ui-confirm");
     pub(crate) const UI_BACK: AudioCueKey = AudioCueKey::new("ui-back");
+    pub(crate) const UI_MOVE: AudioCueKey = AudioCueKey::new("ui-move");
 
     #[cfg(test)]
-    pub(crate) const BUILTIN: [AudioCueKey; 46] = [
+    pub(crate) const BUILTIN: [AudioCueKey; 47] = [
         FIRE_STRAIGHT,
         FIRE_STICKY,
         FIRE_LOBBED,
@@ -177,6 +178,7 @@ pub(crate) mod cue_keys {
         UI_CLICK,
         UI_CONFIRM,
         UI_BACK,
+        UI_MOVE,
     ];
 }
 

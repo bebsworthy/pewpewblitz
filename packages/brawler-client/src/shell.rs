@@ -2,6 +2,7 @@
 
 use super::flow::ClientFlowSet;
 use super::flow::ClientLocalLoadFailures;
+use super::ui::feedback::UiFeedback;
 use super::{
     ClientFlow, ClientInputContext, ClientOverlay, InputCaptureConsumed, InputSettingsSelection,
     settings::{
@@ -152,6 +153,7 @@ impl Plugin for ClientShellPlugin {
     fn build(&self, app: &mut App) {
         super::ui::press::add_release_activation(app);
         super::back::add_back_input(app);
+        super::ui::feedback::add_ui_feedback(app);
         app.add_plugins((
             DirectionalNavigationPlugin,
             super::ui::controls::UiControlsPlugin,
@@ -190,6 +192,7 @@ impl Plugin for ClientShellPlugin {
                     controls::actions,
                     settings_screen::choose_category,
                     settings_screen::preference_actions,
+                    settings_screen::slider_step_feedback,
                     settings_screen::autosave,
                     handle_shell_actions,
                 )
@@ -456,6 +459,8 @@ fn collect_navigation_input(
     page: Res<settings_screen::SettingsPage>,
     controls_state: Res<controls::ControlsState>,
     mut pending: ResMut<PendingActions>,
+    surfaces: Query<&super::ui::surface::Surface>,
+    mut feedback: MessageWriter<UiFeedback>,
 ) {
     if selection.listening || capture_consumed.0 {
         return;
@@ -496,6 +501,7 @@ fn collect_navigation_input(
             || pad_pressed(GamepadButton::LeftTrigger)
             || pad_pressed(GamepadButton::RightTrigger))
     {
+        let before = navigation.focus.get();
         transfer_settings_focus(
             &keyboard,
             pad_pressed(GamepadButton::RightTrigger),
@@ -504,12 +510,12 @@ fn collect_navigation_input(
             &controls_state,
             &mut navigation.focus,
         );
+        if navigation.focus.get() != before {
+            feedback.write(UiFeedback::Moved);
+        }
     }
-    if up {
-        let _ = navigation.navigate(CompassOctant::North);
-    }
-    if down {
-        let _ = navigation.navigate(CompassOctant::South);
+    for (pressed, octant) in [(up, CompassOctant::North), (down, CompassOctant::South)] {
+        navigate_with_feedback(pressed, &mut navigation, octant, &mut feedback);
     }
     let slider = navigation
         .focus
@@ -525,11 +531,8 @@ fn collect_navigation_input(
             pending.0.push(increase);
         }
     } else {
-        if left {
-            let _ = navigation.navigate(CompassOctant::West);
-        }
-        if right {
-            let _ = navigation.navigate(CompassOctant::East);
+        for (pressed, octant) in [(left, CompassOctant::West), (right, CompassOctant::East)] {
+            navigate_with_feedback(pressed, &mut navigation, octant, &mut feedback);
         }
     }
 
@@ -545,6 +548,7 @@ fn collect_navigation_input(
         && !pending.0.contains(&action)
     {
         pending.0.push(action);
+        feedback.write(UiFeedback::Activated(surfaces.get(entity).ok().copied()));
     }
     let back = !capture_consumed.0
         && (keyboard.just_pressed(KeyCode::Escape)
@@ -555,6 +559,22 @@ fn collect_navigation_input(
         && !pending.0.contains(&ShellAction::Back)
     {
         pending.0.push(ShellAction::Back);
+        // Flow-owned overlays publish their own Back feedback where the flow resolves it.
+        if active_layer(&overlay) != ShellLayer::FlowOwned {
+            feedback.write(UiFeedback::Back);
+        }
+    }
+}
+
+/// Moves focus one step when `pressed`; only a move that lands on another control ticks.
+fn navigate_with_feedback(
+    pressed: bool,
+    navigation: &mut DirectionalNavigation,
+    octant: CompassOctant,
+    feedback: &mut MessageWriter<UiFeedback>,
+) {
+    if pressed && navigation.navigate(octant).is_ok() {
+        feedback.write(UiFeedback::Moved);
     }
 }
 
@@ -1221,6 +1241,8 @@ mod tests {
         let along = |rect: Rect, fraction: f32| {
             Vec2::new(rect.min.x + rect.width() * fraction, rect.center().y)
         };
+        app.init_resource::<RecordedUiFeedback>()
+            .add_systems(Last, record_ui_feedback);
         let master = track(&mut app, ShellControlId::VolumeUp);
         layout_harness::touch(&mut app, TouchPhase::Started, along(master, 0.9));
         layout_harness::touch(&mut app, TouchPhase::Moved, along(master, 0.6));
@@ -1230,6 +1252,11 @@ mod tests {
             30
         );
         assert!(!path.exists(), "saving waits for the finger to lift");
+        // BRL-ek8p: a touch drag steps the slider audibly, like keyboard steps.
+        assert!(
+            take_ui_feedback(&mut app).contains(&UiFeedback::Stepped),
+            "the touch drag publishes slider steps"
+        );
         layout_harness::touch(&mut app, TouchPhase::Ended, along(master, 0.3));
         app.update();
         assert!(path.exists());
@@ -1395,6 +1422,108 @@ mod tests {
         );
         assert!((app.world().resource::<ClientShellSettings>().ui_scale - 1.1).abs() < 0.001);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[derive(Resource, Default)]
+    struct RecordedUiFeedback(Vec<UiFeedback>);
+
+    fn record_ui_feedback(
+        mut feedback: MessageReader<UiFeedback>,
+        mut recorded: ResMut<RecordedUiFeedback>,
+    ) {
+        recorded.0.extend(feedback.read().copied());
+    }
+
+    fn take_ui_feedback(app: &mut App) -> Vec<UiFeedback> {
+        std::mem::take(&mut app.world_mut().resource_mut::<RecordedUiFeedback>().0)
+    }
+
+    fn tap_key(app: &mut App, key: KeyCode) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+        let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keyboard.release(key);
+        keyboard.clear();
+        app.update();
+    }
+
+    /// BRL-ek8p: keyboard slider steps, focus moves, activation and Back each publish one
+    /// presentation fact; a step that cannot change the value and an edge move stay silent.
+    #[test]
+    fn settings_keyboard_input_publishes_step_move_activation_and_back_feedback() {
+        let dir =
+            std::env::temp_dir().join(format!("brawler-brlek8p-shell-{}", std::process::id()));
+        let mut app = shell_test_app(dir.join("settings.ron"));
+        app.init_resource::<RecordedUiFeedback>()
+            .add_systems(Last, record_ui_feedback);
+        app.update();
+        request_settings(&mut app);
+        app.world_mut()
+            .resource_mut::<PendingActions>()
+            .0
+            .push(ShellAction::AudioCategory);
+        app.update();
+        app.update();
+        let mut buttons = app.world_mut().query::<(Entity, &ShellButton)>();
+        let master = buttons
+            .iter(app.world())
+            .find(|(_, button)| button.id == ShellControlId::VolumeUp)
+            .unwrap()
+            .0;
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(master, FocusCause::Navigated);
+        app.update();
+        take_ui_feedback(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ClientShellSettings>().master_volume,
+            100
+        );
+        tap_key(&mut app, KeyCode::ArrowRight);
+        assert_eq!(take_ui_feedback(&mut app), Vec::new(), "already at maximum");
+        tap_key(&mut app, KeyCode::ArrowLeft);
+        assert_eq!(
+            app.world().resource::<ClientShellSettings>().master_volume,
+            90
+        );
+        assert_eq!(take_ui_feedback(&mut app), vec![UiFeedback::Stepped]);
+
+        tap_key(&mut app, KeyCode::ArrowDown);
+        assert_ne!(app.world().resource::<InputFocus>().get(), Some(master));
+        assert_eq!(take_ui_feedback(&mut app), vec![UiFeedback::Moved]);
+
+        // Sliders adjust instead of activating; a toggle row activates.
+        let mut buttons = app.world_mut().query::<(Entity, &ShellButton)>();
+        let focused = buttons
+            .iter(app.world())
+            .find(|(_, button)| button.id == ShellControlId::ToggleFocusMute)
+            .unwrap()
+            .0;
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(focused, FocusCause::Navigated);
+        app.update();
+        take_ui_feedback(&mut app);
+        let surface = app
+            .world()
+            .get::<crate::ui::surface::Surface>(focused)
+            .copied();
+        tap_key(&mut app, KeyCode::Enter);
+        assert_eq!(
+            take_ui_feedback(&mut app),
+            vec![UiFeedback::Activated(surface)]
+        );
+
+        tap_key(&mut app, KeyCode::Escape);
+        assert_eq!(
+            *app.world().resource::<ClientOverlay>(),
+            ClientOverlay::None
+        );
+        assert_eq!(take_ui_feedback(&mut app), vec![UiFeedback::Back]);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -459,4 +459,68 @@ mod tests {
         expected.sort();
         assert_eq!(keys, expected);
     }
+    #[test]
+    fn keyboard_and_gamepad_feedback_requests_ui_sounds_with_spacing() {
+        use crate::ui::{feedback::UiFeedback, surface::Surface};
+        use bevy::{platform::time::Instant, time::Real};
+        use std::time::Duration;
+        let mut app = App::new();
+        let start = Instant::now();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<AudioRequest>()
+            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientPlayableGate(false))
+            .insert_resource(ClientMapReadiness::Ready)
+            .insert_resource(Time::<Real>::new(start))
+            .init_resource::<ObservedRequests>()
+            .add_plugins(AudioRegistryPlugin)
+            .add_plugins(AudioProducersPlugin)
+            .add_systems(Update, observe_requests.after(AudioProducerSet));
+        brawler::test_app::finalize(&mut app);
+        let frame = |app: &mut App, at_ms: u64, facts: &[UiFeedback]| {
+            app.world_mut()
+                .resource_mut::<Time<Real>>()
+                .update_with_instant(start + Duration::from_millis(at_ms));
+            for fact in facts {
+                app.world_mut().write_message(*fact);
+            }
+            app.update();
+            std::mem::take(&mut app.world_mut().resource_mut::<ObservedRequests>().0)
+                .into_iter()
+                .map(|request| request.cue_key)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            frame(
+                &mut app,
+                100,
+                &[
+                    UiFeedback::Activated(Some(Surface::Primary)),
+                    UiFeedback::Activated(Some(Surface::Primary)),
+                    UiFeedback::Moved,
+                ]
+            ),
+            vec![cue_keys::UI_CONFIRM],
+            "one activation seen twice sounds once and suppresses the same frame's tick"
+        );
+        assert_eq!(
+            frame(&mut app, 300, &[UiFeedback::Back]),
+            vec![cue_keys::UI_BACK]
+        );
+        assert_eq!(
+            frame(&mut app, 500, &[UiFeedback::Activated(None)]),
+            vec![cue_keys::UI_CLICK]
+        );
+        assert_eq!(
+            frame(&mut app, 700, &[UiFeedback::Moved]),
+            vec![cue_keys::UI_MOVE]
+        );
+        // A held stick sweep or a slider drag: ticks are rate limited, never one per frame.
+        let ticks = (1..=12)
+            .map(|step| frame(&mut app, 700 + step * 8, &[UiFeedback::Stepped]).len())
+            .sum::<usize>();
+        assert_eq!(ticks, 1, "96 ms of per-frame steps after a tick at 700 ms");
+    }
 }

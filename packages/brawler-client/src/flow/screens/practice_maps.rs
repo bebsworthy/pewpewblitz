@@ -1,5 +1,6 @@
 //! Fullscreen Practice map browsing; focus is independent from the requested map.
 use super::shared::FlowRoot;
+use crate::ui::feedback::UiFeedback;
 use crate::ui::press::ReleaseActivation;
 use crate::ui::surface::{Surface, SurfaceState};
 use crate::ui::theme::{TEXT, font, shell_background};
@@ -457,16 +458,20 @@ fn control(
             Button,
             AccessibleLabel::new(name),
             control,
-            match control {
-                PracticeControl::Map(_) => Surface::Card,
-                PracticeControl::Start => Surface::Primary,
-                PracticeControl::Back => Surface::Back,
-                _ => Surface::Action,
-            },
+            control_surface(control),
             SurfaceState::default(),
             node,
         ))
         .id()
+}
+
+const fn control_surface(control: PracticeControl) -> Surface {
+    match control {
+        PracticeControl::Map(_) => Surface::Card,
+        PracticeControl::Start => Surface::Primary,
+        PracticeControl::Back => Surface::Back,
+        _ => Surface::Action,
+    }
 }
 
 #[allow(
@@ -485,6 +490,7 @@ pub(in crate::flow) fn practice_map_input(
     buttons: Query<(&PracticeControl, &ReleaseActivation)>,
     mut carousel: ResMut<PracticeCarousel>,
     mut actions: ResMut<PendingFlowActions>,
+    mut feedback: MessageWriter<UiFeedback>,
 ) {
     let delta: f32 = wheel
         .read()
@@ -507,6 +513,7 @@ pub(in crate::flow) fn practice_map_input(
     let pad = |b| pads.iter().any(|p| p.just_pressed(b));
     if keyboard.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) || back.just_pressed() {
         queue_ui_action(&mut actions, FlowUiAction::CancelPracticeMaps);
+        feedback.write(UiFeedback::Back);
         return;
     }
     let mut activation = None;
@@ -524,6 +531,7 @@ pub(in crate::flow) fn practice_map_input(
         || keyboard.just_pressed(KeyCode::KeyD)
         || pad(GamepadButton::DPadRight)
         || carousel.wheel <= -40.0;
+    let focus_before = (carousel.slot, carousel.start);
     if left || right {
         carousel.step(right);
         carousel.wheel = 0.0;
@@ -534,15 +542,23 @@ pub(in crate::flow) fn practice_map_input(
     if keyboard.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp) {
         carousel.start = false;
     }
+    if (carousel.slot, carousel.start) != focus_before {
+        feedback.write(UiFeedback::Moved);
+    }
     if keyboard.just_pressed(KeyCode::Enter)
         || keyboard.just_pressed(KeyCode::Space)
         || pad(GamepadButton::South)
     {
-        activation = Some(if carousel.start {
+        let control = if carousel.start {
             PracticeControl::Start
         } else {
             PracticeControl::Map(carousel.slot)
-        });
+        };
+        // A pointer release this frame already sounded through the shared press model.
+        if activation.is_none() {
+            feedback.write(UiFeedback::Activated(Some(control_surface(control))));
+        }
+        activation = Some(control);
     }
     match activation {
         Some(PracticeControl::Back) => {

@@ -1246,7 +1246,9 @@ pub(in crate::flow) fn map_maker_input(
     )>,
     mut runtime: ResMut<MapMakerRuntime>,
     mut actions: ResMut<PendingFlowActions>,
+    mut feedback: MessageWriter<crate::ui::feedback::UiFeedback>,
 ) {
+    use crate::ui::feedback::UiFeedback;
     if !matches!(*flow.get(), ClientFlow::MapLibrary | ClientFlow::MapEditor) {
         return;
     }
@@ -1296,6 +1298,7 @@ pub(in crate::flow) fn map_maker_input(
                 queue_ui_action(&mut actions, FlowUiAction::ConfirmCreateMap);
             } else if escape {
                 queue_ui_action(&mut actions, FlowUiAction::CancelCreateMap);
+                feedback.write(UiFeedback::Back);
             }
             return;
         }
@@ -1320,6 +1323,7 @@ pub(in crate::flow) fn map_maker_input(
                 queue_ui_action(&mut actions, FlowUiAction::ConfirmRenameMapDraft);
             } else if escape {
                 queue_ui_action(&mut actions, FlowUiAction::CancelRenameMapDraft);
+                feedback.write(UiFeedback::Back);
             }
             return;
         }
@@ -1329,6 +1333,7 @@ pub(in crate::flow) fn map_maker_input(
                 .any(|pad| pad.just_pressed(GamepadButton::East))
         {
             queue_ui_action(&mut actions, FlowUiAction::CloseMapMaker);
+            feedback.write(UiFeedback::Back);
         }
         return;
     }
@@ -1623,6 +1628,7 @@ pub(in crate::flow) fn map_maker_input(
             runtime.bump_render();
         } else {
             queue_ui_action(&mut actions, FlowUiAction::BackToMapLibrary);
+            feedback.write(UiFeedback::Back);
         }
     }
 }
@@ -3703,9 +3709,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn five_seconds_of_pan_and_zoom_never_respawn_the_editor_ui() {
-        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+    /// An editor runtime with one selected placement, so the camera-anchored selection toolbar
+    /// is present too.
+    fn camera_test_runtime(catalog: &brawler::map::MapContentCatalog) -> MapMakerRuntime {
         let document = MapDraftDocument::blank(
             MapDraftId(1),
             "Camera",
@@ -3721,7 +3727,7 @@ mod tests {
         let mut session = MapEditorSession::open(document);
         session
             .place(
-                &catalog,
+                catalog,
                 brawler::map::TALL_GRASS_ASSET,
                 MapCell::new(10, 10),
                 0,
@@ -3732,10 +3738,16 @@ mod tests {
             session: Some(session),
             ..MapMakerRuntime::default()
         };
-        // Select a placement so the camera-anchored selection toolbar is present too.
         activate_editor_tool(&mut runtime, EditorTool::Select);
         runtime.selection.insert(selected);
         runtime.bump_render();
+        runtime
+    }
+
+    #[test]
+    fn five_seconds_of_pan_and_zoom_never_respawn_the_editor_ui() {
+        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+        let runtime = camera_test_runtime(&catalog);
 
         let mut app = App::new();
         app.add_plugins((
@@ -3754,6 +3766,7 @@ mod tests {
         .insert_resource(AccumulatedMouseMotion::default())
         .insert_resource(PendingFlowActions::default())
         .init_resource::<crate::BackInput>()
+        .add_message::<crate::ui::feedback::UiFeedback>()
         .insert_resource(MapCatalogResource(catalog))
         .insert_resource(runtime)
         .insert_state(ClientFlow::MapEditor)
@@ -3867,6 +3880,7 @@ mod tests {
         .insert_resource(AccumulatedMouseMotion::default())
         .insert_resource(PendingFlowActions::default())
         .init_resource::<crate::BackInput>()
+        .add_message::<crate::ui::feedback::UiFeedback>()
         // No exercised action saves, renames, or deletes, so this path is never written.
         .insert_resource(MapDraftStorage(
             std::env::temp_dir().join("brl0175-value-edit-test-unused"),

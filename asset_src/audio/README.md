@@ -48,7 +48,7 @@ ultimate-uncloak, ultimate-scan, ultimate-revealed, ultimate-field, ultimate-str
 dash, charge-ready, passive, sentry-spawn, concealment-field-spawn, reload. Objectives:
 objective-hit, objective-critical, objective-destroyed, zone-captured, zone-lost, zone-progress.
 Match: match-start, match-score, match-victory, match-defeat, match-draw. Pickups:
-pickup-spawned, pickup-collected. UI: ui-click, ui-confirm, ui-back. Music: music-menu,
+pickup-spawned, pickup-collected. UI: ui-click, ui-confirm, ui-back, ui-move. Music: music-menu,
 music-match. (`playable` and `error` use the Kenney `ready.ogg` and `error.ogg`.)
 
 Add a clip by defining a render function and a `CLIPS` row in the script, rebuilding it, adding an

@@ -1,6 +1,6 @@
 //! Pure focus navigation, overlay filtering, and action-priority policy for flow input.
 
-use crate::ui::press::ReleaseActivation;
+use crate::ui::{feedback::UiFeedback, press::ReleaseActivation, surface::Surface};
 use crate::{
     BackInput,
     connection_persistence::{ClientConnectionsPath, save_connections},
@@ -217,10 +217,13 @@ pub(super) fn collect_flow_input(
         &Interaction,
         &ReleaseActivation,
         Has<InteractionDisabled>,
+        Option<&Surface>,
     )>,
     dashboard_layout: Query<&DashboardLayoutClass, With<DashboardRoot>>,
     game_columns: Query<&super::screens::game_select::GameSelectionColumns>,
-    mut actions: ResMut<PendingFlowActions>,
+    // Paired to stay within Bevy's system parameter limit: the queued action and its
+    // presentation-only keyboard/gamepad feedback (BRL-ek8p).
+    (mut actions, mut feedback): (ResMut<PendingFlowActions>, MessageWriter<UiFeedback>),
     mut brawler_edit: ResMut<BrawlerEditDraft>,
     mut creation: ResMut<BrawlerCreationDraft>,
 ) {
@@ -231,7 +234,7 @@ pub(super) fn collect_flow_input(
     {
         return;
     }
-    for (button, interaction, activation, disabled) in &buttons {
+    for (button, interaction, activation, disabled, _) in &buttons {
         if disabled || !overlay_allows_button(&overlay, button) {
             continue;
         }
@@ -355,8 +358,8 @@ pub(super) fn collect_flow_input(
 
     let mut available = buttons
         .iter()
-        .filter(|(button, _, _, disabled)| !*disabled && overlay_allows_button(&overlay, button))
-        .map(|(button, _, _, _)| button.index)
+        .filter(|(button, _, _, disabled, _)| !*disabled && overlay_allows_button(&overlay, button))
+        .map(|(button, _, _, _, _)| button.index)
         .collect::<Vec<_>>();
     available.sort_unstable();
     available.dedup();
@@ -387,8 +390,9 @@ pub(super) fn collect_flow_input(
             };
             if let Some(direction) = direction {
                 let class = dashboard_layout.iter().next().copied().unwrap_or_default();
-                navigation.selected =
+                let next =
                     dashboard_focus_neighbor(class, navigation.selected, direction, &available);
+                move_focus(&mut navigation, next, &mut feedback);
             }
         } else if (*flow.get() == ClientFlow::GameTypeSelect
             && matches!(*overlay, ClientOverlay::None))
@@ -424,7 +428,7 @@ pub(super) fn collect_flow_input(
             };
             if let Some(direction) = direction {
                 let columns = game_columns.iter().next().map_or(4, |c| c.0);
-                navigation.selected = if matches!(
+                let next = if matches!(
                     *overlay,
                     ClientOverlay::WeaponEquipment
                         | ClientOverlay::BrawlerList
@@ -435,6 +439,7 @@ pub(super) fn collect_flow_input(
                 } else {
                     game_selection_neighbor(navigation.selected, direction, &available, columns)
                 };
+                move_focus(&mut navigation, next, &mut feedback);
             }
         } else {
             let position = available
@@ -454,7 +459,8 @@ pub(super) fn collect_flow_input(
                     && (keyboard.just_pressed(KeyCode::ArrowRight)
                         || pad_pressed(GamepadButton::DPadRight)))
             {
-                navigation.selected = available[(position + 1).min(available.len() - 1)];
+                let next = available[(position + 1).min(available.len() - 1)];
+                move_focus(&mut navigation, next, &mut feedback);
             }
             if keyboard.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW])
                 || pad_pressed(GamepadButton::DPadUp)
@@ -462,22 +468,24 @@ pub(super) fn collect_flow_input(
                     && (keyboard.just_pressed(KeyCode::ArrowLeft)
                         || pad_pressed(GamepadButton::DPadLeft)))
             {
-                navigation.selected = available[position.saturating_sub(1)];
+                let next = available[position.saturating_sub(1)];
+                move_focus(&mut navigation, next, &mut feedback);
             }
         }
     }
     if (keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
         || pad_pressed(GamepadButton::South))
-        && let Some((button, _, _, _)) = buttons
+        && let Some((button, _, _, _, surface)) = buttons
             .iter()
-            .filter(|(button, _, _, disabled)| {
+            .filter(|(button, _, _, disabled, _)| {
                 !*disabled
                     && button.index == navigation.selected
                     && overlay_allows_button(&overlay, button)
             })
-            .min_by_key(|(button, _, _, _)| button.index)
+            .min_by_key(|(button, _, _, _, _)| button.index)
     {
         queue_ui_action(&mut actions, button.action.clone());
+        feedback.write(UiFeedback::Activated(surface.copied()));
     }
     if keyboard.just_pressed(KeyCode::Escape) || cancel_pressed {
         let action = if matches!(overlay.as_ref(), ClientOverlay::ChangeServerConfirmation) {
@@ -523,6 +531,19 @@ pub(super) fn collect_flow_input(
             }
         };
         queue_ui_action(&mut actions, action);
+        feedback.write(UiFeedback::Back);
+    }
+}
+
+/// Keyboard/gamepad focus movement; a move that stays on the same control (an edge) is silent.
+fn move_focus(
+    navigation: &mut FlowNavigation,
+    next: usize,
+    feedback: &mut MessageWriter<UiFeedback>,
+) {
+    if navigation.selected != next {
+        navigation.selected = next;
+        feedback.write(UiFeedback::Moved);
     }
 }
 

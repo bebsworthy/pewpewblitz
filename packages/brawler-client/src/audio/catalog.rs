@@ -389,6 +389,8 @@ mod tests {
         assert!(catalog.mapped_profile(cue_keys::HIT_DEALT).concurrency_cap <= 6);
         assert!(catalog.mapped_profile(cue_keys::HIT_TAKEN).concurrency_cap <= 6);
         assert!(catalog.mapped_profile(cue_keys::UI_CLICK).concurrency_cap <= 4);
+        // Focus/slider ticks are also spaced by the UI producer; two live voices are enough.
+        assert!(catalog.mapped_profile(cue_keys::UI_MOVE).concurrency_cap <= 2);
     }
 
     #[test]

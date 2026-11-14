@@ -3859,3 +3859,123 @@ fn flow_burst_targets_the_active_action_and_expires() {
         "later rebuilds do not replay the burst"
     );
 }
+
+#[derive(Resource, Default)]
+struct RecordedUiFeedback(Vec<crate::ui::feedback::UiFeedback>);
+
+fn record_ui_feedback(
+    mut feedback: MessageReader<crate::ui::feedback::UiFeedback>,
+    mut recorded: ResMut<RecordedUiFeedback>,
+) {
+    recorded.0.extend(feedback.read().copied());
+}
+
+fn take_ui_feedback(app: &mut App) -> Vec<crate::ui::feedback::UiFeedback> {
+    std::mem::take(&mut app.world_mut().resource_mut::<RecordedUiFeedback>().0)
+}
+
+fn record_feedback_in(app: &mut App) {
+    app.init_resource::<RecordedUiFeedback>()
+        .add_systems(Last, record_ui_feedback);
+}
+
+fn press_key(app: &mut App, key: KeyCode) {
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(key);
+    app.update();
+    let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keyboard.release(key);
+    keyboard.clear();
+    app.update();
+}
+
+#[test]
+fn escape_and_platform_back_publish_one_back_feedback_on_every_shell_screen() {
+    use crate::ui::feedback::UiFeedback;
+    let membership = lobby_membership_with_brawler();
+    let brawler = membership.profile.brawlers[0].id;
+    for case in shell_back_cases(brawler) {
+        for platform in [false, true] {
+            let mut app = opened_shell_screen(&case, &membership);
+            record_feedback_in(&mut app);
+            app.update();
+            take_ui_feedback(&mut app);
+            if platform {
+                press_platform_back(&mut app);
+            } else {
+                press_escape(&mut app);
+            }
+            assert_eq!(
+                take_ui_feedback(&mut app),
+                vec![UiFeedback::Back],
+                "{} (platform Back: {platform})",
+                case.screen
+            );
+        }
+    }
+    // The root Dashboard has no in-app Back destination, so Back is silent there.
+    let mut app = configured_customization_app(&membership);
+    record_feedback_in(&mut app);
+    app.update();
+    press_escape(&mut app);
+    assert_eq!(take_ui_feedback(&mut app), Vec::new());
+}
+
+#[test]
+fn dashboard_keyboard_moves_and_activation_publish_feedback_with_the_surface_role() {
+    use crate::ui::{feedback::UiFeedback, surface::Surface};
+    let mut app = configured_customization_app(&lobby_membership_with_brawler());
+    record_feedback_in(&mut app);
+    // The test Dashboard was entered before the lobby membership existed; re-enter it so its
+    // controls are spawned.
+    inject_action(&mut app, FlowUiAction::OpenGameTypeSelect);
+    app.update();
+    press_escape(&mut app);
+    assert_eq!(
+        shell_position(&app),
+        (ClientFlow::Dashboard, ClientOverlay::None)
+    );
+    app.update();
+    take_ui_feedback(&mut app);
+    let mut buttons = app
+        .world_mut()
+        .query::<(&FlowButton, Has<InteractionDisabled>)>();
+    let enabled = buttons
+        .iter(app.world())
+        .filter(|(_, disabled)| !disabled)
+        .map(|(button, _)| button.index)
+        .collect::<Vec<_>>();
+    assert!(enabled.contains(&DASHBOARD_PLAY_INDEX), "{enabled:?}");
+    assert!(enabled.contains(&DASHBOARD_PRACTICE_INDEX), "{enabled:?}");
+    app.world_mut().resource_mut::<FlowNavigation>().selected = DASHBOARD_PLAY_INDEX;
+
+    press_key(&mut app, KeyCode::ArrowDown);
+    assert_eq!(
+        app.world().resource::<FlowNavigation>().selected,
+        DASHBOARD_PRACTICE_INDEX
+    );
+    assert_eq!(take_ui_feedback(&mut app), vec![UiFeedback::Moved]);
+
+    // Practice is the bottom of the column: an edge press does not move focus and is silent.
+    press_key(&mut app, KeyCode::ArrowDown);
+    assert_eq!(take_ui_feedback(&mut app), Vec::new());
+
+    press_key(&mut app, KeyCode::ArrowUp);
+    take_ui_feedback(&mut app);
+    let play_surface = {
+        let mut buttons = app
+            .world_mut()
+            .query::<(&FlowButton, Option<&Surface>, Has<InteractionDisabled>)>();
+        buttons
+            .iter(app.world())
+            .find(|(button, _, disabled)| button.index == DASHBOARD_PLAY_INDEX && !disabled)
+            .and_then(|(_, surface, _)| surface.copied())
+    };
+    assert_eq!(play_surface, Some(Surface::Primary));
+    press_key(&mut app, KeyCode::Enter);
+    assert_eq!(
+        take_ui_feedback(&mut app),
+        vec![UiFeedback::Activated(Some(Surface::Primary))]
+    );
+}

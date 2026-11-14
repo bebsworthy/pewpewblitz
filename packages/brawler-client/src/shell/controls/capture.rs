@@ -24,6 +24,7 @@ pub(in crate::shell) fn capture_input(
     mut page: ResMut<SettingsPage>,
     mut dirty: ResMut<NavigationDirty>,
     overlay: Res<ClientOverlay>,
+    mut feedback: MessageWriter<crate::ui::feedback::UiFeedback>,
 ) {
     if *overlay != ClientOverlay::Settings {
         state.cancel_transient();
@@ -57,6 +58,9 @@ pub(in crate::shell) fn capture_input(
         page.rebuild = true;
         if disconnected {
             state.notice = "Controller disconnected. The binding was not changed.".into();
+        } else if !cancel_clicked {
+            // A clicked Cancel already sounded through the shared press model.
+            feedback.write(crate::ui::feedback::UiFeedback::Back);
         }
         dirty.0 = Some(ShellControlId::Input(id));
         return;

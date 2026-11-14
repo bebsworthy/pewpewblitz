@@ -899,7 +899,12 @@ it): per weapon delivery family fire (`fire-straight`, `fire-sticky`, `fire-lobb
 the controlled fighter (spaced at least 4 ticks apart per kind, 12 under reduced combat effects,
 which thins but never mutes them), per-ultimate activation, objective, pickup, match start/score and
 victory/defeat/draw stings, and `ui-click`/`ui-confirm`/`ui-back` from the shared release-activation
-press model by surface role. The same catalog owns two looping music tracks selected by semantic
+press model by surface role. Keyboard, gamepad and platform-Back input is interpreted by each
+screen owner, which publishes a presentation-only `UiFeedback` fact (activated with the control's
+surface role, back, focus moved, slider stepped) only where its input actually acted; the same UI
+producer maps it to the same cues plus a quiet `ui-move` tick for focus moves and slider steps. A
+key press within 50 ms of another UI press is one gesture and sounds once, and ticks are at most
+one per 70 ms (none right after a press), so held or swept input never buzzes. The same catalog owns two looping music tracks selected by semantic
 key (`menu` everywhere except `match` during a match); a client music adapter crossfades between
 them and trims playback to the authored `loop_seconds`. A single mix system scales every audio
 entity by Master × its category (Effects or Music, both persisted settings) × its authored base

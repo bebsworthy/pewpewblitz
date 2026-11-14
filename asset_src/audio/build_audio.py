@@ -629,6 +629,14 @@ def ui_back() -> list[float]:
     return out
 
 
+def ui_move() -> list[float]:
+    # Focus movement and slider steps (BRL-ek8p): quieter and shorter than ui-click, no noise
+    # transient, so a run of arrow presses reads as a soft tick rather than repeated clicks.
+    out = buffer(0.04)
+    tone(out, 0.0, 0.03, const(2350), "sine", 0.6, decay=0.008)
+    return out
+
+
 # ---------------------------------------------------------------------------------------------
 # Music loops. Every event wraps around the loop buffer so tails cross the seam seamlessly.
 # ---------------------------------------------------------------------------------------------
@@ -765,6 +773,7 @@ CLIPS = {
     "ui-click": (ui_click, -24.0, False),
     "ui-confirm": (ui_confirm, -22.0, False),
     "ui-back": (ui_back, -22.0, False),
+    "ui-move": (ui_move, -28.0, False),
     "music-menu": (music_menu, -19.0, True),
     "music-match": (music_match, -18.0, True),
 }
