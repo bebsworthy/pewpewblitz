@@ -1,19 +1,25 @@
 ---
 id: BRL-0195
+
 title: Make the Android client store-ready and keyboard-complete
+
 status: todo
-theme:
-release:
-created: 2026-11-13T15:54:23Z
-modified: 2026-11-13T20:09:05Z
 closed:
 status_changed: 2026-11-13T15:54:23Z
-history:
-- todo@2026-11-13T15:54:23Z
-revision: 4e68e8a4a00f2599
+
+theme:
+
+release:
+
+created: 2026-11-13T15:54:23Z
+
 blocks: []
+
 related: [BRL-0159]
+
 parent: BRL-0171
+
+rank: 1703936
 ---
 
 # Description

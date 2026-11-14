@@ -1,19 +1,25 @@
 ---
 id: BRL-0215
+
 title: 'Match fallback name glyphs to the display font''s weight and style'
+
 status: todo
-theme: quality
-release:
-created: 2026-11-14T05:52:38Z
-modified: 2026-11-14T05:52:54Z
 closed:
 status_changed: 2026-11-14T05:52:38Z
-history:
-- todo@2026-11-14T05:52:38Z
-revision: 19826a3358557ecb
+
+theme: quality
+
+release:
+
+created: 2026-11-14T05:52:38Z
+
 blocks: []
+
 related: [BRL-0168]
+
 parent: BRL-0171
+
+rank: 14155776
 ---
 
 # Description

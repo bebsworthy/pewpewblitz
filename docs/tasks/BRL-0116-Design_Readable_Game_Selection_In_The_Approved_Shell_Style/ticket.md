@@ -1,15 +1,25 @@
 ---
 id: BRL-0116
+
 title: Design readable game selection in the approved shell style
+
 status: done
-theme:
-release:
-created: 2026-09-08T16:04:08Z
-modified: 2026-09-08T17:34:58Z
 closed: 2026-09-08T17:34:58Z
-revision: bd47a04b735a2cf5
+status_changed: 2026-09-08T17:34:58Z
+
+theme:
+
+release:
+
+created: 2026-09-08T16:04:08Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

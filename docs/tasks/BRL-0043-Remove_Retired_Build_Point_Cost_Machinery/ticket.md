@@ -1,16 +1,25 @@
 ---
 id: BRL-0043
+
 title: Remove retired build point-cost machinery
+
 status: backlog
-theme: quality
-release:
-priority: none
-created: 2026-08-28T13:27:16Z
-modified: 2026-08-28T19:44:02Z
 closed:
-revision: a1baa1f113f69a7c
+status_changed: 2026-08-28T19:44:02Z
+
+theme: quality
+
+release:
+
+created: 2026-08-28T13:27:16Z
+
 blocks: []
+
 related: [BRL-0003, BRL-0007, BRL-0032, BRL-0070]
+
+parent:
+
+rank: 2883584
 ---
 
 # Description

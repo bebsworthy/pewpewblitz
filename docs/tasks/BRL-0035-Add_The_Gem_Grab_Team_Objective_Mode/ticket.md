@@ -1,15 +1,25 @@
 ---
 id: BRL-0035
+
 title: Add the Gem Grab team objective mode
+
 status: backlog
-theme: core
-release:
-created: 2026-08-28T09:40:58Z
-modified: 2026-08-31T04:33:13Z
 closed:
-revision: 7b00d174e44d86c4
+status_changed: 2026-08-31T04:33:13Z
+
+theme: core
+
+release:
+
+created: 2026-08-28T09:40:58Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank: 2170880
 ---
 
 # Description

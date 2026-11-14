@@ -4,8 +4,8 @@
 
 ## Resolved
 
-- q-000008
-- q-000009
-- q-000010
-- q-000011
-- q-000012
+- q-019w5af
+- q-v0qhnm1
+- q-tgekb4s
+- q-pxzyxkt
+- q-ce8v3bq

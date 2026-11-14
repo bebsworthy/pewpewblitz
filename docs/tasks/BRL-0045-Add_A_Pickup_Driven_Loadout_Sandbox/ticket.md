@@ -1,16 +1,25 @@
 ---
 id: BRL-0045
+
 title: Add a pickup-driven loadout sandbox
+
 status: backlog
-theme: core
-release:
-priority: none
-created: 2026-08-28T18:51:01Z
-modified: 2026-08-28T18:55:55Z
 closed:
-revision: b6c2cddbafa82e1d
+status_changed: 2026-08-28T18:55:55Z
+
+theme: core
+
+release:
+
+created: 2026-08-28T18:51:01Z
+
 blocks: []
+
 related: [BRL-0003, BRL-0033]
+
+parent:
+
+rank: 3014656
 ---
 
 # Description

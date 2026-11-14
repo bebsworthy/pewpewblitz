@@ -1,16 +1,25 @@
 ---
 id: BRL-0030
+
 title: Separate environment visual catalog from runtime asset preparation
+
 status: done
-theme: quality
-release:
-priority: none
-created: 2026-08-28T07:52:25Z
-modified: 2026-08-28T11:24:29Z
 closed: 2026-08-28T11:24:29Z
-revision: 8e396429099260b1
+status_changed: 2026-08-28T11:24:29Z
+
+theme: quality
+
+release:
+
+created: 2026-08-28T07:52:25Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

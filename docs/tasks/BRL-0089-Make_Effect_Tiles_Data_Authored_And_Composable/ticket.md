@@ -1,15 +1,25 @@
 ---
 id: BRL-0089
+
 title: Make effect tiles data-authored and composable
+
 status: done
-theme: quality
-release:
-created: 2026-08-31T05:47:44Z
-modified: 2026-09-01T19:10:00Z
 closed: 2026-09-01T19:10:00Z
-revision: 63581eb3f769ee00
+status_changed: 2026-09-01T19:10:00Z
+
+theme: quality
+
+release:
+
+created: 2026-08-31T05:47:44Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

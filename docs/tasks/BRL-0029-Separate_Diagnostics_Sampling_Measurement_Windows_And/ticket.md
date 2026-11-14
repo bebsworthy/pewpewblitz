@@ -1,16 +1,25 @@
 ---
 id: BRL-0029
+
 title: 'Separate diagnostics sampling, measurement windows, and closeout'
+
 status: done
-theme: quality
-release:
-priority: none
-created: 2026-08-28T07:52:25Z
-modified: 2026-08-28T11:02:23Z
 closed: 2026-08-28T11:02:23Z
-revision: 00a5c9155af25dca
+status_changed: 2026-08-28T11:02:23Z
+
+theme: quality
+
+release:
+
+created: 2026-08-28T07:52:25Z
+
 blocks: []
+
 related: [BRL-0031]
+
+parent:
+
+rank:
 ---
 
 # Description

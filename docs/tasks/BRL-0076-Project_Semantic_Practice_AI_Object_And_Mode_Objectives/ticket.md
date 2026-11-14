@@ -1,16 +1,25 @@
 ---
 id: BRL-0076
+
 title: Project semantic Practice AI object and mode objectives
+
 status: done
-theme:
-release:
-priority: high
-created: 2026-08-30T21:25:08Z
-modified: 2026-08-30T21:50:51Z
 closed: 2026-08-30T21:50:51Z
-revision: 102bccaf7d2dc32b
+status_changed: 2026-08-30T21:50:51Z
+
+theme:
+
+release:
+
+created: 2026-08-30T21:25:08Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

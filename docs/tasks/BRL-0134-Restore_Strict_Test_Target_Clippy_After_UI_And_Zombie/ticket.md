@@ -1,15 +1,25 @@
 ---
 id: BRL-0134
+
 title: Restore strict test-target Clippy after UI and Zombie additions
+
 status: backlog
-theme:
-release:
-created: 2026-09-09T23:46:07Z
-modified: 2026-09-09T23:46:51Z
 closed:
-revision: 5ab9baf9536d5de3
+status_changed: 2026-09-09T23:46:51Z
+
+theme:
+
+release:
+
+created: 2026-09-09T23:46:07Z
+
 blocks: []
+
 related: [BRL-0166]
+
+parent:
+
+rank: 6160384
 ---
 
 # Description

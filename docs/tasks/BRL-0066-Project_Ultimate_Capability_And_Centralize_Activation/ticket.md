@@ -1,16 +1,25 @@
 ---
 id: BRL-0066
+
 title: Project Ultimate Capability And Centralize Activation Admission
+
 status: done
-theme:
-release:
-priority: high
-created: 2026-08-30T13:00:39Z
-modified: 2026-08-30T13:18:11Z
 closed: 2026-08-30T13:18:11Z
-revision: e99eafb69e08bfa1
+status_changed: 2026-08-30T13:18:11Z
+
+theme:
+
+release:
+
+created: 2026-08-30T13:00:39Z
+
 blocks: [BRL-0061]
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

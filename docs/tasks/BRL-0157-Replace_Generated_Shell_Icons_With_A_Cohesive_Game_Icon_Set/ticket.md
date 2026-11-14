@@ -1,21 +1,25 @@
 ---
 id: BRL-0157
+
 title: Replace generated shell icons with a cohesive game icon set
+
 status: doing
-theme: quality
-release:
-created: 2026-10-23T13:19:03Z
-modified: 2026-11-13T13:05:49Z
 closed:
 status_changed: 2026-11-13T11:20:48Z
-history:
-- backlog@2026-10-23T13:19:05Z
-- todo@2026-11-12T20:15:04Z
-- doing@2026-11-13T11:20:48Z
-revision: beb5771e6b374fb3
+
+theme: quality
+
+release:
+
+created: 2026-10-23T13:19:03Z
+
 blocks: []
+
 related: [BRL-0191]
+
 parent: BRL-0171
+
+rank: 11665408
 ---
 
 # Description

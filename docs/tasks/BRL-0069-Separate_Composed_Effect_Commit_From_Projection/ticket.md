@@ -1,16 +1,25 @@
 ---
 id: BRL-0069
+
 title: Separate Composed Effect Commit From Projection
+
 status: done
-theme:
-release:
-priority: none
-created: 2026-08-30T14:40:42Z
-modified: 2026-08-30T18:20:38Z
 closed: 2026-08-30T18:20:38Z
-revision: c45c93ac19b2b77e
+status_changed: 2026-08-30T18:20:38Z
+
+theme:
+
+release:
+
+created: 2026-08-30T14:40:42Z
+
 blocks: [BRL-0061]
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

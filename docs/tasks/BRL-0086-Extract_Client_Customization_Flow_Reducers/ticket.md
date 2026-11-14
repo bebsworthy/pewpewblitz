@@ -1,15 +1,25 @@
 ---
 id: BRL-0086
+
 title: Extract client customization flow reducers
+
 status: done
-theme:
-release:
-created: 2026-08-31T04:53:02Z
-modified: 2026-08-31T05:11:44Z
 closed: 2026-08-31T05:11:44Z
-revision: 27213fc8ccf1c6a3
+status_changed: 2026-08-31T05:11:44Z
+
+theme:
+
+release:
+
+created: 2026-08-31T04:53:02Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

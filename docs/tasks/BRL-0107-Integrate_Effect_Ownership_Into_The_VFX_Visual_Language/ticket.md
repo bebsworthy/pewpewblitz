@@ -1,15 +1,25 @@
 ---
 id: BRL-0107
+
 title: Integrate effect ownership into the VFX visual language
+
 status: done
-theme:
-release:
-created: 2026-08-31T17:42:13Z
-modified: 2026-09-02T03:52:19Z
 closed: 2026-09-02T03:52:19Z
-revision: 0c08577e6be0cb3e
+status_changed: 2026-09-02T03:52:19Z
+
+theme:
+
+release:
+
+created: 2026-08-31T17:42:13Z
+
 blocks: [BRL-0108]
+
 related: [BRL-0094, BRL-0101]
+
+parent:
+
+rank:
 ---
 
 # Description

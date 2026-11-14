@@ -1,16 +1,25 @@
 ---
 id: BRL-0073
+
 title: Author direct-diagnostic starter loadout policy
+
 status: done
-theme:
-release:
-priority: high
-created: 2026-08-30T19:29:11Z
-modified: 2026-08-30T19:51:58Z
 closed: 2026-08-30T19:51:58Z
-revision: ac3d06cb135c7124
+status_changed: 2026-08-30T19:51:58Z
+
+theme:
+
+release:
+
+created: 2026-08-30T19:29:11Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

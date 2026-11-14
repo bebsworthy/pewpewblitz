@@ -1,15 +1,25 @@
 ---
 id: BRL-0012
+
 title: 'P2: Narrow the application crate public API'
+
 status: done
-theme: quality
-release:
-created: 2026-08-27T18:15:30Z
-modified: 2026-08-27T22:38:57Z
 closed: 2026-08-27T22:38:57Z
-revision: d47c1147488dfb25
+status_changed: 2026-08-27T22:38:57Z
+
+theme: quality
+
+release:
+
+created: 2026-08-27T18:15:30Z
+
 blocks: []
+
 related: [BRL-0002, BRL-0170]
+
+parent:
+
+rank:
 ---
 
 # Description

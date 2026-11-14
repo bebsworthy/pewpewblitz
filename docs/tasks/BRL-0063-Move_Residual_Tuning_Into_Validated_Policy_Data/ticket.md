@@ -1,16 +1,25 @@
 ---
 id: BRL-0063
+
 title: Move residual tuning into validated policy data
+
 status: done
-theme:
-release:
-priority: none
-created: 2026-08-30T10:00:11Z
-modified: 2026-08-30T11:52:23Z
 closed: 2026-08-30T11:52:23Z
-revision: 3d99f73dd3e6aa4c
+status_changed: 2026-08-30T11:52:23Z
+
+theme:
+
+release:
+
+created: 2026-08-30T10:00:11Z
+
 blocks: [BRL-0061]
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

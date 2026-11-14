@@ -1,15 +1,25 @@
 ---
 id: BRL-0106
+
 title: Align native render evidence duration validation with the sample gate
+
 status: backlog
-theme:
-release:
-created: 2026-08-31T11:43:50Z
-modified: 2026-08-31T11:44:10Z
 closed:
-revision: 179ba55a74054063
+status_changed: 2026-08-31T11:44:10Z
+
+theme:
+
+release:
+
+created: 2026-08-31T11:43:50Z
+
 blocks: []
+
 related: [BRL-0164]
+
+parent:
+
+rank: 5963776
 ---
 
 # Description

@@ -1,16 +1,25 @@
 ---
 id: BRL-0055
+
 title: Move ability passive and bot balance into authored data
+
 status: done
-theme:
-release:
-priority: high
-created: 2026-08-29T19:01:09Z
-modified: 2026-08-29T22:13:20Z
 closed: 2026-08-29T22:13:20Z
-revision: 030d085036f8beb5
+status_changed: 2026-08-29T22:13:20Z
+
+theme:
+
+release:
+
+created: 2026-08-29T19:01:09Z
+
 blocks: []
+
 related: [BRL-0052, BRL-0060]
+
+parent:
+
+rank:
 ---
 
 # Description

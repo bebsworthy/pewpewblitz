@@ -1,15 +1,25 @@
 ---
 id: BRL-0120
+
 title: Implement approved weapon overview and fullscreen parts picker
+
 status: done
-theme:
-release:
-created: 2026-09-08T17:38:02Z
-modified: 2026-09-08T19:01:58Z
 closed: 2026-09-08T19:01:58Z
-revision: 00ae0065963d4e24
+status_changed: 2026-09-08T19:01:58Z
+
+theme:
+
+release:
+
+created: 2026-09-08T17:38:02Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

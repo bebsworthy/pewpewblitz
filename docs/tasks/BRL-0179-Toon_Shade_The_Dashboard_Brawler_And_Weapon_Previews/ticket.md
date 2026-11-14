@@ -1,19 +1,25 @@
 ---
 id: BRL-0179
+
 title: Toon-shade the Dashboard brawler and weapon previews
+
 status: todo
-theme: core
-release:
-created: 2026-11-12T23:58:26Z
-modified: 2026-11-13T20:09:05Z
 closed:
 status_changed: 2026-11-12T23:58:26Z
-history:
-- todo@2026-11-12T23:58:26Z
-revision: da8bbae2083602f5
+
+theme: core
+
+release:
+
+created: 2026-11-12T23:58:26Z
+
 blocks: []
+
 related: [BRL-0150]
+
 parent: BRL-0171
+
+rank: 1048576
 ---
 
 # Description

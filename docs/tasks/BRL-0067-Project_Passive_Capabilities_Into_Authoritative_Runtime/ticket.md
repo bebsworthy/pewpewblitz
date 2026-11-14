@@ -1,16 +1,25 @@
 ---
 id: BRL-0067
+
 title: Project Passive Capabilities Into Authoritative Runtime
+
 status: done
-theme:
-release:
-priority: none
-created: 2026-08-30T13:23:36Z
-modified: 2026-08-30T13:49:32Z
 closed: 2026-08-30T13:49:32Z
-revision: 0c813623c9bdd862
+status_changed: 2026-08-30T13:49:32Z
+
+theme:
+
+release:
+
+created: 2026-08-30T13:23:36Z
+
 blocks: [BRL-0061]
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

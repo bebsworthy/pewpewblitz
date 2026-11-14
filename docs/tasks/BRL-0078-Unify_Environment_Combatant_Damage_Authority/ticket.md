@@ -1,15 +1,25 @@
 ---
 id: BRL-0078
+
 title: Unify environment combatant damage authority
+
 status: done
-theme:
-release:
-created: 2026-08-30T22:24:38Z
-modified: 2026-08-30T23:20:30Z
 closed: 2026-08-30T23:20:30Z
-revision: 66597ecb0340e1d3
+status_changed: 2026-08-30T23:20:30Z
+
+theme:
+
+release:
+
+created: 2026-08-30T22:24:38Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

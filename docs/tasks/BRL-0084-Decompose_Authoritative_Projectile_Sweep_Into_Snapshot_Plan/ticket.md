@@ -1,15 +1,25 @@
 ---
 id: BRL-0084
+
 title: Decompose authoritative projectile sweep into snapshot plan commit
+
 status: done
-theme:
-release:
-created: 2026-08-31T03:20:59Z
-modified: 2026-08-31T04:21:45Z
 closed: 2026-08-31T04:21:45Z
-revision: 2619d30a6afecb8c
+status_changed: 2026-08-31T04:21:45Z
+
+theme:
+
+release:
+
+created: 2026-08-31T03:20:59Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

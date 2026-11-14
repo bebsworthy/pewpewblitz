@@ -1,16 +1,25 @@
 ---
 id: BRL-0027
+
 title: Separate map object authority from map dynamic runtime
+
 status: done
-theme: quality
-release:
-priority: none
-created: 2026-08-28T07:52:25Z
-modified: 2026-08-28T09:57:29Z
 closed: 2026-08-28T09:57:29Z
-revision: 90350af07c2edcf6
+status_changed: 2026-08-28T09:57:29Z
+
+theme: quality
+
+release:
+
+created: 2026-08-28T07:52:25Z
+
 blocks: []
+
 related: [BRL-0024]
+
+parent:
+
+rank:
 ---
 
 # Description

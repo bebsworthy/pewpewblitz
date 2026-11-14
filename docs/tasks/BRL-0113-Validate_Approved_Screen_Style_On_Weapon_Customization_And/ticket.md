@@ -1,15 +1,25 @@
 ---
 id: BRL-0113
+
 title: Validate approved screen style on weapon customization and loading
+
 status: done
-theme:
-release:
-created: 2026-09-07T15:32:33Z
-modified: 2026-09-07T16:07:15Z
 closed: 2026-09-07T16:07:15Z
-revision: 72e2fb1fef59ba57
+status_changed: 2026-09-07T16:07:15Z
+
+theme:
+
+release:
+
+created: 2026-09-07T15:32:33Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

@@ -1,16 +1,25 @@
 ---
 id: BRL-0015
+
 title: 'P2: Consolidate flow scroll and focus geometry helpers'
+
 status: done
-theme: quality
-release:
-priority: none
-created: 2026-08-27T18:15:31Z
-modified: 2026-08-27T23:29:19Z
 closed: 2026-08-27T23:29:19Z
-revision: e1dcf35ff6a13528
+status_changed: 2026-08-27T23:29:19Z
+
+theme: quality
+
+release:
+
+created: 2026-08-27T18:15:31Z
+
 blocks: []
+
 related: [BRL-0002]
+
+parent:
+
+rank:
 ---
 
 # Description

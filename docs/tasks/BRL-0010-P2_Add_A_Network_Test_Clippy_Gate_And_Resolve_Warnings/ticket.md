@@ -1,16 +1,25 @@
 ---
 id: BRL-0010
+
 title: 'P2: Add a network-test Clippy gate and resolve warnings'
+
 status: done
-theme: quality
-release:
-priority: none
-created: 2026-08-27T18:15:29Z
-modified: 2026-08-27T21:50:18Z
 closed: 2026-08-27T21:50:18Z
-revision: 33bbe44fe349229a
+status_changed: 2026-08-27T21:50:18Z
+
+theme: quality
+
+release:
+
+created: 2026-08-27T18:15:29Z
+
 blocks: []
+
 related: [BRL-0002]
+
+parent:
+
+rank:
 ---
 
 # Description

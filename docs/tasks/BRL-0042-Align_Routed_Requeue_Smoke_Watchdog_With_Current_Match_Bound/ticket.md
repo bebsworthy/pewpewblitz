@@ -1,16 +1,25 @@
 ---
 id: BRL-0042
+
 title: Align routed requeue smoke watchdog with current match bound
+
 status: backlog
-theme:
-release:
-priority: none
-created: 2026-08-28T10:31:11Z
-modified: 2026-08-28T10:31:28Z
 closed:
-revision: c4a601df1bff2079
+status_changed: 2026-08-28T10:31:28Z
+
+theme:
+
+release:
+
+created: 2026-08-28T10:31:11Z
+
 blocks: []
+
 related: [BRL-0028]
+
+parent:
+
+rank: 2818048
 ---
 
 # Description

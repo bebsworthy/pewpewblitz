@@ -1,15 +1,25 @@
 ---
 id: BRL-0105
+
 title: Reconcile durable documentation with current ECS architecture
+
 status: done
-theme:
-release:
-created: 2026-08-31T08:56:34Z
-modified: 2026-08-31T09:41:47Z
 closed: 2026-08-31T09:41:47Z
-revision: 30c7e12e7714c3ce
+status_changed: 2026-08-31T09:41:47Z
+
+theme:
+
+release:
+
+created: 2026-08-31T08:56:34Z
+
 blocks: []
+
 related: [BRL-0061, BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

@@ -1,19 +1,25 @@
 ---
 id: BRL-0191
+
 title: Redraw mode pennant badges in the shell icon style
+
 status: todo
-theme:
-release:
-created: 2026-11-13T13:01:55Z
-modified: 2026-11-13T20:09:05Z
 closed:
 status_changed: 2026-11-13T13:01:55Z
-history:
-- todo@2026-11-13T13:01:55Z
-revision: 9086bb0701461f40
+
+theme:
+
+release:
+
+created: 2026-11-13T13:01:55Z
+
 blocks: []
+
 related: [BRL-0157]
+
 parent: BRL-0171
+
+rank: 1507328
 ---
 
 # Description

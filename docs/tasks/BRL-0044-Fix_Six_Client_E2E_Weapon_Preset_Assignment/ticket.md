@@ -1,16 +1,25 @@
 ---
 id: BRL-0044
+
 title: Fix six-client E2E weapon preset assignment
+
 status: backlog
-theme:
-release:
-priority: none
-created: 2026-08-28T14:02:16Z
-modified: 2026-08-28T14:02:42Z
 closed:
-revision: f9b73ed9ba4a5ce3
+status_changed: 2026-08-28T14:02:42Z
+
+theme:
+
+release:
+
+created: 2026-08-28T14:02:16Z
+
 blocks: []
+
 related: [BRL-0032]
+
+parent:
+
+rank: 2949120
 ---
 
 # Description

@@ -1,15 +1,25 @@
 ---
 id: BRL-0080
+
 title: Register gameplay content fingerprint contributors
+
 status: done
-theme:
-release:
-created: 2026-08-31T00:18:42Z
-modified: 2026-08-31T00:47:42Z
 closed: 2026-08-31T00:47:42Z
-revision: d7ea71918c7b6be5
+status_changed: 2026-08-31T00:47:42Z
+
+theme:
+
+release:
+
+created: 2026-08-31T00:18:42Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

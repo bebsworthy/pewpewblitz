@@ -1,22 +1,25 @@
 ---
 id: BRL-0147
+
 title: Replace the flat arena floor with a readable two-tone tile surface
+
 status: done
-theme: core
-release:
-created: 2026-10-23T13:19:03Z
-modified: 2026-11-13T06:34:27Z
 closed: 2026-11-13T06:34:27Z
 status_changed: 2026-11-13T06:34:27Z
-history:
-- backlog@2026-10-23T13:19:05Z
-- todo@2026-11-12T20:15:04Z
-- doing@2026-11-12T23:02:21Z
-- done@2026-11-13T06:34:27Z
-revision: 8b0e6efa87546587
+
+theme: core
+
+release:
+
+created: 2026-10-23T13:19:03Z
+
 blocks: []
+
 related: [BRL-0178]
+
 parent: BRL-0171
+
+rank:
 ---
 
 # Description

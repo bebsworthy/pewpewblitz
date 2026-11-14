@@ -1,19 +1,25 @@
 ---
 id: BRL-0176
+
 title: Retune non-glow VFX shaders and unlit materials for the HDR bloom pipeline
+
 status: todo
-theme: core
-release:
-created: 2026-11-12T22:52:14Z
-modified: 2026-11-13T20:09:05Z
 closed:
 status_changed: 2026-11-12T22:52:14Z
-history:
-- todo@2026-11-12T22:52:14Z
-revision: 8c6232573e47d2d2
+
+theme: core
+
+release:
+
+created: 2026-11-12T22:52:14Z
+
 blocks: []
+
 related: [BRL-0146]
+
 parent: BRL-0171
+
+rank: 917504
 ---
 
 # Description

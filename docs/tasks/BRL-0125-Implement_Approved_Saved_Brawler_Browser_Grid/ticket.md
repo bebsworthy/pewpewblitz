@@ -1,15 +1,25 @@
 ---
 id: BRL-0125
+
 title: Implement approved saved-brawler browser grid
+
 status: done
-theme:
-release:
-created: 2026-09-09T14:27:28Z
-modified: 2026-09-09T15:32:09Z
 closed: 2026-09-09T15:32:09Z
-revision: c9aa0fe9890a19ac
+status_changed: 2026-09-09T15:32:09Z
+
+theme:
+
+release:
+
+created: 2026-09-09T14:27:28Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

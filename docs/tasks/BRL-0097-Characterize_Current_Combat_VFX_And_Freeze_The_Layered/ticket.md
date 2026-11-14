@@ -1,15 +1,25 @@
 ---
 id: BRL-0097
+
 title: Characterize current combat VFX and freeze the layered recipe contract
+
 status: done
-theme:
-release:
-created: 2026-08-31T08:21:40Z
-modified: 2026-08-31T11:01:59Z
 closed: 2026-08-31T11:01:59Z
-revision: 8303f55641baf19a
+status_changed: 2026-08-31T11:01:59Z
+
+theme:
+
+release:
+
+created: 2026-08-31T08:21:40Z
+
 blocks: [BRL-0098]
+
 related: [BRL-0094]
+
+parent:
+
+rank:
 ---
 
 # Description

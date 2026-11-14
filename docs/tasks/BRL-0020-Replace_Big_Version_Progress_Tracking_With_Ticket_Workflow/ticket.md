@@ -1,15 +1,25 @@
 ---
 id: BRL-0020
+
 title: Replace big-version progress tracking with Ticket workflow
+
 status: done
-theme:
-release:
-created: 2026-08-27T18:38:54Z
-modified: 2026-08-27T18:46:00Z
 closed: 2026-08-27T18:46:00Z
-revision: 5313ce9af0d34d74
+status_changed: 2026-08-27T18:46:00Z
+
+theme:
+
+release:
+
+created: 2026-08-27T18:38:54Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

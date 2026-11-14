@@ -1,16 +1,25 @@
 ---
 id: BRL-0051
+
 title: Audit Bevy architecture and data-driven extensibility
+
 status: done
-theme:
-release:
-priority: none
-created: 2026-08-29T18:50:04Z
-modified: 2026-08-29T18:54:59Z
 closed: 2026-08-29T18:54:59Z
-revision: 0512f573806e5d0b
+status_changed: 2026-08-29T18:54:59Z
+
+theme:
+
+release:
+
+created: 2026-08-29T18:50:04Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

@@ -1,15 +1,25 @@
 ---
 id: BRL-0040
+
 title: Add a persistent splash-area weapon
+
 status: done
-theme: core
-release:
-created: 2026-08-28T09:40:59Z
-modified: 2026-08-29T14:47:19Z
 closed: 2026-08-29T14:34:25Z
-revision: 23645d602b3d9d45
+status_changed: 2026-08-29T14:34:25Z
+
+theme: core
+
+release:
+
+created: 2026-08-28T09:40:59Z
+
 blocks: []
+
 related: [BRL-0047, BRL-0094]
+
+parent:
+
+rank:
 ---
 
 # Description

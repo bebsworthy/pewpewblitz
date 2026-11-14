@@ -1,19 +1,25 @@
 ---
 id: BRL-0180
+
 title: Decide whether gameplay cast shadows should reach the arena view
+
 status: todo
-theme: core
-release:
-created: 2026-11-13T01:26:41Z
-modified: 2026-11-13T20:09:05Z
 closed:
 status_changed: 2026-11-13T01:26:41Z
-history:
-- todo@2026-11-13T01:26:41Z
-revision: 4ff67884497f84af
+
+theme: core
+
+release:
+
+created: 2026-11-13T01:26:41Z
+
 blocks: []
+
 related: [BRL-0152, BRL-0161]
+
 parent: BRL-0171
+
+rank: 1114112
 ---
 
 # Description

@@ -1,20 +1,25 @@
 ---
 id: BRL-0109
+
 title: Present Balance Lab categories as comparison matrices
+
 status: backlog
-theme:
-release:
-created: 2026-08-31T21:28:25Z
-modified: 2026-11-12T20:15:05Z
 closed:
 status_changed: 2026-11-12T20:15:05Z
-history:
-- doing@2026-09-01T16:45:10Z
-- backlog@2026-11-12T20:15:05Z
-revision: 3cfd98aa4a3dccee
+
+theme:
+
+release:
+
+created: 2026-08-31T21:28:25Z
+
 blocks: []
+
 related: []
+
 parent:
+
+rank: 9568256
 ---
 
 # Description

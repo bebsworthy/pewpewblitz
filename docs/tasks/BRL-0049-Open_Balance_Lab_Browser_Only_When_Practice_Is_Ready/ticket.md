@@ -1,16 +1,25 @@
 ---
 id: BRL-0049
+
 title: Open Balance Lab browser only when Practice is ready
+
 status: done
-theme:
-release:
-priority: none
-created: 2026-08-29T08:45:49Z
-modified: 2026-08-29T08:46:44Z
 closed: 2026-08-29T08:46:44Z
-revision: bdd729930d5a2dfc
+status_changed: 2026-08-29T08:46:44Z
+
+theme:
+
+release:
+
+created: 2026-08-29T08:45:49Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

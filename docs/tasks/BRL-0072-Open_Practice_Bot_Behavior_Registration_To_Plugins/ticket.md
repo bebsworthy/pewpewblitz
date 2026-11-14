@@ -1,16 +1,25 @@
 ---
 id: BRL-0072
+
 title: Open Practice bot behavior registration to plugins
+
 status: done
-theme:
-release:
-priority: high
-created: 2026-08-30T18:55:10Z
-modified: 2026-08-30T19:18:26Z
 closed: 2026-08-30T19:18:26Z
-revision: a2bc0cfddbaa1552
+status_changed: 2026-08-30T19:18:26Z
+
+theme:
+
+release:
+
+created: 2026-08-30T18:55:10Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

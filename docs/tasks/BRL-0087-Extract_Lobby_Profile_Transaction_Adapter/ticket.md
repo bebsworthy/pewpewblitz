@@ -1,15 +1,25 @@
 ---
 id: BRL-0087
+
 title: Extract lobby profile transaction adapter
+
 status: done
-theme:
-release:
-created: 2026-08-31T05:12:32Z
-modified: 2026-08-31T05:28:20Z
 closed: 2026-08-31T05:28:20Z
-revision: a0c67f57dcb6463f
+status_changed: 2026-08-31T05:28:20Z
+
+theme:
+
+release:
+
+created: 2026-08-31T05:12:32Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

@@ -1,20 +1,25 @@
 ---
 id: BRL-0094
+
 title: Add composable layered combat VFX recipes
+
 status: backlog
-theme:
-release:
-created: 2026-08-31T07:44:11Z
-modified: 2026-11-12T20:15:05Z
 closed:
 status_changed: 2026-11-12T20:15:05Z
-history:
-- doing@2026-09-01T20:01:29Z
-- backlog@2026-11-12T20:15:05Z
-revision: 915a098bf9697c40
+
+theme:
+
+release:
+
+created: 2026-08-31T07:44:11Z
+
 blocks: []
+
 related: [BRL-0001, BRL-0003, BRL-0021, BRL-0040, BRL-0046, BRL-0059, BRL-0070, BRL-0082, BRL-0096, BRL-0097, BRL-0098, BRL-0099, BRL-0100, BRL-0101, BRL-0102, BRL-0103, BRL-0104, BRL-0107, BRL-0108, BRL-0142, BRL-0144]
+
 parent:
+
+rank: 9371648
 ---
 
 # Description

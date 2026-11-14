@@ -1,15 +1,25 @@
 ---
 id: BRL-0095
+
 title: Co-locate ultimate Balance Lab metadata and bounds
+
 status: done
-theme: quality
-release:
-created: 2026-08-31T07:51:59Z
-modified: 2026-08-31T08:35:10Z
 closed: 2026-08-31T08:35:10Z
-revision: b288560928cda8a0
+status_changed: 2026-08-31T08:35:10Z
+
+theme: quality
+
+release:
+
+created: 2026-08-31T07:51:59Z
+
 blocks: []
+
 related: [BRL-0070, BRL-0093]
+
+parent:
+
+rank:
 ---
 
 # Description

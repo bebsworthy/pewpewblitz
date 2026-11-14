@@ -1,19 +1,25 @@
 ---
 id: BRL-0184
+
 title: Give Riff per-family weapon models with two-handed grips
+
 status: todo
-theme: core
-release:
-created: 2026-11-13T06:40:00Z
-modified: 2026-11-13T20:09:05Z
 closed:
 status_changed: 2026-11-13T06:40:00Z
-history:
-- todo@2026-11-13T06:40:00Z
-revision: b81e8604f36318f3
+
+theme: core
+
+release:
+
+created: 2026-11-13T06:40:00Z
+
 blocks: []
+
 related: [BRL-0154]
+
 parent: BRL-0171
+
+rank: 1310720
 ---
 
 # Description

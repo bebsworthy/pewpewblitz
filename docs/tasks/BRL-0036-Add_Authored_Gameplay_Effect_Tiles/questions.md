@@ -4,5 +4,5 @@
 
 ## Resolved
 
-- q-000005
-- q-000006
+- q-nben785
+- q-r1mdsfn

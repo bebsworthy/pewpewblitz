@@ -1,16 +1,25 @@
 ---
 id: BRL-0065
+
 title: Remove Authority Reads Already Covered By Runtime Projections
+
 status: done
-theme:
-release:
-priority: high
-created: 2026-08-30T12:39:33Z
-modified: 2026-08-30T13:00:28Z
 closed: 2026-08-30T13:00:28Z
-revision: 41e87d2258854829
+status_changed: 2026-08-30T13:00:28Z
+
+theme:
+
+release:
+
+created: 2026-08-30T12:39:33Z
+
 blocks: [BRL-0061]
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

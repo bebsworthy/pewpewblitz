@@ -1,16 +1,25 @@
 ---
 id: BRL-0064
+
 title: Separate gameplay composition from protocol and transport plugins
+
 status: done
-theme:
-release:
-priority: none
-created: 2026-08-30T11:54:06Z
-modified: 2026-08-30T12:33:22Z
 closed: 2026-08-30T12:33:22Z
-revision: 8c221d1d67f6b358
+status_changed: 2026-08-30T12:33:22Z
+
+theme:
+
+release:
+
+created: 2026-08-30T11:54:06Z
+
 blocks: [BRL-0061]
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

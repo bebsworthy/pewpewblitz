@@ -1,15 +1,25 @@
 ---
 id: BRL-0083
+
 title: Separate gameplay audio requests from one-shot playback
+
 status: done
-theme:
-release:
-created: 2026-08-31T02:33:25Z
-modified: 2026-08-31T03:20:10Z
 closed: 2026-08-31T03:20:10Z
-revision: c6bea7d2abc3eefa
+status_changed: 2026-08-31T03:20:10Z
+
+theme:
+
+release:
+
+created: 2026-08-31T02:33:25Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

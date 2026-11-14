@@ -1,15 +1,25 @@
 ---
 id: BRL-0111
+
 title: Prepare coherent player-screen art direction and imaging handoff
+
 status: done
-theme:
-release:
-created: 2026-09-07T05:55:58Z
-modified: 2026-09-07T06:05:43Z
 closed: 2026-09-07T06:05:43Z
-revision: 7d2b381754c696d1
+status_changed: 2026-09-07T06:05:43Z
+
+theme:
+
+release:
+
+created: 2026-09-07T05:55:58Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

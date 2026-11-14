@@ -1,16 +1,25 @@
 ---
 id: BRL-0074
+
 title: Centralize shared timing and match formation policy
+
 status: done
-theme:
-release:
-priority: none
-created: 2026-08-30T20:36:36Z
-modified: 2026-08-30T20:58:28Z
 closed: 2026-08-30T20:58:28Z
-revision: 1d383908fd7d3b1f
+status_changed: 2026-08-30T20:58:28Z
+
+theme:
+
+release:
+
+created: 2026-08-30T20:36:36Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

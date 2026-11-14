@@ -1,15 +1,25 @@
 ---
 id: BRL-0138
+
 title: Document the shared player-shell UI toolkit
+
 status: done
-theme:
-release:
-created: 2026-09-10T13:48:19Z
-modified: 2026-09-10T13:56:18Z
 closed: 2026-09-10T13:56:18Z
-revision: d01f4e200f206205
+status_changed: 2026-09-10T13:56:18Z
+
+theme:
+
+release:
+
+created: 2026-09-10T13:48:19Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

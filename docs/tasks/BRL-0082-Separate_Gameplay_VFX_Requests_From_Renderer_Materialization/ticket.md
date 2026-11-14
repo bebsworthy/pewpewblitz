@@ -1,15 +1,25 @@
 ---
 id: BRL-0082
+
 title: Separate gameplay VFX requests from renderer materialization
+
 status: done
-theme:
-release:
-created: 2026-08-31T01:27:34Z
-modified: 2026-08-31T02:32:03Z
 closed: 2026-08-31T02:32:03Z
-revision: 66bf906572367b4f
+status_changed: 2026-08-31T02:32:03Z
+
+theme:
+
+release:
+
+created: 2026-08-31T01:27:34Z
+
 blocks: []
+
 related: [BRL-0070, BRL-0094]
+
+parent:
+
+rank:
 ---
 
 # Description

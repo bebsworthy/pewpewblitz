@@ -1,15 +1,25 @@
 ---
 id: BRL-0004
+
 title: Apply accepted Balance Lab defaults
+
 status: done
-theme:
-release:
-created: 2026-08-27T17:57:06Z
-modified: 2026-08-27T18:12:52Z
 closed: 2026-08-27T18:12:52Z
-revision: 31f6da3ef0f80c3a
+status_changed: 2026-08-27T18:12:52Z
+
+theme:
+
+release:
+
+created: 2026-08-27T17:57:06Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

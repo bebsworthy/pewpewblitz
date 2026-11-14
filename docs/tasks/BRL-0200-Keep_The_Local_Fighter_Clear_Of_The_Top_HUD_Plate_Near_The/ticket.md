@@ -1,19 +1,25 @@
 ---
 id: BRL-0200
+
 title: 'Keep the local fighter clear of the top HUD plate near the map''s top edge'
+
 status: todo
-theme: core
-release:
-created: 2026-11-13T22:34:00Z
-modified: 2026-11-14T01:49:40Z
 closed:
 status_changed: 2026-11-13T22:34:00Z
-history:
-- todo@2026-11-13T22:34:00Z
-revision: a66903fba3318789
+
+theme: core
+
+release:
+
+created: 2026-11-13T22:34:00Z
+
 blocks: []
+
 related: [BRL-0155]
+
 parent: BRL-0171
+
+rank: 1769472
 ---
 
 # Description

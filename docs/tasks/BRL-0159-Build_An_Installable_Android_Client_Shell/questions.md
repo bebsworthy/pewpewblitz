@@ -2,7 +2,7 @@
 
 # Questions · BRL-0159
 
-## q-000019 · answered
+## q-p57x828 · answered
 
 Which Android devices should be the minimum support targets? This decides GPU and feature fallbacks (Vulkan compute for bevy_hanabi, shadows, MSAA).
 
@@ -14,4 +14,4 @@ Which Android devices should be the minimum support targets? This decides GPU an
 
 ## Resolved
 
-- q-000021
+- q-dnw73vh

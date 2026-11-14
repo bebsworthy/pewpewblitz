@@ -1,15 +1,25 @@
 ---
 id: BRL-0085
+
 title: Decompose Balance Lab authoritative apply transaction
+
 status: done
-theme:
-release:
-created: 2026-08-31T04:26:00Z
-modified: 2026-08-31T04:51:58Z
 closed: 2026-08-31T04:51:58Z
-revision: b595b5a36b08dc94
+status_changed: 2026-08-31T04:51:58Z
+
+theme:
+
+release:
+
+created: 2026-08-31T04:26:00Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

@@ -1,16 +1,25 @@
 ---
 id: BRL-0047
+
 title: Add Sticky Blomb weapon and Big Blob cluster ultimate
+
 status: done
-theme: core
-release:
-priority: high
-created: 2026-08-29T07:30:02Z
-modified: 2026-08-29T08:47:05Z
 closed: 2026-08-29T08:47:05Z
-revision: 5c70ef4e69d1014d
+status_changed: 2026-08-29T08:47:05Z
+
+theme: core
+
+release:
+
+created: 2026-08-29T07:30:02Z
+
 blocks: []
+
 related: [BRL-0040, BRL-0048]
+
+parent:
+
+rank:
 ---
 
 # Description

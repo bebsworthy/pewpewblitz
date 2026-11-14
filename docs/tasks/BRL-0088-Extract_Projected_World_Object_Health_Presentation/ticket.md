@@ -1,15 +1,25 @@
 ---
 id: BRL-0088
+
 title: Extract projected world-object health presentation
+
 status: done
-theme:
-release:
-created: 2026-08-31T05:29:04Z
-modified: 2026-08-31T05:46:03Z
 closed: 2026-08-31T05:46:03Z
-revision: a87151568960dd21
+status_changed: 2026-08-31T05:46:03Z
+
+theme:
+
+release:
+
+created: 2026-08-31T05:29:04Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

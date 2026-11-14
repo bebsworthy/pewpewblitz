@@ -1,15 +1,25 @@
 ---
 id: BRL-0061
+
 title: Architecture improvement
+
 status: done
-theme:
-release:
-created: 2026-08-30T08:01:29Z
-modified: 2026-08-30T18:21:12Z
 closed: 2026-08-30T18:21:12Z
-revision: e159c89d3c12b512
+status_changed: 2026-08-30T18:21:12Z
+
+theme:
+
+release:
+
+created: 2026-08-30T08:01:29Z
+
 blocks: []
+
 related: [BRL-0105]
+
+parent:
+
+rank:
 ---
 
 # Description

@@ -1,15 +1,25 @@
 ---
 id: BRL-0005
+
 title: 'P1: Make ECS app tests fail on unexpected system errors'
+
 status: done
-theme: quality
-release:
-created: 2026-08-27T18:12:30Z
-modified: 2026-08-27T18:54:18Z
 closed: 2026-08-27T18:54:18Z
-revision: 3a5cbd266476bcec
+status_changed: 2026-08-27T18:54:18Z
+
+theme: quality
+
+release:
+
+created: 2026-08-27T18:12:30Z
+
 blocks: []
+
 related: [BRL-0002]
+
+parent:
+
+rank:
 ---
 
 # Description

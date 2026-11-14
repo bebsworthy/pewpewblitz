@@ -1,15 +1,25 @@
 ---
 id: BRL-0034
+
 title: Add a second purpose-built Wipeout map
+
 status: backlog
-theme: core
-release:
-created: 2026-08-28T09:40:58Z
-modified: 2026-08-31T04:32:20Z
 closed:
-revision: d14a7b72e95a8c4c
+status_changed: 2026-08-31T04:32:20Z
+
+theme: core
+
+release:
+
+created: 2026-08-28T09:40:58Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank: 2162688
 ---
 
 # Description

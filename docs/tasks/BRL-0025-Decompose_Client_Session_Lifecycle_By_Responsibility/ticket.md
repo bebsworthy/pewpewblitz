@@ -1,16 +1,25 @@
 ---
 id: BRL-0025
+
 title: Decompose client session lifecycle by responsibility
+
 status: done
-theme: quality
-release:
-priority: none
-created: 2026-08-28T07:52:25Z
-modified: 2026-08-28T08:58:03Z
 closed: 2026-08-28T08:58:03Z
-revision: 218bdd1249b6b899
+status_changed: 2026-08-28T08:58:03Z
+
+theme: quality
+
+release:
+
+created: 2026-08-28T07:52:25Z
+
 blocks: []
+
 related: [BRL-0022, BRL-0031]
+
+parent:
+
+rank:
 ---
 
 # Description

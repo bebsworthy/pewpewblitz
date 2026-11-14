@@ -1,16 +1,25 @@
 ---
 id: BRL-0009
+
 title: 'P1: Gate and index stable presentation reconciliation'
+
 status: done
-theme: quality
-release:
-priority: none
-created: 2026-08-27T18:15:29Z
-modified: 2026-08-27T21:13:48Z
 closed: 2026-08-27T21:13:48Z
-revision: cd4b5887f7145a60
+status_changed: 2026-08-27T21:13:48Z
+
+theme: quality
+
+release:
+
+created: 2026-08-27T18:15:29Z
+
 blocks: []
+
 related: [BRL-0002]
+
+parent:
+
+rank:
 ---
 
 # Description

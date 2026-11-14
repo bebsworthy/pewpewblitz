@@ -1,15 +1,25 @@
 ---
 id: BRL-0090
+
 title: Extract client matchmaking and results flow reducer
+
 status: done
-theme: quality
-release:
-created: 2026-08-31T05:50:53Z
-modified: 2026-08-31T06:16:20Z
 closed: 2026-08-31T06:16:20Z
-revision: e1011e591229b247
+status_changed: 2026-08-31T06:16:20Z
+
+theme: quality
+
+release:
+
+created: 2026-08-31T05:50:53Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

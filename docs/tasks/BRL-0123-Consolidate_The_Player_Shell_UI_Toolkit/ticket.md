@@ -1,15 +1,25 @@
 ---
 id: BRL-0123
+
 title: Consolidate the player shell UI toolkit
+
 status: done
-theme:
-release:
-created: 2026-09-09T10:47:46Z
-modified: 2026-09-09T20:04:26Z
 closed: 2026-09-09T20:04:26Z
-revision: 80a48b4521782e71
+status_changed: 2026-09-09T20:04:26Z
+
+theme:
+
+release:
+
+created: 2026-09-09T10:47:46Z
+
 blocks: []
+
 related: [BRL-0156]
+
+parent:
+
+rank:
 ---
 
 # Description

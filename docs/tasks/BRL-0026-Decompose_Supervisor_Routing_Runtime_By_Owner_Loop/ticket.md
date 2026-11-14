@@ -1,16 +1,25 @@
 ---
 id: BRL-0026
+
 title: Decompose supervisor routing runtime by owner-loop responsibility
+
 status: done
-theme: quality
-release:
-priority: none
-created: 2026-08-28T07:52:25Z
-modified: 2026-08-28T09:35:10Z
 closed: 2026-08-28T09:35:10Z
-revision: b7d79829f978a636
+status_changed: 2026-08-28T09:35:10Z
+
+theme: quality
+
+release:
+
+created: 2026-08-28T07:52:25Z
+
 blocks: []
+
 related: [BRL-0031]
+
+parent:
+
+rank:
 ---
 
 # Description

@@ -1,16 +1,25 @@
 ---
 id: BRL-0062
+
 title: Unify authoritative fighter and weapon runtime data
+
 status: done
-theme:
-release:
-priority: none
-created: 2026-08-30T08:09:01Z
-modified: 2026-08-30T09:53:33Z
 closed: 2026-08-30T09:53:33Z
-revision: 7230771c97ab4322
+status_changed: 2026-08-30T09:53:33Z
+
+theme:
+
+release:
+
+created: 2026-08-30T08:09:01Z
+
 blocks: [BRL-0061]
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

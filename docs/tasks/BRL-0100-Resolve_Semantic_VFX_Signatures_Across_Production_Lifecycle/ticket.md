@@ -1,15 +1,25 @@
 ---
 id: BRL-0100
+
 title: Resolve semantic VFX signatures across production lifecycle adapters
+
 status: done
-theme:
-release:
-created: 2026-08-31T08:21:40Z
-modified: 2026-08-31T14:38:50Z
 closed: 2026-08-31T14:38:50Z
-revision: 720d9c9c46921d12
+status_changed: 2026-08-31T14:38:50Z
+
+theme:
+
+release:
+
+created: 2026-08-31T08:21:40Z
+
 blocks: [BRL-0101]
+
 related: [BRL-0094]
+
+parent:
+
+rank:
 ---
 
 # Description

@@ -1,15 +1,25 @@
 ---
 id: BRL-0114
+
 title: Implement approved native player Dashboard design
+
 status: done
-theme:
-release:
-created: 2026-09-07T16:23:26Z
-modified: 2026-09-08T15:59:48Z
 closed: 2026-09-08T15:59:48Z
-revision: 30766a87f561265a
+status_changed: 2026-09-08T15:59:48Z
+
+theme:
+
+release:
+
+created: 2026-09-07T16:23:26Z
+
 blocks: []
+
 related: []
+
+parent:
+
+rank:
 ---
 
 # Description

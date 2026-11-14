@@ -1,15 +1,25 @@
 ---
 id: BRL-0104
+
 title: Complete remaining combat VFX families and close BRL-0094
+
 status: done
-theme:
-release:
-created: 2026-08-31T08:21:41Z
-modified: 2026-09-01T20:00:18Z
 closed: 2026-09-01T20:00:18Z
-revision: a3777ee74ad7e3d2
+status_changed: 2026-09-01T20:00:18Z
+
+theme:
+
+release:
+
+created: 2026-08-31T08:21:41Z
+
 blocks: [BRL-0107]
+
 related: [BRL-0094]
+
+parent:
+
+rank:
 ---
 
 # Description

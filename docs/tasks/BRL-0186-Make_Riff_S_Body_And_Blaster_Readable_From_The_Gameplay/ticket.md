@@ -1,19 +1,25 @@
 ---
 id: BRL-0186
+
 title: 'Make Riff''s body and blaster readable from the gameplay camera'
+
 status: backlog
-theme: core
-release:
-created: 2026-11-13T07:30:08Z
-modified: 2026-11-13T07:30:10Z
 closed:
 status_changed: 2026-11-13T07:30:08Z
-history:
-- backlog@2026-11-13T07:30:08Z
-revision: 3d5894c59d61b8ec
+
+theme: core
+
+release:
+
+created: 2026-11-13T07:30:08Z
+
 blocks: []
+
 related: [BRL-0154]
+
 parent: BRL-0171
+
+rank: 12255232
 ---
 
 # Description

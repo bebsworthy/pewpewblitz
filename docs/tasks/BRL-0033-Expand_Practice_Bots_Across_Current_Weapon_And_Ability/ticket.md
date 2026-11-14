@@ -1,15 +1,25 @@
 ---
 id: BRL-0033
+
 title: Expand Practice bots across current weapon and ability matchups
+
 status: backlog
-theme: core
-release:
-created: 2026-08-28T09:40:58Z
-modified: 2026-08-31T04:33:09Z
 closed:
-revision: fc931290c6afdb8b
+status_changed: 2026-08-31T04:33:09Z
+
+theme: core
+
+release:
+
+created: 2026-08-28T09:40:58Z
+
 blocks: []
+
 related: [BRL-0003, BRL-0045]
+
+parent:
+
+rank: 2179072
 ---
 
 # Description

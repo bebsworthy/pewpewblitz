@@ -1,16 +1,25 @@
 ---
 id: BRL-0057
+
 title: Decompose high-risk gameplay and flow coordinators
+
 status: done
-theme:
-release:
-priority: medium
-created: 2026-08-29T19:01:09Z
-modified: 2026-08-29T23:10:28Z
 closed: 2026-08-29T23:10:28Z
-revision: 42c12cf2713c305c
+status_changed: 2026-08-29T23:10:28Z
+
+theme:
+
+release:
+
+created: 2026-08-29T19:01:09Z
+
 blocks: []
+
 related: [BRL-0052, BRL-0060]
+
+parent:
+
+rank:
 ---
 
 # Description

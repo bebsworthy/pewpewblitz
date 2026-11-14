@@ -1,15 +1,25 @@
 ---
 id: BRL-0081
+
 title: Open local mode registration and installation lifecycle
+
 status: done
-theme:
-release:
-created: 2026-08-31T00:48:39Z
-modified: 2026-08-31T01:24:45Z
 closed: 2026-08-31T01:24:45Z
-revision: aed7ecff24884aa7
+status_changed: 2026-08-31T01:24:45Z
+
+theme:
+
+release:
+
+created: 2026-08-31T00:48:39Z
+
 blocks: []
+
 related: [BRL-0070]
+
+parent:
+
+rank:
 ---
 
 # Description

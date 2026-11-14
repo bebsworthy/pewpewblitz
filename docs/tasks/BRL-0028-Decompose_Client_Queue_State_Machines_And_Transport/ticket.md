@@ -1,16 +1,25 @@
 ---
 id: BRL-0028
+
 title: Decompose client queue state machines and transport orchestration
+
 status: done
-theme: quality
-release:
-priority: none
-created: 2026-08-28T07:52:25Z
-modified: 2026-08-28T10:31:50Z
 closed: 2026-08-28T10:31:50Z
-revision: 2b94e01a1f9c2a8e
+status_changed: 2026-08-28T10:31:50Z
+
+theme: quality
+
+release:
+
+created: 2026-08-28T07:52:25Z
+
 blocks: []
+
 related: [BRL-0022, BRL-0042]
+
+parent:
+
+rank:
 ---
 
 # Description

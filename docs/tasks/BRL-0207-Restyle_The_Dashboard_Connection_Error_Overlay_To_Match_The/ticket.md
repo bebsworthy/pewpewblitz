@@ -1,19 +1,25 @@
 ---
 id: BRL-0207
+
 title: Restyle the Dashboard connection-error overlay to match the shell
+
 status: todo
-theme:
-release:
-created: 2026-11-14T01:38:35Z
-modified: 2026-11-14T01:49:40Z
 closed:
 status_changed: 2026-11-14T01:38:35Z
-history:
-- todo@2026-11-14T01:38:35Z
-revision: 8207a468913b2d3e
+
+theme:
+
+release:
+
+created: 2026-11-14T01:38:35Z
+
 blocks: []
+
 related: [BRL-0162]
+
 parent: BRL-0171
+
+rank: 2162688
 ---
 
 # Description

@@ -1,15 +1,25 @@
 ---
 id: BRL-0021
+
 title: Split 3D combat presentation by lifecycle ownership
+
 status: done
-theme:
-release:
-created: 2026-08-28T05:48:12Z
-modified: 2026-08-28T06:06:38Z
 closed: 2026-08-28T06:06:38Z
-revision: 39f2f4ecdf187ace
+status_changed: 2026-08-28T06:06:38Z
+
+theme:
+
+release:
+
+created: 2026-08-28T05:48:12Z
+
 blocks: []
+
 related: [BRL-0094]
+
+parent:
+
+rank:
 ---
 
 # Description
