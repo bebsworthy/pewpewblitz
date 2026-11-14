@@ -4,9 +4,9 @@ was: BRL-0194
 
 title: Finish excluding inert automation data and legacy evidence observers from the player client
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-13T14:08:49Z
+status_changed: 2026-11-14T20:57:59Z
 
 theme: quality
 
@@ -20,7 +20,7 @@ related: [BRL-zv4x]
 
 parent: BRL-q5c4
 
-rank: 1638400
+rank: 13565952
 ---
 
 # Description
