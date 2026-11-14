@@ -3,9 +3,9 @@ id: BRL-0172
 
 title: 'Present the local player''s ultimate activation sound and effect on the input frame'
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-12T21:39:17Z
+status_changed: 2026-11-14T10:26:46Z
 
 theme: core
 
@@ -19,7 +19,7 @@ related: [BRL-0142]
 
 parent: BRL-0171
 
-rank: 655360
+rank: 12713984
 ---
 
 # Description
