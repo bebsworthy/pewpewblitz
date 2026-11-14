@@ -138,7 +138,7 @@ Run `just` to list the supported everyday surface.
 | `just test` | Run deterministic routing, client, server, Balance Lab, network, and performance suites |
 | `just e2e [2, 4, or 6]` | Run the real-process 1v1, 2v2, or 3v3 product path; default is 2 |
 | `just practice-e2e [game type]` | Run one exact real-process Practice match with one human and server-filled bots; default is `wipeout-1v1` |
-| `just network-change-e2e [game type]` | Keep one routed Practice match session alive across a 4 s outage and a new client source port (BRL-0162) |
+| `just network-change-e2e [game type]` | Keep one routed Practice match session alive across two 4 s outages: to a new client source port, then back to the original (BRL-g57a, BRL-sqz0) |
 | `just v3-render-evidence [path]` | Record the bounded native release render report; the historical recipe name is retained |
 | `just android-build [HOST:PORT]` / `just android-install [HOST:PORT]` | Build the Android player APK (and install/launch it over adb); see [Android client](#android-client) |
 | `just ci` | Run lint, deterministic tests, the complete 2/4/6-client E2E matrix, and all nine Practice game types |

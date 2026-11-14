@@ -105,6 +105,10 @@ enum NetworkChangeStage {
 #[derive(bevy::prelude::Resource, Debug, Default)]
 pub(super) struct NetworkChangeSmoke {
     stage: NetworkChangeStage,
+    /// The source port the match session started on. The first outage moves to a new port; the
+    /// second returns to this one, as a Wi-Fi -> cellular -> Wi-Fi flap would (BRL-sqz0).
+    first_source: Option<std::net::SocketAddr>,
+    returned: bool,
 }
 
 /// Settle time after Active before the rehearsed outage starts.
@@ -115,9 +119,10 @@ const NETWORK_CHANGE_OUTAGE: core::time::Duration = core::time::Duration::from_s
 /// Authoritative ticks the resumed session must deliver after the source-port change (1 s).
 const NETWORK_CHANGE_RESUMED_TICKS: u64 = brawler::timing::SIMULATION_TICK_HZ;
 
-/// Drive one mid-match outage plus source-port change and require the same routed match
-/// session to resume: the session generation must not change, the client must stay Active, and
-/// fresh authoritative ticks must arrive from the server after the rebind.
+/// Drive two mid-match outages, the first followed by a new source port and the second by a
+/// return to the original port, and require the same routed match session to resume after each:
+/// the session generation must not change, the client must stay Active, and fresh authoritative
+/// ticks must arrive from the server after each rebind.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -181,15 +186,8 @@ pub(super) fn drive_network_change_smoke(
             };
         }
         NetworkChangeStage::Outage { until, generation } if now >= until => {
-            let previous = io.local_addr();
-            match io.rebind_socket(local_addr.0) {
-                Ok(rebound) => {
-                    io.set_simulated_outage(false);
-                    info!(
-                        ?previous,
-                        %rebound,
-                        "network-change smoke: traffic restored from a new source port"
-                    );
+            match restore_traffic(&mut smoke, &mut io, local_addr.0) {
+                Ok(()) => {
                     smoke.stage = NetworkChangeStage::Recovering {
                         deadline: now.saturating_add(super::ROUTED_SESSION_TIMEOUT),
                         generation,
@@ -224,10 +222,16 @@ pub(super) fn drive_network_change_smoke(
                     generation,
                     tick_at_rebind,
                     newest_tick,
+                    returned = smoke.returned,
                     "network-change smoke: the same match session resumed after the source change"
                 );
-                exit.write(AppExit::Success);
-                smoke.stage = NetworkChangeStage::Finished;
+                if smoke.returned {
+                    exit.write(AppExit::Success);
+                    smoke.stage = NetworkChangeStage::Finished;
+                } else {
+                    // Second outage, then a return to the original source port.
+                    smoke.stage = NetworkChangeStage::Settling { until: now };
+                }
             } else if now >= deadline {
                 bevy::log::error!(
                     tick_at_rebind,
@@ -242,6 +246,34 @@ pub(super) fn drive_network_change_smoke(
         | NetworkChangeStage::Outage { .. }
         | NetworkChangeStage::Finished => {}
     }
+}
+
+/// End a rehearsed outage: the first moves the socket to a new source port (from the configured
+/// local address), the second returns it to the port the session started on.
+fn restore_traffic(
+    smoke: &mut NetworkChangeSmoke,
+    io: &mut crate::routed_udp::RoutedUdpIo,
+    configured: std::net::SocketAddr,
+) -> std::io::Result<()> {
+    let previous = io.local_addr();
+    let returning = smoke.first_source.is_some();
+    let target = if let Some(first) = smoke.first_source {
+        first
+    } else {
+        let started = previous
+            .ok_or_else(|| std::io::Error::other("the routed socket has no local address"))?;
+        smoke.first_source = Some(started);
+        configured
+    };
+    let rebound = io.rebind_socket(target)?;
+    io.set_simulated_outage(false);
+    smoke.returned = returning;
+    if returning {
+        info!(?previous, %rebound, "network-change smoke: traffic restored from the original source port");
+    } else {
+        info!(?previous, %rebound, "network-change smoke: traffic restored from a new source port");
+    }
+    Ok(())
 }
 
 /// Finish the routed process smoke only after the match session has completed, its routes have

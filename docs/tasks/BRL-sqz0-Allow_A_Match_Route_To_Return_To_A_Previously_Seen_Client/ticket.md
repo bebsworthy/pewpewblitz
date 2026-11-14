@@ -4,9 +4,9 @@ was: BRL-0205
 
 title: Allow a match route to return to a previously seen client address
 
-status: doing
-closed:
-status_changed: 2026-11-14T23:03:42Z
+status: done
+closed: 2026-11-14T23:45:10Z
+status_changed: 2026-11-14T23:45:10Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-g57a]
 
 parent: BRL-q5c4
 
-rank: 12713984
+rank:
 ---
 
 # Description

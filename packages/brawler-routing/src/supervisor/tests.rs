@@ -205,7 +205,7 @@ fn capability_rejects_monotonic_time_regression_without_mutating_state() {
 }
 
 #[test]
-fn rebind_window_rolls_forward_but_retired_sources_stay_invalid() {
+fn rebind_window_rolls_forward_and_retired_sources_wait_out_the_grace() {
     let (mut core, route) = configured_core();
     let token = capability(2);
     core.bind_capability(token.clone(), binding(route), MonotonicMillis(0))
@@ -223,9 +223,119 @@ fn rebind_window_rolls_forward_but_retired_sources_stay_invalid() {
             .unwrap()
             .rebound
     );
+    // Source 3 was retired at 10_003: still inside the grace, so it cannot flip the route back.
     assert_eq!(
-        core.authorize(&token, source(2), MonotonicMillis(10_004)),
+        core.authorize(
+            &token,
+            source(3),
+            MonotonicMillis(10_003 + CAPABILITY_RETURN_GRACE_MILLIS - 1)
+        ),
         Err(RoutingErrorCategory::Binding)
+    );
+    // Source 2 was retired long ago, so its return is an ordinary rebind (the second of this
+    // window).
+    assert!(
+        core.authorize(&token, source(2), MonotonicMillis(10_004))
+            .unwrap()
+            .rebound
+    );
+    assert_eq!(core.metrics().capability_rebinds, 4);
+}
+
+fn route_capability(
+    core: &mut SupervisorCore,
+    token: &Capability,
+    source: SocketAddr,
+    now: u64,
+) -> std::result::Result<RouteRegistration, RoutingErrorCategory> {
+    let envelope = PublicEnvelope::new(RouteSelector::Capability(token.clone()), vec![1]).unwrap();
+    core.route_public(&envelope, source, MonotonicMillis(now))
+}
+
+#[test]
+fn match_route_returns_to_an_earlier_source_as_a_bounded_rebind() {
+    let (mut core, route) = configured_core();
+    let token = capability(24);
+    core.bind_capability(token.clone(), binding(route), MonotonicMillis(0))
+        .unwrap();
+    let (wifi, cellular, other) = (source(1), source(2), source(3));
+    route_capability(&mut core, &token, wifi, 1).unwrap();
+    assert_eq!(core.source_for_route(route.route_id), Some(wifi));
+
+    // Wi-Fi -> cellular: rebind 1; outbound follows the newest source.
+    route_capability(&mut core, &token, cellular, 1_000).unwrap();
+    assert_eq!(core.source_for_route(route.route_id), Some(cellular));
+
+    // A late Wi-Fi datagram inside the grace is refused and does not move outbound traffic.
+    assert_eq!(
+        route_capability(&mut core, &token, wifi, 1_500),
+        Err(RoutingErrorCategory::Binding)
+    );
+    assert_eq!(core.source_for_route(route.route_id), Some(cellular));
+
+    // Cellular -> the same Wi-Fi address after the grace: rebind 2, and the route follows it.
+    let returned_at = 1_000 + CAPABILITY_RETURN_GRACE_MILLIS;
+    route_capability(&mut core, &token, wifi, returned_at).unwrap();
+    assert_eq!(core.source_for_route(route.route_id), Some(wifi));
+    route_capability(&mut core, &token, wifi, returned_at + 1).unwrap();
+    assert_eq!(core.source_for_route(route.route_id), Some(wifi));
+    assert_eq!(core.metrics().capability_rebinds, 2);
+
+    // A fourth source inside the 10 s window, new or previously seen, is RebindLimited and
+    // leaves the route on Wi-Fi.
+    let late = returned_at + CAPABILITY_RETURN_GRACE_MILLIS;
+    assert!(late < 1_000 + CAPABILITY_REBIND_WINDOW_MILLIS);
+    assert_eq!(
+        route_capability(&mut core, &token, cellular, late),
+        Err(RoutingErrorCategory::RebindLimited)
+    );
+    assert_eq!(
+        route_capability(&mut core, &token, other, late),
+        Err(RoutingErrorCategory::RebindLimited)
+    );
+    assert_eq!(core.source_for_route(route.route_id), Some(wifi));
+    assert_eq!(
+        core.capability_status(&token),
+        Some(CapabilityStatus::Active)
+    );
+
+    // Once the first rebind leaves the window, cellular may be used again.
+    route_capability(
+        &mut core,
+        &token,
+        cellular,
+        1_000 + CAPABILITY_REBIND_WINDOW_MILLIS,
+    )
+    .unwrap();
+    assert_eq!(core.source_for_route(route.route_id), Some(cellular));
+    assert_eq!(core.metrics().capability_rebinds, 3);
+}
+
+#[test]
+fn refused_late_datagrams_neither_refresh_idle_nor_consume_rebinds() {
+    let (mut core, route) = configured_core();
+    let token = capability(25);
+    core.bind_capability(token.clone(), binding(route), MonotonicMillis(0))
+        .unwrap();
+    core.authorize(&token, source(1), MonotonicMillis(1))
+        .unwrap();
+    core.authorize(&token, source(2), MonotonicMillis(2))
+        .unwrap();
+    for at in 3..CAPABILITY_RETURN_GRACE_MILLIS {
+        assert_eq!(
+            core.authorize(&token, source(1), MonotonicMillis(at)),
+            Err(RoutingErrorCategory::Binding)
+        );
+    }
+    assert_eq!(core.metrics().capability_rebinds, 1);
+    // Idle is measured from the last accepted (newest-source) datagram at 2 ms.
+    assert_eq!(
+        core.authorize(
+            &token,
+            source(1),
+            MonotonicMillis(2 + CAPABILITY_IDLE_MILLIS)
+        ),
+        Err(RoutingErrorCategory::RouteExpired)
     );
 }
 

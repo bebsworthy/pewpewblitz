@@ -1,13 +1,13 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     fmt,
     net::SocketAddr,
 };
 
 use crate::{
     CAPABILITY_HARD_LIFETIME_MILLIS, CAPABILITY_IDLE_MILLIS, CAPABILITY_PENDING_MILLIS,
-    CAPABILITY_REBIND_WINDOW_MILLIS, CAPABILITY_REBINDS_PER_WINDOW, Capability, RouteId,
-    RoutingErrorCategory, WorkerId,
+    CAPABILITY_REBIND_WINDOW_MILLIS, CAPABILITY_REBINDS_PER_WINDOW, CAPABILITY_RETURN_GRACE_MILLIS,
+    Capability, RouteId, RoutingErrorCategory, WorkerId,
 };
 
 use super::{Authorization, CapabilityBinding, CapabilityStatus, MonotonicMillis};
@@ -17,7 +17,9 @@ enum State {
     Pending,
     Active {
         newest_source: SocketAddr,
-        seen_sources: HashSet<SocketAddr>,
+        /// Sources replaced by a rebind less than `CAPABILITY_RETURN_GRACE_MILLIS` ago, with the
+        /// time each was retired. At most `CAPABILITY_REBINDS_PER_WINDOW` entries.
+        retired_sources: VecDeque<(SocketAddr, MonotonicMillis)>,
         rebinds: VecDeque<MonotonicMillis>,
         last_seen: MonotonicMillis,
     },
@@ -29,13 +31,13 @@ impl fmt::Debug for State {
         match self {
             Self::Pending => formatter.write_str("Pending"),
             Self::Active {
-                seen_sources,
+                retired_sources,
                 rebinds,
                 last_seen,
                 ..
             } => formatter
                 .debug_struct("Active")
-                .field("source_count", &seen_sources.len())
+                .field("retired_source_count", &retired_sources.len())
                 .field("rebind_count", &rebinds.len())
                 .field("last_seen", last_seen)
                 .finish(),
@@ -158,11 +160,9 @@ impl CapabilityRegistry {
                     record.state = State::Revoked;
                     return Err(RoutingErrorCategory::PendingExpired);
                 }
-                let mut seen_sources = HashSet::with_capacity(CAPABILITY_REBINDS_PER_WINDOW + 1);
-                seen_sources.insert(source);
                 record.state = State::Active {
                     newest_source: source,
-                    seen_sources,
+                    retired_sources: VecDeque::with_capacity(CAPABILITY_REBINDS_PER_WINDOW),
                     rebinds: VecDeque::with_capacity(CAPABILITY_REBINDS_PER_WINDOW),
                     last_seen: now,
                 };
@@ -174,7 +174,7 @@ impl CapabilityRegistry {
             }
             State::Active {
                 newest_source,
-                seen_sources,
+                retired_sources,
                 rebinds,
                 last_seen,
             } => {
@@ -193,7 +193,18 @@ impl CapabilityRegistry {
                         rebound: false,
                     });
                 }
-                if seen_sources.contains(&source) {
+                // A recently retired source is most likely a late datagram from the old path;
+                // refuse it so it cannot flip outbound traffic back. After the grace, a return to
+                // an earlier source is a new rebind like any other.
+                while retired_sources.front().is_some_and(|(_, at)| {
+                    now.0.saturating_sub(at.0) >= CAPABILITY_RETURN_GRACE_MILLIS
+                }) {
+                    retired_sources.pop_front();
+                }
+                if retired_sources
+                    .iter()
+                    .any(|(retired, _)| *retired == source)
+                {
                     return Err(RoutingErrorCategory::Binding);
                 }
                 while rebinds
@@ -206,7 +217,10 @@ impl CapabilityRegistry {
                     return Err(RoutingErrorCategory::RebindLimited);
                 }
                 rebinds.push_back(now);
-                seen_sources.insert(source);
+                // Every retired entry shares its timestamp with a rebind and the grace is no
+                // longer than the window, so this stays within the rebind limit.
+                retired_sources.push_back((*newest_source, now));
+                debug_assert!(retired_sources.len() <= CAPABILITY_REBINDS_PER_WINDOW);
                 *newest_source = source;
                 *last_seen = now;
                 Ok(Authorization {

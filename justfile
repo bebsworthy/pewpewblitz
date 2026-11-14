@@ -61,7 +61,7 @@ zombie-e2e players="2":
 practice-e2e game_type="wipeout-1v1":
     ./scripts/e2e-practice.sh {{game_type}}
 
-# Keep one routed Practice match session alive across a 4 s outage and a new client source port.
+# Keep one routed Practice match session alive across two 4 s outages: to a new client source port, then back to the original.
 network-change-e2e game_type="wipeout-1v1":
     ./scripts/e2e-network-change.sh {{game_type}}
 

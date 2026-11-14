@@ -51,6 +51,12 @@ pub const CAPABILITY_IDLE_MILLIS: u64 = 10_000;
 pub const CAPABILITY_HARD_LIFETIME_MILLIS: u64 = 600_000;
 pub const CAPABILITY_REBIND_WINDOW_MILLIS: u64 = 10_000;
 pub const CAPABILITY_REBINDS_PER_WINDOW: usize = 2;
+/// A source retired by a rebind is refused for this long, so late in-flight datagrams from the
+/// old path cannot flip outbound traffic back to it. After the grace, a return to that source
+/// (a Wi-Fi -> cellular -> Wi-Fi flap) is an ordinary rebind counted against the window limit.
+pub const CAPABILITY_RETURN_GRACE_MILLIS: u64 = 2_000;
+// The retired-source list is bounded by the rebind limit only while the grace fits the window.
+const _: () = assert!(CAPABILITY_RETURN_GRACE_MILLIS <= CAPABILITY_REBIND_WINDOW_MILLIS);
 
 pub const PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW: usize = 8;
 pub const PUBLIC_PREAUTH_BYTES_PER_WINDOW: usize = 9_216;

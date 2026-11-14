@@ -112,7 +112,11 @@ host, network down, address unavailable, refused/reset, permission denied, timed
 packet loss and keeps its wildcard-bound socket and Lightyear link. When traffic resumes, the OS
 selects the new source address and the supervisor's capability rebind (at most two source changes
 per 10 s; the newest source receives outbound traffic) follows it, while the match worker keys the
-peer by route and peer identity, never by address. Lobby routes are keyed by source address, so a
+peer by route and peer identity, never by address. A return to an earlier source (a Wi-Fi to
+cellular to Wi-Fi flap at the same address and port) is an ordinary rebind counted against the same
+limit, once 2 s (`CAPABILITY_RETURN_GRACE_MILLIS`) have passed since that source was replaced.
+Inside that grace its datagrams are refused (`Binding`), so late in-flight packets from the old
+path cannot flip outbound traffic back. Lobby routes are keyed by source address, so a
 lobby session survives a gap at the same address but not an address change.
 
 Routed sessions created by a routed transition use a 10 s Netcode connect-token timeout, equal to
@@ -120,9 +124,23 @@ the supervisor's idle revocation of an active capability (`CAPABILITY_IDLE_MILLI
 the token timeout on both ends, so a gap shorter than 10 s keeps the same session, fighter, and
 route, and a longer gap (including app suspension) is declared lost by every party at about the
 same time. A lost match session returns the client to a fresh lobby and Dashboard with an
-explanation; a match session is not resumed after that bound. Returning to a previously seen
-source address, post-timeout match rejoin, and a non-UDP fallback transport are not part of this
-contract.
+explanation; a match session is not resumed after that bound. Post-timeout match rejoin and a
+non-UDP fallback transport are not part of this contract.
+
+Security note (BRL-sqz0). Allowing a return does not widen what a capability holder can do. The
+256-bit capability, not the source address, authorizes a route; any holder could already move a
+route to a fresh address within the rebind limit, so returning to a known one adds no power. A
+datagram with a spoofed source address still needs the secret capability, and a holder who
+spoofs a victim's earlier address can only redirect bounded outbound match traffic there, at most
+two source changes per 10 s, which is the same reflection exposure a new address already had.
+Netcode still authenticates every payload, so a redirected route carries no gameplay identity.
+Only the newest source receives outbound traffic and keeps the route alive (idle 10 s); a refused
+or rate-limited datagram refreshes neither. The supervisor remembers only sources retired inside
+the grace, at most two per capability, so the per-capability state no longer grows with the number
+of addresses seen. A datagram delayed longer than the grace can still flip the route back and
+spend a rebind. The current path is then itself inside the grace, so its datagrams rebind the
+route back about 2 s later if the limit allows; otherwise the route waits for the window to roll or
+idles out like any lost path.
 
 ### Relaunch after the app was killed
 

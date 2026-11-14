@@ -261,7 +261,7 @@ supervisor_pid=
 if [ "$headless" = 1 ]; then
     roster_count=$((client_count / roster_size))
     if [ "$network_change_smoke" = 1 ]; then
-        echo "brawler product match: Practice $game_type kept its match session across an outage and source-port change"
+        echo "brawler product match: Practice $game_type kept its match session across a source-port change and a return to the original port"
     elif [ "$practice_smoke" = 1 ]; then
         echo "brawler product match: Practice $game_type reached Active with one human"
     elif [ "$requeue_smoke" = 1 ]; then
