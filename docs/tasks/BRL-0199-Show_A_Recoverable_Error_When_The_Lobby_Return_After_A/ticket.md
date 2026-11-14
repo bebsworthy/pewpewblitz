@@ -1,16 +1,17 @@
 ---
 id: BRL-0199
 title: Show a recoverable error when the lobby return after a match fails
-status: todo
+status: doing
 theme:
 release:
 created: 2026-11-13T21:52:36Z
-modified: 2026-11-14T01:48:54Z
+modified: 2026-11-14T01:49:36Z
 closed:
-status_changed: 2026-11-13T21:52:36Z
+status_changed: 2026-11-14T01:49:36Z
 history:
 - todo@2026-11-13T21:52:36Z
-revision: 6708a5224837574a
+- doing@2026-11-14T01:49:36Z
+revision: 78329e09b493ef45
 blocks: []
 related: [BRL-0162, BRL-0196]
 parent: BRL-0171
