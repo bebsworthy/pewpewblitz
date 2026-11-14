@@ -1,9 +1,10 @@
-// Client-only gameplay camera rig tuning (BRL-0143; per-weapon and per-hit shake, BRL-0173). Presentation only: none of these values
+// Client-only gameplay camera rig tuning (BRL-0143; per-weapon and per-hit shake, BRL-0173;
+// reach-aware look-ahead, BRL-vptw). Presentation only: none of these values
 // feed aim, targeting, input, or simulation. Code-owned ceilings live in
 // `packages/brawler-client/src/presentation_3d/camera_rig.rs`; framing (FOV, elevation, distance) stays in
 // `camera.rs`.
 (
-    schema_version: 2,
+    schema_version: 3,
     follow: (
         // Critically damped follow of the presented (predicted) local fighter pose.
         smooth_seconds: 0.11,
@@ -13,11 +14,21 @@
         snap_distance_cells: 6.0,
     ),
     look_ahead: (
-        // Lean toward the aim direction; disabled under reduced motion.
+        // Lean toward the aim direction; disabled under reduced motion. Every aim leans at least
+        // `distance_cells`; a weapon whose reach (plus `reach_margin_cells`) runs past the visible
+        // ground in the aim direction leans further, up to `max_distance_cells`. The view is
+        // shallower toward the bottom and top of the screen than to the sides, so vertical aim
+        // leans more than horizontal aim for the same weapon.
         distance_cells: 1.5,
+        max_distance_cells: 5.0,
+        reach_margin_cells: 0.25,
+        // The lean never brings the fighter closer than this to a screen edge.
+        fighter_safe_margin_cells: 1.0,
         smooth_seconds: 0.32,
-        // Mouse/lob aim at this distance from the fighter leans fully; closer aim leans less.
-        full_strength_aim_distance_cells: 5.0,
+        // Mouse/placement aim at this distance from the fighter leans fully; closer aim leans
+        // less. Direction-only stick aim always leans fully. Must stay well above
+        // `max_distance_cells` so a mouse cursor cannot pull the view after itself.
+        full_strength_aim_distance_cells: 8.0,
     ),
     shake: (
         max_offset_world: 6.0,

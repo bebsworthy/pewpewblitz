@@ -3,11 +3,13 @@
 //! The rig reads the controlled fighter's presented (predicted) pose, the local aim sample, and
 //! combat cues, and only ever writes the arena camera transform plus the [`ArenaCameraShake`]
 //! offset baked into it. Aim and targeting project through the unshaken view
-//! ([`arena_aim_view`]), so shake never moves aim, targeting, input, or gameplay state. Follow
-//! and look-ahead always pass through the unchanged per-axis framing clamp; shake is a bounded
-//! transient offset applied after it.
+//! ([`arena_aim_view`]), so shake never moves aim, targeting, input, or gameplay state. The aim
+//! lean grows with the commanded reach and the view's depth in the aim direction (BRL-vptw), the
+//! combined lead keeps the fighter inside a safe frame of the visible ground, and the result
+//! always passes through the unchanged per-axis framing clamp; shake is a bounded transient
+//! offset applied after it.
 
-use super::camera::clamp_3d_camera_center;
+use super::camera::{GroundView, clamp_3d_camera_center, ground_view, viewport_aspect};
 #[allow(
     clippy::wildcard_imports,
     reason = "the world-renderer submodule consumes the presentation_3d composition surface"
@@ -22,11 +24,20 @@ use serde::Deserialize;
 use std::collections::VecDeque;
 
 const CAMERA_RIG_CATALOG: &str = include_str!("../../../../assets/catalogs/camera_rig.ron");
-const CAMERA_RIG_SCHEMA_VERSION: u16 = 2;
-/// Largest distance the rig may lead or trail the fighter before framing. Inside the conservative
-/// view's nearest extent (about 4.9 cells below the look target, 7.1 above, 8.8 to each side at
-/// the reference aspect), so the fighter always stays visible.
-pub(super) const MAX_CAMERA_LEAD_WORLD: f32 = MAP_CELL_SIZE_WORLD * 3.0;
+const CAMERA_RIG_SCHEMA_VERSION: u16 = 3;
+/// Ceiling for the authored look-ahead lean. The lean actually applied is also limited per
+/// direction by the fighter safe frame for the current viewport (BRL-vptw).
+const MAX_LOOK_AHEAD_CELLS: f32 = 6.0;
+/// The fighter stays at least this far inside every screen edge while the rig leads it.
+const MIN_FIGHTER_SAFE_MARGIN_CELLS: f32 = 1.0;
+const MAX_FIGHTER_SAFE_MARGIN_CELLS: f32 = 3.0;
+const MAX_REACH_MARGIN_CELLS: f32 = 2.0;
+/// Mouse aim distance is measured through the leaning view, so the lean feeds back into it. Full
+/// strength must sit at least this many times farther than the largest lean, which keeps that
+/// loop's gain at or below two thirds: the view settles instead of chasing the cursor.
+const MIN_FULL_STRENGTH_TO_LEAN_RATIO: f32 = 1.5;
+/// A follow spring further behind than this is a teleport, not a move.
+const MIN_SNAP_DISTANCE_CELLS: f32 = 3.0;
 /// Shake stays a small transient offset: at most a quarter cell beyond the framing clamp.
 const MAX_SHAKE_OFFSET_WORLD: f32 = MAP_CELL_SIZE_WORLD * 0.25;
 const MIN_SMOOTH_SECONDS: f32 = 0.01;
@@ -59,7 +70,14 @@ pub(super) struct FollowTuning {
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(super) struct LookAheadTuning {
+    /// Lean of every aim, and the whole lean of a weapon whose reach is already on screen.
     pub(super) distance_cells: f32,
+    /// Largest lean, used when the weapon's reach runs past the visible ground.
+    pub(super) max_distance_cells: f32,
+    /// Ground shown past the weapon's reach when the lean is large enough.
+    pub(super) reach_margin_cells: f32,
+    /// Smallest distance between the fighter and a screen edge while the rig leads it.
+    pub(super) fighter_safe_margin_cells: f32,
     pub(super) smooth_seconds: f32,
     pub(super) full_strength_aim_distance_cells: f32,
 }
@@ -195,27 +213,10 @@ impl CameraRigCatalog {
         check_range(
             "follow.snap_distance_cells",
             follow.snap_distance_cells,
-            MAX_CAMERA_LEAD_WORLD / MAP_CELL_SIZE_WORLD,
+            MIN_SNAP_DISTANCE_CELLS,
             64.0,
         )?;
-        check_range(
-            "look_ahead.distance_cells",
-            look.distance_cells,
-            0.0,
-            MAX_CAMERA_LEAD_WORLD / MAP_CELL_SIZE_WORLD,
-        )?;
-        check_range(
-            "look_ahead.smooth_seconds",
-            look.smooth_seconds,
-            MIN_SMOOTH_SECONDS,
-            MAX_SMOOTH_SECONDS,
-        )?;
-        check_range(
-            "look_ahead.full_strength_aim_distance_cells",
-            look.full_strength_aim_distance_cells,
-            0.5,
-            32.0,
-        )?;
+        validate_look_ahead(look)?;
         check_range(
             "shake.max_offset_world",
             shake.max_offset_world,
@@ -270,6 +271,47 @@ impl CameraRigCatalog {
             32.0,
         )
     }
+}
+
+/// Look-ahead bounds: the lean ceilings, the fighter safe margin, and the mouse-loop ratio.
+fn validate_look_ahead(look: LookAheadTuning) -> Result<(), String> {
+    check_range(
+        "look_ahead.max_distance_cells",
+        look.max_distance_cells,
+        0.0,
+        MAX_LOOK_AHEAD_CELLS,
+    )?;
+    check_range(
+        "look_ahead.distance_cells",
+        look.distance_cells,
+        0.0,
+        look.max_distance_cells,
+    )?;
+    check_range(
+        "look_ahead.reach_margin_cells",
+        look.reach_margin_cells,
+        0.0,
+        MAX_REACH_MARGIN_CELLS,
+    )?;
+    check_range(
+        "look_ahead.fighter_safe_margin_cells",
+        look.fighter_safe_margin_cells,
+        MIN_FIGHTER_SAFE_MARGIN_CELLS,
+        MAX_FIGHTER_SAFE_MARGIN_CELLS,
+    )?;
+    check_range(
+        "look_ahead.smooth_seconds",
+        look.smooth_seconds,
+        MIN_SMOOTH_SECONDS,
+        MAX_SMOOTH_SECONDS,
+    )?;
+    check_range(
+        "look_ahead.full_strength_aim_distance_cells",
+        look.full_strength_aim_distance_cells,
+        (look.max_distance_cells * MIN_FULL_STRENGTH_TO_LEAN_RATIO).max(0.5),
+        32.0,
+    )?;
+    Ok(())
 }
 
 fn check_range(name: &str, value: f32, min: f32, max: f32) -> Result<(), String> {
@@ -362,6 +404,8 @@ pub(super) struct CameraRigFrameInput {
     pub(super) fighter: Option<Vec2>,
     /// Local aim direction plus optional aim distance (mouse/lob), presentation copy only.
     pub(super) aim: Option<(Vec2, Option<f32>)>,
+    /// World reach of what the aim currently commands (primary weapon or targeted ultimate).
+    pub(super) reach: Option<f32>,
     pub(super) bounds: AxisAlignedMapRect,
     pub(super) viewport: Vec2,
     pub(super) dt: f32,
@@ -440,15 +484,18 @@ impl CameraRig {
                 anchor
             }
         };
+        let view = ground_view(viewport_aspect(input.viewport));
+        let safe_margin = catalog.look_ahead.fighter_safe_margin_cells * MAP_CELL_SIZE_WORLD;
         let look_target = if input.reduced_motion || input.fighter.is_none() {
             Vec2::ZERO
         } else {
-            look_ahead_target(&catalog.look_ahead, input.aim)
+            look_ahead_target(&catalog.look_ahead, input.aim, input.reach, view)
         };
         let look_ahead = self
             .look_ahead
             .step(look_target, catalog.look_ahead.smooth_seconds, dt);
-        let lead = (follow + look_ahead - anchor).clamp_length_max(MAX_CAMERA_LEAD_WORLD);
+        // The fighter sits at `-lead` from the look target; keep it inside the safe frame.
+        let lead = -view.clamp(anchor - (follow + look_ahead), safe_margin);
         let center = clamp_3d_camera_center(anchor + lead, input.bounds, input.viewport);
 
         self.trauma = (self.trauma - catalog.shake.decay_per_second * dt).max(0.0);
@@ -473,7 +520,15 @@ impl CameraRig {
     }
 }
 
-fn look_ahead_target(tuning: &LookAheadTuning, aim: Option<(Vec2, Option<f32>)>) -> Vec2 {
+/// The aim lean: at least `distance_cells`, more when the reach (plus margin) would otherwise run
+/// past the visible ground in the aim direction, never past `max_distance_cells` or the fighter
+/// safe frame, then scaled by the aim-distance strength.
+pub(super) fn look_ahead_target(
+    tuning: &LookAheadTuning,
+    aim: Option<(Vec2, Option<f32>)>,
+    reach: Option<f32>,
+    view: GroundView,
+) -> Vec2 {
     let Some((direction, distance)) = aim else {
         return Vec2::ZERO;
     };
@@ -488,7 +543,40 @@ fn look_ahead_target(tuning: &LookAheadTuning, aim: Option<(Vec2, Option<f32>)>)
             0.0
         }
     });
-    direction * tuning.distance_cells * MAP_CELL_SIZE_WORLD * strength
+    let minimum = tuning.distance_cells * MAP_CELL_SIZE_WORLD;
+    let maximum = tuning.max_distance_cells * MAP_CELL_SIZE_WORLD;
+    let needed = reach
+        .filter(|reach| reach.is_finite())
+        .map_or(0.0, |reach| {
+            reach + tuning.reach_margin_cells * MAP_CELL_SIZE_WORLD
+                - view.ray_extent(direction, 0.0)
+        });
+    // Leaning along `direction` moves the fighter along `-direction` from the look target.
+    let safe_margin = tuning.fighter_safe_margin_cells * MAP_CELL_SIZE_WORLD;
+    let lean = needed
+        .clamp(minimum, maximum)
+        .min(view.ray_extent(-direction, safe_margin));
+    direction * lean * strength
+}
+
+/// Farthest ground a weapon's delivery threatens from the fighter.
+pub(super) fn weapon_reach(recipe: &WeaponRecipe) -> f32 {
+    match recipe.delivery {
+        DeliveryMethod::Straight {
+            range,
+            muzzle_offset,
+            ..
+        }
+        | DeliveryMethod::StickyStraight {
+            range,
+            muzzle_offset,
+            ..
+        } => range + muzzle_offset,
+        DeliveryMethod::Lobbed { distance, .. } | DeliveryMethod::Splash { distance, .. } => {
+            distance
+        }
+        DeliveryMethod::MeleeArc { reach, .. } | DeliveryMethod::ConeSpray { reach, .. } => reach,
+    }
 }
 
 /// Smooth deterministic noise in roughly [-1, 1] per axis. The rational frequency ratios share a

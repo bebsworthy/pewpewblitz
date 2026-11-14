@@ -1,6 +1,8 @@
 //! Per-axis map/viewport framing, the arena camera writer, and ground-plane cursor projection.
 
-use super::camera_rig::{ArenaCameraShake, CameraRig, CameraRigCatalog, CameraRigFrameInput};
+use super::camera_rig::{
+    ArenaCameraShake, CameraRig, CameraRigCatalog, CameraRigFrameInput, weapon_reach,
+};
 #[allow(
     clippy::wildcard_imports,
     reason = "the world-renderer submodule consumes the presentation_3d composition surface"
@@ -86,7 +88,10 @@ pub(super) struct CameraRigParams<'w> {
 pub(super) fn follow_3d_camera(
     map: Option<Res<brawler::map::PresentedMap>>,
     editor: Option<Res<MapEditorPreview>>,
-    fighters: Query<&Position, (With<Fighter>, With<Controlled>, Without<ArenaCamera>)>,
+    fighters: Query<
+        (&Position, Option<&brawler::builds::ResolvedMatchLoadout>),
+        (With<Fighter>, With<Controlled>, Without<ArenaCamera>),
+    >,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cameras: Query<
         (
@@ -134,6 +139,7 @@ pub(super) fn follow_3d_camera(
         }
         return;
     }
+    let controlled = fighters.iter().next();
     let (bounds, fighter) = map.as_ref().map_or_else(
         || {
             let neutral = brawler::map::AxisAlignedMapRect {
@@ -145,7 +151,7 @@ pub(super) fn follow_3d_camera(
         |map| {
             (
                 map.camera_bounds,
-                fighters.iter().next().map(|position| position.0),
+                controlled.map(|(position, _)| position.0),
             )
         },
     );
@@ -155,6 +161,10 @@ pub(super) fn follow_3d_camera(
             .aim_axis
             .map(|direction| (direction, pending.aim_distance))
     });
+    let reach = controlled
+        .and_then(|(_, loadout)| loadout)
+        .zip(rig.pending.as_deref())
+        .map(|(loadout, pending)| aim_reach(loadout, pending.targeted_ultimate));
     let dt = rig.time.delta_secs();
     let catalog = *rig.catalog;
     let frame = rig.rig.step(
@@ -162,6 +172,7 @@ pub(super) fn follow_3d_camera(
         CameraRigFrameInput {
             fighter,
             aim,
+            reach,
             bounds,
             viewport,
             dt,
@@ -182,6 +193,19 @@ pub(super) fn follow_3d_camera(
     }
 }
 
+/// Reach of what the local aim commands: an armed targeted ultimate's placement range, otherwise
+/// the primary weapon's reach.
+fn aim_reach(
+    loadout: &brawler::builds::ResolvedMatchLoadout,
+    targeted_ultimate: TargetedUltimateInput,
+) -> f32 {
+    targeted_ultimate
+        .is_targeting(loadout.ultimate.id)
+        .then(|| targeted_ultimate_range(loadout))
+        .flatten()
+        .unwrap_or_else(|| weapon_reach(&loadout.primary_weapon.recipe))
+}
+
 /// Camera position relative to its ground look target at the framing distance.
 pub(super) fn camera_offset() -> Vec3 {
     Vec3::new(
@@ -191,7 +215,7 @@ pub(super) fn camera_offset() -> Vec3 {
     ) * CAMERA_DISTANCE
 }
 
-fn viewport_aspect(viewport: Vec2) -> f32 {
+pub(super) fn viewport_aspect(viewport: Vec2) -> f32 {
     if viewport.is_finite() && viewport.x > 0.0 && viewport.y > 0.0 {
         viewport.x / viewport.y
     } else {
@@ -230,6 +254,78 @@ pub(super) fn clamp_3d_camera_center(
 }
 
 pub(super) fn conservative_ground_footprint(aspect: f32) -> brawler::map::AxisAlignedMapRect {
+    let view = ground_view(aspect);
+    // A tilted perspective view is a trapezoid on the ground. Axis-fit decisions must use its
+    // narrow near edge so a map judged to fit cannot be clipped lower in the viewport.
+    brawler::map::AxisAlignedMapRect {
+        min: Vec2::new(-view.near_half_width, view.near_y),
+        max: Vec2::new(view.near_half_width, view.far_y),
+    }
+}
+
+/// The visible ground relative to the look target: a trapezoid whose rows run from `near_y`
+/// (bottom screen edge, negative) to `far_y` (top screen edge), widening linearly from
+/// `near_half_width` to `far_half_width`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct GroundView {
+    pub(super) near_y: f32,
+    pub(super) far_y: f32,
+    pub(super) near_half_width: f32,
+    pub(super) far_half_width: f32,
+}
+
+impl GroundView {
+    /// Increase of the visible half width per unit of ground depth.
+    fn width_slope(self) -> f32 {
+        (self.far_half_width - self.near_half_width) / (self.far_y - self.near_y)
+    }
+
+    /// Visible half width on the ground row `y` units above the look target.
+    pub(super) fn half_width_at(self, y: f32) -> f32 {
+        self.near_half_width + (y - self.near_y) * self.width_slope()
+    }
+
+    /// Whether a ground offset from the look target lies at least `margin` inside every edge.
+    #[cfg(test)]
+    pub(super) fn contains(self, offset: Vec2, margin: f32) -> bool {
+        offset.y >= self.near_y + margin
+            && offset.y <= self.far_y - margin
+            && offset.x.abs() <= self.half_width_at(offset.y) - margin
+    }
+
+    /// Distance from the look target to the edge shrunk by `margin` along a unit direction
+    /// (zero when the look target itself is inside the margin).
+    pub(super) fn ray_extent(self, direction: Vec2, margin: f32) -> f32 {
+        let near = (self.near_y + margin).min(0.0);
+        let far = (self.far_y - margin).max(0.0);
+        let half_width = (self.half_width_at(0.0) - margin).max(0.0);
+        let mut extent = f32::INFINITY;
+        if direction.y > f32::EPSILON {
+            extent = extent.min(far / direction.y);
+        } else if direction.y < -f32::EPSILON {
+            extent = extent.min(near / direction.y);
+        }
+        // `|t * dx| <= half_width + slope * t * dy` along the ray.
+        let closing = direction.x.abs() - self.width_slope() * direction.y;
+        if closing > f32::EPSILON {
+            extent = extent.min(half_width / closing);
+        }
+        extent.max(0.0)
+    }
+
+    /// Move a ground offset from the look target to the nearest point at least `margin` inside
+    /// the view: depth first, then width on that row.
+    pub(super) fn clamp(self, offset: Vec2, margin: f32) -> Vec2 {
+        let y = offset.y.clamp(
+            (self.near_y + margin).min(0.0),
+            (self.far_y - margin).max(0.0),
+        );
+        let half_width = (self.half_width_at(y) - margin).max(0.0);
+        Vec2::new(offset.x.clamp(-half_width, half_width), y)
+    }
+}
+
+pub(super) fn ground_view(aspect: f32) -> GroundView {
     let aspect = valid_aspect(aspect);
     let sin_elevation = CAMERA_ELEVATION_RADIANS.sin();
     let cos_elevation = CAMERA_ELEVATION_RADIANS.cos();
@@ -243,13 +339,12 @@ pub(super) fn conservative_ground_footprint(aspect: f32) -> brawler::map::AxisAl
         far_parameter * (cos_elevation + vertical_tangent * sin_elevation) - camera_ground_distance;
     let near_y = near_parameter * (cos_elevation - vertical_tangent * sin_elevation)
         - camera_ground_distance;
-    // A tilted perspective view is a trapezoid on the ground. Axis-fit decisions must use its
-    // narrow near edge so a map judged to fit cannot be clipped lower in the viewport.
-    let near_half_width = near_parameter * horizontal_tangent;
 
-    brawler::map::AxisAlignedMapRect {
-        min: Vec2::new(-near_half_width, near_y),
-        max: Vec2::new(near_half_width, far_y),
+    GroundView {
+        near_y,
+        far_y,
+        near_half_width: near_parameter * horizontal_tangent,
+        far_half_width: far_parameter * horizontal_tangent,
     }
 }
 

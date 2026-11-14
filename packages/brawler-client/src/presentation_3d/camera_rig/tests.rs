@@ -24,6 +24,7 @@ fn input(fighter: Vec2, bounds: AxisAlignedMapRect) -> CameraRigFrameInput {
     CameraRigFrameInput {
         fighter: Some(fighter),
         aim: None,
+        reach: None,
         bounds,
         viewport: DEFAULT_GAMEPLAY_VIEWPORT,
         dt: FRAME,
@@ -33,33 +34,38 @@ fn input(fighter: Vec2, bounds: AxisAlignedMapRect) -> CameraRigFrameInput {
     }
 }
 
-fn visible(center: Vec2) -> AxisAlignedMapRect {
-    let footprint = camera::conservative_ground_footprint(
-        DEFAULT_GAMEPLAY_VIEWPORT.x / DEFAULT_GAMEPLAY_VIEWPORT.y,
-    );
-    AxisAlignedMapRect {
-        min: center + footprint.min,
-        max: center + footprint.max,
-    }
-}
-
 #[test]
 fn embedded_catalog_is_valid_and_ceilings_fail_closed() {
     let catalog = catalog();
-    assert!(catalog.look_ahead.distance_cells * MAP_CELL_SIZE_WORLD <= MAX_CAMERA_LEAD_WORLD);
+    assert!(catalog.look_ahead.distance_cells <= catalog.look_ahead.max_distance_cells);
+    assert!(catalog.look_ahead.max_distance_cells <= MAX_LOOK_AHEAD_CELLS);
 
     let oversized_shake =
         CAMERA_RIG_CATALOG.replace("max_offset_world: 6.0", "max_offset_world: 40.0");
     assert!(CameraRigCatalog::from_ron(&oversized_shake).is_err());
     let oversized_lead = CAMERA_RIG_CATALOG.replace("distance_cells: 1.5", "distance_cells: 9.0");
     assert!(CameraRigCatalog::from_ron(&oversized_lead).is_err());
+    let oversized_max =
+        CAMERA_RIG_CATALOG.replace("max_distance_cells: 5.0", "max_distance_cells: 7.0");
+    assert!(CameraRigCatalog::from_ron(&oversized_max).is_err());
+    let thin_margin = CAMERA_RIG_CATALOG.replace(
+        "fighter_safe_margin_cells: 1.0",
+        "fighter_safe_margin_cells: 0.5",
+    );
+    assert!(CameraRigCatalog::from_ron(&thin_margin).is_err());
+    // Full strength close to the largest lean would let a mouse cursor drag the view after it.
+    let runaway = CAMERA_RIG_CATALOG.replace(
+        "full_strength_aim_distance_cells: 8.0",
+        "full_strength_aim_distance_cells: 6.0",
+    );
+    assert!(CameraRigCatalog::from_ron(&runaway).is_err());
     let unknown = CAMERA_RIG_CATALOG.replace("exponent: 2.0,", "exponent: 2.0, roll: 1.0,");
     assert!(CameraRigCatalog::from_ron(&unknown).is_err());
     let oversized_spread = CAMERA_RIG_CATALOG.replace("spread_scale: 1.75", "spread_scale: 9.0");
     assert!(CameraRigCatalog::from_ron(&oversized_spread).is_err());
     let inverted_damage = CAMERA_RIG_CATALOG.replace("maximum: 0.6", "maximum: 0.1");
     assert!(CameraRigCatalog::from_ron(&inverted_damage).is_err());
-    let schema = CAMERA_RIG_CATALOG.replace("schema_version: 2", "schema_version: 1");
+    let schema = CAMERA_RIG_CATALOG.replace("schema_version: 3", "schema_version: 2");
     assert!(CameraRigCatalog::from_ron(&schema).is_err());
 }
 
@@ -175,54 +181,109 @@ fn reduced_effects_disables_shake() {
     assert_eq!(frame.shake, Vec2::ZERO);
 }
 
-#[test]
-fn look_ahead_leans_toward_aim_and_respects_framing_at_every_edge() {
+const ASPECTS: [f32; 5] = [
+    4.0 / 3.0,
+    16.0 / 9.0,
+    DEFAULT_GAMEPLAY_WINDOW_ASPECT,
+    21.0 / 9.0,
+    32.0 / 9.0,
+];
+
+/// Standard Pulse Sidearm (320 range + 34 muzzle) and Sticky Blomb (640 + 34) reaches.
+const PULSE_REACH: f32 = 354.0;
+const STICKY_REACH: f32 = 674.0;
+
+fn viewport(aspect: f32) -> Vec2 {
+    Vec2::new(720.0 * aspect, 720.0)
+}
+
+fn aim_directions() -> [Vec2; 8] {
+    [
+        Vec2::X,
+        Vec2::NEG_X,
+        Vec2::Y,
+        Vec2::NEG_Y,
+        Vec2::ONE.normalize(),
+        Vec2::new(1.0, -1.0).normalize(),
+        Vec2::new(-1.0, 2.0).normalize(),
+        Vec2::new(-2.0, -1.0).normalize(),
+    ]
+}
+
+/// Settle the rig on a stationary fighter and aim.
+fn settled_center(
+    fighter: Vec2,
+    bounds: AxisAlignedMapRect,
+    viewport: Vec2,
+    aim: (Vec2, Option<f32>),
+    reach: Option<f32>,
+) -> Vec2 {
     let catalog = catalog();
-    let lean = catalog.look_ahead.distance_cells * MAP_CELL_SIZE_WORLD;
-    for bounds in [centered_map(50.0, 50.0), centered_map(25.0, 37.0)] {
-        for fighter in [
-            Vec2::ZERO,
-            Vec2::new(bounds.min.x, 0.0),
-            Vec2::new(bounds.max.x, 0.0),
-            Vec2::new(0.0, bounds.min.y),
-            Vec2::new(0.0, bounds.max.y),
-            bounds.max,
-            bounds.min,
+    let mut rig = CameraRig::default();
+    let mut center = Vec2::ZERO;
+    for _ in 0..180 {
+        center = rig
+            .step(
+                &catalog,
+                CameraRigFrameInput {
+                    aim: Some(aim),
+                    reach,
+                    viewport,
+                    ..input(fighter, bounds)
+                },
+            )
+            .center;
+    }
+    center
+}
+
+#[test]
+fn look_ahead_keeps_the_fighter_visible_at_every_edge_aspect_and_reach() {
+    let tuning = catalog().look_ahead;
+    let safe_margin = tuning.fighter_safe_margin_cells * MAP_CELL_SIZE_WORLD;
+    let max_lean = tuning.max_distance_cells * MAP_CELL_SIZE_WORLD;
+    let open_arena = centered_map(60.0, 60.0);
+    for aspect in ASPECTS {
+        let viewport = viewport(aspect);
+        let view = ground_view(aspect);
+        for bounds in [
+            open_arena,
+            centered_map(25.0, 37.0),
+            centered_map(16.0, 37.0),
         ] {
-            for aim in [
-                Vec2::X,
-                Vec2::NEG_X,
-                Vec2::Y,
-                Vec2::NEG_Y,
-                Vec2::ONE.normalize(),
+            for fighter in [
+                Vec2::ZERO,
+                Vec2::new(bounds.min.x, 0.0),
+                Vec2::new(bounds.max.x, 0.0),
+                Vec2::new(0.0, bounds.min.y),
+                Vec2::new(0.0, bounds.max.y),
+                bounds.max,
+                bounds.min,
             ] {
-                let mut rig = CameraRig::default();
-                let mut center = Vec2::ZERO;
-                for _ in 0..120 {
-                    center = rig
-                        .step(
-                            &catalog,
-                            CameraRigFrameInput {
-                                aim: Some((aim, None)),
-                                ..input(fighter, bounds)
-                            },
-                        )
-                        .center;
-                }
-                // The framed center is a fixed point of the unchanged framing clamp, so the
-                // look-ahead never reveals space the clamp forbids.
-                assert_eq!(
-                    clamp_3d_camera_center(center, bounds, DEFAULT_GAMEPLAY_VIEWPORT),
-                    center
-                );
-                let view = visible(center);
-                assert!(fighter.x >= view.min.x - EPSILON && fighter.x <= view.max.x + EPSILON);
-                assert!(fighter.y >= view.min.y - EPSILON && fighter.y <= view.max.y + EPSILON);
-                // Framing is 1-Lipschitz per axis, so the lead ceiling bounds the framed offset.
-                let rigid = clamp_3d_camera_center(fighter, bounds, DEFAULT_GAMEPLAY_VIEWPORT);
-                assert!(center.distance(rigid) <= MAX_CAMERA_LEAD_WORLD + EPSILON);
-                if fighter == Vec2::ZERO && bounds == centered_map(50.0, 50.0) {
-                    assert!(center.distance(aim * lean) < EPSILON, "{center} vs {aim}");
+                for direction in aim_directions() {
+                    for reach in [None, Some(120.0), Some(PULSE_REACH), Some(STICKY_REACH)] {
+                        let center =
+                            settled_center(fighter, bounds, viewport, (direction, None), reach);
+                        // The framed center is a fixed point of the unchanged framing clamp, so
+                        // the look-ahead never reveals space the clamp forbids.
+                        assert_eq!(clamp_3d_camera_center(center, bounds, viewport), center);
+                        let offset = fighter - center;
+                        assert!(
+                            view.contains(offset, -EPSILON),
+                            "fighter {fighter} off screen at {aspect}: {offset}"
+                        );
+                        // Framing is 1-Lipschitz per axis, so the lean ceiling bounds the
+                        // framed offset from the rigid view.
+                        let rigid = clamp_3d_camera_center(fighter, bounds, viewport);
+                        assert!(center.distance(rigid) <= max_lean + EPSILON);
+                        if fighter == Vec2::ZERO && bounds == open_arena {
+                            // Away from map edges the fighter keeps its safe margin.
+                            assert!(
+                                view.contains(offset, safe_margin - EPSILON),
+                                "fighter inside the safe margin at {aspect}: {offset}"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -230,20 +291,157 @@ fn look_ahead_leans_toward_aim_and_respects_framing_at_every_edge() {
 }
 
 #[test]
-fn look_ahead_strength_ramps_with_aim_distance_and_clears_without_aim() {
+fn reach_stays_on_screen_until_the_lean_reaches_its_limit() {
     let tuning = catalog().look_ahead;
-    let full = tuning.full_strength_aim_distance_cells * MAP_CELL_SIZE_WORLD;
-    let lean = tuning.distance_cells * MAP_CELL_SIZE_WORLD;
-    assert_eq!(look_ahead_target(&tuning, None), Vec2::ZERO);
-    assert_eq!(
-        look_ahead_target(&tuning, Some((Vec2::ZERO, None))),
-        Vec2::ZERO
+    let minimum = tuning.distance_cells * MAP_CELL_SIZE_WORLD;
+    let maximum = tuning.max_distance_cells * MAP_CELL_SIZE_WORLD;
+    let reach_margin = tuning.reach_margin_cells * MAP_CELL_SIZE_WORLD;
+    let safe_margin = tuning.fighter_safe_margin_cells * MAP_CELL_SIZE_WORLD;
+    for aspect in ASPECTS {
+        let view = ground_view(aspect);
+        for direction in aim_directions() {
+            for reach in [120.0, PULSE_REACH, 480.0, STICKY_REACH] {
+                let target = look_ahead_target(&tuning, Some((direction, None)), Some(reach), view);
+                let lean = target.length();
+                let limit = maximum.min(view.ray_extent(-direction, safe_margin));
+                assert!(lean <= limit + 1e-3, "{aspect} {direction} {reach}");
+                assert!(
+                    lean >= minimum.min(limit) - 1e-3,
+                    "{aspect} {direction} {reach}"
+                );
+                // Either the reach (plus margin) is on screen ahead, or the lean is at its limit.
+                let reach_end = direction * (reach + reach_margin) - target;
+                assert!(
+                    view.contains(reach_end, -1e-2) || (lean - limit).abs() < 1e-3,
+                    "{aspect} {direction} {reach}: lean {lean} of {limit}"
+                );
+                // A reach already on screen leans only the authored minimum.
+                if reach + reach_margin <= view.ray_extent(direction, 0.0) + minimum {
+                    assert!((lean - minimum.min(limit)).abs() < 1e-3);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn standard_pulse_reach_reads_in_every_primary_direction_at_the_reference_aspect() {
+    let tuning = catalog().look_ahead;
+    let view = ground_view(DEFAULT_GAMEPLAY_WINDOW_ASPECT);
+    let shown = |direction: Vec2| {
+        let target = look_ahead_target(&tuning, Some((direction, None)), Some(PULSE_REACH), view);
+        target.length() + view.ray_extent(direction, 0.0)
+    };
+    // Sideways the reach was already on screen: the lean stays the authored minimum.
+    for direction in [Vec2::X, Vec2::NEG_X] {
+        let lean =
+            look_ahead_target(&tuning, Some((direction, None)), Some(PULSE_REACH), view).length();
+        assert!((lean - tuning.distance_cells * MAP_CELL_SIZE_WORLD).abs() < 1e-3);
+        assert!(shown(direction) >= PULSE_REACH, "{direction}");
+    }
+    // Toward the top the whole reach shows to within a tenth of a cell (safe-frame limited);
+    // toward the shallow bottom the lean ceiling shows almost nine tenths of it.
+    assert!(
+        shown(Vec2::Y) >= PULSE_REACH - 0.1 * MAP_CELL_SIZE_WORLD,
+        "{}",
+        shown(Vec2::Y)
     );
     assert!(
-        (look_ahead_target(&tuning, Some((Vec2::X, Some(full * 0.5)))).x - lean * 0.5).abs() < 1e-3
+        shown(Vec2::NEG_Y) >= PULSE_REACH * 0.88,
+        "{}",
+        shown(Vec2::NEG_Y)
     );
-    assert!((look_ahead_target(&tuning, Some((Vec2::X, Some(full * 4.0)))).x - lean).abs() < 1e-3);
-    assert!((look_ahead_target(&tuning, Some((Vec2::X, None))).x - lean).abs() < 1e-3);
+    // Without the reach-aware lean, vertical aim showed only about 6.4 and 8.6 cells.
+    let old = 1.5 * MAP_CELL_SIZE_WORLD;
+    assert!(shown(Vec2::NEG_Y) > view.ray_extent(Vec2::NEG_Y, 0.0) + old + MAP_CELL_SIZE_WORLD);
+}
+
+#[test]
+fn vertical_aim_leans_further_than_horizontal_aim_for_the_same_reach() {
+    let tuning = catalog().look_ahead;
+    for aspect in [16.0 / 9.0, DEFAULT_GAMEPLAY_WINDOW_ASPECT] {
+        let view = ground_view(aspect);
+        let lean = |direction: Vec2| {
+            look_ahead_target(&tuning, Some((direction, None)), Some(PULSE_REACH), view).length()
+        };
+        // A narrower window is also narrower sideways, so the gap shrinks but stays.
+        let gap = if aspect < DEFAULT_GAMEPLAY_WINDOW_ASPECT {
+            0.0
+        } else {
+            MAP_CELL_SIZE_WORLD
+        };
+        assert!(lean(Vec2::Y) > lean(Vec2::X) + gap, "{aspect}");
+        assert!(lean(Vec2::NEG_Y) > lean(Vec2::Y), "{aspect}");
+    }
+}
+
+#[test]
+fn weapon_reach_covers_each_delivery_family() {
+    // Preset 1 is the standard Pulse Sidearm; every preset threatens a positive reach.
+    assert!((weapon_reach(&preset_loadout(1).primary_weapon.recipe) - PULSE_REACH).abs() < 1e-3);
+    for preset in 1..=7 {
+        assert!(weapon_reach(&preset_loadout(preset).primary_weapon.recipe) > 0.0);
+    }
+}
+
+#[test]
+fn look_ahead_strength_ramps_with_aim_distance_and_clears_without_aim() {
+    let tuning = catalog().look_ahead;
+    let view = ground_view(DEFAULT_GAMEPLAY_WINDOW_ASPECT);
+    let full = tuning.full_strength_aim_distance_cells * MAP_CELL_SIZE_WORLD;
+    let lean = tuning.distance_cells * MAP_CELL_SIZE_WORLD;
+    let target = |aim| look_ahead_target(&tuning, aim, None, view);
+    assert_eq!(target(None), Vec2::ZERO);
+    assert_eq!(target(Some((Vec2::ZERO, None))), Vec2::ZERO);
+    assert!((target(Some((Vec2::X, Some(full * 0.5)))).x - lean * 0.5).abs() < 1e-3);
+    assert!((target(Some((Vec2::X, Some(full * 4.0)))).x - lean).abs() < 1e-3);
+    assert!((target(Some((Vec2::X, None))).x - lean).abs() < 1e-3);
+    assert!(target(Some((Vec2::X, Some(f32::NAN)))).length() < 1e-3);
+}
+
+#[test]
+fn mouse_look_ahead_settles_instead_of_chasing_the_cursor() {
+    // Mouse aim distance is measured through the leaning view: hold the cursor still on screen
+    // and feed each frame's aim back from the previous framed center.
+    let catalog = catalog();
+    let bounds = centered_map(60.0, 60.0);
+    let view = ground_view(DEFAULT_GAMEPLAY_WINDOW_ASPECT);
+    let safe_margin = catalog.look_ahead.fighter_safe_margin_cells * MAP_CELL_SIZE_WORLD;
+    for cursor_on_screen in [
+        Vec2::new(0.0, -1.0) * MAP_CELL_SIZE_WORLD,
+        Vec2::new(0.0, -2.0) * MAP_CELL_SIZE_WORLD,
+        Vec2::new(3.0, 1.0) * MAP_CELL_SIZE_WORLD,
+    ] {
+        let mut rig = CameraRig::default();
+        let mut center = Vec2::ZERO;
+        let mut previous = Vec2::ZERO;
+        for frame in 0..600 {
+            let delta = center + cursor_on_screen;
+            let aim = delta
+                .try_normalize()
+                .map(|direction| (direction, Some(delta.length())));
+            center = rig
+                .step(
+                    &catalog,
+                    CameraRigFrameInput {
+                        aim,
+                        reach: Some(STICKY_REACH),
+                        ..input(Vec2::ZERO, bounds)
+                    },
+                )
+                .center;
+            if frame == 598 {
+                previous = center;
+            }
+        }
+        assert!(center.distance(previous) < 0.05, "still drifting: {center}");
+        // The loop gain stays below one: a cursor one cell from the fighter leans a bounded
+        // multiple of that, never to the ceiling.
+        if cursor_on_screen.length() <= MAP_CELL_SIZE_WORLD {
+            assert!(center.length() < 2.5 * MAP_CELL_SIZE_WORLD, "{center}");
+        }
+        assert!(view.contains(-center, safe_margin - EPSILON), "{center}");
+    }
 }
 
 #[test]

@@ -152,7 +152,8 @@ default aspect the conservative visible ground rectangle is approximately 17.6 b
 4.9 cells behind the look target and 7.1 ahead, and about 21 cells wide on the fighter's row, so
 the standard 320-unit Pulse Sidearm range stays on screen to either side. Longer reaches (lobs,
 Splash, Sticky Blomb, and ultimates up to 20 cells) and vertical aim beyond about 5–7 cells rely on
-aim look-ahead and the aim indicator rather than the full range being on screen. Map authors must
+the reach-aware aim look-ahead (below) and the aim indicator rather than the full range being on
+screen. Map authors must
 not widen authoritative bounds merely to compensate for camera presentation.
 
 Visible area is aspect-fair: no window shape sees more of the arena than the reference aspect on
@@ -173,9 +174,22 @@ map authority or collision.
 A presentation-only camera rig (`presentation_3d/camera_rig.rs`, tuned by the client-only
 `assets/catalogs/camera_rig.ron`) sits on top of that framing. It follows the controlled fighter's
 presented (predicted) pose with a critically damped spring, snapping on respawn-sized jumps and map
-changes, and leans a bounded distance toward the local aim direction. The combined follow lag and
-look-ahead is capped at three cells and then passes through the unchanged per-axis framing clamp, so
-it never reveals space the framing contract forbids and a fit axis stays locked to the map center.
+changes, and leans toward the local aim direction. Every aim leans at least the authored minimum
+(1.5 cells); when the commanded reach (the primary weapon's reach, or an armed targeted ultimate's
+placement range) plus a small margin runs past the visible ground in the aim direction, the lean
+grows to cover it, up to an authored maximum (5 cells, code ceiling 6) (BRL-vptw). The visible
+ground is a trapezoid, so the same reach leans more toward the shallow bottom and top of the screen
+than to the wide sides, and because the view's shape follows the window aspect, the lean is
+computed per viewport: it only reveals up to the commanded reach, never more for a wider window.
+At the reference aspect the standard Pulse reach (354 units) stays on screen to the sides with the
+minimum lean, shows to within a tenth of a cell toward the top, and shows about 9.9 of its 11 cells
+toward the bottom; longer reaches stop at the maximum. Direction-only stick aim leans fully;
+mouse and placement aim scale the lean by aim distance, with full strength authored at least 1.5
+times the maximum lean so a mouse cursor, which is measured through the leaning view, cannot drag
+the view after it. The combined follow lag and look-ahead keeps the fighter at least an authored
+safe margin (1 cell, code minimum 1) inside every screen edge, and the result then passes through
+the unchanged per-axis framing clamp, so it never reveals space the framing contract forbids and a
+fit axis stays locked to the map center.
 A trauma-based shake fed by local fire, local damage and defeat, and distance-scaled nearby lob
 landings, barrel explosions, and defeats adds a ground-plane translation of at most a quarter cell
 after framing. Local fire trauma is authored per primary-weapon delivery family with a spread-pattern
