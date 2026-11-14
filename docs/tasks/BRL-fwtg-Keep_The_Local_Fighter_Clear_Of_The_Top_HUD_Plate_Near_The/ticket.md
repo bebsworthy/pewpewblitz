@@ -4,9 +4,9 @@ was: BRL-0200
 
 title: 'Keep the local fighter clear of the top HUD plate near the map''s top edge'
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-13T22:34:00Z
+status_changed: 2026-11-14T22:06:38Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-3zas]
 
 parent: BRL-q5c4
 
-rank: 1769472
+rank: 12648448
 ---
 
 # Description
