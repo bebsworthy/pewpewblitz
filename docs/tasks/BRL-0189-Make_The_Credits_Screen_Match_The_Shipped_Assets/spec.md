@@ -23,3 +23,20 @@ environment kits are not mentioned.
 # Verification
 
 Focused test, `just lint`, a native look at the Credits overlay.
+
+
+# Mismatches found by BRL-0167 (2026-11-14)
+
+Cross-checked against the new pack index `assets/licenses/THIRD_PARTY.md`:
+
+- "Fighters and sounds: Kenney, CC0 1.0." Fighters are the original Riff model. Kenney now ships
+  only the Zombie NPC (Mini Characters), the blaster held by Riff (Blaster Kit), and five clips
+  (fire/defeat from Sci-Fi Sounds, impact from Impact Sounds, ready/error from Interface Sounds).
+  Most cues are original audio (`pewpew-blitz-original-audio.txt`), which Credits does not mention.
+- "Facility tiles: Murphy's Dad / HaywardMorihara, CC0 1.0." No such asset, manifest row, or
+  license text exists; it must go.
+- Original environment kits, the Riff fighter, and original audio are not credited as
+  PewPew Blitz original work.
+- Lilita One, Fira Mono, Bevy, and "Icons: original" are correct.
+- Consider pointing the focused alignment check at `THIRD_PARTY.md` / `assets/manifest.ron` pack
+  names.

@@ -767,12 +767,13 @@ unique mesh or material per fighter, projectile, tile, prop, or effect is not an
 
 ## Asset sources and provenance
 
-The asset boundary has four distinct sources:
+The asset boundary has these distinct sources:
 
 | Source | Responsibility |
 |---|---|
 | `external_assets/` and `inspiration/` | Source material and retained concepts; not scanned or packaged as runtime content |
 | `assets/manifest.ron` | Exact shipped third-party file inventory, provenance, license, requiredness, and fallback |
+| `assets/licenses/THIRD_PARTY.md` | Human-readable pack index (version, source, license, files used) and source re-acquisition steps; `manifest.ron` stays authoritative |
 | `assets/catalogs/` | Client-owned paths, transforms, material values, theme profiles, and degradation mappings |
 | `content/` | Stable server/client-neutral gameplay, map-asset, gameplay-profile, and theme identities |
 
