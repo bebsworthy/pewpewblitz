@@ -1,5 +1,9 @@
 //! Small production-asset viewports for the Map Maker palette.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use crate::client::flow::{MapPalettePreviewHost, MapPaletteVisual};
 use bevy::{

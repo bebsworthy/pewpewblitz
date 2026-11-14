@@ -1,10 +1,4 @@
 //! The first authoritative combat slice: one direct-fire weapon, projectiles, damage, and reset.
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    reason = "combat math quantizes float weapon/effect values into the bounded u16/u8 wire forms at single, reviewed sites"
-)]
 
 pub(crate) mod attack;
 mod authority;

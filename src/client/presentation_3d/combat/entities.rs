@@ -1,4 +1,8 @@
 use super::super::render_quality::ParticleBackend;
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use super::common::{
     CombatVfxContext, GROUND_EFFECT_HEIGHT, GroundMarkerRelation, ground_marker_material,

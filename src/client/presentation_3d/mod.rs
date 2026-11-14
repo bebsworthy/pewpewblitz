@@ -1,7 +1,10 @@
 //! Default V3 world renderer over the unchanged planar simulation.
-#![allow(clippy::wildcard_imports)]
 
 use super::presentation::spawn_client_hud;
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 use crate::combat::client::CombatClientSet;
 use bevy::{

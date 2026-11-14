@@ -1,6 +1,9 @@
 //! Weapon preview geometry for the controlled fighter.
 
-#![allow(clippy::wildcard_imports)]
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 use avian2d::{collision::collider::contact_query::time_of_impact, prelude::Collider};
 use std::collections::HashMap;
@@ -140,6 +143,11 @@ impl AimTraceBlockerIndex {
         {
             return;
         }
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the floored cell index is clamped to 0..count-1 of a u16 map dimension before narrowing"
+        )]
         let to_cell = |coordinate: f32, axis_min: f32, count: u16| {
             (((coordinate - axis_min) / crate::map::MAP_CELL_SIZE_WORLD).floor() as i32)
                 .clamp(0, i32::from(count) - 1) as u16
@@ -161,6 +169,11 @@ impl AimTraceBlockerIndex {
         };
         let bounds = dimensions.bounds();
         let cell_size = crate::map::MAP_CELL_SIZE_WORLD;
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the floored cell index is clamped to 0..count-1 of a u16 map dimension before narrowing"
+        )]
         let to_cell = |coordinate: f32, axis_min: f32, count: u16| {
             (((coordinate - axis_min) / cell_size).floor() as i32).clamp(0, i32::from(count) - 1)
                 as u16
@@ -823,6 +836,10 @@ fn lobbed_lane_marks(
     marks
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "rim/ray indices are bounded by small code-owned preview point counts"
+)]
 fn sector_marks(origin: Vec2, facing: f32, reach: f32, angle_degrees: f32) -> Vec<AimMark> {
     let angle = angle_degrees.to_radians();
     let arc: Vec<_> = (0..=SECTOR_RIM_POINTS)
@@ -847,6 +864,10 @@ fn sector_marks(origin: Vec2, facing: f32, reach: f32, angle_degrees: f32) -> Ve
     ]
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "rim/ray indices are bounded by small code-owned preview point counts"
+)]
 fn circle_points(center: Vec2, radius: f32) -> Vec<Vec2> {
     (0..AREA_RIM_POINTS)
         .map(|index| {
@@ -885,6 +906,10 @@ pub(crate) fn cone_spray_primitives(
 
 /// Traced cone-spray rays from the clockwise edge to the counter-clockwise edge. Only Heist safes
 /// join map geometry as occluders, matching the authoritative spray.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "rim/ray indices are bounded by small code-owned preview point counts"
+)]
 fn cone_spray_rays(
     origin: Vec2,
     facing: f32,
@@ -925,6 +950,10 @@ fn cone_spray_rays(
         .collect()
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "rim/ray indices are bounded by small code-owned preview point counts"
+)]
 fn cone_spray_preview_primitives(
     origin: Vec2,
     facing: f32,

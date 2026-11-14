@@ -1,3 +1,7 @@
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 
 const OBJECT_HEALTH_BAR_WIDTH: f32 = 76.8;

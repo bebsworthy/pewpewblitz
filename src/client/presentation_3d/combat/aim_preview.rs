@@ -1,3 +1,7 @@
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use super::common::GROUND_EFFECT_HEIGHT;
 use crate::combat::client::{

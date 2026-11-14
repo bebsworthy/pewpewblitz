@@ -1,5 +1,9 @@
 //! Retained Dash wake styling shared by production gameplay and `VfxLab`.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use bevy::{reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef};
 

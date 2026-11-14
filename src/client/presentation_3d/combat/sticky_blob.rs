@@ -1,5 +1,9 @@
 //! Fuse-driven retained presentation for armed Sticky Blomb and Big Blob payloads.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use bevy::{
     ecs::{hierarchy::ChildSpawnerCommands, system::SystemParam},

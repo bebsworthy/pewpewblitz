@@ -19,7 +19,12 @@ pub(crate) fn cone_spray_timing(
     linger_ticks: u64,
     pulse_interval_ticks: u64,
 ) -> (u64, u64, u8) {
-    let fill_ticks = ((reach * crate::timing::SIMULATION_TICK_HZ as f32) / propagation_speed)
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "validated finite positive reach/speed; ceil().max(1.0) yields a small whole tick count"
+    )]
+    let fill_ticks = ((reach * crate::timing::SIMULATION_TICK_HZ_F32) / propagation_speed)
         .ceil()
         .max(1.0) as u64;
     let full_at_tick = emitted_at_tick.saturating_add(fill_ticks);
@@ -86,6 +91,12 @@ fn requested_lob_distance(
 /// Scale lob time by the authoritative landing distance while retaining a short presentation and
 /// replication floor. `max_flight_ticks` is the authored duration at maximum range.
 #[cfg(feature = "server")]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "authored lob durations are small tick counts; the clamped non-negative ratio rounds back to ticks"
+)]
 fn resolved_lob_flight_ticks(
     maximum_distance: f32,
     landing_distance: f32,

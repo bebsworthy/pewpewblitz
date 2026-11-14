@@ -1,6 +1,9 @@
 //! Windowed arena, fighter, camera, HUD, and pause presentation.
-#![allow(clippy::wildcard_imports)]
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 
 #[derive(Resource, Default)]

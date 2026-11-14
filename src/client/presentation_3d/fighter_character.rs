@@ -9,6 +9,10 @@
 //! The GLB is a derivative of `asset_src/characters/riff/build_riff.py`; regenerate it with
 //! `just riff-asset` rather than editing it.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use crate::combat::client::DeduplicatedCombatCue;
 use crate::combat::{CombatCue, DeliveryMethod};

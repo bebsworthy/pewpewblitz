@@ -1,7 +1,9 @@
 //! Authoritative post-physics projectile snapshot, planning, and sequential commit.
 
-#![allow(clippy::wildcard_imports)]
-
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 
 type FighterSweepQuery<'w, 's> = Query<
@@ -205,6 +207,10 @@ enum LobTrajectoryPlan {
     Landed(Vec2),
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "elapsed and total lob ticks are bounded authored flight durations, far below f32's exact range"
+)]
 fn plan_lob_trajectory(tick: u64, lob: &LobbedFlight) -> LobTrajectoryPlan {
     let launch = lob.launch.as_vec2();
     let landing = lob.landing.as_vec2();
@@ -230,7 +236,7 @@ fn plan_straight_trajectory(
     body: Option<&ProjectileBody>,
 ) -> Option<StraightTrajectoryPlan> {
     let body = body.copied().filter(|body| body.shape.is_valid())?;
-    let step = (runtime.velocity.length() / crate::timing::SIMULATION_TICK_HZ as f32)
+    let step = (runtime.velocity.length() / crate::timing::SIMULATION_TICK_HZ_F32)
         .min((runtime.maximum_range - runtime.travelled).max(0.0));
     let direction = Dir2::new(runtime.velocity.normalize_or_zero()).ok()?;
     Some(StraightTrajectoryPlan {

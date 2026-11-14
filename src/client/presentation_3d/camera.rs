@@ -1,6 +1,10 @@
 //! Per-axis map/viewport framing, the arena camera writer, and ground-plane cursor projection.
 
 use super::camera_rig::{ArenaCameraShake, CameraRig, CameraRigCatalog, CameraRigFrameInput};
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 
 /// Vertical field of view at the reference (default native) aspect and every narrower one.

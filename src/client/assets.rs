@@ -1,6 +1,9 @@
 //! Retained client asset handles, loading state, and manifest validation.
-#![allow(clippy::wildcard_imports)]
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 use bevy::asset::{LoadState, RecursiveDependencyLoadState};
 use bevy::audio::AudioSource;

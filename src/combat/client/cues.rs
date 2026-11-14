@@ -1,6 +1,9 @@
 //! Combat cue ingestion and deduplication.
 
-#![allow(clippy::wildcard_imports)]
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 use bevy::input::gamepad::{Gamepad, GamepadRumbleIntensity, GamepadRumbleRequest};
 use std::time::Duration;

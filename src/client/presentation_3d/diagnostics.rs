@@ -1,5 +1,9 @@
 //! Opt-in, bounded native render evidence for V3 closeout.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use atomic_write_file::AtomicWriteFile;
 use bevy::ecs::system::SystemParam;

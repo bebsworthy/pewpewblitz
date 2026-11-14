@@ -10,6 +10,10 @@
 //! `assets/catalogs/fighter_outline.ron`; everything here is client presentation outside the
 //! gameplay fingerprint.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use super::fighter_feedback::fighter_is_visually_concealed;
 use bevy::{

@@ -1,8 +1,11 @@
 //! Automation-only client drivers, compiled only with the `automation` feature: headless
 //! gameplay-intent synthesis for scripted smoke runs and the scheduled paired-capture plan used
 //! by native visual verification. The player build never contains this module.
-#![allow(clippy::wildcard_imports)]
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 
 const HEADLESS_FIRE_DURATION_TICKS: u32 = 6_000;

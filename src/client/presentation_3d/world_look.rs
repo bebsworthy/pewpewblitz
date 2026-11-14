@@ -7,6 +7,10 @@
 //! HDR target with no tonemapping, grading, or bloom, so it composites untouched on top. Offscreen
 //! previews use the same tonemapper and the preview grading without HDR or bloom.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use bevy::{
     camera::Hdr,

@@ -1,5 +1,9 @@
 //! Durable client presentation for replicated Zombie-mode NPCs and Boost pickups.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 
 const ZOMBIE_ANIMATION_NAMES: [&str; 3] = ["idle", "walk", "attack-melee-right"];

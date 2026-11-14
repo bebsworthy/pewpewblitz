@@ -212,7 +212,10 @@ pub fn timeout_result(health: [u16; 2], maximum: [u16; 2]) -> super::MatchResult
 
 #[cfg(feature = "server")]
 mod authority {
-    #![allow(clippy::wildcard_imports)]
+    #[allow(
+        clippy::wildcard_imports,
+        reason = "the child module consumes its parent module's composition surface"
+    )]
     use super::*;
     use crate::{
         combat::{CombatDamageSet, CurrentHealth},

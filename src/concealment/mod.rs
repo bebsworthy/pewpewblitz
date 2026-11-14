@@ -30,7 +30,7 @@ use bevy::prelude::*;
 
 #[cfg(feature = "server")]
 mod server {
-    #![allow(
+    #[allow(
         clippy::wildcard_imports,
         reason = "the role-owned module composes the shared concealment contract"
     )]

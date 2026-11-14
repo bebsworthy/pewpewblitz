@@ -72,7 +72,10 @@ pub fn timeout_result(scores: [u16; 2]) -> MatchResult {
 
 #[cfg(feature = "server")]
 mod rules {
-    #![allow(clippy::wildcard_imports)]
+    #[allow(
+        clippy::wildcard_imports,
+        reason = "the child module consumes its parent module's composition surface"
+    )]
     use super::*;
     use crate::matchplay::{
         MatchOutcomeDiagnostics, MatchPhase, MatchRestartSet, MatchRoot, MatchSet, MatchState,

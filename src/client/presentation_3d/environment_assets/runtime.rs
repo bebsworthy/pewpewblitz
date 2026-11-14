@@ -1,5 +1,9 @@
 //! Runtime handles, material preparation/tinting, imported-scene readiness, and fitting admission.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 

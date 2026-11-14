@@ -1,7 +1,10 @@
 //! Local device sampling, render-to-fixed input bridging, and input diagnostics.
-#![allow(clippy::wildcard_imports)]
 
 use super::settings::key_code_letter;
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 
 pub(super) fn logical_key_pressed(keyboard: Option<&ButtonInput<Key>>, expected: &str) -> bool {

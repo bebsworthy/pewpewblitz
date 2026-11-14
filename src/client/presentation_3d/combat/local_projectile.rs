@@ -14,6 +14,10 @@
 //! [`LOCAL_PROJECTILE_FADE_SECONDS`]. Replicated visuals of the local player's projectiles are
 //! hidden while their cosmetic already finished its flight, or while a local shot is unconfirmed.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use super::common::CombatVfxContext;
 use crate::client::local_attack::{

@@ -1,6 +1,9 @@
 //! Process-level movement/combat evidence validation and report parsing.
-#![allow(clippy::wildcard_imports)]
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 
 /// Every failure path in this module funnels through here: classify the exit as

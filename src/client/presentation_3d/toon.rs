@@ -8,6 +8,10 @@
 //! per-relationship variants. Tuning lives in `assets/catalogs/toon_shading.ron`; everything here is
 //! client presentation outside the gameplay fingerprint.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use bevy::{
     ecs::system::SystemParam,

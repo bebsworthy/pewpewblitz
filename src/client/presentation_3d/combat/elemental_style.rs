@@ -1,5 +1,9 @@
 //! Retained elemental styling shared by durable projectile and area roots.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use bevy::{reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef};
 

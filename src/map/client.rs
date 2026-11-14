@@ -1,7 +1,10 @@
 //! Renderer-neutral client reconstruction of a replicated resolved map snapshot.
-#![allow(clippy::wildcard_imports)]
 
 use super::catalog::MAP_CATALOG_SCHEMA_VERSION;
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 use bevy::prelude::*;
 use lightyear::prelude::client::Client;

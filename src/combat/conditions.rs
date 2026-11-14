@@ -1,10 +1,9 @@
 //! Bounded target-owned Cold, Freeze, Poison, and Fire lifecycle.
 
-#![allow(
+#[allow(
     clippy::wildcard_imports,
     reason = "the server-only condition transaction consumes the combat composition surface"
 )]
-
 use super::*;
 use avian2d::prelude::{CollisionLayers, Position};
 use bevy::prelude::*;

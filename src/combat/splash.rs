@@ -1,10 +1,9 @@
 //! Stationary persistent Splash-area authority.
 
-#![allow(
+#[allow(
     clippy::wildcard_imports,
     reason = "the server-owned Splash transaction consumes the combat composition surface"
 )]
-
 use super::*;
 use avian2d::prelude::Position;
 use bevy::prelude::*;

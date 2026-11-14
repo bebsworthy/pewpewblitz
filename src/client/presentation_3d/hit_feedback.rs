@@ -8,6 +8,10 @@
 //! neither a flash nor a number. Defeat feedback stays on the shared VFX/audio request path
 //! (authored `defeat` recipes and the `defeat` audio cue), and camera shake stays with the rig.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use crate::combat::client::DeduplicatedCombatCue;
 use crate::combat::{CombatCue, CombatEffectCue};

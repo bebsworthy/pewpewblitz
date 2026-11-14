@@ -1,6 +1,9 @@
 //! Authoritative map resolution, instantiation, and exact-generation lifecycle.
-#![allow(clippy::wildcard_imports)]
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 use bevy::prelude::*;
 

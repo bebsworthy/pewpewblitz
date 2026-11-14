@@ -13,6 +13,13 @@ pub const SIMULATION_TICK_HZ: u64 = 60;
 )]
 pub const SIMULATION_TICK_HZ_F64: f64 = SIMULATION_TICK_HZ as f64;
 
+/// Single-precision simulation frequency for planar gameplay and presentation math.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "the authoritative frequency is the exact small integer 60"
+)]
+pub const SIMULATION_TICK_HZ_F32: f32 = SIMULATION_TICK_HZ as f32;
+
 /// The one source from which application configurations derive their fixed step.
 pub const SIMULATION_TICK: Duration = Duration::from_nanos(1_000_000_000 / SIMULATION_TICK_HZ);
 

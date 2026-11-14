@@ -1,6 +1,9 @@
 //! Damage, defeat, slow, knockback, and passive runtime math.
 
-#![allow(clippy::wildcard_imports)]
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 pub const MAX_EXTERNAL_MOTION_SPEED: f32 = 900.0;
 
@@ -363,13 +366,19 @@ pub(super) fn plan_runtime_effects(
                         },
                     });
                 }
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "the rounded per-mille slow multiplier is clamped to 1..=1000 before quantizing"
+                )]
+                let movement_multiplier_per_mille = (movement_multiplier * scale * 1000.0)
+                    .round()
+                    .clamp(1.0, 1000.0) as u16;
                 refresh_strongest_slow(
                     &mut effects_state,
                     record.source.attack_id,
                     record.source.owner_network_entity_id,
-                    (movement_multiplier * scale * 1000.0)
-                        .round()
-                        .clamp(1.0, 1000.0) as u16,
+                    movement_multiplier_per_mille,
                     tick.saturating_add(duration_ticks),
                 );
                 if let Some(slow) = effects_state.slow {

@@ -1,4 +1,8 @@
 use super::super::render_quality::{ActiveRenderQuality, ParticleBackend};
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use super::{
     MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, RetainedProjectileSmoke3d,

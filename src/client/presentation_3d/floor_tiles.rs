@@ -4,6 +4,10 @@
 //! material: a checkerboard of the theme's two close tones, a deterministic per-cell value jitter,
 //! and darkening at cell corners near the arena edge and static walls. Presentation only.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use serde::Deserialize;
 

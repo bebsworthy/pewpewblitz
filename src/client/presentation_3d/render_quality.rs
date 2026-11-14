@@ -6,6 +6,10 @@
 //! particle backend. Code owns the ceilings (MSAA at most 4 samples, bloom needs HDR). Everything
 //! here is client presentation: the server never sees a tier and gameplay facts never depend on it.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use crate::client::settings::persistence::GraphicsQuality;
 use bevy::{

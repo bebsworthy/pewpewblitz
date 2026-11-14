@@ -1,10 +1,9 @@
 //! Bounded server-owned elemental ultimate fields.
 
-#![allow(
+#[allow(
     clippy::wildcard_imports,
     reason = "the server-only field transaction consumes the combat composition surface"
 )]
-
 use super::*;
 use avian2d::prelude::Position;
 use bevy::prelude::*;

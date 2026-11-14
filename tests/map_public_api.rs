@@ -1,5 +1,7 @@
-#![allow(unused_imports)]
-
+#[expect(
+    unused_imports,
+    reason = "the imports exist only to prove the established public map paths still resolve"
+)]
 use brawler::map::{
     ASHEN_COURT_ADMISSION_REVISION, ASHEN_COURT_PRESET, ASHEN_PINE_ASSET, ASHEN_ROCK_ASSET,
     ASHEN_WALL_ASSET, AxisAlignedMapRect, BARREL_WOOD_DEBRIS_ASSET, BREAKABLE_BARRIER_ASSET,
@@ -48,6 +50,10 @@ use brawler::map::{
 };
 
 #[cfg(feature = "client")]
+#[expect(
+    unused_imports,
+    reason = "the imports exist only to prove the established public map paths still resolve"
+)]
 use brawler::map::{
     ClientMapPlugin, ClientMapReadiness, ClientWorldObjectReadiness, MapPresentationMember,
     MapPresentationPlugin, MapPresentationSet, PresentedMap, ReceivedPickupCues,
@@ -55,6 +61,10 @@ use brawler::map::{
 };
 
 #[cfg(feature = "server")]
+#[expect(
+    unused_imports,
+    reason = "the imports exist only to prove the established public map paths still resolve"
+)]
 use brawler::map::{
     AuthoritativeMapPlugin, DestructibleMapCollider, MapDynamicTelemetry, MapRuntimeSet,
     MapStartupSet, NextMapInstanceId, PendingWorldTargetDamage, PendingWorldTargetDamages,

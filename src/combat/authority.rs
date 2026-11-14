@@ -1,7 +1,10 @@
 //! Server-authoritative combat lifecycle, spatial targeting, and cue publication.
-#![allow(clippy::wildcard_imports)]
 
 #[cfg(feature = "server")]
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 
 /// M04's legacy cue/log shape is a compatibility adapter for the original single straight

@@ -3,11 +3,18 @@
 //! sequences these stages; the rules live here and in the sibling `planning`/`runtime`
 //! modules.
 
-#![allow(clippy::wildcard_imports)]
 use super::planning::{
     delivery_survives_owner_disconnect, pending_delivery_kind_order, required_payload_event_count,
 };
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::runtime::*;
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 
 mod transaction;
@@ -267,6 +274,11 @@ pub(super) fn plan_healing_application(
     amount: u16,
     recipient_scale: f32,
 ) -> HealingApplicationPlan {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the rounded value is clamped to 1..=u16::MAX before quantizing to the wire health unit"
+    )]
     let requested = (f32::from(amount) * recipient_scale)
         .round()
         .clamp(1.0, f32::from(u16::MAX)) as u16;

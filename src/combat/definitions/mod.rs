@@ -640,7 +640,7 @@ impl WeaponConfiguration {
                     || lifetime_ticks > policy.max_projectile_lifetime_ticks
                     || !finite_range(muzzle_offset, 0.0, limits.max_world_field)
                     || muzzle_offset == 0.0
-                    || speed / crate::timing::SIMULATION_TICK_HZ as f32 > range
+                    || speed / crate::timing::SIMULATION_TICK_HZ_F32 > range
                 {
                     return Err("invalid straight delivery".to_string());
                 }
@@ -671,7 +671,7 @@ impl WeaponConfiguration {
                     || fuse_ticks > limits.max_deadline_ticks
                     || max_active_per_owner == 0
                     || max_active_per_owner > MAX_STICKY_ACTIVE_PER_OWNER
-                    || speed / crate::timing::SIMULATION_TICK_HZ as f32 > range
+                    || speed / crate::timing::SIMULATION_TICK_HZ_F32 > range
                 {
                     return Err("invalid sticky straight delivery".to_string());
                 }
@@ -762,7 +762,12 @@ impl WeaponConfiguration {
                 {
                     return Err("invalid cone spray delivery".to_string());
                 }
-                let fill_ticks = ((reach * crate::timing::SIMULATION_TICK_HZ as f32)
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "reach/speed were validated finite and positive above; ceil().max(1.0) is a whole tick count"
+                )]
+                let fill_ticks = ((reach * crate::timing::SIMULATION_TICK_HZ_F32)
                     / propagation_speed)
                     .ceil()
                     .max(1.0) as u64;

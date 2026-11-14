@@ -3,6 +3,10 @@
 //! Kept beside the renderer it observes but out of the lifecycle code: it only reads renderer
 //! ownership, catalog, and retained-asset state and never mutates presentation.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::super::*;
 use super::super::{MAX_ACTIVE_PARTICLE_EMITTERS, RetainedProjectileSmoke3d};
 use super::{

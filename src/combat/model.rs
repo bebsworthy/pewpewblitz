@@ -240,9 +240,13 @@ pub struct PersistentSplashState {
 
 impl ConeSprayState {
     #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "elapsed spray ticks are bounded by the authored fill-plus-linger lifetime"
+    )]
     pub fn reached_distance(self, tick: u64) -> f32 {
         let elapsed = tick.saturating_sub(self.emitted_at_tick) as f32;
-        (elapsed * self.propagation_speed / crate::timing::SIMULATION_TICK_HZ as f32)
+        (elapsed * self.propagation_speed / crate::timing::SIMULATION_TICK_HZ_F32)
             .clamp(0.0, self.maximum_reach)
     }
 

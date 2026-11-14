@@ -94,6 +94,10 @@ impl CombatProjectileSnapshot {
         clippy::too_many_arguments,
         reason = "the snapshot constructor consumes the complete bounded projectile component view"
     )]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "elapsed and total flight ticks are bounded authored projectile lifetimes"
+    )]
     pub fn from_components(
         position: WorldPoint,
         delivery: Option<&AttackDelivery>,
@@ -109,7 +113,7 @@ impl CombatProjectileSnapshot {
             .map(|flight| {
                 let elapsed_ticks = authoritative_tick.saturating_sub(flight.launched_at_tick);
                 let distance = (elapsed_ticks as f32 * flight.speed
-                    / crate::timing::SIMULATION_TICK_HZ as f32)
+                    / crate::timing::SIMULATION_TICK_HZ_F32)
                     .min(flight.maximum_range)
                     .max(0.0);
                 WorldPoint::from(

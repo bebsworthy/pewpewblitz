@@ -1,5 +1,9 @@
 //! Retained dual-purpose fluid styling for mixed restorative and damaging Splash areas.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use bevy::{
     ecs::hierarchy::ChildSpawnerCommands, reflect::TypePath, render::render_resource::AsBindGroup,

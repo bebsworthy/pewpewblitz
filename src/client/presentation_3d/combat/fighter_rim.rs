@@ -5,6 +5,10 @@
 //! shared, and a relation change is only a tag write. The fighter outline hulls (BRL-0151) carry the
 //! same tag, so their optional relationship tint follows the same relation.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::super::*;
 use super::common::{GroundMarkerRelation, ground_marker_relation};
 use super::fighter_outline::FighterOutlineHull;

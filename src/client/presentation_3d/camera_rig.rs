@@ -8,6 +8,10 @@
 //! transient offset applied after it.
 
 use super::camera::clamp_3d_camera_center;
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 use crate::client::local_attack::{LocalAttackLedger, LocalAttackPresented};
 use crate::combat::client::DeduplicatedCombatCue;

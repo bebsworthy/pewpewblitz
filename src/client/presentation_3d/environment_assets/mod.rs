@@ -1,5 +1,9 @@
 //! Client-only environment catalog and runtime asset-preparation facade.
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
+)]
 use super::*;
 
 mod catalog;

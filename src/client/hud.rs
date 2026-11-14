@@ -1,6 +1,9 @@
 //! Readiness and match-shell HUD that remains independent from gameplay mutation.
-#![allow(clippy::wildcard_imports)]
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 use crate::combat::TeamId;
 use std::collections::BTreeMap;

@@ -1,6 +1,9 @@
 //! Deterministic recipe normalization, resolution, fingerprints, spread, and falloff.
-#![allow(clippy::wildcard_imports)]
 
+#[allow(
+    clippy::wildcard_imports,
+    reason = "the child module consumes its parent module's composition surface"
+)]
 use super::*;
 
 pub fn resolve_configuration(
