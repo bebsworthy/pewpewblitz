@@ -6,12 +6,42 @@ use super::camera_rig::{ArenaCameraShake, CameraRig, CameraRigCatalog, CameraRig
     reason = "the world-renderer submodule consumes the presentation_3d composition surface"
 )]
 use super::*;
+use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder};
 
 /// Vertical field of view at the reference (default native) aspect and every narrower one.
 pub(super) const CAMERA_VERTICAL_FOV_RADIANS: f32 = 30.0_f32.to_radians();
 pub(super) const CAMERA_ELEVATION_RADIANS: f32 = 55.0_f32.to_radians();
 /// Keeps approximately twelve map cells visible vertically (BRL-0148).
 pub(super) const CAMERA_DISTANCE: f32 = 566.0;
+
+/// Margin past the farthest visible ground so the top screen edge never sits on the cascade's
+/// hard cutoff (camera shake is at most a few units; one map cell is ample).
+const SHADOW_FAR_MARGIN_WORLD: f32 = brawler::map::MAP_CELL_SIZE_WORLD;
+
+/// View-space depth of the farthest visible gameplay ground at the framing distance. Wider
+/// viewports narrow the vertical field of view, so the reference vertical view is the maximum.
+fn farthest_visible_ground_depth() -> f32 {
+    let half_fov = CAMERA_VERTICAL_FOV_RADIANS * 0.5;
+    let camera_height = CAMERA_DISTANCE * CAMERA_ELEVATION_RADIANS.sin();
+    // The top screen edge's ray descends at `elevation - half_fov`; its view-space depth is the
+    // ray length projected on the view axis.
+    camera_height / (CAMERA_ELEVATION_RADIANS - half_fov).sin() * half_fov.cos()
+}
+
+/// The arena light's cascade layout for the gameplay view (BRL-0180). Bevy's default (4 cascades
+/// ending 150 units from the camera) never reached the ground, which starts roughly 480 view
+/// units away. One cascade spanning the whole visible depth keeps texels well under one world
+/// unit at the default 2048 map size, because the far-plane diagonal sets the cascade size and
+/// the minimum distance does not; the near bound stays at Bevy's default so nothing between the
+/// camera and the ground loses its shadow.
+pub(super) fn arena_shadow_cascades() -> CascadeShadowConfig {
+    CascadeShadowConfigBuilder {
+        num_cascades: 1,
+        maximum_distance: farthest_visible_ground_depth() + SHADOW_FAR_MARGIN_WORLD,
+        ..default()
+    }
+    .build()
+}
 
 /// Vertical field of view for a viewport aspect. Narrower viewports keep the reference vertical
 /// view and see less width; wider ones keep the reference horizontal view and see less depth, so
@@ -263,6 +293,38 @@ mod tests {
         // The fighter sits nearer the bottom edge: ~4.9 cells behind, ~7.1 cells ahead.
         assert!((footprint.min.y / brawler::map::MAP_CELL_SIZE_WORLD + 4.87).abs() < 0.02);
         assert!((footprint.max.y / brawler::map::MAP_CELL_SIZE_WORLD - 7.12).abs() < 0.02);
+    }
+
+    #[test]
+    fn arena_shadow_cascade_covers_the_visible_ground() {
+        // Measure the far ground edge from the footprint and the real camera pose rather than
+        // reusing the closed form under test.
+        let camera = Transform::from_translation(camera_offset()).looking_at(Vec3::ZERO, Vec3::Y);
+        let forward = camera.forward().as_vec3();
+        let depth = |ground: Vec2| (ground_position(ground) - camera.translation).dot(forward);
+        let reference = conservative_ground_footprint(DEFAULT_GAMEPLAY_WINDOW_ASPECT);
+        let far_depth = depth(Vec2::new(0.0, reference.max.y));
+        let near_depth = depth(Vec2::new(0.0, reference.min.y));
+        assert_approximately(farthest_visible_ground_depth(), far_depth);
+        // BRL-0148 framing: the ground spans roughly 475-700 view units.
+        assert!((470.0..490.0).contains(&near_depth), "{near_depth}");
+        assert!((690.0..705.0).contains(&far_depth), "{far_depth}");
+
+        let cascades = arena_shadow_cascades();
+        assert_eq!(cascades.bounds.len(), 1);
+        assert!(cascades.minimum_distance < near_depth);
+        for aspect in [
+            4.0 / 3.0,
+            16.0 / 9.0,
+            DEFAULT_GAMEPLAY_WINDOW_ASPECT,
+            32.0 / 9.0,
+        ] {
+            let footprint = conservative_ground_footprint(aspect);
+            assert!(
+                cascades.bounds[0] > depth(Vec2::new(0.0, footprint.max.y)),
+                "{aspect}"
+            );
+        }
     }
 
     #[test]

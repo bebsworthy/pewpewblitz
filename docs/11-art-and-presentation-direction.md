@@ -233,7 +233,7 @@ glow set. On the `Low` tier (no HDR) custom effect shaders write untonemapped va
 
 **Quality tiers (BRL-0161).** The world presentation runs at one of three tiers authored in
 `assets/catalogs/render_quality.ron` (client-only, outside the gameplay fingerprint): `High` is the
-look described above (MSAA 4, HDR, bloom, arena shadow maps, foliage sway, Hanabi particles);
+look described above (MSAA 4, HDR, bloom, arena cast shadows, foliage sway, Hanabi particles);
 `Medium` turns off MSAA, bloom, and shadow maps; `Low` also drops HDR (tonemapping and grading then
 run in the material shaders), foliage sway, floor decals, and GPU particles. Outlines, the toon
 material, and contact shadows stay on in every tier because they carry readability. The player's Settings >
@@ -305,9 +305,14 @@ with it: destroyed cover loses its shadow, and a concealed enemy, which the serv
 replicate, has none. A locally concealed ally hides its shadow like its outline. Reduced effects
 and the primitive world keep contact shadows. A class with opacity 0 spawns no blobs, which is the
 seam for a lower device tier. SSAO was rejected because it needs depth and normal prepasses,
-disables MSAA, and costs a full-screen pass for little gain under the high gameplay camera. The
-directional light's cast shadows do not reach the gameplay view (its default cascade range ends
-far in front of the floor), so cast shadows currently play no part in grounding.
+disables MSAA, and costs a full-screen pass for little gain under the high gameplay camera. On the
+`High` tier the arena directional light also casts real shadows (BRL-0180): one shadow cascade,
+derived in `camera.rs` from the gameplay framing, spans the whole visible ground (about 480-700
+view units) plus one cell, so walls, props, foliage, and fighters shadow the floor away from the
+camera. Effect tiles, the Hot Zone, relationship rings, and the aim lane are unlit and never
+receive shadows, so cast shadows add depth without darkening gameplay signals. `Medium` and `Low`
+skip the shadow pass and rely on contact shadows alone. The map editor's zoomed-out camera can sit
+beyond the cascade, where its view simply loses cast shadows.
 
 Presentation reads authoritative or replicated facts and resolves stable presentation identities.
 Gameplay definitions and protocol state never carry source paths, scene-node names, mesh or

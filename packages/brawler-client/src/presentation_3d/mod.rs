@@ -47,7 +47,7 @@ mod world_look;
 mod zombie;
 
 pub(super) use camera::cursor_ground_point;
-use camera::{CAMERA_VERTICAL_FOV_RADIANS, camera_offset, follow_3d_camera};
+use camera::{CAMERA_VERTICAL_FOV_RADIANS, arena_shadow_cascades, camera_offset, follow_3d_camera};
 pub(super) use camera_rig::{ArenaAimCameras, arena_aim_view};
 pub(super) use combat::collect_vfx_evidence_snapshot;
 #[cfg(feature = "automation")]
@@ -1606,9 +1606,11 @@ pub(crate) fn setup_3d_foundation(
     commands.spawn((
         DirectionalLight {
             illuminance: 6_000.0,
+            // The active quality tier owns this (`render_quality::apply_light_quality`).
             shadow_maps_enabled: true,
             ..default()
         },
+        arena_shadow_cascades(),
         Transform::from_xyz(-500.0, 900.0, 650.0).looking_at(Vec3::ZERO, Vec3::Y),
         V3WorldMember,
     ));

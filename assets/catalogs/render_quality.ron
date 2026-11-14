@@ -13,6 +13,8 @@
         msaa: Sample4,
         hdr: true,
         bloom: true,
+        // Arena cast shadows (BRL-0180): one cascade covering the visible ground, so walls,
+        // props, and fighters shadow the floor. Medium and low skip the shadow pass entirely.
         shadow_maps: true,
         foliage_sway: true,
         floor_decals: true,
