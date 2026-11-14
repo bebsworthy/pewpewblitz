@@ -4,9 +4,9 @@ was: BRL-0182
 
 title: Let render evidence select the primary weapon for native aim-lane captures
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-13T02:59:34Z
+status_changed: 2026-11-14T16:49:39Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-2dv1, BRL-wegn]
 
 parent: BRL-q5c4
 
-rank: 1245184
+rank: 13303808
 ---
 
 # Description
