@@ -49,6 +49,11 @@ pub(crate) const PARTS: [&str; 5] = [
     "part-element",
 ];
 
+/// Hanging mode pennants (250x310 px), in `AdvertisedRulesSummary` order: Wipeout, Hot Zone,
+/// Heist, Zombie (BRL-1wms). Names are `mode-<mode key>`.
+pub(crate) const MODE_PENNANTS: [&str; 4] =
+    ["mode-wipeout", "mode-hot-zone", "mode-heist", "mode-zombie"];
+
 /// The badge of an ultimate family. Icons are selected by advertised semantic family, never by
 /// built-in definition IDs; the brawler screens and the in-match ultimate button share it.
 pub(crate) fn ultimate_icon(kind: brawler::builds::UltimateKind) -> &'static str {
@@ -80,7 +85,11 @@ mod tests {
     use std::path::Path;
 
     fn all() -> impl Iterator<Item = &'static str> {
-        PICTOGRAMS.into_iter().chain(BADGES).chain(PARTS)
+        PICTOGRAMS
+            .into_iter()
+            .chain(BADGES)
+            .chain(PARTS)
+            .chain(MODE_PENNANTS)
     }
 
     fn png_size(bytes: &[u8]) -> (u32, u32) {
@@ -103,6 +112,7 @@ mod tests {
             (&PICTOGRAMS[..], (128, 128)),
             (&BADGES[..], (240, 200)),
             (&PARTS[..], (288, 240)),
+            (&MODE_PENNANTS[..], (250, 310)),
         ];
         for (name, expected) in classes
             .into_iter()
@@ -124,6 +134,30 @@ mod tests {
     }
 
     #[test]
+    fn every_registered_mode_key_names_its_pennant_in_dashboard_order() {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.add_plugins((
+            brawler::modes::ModeRegistryPlugin,
+            brawler::modes::BuiltInModeRegistrationsPlugin,
+        ));
+        brawler::test_app::finalize(&mut app);
+        let modes = app.world().resource::<brawler::modes::ModeRegistry>();
+        for (pennant, definition) in MODE_PENNANTS.into_iter().zip([
+            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::HOT_ZONE_MODE_DEFINITION,
+            brawler::map::HEIST_MODE_DEFINITION,
+            brawler::map::ZOMBIE_MODE_DEFINITION,
+        ]) {
+            let key = modes
+                .descriptor_for_definition(definition)
+                .expect("built-in mode is registered")
+                .key;
+            assert_eq!(pennant, format!("mode-{key}"));
+        }
+    }
+
+    #[test]
     fn icon_directory_holds_exactly_the_set_and_retired_icons_are_gone() {
         let root = Path::new(crate::REPOSITORY_ROOT);
         let shipped: BTreeSet<String> = std::fs::read_dir(root.join("assets/brawler/ui/icons"))
@@ -134,7 +168,18 @@ mod tests {
         assert_eq!(shipped, expected);
         assert!(!root.join("assets/brawler/ui/details").exists());
         assert!(!root.join("assets/licenses/kenney-game-icons.txt").exists());
-        for retired in ["icon-skull", "icon-chevron", "part-barrel"] {
+        for retired in [
+            "icon-skull",
+            "icon-chevron",
+            "part-barrel",
+            "wipeout",
+            "hot-zone",
+            "heist",
+            "zombie",
+            "game-badge-hot-zone",
+            "game-badge-heist",
+            "game-badge-zombie",
+        ] {
             assert!(
                 !root
                     .join(format!("assets/brawler/ui/shell/{retired}.png"))

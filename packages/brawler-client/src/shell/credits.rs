@@ -67,7 +67,10 @@ const ORIGINAL: [(&str, &str); 7] = [
         "floor decals",
         "assets/licenses/pewpew-blitz-original-decals.txt",
     ),
-    ("icons", "assets/licenses/pewpew-blitz-original-icons.txt"),
+    (
+        "icons and mode pennants",
+        "assets/licenses/pewpew-blitz-original-icons.txt",
+    ),
     ("branding and menu art", "asset_src/player-shell"),
     (
         "all other sound effects and music",

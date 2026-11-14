@@ -48,6 +48,7 @@ TONES = {
 SQUARE = (100, 100, 1.28)
 BADGE = (120, 100, 2.0)
 PART = (120, 100, 2.4)
+PENNANT = (100, 124, 2.5)
 
 
 # ---- primitives -------------------------------------------------------------------------------
@@ -126,6 +127,21 @@ def hex_badge(*glyph):
              bands=(3.0, 3.0)),
     ]
     return frame + list(glyph)
+
+
+def pennant(*emblem):
+    """Mode pennant (BRL-1wms): an orange hanging pennant on a steel rod with a navy emblem field."""
+    return [
+        part("orange", poly((12, 10), (88, 10), (88, 86), (50, 112), (12, 86)), bands=(7.0, 5.0)),
+        part("navy", poly((24, 25), (76, 25), (76, 80), (50, 96), (24, 80)), bands=(3.0, 3.0)),
+        part("steel", rrect(6, 5, 88, 11, 5.5), bands=THIN),
+        *emblem,
+    ]
+
+
+def ellipse(cx, cy, rx, ry, steps=40):
+    return poly(*[(cx + rx * math.cos(2 * math.pi * i / steps),
+                   cy + ry * math.sin(2 * math.pi * i / steps)) for i in range(steps)])
 
 
 def snowflake(cx, cy, r):
@@ -270,6 +286,30 @@ ICONS = {
     "cycle": (BADGE, hex_badge(
         part("yellow", arrow_arc(60, 47, 22, 200, 330, 8, 11), bands=THIN),
         part("yellow", arrow_arc(60, 47, 22, 20, 150, 8, 11), bands=THIN))),
+    # Mode pennants (BRL-1wms): one hanging-pennant silhouette, the emblem names the mode.
+    "mode-wipeout": (PENNANT, pennant(
+        part("steel", stroke([(33, 42), (67, 76)], 6.5), stroke([(67, 42), (33, 76)], 6.5),
+             circle(31, 40, 4.5), circle(69, 40, 4.5), circle(31, 78, 4.5), circle(69, 78, 4.5),
+             bands=(2.0, 1.5)),
+        part("white", circle(50, 52, 17), rrect(39.5, 58, 21, 17, 5)),
+        part("ink", circle(43.5, 53, 5), circle(56.5, 53, 5), poly((50, 59), (46.5, 65), (53.5, 65)),
+             stroke([(45.5, 69), (45.5, 75)], 2.5), stroke([(54.5, 69), (54.5, 75)], 2.5)))),
+    "mode-hot-zone": (PENNANT, pennant(
+        part("yellow", ellipse(50, 73, 24, 8.5), bands=(3.0, 2.0)),
+        part("orange", ellipse(50, 72, 12, 4.2), bands=(1.5, 1.0)),
+        part("white", stroke([(45, 72), (45, 33)], 5), bands=(1.5, 1.0)),
+        part("coral", poly((47, 31), (72, 39.5), (47, 48)), bands=(3.0, 2.0)))),
+    "mode-heist": (PENNANT, pennant(
+        part("steel", rrect(32, 69, 9, 9, 2.5), rrect(59, 69, 9, 9, 2.5), bands=(1.5, 1.0)),
+        part("steel", rrect(25, 38, 7, 9, 2), rrect(25, 58, 7, 9, 2), bands=(1.0, 1.0)),
+        part("white", rrect(29, 32, 44, 40, 7)),
+        part("yellow", ring(51, 52, 10.5, 5), bands=(1.5, 1.0)),
+        part("yellow", circle(51, 52, 3.5), bands=(1.0, 0.5)))),
+    "mode-zombie": (PENNANT, pennant(
+        part("lime", circle(50, 49, 19), rrect(36, 55, 28, 21, 7)),
+        part("ink", circle(43, 50, 5.2), stroke([(53, 45.5), (61.5, 54)], 3.5),
+             stroke([(61.5, 45.5), (53, 54)], 3.5),
+             stroke([(40, 67), (44, 63.5), (48, 67.5), (52, 63.5), (56, 67.5), (60, 64)], 3)))),
     # Weapon part families (symbolic illustrations, not physical attachments).
     "part-magazine": (PART, [
         part("indigo", poly((41, 12), (83, 12), (77, 74), (65, 88), (35, 88))),

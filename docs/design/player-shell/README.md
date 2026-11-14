@@ -39,7 +39,7 @@ Migration from the legacy roles: Cream surface → `panel`. Cream background →
   - The cut-corner slanted geometry is kept.
   - Pressed surfaces squash and lose their lip (see [motion](motion.md)).
 - **Selection without redundancy.** Do not add Selected labels or checkmarks when color already communicates the choice.
-- **Iconography.** Multi-tone, outlined, slightly dimensional icons from one cohesive set (BRL-0157). Each icon carries meaning; hanging pennant emblems still distinguish game modes.
+- **Iconography.** Multi-tone, outlined, slightly dimensional icons from one cohesive set (BRL-0157). Each icon carries meaning; hanging pennant emblems from the same set (BRL-1wms) distinguish game modes.
 - **Background.** A blue gradient with sparse, low-contrast toy-like motifs is allowed. No grime, halftone, distressed lettering or invented stage architecture.
 - **Branding.** Use the retained logo; preserve the original branding sources.
 

@@ -921,7 +921,8 @@ its README (for Riff, `asset_src/characters/riff/README.md`; for the held weapon
 `asset_src/weapons/README.md`; for environment kits, `asset_src/environment/<kit>/README.md`),
 not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt` and
 `pewpew-blitz-original-weapons.txt` point at the environment kit and weapon sources.
-The shell icon set under `assets/brawler/ui/icons/` is likewise original generated artwork:
+The shell icon set under `assets/brawler/ui/icons/`, including the hanging mode pennants
+(BRL-1wms), is likewise original generated artwork:
 `asset_src/player-shell/icons/` holds the generator, editable SVG sources and README, and
 `assets/licenses/pewpew-blitz-original-icons.txt` points at them.
 

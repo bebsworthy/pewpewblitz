@@ -187,13 +187,8 @@ impl LoadingView<'_> {
         })
         .with_children(|group| {
             if let Some(s) = self.server {
-                let path = if badge == "wipeout" {
-                    "brawler/ui/shell/wipeout.png".to_owned()
-                } else {
-                    format!("brawler/ui/shell/game-badge-{badge}.png")
-                };
                 group.spawn((
-                    ImageNode::new(s.load(path)),
+                    ImageNode::new(s.load(crate::ui::icons::path(&format!("mode-{badge}")))),
                     Node {
                         width: px(130.0 * self.factor),
                         height: px(160.0 * self.factor),

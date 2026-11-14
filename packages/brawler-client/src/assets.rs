@@ -63,8 +63,8 @@ impl ClientAssetHandles {
             loading_logo: asset_server.load(LOADING_LOGO_PATH),
             wordmark: asset_server.load("brawler/ui/branding/pewpew-blitz-wordmark.png"),
             dashboard_logo: asset_server.load("brawler/ui/shell/logo.png"),
-            dashboard_badges: ["wipeout", "hot-zone", "heist", "zombie"]
-                .map(|name| asset_server.load(format!("brawler/ui/shell/{name}.png"))),
+            dashboard_badges: ui::icons::MODE_PENNANTS
+                .map(|name| asset_server.load(ui::icons::path(name))),
             dashboard_identity_panel: asset_server.load("brawler/ui/shell/panel-identity.png"),
             dashboard_icons: [
                 "lightning",

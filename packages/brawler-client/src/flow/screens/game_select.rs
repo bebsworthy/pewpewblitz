@@ -405,19 +405,7 @@ fn spawn_cards(
                 row.commands().entity(id).with_children(|card| {
                     if let Some(a) = assets {
                         card.spawn((
-                            ImageNode::new(if mode == 0 {
-                                a.dashboard_badges[0].clone()
-                            } else {
-                                server.map_or_else(
-                                    || a.dashboard_badges[mode].clone(),
-                                    |s| {
-                                        s.load(format!(
-                                            "brawler/ui/shell/game-badge-{}.png",
-                                            ["wipeout", "hot-zone", "heist", "zombie"][mode]
-                                        ))
-                                    },
-                                )
-                            }),
+                            ImageNode::new(a.dashboard_badges[mode].clone()),
                             Node {
                                 width: px(140.0 * factor),
                                 height: px(174.0 * factor),

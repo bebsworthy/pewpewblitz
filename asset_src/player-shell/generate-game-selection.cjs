@@ -10,12 +10,7 @@ async function write(name, w, h, body) {
 (async () => {
   // BRL-0156: shell-bg gradient with two low-contrast tonal planes (BRL-0140 tokens).
   await write('game-selection-background', 1600, 900, '<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2e7bff"/><stop offset="1" stop-color="#1b3fa8"/></linearGradient></defs><path fill="url(#bg)" d="M0 0h1600v900H0z"/><path fill="#0e1638" fill-opacity=".14" d="M0 180 1100 900H0z"/><path fill="#ffffff" fill-opacity=".08" d="m0 900 1600-230v230z"/>');
-  const icons = [
-    ['hot-zone', '#318f8c', '<circle cx="100" cy="94" r="49" fill="none" stroke="#faebcf" stroke-width="15"/><circle cx="100" cy="94" r="20" fill="#faebcf"/>'],
-    ['heist', '#061a25', '<rect x="49" y="47" width="102" height="99" rx="7" fill="none" stroke="#faebcf" stroke-width="12"/><circle cx="100" cy="96" r="24" fill="none" stroke="#faebcf" stroke-width="9"/><path d="M100 65v62M69 96h62" stroke="#faebcf" stroke-width="8"/>'],
-    ['zombie', '#318f8c', '<path d="M58 61 81 40 127 43 115 57 143 65 148 124 130 148 72 148 52 119Z" fill="#faebcf"/><g fill="#318f8c"><circle cx="77" cy="91" r="13"/><circle cx="124" cy="91" r="13"/><path d="m80 123 12-9 10 11 11-11 12 10-12 15-11-9-10 9Z"/></g>']
-  ];
-  for (const [name, fill, icon] of icons) await write(`game-badge-${name}`, 200, 248, `<path d="M12 8h176v175l-88 54-88-54Z" fill="${fill}" stroke="#061a25" stroke-width="5"/>${icon}`);
+  // Mode badges moved to icons/build_icons.py (BRL-1wms).
   for (const selected of [false, true]) for (const focus of [false, true]) {
     const p = 'M24 14 370 4Q382 4 380 18L362 490Q362 500 350 500L12 510Q3 510 4 496Z';
     await write(`game-card${selected ? '-selected' : ''}${focus ? '-focus' : ''}`, 400, 530,

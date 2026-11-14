@@ -303,7 +303,8 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     });
 }
 
-/// The BRL-0157 icon set at shipped sizes on the surfaces that host it.
+/// The BRL-0157 icon set and BRL-1wms mode pennants at shipped sizes on the surfaces that host
+/// them.
 fn icon_set(parent: &mut ChildSpawnerCommands, font: &TextFont, assets: &AssetServer) {
     heading(parent, font, "ICON SET");
     let framed: Vec<_> = super::icons::BADGES
@@ -318,6 +319,10 @@ fn icon_set(parent: &mut ChildSpawnerCommands, font: &TextFont, assets: &AssetSe
         icon_strip(parent, assets, role, &super::icons::PICTOGRAMS, size, size);
     }
     icon_strip(parent, assets, Surface::Card, &framed, 120.0, 100.0);
+    // Mode pennants at their Dashboard (Panel) and game-selection (Card) sizes (BRL-1wms).
+    let pennants = &super::icons::MODE_PENNANTS;
+    icon_strip(parent, assets, Surface::Panel, pennants, 64.0, 80.0);
+    icon_strip(parent, assets, Surface::Card, pennants, 140.0, 174.0);
 }
 
 fn icon_strip(
