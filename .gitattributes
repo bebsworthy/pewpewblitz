@@ -1,0 +1,6 @@
+# >>> ticket
+docs/tasks/**/history.log merge=union
+docs/tasks/**/discussion.jsonl merge=union
+docs/tasks/_purged.log merge=union
+docs/tasks/**/ticket.md merge=ticket
+# <<< ticket
