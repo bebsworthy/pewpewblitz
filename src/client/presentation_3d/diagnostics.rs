@@ -80,6 +80,8 @@ const REPORT_FIELDS: &[&str] = &[
     "owner_speed_ratio_p05",
     "owner_speed_ratio_p50",
     "owner_speed_ratio_p95",
+    "owner_pullback_frames",
+    "owner_pullback_max",
     "result",
     "first_failure",
 ];
@@ -152,31 +154,55 @@ struct RenderMeasurementState {
 /// For each rendered frame whose predicted step is moving, the presented planar speed is divided
 /// by the predicted step speed. Fixed-tick stepping on a high-refresh display shows as stalled
 /// frames (ratio near 0) alternating with catch-up frames (ratio near 2 at 120 Hz); smooth
-/// presentation keeps the ratio near 1.
+/// presentation keeps the ratio near 1. Independently of the predicted step, a frame whose
+/// presented displacement reverses the previous frame's direction by more than
+/// [`OWNER_PULLBACK_DISTANCE`] counts as a pull-back (wall-contact overshoot snapping back).
 #[derive(Default)]
 struct OwnerMotionSamples {
     previous: Option<(Entity, Vec2)>,
+    /// Direction of the newest non-negligible presented displacement.
+    previous_direction: Option<Vec2>,
     stalled: usize,
     ratios: Vec<f32>,
+    pullbacks: usize,
+    max_pullback: f32,
 }
 
 /// Presented-to-predicted speed ratio below which a moving frame counts as stalled.
 const OWNER_STALLED_RATIO: f32 = 0.05;
 /// Predicted step speed below which the owner is treated as standing still.
 const OWNER_MOVING_SPEED: f32 = 1.0;
+/// Backward presented travel in one frame, in world units, that counts as a pull-back.
+const OWNER_PULLBACK_DISTANCE: f32 = 0.05;
 
 impl OwnerMotionSamples {
     fn sample(&mut self, owner: Option<(Entity, Vec2, Vec2)>, delta_seconds: f32) {
         let Some((entity, presented, step_velocity)) = owner else {
             self.previous = None;
+            self.previous_direction = None;
             return;
         };
         let previous = self.previous.replace((entity, presented));
         let Some((previous_entity, previous_position)) = previous else {
             return;
         };
+        if previous_entity != entity {
+            self.previous_direction = None;
+            return;
+        }
+        let displacement = presented - previous_position;
+        if let Some(direction) = self.previous_direction {
+            let backward = -displacement.dot(direction);
+            if backward > OWNER_PULLBACK_DISTANCE {
+                self.pullbacks += 1;
+                self.max_pullback = self.max_pullback.max(backward);
+            }
+        }
+        if displacement.length() > OWNER_PULLBACK_DISTANCE {
+            self.previous_direction = Some(displacement.normalize());
+        }
         let expected = step_velocity.length();
-        if previous_entity != entity || delta_seconds <= 0.0 || expected < OWNER_MOVING_SPEED {
+        if delta_seconds <= 0.0 || expected < OWNER_MOVING_SPEED {
             return;
         }
         let ratio = presented.distance(previous_position) / delta_seconds / expected;
@@ -470,7 +496,7 @@ fn compose_report(
     let context = state.context.unwrap_or_default().name();
     let owner_ratios = state.owner_motion.percentiles();
     format!(
-        "schema=4\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nowner_moving_frames={}\nowner_stalled_frames={}\nowner_speed_ratio_p05={:.3}\nowner_speed_ratio_p50={:.3}\nowner_speed_ratio_p95={:.3}\nresult={}\nfirst_failure={}\n",
+        "schema=5\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nowner_moving_frames={}\nowner_stalled_frames={}\nowner_speed_ratio_p05={:.3}\nowner_speed_ratio_p50={:.3}\nowner_speed_ratio_p95={:.3}\nowner_pullback_frames={}\nowner_pullback_max={:.3}\nresult={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -533,6 +559,8 @@ fn compose_report(
         owner_ratios[0],
         owner_ratios[1],
         owner_ratios[2],
+        state.owner_motion.pullbacks,
+        state.owner_motion.max_pullback,
         if failed.is_none() { "pass" } else { "fail" },
         failed.unwrap_or("none"),
     )
@@ -614,12 +642,28 @@ mod tests {
             smooth.sample(Some((owner, Vec2::new(x, 0.0), velocity)), frame);
         }
         assert_eq!(smooth.stalled, 0);
+        assert_eq!(smooth.pullbacks, 0);
         let [p05, p50, p95] = smooth.percentiles();
         assert!((p05 - 1.0).abs() < 1e-3 && (p50 - 1.0).abs() < 1e-3 && (p95 - 1.0).abs() < 1e-3);
         // Standing still or losing the owner records nothing.
         smooth.sample(Some((owner, Vec2::ZERO, Vec2::ZERO)), frame);
         smooth.sample(None, frame);
         assert_eq!(smooth.ratios.len(), 8);
+        assert_eq!(stepped.pullbacks, 0, "tick stepping never moves backward");
+    }
+
+    #[test]
+    fn owner_motion_counts_wall_contact_pull_backs() {
+        let owner = Entity::from_raw_u32(7).expect("valid entity index");
+        let velocity = Vec2::new(120.0, 0.0);
+        let frame = 1.0 / 120.0;
+        let mut samples = OwnerMotionSamples::default();
+        // Walking forward, overshooting by 0.5, then snapping back to the contact and holding.
+        for x in [0.0, 1.0, 2.0, 2.5, 2.0, 2.0, 2.0] {
+            samples.sample(Some((owner, Vec2::new(x, 0.0), velocity)), frame);
+        }
+        assert_eq!(samples.pullbacks, 1);
+        assert!((samples.max_pullback - 0.5).abs() < 1e-5);
     }
 
     #[test]

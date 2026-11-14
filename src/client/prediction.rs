@@ -134,26 +134,33 @@ impl OwnerPrediction {
     }
 
     /// The pose presented `overstep` after the newest predicted tick: a partial-tick
-    /// extrapolation of the newest step plus the correction offset decayed for that time.
+    /// extrapolation of the newest step, resolved by `resolve_body` (the same planar map
+    /// resolution the prediction step uses), plus the correction offset decayed for that time.
     ///
     /// Presentation only. `overstep` is clamped to one `fixed_step`, so a stalled fixed loop
     /// never extrapolates further than one tick of travel; at zero it equals
-    /// [`Self::presented_position`] exactly.
+    /// [`Self::presented_position`] exactly. Resolving the extrapolation stops the presented
+    /// pose at the wall contact the next tick will realize instead of overshooting into the
+    /// wall and snapping back.
     #[must_use]
     pub fn presented_position_at(
         &self,
         overstep: f32,
         fixed_step: f32,
         tuning: OwnerPredictionTuning,
+        resolve_body: impl FnOnce(Vec2) -> Vec2,
     ) -> Vec2 {
         let overstep = overstep.clamp(0.0, fixed_step.max(0.0));
         if overstep <= 0.0 {
             return self.presented_position();
         }
+        let extrapolated = if self.step_velocity == Vec2::ZERO {
+            self.position
+        } else {
+            resolve_body(self.position + self.step_velocity * overstep)
+        };
         let half_life = tuning.correction_half_life_seconds.max(f32::EPSILON);
-        self.position
-            + self.step_velocity * overstep
-            + self.correction_offset * 0.5_f32.powf(overstep / half_life)
+        extrapolated + self.correction_offset * 0.5_f32.powf(overstep / half_life)
     }
 
     /// Realized velocity of the newest predicted step (zero while following authority).
@@ -565,6 +572,8 @@ fn predict_owner_movement(
 /// Runs every rendered frame after the fixed loop, so `Time<Fixed>::overstep` is the time since
 /// the newest predicted tick; the partial-tick extrapolation keeps the owner (and the camera that
 /// follows it) moving on frames without a fixed tick, without delaying the input tick's motion.
+/// The extrapolation is resolved against the same replicated map blockers as prediction, so the
+/// presented pose never runs ahead into a wall the next tick will stop at.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -573,6 +582,9 @@ fn predict_owner_movement(
 fn present_owner_prediction(
     time: Res<Time<Fixed>>,
     tuning: Res<OwnerPredictionTuning>,
+    builds: Res<crate::builds::BuildCatalogResource>,
+    catalog: Res<MapCatalogResource>,
+    maps: Query<(&ResolvedMapSnapshot, &MapDynamicState), With<MapRoot>>,
     mut owners: Query<
         (&OwnerPrediction, &mut Position, &mut Rotation),
         (With<Fighter>, With<Controlled>),
@@ -580,8 +592,14 @@ fn present_owner_prediction(
 ) {
     let overstep = time.overstep().as_secs_f32();
     let fixed_step = time.timestep().as_secs_f32();
+    let map = maps.single().ok();
+    let radius = builds.0.fighter_body.radius;
     for (prediction, mut position, mut rotation) in &mut owners {
-        position.0 = prediction.presented_position_at(overstep, fixed_step, *tuning);
+        position.0 = prediction.presented_position_at(overstep, fixed_step, *tuning, |body| {
+            map.map_or(body, |(snapshot, state)| {
+                resolve_circle_against_blocking_map(body, radius, snapshot, state, &catalog.0)
+            })
+        });
         *rotation = Rotation::radians(prediction.facing);
     }
 }

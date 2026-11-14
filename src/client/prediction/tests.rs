@@ -356,19 +356,19 @@ fn presented_pose_extrapolates_the_newest_step_and_is_exact_at_tick_boundaries()
     let prediction = predicted_walk(Vec2::ZERO, 100, 5, Vec2::X);
     assert_eq!(prediction.step_velocity(), Vec2::X / DT);
     assert_eq!(
-        prediction.presented_position_at(0.0, DT, tuning),
+        prediction.presented_position_at(0.0, DT, tuning, core::convert::identity),
         prediction.presented_position(),
         "a tick boundary presents the committed prediction exactly"
     );
-    let half = prediction.presented_position_at(DT / 2.0, DT, tuning);
+    let half = prediction.presented_position_at(DT / 2.0, DT, tuning, core::convert::identity);
     assert!((half - Vec2::new(5.5, 0.0)).length() < 1e-4);
-    let full = prediction.presented_position_at(DT, DT, tuning);
+    let full = prediction.presented_position_at(DT, DT, tuning, core::convert::identity);
     assert!(
         (full - Vec2::new(6.0, 0.0)).length() < 1e-4,
         "a full overstep meets the next step"
     );
     assert_eq!(
-        prediction.presented_position_at(3.0 * DT, DT, tuning),
+        prediction.presented_position_at(3.0 * DT, DT, tuning, core::convert::identity),
         full,
         "a stalled fixed loop never extrapolates beyond one tick of travel"
     );
@@ -380,9 +380,9 @@ fn presented_correction_decays_continuously_across_a_tick() {
     let mut prediction = OwnerPrediction::from_pose(Vec2::ZERO, 0.0);
     prediction.record_step(Tick(1), Vec2::ZERO, None, tuning, DT);
     prediction.correction_offset = Vec2::new(4.0, 0.0);
-    let before_tick = prediction.presented_position_at(DT, DT, tuning);
+    let before_tick = prediction.presented_position_at(DT, DT, tuning, core::convert::identity);
     prediction.record_step(Tick(2), Vec2::ZERO, None, tuning, DT);
-    let after_tick = prediction.presented_position_at(0.0, DT, tuning);
+    let after_tick = prediction.presented_position_at(0.0, DT, tuning, core::convert::identity);
     assert!((before_tick - after_tick).length() < 1e-4);
     assert!(before_tick.x < 4.0 && before_tick.x > 0.0);
 }
@@ -395,7 +395,7 @@ fn following_authority_presents_without_extrapolation() {
     prediction.record_step(Tick(1), Vec2::new(20.0, 0.0), None, tuning, DT);
     assert_eq!(prediction.step_velocity(), Vec2::ZERO);
     assert_eq!(
-        prediction.presented_position_at(DT / 2.0, DT, tuning),
+        prediction.presented_position_at(DT / 2.0, DT, tuning, core::convert::identity),
         Vec2::new(20.0, 0.0)
     );
 }
@@ -418,6 +418,10 @@ fn render_frame(app: &mut App, delta: core::time::Duration) -> usize {
 }
 
 fn walking_owner_app() -> (App, Entity, f32) {
+    walking_owner_app_from(Vec2::ZERO, Vec2::X)
+}
+
+fn walking_owner_app_from(start: Vec2, axis: Vec2) -> (App, Entity, f32) {
     let mut app = plugin_app();
     app.world_mut()
         .resource_mut::<Time<Fixed>>()
@@ -434,13 +438,13 @@ fn walking_owner_app() -> (App, Entity, f32) {
             Fighter,
             Controlled,
             AuthoritativePose {
-                position: crate::combat::WorldPoint::from(Vec2::ZERO),
+                position: crate::combat::WorldPoint::from(start),
                 facing: 0.0,
                 tick: 50,
             },
-            ActionState(FighterInput::from_axes(Vec2::X, None, 0)),
+            ActionState(FighterInput::from_axes(axis, None, 0)),
             loadout,
-            Position(Vec2::ZERO),
+            Position(start),
             Rotation::default(),
         ))
         .id();
@@ -575,4 +579,184 @@ fn releasing_input_withdraws_at_most_one_partial_step_and_corrections_do_not_sna
     );
     let prediction = app.world().get::<OwnerPrediction>(owner).expect("attached");
     assert!((settled - prediction.presented_position().x).abs() < 1e-3);
+}
+
+#[test]
+fn presented_extrapolation_is_resolved_by_the_body_resolver() {
+    let tuning = OwnerPredictionTuning::default();
+    let prediction = predicted_walk(Vec2::ZERO, 100, 5, Vec2::new(1.0, 0.5));
+    let wall = |body: Vec2| Vec2::new(body.x.min(5.25), body.y);
+    let half = prediction.presented_position_at(DT / 2.0, DT, tuning, wall);
+    assert!((half - Vec2::new(5.25, 2.75)).length() < 1e-4, "{half}");
+    assert_eq!(
+        prediction.presented_position_at(0.0, DT, tuning, |_| Vec2::splat(-99.0)),
+        prediction.presented_position(),
+        "a tick boundary presents the committed prediction without resolving"
+    );
+    let still = OwnerPrediction::from_pose(Vec2::ONE, 0.0);
+    assert_eq!(
+        still.presented_position_at(DT / 2.0, DT, tuning, |_| Vec2::splat(-99.0)),
+        Vec2::ONE,
+        "a still owner skips resolution"
+    );
+}
+
+/// A nine-cell vertical column of dungeon walls right of the origin; returns the x coordinate
+/// at which a fighter body touches its left face.
+fn spawn_wall_column(app: &mut App) -> f32 {
+    let catalog = crate::map::MapContentCatalog::embedded().expect("embedded map catalog");
+    let mut snapshot = catalog
+        .resolve_preset(crate::map::MapPresetId(1), crate::map::MapInstanceId(169))
+        .expect("resolved fixture")
+        .snapshot;
+    let column = snapshot.dimensions.width / 2 + 1;
+    let middle = snapshot.dimensions.height / 2;
+    snapshot.placements = (middle - 4..=middle + 4)
+        .zip(1..)
+        .map(|(y, id)| crate::map::MapAssetPlacement {
+            placement_id: crate::map::MapPlacementId(id),
+            cell: crate::map::MapCell::new(column, y),
+            asset_id: crate::map::WALL_DUNGEON_ASSET,
+            quarter_turns: 0,
+            parameters: crate::map::MapPlacementParameters::None,
+        })
+        .collect();
+    let face = snapshot
+        .dimensions
+        .half_cell_world(crate::map::MapHalfCellPoint {
+            x: column * 2,
+            y: middle * 2,
+        })
+        .expect("inside the map")
+        .x;
+    assert!(face > 20.0, "the column lies right of the origin");
+    let state = MapDynamicState {
+        map_instance_id: snapshot.identity.instance_id,
+        generation: 1,
+        revision: 0,
+        terminal_states: Vec::new(),
+    };
+    app.world_mut().spawn((MapRoot, snapshot, state));
+    let radius = app
+        .world()
+        .resource::<crate::builds::BuildCatalogResource>()
+        .0
+        .fighter_body
+        .radius;
+    face - radius
+}
+
+/// Walk into the wall column with constant frames of `frame`; returns (contact x, presented
+/// poses, whether a tickless frame was presented while touching the wall).
+fn walk_into_wall(
+    axis: Vec2,
+    frame: core::time::Duration,
+    frames: usize,
+) -> (f32, Vec<Vec2>, bool) {
+    let (mut app, owner, speed) = walking_owner_app_from(Vec2::new(-12.0, -40.0), axis);
+    let contact = spawn_wall_column(&mut app);
+    let tuning = *app.world().resource::<OwnerPredictionTuning>();
+    let mut poses = Vec::with_capacity(frames);
+    let mut tickless_contact = false;
+    for index in 0..frames {
+        let ticks = render_frame(&mut app, frame);
+        let presented = app.world().get::<Position>(owner).expect("pose").0;
+        let prediction = app.world().get::<OwnerPrediction>(owner).expect("attached");
+        tickless_contact |= ticks == 0 && (prediction.position.x - contact).abs() < 1e-3;
+        // Open space, more than one tick of travel from the wall: unchanged extrapolation.
+        if prediction.position.x < contact - speed / 60.0 - 1.0 {
+            let overstep = app
+                .world()
+                .resource::<Time<Fixed>>()
+                .overstep()
+                .as_secs_f32();
+            let open =
+                prediction.presented_position_at(overstep, DT, tuning, core::convert::identity);
+            assert!(
+                (presented - open).length() < 1e-4,
+                "frame {index}: open-space presentation changed ({presented} vs {open})"
+            );
+        }
+        poses.push(presented);
+    }
+    let settled = app
+        .world()
+        .get::<OwnerPrediction>(owner)
+        .expect("attached")
+        .position;
+    assert!(
+        (settled.x - contact).abs() < 1e-3,
+        "the walk reached the wall ({} vs {contact})",
+        settled.x
+    );
+    (contact, poses, tickless_contact)
+}
+
+const HIGH_REFRESH_FRAMES_NANOS: [u64; 2] = [8_333_333, 6_944_444];
+
+#[test]
+fn running_into_a_wall_never_presents_past_contact_or_pulls_back() {
+    for nanos in HIGH_REFRESH_FRAMES_NANOS {
+        let frame = core::time::Duration::from_nanos(nanos);
+        let (contact, poses, tickless_contact) = walk_into_wall(Vec2::X, frame, 240);
+        assert!(
+            tickless_contact,
+            "{nanos} ns: frames between ticks were presented at the wall"
+        );
+        let mut previous = poses[0].x;
+        for (index, pose) in poses.iter().enumerate() {
+            assert!(
+                pose.x <= contact + 1e-3,
+                "{nanos} ns frame {index}: presented {} past contact {contact}",
+                pose.x
+            );
+            assert!(
+                pose.x >= previous - 1e-3,
+                "{nanos} ns frame {index}: pulled back {} -> {}",
+                previous,
+                pose.x
+            );
+            previous = pose.x;
+        }
+    }
+}
+
+#[test]
+fn sliding_along_a_wall_stays_smooth() {
+    let axis = Vec2::new(1.0, 1.0).normalize();
+    for nanos in HIGH_REFRESH_FRAMES_NANOS {
+        let frame = core::time::Duration::from_nanos(nanos);
+        let (contact, poses, tickless_contact) = walk_into_wall(axis, frame, 240);
+        assert!(
+            tickless_contact,
+            "{nanos} ns: frames between ticks were presented at the wall"
+        );
+        let touching: Vec<Vec2> = poses
+            .iter()
+            .copied()
+            .filter(|pose| (pose.x - contact).abs() < 1e-3)
+            .collect();
+        assert!(
+            touching.len() > 60,
+            "{nanos} ns: the walk slid along the wall"
+        );
+        let steps: Vec<f32> = touching
+            .windows(2)
+            .map(|pair| pair[1].y - pair[0].y)
+            .collect();
+        let mean = steps.iter().sum::<f32>() / f32::from(u16::try_from(steps.len()).expect("few"));
+        assert!(mean > 0.0);
+        for (index, step) in steps.iter().enumerate() {
+            assert!(
+                (0.5 * mean..=1.5 * mean).contains(step),
+                "{nanos} ns slide frame {index}: step {step} vs mean {mean}"
+            );
+        }
+        for (index, pose) in poses.iter().enumerate() {
+            assert!(
+                pose.x <= contact + 1e-3,
+                "{nanos} ns frame {index}: past contact"
+            );
+        }
+    }
 }

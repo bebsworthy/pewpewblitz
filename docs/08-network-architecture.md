@@ -224,8 +224,9 @@ errors (respawn, teleport) snap. `AuthoritativePose.tick` maps local ticks to se
 deadlines. The predicted pose replaces the owner's interpolated `Position`/`Rotation` after
 Lightyear interpolation, so renderer, camera, overhead UI, and aim origin share it. Between fixed
 ticks the presented pose extrapolates the newest predicted step's realized velocity across
-`Time<Fixed>::overstep()` (clamped to one tick, zero while following authority) and decays the
-correction offset for the same time, so high-refresh frames advance without tick stepping or an
+`Time<Fixed>::overstep()` (clamped to one tick, zero while following authority), resolves that
+partial step against the same replicated map blockers as prediction so it stops at the wall
+contact the next tick realizes, and decays the correction offset for the same time, so high-refresh frames advance without tick stepping or an
 added frame of input latency; at a tick boundary it equals the committed prediction exactly
 (BRL-0169). Lightyear's `FrameInterpolationPlugin` is not used because it renders one tick
 behind. The prediction

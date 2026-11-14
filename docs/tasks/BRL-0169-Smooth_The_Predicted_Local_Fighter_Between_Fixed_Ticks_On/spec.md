@@ -148,3 +148,97 @@ Changing the prediction or reconciliation model, server authority, or protocol.
 - `scripts/v3-render-evidence.sh` runs the supervisor with the default tracked
   `data/server` directory; evidence runs need `--data-directory` (used a scratch copy). Worth a
   script option if it recurs.
+
+
+## Owner playtest feedback (2026-11-14, ProMotion Mac)
+
+- Stopping in open space: the pull-back is not visible. Accepted.
+- Hitting a wall and stopping: the pull-back is visible. **Implement**: the between-tick extrapolation must not carry the fighter into or past collision geometry. The tick that hits the wall still has a non-zero realized velocity, so the extrapolated pose overshoots and then snaps back when the next tick realizes about 0.
+
+
+## Wall-contact feedback design (2026-11-14)
+
+- Decision: resolve the partial-tick extrapolated displacement with the same client-side planar
+  resolution the prediction step already uses, `crate::map::resolve_circle_against_blocking_map`
+  (arena-bounds clamp plus push-out from the effective current map blockers, fighter body radius
+  from the build catalog, replicated `ResolvedMapSnapshot`/`MapDynamicState`). The presented pose
+  is `resolve(position + step_velocity * overstep) + decayed correction_offset`.
+- Why this option: the next fixed tick resolves its full-tick displacement with exactly this
+  function from the same committed position, so the presented pose stops at the same contact the
+  tick will realize, and the tangential component a straight wall face preserves is the slide the
+  next tick will take. A separate sweep/clip would be a second collision model that can disagree
+  with prediction at corners and round blockers; zeroing along a contact normal needs a normal the
+  resolver does not expose and still overshoots on the tick that first reaches the wall (that
+  step's realized velocity points into the wall while its start was not yet in contact).
+- Constraints kept: presentation only (`OwnerPrediction`, history, reconciliation, authority, and
+  protocol unchanged; only the presented `Position` write differs). Exact at tick boundaries: zero
+  overstep still returns `presented_position()` without resolving, and the committed position is
+  already a resolver output, so a near-zero overstep resolves to it. Cost: one resolver pass per
+  rendered frame for the controlled fighter only while its step velocity is non-zero (the same
+  work prediction does per tick); standing still or following authority skips it.
+- Scope: other fighters and deployables are not prediction blockers today and stay out of scope.
+
+
+## Wall-contact feedback: disposition and verification (2026-11-14)
+
+- Feedback "hitting a wall and stopping shows a pull-back": **implemented** as designed above.
+  `OwnerPrediction::presented_position_at` takes the body resolver; `present_owner_prediction`
+  passes `resolve_circle_against_blocking_map` with the fighter body radius and the replicated map
+  snapshot/dynamic state (identity when no map is present). A still owner skips resolution.
+  Prediction, history, reconciliation, authority, and protocol are unchanged.
+  `docs/08-network-architecture.md` owner-prediction paragraph records the resolved partial step.
+- Feedback "open-space stop pull-back is not visible": accepted, unchanged.
+- Diagnostics (automation only): render report schema 5 adds `owner_pullback_frames` (frames whose
+  presented displacement reverses the previous frame's direction by more than 0.05 u) and
+  `owner_pullback_max`.
+- New tests (`src/client/prediction/tests.rs`): pure resolver use (clipped partial step keeps its
+  tangential component; tick boundary and still owner never resolve); ECS fixed-loop walk into a
+  nine-cell dungeon-wall column at 120 Hz and 144 Hz frames: the presented x never exceeds the
+  contact by more than 1e-3 u and never moves backward by more than 1e-3 u, frames between ticks
+  were presented at the wall, and while more than one tick from the wall the presentation equals
+  the unresolved extrapolation exactly (open space unchanged, within 1e-4 u); sliding diagonally
+  along the column at 120/144 Hz keeps every per-frame tangential step within 0.5-1.5x of the
+  mean and never passes contact. Both wall tests fail with the resolver replaced by identity
+  (presented 18.25 past contact 18.0 at 120 Hz), and pass with it. Diagnostics test covers the
+  pull-back counter.
+- `just lint` (VS Code ripgrep first on PATH): pass. `just test`: pass (2316 passed, 0 failed).
+  `just e2e 2`: pass (1v1 routed roster reached Active). Tracked `data/server/` untouched.
+- Native evidence, MacBook Pro Liquid Retina XDR, release client, Practice smoke, scratch copy of
+  `scripts/v3-render-evidence.sh` with `--data-directory` in the session scratchpad
+  (`brl0169-wall/`), bind 127.0.0.1:5031, 2 s warmup + 20 s window, constant move axis so the
+  fighter runs into walls and holds against them. "Before" is the same build with the resolver
+  replaced by identity. The display ran at 60 Hz in the native profile this session (p50
+  16.7 ms); high-refresh (AutoNoVsync) ran at 120 Hz (p50 8.33 ms).
+
+  | run | axis | frame p50 | stalled | speed ratio p05/p50/p95 | pull-back frames | max pull-back |
+  |---|---|---|---|---|---|---|
+  | before, native | 1,0 | 16.67 ms | 0 | 1.000 / 1.000 / 1.024 | 2 | 0.909 u |
+  | after, native | 1,0 | 16.66 ms | 0 | 1.000 / 1.000 / 1.008 | 0 | 0 |
+  | before, native | 1,1 | 16.65 ms | 0 | 0.936 / 1.003 / 1.263 | 45 | 0.416 u |
+  | after, native | 1,1 | 16.67 ms | 0 | 0.835 / 1.000 / 1.035 | 0 | 0 |
+  | before, high-refresh | 1,0 | 8.33 ms | 0 | 1.000 / 1.000 / 1.002 | 0 | 0 |
+  | after, high-refresh | 1,0 | 8.33 ms | 0 | 1.000 / 1.000 / 1.004 | 0 | 0 |
+  | before, high-refresh | 1,1 | 8.34 ms | 0 | 0.991 / 1.000 / 1.031 | 9 | 0.159 u |
+  | after, high-refresh | 1,1 | 8.34 ms | 0 | 0.769 / 1.008 / 1.255 | 0 | 0 |
+  | after, high-refresh rerun | 1,1 | 8.33 ms | 0 | 0.990 / 1.000 / 1.026 | 0 | 0 |
+
+  All reports `result=pass`. Runs are not deterministic (Practice bots, walls reached at
+  different times); the high-refresh 1,0 "before" run recorded no wall-contact frame. Speed-ratio
+  tails near walls vary run to run (the before native 1,1 run also reached p95 1.26; the after
+  rerun is 0.99/1.03); a ratio near 0.7 is expected on the contact tick of a diagonal approach,
+  where the presented pose keeps only the tangential component. Pull-back frames dropped to 0 in
+  every after run.
+- Process note: the evidence script rebuilds `target/debug/brawler-server`, which the user's
+  running supervisor (UDP 5000) uses as its worker executable; this change is client-only, so the
+  server binary's behaviour and fingerprints are unchanged. That supervisor was not touched.
+
+## Playtest request (wall contact)
+
+- Run `just client` (and optionally `BRAWLER_RENDER_PROFILE=high-refresh just client`) on the
+  ProMotion Mac; enter Practice. Run straight into walls and cover, then at an angle (slide along
+  the wall), then stop while touching the wall; also round convex cover corners and the arena
+  edge.
+- Observe: no visible pull-back or twitch when hitting or stopping at a wall; sliding along a wall
+  stays smooth; open-space motion and stopping feel unchanged.
+- Known limitation: other fighters and deployables are not prediction blockers, so the presented
+  pose can still overlap them briefly as before; dash/defeat followed motion still steps (BRL-0217).
