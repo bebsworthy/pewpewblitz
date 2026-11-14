@@ -23,7 +23,7 @@ use crate::map::{
 };
 use crate::matchplay::{MatchParticipant, MatchPhase, MatchState, RespawnState};
 use crate::movement::{
-    InputTuning, MovementModifiers, movement_intent, movement_is_suspended,
+    InputTuning, MovementModifiers, MovementTuning, movement_intent, movement_is_suspended,
     resolved_movement_velocity,
 };
 use crate::protocol::{Fighter, FighterInput};
@@ -357,6 +357,7 @@ pub struct OwnerPredictionPlugin;
 impl Plugin for OwnerPredictionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InputTuning>()
+            .init_resource::<MovementTuning>()
             .init_resource::<OwnerPredictionTuning>()
             .init_resource::<OwnerPredictionStats>()
             .configure_sets(
@@ -476,6 +477,7 @@ fn predict_owner_movement(
     time: Res<Time<Fixed>>,
     tuning: Res<OwnerPredictionTuning>,
     input_tuning: Res<InputTuning>,
+    movement_tuning: Res<MovementTuning>,
     builds: Res<crate::builds::BuildCatalogResource>,
     catalog: Res<MapCatalogResource>,
     mut stats: ResMut<OwnerPredictionStats>,
@@ -505,6 +507,7 @@ fn predict_owner_movement(
     let tick = timeline.tick();
     let delta = time.delta().as_secs_f32();
     let map = maps.single().ok();
+    let contact_radius = owner_contact_radius(&builds, &movement_tuning);
     let match_active = matches
         .iter()
         .next()
@@ -554,7 +557,7 @@ fn predict_owner_movement(
         if let Some((snapshot, state)) = map {
             position = resolve_circle_against_blocking_map(
                 position,
-                builds.0.fighter_body.radius,
+                contact_radius,
                 snapshot,
                 state,
                 &catalog.0,
@@ -565,6 +568,17 @@ fn predict_owner_movement(
         prediction.record_step(tick, position, aim, *tuning, delta);
         stats.predicted_ticks = stats.predicted_ticks.saturating_add(1);
     }
+}
+
+/// Radius the owner prediction resolves map contact with: the fighter body plus the clearance
+/// authoritative move-and-slide keeps from every blocker. Resolving at the bare body radius
+/// rests the prediction one skin deeper than authority, so every contact tick reconciles a
+/// correction that vibrates the presented fighter into the wall and bounces it back on release.
+fn owner_contact_radius(
+    builds: &crate::builds::BuildCatalogResource,
+    movement_tuning: &MovementTuning,
+) -> f32 {
+    builds.0.fighter_body.radius + movement_tuning.contact_skin_world()
 }
 
 /// Present the predicted owner pose in place of the interpolated one.
@@ -582,6 +596,7 @@ fn predict_owner_movement(
 fn present_owner_prediction(
     time: Res<Time<Fixed>>,
     tuning: Res<OwnerPredictionTuning>,
+    movement_tuning: Res<MovementTuning>,
     builds: Res<crate::builds::BuildCatalogResource>,
     catalog: Res<MapCatalogResource>,
     maps: Query<(&ResolvedMapSnapshot, &MapDynamicState), With<MapRoot>>,
@@ -593,7 +608,7 @@ fn present_owner_prediction(
     let overstep = time.overstep().as_secs_f32();
     let fixed_step = time.timestep().as_secs_f32();
     let map = maps.single().ok();
-    let radius = builds.0.fighter_body.radius;
+    let radius = owner_contact_radius(&builds, &movement_tuning);
     for (prediction, mut position, mut rotation) in &mut owners {
         position.0 = prediction.presented_position_at(overstep, fixed_step, *tuning, |body| {
             map.map_or(body, |(snapshot, state)| {

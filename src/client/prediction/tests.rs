@@ -602,7 +602,8 @@ fn presented_extrapolation_is_resolved_by_the_body_resolver() {
 }
 
 /// A nine-cell vertical column of dungeon walls right of the origin; returns the x coordinate
-/// at which a fighter body touches its left face.
+/// at which a fighter rests against its left face (body radius plus the authoritative
+/// move-and-slide contact skin).
 fn spawn_wall_column(app: &mut App) -> f32 {
     let catalog = crate::map::MapContentCatalog::embedded().expect("embedded map catalog");
     let mut snapshot = catalog
@@ -643,7 +644,11 @@ fn spawn_wall_column(app: &mut App) -> f32 {
         .0
         .fighter_body
         .radius;
-    face - radius
+    let skin = app
+        .world()
+        .resource::<MovementTuning>()
+        .contact_skin_world();
+    face - radius - skin
 }
 
 /// Walk into the wall column with constant frames of `frame`; returns (contact x, presented

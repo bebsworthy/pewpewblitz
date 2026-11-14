@@ -30,6 +30,10 @@ pub(crate) use step::{
 
 pub const AUTHORITATIVE_INPUT_STALE_TICKS: u64 = 12;
 
+/// Avian's `PhysicsLengthUnit` for the authoritative world. Avian scales move-and-slide skin
+/// width and depenetration thresholds by it, so it is part of the fighter contact rule.
+pub const PHYSICS_LENGTH_UNIT: f32 = 100.0;
+
 /// Live input-trace switch and last-seen inputs. Read only by the server-gated coordinator.
 #[derive(Resource, Debug)]
 #[cfg_attr(not(feature = "server"), allow(dead_code))]
@@ -53,6 +57,16 @@ pub struct MovementTuning {
     pub stale_input_ticks: u64,
     pub move_iterations: usize,
     pub skin_width: f32,
+}
+
+impl MovementTuning {
+    /// World-unit clearance authoritative move-and-slide keeps between a fighter and every
+    /// blocker (`skin_width` scaled by [`PHYSICS_LENGTH_UNIT`]). Owner prediction resolves
+    /// contact with the same clearance so it rests where authority rests.
+    #[must_use]
+    pub fn contact_skin_world(&self) -> f32 {
+        self.skin_width * PHYSICS_LENGTH_UNIT
+    }
 }
 
 impl Default for MovementTuning {
@@ -102,7 +116,7 @@ impl Plugin for AuthoritativeMovementPlugin {
         // physics interpolation plugins stay disabled because Lightyear owns network pose history.
         app.add_plugins(
             PhysicsPlugins::default()
-                .with_length_unit(100.0)
+                .with_length_unit(PHYSICS_LENGTH_UNIT)
                 .build()
                 .disable::<PhysicsTransformPlugin>()
                 .disable::<PhysicsInterpolationPlugin>(),

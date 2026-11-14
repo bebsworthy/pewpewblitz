@@ -242,3 +242,123 @@ Changing the prediction or reconciliation model, server authority, or protocol.
   stays smooth; open-space motion and stopping feel unchanged.
 - Known limitation: other fighters and deployables are not prediction blockers, so the presented
   pose can still overlap them briefly as before; dash/defeat followed motion still steps (BRL-0217).
+
+
+## Owner playtest feedback 2 (2026-11-14, after 6f15d173)
+
+No change was felt. When walking into a wall, the fighter visibly "vibrates" as if trying to push into it. On stopping, it bounces a little way back from the wall. The resolved extrapolation did not remove the symptom. That points to a cause outside the between-tick extrapolation, for example a mismatch between the client prediction and server collision (per-tick reconciliation corrections at contact), or the visible mesh following a different pose than the one the render metric measures. **Status: awaiting diagnosis.** Determine whether this already happened before BRL-0169 (compare against 08b7f789^).
+
+
+## Feedback 2 diagnosis: client/server contact-distance mismatch (2026-11-14)
+
+- **Root cause.** The server's Avian move-and-slide keeps every fighter `skin_width` from each
+  blocker, and Avian scales that value by `PhysicsLengthUnit`: `MovementTuning::skin_width`
+  0.01 × `with_length_unit(100.0)` = **1.0 world unit**, both while sweeping and while
+  depenetrating. Owner prediction (and the BRL-0169 resolved partial step) resolve with
+  `resolve_circle_against_blocking_map` at the bare body radius, so they rest exactly touching.
+  Against any wall the prediction therefore rests 1 u deeper than authority. Every contact tick
+  reconciles an error of about 1 u: the prediction is shifted back, the next predicted step
+  clamps it 1 u forward again, and the correction offset (`-= error`) accumulates toward the wall
+  and decays between samples. The presented pose sits 1.2-2.9 u past authority and oscillates
+  (the "vibration"); on release the offset decays to zero and the fighter visibly slides back
+  1-3 u from the wall (the "bounce").
+- **Evidence.** Network harness trace (separate-App server + client, 4-tick delay, walking +X into
+  the arena edge): server rests at x = 1009.0, prediction at 1010.0, correction offset
+  0.77 → 1.22 → 0.90 → 1.58 → 1.84 u while pushing, presented up to 1011.85; after release the
+  presented x falls from 1010.75 to 1009.0 over about 30 ticks. Sliding diagonally and walking
+  -Y into the bottom edge show the same pattern (offset up to 1.97 u). Native, release client,
+  Practice, constant axis, before any fix, with new automation-only render fields (below):
+  `owner_correction_max` 3.279 u / 150 frames (axis 1,0) and 2.269 u / 373 frames (axis 1,1).
+- **Hypotheses ruled out.** The visible mesh (`write_fighter_visual_poses`), camera, and the
+  render metric all read the same presented `Position`, so the metric did not measure another
+  pose. `owner_pullback_frames` missed it because the offset mostly grows toward the wall while
+  pushing and the constant-axis evidence runs never released input, so the release bounce was
+  never sampled. Rollback/replay is not used (owner prediction is local; Lightyear prediction is
+  off); the input timeline aligns (open-space walking reconciles at 0 error).
+- **Pre-existing.** The same trace on `08b7f789^` (8f054d5a, scratch worktree, same harness test)
+  produced identical offsets and release slide, so the defect dates from owner prediction
+  (BRL-0141), not the BRL-0169 extrapolation; BRL-0169's smoother frames made it easier to see.
+- **Decision.** Make the client contact rule match authority with one shared parameter instead of
+  a second collision model: name the Avian length unit (`movement::PHYSICS_LENGTH_UNIT`, used by
+  `with_length_unit`) and derive `MovementTuning::contact_skin_world()` = skin × length unit. The
+  owner prediction step and the presented partial step resolve the fighter at
+  `body radius + contact_skin_world()`, which is exactly the clearance Avian keeps from every
+  blocker (arena edge, rectangles, circles, corners). Client-only behaviour change: server
+  movement, authority, `MovementTuning` values, wire contracts, and fingerprints are unchanged
+  (the server now reads the named constant instead of the literal 100.0). Rejected: shrinking the
+  server skin (changes authority and Avian stability) and running Avian on the client
+  (a second physics world for presentation only).
+- **Regression.** `tests/network/prediction.rs::
+  wall_contact_matches_authority_without_vibration_or_release_bounce` pushes into the +X edge,
+  slides diagonally, and pushes -Y, then releases; it asserts the max smoothed error,
+  correction offset, presented lead past authority along the wall normal, and per-frame release
+  bounce each stay below 0.05 u. Before the fix it fails (offset 1.86 u, lead 2.86 u).
+- **Diagnostics.** Render report schema 6 adds `owner_correction_frames` (frames presented with a
+  correction offset above 0.05 u) and `owner_correction_max`.
+
+
+## Feedback 2: disposition and verification (2026-11-14)
+
+- Feedback "walking into a wall vibrates; stopping bounces back": **implemented** as decided
+  above. `movement::PHYSICS_LENGTH_UNIT` names the Avian length unit (server
+  `with_length_unit` reads it; value unchanged), `MovementTuning::contact_skin_world()` derives
+  the 1.0 u clearance, and `OwnerPredictionPlugin` initializes `MovementTuning` and resolves both
+  the predicted tick and the presented partial step at body radius + that clearance
+  (`owner_contact_radius`). Authority, reconciliation, protocol, and fingerprints unchanged
+  (routing identity still 4778953997791089217 / 18160765825630381060 / 7772007507332977560).
+  `docs/08-network-architecture.md` owner-prediction paragraph records the contact rule.
+- Regression: `prediction::wall_contact_matches_authority_without_vibration_or_release_bounce`
+  (arena +X edge, diagonal slide, -Y edge, and map cover). Before the fix (contact radius
+  reverted to the bare body radius): fails, max smoothed error 0.84 u, correction offset 1.86 u,
+  lead past authority 2.86 u. After: all four cases pass, max smoothed error ≤ 2e-4 u, offset
+  ≤ 0.01 u, lead ≤ 0.01 u, release bounce 0. The BRL-0169 ECS wall tests now place contact at
+  face − radius − skin.
+- Native, MacBook Pro (ProMotion, 120 Hz native profile this session), release client,
+  Practice, scratch copy of the evidence script (`--data-directory` scratch, bind
+  127.0.0.1:5032), 2 s warmup + 20 s window, report schema 6. Axis 1,0 / 1,1 runs never reach a
+  wall (Practice bots defeat the fighter mid-arena), which is also why the earlier
+  `owner_pullback_frames` evidence was 0; axes -1,0 and 0,1 reach the west/top edge in about 4 s
+  and hold there. A temporary reconciliation trace (scratch only, removed) logged every
+  correction above 0.05 u:
+
+  | run | axis | pull-back frames (max) | correction frames (max) | traced corrections |
+  |---|---|---|---|---|
+  | before | -1,0 | 467 (0.794 u) | 1891 (3.029 u) | 235, almost all exactly 1.0 u at x = -1009 |
+  | before | 0,1 | 359 (0.812 u) | 1788 (4.039 u) | 181 |
+  | after | -1,0 | 0 | 62 (4.039 u) | 1 (match-start, 4.67 u) |
+  | after | 0,1 | 0 | 52 (2.020 u) | 1 (match-start, 2.33 u) |
+
+  All four reports `result=pass` (frame p50 8.33 ms). Speed-ratio p05 rose from 0.26/0.23 to
+  1.00/1.00. The remaining correction is a single one at the first walking tick after match
+  activation (the server applies one tick of the previous neutral input; the existing
+  "late-arriving input" misprediction, behind the fighter, not wall-related); recorded here as
+  an observation, not addressed.
+- `just lint` (VS Code ripgrep first on PATH): pass. `just test`: pass (2317 passed, 0 failed).
+  e2e 2: the canonical `scripts/network-product-match.sh` path with 1 player per team via a
+  scratch copy that only adds `--data-directory` (the canonical script defaults to the tracked
+  `data/server/`): pass, 1v1 roster reached Active; tracked `data/server/` checksums unchanged.
+- Pre-BRL-0169 check: scratch worktree at 8f054d5a (removed afterwards) reproduced identical
+  offsets and release slide; the defect predates BRL-0169.
+- Server restart: not required. The server-side edit only names the existing 100.0 length
+  unit; behaviour and routing identity are unchanged. The running supervisor's worker
+  executable `target/debug/brawler-server` was rebuilt by the evidence/e2e scripts with
+  behaviour-identical code. The owner must restart the client.
+
+## Playtest request (wall contact, feedback 2)
+
+- `just client` (optionally `BRAWLER_RENDER_PROFILE=high-refresh just client`) on the ProMotion
+  Mac; Practice. Push straight into the arena edge and into cover for several seconds, slide
+  along a wall at an angle, then release while touching it; round convex cover corners.
+- Observe: the fighter stops at the wall and stays still while pushing (no vibration, and the
+  run animation does not flicker); releasing does not bounce away from the wall; sliding stays
+  smooth; open-space motion unchanged.
+
+## Learn from errors (feedback 2)
+
+- The first fix trusted an evidence metric whose runs never reached a wall: constant-axis
+  Practice runs were defeated mid-arena. Prevention: assert the scenario precondition (pose at
+  contact, or contact-tick count) in evidence, and trace authoritative vs predicted values before
+  trusting an aggregate.
+- Avian scales `skin_width` (and depenetration thresholds) by `PhysicsLengthUnit`; a value that
+  reads as 0.01 is 1 world unit here. Any client-side mirror of Avian contact must use the scaled
+  clearance.

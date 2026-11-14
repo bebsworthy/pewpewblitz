@@ -82,6 +82,8 @@ const REPORT_FIELDS: &[&str] = &[
     "owner_speed_ratio_p95",
     "owner_pullback_frames",
     "owner_pullback_max",
+    "owner_correction_frames",
+    "owner_correction_max",
     "result",
     "first_failure",
 ];
@@ -166,6 +168,11 @@ struct OwnerMotionSamples {
     ratios: Vec<f32>,
     pullbacks: usize,
     max_pullback: f32,
+    /// Frames presented with a reconciliation correction offset above
+    /// [`OWNER_PULLBACK_DISTANCE`], and the largest offset: a client/server contact mismatch
+    /// shows here as a standing offset into the wall that bounces back once input stops.
+    corrections: usize,
+    max_correction: f32,
 }
 
 /// Presented-to-predicted speed ratio below which a moving frame counts as stalled.
@@ -212,6 +219,14 @@ impl OwnerMotionSamples {
             }
             self.ratios.push(ratio);
         }
+    }
+
+    fn sample_correction(&mut self, offset: Vec2) {
+        let magnitude = offset.length();
+        if magnitude > OWNER_PULLBACK_DISTANCE {
+            self.corrections += 1;
+        }
+        self.max_correction = self.max_correction.max(magnitude);
     }
 
     fn percentiles(&self) -> [f64; 3] {
@@ -405,9 +420,13 @@ fn sample_owner_motion(
     if state.written || real.elapsed().saturating_sub(ready_at) < state.config.warmup {
         return;
     }
-    let owner = owners
-        .iter()
-        .next()
+    let owner = owners.iter().next();
+    if let Some((_, _, prediction)) = owner {
+        state
+            .owner_motion
+            .sample_correction(prediction.correction_offset);
+    }
+    let owner = owner
         .map(|(entity, position, prediction)| (entity, position.0, prediction.step_velocity()));
     state.owner_motion.sample(owner, time.delta_secs());
 }
@@ -496,7 +515,7 @@ fn compose_report(
     let context = state.context.unwrap_or_default().name();
     let owner_ratios = state.owner_motion.percentiles();
     format!(
-        "schema=5\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nowner_moving_frames={}\nowner_stalled_frames={}\nowner_speed_ratio_p05={:.3}\nowner_speed_ratio_p50={:.3}\nowner_speed_ratio_p95={:.3}\nowner_pullback_frames={}\nowner_pullback_max={:.3}\nresult={}\nfirst_failure={}\n",
+        "schema=6\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nowner_moving_frames={}\nowner_stalled_frames={}\nowner_speed_ratio_p05={:.3}\nowner_speed_ratio_p50={:.3}\nowner_speed_ratio_p95={:.3}\nowner_pullback_frames={}\nowner_pullback_max={:.3}\nowner_correction_frames={}\nowner_correction_max={:.3}\nresult={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -561,6 +580,8 @@ fn compose_report(
         owner_ratios[2],
         state.owner_motion.pullbacks,
         state.owner_motion.max_pullback,
+        state.owner_motion.corrections,
+        state.owner_motion.max_correction,
         if failed.is_none() { "pass" } else { "fail" },
         failed.unwrap_or("none"),
     )
@@ -664,6 +685,12 @@ mod tests {
         }
         assert_eq!(samples.pullbacks, 1);
         assert!((samples.max_pullback - 0.5).abs() < 1e-5);
+        // A standing correction offset counts per frame and keeps its largest magnitude.
+        for offset in [0.0, 0.02, 1.5, 0.8] {
+            samples.sample_correction(Vec2::new(offset, 0.0));
+        }
+        assert_eq!(samples.corrections, 2);
+        assert!((samples.max_correction - 1.5).abs() < 1e-5);
     }
 
     #[test]

@@ -357,41 +357,8 @@ fn dash_converges_without_snapping() {
 fn destroyed_cover_converges_without_snapping() {
     let mut harness = joined_harness(7);
     // Find removable player-blocking cover with free space to its left.
-    let (start, cover_center) = {
-        let world = harness.server.world_mut();
-        let catalog = world.resource::<MapCatalogResource>().0.clone();
-        let radius = world
-            .resource::<brawler::builds::BuildCatalogResource>()
-            .0
-            .fighter_body
-            .radius;
-        let mut roots =
-            world.query_filtered::<(&ResolvedMapSnapshot, &MapDynamicState), With<MapRoot>>();
-        let (snapshot, state) = roots.single(world).expect("one map");
-        snapshot
-            .placements
-            .iter()
-            .find_map(|placement| {
-                let asset = catalog.asset(placement.asset_id)?;
-                let profile = catalog.profile(asset.gameplay_profile_id)?;
-                if profile.player_collision != brawler::map::PlayerCollision::Block
-                    || profile.destruction
-                        != brawler::map::MapDestructionBehavior::RemoveOnMapDestruction
-                {
-                    return None;
-                }
-                let center = placement_world_center(snapshot.dimensions, asset, placement);
-                let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
-                let half_width = f32::from(footprint.width) * 16.0;
-                let start = center - Vec2::X * (half_width + radius + 24.0);
-                let clear = (0_u8..=8).all(|step| {
-                    let probe = start - Vec2::X * (f32::from(step) * 4.0);
-                    !circle_overlaps_blocking_map(probe, radius, snapshot, state, &catalog)
-                });
-                clear.then_some((start, center))
-            })
-            .expect("a removable cover placement with free space to its left")
-    };
+    let (start, cover_center) = cover_with_clear_left(&mut harness, true)
+        .expect("a removable cover placement with free space to its left");
     let entity = server_fighter(&mut harness);
     harness
         .server
@@ -424,6 +391,41 @@ fn destroyed_cover_converges_without_snapping() {
     assert_converged_without_teleport(&mut harness, "destroyed cover", largest_frame_step);
 }
 
+/// A player-blocking cover placement (optionally only removable cover) with free space to its
+/// left, as (walking start, cover center).
+fn cover_with_clear_left(harness: &mut Harness, removable_only: bool) -> Option<(Vec2, Vec2)> {
+    let world = harness.server.world_mut();
+    let catalog = world.resource::<MapCatalogResource>().0.clone();
+    let radius = world
+        .resource::<brawler::builds::BuildCatalogResource>()
+        .0
+        .fighter_body
+        .radius;
+    let mut roots =
+        world.query_filtered::<(&ResolvedMapSnapshot, &MapDynamicState), With<MapRoot>>();
+    let (snapshot, state) = roots.single(world).expect("one map");
+    snapshot.placements.iter().find_map(|placement| {
+        let asset = catalog.asset(placement.asset_id)?;
+        let profile = catalog.profile(asset.gameplay_profile_id)?;
+        if profile.player_collision != brawler::map::PlayerCollision::Block
+            || (removable_only
+                && profile.destruction
+                    != brawler::map::MapDestructionBehavior::RemoveOnMapDestruction)
+        {
+            return None;
+        }
+        let center = placement_world_center(snapshot.dimensions, asset, placement);
+        let footprint = asset.footprint_cells.rotated(placement.quarter_turns);
+        let half_width = f32::from(footprint.width) * 16.0;
+        let start = center - Vec2::X * (half_width + radius + 24.0);
+        let clear = (0_u8..=8).all(|step| {
+            let probe = start - Vec2::X * (f32::from(step) * 4.0);
+            !circle_overlaps_blocking_map(probe, radius, snapshot, state, &catalog)
+        });
+        clear.then_some((start, center))
+    })
+}
+
 #[test]
 fn client_prediction_never_moves_the_authoritative_fighter() {
     let mut harness = joined_harness(4);
@@ -450,4 +452,101 @@ fn client_prediction_never_moves_the_authoritative_fighter() {
         "the corrupted prediction snaps back to authority"
     );
     assert!(presented(&mut harness).distance(server_before) < 0.05);
+}
+
+/// Push into the arena edge and blocking cover, then release: the presented owner pose must
+/// rest where authority rests. A client contact rule that stops at a different distance than
+/// the server's Avian move-and-slide makes every contact tick a correction, so the decaying
+/// offset vibrates the fighter into the wall and bounces it back on release.
+#[test]
+fn wall_contact_matches_authority_without_vibration_or_release_bounce() {
+    // (input direction, wall normal it pushes against, start at cover): straight into the
+    // arena edge, sliding along it, the opposite arena axis, and straight into map cover.
+    let cases = [
+        (Vec2::X, Vec2::X, false),
+        (Vec2::new(1.0, 0.4).normalize(), Vec2::X, false),
+        (-Vec2::Y, -Vec2::Y, false),
+        (Vec2::X, Vec2::X, true),
+    ];
+    for (direction, normal, at_cover) in cases {
+        let mut harness = joined_harness(4);
+        if at_cover {
+            let (start, _) =
+                cover_with_clear_left(&mut harness, false).expect("blocking cover with space");
+            let entity = server_fighter(&mut harness);
+            harness
+                .server
+                .world_mut()
+                .get_mut::<Position>(entity)
+                .expect("server pose")
+                .0 = start;
+            for _ in 0..40 {
+                harness.step();
+            }
+        }
+        harness.set_controlled_input(0, walk(direction));
+        // Walk until authority has stopped against the wall for a while.
+        let mut previous_server = server_pose(&mut harness);
+        let mut blocked_ticks = 0;
+        for _ in 0..600 {
+            harness.step();
+            let current = server_pose(&mut harness);
+            let into_wall = (current - previous_server).dot(normal);
+            previous_server = current;
+            blocked_ticks = if into_wall.abs() < 1e-3 {
+                blocked_ticks + 1
+            } else {
+                0
+            };
+            if blocked_ticks >= 20 {
+                break;
+            }
+        }
+        assert!(
+            blocked_ticks >= 20,
+            "[{direction:?}] the fighter reached a wall"
+        );
+        reset_stats(&mut harness);
+        let mut largest_offset: f32 = 0.0;
+        let mut largest_lead: f32 = 0.0;
+        for _ in 0..90 {
+            harness.step();
+            let prediction = owner(&mut harness).expect("owner prediction");
+            largest_offset = largest_offset.max(prediction.correction_offset.length());
+            let lead = (presented(&mut harness) - server_pose(&mut harness)).dot(normal);
+            largest_lead = largest_lead.max(lead);
+        }
+        let pushing = stats(&harness);
+        harness.set_controlled_input(0, FighterInput::default());
+        let mut previous = presented(&mut harness);
+        let mut largest_bounce: f32 = 0.0;
+        for _ in 0..60 {
+            harness.step();
+            let current = presented(&mut harness);
+            largest_bounce = largest_bounce.max(-(current - previous).dot(normal));
+            previous = current;
+        }
+        println!(
+            "owner wall contact [{direction:?} cover={at_cover}]: {pushing:?}, largest correction offset \
+             {largest_offset:.3}, largest lead past authority {largest_lead:.3}, largest \
+             release bounce {largest_bounce:.3}"
+        );
+        assert!(
+            pushing.max_smoothed_error < 0.05,
+            "[{direction:?}] prediction rests at the authoritative contact"
+        );
+        assert!(
+            largest_offset < 0.05,
+            "[{direction:?}] no correction offset accumulates against the wall"
+        );
+        assert!(
+            largest_lead < 0.05,
+            "[{direction:?}] the presented pose never pushes past authority into the wall"
+        );
+        assert!(
+            largest_bounce < 0.05,
+            "[{direction:?}] releasing at the wall does not bounce back"
+        );
+        assert!(presented(&mut harness).distance(server_pose(&mut harness)) < 0.05);
+    }
 }

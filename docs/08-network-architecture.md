@@ -216,7 +216,11 @@ Each client predicts only its own controlled fighter's movement. It applies its 
 Lightyear tick T through the shared movement step (`movement::step`: intent shaping, dash/defeat/
 inactive-participant suspension, slow, freeze, effect tile, adrenaline, and replicated knockback)
 and resolves the result against the replicated current map blockers, including destroyed or
-replaced cover. The server applies the same input at server tick T, so the client reconciles the
+replaced cover. Contact resolution uses the fighter body radius plus
+`MovementTuning::contact_skin_world()`, the clearance the server's Avian move-and-slide keeps from
+every blocker (`skin_width` scaled by `PHYSICS_LENGTH_UNIT`), so prediction rests exactly where
+authority rests; resolving at the bare radius made every contact tick a correction that vibrated
+the fighter into walls and bounced it back on release. The server applies the same input at server tick T, so the client reconciles the
 entity's newest Replicon confirmation tick and raw replicated `Position`/`Rotation` against the
 prediction it recorded for that tick: the error shifts every unacknowledged predicted step, a
 presented offset absorbs errors below `OwnerPredictionTuning::snap_distance` and decays, and larger
