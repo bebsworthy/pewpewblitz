@@ -965,7 +965,10 @@ fallback paths, Dashboard preview, defeat/respawn, map destruction, objectives, 
 combat density. The render-evidence harness accepts `BRAWLER_RENDER_REDUCED_EFFECTS=1` to install
 the same reduced-combat-effects resource used by the product settings shell in non-interactive
 release clients; the generated report records that policy so an accidental default-profile run
-cannot be accepted as reduced-effects evidence.
+cannot be accepted as reduced-effects evidence. `BRAWLER_RENDER_WEAPON=<ID>` (a costed weapon ID
+from `content/catalogs/builds.ron`) gives the measured client that primary weapon through the
+canonical saved-brawler create/select path, so each weapon family's aim lane, projectiles, and
+effects can be captured; unset, the measured client keeps its existing selected brawler.
 
 Imported map-object scale is validated from intrinsic asset bounds after the complete parent/child
 transform chain, not from a profile number in isolation. A nearby authored tile provides a native

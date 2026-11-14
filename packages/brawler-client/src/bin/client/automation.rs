@@ -10,7 +10,7 @@ use brawler::config::{
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
 
-pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <1-6>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]]";
+pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]]";
 
 fn parse_value<T: core::str::FromStr>(flag: &str, value: Option<String>) -> Result<T, String> {
     value

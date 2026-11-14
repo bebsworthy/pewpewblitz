@@ -120,7 +120,22 @@ fn headless_weapon_preset_and_window_size_are_bounded() {
     assert!(config.validate().is_ok());
     config.weapon_preset = Some(6);
     assert!(config.validate().is_ok());
-    config.weapon_preset = Some(7);
+    // The bound follows the build catalog's costed weapons, including Splash.
+    let catalog = brawler::builds::BuildCatalog::embedded().expect("embedded build catalog");
+    for cost in &catalog.weapon_costs {
+        config.weapon_preset = Some(cost.weapon_id.0);
+        assert!(config.validate().is_ok(), "weapon {}", cost.weapon_id.0);
+    }
+    let unknown = catalog
+        .weapon_costs
+        .iter()
+        .map(|cost| cost.weapon_id.0)
+        .max()
+        .expect("costed weapons")
+        + 1;
+    config.weapon_preset = Some(unknown);
+    assert!(config.validate().is_err());
+    config.weapon_preset = Some(0);
     assert!(config.validate().is_err());
     config.weapon_preset = Some(4);
     config.window_size = Some((960, 540));

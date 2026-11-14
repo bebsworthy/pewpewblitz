@@ -18,6 +18,10 @@ validate_peer=${BRAWLER_RENDER_VALIDATE_PEER:-1}
 practice_smoke=${BRAWLER_RENDER_PRACTICE:-0}
 reduced_effects=${BRAWLER_RENDER_REDUCED_EFFECTS:-0}
 combat_smoke=${BRAWLER_RENDER_COMBAT:-0}
+# Optional primary weapon for the measured client: a costed weapon ID from
+# content/catalogs/builds.ron. The client validates it against the embedded catalog and selects,
+# or creates and selects, a saved brawler with that weapon through the canonical profile commands.
+render_weapon=${BRAWLER_RENDER_WEAPON:-}
 client_one_log=${report_path}.client-1.log
 client_two_log=${report_path}.client-2.log
 # The measured client requests exactly this many paired frame/state captures.
@@ -62,6 +66,14 @@ case "$combat_smoke" in
         printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_COMBAT must be 0 or 1' >&2
         exit 2
         ;;
+esac
+case "$render_weapon" in
+    '') measured_weapon_flags= ;;
+    *[!0-9]* | 0*)
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_WEAPON must be a build-catalog weapon ID' >&2
+        exit 2
+        ;;
+    *) measured_weapon_flags="--weapon-preset $render_weapon" ;;
 esac
 if [[ "$practice_smoke" == 1 ]]; then
     validate_peer=0
@@ -180,6 +192,7 @@ if [[ "$practice_smoke" == 1 ]]; then
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
         --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         ${measured_combat_flags:+$measured_combat_flags} \
+        ${measured_weapon_flags:+$measured_weapon_flags} \
         >"$client_one_log" 2>&1 &
 else
     target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
@@ -190,6 +203,7 @@ else
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
         --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         ${measured_combat_flags:+$measured_combat_flags} \
+        ${measured_weapon_flags:+$measured_weapon_flags} \
         >"$client_one_log" 2>&1 &
 fi
 measured_pid=$!

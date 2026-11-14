@@ -172,6 +172,11 @@ fn start_headless_product_request(
             .iter()
             .find(|brawler| brawler.id == id)
     })?;
+    // `--weapon-preset` waits until profile automation has selected a matching saved brawler,
+    // so the server resolves the requested primary weapon for the match.
+    if !crate::profile::automation_brawler_ready(config, brawler) {
+        return None;
+    }
     if config.product_practice_smoke && practice.start(&selection, brawler.id, brawler.revision) {
         debug!(
             game_type = game.id.as_str(),

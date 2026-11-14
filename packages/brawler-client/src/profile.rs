@@ -5,6 +5,11 @@ use bevy::prelude::*;
 use lightyear::prelude::{MessageReceiver, MessageSender};
 use std::collections::VecDeque;
 
+#[cfg(feature = "automation")]
+mod automation;
+#[cfg(feature = "automation")]
+pub(crate) use automation::automation_brawler_ready;
+
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ClientProfileModel {
     snapshot: Option<brawler::profiles::ProfileSnapshot>,
@@ -214,13 +219,14 @@ impl Plugin for ClientProfilePlugin {
             )
                 .chain(),
         );
-        // Automation-only: headless and render-evidence clients create one default brawler so
-        // they can queue without the interactive editor. Queued after outbound drain so the
-        // create command leaves on the following frame, as it did inside the former chain tail.
+        // Automation-only: headless and render-evidence clients create one default brawler, or
+        // select/create one carrying `--weapon-preset`, so they can queue without the
+        // interactive editor. Queued after outbound drain so the command leaves on the following
+        // frame, as it did inside the former chain tail.
         #[cfg(feature = "automation")]
         app.add_systems(
             Update,
-            create_automation_default_brawler.after(send_profile_commands),
+            automation::prepare_automation_brawler.after(send_profile_commands),
         );
     }
 }
@@ -289,53 +295,4 @@ fn send_profile_commands(
     while let Some(command) = model.outbound.pop_front() {
         sender.send::<brawler::protocol::ProfileChannel>(command);
     }
-}
-
-#[cfg(feature = "automation")]
-#[allow(clippy::needless_pass_by_value)]
-fn create_automation_default_brawler(
-    config: Res<brawler::config::ClientNetworkConfig>,
-    mut model: ResMut<ClientProfileModel>,
-) {
-    if !(config.headless || config.render_measurement.is_some())
-        || model.pending()
-        || model
-            .snapshot()
-            .is_none_or(|snapshot| !snapshot.brawlers.is_empty())
-    {
-        return;
-    }
-    let Some(catalog) = model.catalog() else {
-        return;
-    };
-    let requested_weapon = config
-        .weapon_preset
-        .and_then(|id| catalog.weapon(brawler::profiles::WeaponBaseId(id)))
-        .or_else(|| catalog.weapon_bases.first());
-    let Some((fighter, weapon, ultimate, passive_ids)) = catalog
-        .fighter_profiles
-        .first()
-        .zip(requested_weapon)
-        .zip(catalog.ultimates.first())
-        .and_then(|((fighter, weapon), ultimate)| {
-            let mut passives = catalog
-                .selectable_passives()
-                .map(|definition| definition.id);
-            Some((
-                fighter.id,
-                weapon.id,
-                ultimate.id,
-                [passives.next()?, passives.next()?],
-            ))
-        })
-    else {
-        return;
-    };
-    let _ = model.create(brawler::profiles::BrawlerDraft {
-        name: "Automation Brawler".into(),
-        fighter_profile_id: fighter,
-        weapon_base_id: weapon,
-        ultimate_id: ultimate,
-        passive_ids,
-    });
 }

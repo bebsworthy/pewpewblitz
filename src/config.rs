@@ -348,6 +348,28 @@ pub struct RenderMeasurementConfig {
     pub reduced_effects: bool,
 }
 
+/// Accepts only a weapon ID a saved brawler can select: the costed weapons in the embedded
+/// `content/catalogs/builds.ron`, so the bound follows the catalog instead of a literal.
+fn validate_selectable_weapon_preset(preset: u16) -> Result<(), String> {
+    let catalog = crate::builds::BuildCatalog::embedded()?;
+    if catalog
+        .weapon_costs
+        .iter()
+        .any(|cost| cost.weapon_id.0 == preset)
+    {
+        return Ok(());
+    }
+    let ids = catalog
+        .weapon_costs
+        .iter()
+        .map(|cost| cost.weapon_id.0.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "--weapon-preset must be a weapon ID from the build catalog ({ids})"
+    ))
+}
+
 /// Draws a nonzero client identity from operating-system entropy.
 pub fn random_nonzero_client_id() -> Result<u64, String> {
     for _ in 0..4 {
@@ -480,11 +502,8 @@ impl ClientNetworkConfig {
         {
             return Err("--simulation-ticks must be greater than zero".to_string());
         }
-        if self
-            .weapon_preset
-            .is_some_and(|preset| !(1..=6).contains(&preset))
-        {
-            return Err("--weapon-preset must be between 1 and 6".to_string());
+        if let Some(preset) = self.weapon_preset {
+            validate_selectable_weapon_preset(preset)?;
         }
         if self.window_size.is_some_and(|(width, height)| {
             !(640..=3_840).contains(&width) || !(360..=2_160).contains(&height)
