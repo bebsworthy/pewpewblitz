@@ -148,6 +148,7 @@ pub struct ClientShellPlugin;
 impl Plugin for ClientShellPlugin {
     fn build(&self, app: &mut App) {
         super::ui::press::add_release_activation(app);
+        super::back::add_back_input(app);
         app.add_plugins((
             DirectionalNavigationPlugin,
             super::ui::controls::UiControlsPlugin,
@@ -441,6 +442,7 @@ fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
 )]
 fn collect_navigation_input(
     keyboard: Res<ButtonInput<KeyCode>>,
+    platform_back: Res<super::BackInput>,
     gamepads: Query<&Gamepad>,
     selection: Res<InputSettingsSelection>,
     capture_consumed: Res<InputCaptureConsumed>,
@@ -542,7 +544,9 @@ fn collect_navigation_input(
         pending.0.push(action);
     }
     let back = !capture_consumed.0
-        && (keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East));
+        && (keyboard.just_pressed(KeyCode::Escape)
+            || pad_pressed(GamepadButton::East)
+            || platform_back.just_pressed());
     if back
         && !matches!(overlay.as_ref(), ClientOverlay::None)
         && !pending.0.contains(&ShellAction::Back)
@@ -1147,6 +1151,32 @@ mod tests {
         app.update();
         let scroll = app.world().get::<ScrollPosition>(area).unwrap().0.y;
         assert!((scroll - 400.0).abs() < f32::EPSILON, "{scroll}");
+    }
+
+    /// BRL-0198: the platform Back request closes Settings and Credits like Esc.
+    #[test]
+    fn platform_back_closes_settings_and_credits() {
+        let path = std::env::temp_dir().join(format!(
+            "brawler-brl0198-shell-back-{}-settings.ron",
+            std::process::id()
+        ));
+        let mut app = shell_test_app(path);
+        app.update();
+        for overlay in [ClientOverlay::Settings, ClientOverlay::Credits] {
+            *app.world_mut().resource_mut::<ClientOverlay>() = overlay.clone();
+            app.update();
+            app.update();
+            app.world_mut()
+                .resource_mut::<crate::client::BackInput>()
+                .request();
+            app.update();
+            app.update();
+            assert_eq!(
+                *app.world().resource::<ClientOverlay>(),
+                ClientOverlay::None,
+                "{overlay:?} stayed open"
+            );
+        }
     }
 
     #[test]

@@ -1194,6 +1194,7 @@ fn paint_current(
 pub(in crate::client::flow) fn map_maker_input(
     flow: Res<State<ClientFlow>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    back: Res<crate::client::BackInput>,
     mut keyboard_events: MessageReader<KeyboardInput>,
     mouse: Option<Res<ButtonInput<MouseButton>>>,
     mouse_motion: Option<Res<AccumulatedMouseMotion>>,
@@ -1213,6 +1214,8 @@ pub(in crate::client::flow) fn map_maker_input(
     if !matches!(*flow.get(), ClientFlow::MapLibrary | ClientFlow::MapEditor) {
         return;
     }
+    // The platform Back request cancels exactly where Escape does.
+    let escape = keyboard.just_pressed(KeyCode::Escape) || back.just_pressed();
     let mut ui_activated = false;
     // Release activation also keeps a button rebuilt under a held pointer from firing: it never
     // observed that press.
@@ -1255,7 +1258,7 @@ pub(in crate::client::flow) fn map_maker_input(
             }
             if keyboard.just_pressed(KeyCode::Enter) {
                 queue_ui_action(&mut actions, FlowUiAction::ConfirmCreateMap);
-            } else if keyboard.just_pressed(KeyCode::Escape) {
+            } else if escape {
                 queue_ui_action(&mut actions, FlowUiAction::CancelCreateMap);
             }
             return;
@@ -1279,12 +1282,12 @@ pub(in crate::client::flow) fn map_maker_input(
             }
             if keyboard.just_pressed(KeyCode::Enter) {
                 queue_ui_action(&mut actions, FlowUiAction::ConfirmRenameMapDraft);
-            } else if keyboard.just_pressed(KeyCode::Escape) {
+            } else if escape {
                 queue_ui_action(&mut actions, FlowUiAction::CancelRenameMapDraft);
             }
             return;
         }
-        if keyboard.just_pressed(KeyCode::Escape)
+        if escape
             || gamepads
                 .iter()
                 .any(|pad| pad.just_pressed(GamepadButton::East))
@@ -1313,7 +1316,7 @@ pub(in crate::client::flow) fn map_maker_input(
                 }
             }
         }
-        if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Escape) {
+        if keyboard.just_pressed(KeyCode::Enter) || escape {
             runtime.palette_search_active = false;
             changed = true;
         }
@@ -1565,7 +1568,7 @@ pub(in crate::client::flow) fn map_maker_input(
     if keyboard.just_pressed(KeyCode::KeyF) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerFitView);
     }
-    if keyboard.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) {
+    if escape || pad(GamepadButton::East) {
         if runtime.validation_open {
             runtime.validation_open = false;
             runtime.bump_render();
@@ -3644,6 +3647,7 @@ mod tests {
         .insert_resource(ButtonInput::<MouseButton>::default())
         .insert_resource(AccumulatedMouseMotion::default())
         .insert_resource(PendingFlowActions::default())
+        .init_resource::<crate::client::BackInput>()
         .insert_resource(MapCatalogResource(catalog))
         .insert_resource(runtime)
         .insert_state(ClientFlow::MapEditor)

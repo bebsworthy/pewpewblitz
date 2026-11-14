@@ -6,7 +6,7 @@ use super::{
 use actions::{FlowCommit, PendingFlowActions, begin_flow_frame};
 use bevy::{ecs::schedule::ApplyDeferred, prelude::*, ui::UiSystems};
 use connection::{ConnectionGeneration, ResolverState, start_initial_connection};
-use input::collect_flow_input;
+use input::{collect_flow_input, publish_back_root};
 use observation::observe_session;
 use persistence::load_connection_state;
 use reducer::{
@@ -94,6 +94,7 @@ impl Plugin for ClientFlowPlugin {
     )]
     fn build(&self, app: &mut App) {
         super::ui::press::add_release_activation(app);
+        super::back::add_back_input(app);
         app.init_state::<ClientFlow>()
             .init_resource::<ClientOverlay>()
             .init_resource::<PendingFlowActions>()
@@ -138,6 +139,8 @@ impl Plugin for ClientFlowPlugin {
                 )
                     .chain(),
             )
+            // The root flag reflects this frame's committed screen for the platform Back adapter.
+            .add_systems(Last, publish_back_root)
             .configure_sets(
                 Update,
                 (

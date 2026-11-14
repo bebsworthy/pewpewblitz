@@ -4,7 +4,7 @@ use crate::client::ui::press::ReleaseActivation;
 use crate::client::ui::surface::{Surface, SurfaceState};
 use crate::client::ui::theme::{TEXT, font, shell_background};
 use crate::client::{
-    ClientLobbyMembership, ClientPracticeModel,
+    BackInput, ClientLobbyMembership, ClientPracticeModel,
     flow::{
         ClientFlow, ClientOverlay, SelectedGameType,
         actions::{FlowUiAction, PendingFlowActions},
@@ -74,6 +74,7 @@ pub(in crate::client::flow) enum PracticeControl {
     Previous,
     Next,
     Start,
+    Back,
 }
 #[allow(
     clippy::too_many_arguments,
@@ -233,12 +234,33 @@ impl MapPickerView<'_> {
         .with_children(|header| {
             header
                 .spawn(Node {
-                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    column_gap: px(24.0 * self.factor),
                     ..default()
                 })
-                .with_children(|copy| {
-                    label(copy, self.assets, "CHOOSE PRACTICE MAP", 54.0 * self.factor);
-                    label(copy, self.assets, &game.to_uppercase(), 28.0 * self.factor);
+                .with_children(|lead| {
+                    let back = control(
+                        lead,
+                        self.server,
+                        PracticeControl::Back,
+                        Node {
+                            height: px(54),
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                        "Back",
+                    );
+                    lead.commands().entity(back).with_children(|c| {
+                        label(c, self.assets, "BACK", 22.0);
+                    });
+                    lead.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    })
+                    .with_children(|copy| {
+                        label(copy, self.assets, "CHOOSE PRACTICE MAP", 54.0 * self.factor);
+                        label(copy, self.assets, &game.to_uppercase(), 28.0 * self.factor);
+                    });
                 });
             if let Some(a) = self.assets {
                 header.spawn((
@@ -437,6 +459,7 @@ fn control(
             match control {
                 PracticeControl::Map(_) => Surface::Card,
                 PracticeControl::Start => Surface::Primary,
+                PracticeControl::Back => Surface::Back,
                 _ => Surface::Action,
             },
             SurfaceState::default(),
@@ -455,6 +478,7 @@ pub(in crate::client::flow) fn practice_map_input(
     overlay: Res<ClientOverlay>,
     practice: Res<ClientPracticeModel>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    back: Res<BackInput>,
     pads: Query<&Gamepad>,
     mut wheel: MessageReader<MouseWheel>,
     buttons: Query<(&PracticeControl, &ReleaseActivation)>,
@@ -480,7 +504,7 @@ pub(in crate::client::flow) fn practice_map_input(
         return;
     }
     let pad = |b| pads.iter().any(|p| p.just_pressed(b));
-    if keyboard.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) {
+    if keyboard.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) || back.just_pressed() {
         queue_ui_action(&mut actions, FlowUiAction::CancelPracticeMaps);
         return;
     }
@@ -520,6 +544,9 @@ pub(in crate::client::flow) fn practice_map_input(
         });
     }
     match activation {
+        Some(PracticeControl::Back) => {
+            queue_ui_action(&mut actions, FlowUiAction::CancelPracticeMaps);
+        }
         Some(PracticeControl::Previous) => carousel.step(false),
         Some(PracticeControl::Next) => carousel.step(true),
         Some(PracticeControl::Start) => {

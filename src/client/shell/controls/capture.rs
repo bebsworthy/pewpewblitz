@@ -13,6 +13,7 @@ use bevy::prelude::*;
 )]
 pub(in crate::client::shell) fn capture_input(
     keyboard: Res<ButtonInput<KeyCode>>,
+    back: Res<crate::client::BackInput>,
     mouse: Res<ButtonInput<MouseButton>>,
     gamepads: Query<&Gamepad>,
     buttons: Query<(&crate::client::ui::press::ReleaseActivation, &ShellButton)>,
@@ -46,7 +47,11 @@ pub(in crate::client::shell) fn capture_input(
     let target = id.target().expect("capture only starts for a binding row");
     let disconnected = matches!(target, BindingTarget::Gamepad(_))
         && device.is_none_or(|entity| gamepads.get(entity).is_err());
-    if keyboard.just_pressed(KeyCode::Escape) || cancel_clicked || disconnected {
+    if keyboard.just_pressed(KeyCode::Escape)
+        || back.just_pressed()
+        || cancel_clicked
+        || disconnected
+    {
         state.capture = Capture::Idle;
         selection.listening = false;
         page.rebuild = true;

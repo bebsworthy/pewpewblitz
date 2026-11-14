@@ -15,6 +15,8 @@ use bevy::{
 use lightyear::prelude::client::Client;
 
 pub(in crate::client::flow) const GAME_TYPE_CONFIRM_INDEX: usize = 1_000;
+/// Shares the confirm focus row so Left/Right reaches it from SELECT GAME.
+pub(in crate::client::flow) const GAME_TYPE_BACK_INDEX: usize = 1_001;
 #[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
 pub(in crate::client::flow) struct GameTypeSelectionDraft {
     pub(in crate::client::flow) selected_index: Option<usize>,
@@ -249,7 +251,34 @@ fn spawn_header(
         ..default()
     })
     .with_children(|header| {
-        label(header, assets, "CHOOSE GAME", 64.0 * factor);
+        header
+            .spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: px(24.0 * factor),
+                ..default()
+            })
+            .with_children(|lead| {
+                let back = choice(
+                    lead,
+                    None,
+                    Node {
+                        height: px(54),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    &Choice {
+                        index: GAME_TYPE_BACK_INDEX,
+                        action: FlowUiAction::CancelGameType,
+                        selected: false,
+                        card: false,
+                        label: "Back",
+                    },
+                );
+                lead.commands()
+                    .entity(back)
+                    .with_children(|c| label(c, assets, "BACK", 22.0));
+                label(lead, assets, "CHOOSE GAME", 64.0 * factor);
+            });
         if let Some(a) = assets {
             header.spawn((
                 ImageNode::new(a.dashboard_logo.clone()),

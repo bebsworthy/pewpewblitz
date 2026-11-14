@@ -53,6 +53,7 @@ mod assets;
 mod audio;
 #[cfg(feature = "automation")]
 mod automation;
+mod back;
 mod connection_persistence;
 mod dashboard;
 mod evidence_capture;
@@ -79,6 +80,7 @@ pub(crate) mod vfx;
 #[cfg(feature = "automation")]
 mod vfx_lab;
 pub(crate) use assets::ClientAssetHandles;
+pub use back::{BackInput, BackInputSystems};
 pub use flow::{
     CancelMatchStartConfirmation, ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError,
     FlowErrorAction, FlowErrorKind, SelectedGameType, SessionPurpose,

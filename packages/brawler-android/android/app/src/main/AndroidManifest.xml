@@ -11,6 +11,7 @@
         android:appCategory="game"
         android:icon="@mipmap/ic_launcher"
         android:label="PewPew Blitz"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.AppCompat.NoActionBar">
         <activity
             android:name=".MainActivity"

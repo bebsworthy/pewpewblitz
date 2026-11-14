@@ -23,3 +23,14 @@ Shell-screen Back navigation, unless it needs the same key handling.
 - On the Pixel 8a, both the Back gesture and the on-screen control open and close the match menu during Practice.
 - Desktop pause bindings are unchanged.
 - A focused test covers the BrowserBack mapping.
+
+
+# Shared Back seam (from BRL-0198)
+- BRL-0198 adds `client::back::BackInput` (PreUpdate `BackInputSystems`). `just_pressed()` covers
+  the logical `Key::BrowserBack` key (API 31-32 and hardware keyboards) and Android's predictive
+  back callback (`MainActivity` `OnBackPressedCallback` -> JNI `nativeOnBackPressed` ->
+  `BackInput::request()`); at targetSdk 37 the gesture never arrives as a key event, so map pause
+  from `BackInput::just_pressed()` rather than from the KeyCode binding or `NamedKey::BrowserBack`.
+- `BackInput::leaves_app()` is published by the shell flow and is false outside Dashboard / Select
+  Server roots, so during a match Android always forwards Back to Rust. BRL-0198 leaves in-match Back
+  unhandled (except Back on the leave confirmation = Keep Playing, same as Esc).

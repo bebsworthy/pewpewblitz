@@ -23,11 +23,15 @@ fn main() {
             let mut app = build_app_with_config(config);
             #[cfg(target_os = "android")]
             frame_pacing::install(&mut app);
+            #[cfg(target_os = "android")]
+            back::install(&mut app);
             app.run();
         }
         Err(error) => error!("PewPew Blitz could not start: {error}"),
     }
 }
 
+#[cfg(target_os = "android")]
+mod back;
 #[cfg(target_os = "android")]
 mod frame_pacing;

@@ -9,10 +9,13 @@ import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Process;
 import android.provider.Settings;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+
+import androidx.activity.OnBackPressedCallback;
 
 import com.google.androidgamesdk.GameActivity;
 
@@ -36,6 +39,41 @@ public class MainActivity extends GameActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         keepSurfaceOutOfDisplayCutout();
+        routeBackToGame();
+    }
+
+    /**
+     * Back means "back" in the game (BRL-0198). At targetSdk 37 the gesture arrives only through
+     * the back-invoked dispatcher, whose default finishes this activity while the native game
+     * keeps running. The game decides: an inner screen consumes it, a root screen returns false
+     * and the task moves to the background like any root activity, keeping the session.
+     */
+    private void routeBackToGame() {
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (!nativeOnBackPressed()) {
+                    moveTaskToBack(true);
+                }
+            }
+        });
+    }
+
+    /** Implemented by {@code libbrawler_android.so}; never blocks on the game loop. */
+    private native boolean nativeOnBackPressed();
+
+    /**
+     * The native game loop runs once per process: winit cannot recreate its event loop, so a new
+     * activity in this process would hang on the splash. Once this activity is finishing (QUIT
+     * returned from the game loop, or the system finished it) the process ends with it, and the
+     * next launch starts fresh (BRL-0198).
+     */
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (isFinishing()) {
+            Process.killProcess(Process.myPid());
+        }
     }
 
     /**

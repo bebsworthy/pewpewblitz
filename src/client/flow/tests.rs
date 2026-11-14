@@ -2598,7 +2598,7 @@ fn dashboard_chrome_focus_belongs_only_to_the_active_surface() {
 }
 
 #[test]
-fn game_selection_groups_modes_preserves_variants_and_has_no_back_button() {
+fn game_selection_groups_modes_preserves_variants_and_has_one_back_button() {
     let mut app = flow_test_app();
     let mut lobby = lobby_membership();
     let mut second = lobby.game_types[0].clone();
@@ -2631,10 +2631,14 @@ fn game_selection_groups_modes_preserves_variants_and_has_no_back_button() {
             .count(),
         2
     );
-    assert!(
-        !buttons
+    // BRL-0198: touch players need an on-screen way back (desktop also has Esc).
+    assert_eq!(
+        buttons
             .iter()
-            .any(|b| b.action == FlowUiAction::CancelGameType)
+            .filter(|b| b.action == FlowUiAction::CancelGameType)
+            .map(|b| b.index)
+            .collect::<Vec<_>>(),
+        [screens::game_select::GAME_TYPE_BACK_INDEX]
     );
     assert!(
         buttons
@@ -3510,5 +3514,268 @@ fn failed_lobby_return_during_match_presentation_shows_recoverable_connection_er
             RoutedClientPhase::Disabled
         );
         assert!(!app.world().resource::<MatchFailureNotice>().0);
+    }
+}
+
+/// BRL-0198: one shell screen reached from a fresh connected Dashboard.
+struct BackCase {
+    screen: &'static str,
+    open: Vec<FlowUiAction>,
+}
+
+fn shell_back_cases(brawler: crate::profiles::SavedBrawlerId) -> Vec<BackCase> {
+    let case = |screen, open| BackCase { screen, open };
+    vec![
+        case("Choose Game", vec![FlowUiAction::OpenGameTypeSelect]),
+        case("Choose Practice Map", vec![FlowUiAction::OpenPracticeMaps]),
+        case("Dashboard menu", vec![FlowUiAction::OpenDashboardMenu]),
+        case(
+            "Change server confirmation",
+            vec![
+                FlowUiAction::OpenDashboardMenu,
+                FlowUiAction::RequestChangeServer,
+            ],
+        ),
+        case("Brawlers", vec![FlowUiAction::OpenBrawlerList]),
+        case(
+            "Brawler details",
+            vec![
+                FlowUiAction::OpenBrawlerList,
+                FlowUiAction::OpenBrawlerDetails(brawler),
+            ],
+        ),
+        case(
+            "Create Brawler",
+            vec![FlowUiAction::OpenBrawlerList, FlowUiAction::CreateBrawler],
+        ),
+        case(
+            "Customize Weapon",
+            vec![
+                FlowUiAction::OpenBrawlerList,
+                FlowUiAction::OpenBrawlerDetails(brawler),
+                FlowUiAction::OpenWeaponEquipment(brawler),
+            ],
+        ),
+        case(
+            "Delete Brawler confirmation",
+            vec![
+                FlowUiAction::OpenBrawlerList,
+                FlowUiAction::OpenBrawlerDetails(brawler),
+                FlowUiAction::DeleteBrawler(brawler),
+            ],
+        ),
+    ]
+}
+
+fn shell_position(app: &App) -> (ClientFlow, ClientOverlay) {
+    (
+        *app.world().resource::<State<ClientFlow>>().get(),
+        app.world().resource::<ClientOverlay>().clone(),
+    )
+}
+
+fn press_platform_back(app: &mut App) {
+    app.world_mut()
+        .resource_mut::<crate::client::BackInput>()
+        .request();
+    app.update();
+    app.update();
+}
+
+fn press_escape(app: &mut App) {
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Escape);
+    app.update();
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .clear();
+    app.update();
+}
+
+fn opened_shell_screen(case: &BackCase, membership: &ClientLobbyMembership) -> App {
+    let mut app = configured_customization_app(membership);
+    for action in &case.open {
+        inject_action(&mut app, action.clone());
+        app.update();
+    }
+    app
+}
+
+#[test]
+fn platform_back_steps_back_from_every_shell_screen_exactly_like_escape() {
+    let membership = lobby_membership_with_brawler();
+    let brawler = membership.profile.brawlers[0].id;
+    for case in shell_back_cases(brawler) {
+        let mut back = opened_shell_screen(&case, &membership);
+        let opened = shell_position(&back);
+        assert_ne!(
+            opened,
+            (ClientFlow::Dashboard, ClientOverlay::None),
+            "{}: setup did not open the screen",
+            case.screen
+        );
+        assert!(
+            !back
+                .world()
+                .resource::<crate::client::BackInput>()
+                .leaves_app(),
+            "{}: an inner screen must keep Back in the app",
+            case.screen
+        );
+        press_platform_back(&mut back);
+        let after_back = shell_position(&back);
+        assert_ne!(after_back, opened, "{}: Back did nothing", case.screen);
+
+        let mut escape = opened_shell_screen(&case, &membership);
+        press_escape(&mut escape);
+        assert_eq!(
+            after_back,
+            shell_position(&escape),
+            "{}: Back and Esc diverged",
+            case.screen
+        );
+    }
+}
+
+#[test]
+fn platform_back_on_root_screens_leaves_the_app_to_the_platform() {
+    let mut app = configured_customization_app(&lobby_membership_with_brawler());
+    app.update();
+    assert!(
+        app.world()
+            .resource::<crate::client::BackInput>()
+            .leaves_app()
+    );
+    press_platform_back(&mut app);
+    assert_eq!(
+        shell_position(&app),
+        (ClientFlow::Dashboard, ClientOverlay::None),
+        "the root Dashboard has no in-app Back destination"
+    );
+
+    let mut app = flow_test_app();
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    app.update();
+    app.update();
+    assert!(
+        app.world()
+            .resource::<crate::client::BackInput>()
+            .leaves_app()
+    );
+    // Editing a field: Back cancels the edit first and only then leaves the app.
+    app.world_mut().resource_mut::<ServerSelectModel>().editing = Some(EditingField::Address);
+    app.update();
+    assert!(
+        !app.world()
+            .resource::<crate::client::BackInput>()
+            .leaves_app()
+    );
+    press_platform_back(&mut app);
+    assert_eq!(app.world().resource::<ServerSelectModel>().editing, None);
+    assert!(
+        app.world()
+            .resource::<crate::client::BackInput>()
+            .leaves_app()
+    );
+}
+
+#[test]
+fn back_leaves_the_app_only_from_idle_root_screens() {
+    use input::back_leaves_app;
+    assert!(back_leaves_app(
+        ClientFlow::Dashboard,
+        &ClientOverlay::None,
+        false
+    ));
+    assert!(back_leaves_app(
+        ClientFlow::ServerSelect,
+        &ClientOverlay::None,
+        false
+    ));
+    assert!(!back_leaves_app(
+        ClientFlow::ServerSelect,
+        &ClientOverlay::None,
+        true
+    ));
+    assert!(!back_leaves_app(
+        ClientFlow::Dashboard,
+        &ClientOverlay::Settings,
+        false
+    ));
+    assert!(!back_leaves_app(
+        ClientFlow::Dashboard,
+        &ClientOverlay::DashboardMenu,
+        false
+    ));
+    for flow in [
+        ClientFlow::Connecting,
+        ClientFlow::GameTypeSelect,
+        ClientFlow::PracticeMapSelect,
+        ClientFlow::MapLibrary,
+        ClientFlow::MapEditor,
+        ClientFlow::Queue,
+        ClientFlow::MatchLoading,
+        ClientFlow::Match,
+        ClientFlow::Results,
+    ] {
+        assert!(
+            !back_leaves_app(flow, &ClientOverlay::None, false),
+            "{flow:?} must forward Back into the app (BRL-0197 owns the match)"
+        );
+    }
+}
+
+/// The on-screen Back of Choose Game and Choose Practice Map is fully on screen (not only
+/// reachable by scrolling) on the phone and the default desktop window, and a tap goes back.
+#[test]
+fn choose_game_and_practice_map_back_controls_are_on_screen_and_go_back() {
+    for (width, height) in [(914, 411), (1280, 720)] {
+        for open in [
+            FlowUiAction::OpenGameTypeSelect,
+            FlowUiAction::OpenPracticeMaps,
+        ] {
+            let membership = lobby_membership_with_brawler();
+            let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
+                crate::client::ui::layout_harness::add_layout(app, width, height);
+            });
+            crate::client::ui::layout_harness::apply_viewport_fit(&mut app);
+            app.world_mut()
+                .resource_mut::<super::super::ClientProfileModel>()
+                .set_snapshot_for_test(membership.profile.clone());
+            inject_action(&mut app, open.clone());
+            settle_layout(&mut app);
+            let screen = format!("{open:?} at {width}x{height}");
+            let back = {
+                let mut controls = app
+                    .world_mut()
+                    .query_filtered::<(Entity, &AccessibleLabel), With<Button>>();
+                controls
+                    .iter(app.world())
+                    .find(|(_, label)| label.0 == "Back")
+                    .map_or_else(|| panic!("{screen}: no Back control"), |(entity, _)| entity)
+            };
+            assert!(
+                crate::client::ui::layout_harness::on_screen(app.world_mut(), back),
+                "{screen}: Back is not fully on screen"
+            );
+            assert_eq!(
+                app.world().get::<Surface>(back),
+                Some(&Surface::Back),
+                "{screen}: Back uses the shared surface"
+            );
+            let center = crate::client::ui::layout_harness::node_rect(app.world(), back)
+                .expect("laid out")
+                .center();
+            crate::client::ui::layout_harness::tap(&mut app, center);
+            app.update();
+            assert_eq!(
+                shell_position(&app),
+                (ClientFlow::Dashboard, ClientOverlay::None),
+                "{screen}: tapping Back did not return to the Dashboard"
+            );
+        }
     }
 }

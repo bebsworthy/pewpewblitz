@@ -5,7 +5,10 @@ use bevy::{
     asset::AssetPlugin,
     camera::{Camera, Camera2d, ComputedCameraValues, RenderTargetInfo},
     image::ImagePlugin,
-    input::InputPlugin,
+    input::{
+        InputPlugin,
+        touch::{TouchInput, TouchPhase},
+    },
     prelude::*,
     ui::{OverflowAxis, UiScale},
     window::{PrimaryWindow, WindowResolution},
@@ -137,6 +140,40 @@ pub(crate) fn unreachable_buttons(world: &mut World) -> Vec<String> {
         }
     }
     failures
+}
+
+/// True when the laid-out node lies entirely inside the primary window as presented now (without
+/// scrolling).
+pub(crate) fn on_screen(world: &mut World, entity: Entity) -> bool {
+    let mut windows = world.query_filtered::<&Window, With<PrimaryWindow>>();
+    let window = windows.single(world).expect("primary window");
+    let window = Rect::from_corners(Vec2::ZERO, window.physical_size().as_vec2());
+    node_rect(world, entity).is_some_and(|rect| {
+        rect.width() > 0.0
+            && rect.height() > 0.0
+            && rect.min.cmpge(window.min - 0.5).all()
+            && rect.max.cmple(window.max + 0.5).all()
+    })
+}
+
+/// A finger tap at a logical window position (down, up, and one frame to release), through the
+/// real touch input and UI focus path.
+pub(crate) fn tap(app: &mut App, position: Vec2) {
+    let window = app
+        .world_mut()
+        .query_filtered::<Entity, With<PrimaryWindow>>()
+        .single(app.world())
+        .expect("primary window");
+    for phase in [TouchPhase::Started, TouchPhase::Ended, TouchPhase::Ended] {
+        app.world_mut().write_message(TouchInput {
+            phase,
+            position,
+            window,
+            force: None,
+            id: 11,
+        });
+        app.update();
+    }
 }
 
 /// Physical-pixel rectangle of a laid-out node.

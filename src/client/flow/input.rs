@@ -2,6 +2,7 @@
 
 use crate::client::ui::press::ReleaseActivation;
 use crate::client::{
+    BackInput,
     connection_persistence::{ClientConnectionsPath, save_connections},
     flow::{
         actions::{FlowUiAction, PendingFlowActions},
@@ -159,6 +160,29 @@ pub(super) fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton
     }
 }
 
+/// True where the shell has no in-app destination for Back: the Dashboard and Select Server roots
+/// with nothing open and no field being edited. Esc there stays a no-op; a platform shell handles
+/// Back itself (Android moves the task to the background).
+pub(super) fn back_leaves_app(flow: ClientFlow, overlay: &ClientOverlay, editing: bool) -> bool {
+    matches!(flow, ClientFlow::Dashboard | ClientFlow::ServerSelect)
+        && matches!(overlay, ClientOverlay::None)
+        && !editing
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+pub(super) fn publish_back_root(
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    model: Option<Res<ServerSelectModel>>,
+    mut back: ResMut<BackInput>,
+) {
+    let editing = model.is_some_and(|model| model.editing.is_some());
+    back.set_leaves_app(back_leaves_app(*flow.get(), &overlay, editing));
+}
+
 pub(super) fn queue_ui_action(actions: &mut PendingFlowActions, action: FlowUiAction) {
     if matches!(
         action,
@@ -181,6 +205,7 @@ pub(super) fn collect_flow_input(
     flow: Res<State<ClientFlow>>,
     overlay: Res<ClientOverlay>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    back: Res<BackInput>,
     gamepads: Query<&Gamepad>,
     mut keyboard_events: MessageReader<KeyboardInput>,
     mut model: ResMut<ServerSelectModel>,
@@ -220,6 +245,8 @@ pub(super) fn collect_flow_input(
         }
     }
     let pad_pressed = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
+    // Controller East and the platform Back request share every Escape cancel below.
+    let cancel_pressed = pad_pressed(GamepadButton::East) || back.just_pressed();
     if matches!(
         overlay.as_ref(),
         ClientOverlay::BrawlerEditor | ClientOverlay::BrawlerDetails(_)
@@ -234,10 +261,10 @@ pub(super) fn collect_flow_input(
             &keyboard,
             &mut keyboard_events,
             pad_pressed(GamepadButton::South),
-            pad_pressed(GamepadButton::East),
+            cancel_pressed,
         );
         if !edit.editing_name && edit.inline_rename {
-            if keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East) {
+            if keyboard.just_pressed(KeyCode::Escape) || cancel_pressed {
                 edit.inline_rename = false;
             } else {
                 queue_ui_action(&mut actions, FlowUiAction::ConfirmBrawlerEdit);
@@ -255,7 +282,7 @@ pub(super) fn collect_flow_input(
             &keyboard,
             &mut keyboard_events,
             pad_pressed(GamepadButton::South),
-            pad_pressed(GamepadButton::East),
+            cancel_pressed,
         );
         return;
     }
@@ -317,7 +344,7 @@ pub(super) fn collect_flow_input(
                 }
             }
             model.editing = None;
-        } else if keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East) {
+        } else if keyboard.just_pressed(KeyCode::Escape) || cancel_pressed {
             if field == EditingField::Name {
                 model.name = model.committed_name.clone();
             }
@@ -452,7 +479,7 @@ pub(super) fn collect_flow_input(
     {
         queue_ui_action(&mut actions, button.action.clone());
     }
-    if keyboard.just_pressed(KeyCode::Escape) || pad_pressed(GamepadButton::East) {
+    if keyboard.just_pressed(KeyCode::Escape) || cancel_pressed {
         let action = if matches!(overlay.as_ref(), ClientOverlay::ChangeServerConfirmation) {
             FlowUiAction::KeepServer
         } else if matches!(overlay.as_ref(), ClientOverlay::DashboardMenu) {
