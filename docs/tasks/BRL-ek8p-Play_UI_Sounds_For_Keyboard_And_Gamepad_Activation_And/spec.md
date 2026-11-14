@@ -143,3 +143,8 @@ Awaiting owner playtest.
 - Lint caught `f32` array equality (switched to exact bit patterns, which is the intended change
   detection) and two functions over the line limit (extracted `navigate_with_feedback` and a Map
   Maker test runtime helper rather than adding allows).
+
+
+# Owner playtest (2026-11-14)
+
+Owner played `just client` against the routed server and accepted the button sound effects ("i'm ok with the sound effect on button"). The shared ui-move tick, pointer/touch slider ticks, carousel wheel ticks and tick volume stay as implemented; no change requested. Remaining silent paths stay in BRL-yrys.

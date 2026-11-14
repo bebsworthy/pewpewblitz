@@ -4,9 +4,9 @@ was: BRL-0193
 
 title: Play UI sounds for keyboard and gamepad activation and navigation
 
-status: doing
-closed:
-status_changed: 2026-11-14T20:14:57Z
+status: done
+closed: 2026-11-14T21:07:02Z
+status_changed: 2026-11-14T21:07:02Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-jgj4, BRL-yrys]
 
 parent: BRL-q5c4
 
-rank: 13500416
+rank:
 ---
 
 # Description
