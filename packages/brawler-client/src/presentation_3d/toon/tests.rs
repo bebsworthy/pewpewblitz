@@ -204,16 +204,70 @@ fn ready_toon_scenes_convert_their_materials_once() {
     );
     assert_eq!(materials.len(), 1);
 
-    // A world asset without a toon root (offscreen previews) keeps its PBR material.
-    let preview = app.world_mut().spawn_empty().id();
-    let preview_mesh = app
+    // A world asset without a toon root keeps its PBR material.
+    let plain_root = app.world_mut().spawn_empty().id();
+    let plain_mesh = app
         .world_mut()
-        .spawn((MeshMaterial3d(source.clone()), ChildOf(preview)))
+        .spawn((MeshMaterial3d(source.clone()), ChildOf(plain_root)))
         .id();
-    convert(&mut app, preview);
+    convert(&mut app, plain_root);
     assert!(
         app.world()
-            .get::<MeshMaterial3d<StandardMaterial>>(preview_mesh)
+            .get::<MeshMaterial3d<StandardMaterial>>(plain_mesh)
             .is_some()
+    );
+    // Arena roots carry no fixed rim: their fighter relation is tagged per frame.
+    assert!(app.world().get::<MeshTag>(fighter).is_none());
+}
+
+/// BRL-0179: a shell preview root converts through the same cached arena material and tags each
+/// converted mesh, including nested ones, with the player's local rim.
+#[test]
+fn player_preview_scenes_share_the_arena_material_and_wear_the_local_rim() {
+    let mut app = App::new();
+    app.init_resource::<Assets<StandardMaterial>>()
+        .init_resource::<Assets<ToonMaterial>>()
+        .insert_resource(shading())
+        .init_resource::<ToonSceneMaterials>();
+    let source = app
+        .world_mut()
+        .resource_mut::<Assets<StandardMaterial>>()
+        .add(StandardMaterial::default());
+    let arena_root = app.world_mut().spawn(ToonScene).id();
+    let arena_mesh = app
+        .world_mut()
+        .spawn((MeshMaterial3d(source.clone()), ChildOf(arena_root)))
+        .id();
+    convert(&mut app, arena_root);
+
+    let preview_root = app.world_mut().spawn(player_preview_toon_scene()).id();
+    let joint = app.world_mut().spawn(ChildOf(preview_root)).id();
+    let preview_mesh = app
+        .world_mut()
+        .spawn((MeshMaterial3d(source.clone()), ChildOf(joint)))
+        .id();
+    let bone = app.world_mut().spawn(ChildOf(preview_root)).id();
+    convert(&mut app, preview_root);
+
+    let material = |mesh: Entity| {
+        app.world()
+            .get::<MeshMaterial3d<ToonMaterial>>(mesh)
+            .unwrap()
+            .0
+            .clone()
+    };
+    assert_eq!(
+        material(preview_mesh),
+        material(arena_mesh),
+        "the preview reuses the arena's converted material"
+    );
+    assert_eq!(app.world().resource::<Assets<ToonMaterial>>().len(), 1);
+    assert_eq!(
+        app.world().get::<MeshTag>(preview_mesh),
+        Some(&RimRelation::Local.tag())
+    );
+    assert!(
+        app.world().get::<MeshTag>(bone).is_none(),
+        "only meshes are tagged"
     );
 }

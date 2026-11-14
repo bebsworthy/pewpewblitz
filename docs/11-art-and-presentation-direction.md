@@ -284,8 +284,11 @@ stay readable inside wall shadows. Imported glTF instances are converted once wh
 ready, under a `ToonScene` root (fighters, blasters, zombies, every environment kit instance, and
 the Map Maker palette preview), and the generated theme surfaces, primitive fighters, and the
 primitive barrel are built as toon materials. Hit flash and concealment variants work on both
-material families. VFX, rings, markers, and status visuals keep their own materials; the Dashboard
-brawler and weapon previews keep PBR until their light rig is reworked.
+material families. VFX, rings, markers, and status visuals keep their own materials. The Dashboard
+brawler, brawler card, and weapon previews convert through the same `ToonScene` path and cached
+materials (BRL-0179). The brawler and its attached blaster wear the local (green) rim, because they
+show the player's own brawler; the standalone weapon close-up uses the world rim, because at that
+scale a side rim reads as a coloured fringe.
 
 Grounding (`presentation_3d/contact_shadow.rs`, tuned by the client-only
 `assets/catalogs/contact_shadows.ron`) is a hybrid. Static walls and indestructible blockers are
@@ -350,6 +353,14 @@ The Dashboard owns a separate client-only brawler preview, its camera, lighting,
 lifecycle. It may reuse the supported fighter model, attached weapon, idle animation, presentation
 profile, and primitive fallback, but it does not instantiate a gameplay fighter, decide build
 legality, or share entity ownership with the gameplay-world renderer.
+
+The brawler, brawler-card, and weapon previews render toon-shaded like the arena (BRL-0179). Their
+offscreen cameras stay LDR with the world tonemapper and the preview grading, so bloom never
+applies. The toon material bands only directional light plus ambient, so the preview rig is one
+shadowless key light plus a per-camera ambient, both from `preview_light` in
+`assets/catalogs/world_look.ron`. The per-camera ambient keeps the preview independent of the last
+presented map theme. There are no point lights or preview shadow maps; the toon rim takes the place
+of the former coloured rim light. Fighter outlines (BRL-0151) are not drawn in the previews yet.
 
 ### Bevy UI
 

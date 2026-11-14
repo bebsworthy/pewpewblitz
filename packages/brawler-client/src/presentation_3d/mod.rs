@@ -71,7 +71,8 @@ pub(crate) use map_editor::{MapEditorPointerMode, MapEditorPreview, MapEditorPre
 use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_health_ui};
 #[cfg(feature = "automation")]
 pub(crate) use toon::install as install_toon_shading;
-use toon::{RimRelation, ShadedMaterial, ToonMaterial, ToonScene, ToonShading};
+use toon::{RimRelation, ShadedMaterial, ToonMaterial, ToonShading};
+pub(crate) use toon::{ToonScene, ToonSceneRim, player_preview_toon_scene};
 pub(crate) use world_look::WorldLookCatalog;
 #[cfg(feature = "automation")]
 pub(crate) use world_look::install as install_world_look;
@@ -242,6 +243,8 @@ pub(crate) struct Material3dAssets {
     /// Primitive fighter bodies, toon shaded like imported fighters.
     pub(crate) fighter_body_blue: Handle<ToonMaterial>,
     pub(crate) fighter_body_red: Handle<ToonMaterial>,
+    /// The primitive blaster of the offscreen brawler preview, toon shaded like imported blasters.
+    pub(crate) preview_blaster: Handle<ToonMaterial>,
     pub(crate) pickup_glow: Handle<StandardMaterial>,
 }
 
@@ -1558,6 +1561,8 @@ pub(crate) fn setup_3d_foundation(
             .add(toon_shading.material(matte(Color::srgb(0.12, 0.72, 0.96)))),
         fighter_body_red: toon_materials
             .add(toon_shading.material(matte(Color::srgb(1.0, 0.42, 0.12)))),
+        preview_blaster: toon_materials
+            .add(toon_shading.material(matte(Color::srgb(0.72, 0.76, 0.82)))),
         pickup_glow: materials.add(StandardMaterial {
             base_color: Color::LinearRgba(GLOW_PICKUP),
             alpha_mode: AlphaMode::Blend,

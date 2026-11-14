@@ -99,6 +99,7 @@ fn update(
                 ..default()
             }),
             look.preview_camera_look(),
+            look.preview_ambient_light(),
             Transform::from_xyz(0.8, 0.32, 0.9).looking_at(Vec3::new(0.0, -0.05, 0.0), Vec3::Y),
             RenderLayers::layer(LAYER),
         ))
@@ -112,28 +113,19 @@ fn update(
     commands.spawn((
         WeaponOwned,
         WeaponScene,
+        // Arena toon material without a relationship rim: at this close-up a side rim reads as a
+        // coloured fringe on the blaster rather than a silhouette accent (BRL-0179 captures).
+        super::super::presentation_3d::ToonScene,
         WorldAssetRoot(imported.blaster_scene.clone()),
         Transform::default(),
         RenderLayers::layer(LAYER),
     ));
+    // One catalog key light: the toon material bands directional light, so a back fill would put
+    // the whole blaster in the lit band (BRL-0179).
     commands.spawn((
         WeaponOwned,
-        DirectionalLight {
-            illuminance: 12_000.0,
-            shadow_maps_enabled: false,
-            ..default()
-        },
+        look.preview_key_light(),
         Transform::from_xyz(2.0, 4.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
-        RenderLayers::layer(LAYER),
-    ));
-    commands.spawn((
-        WeaponOwned,
-        DirectionalLight {
-            illuminance: 5_000.0,
-            shadow_maps_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(-3.0, 2.0, -2.0).looking_at(Vec3::ZERO, Vec3::Y),
         RenderLayers::layer(LAYER),
     ));
 }

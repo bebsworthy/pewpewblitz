@@ -34,6 +34,10 @@ const MIN_GRADING_SATURATION: f32 = 0.8;
 const MAX_GRADING_SATURATION: f32 = 1.4;
 const MIN_GRADING_CONTRAST: f32 = 0.8;
 const MAX_GRADING_CONTRAST: f32 = 1.3;
+/// Preview key light ceiling in lux; above it a lit preview surface saturates under the tonemapper.
+const MAX_PREVIEW_KEY_ILLUMINANCE: f32 = 15_000.0;
+/// Preview ambient ceiling (cd/m²); the brightest map theme uses 240.
+const MAX_PREVIEW_AMBIENT_BRIGHTNESS: f32 = 400.0;
 /// Peak max-channel HDR value for non-glow effect families (area, status, field, and Dash trail
 /// shaders plus unlit markers). Additive bloom only starts at the knee
 /// (`threshold * (1 - threshold_softness)`), so blended non-glow output stays below it (BRL-0176).
@@ -46,6 +50,46 @@ struct WorldLookCatalogSource {
     schema_version: u16,
     bloom: BloomTuning,
     preview_grading: ThemeGrading,
+    preview_light: PreviewLightTuning,
+}
+
+/// The offscreen preview light rig: one key light and a per-camera ambient (BRL-0179).
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct PreviewLightTuning {
+    key_color: (f32, f32, f32),
+    key_illuminance: f32,
+    ambient_color: (f32, f32, f32),
+    ambient_brightness: f32,
+}
+
+impl PreviewLightTuning {
+    fn validate(self) -> Result<Self, String> {
+        let owner = "world look preview_light";
+        for (name, color) in [
+            ("key_color", self.key_color),
+            ("ambient_color", self.ambient_color),
+        ] {
+            for channel in [color.0, color.1, color.2] {
+                check_range(owner, name, channel, 0.0, 1.0)?;
+            }
+        }
+        check_range(
+            owner,
+            "key_illuminance",
+            self.key_illuminance,
+            0.0,
+            MAX_PREVIEW_KEY_ILLUMINANCE,
+        )?;
+        check_range(
+            owner,
+            "ambient_brightness",
+            self.ambient_brightness,
+            0.0,
+            MAX_PREVIEW_AMBIENT_BRIGHTNESS,
+        )?;
+        Ok(self)
+    }
 }
 
 /// Restrained bloom tuning. A threshold is used, so composition is additive.
@@ -157,6 +201,7 @@ fn check_range(owner: &str, name: &str, value: f32, min: f32, max: f32) -> Resul
 pub(crate) struct WorldLookCatalog {
     pub(super) bloom: BloomTuning,
     preview_grading: ThemeGrading,
+    preview_light: PreviewLightTuning,
 }
 
 impl WorldLookCatalog {
@@ -209,12 +254,37 @@ impl WorldLookCatalog {
         Ok(Self {
             bloom,
             preview_grading: source.preview_grading,
+            preview_light: source.preview_light.validate()?,
         })
     }
 
     /// Tonemapping and grading for an offscreen preview camera that shows world assets.
     pub(crate) fn preview_camera_look(&self) -> (Tonemapping, ColorGrading) {
         (WORLD_TONEMAPPING, self.preview_grading.color_grading())
+    }
+
+    /// The per-camera ambient of a toon-shaded fighter or weapon preview camera, so the preview
+    /// does not follow whichever map theme last set the global ambient.
+    pub(crate) fn preview_ambient_light(&self) -> AmbientLight {
+        let (red, green, blue) = self.preview_light.ambient_color;
+        AmbientLight {
+            color: Color::srgb(red, green, blue),
+            brightness: self.preview_light.ambient_brightness,
+            ..default()
+        }
+    }
+
+    /// The single shadowless key light of a toon-shaded fighter or weapon preview. The toon
+    /// material bands directional light only, and preview fighters ignore received shadows, so a
+    /// shadow map would cost a pass and change nothing.
+    pub(crate) fn preview_key_light(&self) -> DirectionalLight {
+        let (red, green, blue) = self.preview_light.key_color;
+        DirectionalLight {
+            color: Color::srgb(red, green, blue),
+            illuminance: self.preview_light.key_illuminance,
+            shadow_maps_enabled: false,
+            ..default()
+        }
     }
 }
 

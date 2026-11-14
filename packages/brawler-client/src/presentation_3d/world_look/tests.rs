@@ -29,6 +29,35 @@ fn catalog_rejects_unknown_fields_bad_schema_and_out_of_range_values() {
     assert!(WorldLookCatalog::from_ron(&oversaturated).is_err());
 }
 
+/// BRL-0179: the preview rig is one shadowless key plus a per-camera ambient, both validated.
+#[test]
+fn preview_light_rig_is_validated_and_shadowless() {
+    let catalog = catalog();
+    let key = catalog.preview_key_light();
+    assert!(
+        !key.shadow_maps_enabled,
+        "toon preview fighters ignore received shadows"
+    );
+    assert!(key.illuminance > 0.0 && key.illuminance <= MAX_PREVIEW_KEY_ILLUMINANCE);
+    let ambient = catalog.preview_ambient_light();
+    assert!(ambient.brightness > 0.0 && ambient.brightness <= MAX_PREVIEW_AMBIENT_BRIGHTNESS);
+    for invalid in [
+        WORLD_LOOK_CATALOG.replace("key_illuminance: 9000.0", "key_illuminance: 40000.0"),
+        WORLD_LOOK_CATALOG.replace("key_illuminance: 9000.0", "key_illuminance: -1.0"),
+        WORLD_LOOK_CATALOG.replace("ambient_brightness: 160.0", "ambient_brightness: 900.0"),
+        WORLD_LOOK_CATALOG.replace(
+            "key_color: (1.0, 0.88, 0.72)",
+            "key_color: (1.4, 0.88, 0.72)",
+        ),
+        WORLD_LOOK_CATALOG.replace(
+            "ambient_brightness: 160.0,",
+            "ambient_brightness: 160.0, fill: 1.0,",
+        ),
+    ] {
+        assert!(WorldLookCatalog::from_ron(&invalid).is_err());
+    }
+}
+
 #[test]
 fn theme_grading_bounds_are_enforced() {
     let valid = ThemeGrading {

@@ -16,4 +16,13 @@
     // Offscreen previews (dashboard brawler, brawler card, weapon, Map Maker palette): same
     // tonemapper as the world, no HDR or bloom.
     preview_grading: (exposure: 0.3, temperature: 0.0, tint: 0.0, saturation: 1.15, contrast: 1.0),
+    // Light rig of the brawler, card, and weapon previews (BRL-0179). The toon material bands only
+    // directional light plus ambient, so the rig is one shadowless key plus a per-camera ambient
+    // that does not follow the last presented map theme. Colours follow the Feature Yard sun.
+    preview_light: (
+        key_color: (1.0, 0.88, 0.72),
+        key_illuminance: 9000.0,
+        ambient_color: (0.72, 0.82, 0.94),
+        ambient_brightness: 160.0,
+    ),
 )

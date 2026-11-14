@@ -277,7 +277,28 @@ impl ToonShading {
 
 /// Marks a world-asset instance root whose meshes use the toon material.
 #[derive(Component, Clone, Copy, Debug, Default)]
-pub(in crate::presentation_3d) struct ToonScene;
+pub(crate) struct ToonScene;
+
+/// A fixed rim relation for every mesh of a [`ToonScene`] whose rim does not follow a live fighter
+/// (the offscreen shell previews, BRL-0179). Arena fighters are tagged by `tag_fighter_rim_relation`
+/// instead, because their relation follows the observer.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ToonSceneRim(RimRelation);
+
+impl ToonSceneRim {
+    /// The player's own brawler and blaster: the local (green) rim they wear in the arena.
+    pub(crate) const PLAYER: Self = Self(RimRelation::Local);
+
+    pub(crate) const fn tag(self) -> MeshTag {
+        self.0.tag()
+    }
+}
+
+/// The root components of an offscreen preview scene shown as the player's own brawler: converted
+/// to the arena toon material and tagged with the local rim.
+pub(crate) fn player_preview_toon_scene() -> (ToonScene, ToonSceneRim) {
+    (ToonScene, ToonSceneRim::PLAYER)
+}
 
 /// Toon materials converted from imported scene materials, keyed by source material.
 #[derive(Resource, Default)]
@@ -289,7 +310,7 @@ pub(in crate::presentation_3d) struct ToonSceneMaterials {
 #[derive(SystemParam)]
 pub(in crate::presentation_3d) struct ToonSceneConversion<'w, 's> {
     commands: Commands<'w, 's>,
-    roots: Query<'w, 's, (), With<ToonScene>>,
+    roots: Query<'w, 's, Option<&'static ToonSceneRim>, With<ToonScene>>,
     children: Query<'w, 's, &'static Children>,
     meshes: Query<'w, 's, &'static MeshMaterial3d<StandardMaterial>>,
     standard: Res<'w, Assets<StandardMaterial>>,
@@ -299,12 +320,14 @@ pub(in crate::presentation_3d) struct ToonSceneConversion<'w, 's> {
 }
 
 impl ToonSceneConversion<'_, '_> {
-    /// Converts every `StandardMaterial` mesh under a [`ToonScene`] root to the toon material.
-    /// Other roots are left untouched.
+    /// Converts every `StandardMaterial` mesh under a [`ToonScene`] root to the toon material and,
+    /// for a root with a [`ToonSceneRim`], tags each converted mesh with that rim. Other roots are
+    /// left untouched.
     fn convert(&mut self, root: Entity) {
-        if !self.roots.contains(root) {
+        let Ok(rim) = self.roots.get(root) else {
             return;
-        }
+        };
+        let rim = rim.copied();
         for entity in self.children.iter_descendants(root) {
             let Ok(source) = self.meshes.get(entity) else {
                 continue;
@@ -323,10 +346,12 @@ impl ToonSceneConversion<'_, '_> {
                 self.converted.handles.insert(key, handle.clone());
                 handle
             };
-            self.commands
-                .entity(entity)
-                .remove::<MeshMaterial3d<StandardMaterial>>()
+            let mut mesh = self.commands.entity(entity);
+            mesh.remove::<MeshMaterial3d<StandardMaterial>>()
                 .insert(MeshMaterial3d(handle));
+            if let Some(rim) = rim {
+                mesh.insert(rim.tag());
+            }
         }
     }
 }

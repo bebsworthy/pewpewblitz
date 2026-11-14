@@ -260,6 +260,7 @@ fn spawn_dashboard_preview(
                 ..default()
             }),
             look.preview_camera_look(),
+            look.preview_ambient_light(),
             Transform::from_xyz(205.0, 72.0, 125.0).looking_at(Vec3::new(0.0, 34.0, 0.0), Vec3::Y),
             layer.clone(),
         ))
@@ -271,7 +272,7 @@ fn spawn_dashboard_preview(
         host,
     });
 
-    spawn_dashboard_preview_lights(&mut commands, &layer, *flow.get());
+    spawn_dashboard_preview_light(&mut commands, &look, &layer, *flow.get());
     let root = commands
         .spawn((
             DashboardOwned,
@@ -282,17 +283,20 @@ fn spawn_dashboard_preview(
             layer.clone(),
         ))
         .with_children(|root| {
+            let rim = super::presentation_3d::ToonSceneRim::PLAYER.tag();
             root.spawn((
                 DashboardPreviewFallback,
                 Mesh3d(primitives.fighter.clone()),
-                MeshMaterial3d(materials.team_blue.clone()),
+                MeshMaterial3d(materials.fighter_body_blue.clone()),
+                rim.clone(),
                 Transform::from_xyz(0.0, 72.0, 0.0).with_scale(Vec3::splat(1.55)),
                 layer.clone(),
             ));
             root.spawn((
                 DashboardPreviewFallback,
                 Mesh3d(primitives.unit_cuboid.clone()),
-                MeshMaterial3d(materials.neutral.clone()),
+                MeshMaterial3d(materials.preview_blaster.clone()),
+                rim,
                 Transform::from_xyz(34.0, 75.0, 5.0).with_scale(Vec3::new(48.0, 11.0, 14.0)),
                 layer.clone(),
             ));
@@ -388,6 +392,7 @@ fn ensure_brawler_card_target(
                 ..default()
             }),
             look.preview_camera_look(),
+            look.preview_ambient_light(),
             Transform::from_xyz(205.0, 72.0, 125.0).looking_at(Vec3::new(0.0, 34.0, 0.0), Vec3::Y),
             RenderLayers::layer(DASHBOARD_RENDER_LAYER),
         ))
@@ -449,42 +454,20 @@ fn contained_preview_size(source: Vec2, bounds: Vec2) -> Vec2 {
     source * (bounds / source).min_element()
 }
 
-fn spawn_dashboard_preview_lights(commands: &mut Commands, layer: &RenderLayers, flow: ClientFlow) {
+/// The toon material bands directional light and ambient only (BRL-0179), so the preview rig is
+/// the catalog key light; the cameras carry the preview ambient and the toon rim replaces the
+/// former coloured point lights.
+fn spawn_dashboard_preview_light(
+    commands: &mut Commands,
+    look: &super::presentation_3d::WorldLookCatalog,
+    layer: &RenderLayers,
+    flow: ClientFlow,
+) {
     commands.spawn((
         DashboardOwned,
         DespawnOnExit(flow),
-        DirectionalLight {
-            illuminance: 9_000.0,
-            shadow_maps_enabled: true,
-            ..default()
-        },
+        look.preview_key_light(),
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.65, -0.55, 0.0)),
-        layer.clone(),
-    ));
-    commands.spawn((
-        DashboardOwned,
-        DespawnOnExit(flow),
-        PointLight {
-            color: Color::srgb(1.0, 0.82, 0.68),
-            intensity: 1_150_000.0,
-            range: 260.0,
-            shadow_maps_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(135.0, 105.0, 125.0),
-        layer.clone(),
-    ));
-    commands.spawn((
-        DashboardOwned,
-        DespawnOnExit(flow),
-        PointLight {
-            color: Color::srgb(0.05, 0.72, 0.92),
-            intensity: 1_800_000.0,
-            range: 220.0,
-            shadow_maps_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(-58.0, 88.0, -28.0),
         layer.clone(),
     ));
 }
@@ -498,6 +481,7 @@ fn spawn_imported_character(
     commands.entity(root).with_children(|parent| {
         parent.spawn((
             DashboardImportedScene::Character,
+            super::presentation_3d::player_preview_toon_scene(),
             WorldAssetRoot(imported.character_scene.clone()),
             super::presentation_3d::riff_scene_transform(
                 -0.12,
@@ -571,6 +555,7 @@ fn setup_dashboard_imported_scene(
     };
     commands.entity(socket).with_child((
         DashboardImportedScene::Blaster,
+        super::presentation_3d::player_preview_toon_scene(),
         super::presentation_3d::blaster_attachment(imported.blaster_scene.clone()),
         layer,
     ));
