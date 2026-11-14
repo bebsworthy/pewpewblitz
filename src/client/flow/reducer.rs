@@ -803,6 +803,15 @@ pub(super) fn rejection_flow_error(reason: ClientLobbyFailure) -> FlowError {
                 Some(FlowErrorAction::Back),
             ],
         ),
+        ClientLobbyFailure::Rejected(crate::protocol::LobbyJoinRejection::AccountInUse) => (
+            "This account is already connected from another running copy of the game. Close it, \
+             then retry."
+                .to_string(),
+            [
+                Some(FlowErrorAction::RetryConnection),
+                Some(FlowErrorAction::Back),
+            ],
+        ),
         ClientLobbyFailure::Rejected(rejection) => (
             format!("The server rejected compatibility: {rejection:?}"),
             [Some(FlowErrorAction::Back), None],

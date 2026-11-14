@@ -2,7 +2,7 @@
 
 use super::{
     LobbyClient, LobbySessionError, LobbyState, QueueSnapshotPublication, QueueState,
-    authenticated_netcode_id, catalog,
+    account_takeover::AccountTakeovers, authenticated_netcode_id, catalog,
 };
 use crate::{
     protocol::{LobbyHello, LobbyJoinOutcome, LobbyJoinRejection, ProfileChannel, SessionChannel},
@@ -16,12 +16,19 @@ use std::collections::BTreeMap;
 #[derive(Resource, Default)]
 pub(super) struct PendingLobbyAdmissions(BTreeMap<u64, PendingLobbyAdmission>);
 
+impl PendingLobbyAdmissions {
+    /// Forget a loading admission whose profile session is being replaced.
+    pub(super) fn remove(&mut self, client_id: u64) -> Option<Entity> {
+        self.0.remove(&client_id).map(|admission| admission.entity)
+    }
+}
+
 #[derive(Clone)]
-struct PendingLobbyAdmission {
-    entity: Entity,
+pub(super) struct PendingLobbyAdmission {
+    pub(super) entity: Entity,
     route_id: RouteId,
     peer_id: PeerId,
-    hello: LobbyHello,
+    pub(super) hello: LobbyHello,
 }
 
 #[allow(
@@ -31,8 +38,10 @@ struct PendingLobbyAdmission {
 )]
 pub(super) fn lobby_receive_hellos(
     state: Res<LobbyState>,
+    time: Res<Time<Real>>,
     mut authority: ResMut<crate::profiles::ProfileAuthority>,
     mut pending: ResMut<PendingLobbyAdmissions>,
+    mut takeovers: ResMut<AccountTakeovers>,
     mut receivers: Query<(
         Entity,
         &RemoteId,
@@ -72,32 +81,51 @@ pub(super) fn lobby_receive_hellos(
             if state.session_for_client(client_id).is_some() {
                 continue;
             }
-            if let Some(existing) = pending.0.get(&client_id) {
-                if existing.hello != hello {
+            if let Some(existing) = pending
+                .0
+                .get(&client_id)
+                .map(|admission| &admission.hello)
+                .or_else(|| takeovers.hello(client_id))
+            {
+                if *existing != hello {
                     sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
                         reason: LobbyJoinRejection::InvalidAccount,
                     });
                 }
                 continue;
             }
-            match authority.begin_load(client_id, hello.account_id) {
-                Ok(()) => {
-                    pending.0.insert(
-                        client_id,
-                        PendingLobbyAdmission {
-                            entity,
-                            route_id: peer.route_id,
-                            peer_id: peer.peer_id,
-                            hello,
-                        },
-                    );
-                }
-                Err(error) => sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
+            let admission = PendingLobbyAdmission {
+                entity,
+                route_id: peer.route_id,
+                peer_id: peer.peer_id,
+                hello,
+            };
+            if let Some(holder) = authority.account_holder(admission.hello.account_id) {
+                // The account is held by another session. `resolve_account_takeovers`, which runs
+                // next, decides whether that session is stale enough to be replaced.
+                takeovers.defer(client_id, holder, admission, time.elapsed());
+                continue;
+            }
+            if let Err(error) = begin_admission(&mut authority, &mut pending, client_id, admission)
+            {
+                sender.send::<SessionChannel>(LobbyJoinOutcome::Rejected {
                     reason: profile_authority_join_rejection(&error),
-                }),
+                });
             }
         }
     }
+}
+
+/// Submit the profile load for one validated hello and remember it until storage answers.
+pub(super) fn begin_admission(
+    authority: &mut crate::profiles::ProfileAuthority,
+    pending: &mut PendingLobbyAdmissions,
+    client_id: u64,
+    admission: PendingLobbyAdmission,
+) -> Result<(), crate::profiles::ProfileAuthorityError> {
+    authority.begin_load(client_id, admission.hello.account_id)?;
+    pending.0.insert(client_id, admission);
+    Ok(())
 }
 
 #[allow(
@@ -280,7 +308,7 @@ fn profile_command_error_decision(
     }
 }
 
-fn profile_authority_join_rejection(
+pub(super) fn profile_authority_join_rejection(
     error: &crate::profiles::ProfileAuthorityError,
 ) -> LobbyJoinRejection {
     match error {

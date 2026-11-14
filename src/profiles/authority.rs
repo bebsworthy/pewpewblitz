@@ -297,6 +297,15 @@ impl ProfileAuthority {
         Ok(ProfileMutationSubmission::Pending)
     }
 
+    /// The client key whose accepted or loading profile session currently holds `account_id`.
+    #[must_use]
+    pub fn account_holder(&self, account_id: AccountId) -> Option<u64> {
+        self.active_accounts
+            .get(&account_id)
+            .or_else(|| self.pending_accounts.get(&account_id))
+            .copied()
+    }
+
     #[must_use]
     pub fn snapshot(&self, client_key: u64) -> Option<&ProfileSnapshot> {
         self.sessions

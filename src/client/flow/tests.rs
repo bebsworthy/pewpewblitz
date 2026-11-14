@@ -2445,6 +2445,21 @@ fn rejection_actions_and_favorite_focus_are_deterministic() {
         invalid_name.actions,
         [Some(FlowErrorAction::EditName), Some(FlowErrorAction::Back)]
     );
+    let account_in_use = rejection_flow_error(ClientLobbyFailure::Rejected(
+        crate::protocol::LobbyJoinRejection::AccountInUse,
+    ));
+    assert_eq!(
+        account_in_use.message,
+        "This account is already connected from another running copy of the game. Close it, then \
+         retry."
+    );
+    assert_eq!(
+        account_in_use.actions,
+        [
+            Some(FlowErrorAction::RetryConnection),
+            Some(FlowErrorAction::Back)
+        ]
+    );
     assert_eq!(favorite_focus_after_removal(Some(1), 2), 5);
     assert_eq!(favorite_focus_after_removal(Some(2), 2), 5);
     assert_eq!(favorite_focus_after_removal(Some(0), 0), 0);

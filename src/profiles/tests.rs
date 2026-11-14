@@ -524,7 +524,9 @@ fn profile_authority_serializes_sessions_mutations_and_queue_lock() {
         authority.begin_load(8, account),
         Err(ProfileAuthorityError::AccountInUse)
     );
+    assert_eq!(authority.account_holder(account), Some(7));
     let (loads, _) = poll_authority(&mut authority);
+    assert_eq!(authority.account_holder(account), Some(7));
     let loaded = loads[0].result.as_ref().unwrap();
     assert_eq!(loaded.account_id, account);
     assert!(loaded.brawlers.is_empty());
@@ -597,7 +599,9 @@ fn profile_authority_serializes_sessions_mutations_and_queue_lock() {
     assert_eq!(authority.snapshot(7).unwrap().brawlers[0], brawler);
 
     authority.remove_client(7);
+    assert_eq!(authority.account_holder(account), None);
     authority.begin_load(8, account).unwrap();
+    assert_eq!(authority.account_holder(account), Some(8));
     let (loads, _) = poll_authority(&mut authority);
     assert_eq!(loads[0].result.as_ref().unwrap().brawlers[0], brawler);
     drop(authority);

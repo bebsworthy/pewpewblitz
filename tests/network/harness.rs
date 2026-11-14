@@ -206,6 +206,8 @@ pub(super) struct Harness {
     pub(super) client_entities: Vec<Entity>,
     pub(super) client_cues: Vec<Vec<CombatCue>>,
     pub(super) client_heist_cues: Vec<Vec<brawler::matchplay::HeistObjectiveCue>>,
+    /// Clients that are no longer updated, rehearsing an app killed without a disconnect.
+    pub(super) suspended_clients: Vec<bool>,
     pub(super) now: Instant,
 }
 
@@ -354,33 +356,43 @@ impl Harness {
             client_entities: Vec::with_capacity(client_count),
             client_cues: Vec::with_capacity(client_count),
             client_heist_cues: Vec::with_capacity(client_count),
+            suspended_clients: Vec::with_capacity(client_count),
             now: Instant::now(),
         };
         for client_index in 0..client_count {
             let client_id = u64::try_from(client_index + 1).expect("test client count fits u64");
-            harness.add_client(client_id);
-            let client_entity = harness.client_entities[client_index];
-            harness.clients[client_index]
-                .world_mut()
-                .resource_mut::<brawler::client::RoutedClientLifecycle>()
-                .start_lobby();
-            harness.clients[client_index]
-                .world_mut()
-                .entity_mut(client_entity)
-                .insert(brawler::client::RoutedClientSession {
-                    generation: 1,
-                    kind: brawler::client::RoutedClientSessionKind::Lobby,
-                });
-            let server_link = harness.server_links[client_index];
-            harness.server.world_mut().entity_mut(server_link).insert(
-                brawler::server::RoutedPeer {
-                    worker: server_entity,
-                    route_id: brawler_routing::RouteId::new(100 + u128::from(client_id)).unwrap(),
-                    peer_id: brawler_routing::PeerId::new(200 + u128::from(client_id)).unwrap(),
-                },
-            );
+            harness.add_product_lobby_client(client_id, None);
         }
         harness
+    }
+
+    /// Connect one more routed lobby client to a product-lobby harness. `account_id` overrides
+    /// the account the client presents (by default its Netcode client ID).
+    pub(super) fn add_product_lobby_client(&mut self, client_id: u64, account_id: Option<u128>) {
+        self.add_client_with_account(client_id, account_id);
+        let client_index = self.clients.len() - 1;
+        let client_entity = self.client_entities[client_index];
+        self.clients[client_index]
+            .world_mut()
+            .resource_mut::<brawler::client::RoutedClientLifecycle>()
+            .start_lobby();
+        self.clients[client_index]
+            .world_mut()
+            .entity_mut(client_entity)
+            .insert(brawler::client::RoutedClientSession {
+                generation: 1,
+                kind: brawler::client::RoutedClientSessionKind::Lobby,
+            });
+        let server_link = self.server_links[client_index];
+        let server_entity = self.server_entity;
+        self.server
+            .world_mut()
+            .entity_mut(server_link)
+            .insert(brawler::server::RoutedPeer {
+                worker: server_entity,
+                route_id: brawler_routing::RouteId::new(100 + u128::from(client_id)).unwrap(),
+                peer_id: brawler_routing::PeerId::new(200 + u128::from(client_id)).unwrap(),
+            });
     }
 
     pub(super) fn new_with_protocol(client_count: usize, client_protocol_id: Option<u64>) -> Self {
@@ -501,6 +513,7 @@ impl Harness {
             client_entities: Vec::with_capacity(client_count),
             client_cues: Vec::with_capacity(client_count),
             client_heist_cues: Vec::with_capacity(client_count),
+            suspended_clients: Vec::with_capacity(client_count),
             now: Instant::now(),
         };
         for client_id in 1..=client_count as u64 {
@@ -521,13 +534,28 @@ impl Harness {
         self.add_client_with_options(client_id, None, false);
     }
 
+    fn add_client_with_account(&mut self, client_id: u64, account_id: Option<u128>) {
+        self.add_client_configured(client_id, None, false, account_id);
+    }
+
     pub(super) fn add_client_with_options(
         &mut self,
         client_id: u64,
         client_protocol_id: Option<u64>,
         extra_protocol: bool,
     ) {
+        self.add_client_configured(client_id, client_protocol_id, extra_protocol, None);
+    }
+
+    fn add_client_configured(
+        &mut self,
+        client_id: u64,
+        client_protocol_id: Option<u64>,
+        extra_protocol: bool,
+        account_id: Option<u128>,
+    ) {
         let mut config = ClientNetworkConfig::new(client_id);
+        config.deterministic_account_id = account_id;
         config.transport = NetworkTransport::Crossbeam;
         config.headless = true;
         if let Some(protocol_id) = client_protocol_id {
@@ -586,11 +614,20 @@ impl Harness {
         self.server_links.push(server_link);
         self.client_cues.push(Vec::new());
         self.client_heist_cues.push(Vec::new());
+        self.suspended_clients.push(false);
+    }
+
+    /// Stop updating one client without disconnecting it, as when its app is killed.
+    pub(super) fn suspend_client(&mut self, index: usize) {
+        self.suspended_clients[index] = true;
     }
 
     pub(super) fn step(&mut self) {
         self.now += SIMULATION_TICK;
         for index in 0..self.clients.len() {
+            if self.suspended_clients.get(index).copied().unwrap_or(false) {
+                continue;
+            }
             let client = &mut self.clients[index];
             client.insert_resource(TimeUpdateStrategy::ManualInstant(self.now));
             client.update();

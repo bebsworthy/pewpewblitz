@@ -5,6 +5,7 @@
 //! machine is kept separate from the Bevy adapters so deterministic codec and idempotency tests do
 //! not need a running network endpoint.
 
+mod account_takeover;
 mod catalog;
 mod profile_transactions;
 mod queue;
@@ -1247,6 +1248,7 @@ impl Plugin for LobbyPlugin {
             .init_resource::<LobbyQueueFrame>()
             .init_resource::<LobbySessionLosses>()
             .init_resource::<PendingLobbyAdmissions>()
+            .init_resource::<account_takeover::AccountTakeovers>()
             .init_resource::<QueueSnapshotPublication>()
             .init_resource::<QueueEvidenceSettings>()
             .init_resource::<ProductFormationState>()
@@ -1269,7 +1271,12 @@ impl Plugin for LobbyPlugin {
                 Update,
                 (
                     begin_lobby_frame.in_set(LobbyScheduleSet::BeginLobbyFrame),
-                    lobby_receive_hellos.in_set(LobbyScheduleSet::AuthenticateLobbyHellos),
+                    (
+                        lobby_receive_hellos,
+                        account_takeover::resolve_account_takeovers,
+                    )
+                        .chain()
+                        .in_set(LobbyScheduleSet::AuthenticateLobbyHellos),
                     (
                         process_profile_storage_results,
                         collect_profile_commands,
@@ -1301,6 +1308,12 @@ impl Plugin for LobbyPlugin {
                     report_queue_telemetry_changes
                         .after(LobbyScheduleSet::PublishQueueOutcomesAndSnapshot),
                 ),
+            )
+            .add_systems(
+                PreUpdate,
+                account_takeover::record_lobby_link_activity
+                    .after(lightyear::prelude::LinkSystems::Receive)
+                    .before(lightyear::connection::ConnectionSystems::Receive),
             )
             .add_observer(lobby_client_removed)
             .add_observer(lobby_netcode_authenticated);

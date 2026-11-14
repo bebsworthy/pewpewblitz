@@ -274,6 +274,10 @@ pub struct ClientNetworkConfig {
     pub transport: NetworkTransport,
     pub network_protocol_id: u64,
     pub client_id: u64,
+    /// Lobby account for clients without a persisted per-server account (headless automation and
+    /// tests). `None` uses `client_id`. Setting it lets a fresh Netcode client present the account
+    /// of an earlier one, as an app relaunched after being killed does.
+    pub deterministic_account_id: Option<u128>,
     /// Editable logical address prefill for the interactive product shell.
     pub product_server_prefill: Option<String>,
     pub expected_protocol_version: u16,
@@ -391,6 +395,7 @@ impl ClientNetworkConfig {
             transport: NetworkTransport::Udp,
             network_protocol_id: crate::protocol::NETWORK_PROTOCOL_ID,
             client_id,
+            deterministic_account_id: None,
             product_server_prefill: None,
             expected_protocol_version: crate::protocol::SUPPORTED_PROTOCOL_VERSION,
             expected_build_version: crate::VERSION.to_string(),

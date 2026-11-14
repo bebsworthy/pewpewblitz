@@ -97,7 +97,7 @@ fn queue_command_before_lobby_welcome_cannot_create_membership() {
     );
 }
 
-fn wait_for_product_lobby(harness: &mut Harness) {
+pub(super) fn wait_for_product_lobby(harness: &mut Harness) {
     harness.step_until(|harness| {
         harness
             .clients
@@ -124,7 +124,7 @@ fn wait_for_product_lobby(harness: &mut Harness) {
     });
 }
 
-fn selected_brawler(
+pub(super) fn selected_brawler(
     harness: &Harness,
     client_index: usize,
 ) -> (
@@ -147,7 +147,7 @@ fn selected_brawler(
     (selected.id, selected.revision)
 }
 
-fn start_product_join(harness: &mut Harness, client_index: usize, game_index: usize) {
+pub(super) fn start_product_join(harness: &mut Harness, client_index: usize, game_index: usize) {
     let entity = harness.client_entities[client_index];
     let lobby = harness.clients[client_index]
         .world()

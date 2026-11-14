@@ -572,6 +572,10 @@ Errors map structured causes to the nearest honest action:
   says that some networks block the UDP traffic the game uses;
 - network gap during a session → keep the same session for up to the 10 s routed session bound
   (see [network-change continuity](./14-multiplayer-server-architecture.md#network-change-continuity));
+- relaunch right after the app was killed → the fresh login replaces the silent earlier session of
+  the same account (see
+  [relaunch after the app was killed](./14-multiplayer-server-architecture.md#relaunch-after-the-app-was-killed));
+  if another running copy of the game is still using the account, say so and offer Retry and Back;
 - protocol or content mismatch → explain incompatibility without automatic retry loops;
 - server full or game type temporarily unavailable → preserve a valid lobby and return to the
   invoking Dashboard or Results context;

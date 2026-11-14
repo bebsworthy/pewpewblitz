@@ -124,6 +124,25 @@ explanation; a match session is not resumed after that bound. Returning to a pre
 source address, post-timeout match rejoin, and a non-UDP fallback transport are not part of this
 contract.
 
+### Relaunch after the app was killed
+
+A killed app sends no disconnect, so its lobby session would hold the account until the 10 s
+bound. The lobby's account credential is the device-held `AccountId` presented in `LobbyHello`, not
+the display name. A hello whose `AccountId` is held by another lobby session (accepted or still
+loading its profile) therefore replaces that session once the holder has sent nothing for 2 s
+(`STALE_LOBBY_SESSION_SILENCE`, twenty missed Netcode keep-alives). The lobby stamps each client
+link's last inbound datagram between `LinkSystems::Receive` and `ConnectionSystems::Receive`. Until
+the holder reaches the 2 s silence bound, the hello waits. If the hello has waited 2 s while the
+holder kept sending, it is rejected with `AccountInUse`: two live copies of the game cannot share an
+account. Replacement removes the holder's profile session and records it as a lobby-session loss,
+so its queue ticket, reservation, or Practice formation is cancelled exactly as for a disconnect.
+The holder's Netcode connection is marked disconnected and left to time out, because Lightyear 0.29
+has no public server-side kick. A player in a match holds no lobby session (the lobby connection
+closes at handoff), so a relaunch mid-match reaches Dashboard at once. The old fighter stays in its
+match until that match session times out, and the relaunched client is not re-admitted to it
+(post-timeout rejoin is not part of this contract). No wire, manifest, or control-IPC contract
+carries this policy.
+
 ## Routed packet transport
 
 Lightyear 0.29 exposes `Link` as its transport-neutral boundary: concrete IO pushes opaque received

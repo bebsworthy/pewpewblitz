@@ -188,7 +188,12 @@ fn resolve_lobby_account_id(
         return identity_state.account_id;
     }
     let (Some(target), Some(persistence), Some(path)) = (target, persistence, path) else {
-        return crate::profiles::AccountId::new(u128::from(config.client_id)).ok();
+        return crate::profiles::AccountId::new(
+            config
+                .deterministic_account_id
+                .unwrap_or(u128::from(config.client_id)),
+        )
+        .ok();
     };
     if connections_failed {
         return None;

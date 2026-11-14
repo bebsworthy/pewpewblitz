@@ -1,18 +1,19 @@
 ---
 id: BRL-0208
 title: Accept a fresh lobby login after the app was killed mid-session
-status: todo
+status: doing
 theme:
 release:
 created: 2026-11-14T01:38:35Z
-modified: 2026-11-14T01:49:40Z
+modified: 2026-11-14T04:50:54Z
 closed:
-status_changed: 2026-11-14T01:38:35Z
+status_changed: 2026-11-14T04:03:17Z
 history:
 - todo@2026-11-14T01:38:35Z
-revision: b4e5d673104ff747
+- doing@2026-11-14T04:03:17Z
+revision: 2e8fb38a0a2580cd
 blocks: []
-related: [BRL-0162]
+related: [BRL-0162, BRL-0212]
 parent: BRL-0171
 ---
 
