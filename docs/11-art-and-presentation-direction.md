@@ -108,6 +108,7 @@ the previous presentation for that area:
 |---|---|
 | HDR, tonemapping, bloom, color grading | BRL-0146 (adopted) |
 | Tile floor | BRL-0147 (adopted) |
+| Wall-adjacent floor decals | BRL-0178 (implemented; owner playtest pending) |
 | Camera framing re-evaluation | BRL-0148 (adopted) |
 | Overhead plates and aim lane | BRL-0149 (adopted) |
 | Toon material and rim | BRL-0150 (adopted) |
@@ -234,8 +235,8 @@ glow set. On the `Low` tier (no HDR) custom effect shaders write untonemapped va
 `assets/catalogs/render_quality.ron` (client-only, outside the gameplay fingerprint): `High` is the
 look described above (MSAA 4, HDR, bloom, arena shadow maps, foliage sway, Hanabi particles);
 `Medium` turns off MSAA, bloom, and shadow maps; `Low` also drops HDR (tonemapping and grading then
-run in the material shaders), foliage sway, and GPU particles. Outlines, the toon material, and
-contact shadows stay on in every tier because they carry readability. The player's Settings >
+run in the material shaders), foliage sway, floor decals, and GPU particles. Outlines, the toon
+material, and contact shadows stay on in every tier because they carry readability. The player's Settings >
 Display > Graphics quality chip cycles Auto/Low/Medium/High; Auto resolves from capability detected
 once the render device exists: no compute-capable GPU particles selects `Low`, Android selects
 `Medium`, anything else `High`. The selected tier and its reason are logged. Code owns the ceilings
@@ -252,6 +253,21 @@ the strength of a darkening that fades over two cell corners from the arena edge
 player-blocking walls. Destructible cover does not darken the floor, because the floor is built once
 per map generation. Tones are carried in vertex colors on a white matte material, so the floor stays
 an ordinary lit surface below the bloom knee and works unchanged in the primitive world.
+
+Sparse floor decals (`presentation_3d/floor_decals.rs`, BRL-0178) add place character near walls:
+cracks, scuffs, stains, leaves, sand drifts, and pebbles. Each theme's `floor_decals` block in
+`map_presentation_themes.ron` picks a few sprites with a tint, a weight, a density, and a peak
+opacity (validated: density at most 0.4, opacity at most 0.6, tints at most 20% brighter than the
+floor's brightest tone). Placement is a pure function of the map's recipe ID and each cell, so a map
+always gets the same decals in every match and in the Map Maker preview. Only open cells that touch a
+static wall or the arena edge are candidates; cells under any placement (effect tiles, water, cover,
+foliage, spawns), the Hot Zone circle plus half a cell, Heist safes with their two-cell attack
+sectors, and Zombie ingresses are excluded, decals keep at least one empty cell between each other,
+and a map has at most 160. Every decal fits inside its own cell with its top edge turned toward the
+wall. All of a map's decals are one mesh drawn with one lit, alpha-blended toon material over the
+generated atlas (`asset_src/environment/floor-decals/`), 0.15 above the floor and sorted before every
+other transparent layer, so fields, shadows, rings, and zones always draw over them and they never
+exceed the lit floor's brightness (no bloom). The `Low` quality tier hides them.
 
 Fighters and the world share one toon material (`presentation_3d/toon.rs`,
 `assets/shaders/toon.wgsl`, tuned by the client-only `assets/catalogs/toon_shading.ron`). It

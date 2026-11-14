@@ -100,6 +100,17 @@ fn theme_lighting_stays_below_the_bloom_knee() {
             "theme {} floor {floor} reaches the bloom knee {knee}",
             theme.id.0
         );
+        // Floor decals (BRL-0178) are lit, blended, non-emissive: their tints stay under it too.
+        for kind in &theme.floor_decals.kinds {
+            let peak = kind.tint.0.max(kind.tint.1).max(kind.tint.2);
+            let peak_linear = Color::srgb(peak, peak, peak).to_linear().red;
+            assert!(
+                lit_white * peak_linear < knee,
+                "theme {} decal {:?} reaches the bloom knee {knee}",
+                theme.id.0,
+                kind.sprite
+            );
+        }
     }
 }
 

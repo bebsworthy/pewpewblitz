@@ -3,12 +3,21 @@
 // is the grid-aligned two-tone tile surface: tones differ by at most 8% value, plus a per-cell
 // value jitter and darkening near walls and the arena edge (`floor_tiles.rs`). `water_edge`
 // (BRL-0153, formerly `ground_accent`) colours the curb along open water edges in the kit palette.
+// `floor_decals` (BRL-0178) are sparse wall-adjacent decals from the generated atlas
+// (`asset_src/environment/floor-decals/`): `density` is the chance an open cell touching a wall gets
+// one (at most 0.4), `opacity` the peak (at most 0.6), and each kind's sRGB `tint` (at most 20%
+// brighter than the floor) and pick `weight`. Placement is deterministic per map (`floor_decals.rs`).
 (
-    schema_version: 6,
+    schema_version: 7,
     themes: [
         (
             id: MapPresentationThemeId(1),
             floor: (tone_a: (0.52, 0.38, 0.24), tone_b: (0.54, 0.40, 0.25), value_jitter: 0.025, edge_darkening: 0.22),
+            floor_decals: (density: 0.3, opacity: 0.6, kinds: [
+                (sprite: Crack, tint: (0.26, 0.18, 0.12), weight: 4),
+                (sprite: Scuff, tint: (0.32, 0.24, 0.16), weight: 3),
+                (sprite: Stain, tint: (0.24, 0.19, 0.14), weight: 2),
+            ]),
             outer_ground: (0.055, 0.22, 0.105),
             fallback_wall: (0.10, 0.36, 0.58),
             fallback_perimeter: (0.42, 0.16, 0.075),
@@ -24,6 +33,12 @@
         (
             id: MapPresentationThemeId(2),
             floor: (tone_a: (0.72, 0.57, 0.38), tone_b: (0.745, 0.595, 0.40), value_jitter: 0.02, edge_darkening: 0.2),
+            floor_decals: (density: 0.3, opacity: 0.6, kinds: [
+                (sprite: SandDrift, tint: (0.88, 0.77, 0.57), weight: 4),
+                (sprite: Leaves, tint: (0.40, 0.42, 0.18), weight: 3),
+                (sprite: Crack, tint: (0.40, 0.30, 0.20), weight: 2),
+                (sprite: Pebbles, tint: (0.56, 0.48, 0.38), weight: 2),
+            ]),
             outer_ground: (0.08, 0.26, 0.18),
             fallback_wall: (0.48, 0.36, 0.22),
             fallback_perimeter: (0.22, 0.38, 0.20),
@@ -39,6 +54,12 @@
         (
             id: MapPresentationThemeId(3),
             floor: (tone_a: (0.44, 0.43, 0.41), tone_b: (0.46, 0.45, 0.43), value_jitter: 0.025, edge_darkening: 0.3),
+            floor_decals: (density: 0.3, opacity: 0.6, kinds: [
+                (sprite: Crack, tint: (0.22, 0.22, 0.23), weight: 4),
+                (sprite: Leaves, tint: (0.42, 0.33, 0.20), weight: 2),
+                (sprite: Scuff, tint: (0.28, 0.28, 0.28), weight: 2),
+                (sprite: Pebbles, tint: (0.54, 0.53, 0.50), weight: 2),
+            ]),
             outer_ground: (0.055, 0.10, 0.12),
             fallback_wall: (0.30, 0.36, 0.44),
             fallback_perimeter: (0.12, 0.14, 0.18),

@@ -34,6 +34,7 @@ pub(crate) mod coordinates;
 mod diagnostics;
 pub(crate) mod environment_assets;
 mod fighter_character;
+mod floor_decals;
 mod floor_tiles;
 mod hit_feedback;
 mod map;
@@ -503,6 +504,7 @@ impl Plugin for WorldPresentationPlugin {
                     zombie::update_zombie_animation,
                     tint_3d_zone,
                     environment_assets::sway_foliage,
+                    floor_decals::apply_floor_decal_quality,
                 )
                     .in_set(WorldPresentationSet::Animate),
             )
@@ -1850,6 +1852,15 @@ fn reconcile_3d_map(
             grid_snapshot,
             &grid_catalog.0,
             grid_theme.floor,
+        );
+        floor_decals::spawn_floor_decals(
+            &mut commands,
+            &mut meshes,
+            &environment_materials.floor_decals,
+            marker,
+            grid_snapshot,
+            &grid_catalog.0,
+            &grid_theme.floor_decals,
         );
         materialize_map_static_visuals(
             &mut commands,

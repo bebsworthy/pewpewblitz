@@ -13,7 +13,7 @@ const MAP_VISUAL_CATALOG: &str =
 const MAP_THEME_CATALOG: &str =
     include_str!("../../../../../assets/catalogs/map_presentation_themes.ron");
 const MAP_VISUAL_SCHEMA_VERSION: u16 = 7;
-const MAP_THEME_SCHEMA_VERSION: u16 = 6;
+const MAP_THEME_SCHEMA_VERSION: u16 = 7;
 
 #[derive(Deserialize, Clone)]
 pub(in crate::presentation_3d) enum MapVisualKind {
@@ -131,6 +131,8 @@ struct MapThemeSource {
 pub(in crate::presentation_3d) struct MapThemeProfile {
     pub(in crate::presentation_3d) id: brawler::map::MapPresentationThemeId,
     pub(in crate::presentation_3d) floor: floor_tiles::FloorTiles,
+    /// Sparse wall-adjacent floor decals (BRL-0178).
+    pub(in crate::presentation_3d) floor_decals: floor_decals::FloorDecals,
     pub(in crate::presentation_3d) outer_ground: (f32, f32, f32),
     pub(in crate::presentation_3d) fallback_wall: (f32, f32, f32),
     pub(in crate::presentation_3d) fallback_perimeter: (f32, f32, f32),
@@ -434,6 +436,10 @@ fn validate_map_themes(
         theme
             .floor
             .validate(&format!("client map theme {} floor", theme.id.0))?;
+        theme.floor_decals.validate(
+            &format!("client map theme {} floor decals", theme.id.0),
+            theme.floor,
+        )?;
     }
     let expected_themes: BTreeSet<_> = catalog
         .presets

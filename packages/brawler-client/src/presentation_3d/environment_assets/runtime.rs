@@ -15,6 +15,7 @@ impl MapVisualCatalog {
         &self,
         materials: &mut Assets<ToonMaterial>,
         shading: &ToonShading,
+        decal_atlas: Handle<Image>,
     ) -> BTreeMap<brawler::map::MapPresentationThemeId, EnvironmentThemeMaterials> {
         let mut add = |material: StandardMaterial| materials.add(shading.material(material));
         let matte = |color: Color| StandardMaterial {
@@ -23,6 +24,8 @@ impl MapVisualCatalog {
             metallic: 0.0,
             ..default()
         };
+        // One decal material for every theme: tints and opacity are vertex colours (BRL-0178).
+        let floor_decals = add(floor_decals::floor_decal_material(decal_atlas));
         self.themes
             .iter()
             .map(|(id, theme)| {
@@ -53,6 +56,7 @@ impl MapVisualCatalog {
                         }),
                         rubble: add(matte(tuple_color(theme.rubble))),
                         water_edge: add(matte(tuple_color(theme.water_edge))),
+                        floor_decals: floor_decals.clone(),
                     },
                 )
             })
@@ -71,6 +75,7 @@ pub(crate) struct EnvironmentThemeMaterials {
     pub(crate) vegetation: Handle<ToonMaterial>,
     pub(crate) rubble: Handle<ToonMaterial>,
     pub(crate) water_edge: Handle<ToonMaterial>,
+    pub(crate) floor_decals: Handle<ToonMaterial>,
 }
 
 #[derive(Resource, Clone)]
@@ -159,8 +164,15 @@ pub(in crate::presentation_3d) fn load_environment_assets(
 ) {
     let map_visuals =
         MapVisualCatalog::embedded(&maps.0).expect("embedded client map catalogs are valid");
+    // The decal atlas is minified at gameplay zoom: sample it linearly (the app default is nearest).
+    let decal_atlas = asset_server
+        .load_builder()
+        .with_settings(|settings: &mut bevy::image::ImageLoaderSettings| {
+            settings.sampler = bevy::image::ImageSampler::linear();
+        })
+        .load(floor_decals::FLOOR_DECAL_ATLAS_PATH);
     let theme_materials = EnvironmentThemeMaterialCatalog {
-        materials: map_visuals.build_theme_materials(&mut materials, &shading),
+        materials: map_visuals.build_theme_materials(&mut materials, &shading, decal_atlas),
     };
     let mut handles = BTreeMap::new();
     for path in map_visuals

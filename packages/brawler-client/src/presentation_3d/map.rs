@@ -7,7 +7,7 @@
 use super::*;
 
 /// Top of the playable floor; effect tiles, water, zones, and rings layer above it.
-const PLAYABLE_FLOOR_Y: f32 = 0.25;
+pub(super) const PLAYABLE_FLOOR_Y: f32 = 0.25;
 
 #[derive(Component)]
 pub(super) struct GeneratedMapMesh(pub(super) Handle<Mesh>);

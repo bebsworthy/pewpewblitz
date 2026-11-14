@@ -2,8 +2,8 @@
 //!
 //! The player's [`GraphicsQuality`] preference resolves to one [`QualityTier`]; `Auto` picks from
 //! the capability detected once the render device exists. Each tier's contents are authored in
-//! `assets/catalogs/render_quality.ron`: MSAA, HDR, bloom, arena shadow maps, foliage sway, and the
-//! particle backend. Code owns the ceilings (MSAA at most 4 samples, bloom needs HDR). Everything
+//! `assets/catalogs/render_quality.ron`: MSAA, HDR, bloom, arena shadow maps, foliage sway, floor
+//! decals, and the particle backend. Code owns the ceilings (MSAA at most 4 samples, bloom needs HDR). Everything
 //! here is client presentation: the server never sees a tier and gameplay facts never depend on it.
 
 #[allow(
@@ -23,7 +23,7 @@ use bevy::{
 use serde::Deserialize;
 
 const RENDER_QUALITY_CATALOG: &str = include_str!("../../../../assets/catalogs/render_quality.ron");
-const RENDER_QUALITY_SCHEMA_VERSION: u16 = 1;
+const RENDER_QUALITY_SCHEMA_VERSION: u16 = 2;
 /// Desktop verification override (like `BRAWLER_FORCE_PRIMITIVE_WORLD`): `1` treats the GPU as
 /// unable to run compute particles, so Hanabi is never installed and the CPU fallback is used.
 pub(crate) const PARTICLE_FALLBACK_ENV: &str = "BRAWLER_FORCE_PARTICLE_FALLBACK";
@@ -94,6 +94,8 @@ pub(crate) struct QualityProfile {
     pub(crate) bloom: bool,
     pub(crate) shadow_maps: bool,
     pub(crate) foliage_sway: bool,
+    /// Sparse wall-adjacent floor decals (BRL-0178).
+    pub(crate) floor_decals: bool,
     pub(crate) particles: ParticleBackend,
 }
 
@@ -296,6 +298,7 @@ fn select_render_quality(
         hdr = next.profile.hdr,
         bloom = next.profile.bloom,
         shadow_maps = next.profile.shadow_maps,
+        floor_decals = next.profile.floor_decals,
         "render quality tier selected"
     );
     commands.insert_resource(next);
@@ -345,6 +348,11 @@ fn apply_light_quality(
 /// Whether the active tier keeps foliage sway; absent quality keeps the authored motion.
 pub(super) fn foliage_sway_enabled(quality: Option<&ActiveRenderQuality>) -> bool {
     quality.is_none_or(|quality| quality.profile.foliage_sway)
+}
+
+/// Whether the active tier keeps floor decals; absent quality keeps them.
+pub(super) fn floor_decals_enabled(quality: Option<&ActiveRenderQuality>) -> bool {
+    quality.is_none_or(|quality| quality.profile.floor_decals)
 }
 
 /// Whether the active tier keeps bloom; absent quality keeps the authored look.
