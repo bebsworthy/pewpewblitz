@@ -4,9 +4,9 @@ was: BRL-0184
 
 title: Give Riff per-family weapon models with two-handed grips
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-13T06:40:00Z
+status_changed: 2026-11-14T17:28:45Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-57hs]
 
 parent: BRL-q5c4
 
-rank: 1310720
+rank: 13303808
 ---
 
 # Description
