@@ -1258,7 +1258,6 @@ pub(crate) fn setup_3d_foundation(
         }),
         effect_ally: materials.add(StandardMaterial {
             base_color: Color::srgba(0.04, 0.58, 1.0, 0.82),
-            emissive: LinearRgba::new(0.08, 0.9, 2.6, 1.0),
             alpha_mode: AlphaMode::Blend,
             double_sided: true,
             cull_mode: None,
@@ -1267,7 +1266,6 @@ pub(crate) fn setup_3d_foundation(
         }),
         effect_enemy: materials.add(StandardMaterial {
             base_color: Color::srgba(1.0, 0.025, 0.055, 0.76),
-            emissive: LinearRgba::new(1.9, 0.008, 0.02, 1.0),
             alpha_mode: AlphaMode::Blend,
             double_sided: true,
             cull_mode: None,
@@ -1283,7 +1281,6 @@ pub(crate) fn setup_3d_foundation(
         }),
         zone_boundary: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.82, 0.2),
-            emissive: LinearRgba::new(1.2, 0.8, 0.08, 1.0),
             unlit: true,
             ..default()
         }),
@@ -1341,60 +1338,51 @@ pub(crate) fn setup_3d_foundation(
         }),
         status_reveal: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.12, 0.72),
-            emissive: LinearRgba::new(2.2, 0.03, 0.8, 1.0),
             unlit: true,
             ..default()
         }),
         status_poison: materials.add(StandardMaterial {
             base_color: Color::srgba(0.42, 0.95, 0.18, 0.86),
-            emissive: LinearRgba::new(0.24, 1.5, 0.08, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         status_fire: materials.add(StandardMaterial {
             base_color: Color::srgba(1.0, 0.26, 0.04, 0.86),
-            emissive: LinearRgba::new(2.0, 0.12, 0.01, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         elemental_cold: materials.add(StandardMaterial {
             base_color: Color::srgba(0.15, 0.78, 1.0, 0.34),
-            emissive: LinearRgba::new(0.05, 0.72, 1.6, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         elemental_cold_bright: materials.add(StandardMaterial {
             base_color: Color::srgb(0.58, 0.94, 1.0),
-            emissive: LinearRgba::new(0.22, 1.5, 2.5, 1.0),
             unlit: true,
             ..default()
         }),
         elemental_fire: materials.add(StandardMaterial {
             base_color: Color::srgba(1.0, 0.18, 0.02, 0.36),
-            emissive: LinearRgba::new(2.2, 0.08, 0.01, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         elemental_fire_bright: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.58, 0.08),
-            emissive: LinearRgba::new(2.8, 0.62, 0.03, 1.0),
             unlit: true,
             ..default()
         }),
         elemental_fire_fill: materials.add(StandardMaterial {
             base_color: Color::srgba(0.72, 0.055, 0.008, 0.13),
-            emissive: LinearRgba::new(0.32, 0.018, 0.002, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         elemental_fire_hot: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.82, 0.18),
-            emissive: LinearRgba::new(4.2, 1.65, 0.05, 1.0),
             unlit: true,
             ..default()
         }),
@@ -1411,14 +1399,12 @@ pub(crate) fn setup_3d_foundation(
         ),
         elemental_poison: materials.add(StandardMaterial {
             base_color: Color::srgba(0.22, 0.62, 0.055, 0.28),
-            emissive: LinearRgba::new(0.12, 0.72, 0.018, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         elemental_poison_bright: materials.add(StandardMaterial {
             base_color: Color::srgb(0.68, 1.0, 0.16),
-            emissive: LinearRgba::new(0.62, 2.2, 0.035, 1.0),
             unlit: true,
             ..default()
         }),
@@ -1435,7 +1421,6 @@ pub(crate) fn setup_3d_foundation(
         ),
         elemental_restoration: materials.add(StandardMaterial {
             base_color: Color::srgba(0.04, 0.76, 0.48, 0.24),
-            emissive: LinearRgba::new(0.018, 0.92, 0.42, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
@@ -1461,39 +1446,33 @@ pub(crate) fn setup_3d_foundation(
         splash_area_reduced,
         elemental_restoration_bright: materials.add(StandardMaterial {
             base_color: Color::srgb(0.42, 1.0, 0.74),
-            emissive: LinearRgba::new(0.12, 2.4, 0.82, 1.0),
             unlit: true,
             ..default()
         }),
         sticky_blob: materials.add(StandardMaterial {
             base_color: Color::srgba(0.52, 0.12, 0.72, 0.96),
-            emissive: LinearRgba::new(0.55, 0.04, 1.1, 1.0),
             unlit: true,
             ..default()
         }),
         sticky_warning: materials.add(StandardMaterial {
             base_color: Color::srgba(0.84, 0.2, 1.0, 0.42),
-            emissive: LinearRgba::new(0.7, 0.03, 1.4, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         sticky_warning_fill: materials.add(StandardMaterial {
             base_color: Color::srgba(0.58, 0.08, 0.82, 0.10),
-            emissive: LinearRgba::new(0.12, 0.008, 0.28, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         scan_area: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.12, 0.72),
-            emissive: LinearRgba::new(1.8, 0.04, 0.7, 1.0),
             unlit: true,
             ..default()
         }),
         demolition_area: materials.add(StandardMaterial {
             base_color: Color::srgba(1.0, 0.28, 0.04, 0.72),
-            emissive: LinearRgba::new(2.4, 0.18, 0.02, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
@@ -1506,7 +1485,6 @@ pub(crate) fn setup_3d_foundation(
         }),
         concealment_field_blue_boundary: materials.add(StandardMaterial {
             base_color: Color::srgb(0.08, 0.72, 1.0),
-            emissive: LinearRgba::new(0.05, 0.75, 1.5, 1.0),
             unlit: true,
             ..default()
         }),
@@ -1518,7 +1496,6 @@ pub(crate) fn setup_3d_foundation(
         }),
         concealment_field_red_boundary: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.24, 0.16),
-            emissive: LinearRgba::new(1.5, 0.12, 0.05, 1.0),
             unlit: true,
             ..default()
         }),
@@ -1529,25 +1506,21 @@ pub(crate) fn setup_3d_foundation(
         }),
         effect_impact: materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.3, 0.08),
-            emissive: LinearRgba::new(1.5, 0.2, 0.02, 1.0),
             unlit: true,
             ..default()
         }),
         effect_damage: materials.add(StandardMaterial {
             base_color: Color::srgb(0.95, 0.08, 0.12),
-            emissive: LinearRgba::new(1.2, 0.02, 0.02, 1.0),
             unlit: true,
             ..default()
         }),
         neutral_energy_bright: materials.add(StandardMaterial {
             base_color: Color::srgb(0.82, 0.98, 1.0),
-            emissive: LinearRgba::new(1.35, 2.8, 3.4, 1.0),
             unlit: true,
             ..default()
         }),
         neutral_energy_soft: materials.add(StandardMaterial {
             base_color: Color::srgba(0.16, 0.88, 1.0, 0.28),
-            emissive: LinearRgba::new(0.08, 1.15, 1.8, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()

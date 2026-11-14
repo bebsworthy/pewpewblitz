@@ -1,3 +1,6 @@
+// Non-glow family (BRL-0176): every authored color keeps its max channel at or below
+// NON_GLOW_HDR_PEAK in presentation_3d/world_look.rs, so blended output stays under the
+// bloom knee. Only projectile cores, muzzle/explosion flashes, and pickups bloom.
 #import bevy_pbr::forward_io::VertexOutput
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)

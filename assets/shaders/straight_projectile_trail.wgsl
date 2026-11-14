@@ -1,3 +1,5 @@
+// Deliberate glow part (BRL-0176): the trail belongs to the projectile glow set, so its
+// white-hot head wrap and team color may exceed the bloom knee next to the HDR core.
 #import bevy_pbr::forward_io::VertexOutput
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)

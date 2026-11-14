@@ -116,6 +116,113 @@ fn glow_materials_exceed_the_bloom_threshold() {
     }
 }
 
+/// Non-glow families peak below the bloom knee even before blending dilutes them.
+#[test]
+fn non_glow_peak_stays_below_the_bloom_knee() {
+    let catalog = catalog();
+    let knee = catalog.bloom.threshold * (1.0 - catalog.bloom.threshold_softness);
+    assert!(NON_GLOW_HDR_PEAK < knee);
+}
+
+/// Every `vec3<f32>(r, g, b)` literal color in a non-glow effect shader.
+fn shader_color_literals(source: &str) -> Vec<[f32; 3]> {
+    source
+        .split("vec3<f32>(")
+        .skip(1)
+        .filter_map(|tail| {
+            let args = tail.split(')').next()?;
+            let values = args
+                .split(',')
+                .map(|value| value.trim().parse::<f32>().ok())
+                .collect::<Option<Vec<_>>>()?;
+            <[f32; 3]>::try_from(values).ok()
+        })
+        .collect()
+}
+
+/// BRL-0176: area, status, field, and Dash trail shaders keep every authored color at or below
+/// the non-glow peak. The straight projectile trail is a deliberate glow part and is excluded.
+#[test]
+fn non_glow_effect_shaders_stay_below_the_peak() {
+    let shaders = [
+        (
+            "fire_area",
+            include_str!("../../../../../assets/shaders/fire_area.wgsl"),
+        ),
+        (
+            "elemental_support_area",
+            include_str!("../../../../../assets/shaders/elemental_support_area.wgsl"),
+        ),
+        (
+            "splash_area",
+            include_str!("../../../../../assets/shaders/splash_area.wgsl"),
+        ),
+        (
+            "sticky_blob",
+            include_str!("../../../../../assets/shaders/sticky_blob.wgsl"),
+        ),
+        (
+            "dash_trail",
+            include_str!("../../../../../assets/shaders/dash_trail.wgsl"),
+        ),
+        (
+            "cone_spray",
+            include_str!("../../../../../assets/shaders/cone_spray.wgsl"),
+        ),
+    ];
+    for (name, source) in shaders {
+        let colors = shader_color_literals(source);
+        assert!(!colors.is_empty(), "{name} exposes its authored colors");
+        for color in colors {
+            let peak = color[0].max(color[1]).max(color[2]);
+            assert!(
+                peak <= NON_GLOW_HDR_PEAK,
+                "{name} color {color:?} exceeds the non-glow peak {NON_GLOW_HDR_PEAK}"
+            );
+        }
+    }
+}
+
+/// Unlit materials ignore `emissive` (Bevy `pbr.wgsl` unlit branch), so the shared palette
+/// authors none; only the glow set's unlit materials carry HDR `base_color`.
+#[test]
+fn shared_unlit_palette_has_no_inert_emissive_and_only_glow_is_hdr() {
+    let mut app = App::new();
+    app.init_resource::<Assets<Mesh>>()
+        .init_resource::<Assets<StandardMaterial>>()
+        .init_resource::<Assets<combat::FireAreaMaterial>>()
+        .init_resource::<Assets<combat::ElementalSupportAreaMaterial>>()
+        .init_resource::<Assets<combat::ConeSprayMaterial>>()
+        .init_resource::<Assets<combat::StraightProjectileTrailMaterial>>()
+        .init_resource::<brawler::builds::BuildCatalogResource>()
+        .init_resource::<Assets<ToonMaterial>>()
+        .insert_resource(ToonShading::embedded().unwrap())
+        .add_systems(Startup, setup_3d_foundation);
+    app.update();
+
+    let materials = app.world().resource::<Assets<StandardMaterial>>();
+    let mut unlit = 0;
+    for (_, material) in materials.iter() {
+        if !material.unlit {
+            continue;
+        }
+        unlit += 1;
+        assert_eq!(
+            material.emissive,
+            LinearRgba::BLACK,
+            "unlit material authors inert emissive"
+        );
+        let base = material.base_color.to_linear();
+        let is_glow = [GLOW_MUZZLE, GLOW_PICKUP].contains(&base);
+        let peak = base.red.max(base.green).max(base.blue);
+        assert!(
+            is_glow || peak <= 1.0,
+            "non-glow unlit material {base:?} is HDR"
+        );
+    }
+    assert!(unlit > 20, "the shared palette was built");
+}
+
 fn camera_app(reduced: bool) -> (App, Entity, Entity) {
     let mut app = App::new();
     app.insert_resource(catalog())

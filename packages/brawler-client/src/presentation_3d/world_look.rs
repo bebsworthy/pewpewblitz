@@ -34,6 +34,11 @@ const MIN_GRADING_SATURATION: f32 = 0.8;
 const MAX_GRADING_SATURATION: f32 = 1.4;
 const MIN_GRADING_CONTRAST: f32 = 0.8;
 const MAX_GRADING_CONTRAST: f32 = 1.3;
+/// Peak max-channel HDR value for non-glow effect families (area, status, field, and Dash trail
+/// shaders plus unlit markers). Additive bloom only starts at the knee
+/// (`threshold * (1 - threshold_softness)`), so blended non-glow output stays below it (BRL-0176).
+#[cfg(test)]
+pub(crate) const NON_GLOW_HDR_PEAK: f32 = 2.0;
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]

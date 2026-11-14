@@ -21,7 +21,7 @@ impl DashTrailMaterial {
     pub(super) const fn new(quality: DashTrailQuality) -> Self {
         Self {
             params: Vec4::new(0.0, 1.0, quality.shader_index(), 0.0),
-            color: Vec4::new(0.08, 1.45, 2.6, 1.0),
+            color: Vec4::new(0.06, 1.12, 2.0, 1.0),
         }
     }
 
@@ -110,5 +110,8 @@ mod tests {
 
         material.set_time_and_opacity(3.0, -0.2);
         assert!(material.params.y.abs() < f32::EPSILON);
+
+        // BRL-0176: the wake is a non-glow family and stays below the bloom knee.
+        assert!(material.color.truncate().max_element() <= world_look::NON_GLOW_HDR_PEAK);
     }
 }

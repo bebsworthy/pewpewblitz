@@ -1,3 +1,6 @@
+// Non-glow family (BRL-0176): every authored color keeps its max channel at or below
+// NON_GLOW_HDR_PEAK in presentation_3d/world_look.rs, so blended output stays under the
+// bloom knee. Only projectile cores, muzzle/explosion flashes, and pickups bloom.
 #import bevy_pbr::forward_io::VertexOutput
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)
@@ -31,11 +34,11 @@ fn ring_mask(radius: f32, center: f32, width: f32) -> f32 {
 fn team_tint(color: vec3<f32>, mask: f32, team_accent: f32) -> vec3<f32> {
     if team_accent > 0.5 && team_accent < 1.5 {
         let strength = smoothstep(0.08, 0.58, mask) * 0.86;
-        return mix(color, vec3<f32>(0.025, 0.62, 3.6), strength);
+        return mix(color, vec3<f32>(0.016, 0.42, 2.0), strength);
     }
     if team_accent > 1.5 {
         let strength = smoothstep(0.06, 0.54, mask) * 0.92;
-        return mix(color, vec3<f32>(2.4, 0.004, 0.018), strength);
+        return mix(color, vec3<f32>(2.0, 0.004, 0.016), strength);
     }
     return color;
 }
@@ -65,7 +68,7 @@ fn poison(point: vec2<f32>, radius: f32, time: f32, team_accent: f32) -> vec4<f3
 
     let murk = vec3<f32>(0.035, 0.20, 0.012);
     let acid = vec3<f32>(0.30, 1.55, 0.025);
-    let foam = vec3<f32>(1.05, 3.25, 0.11);
+    let foam = vec3<f32>(0.66, 2.0, 0.07);
     var color = mix(murk, acid, veins * 0.72 + edge * 0.28);
     color = mix(color, foam, bubbles * edge * 0.58);
     let team_wave = sin(angle * 6.0 - time * 0.72 + broad * 3.1) * 0.5 + 0.5;
@@ -105,7 +108,7 @@ fn restoration(point: vec2<f32>, radius: f32, time: f32, team_accent: f32) -> ve
 
     let calm = vec3<f32>(0.01, 0.22, 0.12);
     let life = vec3<f32>(0.06, 1.75, 0.72);
-    let bright = vec3<f32>(0.48, 3.20, 1.62);
+    let bright = vec3<f32>(0.30, 2.0, 1.01);
     var color = mix(calm, life, clamp(arcs * 0.8 + inner_ripple * 0.62, 0.0, 1.0));
     color = mix(
         color,

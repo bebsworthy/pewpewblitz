@@ -223,7 +223,12 @@ bloom but keeps HDR, tonemapping, and grading so colors do not shift. The HUD ca
 target without tonemapping, grading, or bloom, so HUD colors are exact. Offscreen previews
 (Dashboard brawler and card, weapon, Map Maker palette) use the same tonemapper and a preview
 grading without HDR or bloom. Unlit materials ignore `emissive`, so unlit glows carry their HDR
-value in `base_color`.
+value in `base_color` and the shared unlit palette authors no `emissive` at all. Non-glow effect
+shaders (fire, poison, and restoration fields, Splash, Sticky, cone spray, and the Dash wake) keep
+every authored color at or below a 2.0 peak, under the 2.25 bloom knee, so blended area, status,
+and trail effects never bloom (BRL-0176); the straight projectile trail belongs to the projectile
+glow set. On the `Low` tier (no HDR) custom effect shaders write untonemapped values that clip at
+1.0 per channel.
 
 **Quality tiers (BRL-0161).** The world presentation runs at one of three tiers authored in
 `assets/catalogs/render_quality.ron` (client-only, outside the gameplay fingerprint): `High` is the

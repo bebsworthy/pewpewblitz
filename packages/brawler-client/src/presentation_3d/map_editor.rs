@@ -170,49 +170,42 @@ pub(super) fn reconcile_map_editor_overlay(
             }),
             place: standard_materials.add(StandardMaterial {
                 base_color: Color::srgba(0.02, 0.92, 0.86, 0.42),
-                emissive: LinearRgba::new(0.01, 1.65, 1.45, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
             }),
             erase: standard_materials.add(StandardMaterial {
                 base_color: Color::srgba(0.95, 0.08, 0.06, 0.38),
-                emissive: LinearRgba::new(1.2, 0.02, 0.01, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
             }),
             move_selection: standard_materials.add(StandardMaterial {
                 base_color: Color::srgba(0.01, 0.96, 0.90, 0.82),
-                emissive: LinearRgba::new(0.01, 2.2, 1.9, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
             }),
             selection_fill: standard_materials.add(StandardMaterial {
                 base_color: Color::srgba(0.02, 0.88, 0.82, 0.14),
-                emissive: LinearRgba::new(0.01, 0.22, 0.20, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
             }),
             hover: standard_materials.add(StandardMaterial {
                 base_color: Color::srgba(1.0, 0.58, 0.04, 0.42),
-                emissive: LinearRgba::new(1.1, 0.34, 0.01, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
             }),
             blocked: standard_materials.add(StandardMaterial {
                 base_color: Color::srgba(0.95, 0.08, 0.06, 0.5),
-                emissive: LinearRgba::new(1.2, 0.02, 0.01, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()
             }),
             symmetry: standard_materials.add(StandardMaterial {
                 base_color: Color::srgba(0.1, 0.9, 0.85, 0.72),
-                emissive: LinearRgba::new(0.02, 0.8, 0.7, 1.0),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 ..default()

@@ -1,3 +1,6 @@
+// Non-glow family (BRL-0176): every authored color keeps its max channel at or below
+// NON_GLOW_HDR_PEAK in presentation_3d/world_look.rs, so blended output stays under the
+// bloom knee. Only projectile cores, muzzle/explosion flashes, and pickups bloom.
 #import bevy_pbr::forward_io::VertexOutput
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)
@@ -45,7 +48,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let deep = vec3<f32>(0.17, 0.015, 0.31);
     let body = vec3<f32>(0.62, 0.08, 0.92);
-    let hot = vec3<f32>(2.4, 0.34, 3.2);
+    let hot = vec3<f32>(1.5, 0.21, 2.0);
     var color = mix(deep, body, broad * 0.62 + detail * 0.18);
     color = mix(color, hot, veins * (0.36 + urgency * 0.42) + heartbeat * urgency * 0.28);
     let alpha = 0.24 + broad * 0.16 + veins * 0.26 + rim * 0.14;
