@@ -21,7 +21,7 @@ pub use cues::CaptureCombatCues;
 pub use cues::ClientCombatEvidenceStatus;
 pub use cues::ClientCombatObservation;
 pub(crate) use cues::RecentCombatEvents;
-pub(crate) use preview::{
+pub use preview::{
     AimMark, AimTone, AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker,
     MAX_CONE_SPRAY_SEGMENTS, PreviewGeometry, PreviewPrimitive, aim_lane_marks,
     cone_spray_primitives, straight_map_travel, ultimate_area_marks,

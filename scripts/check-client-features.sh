@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Verifies that the player client build (`--no-default-features --features client`, also the
-# package default) excludes automation and evidence-tooling code (BRL-0165):
-#   1. the `automation` feature exists and is unreachable from `default` and `client`;
+# Verifies that the player client build (`-p brawler-client` without features) excludes
+# automation and evidence-tooling code (BRL-0165, package layout BRL-0170):
+#   1. `brawler-client` owns the `automation` feature, unreachable from its default, and the shared
+#      `brawler` crate has no automation feature;
 #   2. automation-owned module declarations stay behind `#[cfg(feature = "automation")]`;
 #   3. the built player binary contains none of the automation marker strings.
 set -euo pipefail
@@ -12,9 +13,11 @@ cd "$project_dir"
 metadata="$(cargo metadata --locked --no-deps --format-version 1)"
 python3 -c 'import json, sys
 data = json.loads(sys.stdin.read())
-package = next(p for p in data["packages"] if p["name"] == "brawler")
+shared = next(p for p in data["packages"] if p["name"] == "brawler")
+assert "automation" not in shared["features"], "the shared brawler crate has an automation feature"
+package = next(p for p in data["packages"] if p["name"] == "brawler-client")
 features = package["features"]
-assert "automation" in features, "brawler has no automation feature"
+assert "automation" in features, "brawler-client has no automation feature"
 
 def closure(name, seen):
     for entry in features.get(name, []):
@@ -23,7 +26,7 @@ def closure(name, seen):
             closure(entry, seen)
     return seen
 
-for root in ("default", "client"):
+for root in ("default",):
     reached = closure(root, {root})
     assert "automation" not in reached, f"the {root} feature enables automation"
 
@@ -36,13 +39,13 @@ for target in package["targets"]:
 
 # Each automation-owned module or seam must be declared directly under the feature gate.
 gated_declarations=(
-    "src/client/mod.rs:mod automation;"
-    "src/client/mod.rs:mod vfx_lab;"
-    "src/client/queue/mod.rs:mod automation;"
-    "src/client/session/mod.rs:mod automation;"
-    "src/client/ui/mod.rs:pub(crate) mod gallery;"
-    "src/client/presentation_3d/mod.rs:mod diagnostics;"
-    "src/bin/client.rs:mod automation;"
+    "packages/brawler-client/src/lib.rs:mod automation;"
+    "packages/brawler-client/src/lib.rs:mod vfx_lab;"
+    "packages/brawler-client/src/queue/mod.rs:mod automation;"
+    "packages/brawler-client/src/session/mod.rs:mod automation;"
+    "packages/brawler-client/src/ui/mod.rs:pub(crate) mod gallery;"
+    "packages/brawler-client/src/presentation_3d/mod.rs:mod diagnostics;"
+    "packages/brawler-client/src/bin/client.rs:mod automation;"
 )
 for entry in "${gated_declarations[@]}"; do
     file=${entry%%:*}
@@ -59,7 +62,7 @@ for entry in "${gated_declarations[@]}"; do
 done
 
 # Literal strings owned by automation-only code reachable from brawler-client (verified present
-# in a `client,automation` build). Each must still exist in the source so a rename cannot
+# in a `-p brawler-client --features automation` build). Each must still exist in the source so a rename cannot
 # silently turn this check into a no-op.
 markers=(
     "[--combat-demo | --controller-demo]"
@@ -71,14 +74,14 @@ markers=(
     "capturing scheduled frame + client state"
 )
 for marker in "${markers[@]}"; do
-    if ! grep -rqF -- "$marker" src; then
-        printf 'player client: marker %s no longer exists in src; update this check\n' "$marker" >&2
+    if ! grep -rqF -- "$marker" packages/brawler-client/src; then
+        printf 'player client: marker %s no longer exists in packages/brawler-client/src; update this check\n' "$marker" >&2
         exit 1
     fi
 done
 
-cargo build --locked --bin brawler-client --no-default-features --features client
-binary="target/debug/brawler-client"
+cargo build --locked -p brawler-client --bin brawler-client
+binary="${CARGO_TARGET_DIR:-target}/debug/brawler-client"
 binary_strings="$(strings -a "$binary")"
 for marker in "${markers[@]}"; do
     if grep -qF -- "$marker" <<< "$binary_strings"; then

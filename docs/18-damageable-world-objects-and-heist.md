@@ -721,10 +721,10 @@ src/combat/
 src/matchplay/
   heist.rs              rules, safe ownership, outcome, restart, telemetry
 
-src/client/presentation_3d/
+packages/brawler-client/src/presentation_3d/
   map/object presentation plus focused object_health.rs projection from replicated state
 
-src/client/
+packages/brawler-client/src/
   HUD, audio, results, and product-flow dispatch
 ```
 
@@ -761,14 +761,14 @@ Local, version-pinned sources inspected while preparing and implementing this co
   outcome consumers;
 - `src/concealment/mod.rs`, `network.rs`, and `field.rs` for completed attack/damage reveal,
   connection-specific observer decisions, cue privacy, public entities, and replication ordering;
-- `src/profiles/catalog.rs` and `src/client/profile.rs` for the bounded server-advertised brawler
+- `src/profiles/catalog.rs` and `packages/brawler-client/src/profile.rs` for the bounded server-advertised brawler
   catalog and authoritative resolved maximum-health source used by restoration pickups;
 - `src/gameplay.rs`, `src/matchplay/mod.rs`, `hot_zone.rs`, `wipeout.rs`, `heist.rs`, `server.rs`, and
   `telemetry.rs` for fixed-post ordering, restart transactions, mode-owned state, deadline/
   threshold precedence, summaries, and result publication;
 - `src/protocol.rs`, `src/server/admission.rs`, `src/server/lobby/catalog.rs`, and routed game-mode
   mappings for global registration, compatibility, admission, worker, and product dispatch;
-- `src/client/hud.rs`, `audio/`, `session/`, and `presentation_3d/` for objective generation
+- `packages/brawler-client/src/hud.rs`, `audio/`, `session/`, and `presentation_3d/` for objective generation
   matching, HUD/results, cues, and world presentation;
 - `references/bevy/examples/app/plugin.rs` for focused Bevy plugin composition;
 - `references/lightyear/examples/network_visibility/src/server.rs` and the checked-in Lightyear

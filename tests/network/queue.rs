@@ -92,7 +92,7 @@ fn queue_command_before_lobby_welcome_cannot_create_membership() {
     assert!(
         harness.clients[0]
             .world()
-            .get::<brawler::client::ClientLobbyMembership>(client_entity)
+            .get::<brawler_client::ClientLobbyMembership>(client_entity)
             .is_none()
     );
 }
@@ -106,16 +106,16 @@ pub(super) fn wait_for_product_lobby(harness: &mut Harness) {
             .all(|(client, entity)| {
                 client
                     .world()
-                    .get::<brawler::client::ClientLobbyMembership>(*entity)
+                    .get::<brawler_client::ClientLobbyMembership>(*entity)
                     .is_some()
                     && client
                         .world()
-                        .resource::<brawler::client::ClientQueueModel>()
+                        .resource::<brawler_client::ClientQueueModel>()
                         .snapshot()
                         .is_some()
                     && client
                         .world()
-                        .resource::<brawler::client::ClientProfileModel>()
+                        .resource::<brawler_client::ClientProfileModel>()
                         .snapshot()
                         .is_some_and(|profile| {
                             profile.selected_brawler_id.is_some() && !profile.brawlers.is_empty()
@@ -133,7 +133,7 @@ pub(super) fn selected_brawler(
 ) {
     let profile = harness.clients[client_index]
         .world()
-        .resource::<brawler::client::ClientProfileModel>()
+        .resource::<brawler_client::ClientProfileModel>()
         .snapshot()
         .expect("product lobby has delivered the authoritative profile");
     let selected_id = profile
@@ -151,11 +151,11 @@ pub(super) fn start_product_join(harness: &mut Harness, client_index: usize, gam
     let entity = harness.client_entities[client_index];
     let lobby = harness.clients[client_index]
         .world()
-        .get::<brawler::client::ClientLobbyMembership>(entity)
+        .get::<brawler_client::ClientLobbyMembership>(entity)
         .unwrap()
         .clone();
     let game = lobby.game_types[game_index].clone();
-    let selection = brawler::client::SelectedGameType {
+    let selection = brawler_client::SelectedGameType {
         catalog_revision: Some(lobby.catalog_revision),
         game_type_id: Some(game.id),
         configuration_revision: Some(game.configuration_revision),
@@ -164,7 +164,7 @@ pub(super) fn start_product_join(harness: &mut Harness, client_index: usize, gam
     assert!(
         harness.clients[client_index]
             .world_mut()
-            .resource_mut::<brawler::client::ClientQueueModel>()
+            .resource_mut::<brawler_client::ClientQueueModel>()
             .start_join(
                 &selection,
                 brawler_id,
@@ -196,7 +196,7 @@ fn practice_request_bypasses_queue_and_starts_one_human_three_v_three_reservatio
     let client_entity = harness.client_entities[0];
     let lobby = harness.clients[0]
         .world()
-        .get::<brawler::client::ClientLobbyMembership>(client_entity)
+        .get::<brawler_client::ClientLobbyMembership>(client_entity)
         .unwrap()
         .clone();
     let game = lobby
@@ -204,7 +204,7 @@ fn practice_request_bypasses_queue_and_starts_one_human_three_v_three_reservatio
         .iter()
         .find(|game| game.id.as_str() == "hot-zone-3v3")
         .unwrap();
-    let selected = brawler::client::SelectedGameType {
+    let selected = brawler_client::SelectedGameType {
         catalog_revision: Some(lobby.catalog_revision),
         game_type_id: Some(game.id.clone()),
         configuration_revision: Some(game.configuration_revision),
@@ -213,20 +213,20 @@ fn practice_request_bypasses_queue_and_starts_one_human_three_v_three_reservatio
     assert!(
         harness.clients[0]
             .world_mut()
-            .resource_mut::<brawler::client::ClientPracticeModel>()
+            .resource_mut::<brawler_client::ClientPracticeModel>()
             .start(&selected, brawler_id, brawler_revision,)
     );
 
     harness.step_until(|harness| {
         harness.clients[0]
             .world()
-            .resource::<brawler::client::ClientMatchLoadingModel>()
+            .resource::<brawler_client::ClientMatchLoadingModel>()
             .active()
             .is_some()
     });
     let started = harness.clients[0]
         .world()
-        .resource::<brawler::client::ClientMatchLoadingModel>()
+        .resource::<brawler_client::ClientMatchLoadingModel>()
         .active()
         .unwrap();
     assert_eq!(started.ticket_id, None);
@@ -251,7 +251,7 @@ fn product_lobby_two_client_fifo_cancel_and_aggregate_convergence() {
         harness.clients.iter().all(|client| {
             let queue = client
                 .world()
-                .resource::<brawler::client::ClientQueueModel>();
+                .resource::<brawler_client::ClientQueueModel>();
             queue.membership().is_some()
                 && queue
                     .snapshot()
@@ -279,16 +279,16 @@ fn product_lobby_two_client_fifo_cancel_and_aggregate_convergence() {
     assert!(
         harness.clients[0]
             .world_mut()
-            .resource_mut::<brawler::client::ClientQueueModel>()
+            .resource_mut::<brawler_client::ClientQueueModel>()
             .start_cancel(std::time::Duration::from_secs(1))
     );
     harness.step_until(|harness| {
         let first = harness.clients[0]
             .world()
-            .resource::<brawler::client::ClientQueueModel>();
+            .resource::<brawler_client::ClientQueueModel>();
         let second = harness.clients[1]
             .world()
-            .resource::<brawler::client::ClientQueueModel>();
+            .resource::<brawler_client::ClientQueueModel>();
         first.membership().is_none()
             && first
                 .snapshot()
@@ -318,7 +318,7 @@ fn product_lobby_cross_pool_snapshots_are_shared_but_membership_is_private() {
         harness.clients.iter().all(|client| {
             let queue = client
                 .world()
-                .resource::<brawler::client::ClientQueueModel>();
+                .resource::<brawler_client::ClientQueueModel>();
             queue.membership().is_some()
                 && queue.snapshot().is_some_and(|snapshot| {
                     snapshot.pools[0].queued == 1 && snapshot.pools[1].queued == 1
@@ -327,10 +327,10 @@ fn product_lobby_cross_pool_snapshots_are_shared_but_membership_is_private() {
     });
     let first = harness.clients[0]
         .world()
-        .resource::<brawler::client::ClientQueueModel>();
+        .resource::<brawler_client::ClientQueueModel>();
     let second = harness.clients[1]
         .world()
-        .resource::<brawler::client::ClientQueueModel>();
+        .resource::<brawler_client::ClientQueueModel>();
     assert_ne!(
         first.membership().unwrap().game_type_id,
         second.membership().unwrap().game_type_id

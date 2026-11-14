@@ -596,6 +596,41 @@ impl ClientNetworkConfig {
     }
 }
 
+/// Runtime state of the configured headless client automation (BRL-0170: owned here so the
+/// shared combat evidence adapter and the `brawler-client` input driver read one resource).
+#[cfg(feature = "client")]
+#[derive(bevy::prelude::Resource, Clone, Copy, Debug, PartialEq)]
+pub struct HeadlessAutomation {
+    pub move_axis: bevy::math::Vec2,
+    pub aim_axis: Option<bevy::math::Vec2>,
+    pub aim_at_dummy: bool,
+    pub fire: bool,
+    pub ultimate: bool,
+    pub simulation_ticks: Option<u32>,
+    pub elapsed_ticks: u32,
+}
+
+#[cfg(feature = "client")]
+impl bevy::prelude::FromWorld for HeadlessAutomation {
+    fn from_world(world: &mut bevy::prelude::World) -> Self {
+        use bevy::math::Vec2;
+        let config = world.resource::<ClientNetworkConfig>();
+        Self {
+            move_axis: config
+                .headless_move
+                .map_or(Vec2::ZERO, |(x, y)| Vec2::new(f32::from(x), f32::from(y))),
+            aim_axis: config
+                .headless_aim
+                .map(|(x, y)| Vec2::new(f32::from(x), f32::from(y))),
+            aim_at_dummy: config.headless_aim_at_dummy,
+            fire: config.headless_fire,
+            ultimate: config.headless_ultimate,
+            simulation_ticks: config.headless_simulation_ticks,
+            elapsed_ticks: 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

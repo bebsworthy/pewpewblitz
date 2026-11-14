@@ -1,5 +1,5 @@
 // Client-only map theme presentation. `grading` (BRL-0146) is applied to the HDR arena camera
-// with the theme lights; bounds live in `src/client/presentation_3d/world_look.rs`. `floor` (BRL-0147)
+// with the theme lights; bounds live in `packages/brawler-client/src/presentation_3d/world_look.rs`. `floor` (BRL-0147)
 // is the grid-aligned two-tone tile surface: tones differ by at most 8% value, plus a per-cell
 // value jitter and darkening near walls and the arena edge (`floor_tiles.rs`). `water_edge`
 // (BRL-0153, formerly `ground_accent`) colours the curb along open water edges in the kit palette.

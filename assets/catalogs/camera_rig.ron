@@ -1,6 +1,6 @@
 // Client-only gameplay camera rig tuning (BRL-0143). Presentation only: none of these values
 // feed aim, targeting, input, or simulation. Code-owned ceilings live in
-// `src/client/presentation_3d/camera_rig.rs`; framing (FOV, elevation, distance) stays in
+// `packages/brawler-client/src/presentation_3d/camera_rig.rs`; framing (FOV, elevation, distance) stays in
 // `camera.rs`.
 (
     schema_version: 1,

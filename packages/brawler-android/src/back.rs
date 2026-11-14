@@ -5,10 +5,10 @@
 //! on the Android UI thread and asks [`Java_com_pewpewblitz_client_MainActivity_nativeOnBackPressed`]
 //! whether the shell can go back: at a root screen it returns false and Java moves the task to the
 //! background; otherwise the press is queued here and replayed into the shared
-//! [`brawler::client::BackInput`] on the Bevy thread.
+//! [`brawler_client::BackInput`] on the Bevy thread.
 
 use bevy::prelude::*;
-use brawler::client::BackInput;
+use brawler_client::BackInput;
 use std::{
     ffi::c_void,
     sync::atomic::{AtomicBool, AtomicU32, Ordering},

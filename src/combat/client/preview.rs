@@ -9,10 +9,10 @@ use avian2d::{collision::collider::contact_query::time_of_impact, prelude::Colli
 use std::collections::HashMap;
 
 /// Rays plus rim segments of one live cone-spray surface.
-pub(crate) const MAX_CONE_SPRAY_SEGMENTS: usize = CONE_SPRAY_RAYS * 2 - 1;
+pub const MAX_CONE_SPRAY_SEGMENTS: usize = CONE_SPRAY_RAYS * 2 - 1;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum PreviewGeometry {
+pub enum PreviewGeometry {
     Corridor {
         center: Vec2,
         angle: f32,
@@ -22,7 +22,7 @@ pub(crate) enum PreviewGeometry {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PreviewPrimitive {
+pub struct PreviewPrimitive {
     pub geometry: PreviewGeometry,
     pub blocked: bool,
 }
@@ -43,7 +43,7 @@ impl PreviewPrimitive {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum AimTraceBlockerClass {
+pub enum AimTraceBlockerClass {
     Fighter,
     Sentry,
     HostileNpc,
@@ -52,7 +52,7 @@ pub(crate) enum AimTraceBlockerClass {
 
 /// One currently replicated dynamic body eligible to stop the local player's next straight shot.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct AimTraceDynamicBlocker {
+pub struct AimTraceDynamicBlocker {
     pub class: AimTraceBlockerClass,
     pub stable_id: u128,
     pub position: Vec2,
@@ -80,7 +80,7 @@ struct IndexedMapBlocker {
 /// filled with non-blocking grass does not allocate one entry per cell, while a deliberately full
 /// wall map remains supported within the authored placement envelope.
 #[derive(Resource, Default)]
-pub(crate) struct AimTraceBlockerIndex {
+pub struct AimTraceBlockerIndex {
     key: Option<AimTraceIndexKey>,
     dimensions: Option<crate::map::MapDimensions>,
     blockers: Vec<IndexedMapBlocker>,
@@ -88,7 +88,7 @@ pub(crate) struct AimTraceBlockerIndex {
 }
 
 impl AimTraceBlockerIndex {
-    pub(crate) fn refresh(
+    pub fn refresh(
         &mut self,
         snapshot: &crate::map::ResolvedMapSnapshot,
         state: &crate::map::MapDynamicState,
@@ -336,7 +336,7 @@ fn trace_projectile_body(
 /// map geometry or the playable perimeter stops it. Fighters and deployables are ignored: this is
 /// presentation geometry for cosmetic flight only, never hit detection.
 #[must_use]
-pub(crate) fn straight_map_travel(
+pub fn straight_map_travel(
     index: &AimTraceBlockerIndex,
     body: ProjectileBody,
     start: Vec2,
@@ -418,7 +418,7 @@ fn distance_to_perimeter(
 /// How an aim mark reads: an open shot, one stopped early by a blocker or an unrepairable landing,
 /// a targeted ultimate, or the Demolition Strike ultimate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AimTone {
+pub enum AimTone {
     Clear,
     Blocked,
     Ultimate,
@@ -437,7 +437,7 @@ impl AimTone {
 /// fill is star-shaped around its apex and never overlaps itself. Strokes are crisp lines of a
 /// world-unit width. Presentation turns the marks into one mesh; nothing here decides a hit.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum AimMark {
+pub enum AimMark {
     Fill {
         apex: Vec2,
         apex_tone: AimTone,
@@ -501,7 +501,8 @@ const CONE_SPRAY_RAYS: usize = 17;
     clippy::too_many_arguments,
     reason = "the aim lane consumes the complete authored delivery and current blocker view"
 )]
-pub(crate) fn aim_lane_marks(
+#[must_use]
+pub fn aim_lane_marks(
     origin: Vec2,
     facing: f32,
     aim_distance: Option<f32>,
@@ -590,7 +591,8 @@ pub(crate) fn aim_lane_marks(
 
 /// A targeted ultimate's preview: a guide to the clamped center, the authored area, and a
 /// thicker rim in the ultimate tone.
-pub(crate) fn ultimate_area_marks(
+#[must_use]
+pub fn ultimate_area_marks(
     origin: Vec2,
     center: Vec2,
     radius: f32,
@@ -887,7 +889,8 @@ fn closed_rim(outline: &[Vec2], tone: AimTone) -> Vec<(Vec2, AimTone)> {
         .collect()
 }
 
-pub(crate) fn cone_spray_primitives(
+#[must_use]
+pub fn cone_spray_primitives(
     state: ConeSprayState,
     tick: u64,
     index: &AimTraceBlockerIndex,

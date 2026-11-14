@@ -44,3 +44,213 @@ AGENTS.md permits a new package for a demonstrated compile-time boundary. This t
 
 - The cheaper dev profile (`debug = "line-tables-only"` for the crate, `debug = false` for dependencies) and a `just sweep` stale-artifact recipe are a separate small change applied first, so the baseline reflects them.
 - BRL-0012 (narrow the application crate public API).
+
+
+## Baseline measurement (2026-11-14, before any split)
+
+Machine: Apple Silicon (12 cores, 32 GB), macOS, rustc/cargo 1.95.0, repository HEAD `1d38cc1b`.
+The "cheaper dev profile" named under Related has **not** landed (`[profile.dev]` is still
+`opt-level = 1` with full debuginfo); both baseline and post-split use the current profile so the
+comparison is like-for-like. Measurements ran in an exported copy of HEAD with a dedicated
+`CARGO_TARGET_DIR` under the session scratchpad, so the owner's `target/` and running routed
+server were never touched. The clean steps overlapped with light `cargo check` prototyping, so
+treat clean wall times as approximate; the incremental matrix ran on an otherwise idle machine.
+
+Clean, sequential, one fresh target dir:
+
+| Step | Wall |
+|---|---|
+| `just check` (clean) | 155 s |
+| `cargo build --no-default-features --features client` (`--timings`) | 367 s; `brawler` lib unit 119 s |
+| `cargo build --no-default-features --features server` (`--timings`) | 131 s; `brawler` lib unit 52 s |
+| `just test` (after the two builds) | 896 s, all suites green |
+| `just lint` | clippy recipes green; `_client-features` fails under a custom `CARGO_TARGET_DIR` because the script reads the literal `target/debug/brawler-client` (pre-existing defect, fixed in this ticket) |
+| `target/` after check + test + lint | 57.1 GB (`debug/deps` 37.2 GB, `debug/incremental` 18.3 GB) |
+
+Incremental matrix: each edit is applied, then every target is rebuilt in turn (each target has its
+own artifacts, so each sees exactly one pending edit); the edit is then reverted and the matrix is
+re-run (two samples per cell). Two edit kinds: a dead `const` appended to the file ("item"), and
+`std::hint::black_box(0_u32);` inserted as the first statement of a live function ("body").
+Targets, using the real feature sets from `justfile`:
+
+- `build-client` = `cargo build --locked --no-default-features --features client`
+- `build-server` = `cargo build --locked --no-default-features --features server`
+- `testlib-client` = `cargo test --locked --no-default-features --features client,automation --lib --no-run`
+- `testlib-server` = `cargo test --locked --no-default-features --features server --lib --no-run`
+- `test-client-all` = the `_test-client` compile (`--features client,automation --all-targets --no-run`)
+
+Baseline incremental results (wall seconds, `add` sample / `revert` sample):
+
+| Edit (add / revert, seconds) | build-client | build-server | testlib-client | testlib-server | test-client-all |
+|---|---|---|---|---|---|
+| client-presentation | 7.8 / 4.7 | 0.2 / 0.2 | 6.7 / 4.8 | 0.2 / 0.2 | 9.7 / 6.4 |
+| client-presentation-body | 40.0 / 41.2 | 0.2 / 0.2 | 52.1 / 50.3 | 0.2 / 0.2 | 42.0 / 41.2 |
+| combat-rule | 0.2 / 0.2 | 5.1 / 2.9 | 0.2 / 0.2 | 3.9 / 2.6 | 0.2 / 0.2 |
+| combat-rule-body | 35.6 / 36.9 | 11.5 / 11.5 | 32.5 / 33.2 | 15.5 / 15.2 | 29.8 / 29.6 |
+| protocol | 4.6 / 6.5 | 3.0 / 3.0 | 4.8 / 4.8 | 2.8 / 2.8 | 6.3 / 6.3 |
+| protocol-body | 34.8 / 35.0 | 16.0 / 15.7 | 41.9 / 41.0 | 18.2 / 17.9 | 46.5 / 46.0 |
+
+Reading: item-level edits are cheap everywhere (5-10 s). Body edits, the realistic case, cost
+30-52 s in every client-feature configuration versus 11-18 s in the server configuration: the cost
+scales with the size of the crate being re-codegened, and the client configuration compiles the
+whole 187k-line crate. A client-only edit never touches server artifacts already.
+
+Edit files: client presentation `src/client/presentation_3d/hit_feedback.rs`
+(`combat_cue_hit_feedback`), shared combat rule `src/combat/definitions/resolver.rs`
+(`spread_angles`, used by server attack emission and client aim preview), protocol
+`src/protocol.rs` (`FighterInput::is_valid`). The "item" combat sample used
+`src/combat/effects/planning.rs`, which turned out to be server-only (client builds 0.2 s).
+
+## Dependency analysis
+
+- 186.7k Rust lines: `src/client/` 92.9k (half the crate), `src/server/` 23.4k, shared ~66k.
+- `src/server/` is not the expensive boundary: server authority is interleaved through the shared
+  domain modules (about 400 `#[cfg(feature = "server")]` sites in combat/abilities/map/matchplay/
+  modes/bots), so a server crate would need a large behavioral refactor. A client-only edit already
+  never rebuilds a server artifact (`build-server`/`testlib-server` stay 0.2 s): cfg'd-out
+  `mod client;` files are not in the server build's dep-info.
+- `src/client/` depends one way on shared modules except for four non-test reverse references:
+  `brawler::testing::spawn_crossbeam_client`, combat evidence reading `client::HeadlessAutomation`,
+  `map::client` writing `client::ClientPlayableGate`, and the diagnostics overlay reading
+  `client::ClientJoinPhase/ClientJoinStatus`.
+- No Lightyear-registered type (component, message, channel) is defined in `src/client/`. Lightyear's
+  registry hasher hashes `DebugName::type_name` of every registered type, so the protocol registry
+  fingerprint depends on crate names: replicated types must stay in a crate named `brawler`.
+  The content fingerprint is built from catalog domain IDs/material, not type names.
+- Client sources include repository files by relative path (`include_str!`) and use
+  `CARGO_MANIFEST_DIR` for the Bevy asset root and asset tests; a moved package must re-anchor these.
+
+## Chosen boundary
+
+One new package, `packages/brawler-client`, holding the former `src/client/` (crate root
+`src/lib.rs`), the three client binaries, and the `network`/`performance` integration suites (they
+need both roles). The root package keeps the name `brawler` (wire/fingerprint stability), the
+shared modules, the shared-side client adapters (`combat::client`, `map::client`, combat evidence,
+client protocol registration) behind its `client` feature, the server, and the server binaries.
+No server crate and no separate "core" crate: neither is justified by the dependency structure or
+the measurements above.
+
+Cross-crate API: shared items the client uses become `pub` (they were `pub(crate)`); recorded in
+the implementation notes below and kept to what the client consumes (BRL-0012). `HeadlessAutomation`
+moves to `brawler::config` and `ClientPlayableGate` to `brawler::map` (both re-exported from
+`brawler_client` at their old relative paths); the diagnostics overlay moves into the client
+crate; `spawn_crossbeam_client` moves to `brawler_client::testing`. Integration tests and bins
+import client items as `brawler_client::...` instead of `brawler::client::...`; that path change is
+unavoidable because `brawler` cannot depend on `brawler-client`.
+
+
+## Implementation (2026-11-14)
+
+Built and verified first in a scratch prototype copy, then applied to the working tree as one
+patch. Layout:
+
+- `packages/brawler-client/` (new): former `src/client/` (crate root `src/lib.rs`, was `mod.rs`),
+  `src/bin/{client.rs,client/,vfx_lab.rs,ui_gallery.rs}`, and `diagnostics_overlay.rs` (was
+  `src/diagnostics/overlay.rs`, with its two tests). Features: `automation`, `network-test`
+  (`automation` + `brawler/network-test`), `balance-lab` (passthrough for one network scenario).
+  Owns test targets `network`/`performance`, whose sources stay at `tests/` (`path = "../../tests/..."`).
+  Client-only deps moved here: `bevy_hanabi`, `arboard`, `directories`, and dev-deps `skrifa`, `parley`.
+- Root `brawler`: drops the client binaries, `automation` feature, and those deps; adds
+  `autotests = false` (explicit `map_public_api`, `routed-process`) and a dev-only `test-support`
+  feature exposing `brawler::test_app` to client unit tests.
+- Client code says `brawler::<domain>::...` for shared items (mechanical rewrite of
+  `crate::<domain>::`; `crate::client::` became `crate::`). Relative `include_str!` paths gained one
+  `../`; `CARGO_MANIFEST_DIR` uses go through `REPOSITORY_ROOT` (`<pkg>/../..`), so the Bevy asset
+  root is still the repository `assets/` directory.
+- Reverse references resolved: `HeadlessAutomation` -> `brawler::config` (fields now `pub`),
+  `ClientPlayableGate` -> `brawler::map` (both re-exported from `brawler_client`),
+  `spawn_crossbeam_client` -> `brawler_client::testing`, overlay moved to the client crate; a stale
+  `PendingLocalActions` insert removed from one `combat::client` schedule test.
+- Cross-crate API (`pub(crate)` -> `pub`, about 60 lines, all consumed by `brawler-client`):
+  `combat::{client (module), delivery (module), DeduplicatedCombatCue}` and the aim/spray preview
+  helpers (`AimMark`, `AimTone`, `AimTrace*`, `PreviewGeometry`, `PreviewPrimitive`,
+  `MAX_CONE_SPRAY_SEGMENTS`, `aim_lane_marks`, `cone_spray_primitives`, `straight_map_travel`,
+  `ultimate_area_marks`); `map::{authoring (module), ClientPickupCueSet}`; `matchplay::{ObjectiveResult,
+  ObjectiveTotals}`; `modes` (module, `#[doc(hidden)]`) with `ModeRegistry`, `ModeCatalog`,
+  `ModeRegistryPlugin`, `ModeRegistration{key, presentation}`, `ModePresentationProjection{selection_label}`,
+  `BuiltInModeRegistrationsPlugin`, `descriptor_for_definition`; `movement::{MovementIntent,
+  MovementModifiers, movement_intent, movement_is_suspended, resolved_movement_velocity}`;
+  `logging` (module, `#[doc(hidden)]`, `add_log_plugin_once`); `diagnostics::unix_micros_now`,
+  `ProcessDiagnosticsState::record_error_exit`; `protocol::...::to_routing_capability`. Five new
+  `#[must_use]` attributes satisfy `clippy::must_use_candidate`. Narrowing this belongs to BRL-0012.
+- `justfile`: client recipes now select `-p brawler -p brawler-client` with
+  `--features brawler/client[,brawler-client/automation]`; network/performance/balance-lab-network
+  recipes use `-p brawler-client`. Scripts build the client with `-p brawler-client [--features automation]`;
+  `BRAWLER_ROUTED_CLIENT_FEATURES`/`BRAWLER_NETWORK_CLIENT_FEATURES` now name `brawler-client`
+  features (`automation`, `brawler/process-metrics`). `check-client-features.sh` checks the new
+  package and honors `CARGO_TARGET_DIR`; `check-server-features.sh` also forbids `brawler-client`,
+  `bevy_hanabi`, `arboard`; v3/v8 checks scan `packages/brawler-client/src`.
+- Docs: `docs/01-engine-decision.md` (packages, features), `AGENTS.md` stack/source layout,
+  `README.md`, and path references in durable docs/catalog comments. Historical records untouched.
+
+No wire, protocol, fingerprint, persistence, or behavior change: `brawler-server routing-identity`
+is identical before/after (`network_protocol=4778953997791089217`,
+`protocol_registry_fingerprint=18160765825630381060`, `content_fingerprint=7772007507332977560`,
+also equal to the owner's running supervisor), and the same 2317 tests pass.
+
+## Post-split measurements
+
+Same machine, same profile, fresh scratch target dir, sequential:
+
+| Step | Before | After |
+|---|---|---|
+| `just check` (clean) | 155 s | 162 s |
+| clean client build (`--timings`) | 367 s (`brawler` 119 s) | 323 s (`brawler` 51 s + `brawler-client` 63 s) |
+| clean server build (`--timings`) | 131 s (`brawler` 52 s) | 119 s (`brawler` 51 s) |
+| `just test` | 896 s, 2317 passed | 681 s, 2317 passed |
+| `just lint` | 74 s (stopped at `_client-features`, see baseline) | 67 s, all recipes green |
+| `target/` after check + test + lint | 57.1 GB | 52.6 GB (deps 32.7 GB, incremental 17.8 GB) |
+
+Incremental matrix, mean of the add/revert samples, before -> after (after targets are the
+equivalent package selections: `build-client` = `cargo build -p brawler-client`, `testlib-client` /
+`test-client-all` = `-p brawler -p brawler-client --features brawler/client,brawler-client/automation`
+with `--lib` / `--all-targets --no-run`):
+
+| Edit | build-client | build-server | testlib-client | testlib-server | test-client-all |
+|---|---|---|---|---|---|
+| client-presentation | 6.2 → 4.4 (1.4×) | 0.2 → 0.2 | 5.8 → 3.5 (1.6×) | 0.2 → 0.2 | 8.1 → 3.7 (2.2×) |
+| client-presentation-body | 40.6 → 28.8 (1.4×) | 0.2 → 0.2 | 51.2 → 27.1 (1.9×) | 0.2 → 0.2 | 41.6 → 29.5 (1.4×) |
+| combat-rule | 0.2 → 0.2 | 4.0 → 3.8 (1.0×) | 0.2 → 0.2 | 3.2 → 3.2 (1.0×) | 0.2 → 0.2 |
+| combat-rule-body | 36.2 → 7.2 (5.1×) | 11.5 → 11.2 (1.0×) | 32.9 → 13.3 (2.5×) | 15.3 → 15.3 (1.0×) | 29.7 → 6.1 (4.9×) |
+| protocol | 5.5 → 8.0 (0.7×) | 3.0 → 3.8 (0.8×) | 4.8 → 8.3 (0.6×) | 2.8 → 3.2 (0.9×) | 6.3 → 6.6 (1.0×) |
+| protocol-body | 34.9 → 28.2 (1.2×) | 15.8 → 15.5 (1.0×) | 41.5 → 36.3 (1.1×) | 18.0 → 17.6 (1.0×) | 46.2 → 25.9 (1.8×) |
+
+- A client-only edit recompiles only `brawler-client` (cargo `Compiling` lines in the bench logs);
+  no `brawler` or server artifact rebuilds.
+- `_test-client` after a client-only edit: 2.2x for an item edit, 1.4x for a function-body edit
+  (41.6 s -> 29.5 s). The 2x target is met for item edits but not for body edits; the remaining
+  cost is `brawler-client` codegen plus test/bin linking (follow-up BRL-r8ev).
+- Biggest win is shared gameplay body edits in client configurations (36 s -> 7 s, 30 s -> 6 s):
+  `brawler` recompiles only its half and the downstream client crate reuses almost everything.
+- Regression: item-level protocol edits cost 1-3 s more because both crates rebuild.
+
+## Verification (logs in the session scratchpad `brl0170/`)
+
+- `just check`, `just test`, `just lint` (real ripgrep first on PATH): green (`final-*.log`).
+- Role checks: `scripts/check-server-features.sh`, `scripts/check-client-features.sh` green inside lint.
+- `just e2e 2` and `just practice-e2e wipeout-1v1` equivalents through a scratch
+  `network-product-match.sh` (scratch `--data-directory`, ephemeral 127.0.0.1 port, scratch target):
+  "1 exact 1v1 roster(s) reached Active" and "Practice wipeout-1v1 reached Active with one human".
+  Tracked `data/server/` checksums unchanged.
+- Android: `cargo ndk --target arm64-v8a --platform 31 build --locked -p brawler-android --profile android`
+  finished (3m25s). No gradle, no adb.
+- Python evidence-script unit tests: 38 OK.
+- Not run: `just ci` 4/6-client and full Practice matrices, `network-change-e2e`, native/windowed play.
+
+## Deferred
+
+- BRL-r8ev: cheaper dev debuginfo profile + `just sweep` (assumed by this spec, never landed).
+- BRL-fk77: pre-existing `clippy::float_cmp` in `tests/network/builds.rs` under `network-test,balance-lab`.
+- BRL-0012: narrow the cross-crate `pub` surface listed above.
+
+## Learn from errors
+
+- Item-level probes understated real edit cost 5-8x; measure with function-body edits too.
+- The first "shared combat" probe hit a server-only file; confirm a probe file is compiled in
+  every measured configuration (the client build staying at 0.2 s gave it away).
+- Re-exporting shared modules at the client crate root collided with `use super::*` globs and
+  `unused_qualifications`; explicit `brawler::` paths were cleaner than re-rooting.
+- Scripts that hard-code `target/debug` break under a custom `CARGO_TARGET_DIR`; verification
+  that must not touch the owner's `target/` needs scripts that honor it.
+- Check type-name-sensitive fingerprints (Lightyear registry hashes type paths) before choosing
+  which side of a split keeps the original crate name.

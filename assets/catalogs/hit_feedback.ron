@@ -1,7 +1,7 @@
 // Client-only hit feedback tuning (BRL-0144). Presentation only: every flash and number is driven
 // by an authoritative replicated cue, and none of these values feed simulation, aim, or input.
 // Code-owned ceilings (pool size, durations, scales) live in
-// `src/client/presentation_3d/hit_feedback.rs`; the defeat puff and ground marker are authored in
+// `packages/brawler-client/src/presentation_3d/hit_feedback.rs`; the defeat puff and ground marker are authored in
 // `vfx.ron` under the `defeat` recipes.
 (
     schema_version: 1,

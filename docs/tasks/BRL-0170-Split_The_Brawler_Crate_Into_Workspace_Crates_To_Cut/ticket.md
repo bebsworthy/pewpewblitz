@@ -3,9 +3,9 @@ id: BRL-0170
 
 title: Split the brawler crate into workspace crates to cut rebuild cost
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-12T20:15:05Z
+status_changed: 2026-11-14T08:40:42Z
 
 theme: quality
 
@@ -15,11 +15,11 @@ created: 2026-10-23T17:18:22Z
 
 blocks: []
 
-related: [BRL-0012]
+related: [BRL-0012, BRL-fk77, BRL-r8ev]
 
 parent: BRL-0171
 
-rank: 589824
+rank: 12648448
 ---
 
 # Description

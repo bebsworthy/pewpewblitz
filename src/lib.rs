@@ -1,4 +1,8 @@
-//! Reusable application composition for Brawler's client and dedicated server.
+//! Shared gameplay model, protocol, and dedicated-server composition for Brawler.
+//!
+//! The player client application is the `brawler-client` package, which builds on this crate's
+//! `client` feature (BRL-0170). This crate keeps the name `brawler` so replicated type paths, and
+//! therefore the protocol registry fingerprint, stay stable.
 
 pub mod abilities;
 mod bots;
@@ -11,10 +15,12 @@ pub mod diagnostics;
 pub mod gameplay;
 pub mod lobby;
 #[cfg(any(feature = "client", feature = "server"))]
-mod logging;
+#[doc(hidden)]
+pub mod logging;
 pub mod map;
 pub mod matchplay;
-pub(crate) mod modes;
+#[doc(hidden)]
+pub mod modes;
 pub mod movement;
 pub mod profiles;
 pub mod protocol;
@@ -24,11 +30,10 @@ pub mod weapon_parts;
 #[cfg(feature = "network-test")]
 pub mod testing;
 
-#[cfg(test)]
-pub(crate) mod test_app;
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub mod test_app;
 
-#[cfg(feature = "client")]
-pub mod client;
 #[cfg(feature = "server")]
 pub mod server;
 

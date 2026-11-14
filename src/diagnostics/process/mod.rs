@@ -158,7 +158,7 @@ pub struct ProcessExitClassification {
 impl ProcessExitClassification {
     /// Record the category of an error exit being requested now. The first recorded
     /// category wins, so a shutdown storm cannot overwrite the root cause.
-    pub(crate) fn record_error_exit(&mut self, category: ProcessExitCategory) {
+    pub fn record_error_exit(&mut self, category: ProcessExitCategory) {
         if self.category.is_none() {
             self.category = Some(category);
         }

@@ -4,12 +4,12 @@ set -euo pipefail
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 
-world_sources=(src/client/presentation_3d src/combat/client src/map/client.rs)
+world_sources=(packages/brawler-client/src/presentation_3d src/combat/client src/map/client.rs)
 if rg -n '\b(Sprite|Text2d|Mesh2d|ColorMaterial)\b' "${world_sources[@]}"; then
     printf '%s\n' 'V3 gameplay-world presentation contains a retired 2D render type' >&2
     exit 1
 fi
-if rg -n 'VisualPlacementKind::Sprite|facility_tileset|team_(blue|red)\.png' src assets/manifest.ron Cargo.toml; then
+if rg -n 'VisualPlacementKind::Sprite|facility_tileset|team_(blue|red)\.png' src packages/brawler-client/src assets/manifest.ron Cargo.toml; then
     printf '%s\n' 'V3 source or manifest contains a retired renderer contract or asset' >&2
     exit 1
 fi

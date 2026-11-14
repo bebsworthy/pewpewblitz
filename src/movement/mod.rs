@@ -24,7 +24,7 @@ pub use input::{
     decoded_move, desired_pose_step, input_should_neutralize, latest_present_remote_tick,
     radial_deadzone, trigger_pressed,
 };
-pub(crate) use step::{
+pub use step::{
     MovementModifiers, movement_intent, movement_is_suspended, resolved_movement_velocity,
 };
 

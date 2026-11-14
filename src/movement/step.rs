@@ -14,14 +14,14 @@ use super::input::{InputTuning, active_slow_multiplier, committed_aim, decoded_m
 
 /// Normalized movement and committed aim derived from one input frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct MovementIntent {
+pub struct MovementIntent {
     pub movement: Vec2,
     pub aim: Option<Vec2>,
 }
 
 /// Shape one input frame exactly as the authoritative decoder does. Invalid frames are neutral.
 #[must_use]
-pub(crate) fn movement_intent(input: FighterInput, tuning: &InputTuning) -> MovementIntent {
+pub fn movement_intent(input: FighterInput, tuning: &InputTuning) -> MovementIntent {
     let input = if input.is_valid() {
         input
     } else {
@@ -38,7 +38,7 @@ pub(crate) fn movement_intent(input: FighterInput, tuning: &InputTuning) -> Move
 /// Whether ordinary movement is suspended this tick: a dash owns the pose, the fighter is
 /// defeated, or a match participant is not an active combatant.
 #[must_use]
-pub(crate) fn movement_is_suspended(
+pub fn movement_is_suspended(
     ability: Option<&crate::builds::AbilityState>,
     defeated: bool,
     inactive_participant: bool,
@@ -50,7 +50,7 @@ pub(crate) fn movement_is_suspended(
 
 /// Status, tile, passive, and external-motion inputs to one movement step.
 #[derive(Clone, Copy, Default)]
-pub(crate) struct MovementModifiers<'a> {
+pub struct MovementModifiers<'a> {
     pub active_effects: Option<&'a crate::combat::ActiveEffects>,
     pub effect_tile: Option<&'a crate::map::EffectTileOccupancy>,
     pub adrenal_response: Option<crate::builds::ResolvedPassive>,
@@ -61,7 +61,7 @@ pub(crate) struct MovementModifiers<'a> {
 /// Resolve the per-tick desired velocity from intent, speed, effects, tile, adrenaline, and
 /// external motion. A frozen fighter does not move at all.
 #[must_use]
-pub(crate) fn resolved_movement_velocity(
+pub fn resolved_movement_velocity(
     tick: u64,
     movement: Vec2,
     resolved_speed: f32,

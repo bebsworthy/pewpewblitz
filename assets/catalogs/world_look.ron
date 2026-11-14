@@ -1,6 +1,6 @@
 // Client-only world look tuning (BRL-0146). Presentation only: nothing here feeds simulation or
 // the gameplay content fingerprint. Code-owned ceilings and the tonemapper choice live in
-// `src/client/presentation_3d/world_look.rs`; per-theme grading lives in
+// `packages/brawler-client/src/presentation_3d/world_look.rs`; per-theme grading lives in
 // `map_presentation_themes.ron`.
 (
     schema_version: 1,

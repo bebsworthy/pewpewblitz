@@ -10,16 +10,16 @@ model or a separate UI framework.
 
 | Concern | Native owner |
 |---|---|
-| Palette and display font | [`src/client/ui/theme.rs`](../../../src/client/ui/theme.rs) |
-| Surface roles, geometry, and material states | [`src/client/ui/surface.rs`](../../../src/client/ui/surface.rs) |
+| Palette and display font | [`packages/brawler-client/src/ui/theme.rs`](../../../packages/brawler-client/src/ui/theme.rs) |
+| Surface roles, geometry, and material states | [`packages/brawler-client/src/ui/surface.rs`](../../../packages/brawler-client/src/ui/surface.rs) |
 | Surface shader and antialiasing | [`assets/brawler/shaders/shell_surface.wgsl`](../../../assets/brawler/shaders/shell_surface.wgsl) |
-| Action, tab, toggle, slider, and binding controls | [`src/client/ui/controls.rs`](../../../src/client/ui/controls.rs) |
-| Shared scroll calculations | [`src/client/ui/scroll.rs`](../../../src/client/ui/scroll.rs) |
-| Pointer release activation and drag-cancel | [`src/client/ui/press.rs`](../../../src/client/ui/press.rs) |
-| Product-flow action and focus bridge | [`src/client/flow/screens/shared.rs`](../../../src/client/flow/screens/shared.rs) |
-| Product-flow focus reveal and scrolling | [`src/client/flow/screens/scroll.rs`](../../../src/client/flow/screens/scroll.rs) |
-| Shared connection-screen composition | [`src/client/flow/screens/connection_shell.rs`](../../../src/client/flow/screens/connection_shell.rs) |
-| Standalone component review surface | [`src/client/ui/gallery.rs`](../../../src/client/ui/gallery.rs) |
+| Action, tab, toggle, slider, and binding controls | [`packages/brawler-client/src/ui/controls.rs`](../../../packages/brawler-client/src/ui/controls.rs) |
+| Shared scroll calculations | [`packages/brawler-client/src/ui/scroll.rs`](../../../packages/brawler-client/src/ui/scroll.rs) |
+| Pointer release activation and drag-cancel | [`packages/brawler-client/src/ui/press.rs`](../../../packages/brawler-client/src/ui/press.rs) |
+| Product-flow action and focus bridge | [`packages/brawler-client/src/flow/screens/shared.rs`](../../../packages/brawler-client/src/flow/screens/shared.rs) |
+| Product-flow focus reveal and scrolling | [`packages/brawler-client/src/flow/screens/scroll.rs`](../../../packages/brawler-client/src/flow/screens/scroll.rs) |
+| Shared connection-screen composition | [`packages/brawler-client/src/flow/screens/connection_shell.rs`](../../../packages/brawler-client/src/flow/screens/connection_shell.rs) |
+| Standalone component review surface | [`packages/brawler-client/src/ui/gallery.rs`](../../../packages/brawler-client/src/ui/gallery.rs) |
 
 Screen modules still own their content, responsive composition, action meaning, pending/error
 copy, and connection to real product state. A visual component never owns navigation, saving,

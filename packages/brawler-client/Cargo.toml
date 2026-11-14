@@ -1,0 +1,95 @@
+[package]
+name = "brawler-client"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "PewPew Blitz player client: input, presentation, audio/VFX, HUD, and routed sessions"
+publish = false
+# The separate-App network and performance suites need both this client and the shared crate's
+# server roles; they stay under the repository's `tests/` directory (BRL-0170).
+autotests = false
+
+# BRL-0170: the client half of the former single `brawler` package. Client-only edits rebuild this
+# crate and its binaries, never the shared gameplay/server crate. The shared crate keeps its name
+# `brawler`, so every replicated type path, and therefore the protocol registry fingerprint, is
+# unchanged.
+
+[features]
+# Scripted smoke/demo drivers, scheduled captures, native render reports, and developer-only
+# review tools (VfxLab, UI gallery). Never in the player build: `-p brawler-client` without
+# features must not contain this code (scripts/check-client-features.sh).
+automation = []
+# Separate-App client/server suites under `tests/` (`network`, `performance`).
+network-test = ["automation", "brawler/network-test"]
+# Passes the shared crate's Balance Lab server role through for `tests/network/builds.rs` only.
+balance-lab = ["brawler/balance-lab"]
+
+[dependencies]
+avian2d = { version = "=0.7.0", default-features = false, features = [
+  "2d",
+  "f32",
+  "parry-f32",
+  "serialize",
+] }
+# `client` brings the client protocol registrations, client-side shared adapters, and the
+# `bevy-client` rendering/windowing/audio/input feature set; never `server`.
+brawler = { path = "../..", default-features = false, features = ["client"] }
+brawler-routing = { path = "../brawler-routing" }
+# Bevy features are owned once by the shared crate's `bevy-client` feature.
+bevy = { version = "=0.19.1", default-features = false }
+bevy_hanabi = { version = "=0.19.0", default-features = false, features = ["3d"] }
+lightyear = { version = "=0.29.0", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+postcard = { version = "1.1", features = ["alloc"] }
+ron = "0.12"
+serde_json = "1.0"
+unicode-normalization = "0.1"
+unicode-segmentation = "1"
+atomic-write-file = "0.3"
+directories = "6.0"
+
+# `arboard` has no Android backend; Android paste reports unavailable (BRL-0159).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+arboard = { version = "3.6", default-features = false }
+
+[dev-dependencies]
+brawler = { path = "../..", default-features = false, features = ["client", "test-support"] }
+# Glyph-coverage tests read the shipped display font's character map.
+skrifa = "=0.44.0"
+# Display-name fallback tests lay text out through the same parley version as `bevy_text`.
+parley = { version = "=0.9.0", default-features = false, features = ["std"] }
+
+[[bin]]
+name = "brawler-client"
+path = "src/bin/client.rs"
+
+[[bin]]
+name = "brawler-vfx-lab"
+path = "src/bin/vfx_lab.rs"
+required-features = ["automation"]
+
+[[bin]]
+name = "brawler-ui-gallery"
+path = "src/bin/ui_gallery.rs"
+required-features = ["automation"]
+
+[[test]]
+name = "network"
+path = "../../tests/network.rs"
+required-features = ["network-test"]
+
+[[test]]
+name = "performance"
+path = "../../tests/performance.rs"
+required-features = ["network-test"]
+
+[lints.rust]
+unsafe_code = "deny"
+unused_qualifications = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

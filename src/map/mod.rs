@@ -1,6 +1,6 @@
 //! Typed map content, authoritative runtime state, and client reconstruction boundaries.
 
-pub(crate) mod authoring;
+pub mod authoring;
 mod catalog;
 #[cfg(feature = "client")]
 mod client;
@@ -53,11 +53,12 @@ pub use catalog::{
     ZOMBIE_YARD_PRESET,
 };
 #[cfg(feature = "client")]
-pub(crate) use client::ClientPickupCueSet;
+pub use client::ClientPickupCueSet;
 #[cfg(feature = "client")]
 pub use client::{
-    ClientMapPlugin, ClientMapReadiness, ClientWorldObjectReadiness, MapPresentationMember,
-    MapPresentationPlugin, MapPresentationSet, PresentedMap, perimeter_visual_shapes,
+    ClientMapPlugin, ClientMapReadiness, ClientPlayableGate, ClientWorldObjectReadiness,
+    MapPresentationMember, MapPresentationPlugin, MapPresentationSet, PresentedMap,
+    perimeter_visual_shapes,
 };
 pub use effect_tiles::{
     EffectTileCapabilities, EffectTileDefinition, EffectTileDefinitionId,

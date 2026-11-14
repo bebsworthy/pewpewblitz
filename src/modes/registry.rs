@@ -106,7 +106,7 @@ impl ModeRegistryBuilder {
 }
 
 #[derive(Clone)]
-pub(crate) struct ModeCatalog {
+pub struct ModeCatalog {
     registrations: Box<[ModeRegistration]>,
 }
 
@@ -161,7 +161,7 @@ impl ModeCatalog {
         reason = "all roles seal the same registry; server validates composition without runtime lookup"
     )
 )]
-pub(crate) struct ModeRegistry(ModeCatalog);
+pub struct ModeRegistry(ModeCatalog);
 
 impl ModeRegistry {
     #[cfg(test)]
@@ -170,7 +170,8 @@ impl ModeRegistry {
     }
 
     #[cfg(any(feature = "client", test))]
-    pub(crate) fn descriptor_for_definition(
+    #[must_use]
+    pub fn descriptor_for_definition(
         &self,
         definition_id: ModeDefinitionId,
     ) -> Option<&ModeRegistration> {
@@ -203,7 +204,7 @@ impl ModeRegistrationAppExt for App {
     }
 }
 
-pub(crate) struct ModeRegistryPlugin;
+pub struct ModeRegistryPlugin;
 
 impl Plugin for ModeRegistryPlugin {
     fn build(&self, app: &mut App) {

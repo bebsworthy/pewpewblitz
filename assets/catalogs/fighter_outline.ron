@@ -1,6 +1,6 @@
 // Client-only fighter silhouette outline tuning (BRL-0151). Presentation only: nothing here feeds
 // simulation or the gameplay content fingerprint. Validation bounds live in
-// `src/client/presentation_3d/combat/fighter_outline.rs`; the shader is
+// `packages/brawler-client/src/presentation_3d/combat/fighter_outline.rs`; the shader is
 // `assets/shaders/fighter_outline.wgsl`.
 (
     schema_version: 1,

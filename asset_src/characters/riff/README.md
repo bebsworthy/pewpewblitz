@@ -33,7 +33,7 @@ just riff-asset
 Built and verified with Blender 5.2.3 LTS. Pass `-- --no-renders` after the script to skip the
 review renders. The run prints a `RIFF_BUILD_REPORT` JSON line and fails if the export breaks the
 contract below. Never hand-edit the GLB: change the builder and rebuild. The runtime constants in
-`src/client/presentation_3d/fighter_character.rs` (source ground and top, socket rest rotation,
+`packages/brawler-client/src/presentation_3d/fighter_character.rs` (source ground and top, socket rest rotation,
 body planar reach) mirror the build report; update them and their tests if a rebuild changes them.
 
 ## Provenance

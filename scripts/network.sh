@@ -15,7 +15,8 @@ network_run_id="${BRAWLER_NETWORK_RUN_ID:-network-script}"
 diagnostics_dir="${BRAWLER_DIAGNOSTICS_DIR:-}"
 client_count="${BRAWLER_NETWORK_CLIENT_COUNT:-2}"
 server_features="${BRAWLER_NETWORK_SERVER_FEATURES:-server}"
-client_features="${BRAWLER_NETWORK_CLIENT_FEATURES:-client,automation}"
+# brawler-client package features; shared-crate features are spelled `brawler/<feature>`.
+client_features="${BRAWLER_NETWORK_CLIENT_FEATURES:-automation}"
 diagnostics_scenario_id="${BRAWLER_DIAGNOSTICS_SCENARIO_ID:-}"
 network_timeout_seconds="${BRAWLER_NETWORK_TIMEOUT_SECONDS:-}"
 simulation_ticks="${BRAWLER_NETWORK_SIMULATION_TICKS:-}"
@@ -221,7 +222,7 @@ wait_for_server_closeout() {
 }
 
 cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features "$server_features" --bin brawler-server
-cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" --no-default-features --features "$client_features" --bin brawler-client
+cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" -p brawler-client --features "$client_features" --bin brawler-client
 
 server_env=(env "BRAWLER_SERVER_READY_FILE=$ready_file")
 if [[ -n "$diagnostics_dir" ]]; then

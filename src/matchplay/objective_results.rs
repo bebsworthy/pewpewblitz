@@ -4,13 +4,13 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum ObjectiveTotals {
+pub enum ObjectiveTotals {
     HotZone { progress: [u16; 2], target: u16 },
     Heist { health: [u16; 2], maximum: [u16; 2] },
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ObjectiveResult {
+pub struct ObjectiveResult {
     pub match_id: MatchId,
     pub result: MatchResult,
     pub totals: ObjectiveTotals,

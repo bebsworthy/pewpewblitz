@@ -14,7 +14,7 @@ if [[ "$target_dir" != /* ]]; then
 fi
 
 cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" \
-    --no-default-features --features client --bin brawler-client
+    -p brawler-client --bin brawler-client
 
 bundle_root="$(mktemp -d "${TMPDIR:-/tmp}/brawler-client-bundle.XXXXXX")"
 bundle_path="$bundle_root/BrawlerVisualClient.app"

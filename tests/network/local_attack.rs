@@ -5,10 +5,10 @@
 
 use super::harness::Harness;
 use bevy::prelude::{Vec2, With};
-use brawler::client::local_attack::{LocalAttackLedger, LocalAttackStats};
 use brawler::combat::{CombatTelemetry, WeaponPhase, WeaponState};
 use brawler::matchplay::{MatchPhase, MatchRoot as MatchRootMarker, MatchState};
 use brawler::protocol::{Fighter, FighterInput, MatchCommand, MatchCommandRequest, PlayerId};
+use brawler_client::local_attack::{LocalAttackLedger, LocalAttackStats};
 
 /// (label, receive-delay ticks): local, ~60 ms RTT, ~120 ms RTT.
 const PROFILES: [(&str, usize); 3] = [("local", 0), ("rtt-60ms", 4), ("rtt-120ms", 7)];

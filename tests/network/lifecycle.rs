@@ -439,7 +439,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
         GameplayContentPlugin,
         ProtocolPlugin,
         AvianNetworkPlugin,
-        brawler::client::ClientReplicatedGameplayPlugin,
+        brawler_client::ClientReplicatedGameplayPlugin,
         ClientNetworkPlugin,
     ));
     client.finish();

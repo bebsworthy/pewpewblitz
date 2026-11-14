@@ -11,7 +11,8 @@ timeout_seconds=${BRAWLER_ROUTED_TIMEOUT_SECONDS:-90}
 metrics_file=${BRAWLER_ROUTED_METRICS_FILE:-}
 window_dir=${BRAWLER_ROUTED_WINDOW_DIR:-}
 worker_features=${BRAWLER_ROUTED_SERVER_FEATURES:-server}
-client_features=${BRAWLER_ROUTED_CLIENT_FEATURES:-client,automation}
+# brawler-client package features; shared-crate features are spelled `brawler/<feature>`.
+client_features=${BRAWLER_ROUTED_CLIENT_FEATURES:-automation}
 game_mode=${BRAWLER_ROUTED_GAME_MODE:-wipeout}
 match_rules=${BRAWLER_ROUTED_MATCH_RULES:-}
 simulation_ticks=${BRAWLER_ROUTED_SIMULATION_TICKS:-4000}
@@ -78,7 +79,7 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 cd "$project_dir"
-cargo build --locked --bin brawler-client --no-default-features --features "$client_features"
+cargo build --locked -p brawler-client --bin brawler-client --features "$client_features"
 cargo build --locked --bin brawler-server --no-default-features --features "$worker_features"
 cargo build --locked -p brawler-routing --bin brawler-supervisor
 

@@ -1,9 +1,6 @@
 //! Narrow integration-test support surface for the combined client/server feature graph.
 
-use crate::{
-    config::{ClientNetworkConfig, ServerNetworkConfig},
-    protocol::FighterInput,
-};
+use crate::{config::ServerNetworkConfig, protocol::FighterInput};
 use bevy::prelude::{Entity, World};
 use lightyear::{
     input::{
@@ -44,19 +41,6 @@ pub fn send_forged_native_input(
     let mut message = InputMessage::new(Tick(end_tick));
     message.inputs.push(PerTargetData { target, states });
     sender.send::<InputChannel>(message);
-}
-
-/// Spawn one deterministic Crossbeam client endpoint for a separate-App test.
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the test endpoint consumes its owned configuration and Crossbeam IO"
-)]
-pub fn spawn_crossbeam_client(
-    world: &mut World,
-    config: ClientNetworkConfig,
-    io: lightyear::crossbeam::CrossbeamIo,
-) -> Entity {
-    crate::client::spawn_crossbeam_client(world, config, io)
 }
 
 /// Spawn one deterministic Crossbeam server endpoint for a separate-App test.

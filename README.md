@@ -149,7 +149,7 @@ E2E runs choose an unused loopback port by default and may run beside an interac
 
 ## Android client
 
-The Android build is the same player shell (`--features client`, no automation) packaged as an
+The Android build is the same player shell (`brawler-client` without features) packaged as an
 arm64-v8a APK by `packages/brawler-android` (a thin `cdylib` with Bevy's GameActivity) and its
 Gradle project. It targets Android 12+ (min SDK 31, target SDK 37) and is developed on a Pixel 10.
 
@@ -325,8 +325,8 @@ contract. Important ownership rules are:
 - `--window-size WIDTHxHEIGHT` reproduces supported visual-check layouts;
 - `--weapon-preset 1..6`, movement/aim/fire flags, demos, screenshots, and render reports are
   development or automation inputs rather than alternate product flows. They exist only in a
-  `--features client,automation` build; the player build (`--features client`, used by
-  `just client` and `just run`) accepts only `--server`, `--transport routed-udp`, and
+  `-p brawler-client --features automation` build; the player build (`-p brawler-client` without
+  features, used by `just client` and `just run`) accepts only `--server`, `--transport routed-udp`, and
   `--window-size`;
 - `BRAWLER_FORCE_PRIMITIVE_WORLD=1` verifies deterministic meshes inside the sole 3D renderer; it is
   not a renderer or content-mode selector;
@@ -352,10 +352,12 @@ The command refuses to overwrite its output and validates the completed copy. To
 server, preserve the current database together with any `-wal` and `-shm` siblings, copy the
 validated backup into a fresh data directory as `profiles.sqlite3`, and restart the supervisor.
 
-Do not use `--all-features` as a supported application build. Cargo features are additive: client
-and server are independently tested production configurations, `client,automation` is the scripted
-client used by E2E, evidence, and developer-tool commands, and `network-test` is the dedicated
-separate-App integration-test configuration.
+Do not use `--all-features` as a supported application build. The player client is the
+`packages/brawler-client` package (`-p brawler-client`) built on the shared `brawler` crate's
+`client` feature; the dedicated server is `brawler` with `--features server`. Cargo features are
+additive: client and server are independently tested production configurations,
+`brawler-client/automation` is the scripted client used by E2E, evidence, and developer-tool
+commands, and `network-test` is the dedicated separate-App integration-test configuration.
 
 ## Verification and diagnostics
 

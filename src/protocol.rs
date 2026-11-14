@@ -291,7 +291,8 @@ impl RouteCapability {
     /// The bytes remain private and the routing type redacts them in diagnostics; this bridge is
     /// deliberately crate-visible so only the client transport can install a received grant.
     #[cfg(feature = "client")]
-    pub(crate) fn to_routing_capability(self) -> brawler_routing::Capability {
+    #[must_use]
+    pub fn to_routing_capability(self) -> brawler_routing::Capability {
         brawler_routing::Capability::from_bytes(self.0)
             .expect("validated route capability must be non-zero")
     }

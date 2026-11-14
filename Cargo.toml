@@ -5,18 +5,24 @@ edition = "2024"
 rust-version = "1.95"
 description = "Brawler — a server-authoritative top-down arena shooter"
 publish = false
+# `network` and `performance` belong to `packages/brawler-client`; see the explicit targets below.
+autotests = false
 
 [workspace]
-members = ["packages/brawler-android", "packages/brawler-routing"]
+members = [
+  "packages/brawler-android",
+  "packages/brawler-client",
+  "packages/brawler-routing",
+]
 resolver = "3"
 
 [features]
 default = ["client"]
+# Client-side protocol registrations and the client adapters that live beside their shared domain
+# (combat cues/preview, map presentation readiness, combat evidence). The player application
+# itself is the `brawler-client` package (BRL-0170).
 client = [
-  "dep:arboard",
   "dep:atomic-write-file",
-  "dep:bevy_hanabi",
-  "dep:directories",
   "dep:serde_json",
   "bevy-client",
   "avian2d/serialize",
@@ -40,13 +46,8 @@ server = [
   "lightyear/server",
   "lightyear/udp",
 ]
-# Scripted smoke/demo drivers, scheduled captures, native render reports, and developer-only
-# review tools (VfxLab, UI gallery). Never in `default` or `client`: the player build is
-# `--features client` and must not contain this code (scripts/check-client-features.sh).
-automation = ["client"]
 network-test = [
   "client",
-  "automation",
   "server",
   "lightyear/client",
   "lightyear/crossbeam",
@@ -100,6 +101,8 @@ bevy-client = [
   "bevy/zstd_rust",
 ]
 bevy-server = []
+# Shared Bevy app-test helpers (`brawler::test_app`) for the `brawler-client` unit tests only.
+test-support = []
 
 [dependencies]
 avian2d = { version = "=0.7.0", default-features = false, features = [
@@ -116,7 +119,6 @@ bevy = { version = "=0.19.1", default-features = false, features = [
   "multi_threaded",
   "std",
 ] }
-bevy_hanabi = { version = "=0.19.0", default-features = false, features = ["3d"], optional = true }
 lightyear = { version = "=0.29.0", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 postcard = { version = "1.1", features = ["alloc"] }
@@ -128,33 +130,7 @@ getrandom = "0.3"
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
 atomic-write-file = { version = "0.3", optional = true }
-directories = { version = "6.0", optional = true }
 rusqlite = { version = "0.40.0", features = ["backup", "bundled"], optional = true }
-
-# `arboard` has no Android backend; Android paste reports unavailable (BRL-0159).
-[target.'cfg(not(target_os = "android"))'.dependencies]
-arboard = { version = "3.6", default-features = false, optional = true }
-
-[dev-dependencies]
-# Glyph-coverage tests read the shipped display font's character map.
-skrifa = "=0.44.0"
-# Display-name fallback tests lay text out through the same parley version as `bevy_text`.
-parley = { version = "=0.9.0", default-features = false, features = ["std"] }
-
-[[bin]]
-name = "brawler-client"
-path = "src/bin/client.rs"
-required-features = ["client"]
-
-[[bin]]
-name = "brawler-vfx-lab"
-path = "src/bin/vfx_lab.rs"
-required-features = ["client", "automation"]
-
-[[bin]]
-name = "brawler-ui-gallery"
-path = "src/bin/ui_gallery.rs"
-required-features = ["client", "automation"]
 
 [[bin]]
 name = "brawler-server"
@@ -167,14 +143,8 @@ path = "src/bin/profile_admin.rs"
 required-features = ["server"]
 
 [[test]]
-name = "network"
-path = "tests/network.rs"
-required-features = ["network-test"]
-
-[[test]]
-name = "performance"
-path = "tests/performance.rs"
-required-features = ["network-test"]
+name = "map_public_api"
+path = "tests/map_public_api.rs"
 
 [[test]]
 name = "routed-process"

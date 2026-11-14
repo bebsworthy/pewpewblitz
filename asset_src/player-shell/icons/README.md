@@ -38,7 +38,7 @@ Ultimate/passive families: dash, sentry, cloak, scan, field, blast, cold, fire, 
 blob, feather, shield, pulse, target, cycle.
 Weapon part families: part-magazine, part-ammunition, part-barrel, part-chamber, part-element.
 
-`src/client/ui/icons.rs` lists the shipped names and its tests check each PNG, size and SVG
+`packages/brawler-client/src/ui/icons.rs` lists the shipped names and its tests check each PNG, size and SVG
 source. Add an icon by defining it in `ICONS` in the script, rebuilding, and adding its name to
 `icons.rs`.
 

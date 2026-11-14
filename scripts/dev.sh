@@ -49,7 +49,7 @@ build_balance_lab() {
 }
 
 build_client() {
-    cargo build --locked --bin brawler-client --no-default-features --features client
+    cargo build --locked -p brawler-client --bin brawler-client
 }
 
 supervisor_args() {

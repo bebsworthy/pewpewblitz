@@ -10,7 +10,6 @@ use bevy::{
     time::TimeUpdateStrategy,
 };
 use brawler::{
-    client::{ClientJoinPhase, ClientJoinStatus, ClientNetworkPlugin, PendingLocalActions},
     combat::{
         AcceptedAttackFact, AcceptedAttackFacts, ActiveAttackTrackers, ActiveEffects, AmmoRecovery,
         AttackDelivery, AttackId, AttackSource, CombatCue, CombatEventId, CombatLogRecord,
@@ -46,10 +45,14 @@ use brawler::{
     },
     testing::{
         CaptureCombatCues, TestDummy, TestDummyFixture, TestDummyResetDeadline,
-        TestNativeInputMessage, send_forged_native_input, spawn_crossbeam_client,
-        spawn_crossbeam_link, spawn_crossbeam_server,
+        TestNativeInputMessage, send_forged_native_input, spawn_crossbeam_link,
+        spawn_crossbeam_server,
     },
     timing::{SIMULATION_TICK, SimulationTick},
+};
+use brawler_client::{
+    ClientJoinPhase, ClientJoinStatus, ClientNetworkPlugin, PendingLocalActions,
+    testing::spawn_crossbeam_client,
 };
 use lightyear::prelude::client::{Client, Connected, Disconnect, Disconnected, Remote};
 use lightyear::prelude::server::{NetcodeServer, ServerPlugins, Stopped};

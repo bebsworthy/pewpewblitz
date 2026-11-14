@@ -614,7 +614,7 @@ src/map/
     effect_tiles.rs      authoritative occupancy and periodic pulses
   tests.rs
 
-src/client/presentation_3d/map.rs
+packages/brawler-client/src/presentation_3d/map.rs
                          client map materialization and generated presentation
 ```
 

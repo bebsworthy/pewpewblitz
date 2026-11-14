@@ -3,12 +3,12 @@
 pub(crate) mod attack;
 mod authority;
 #[cfg(feature = "client")]
-pub(crate) mod client;
+pub mod client;
 #[cfg(feature = "server")]
 pub(crate) mod conditions;
 pub(crate) mod cues;
 pub(crate) mod definitions;
-pub(crate) mod delivery;
+pub mod delivery;
 #[cfg(feature = "server")]
 pub(crate) mod effects;
 #[cfg(feature = "server")]
@@ -66,7 +66,7 @@ pub use client::ClientCombatEvidenceStatus;
 #[cfg(feature = "client")]
 pub use client::ClientCombatPlugin;
 #[cfg(feature = "client")]
-pub(crate) use client::DeduplicatedCombatCue;
+pub use client::DeduplicatedCombatCue;
 pub use cues::{
     CombatCue, CombatCueKey, CombatCueKind, CombatEffectCue, DamageSource, SelfCloakEndReason,
     combat_cue_key, decode_combat_cue, encode_combat_cue,

@@ -6,9 +6,9 @@ mod hot_zone;
 mod lifecycle;
 mod model;
 mod objective_results;
-pub(crate) use objective_results::ObjectiveResult;
+pub use objective_results::ObjectiveResult;
 #[cfg(feature = "client")]
-pub(crate) use objective_results::ObjectiveTotals;
+pub use objective_results::ObjectiveTotals;
 #[cfg(feature = "server")]
 mod server;
 mod spawns;

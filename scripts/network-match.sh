@@ -56,7 +56,7 @@ trap 'exit 143' TERM
 cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" \
     --no-default-features --features server --bin brawler-server
 cargo build --locked --manifest-path "$repo_root/Cargo.toml" --target-dir "$target_dir" \
-    --no-default-features --features client,automation --bin brawler-client
+    -p brawler-client --features automation --bin brawler-client
 
 (trap '' INT; exec env \
     BRAWLER_SERVER_READY_FILE="$ready_file" \

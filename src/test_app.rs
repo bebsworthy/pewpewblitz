@@ -8,7 +8,7 @@ use bevy::{
 };
 
 /// Reject ambiguities in one reviewed Brawler-owned schedule while reporting the owning sets.
-pub(crate) fn reject_owned_schedule_ambiguities(app: &mut App, schedule_label: impl ScheduleLabel) {
+pub fn reject_owned_schedule_ambiguities(app: &mut App, schedule_label: impl ScheduleLabel) {
     configure_owned_schedule_ambiguities(app, schedule_label, LogLevel::Error);
 }
 
@@ -28,7 +28,7 @@ fn configure_owned_schedule_ambiguities(
 
 /// Finish plugin composition before manually updating an app, and fail the test on any
 /// unexpected fallible-system error.
-pub(crate) fn finalize(app: &mut App) {
+pub fn finalize(app: &mut App) {
     finalize_with_error_handler(app, panic_on_error);
 }
 

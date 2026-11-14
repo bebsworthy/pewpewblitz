@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static LOG_PLUGIN_INSTALLED: AtomicBool = AtomicBool::new(false);
 
-pub(crate) fn add_log_plugin_once(app: &mut App) {
+pub fn add_log_plugin_once(app: &mut App) {
     if LOG_PLUGIN_INSTALLED
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_ok()

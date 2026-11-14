@@ -750,37 +750,6 @@ fn write_failure_record_appends_key_value_lines() {
     let _ = std::fs::remove_file(&path);
 }
 
-#[cfg(feature = "client")]
-#[test]
-fn overlay_lines_are_bounded_and_hide_wire_entities() {
-    use crate::combat::TeamId;
-    use crate::protocol::{NetworkEntityId, PlayerId};
-
-    let lines = overlay::compose_overlay_lines(&overlay::OverlayFacts {
-        phase_label: "active",
-        match_label: Some("17:active"),
-        identity: Some((PlayerId(2), NetworkEntityId(5), TeamId(1))),
-        tick: Some(1234),
-        rtt_micros: Some(12_300),
-        jitter_micros: Some(2_500),
-        protocol: 11,
-        entity_count: 42,
-    });
-    assert!(lines.len() <= 8);
-    assert!(lines.iter().any(|line| line.contains("authority=server")));
-    assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("player=2 net=5 team=1"))
-    );
-    assert!(lines.iter().any(|line| line.contains("rtt=12.3ms")));
-    assert!(
-        !lines
-            .iter()
-            .any(|line| line.contains("Entity") || line.contains("0x"))
-    );
-}
-
 /// The exit frame must observe terminal counts after the role shutdown chain has cleaned
 /// entities and re-emitted the stashed exit, and finalize the report after that
 /// observation. The stand-in chain mirrors the real server/client drain-stash-rewire
@@ -926,45 +895,6 @@ fn exit_frame_report_observes_terminal_counts_after_the_shutdown_chain() {
         Some("shutdown-incomplete")
     );
     let _ = std::fs::remove_file(&report_path);
-}
-
-#[cfg(feature = "client")]
-#[test]
-fn forced_overlay_visibility_is_not_togglable() {
-    let mut keyboard = ButtonInput::<KeyCode>::default();
-    keyboard.press(KeyCode::F3);
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .insert_resource(keyboard)
-        .insert_resource(overlay::DiagnosticsOverlayState {
-            visible: false,
-            lines: 0,
-            forced: true,
-        })
-        .add_systems(Update, overlay::toggle_diagnostics_overlay);
-
-    // BRAWLER_DIAGNOSTICS_OVERLAY=0 pins the overlay off; F3 must not resurrect it.
-    app.update();
-    assert!(
-        !app.world()
-            .resource::<overlay::DiagnosticsOverlayState>()
-            .visible
-    );
-
-    // Without the forced pin the same F3 press toggles normally, so the suppressed frame
-    // above proves the forced mode, not a broken toggle.
-    app.world_mut()
-        .insert_resource(overlay::DiagnosticsOverlayState {
-            visible: false,
-            lines: 0,
-            forced: false,
-        });
-    app.update();
-    assert!(
-        app.world()
-            .resource::<overlay::DiagnosticsOverlayState>()
-            .visible
-    );
 }
 
 #[test]

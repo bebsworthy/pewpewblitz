@@ -99,7 +99,7 @@ impl Plugin for ClientMapPlugin {
 /// Fills `ReceivedPickupCues` with this frame's newly received pickup cues. Presentation readers
 /// (pickup VFX and audio) run after this set and read the inbox without draining it.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct ClientPickupCueSet;
+pub struct ClientPickupCueSet;
 
 fn receive_pickup_cues(
     mut receivers: Query<Option<&mut MessageReceiver<PickupCue>>, With<Client>>,
@@ -350,7 +350,7 @@ fn reconcile_map_snapshot(
         if presented.is_some() {
             commands.remove_resource::<PresentedMap>();
             commands.insert_resource(ClientMapReadiness::WaitingForSnapshot);
-            commands.insert_resource(crate::client::ClientPlayableGate(false));
+            commands.insert_resource(ClientPlayableGate(false));
         }
         return;
     };
@@ -368,7 +368,7 @@ fn reconcile_map_snapshot(
         warn!(%error, "client rejected authoritative map snapshot");
         commands.remove_resource::<PresentedMap>();
         commands.insert_resource(ClientMapReadiness::Invalid(error));
-        commands.insert_resource(crate::client::ClientPlayableGate(false));
+        commands.insert_resource(ClientPlayableGate(false));
         return;
     }
     info!(
@@ -594,5 +594,19 @@ mod tests {
             *app.world().resource::<ClientWorldObjectReadiness>(),
             ClientWorldObjectReadiness::Ready
         );
+    }
+}
+
+/// Local presentation/readiness gate. Headless automation has no asset requirement.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClientPlayableGate(pub bool);
+
+impl FromWorld for ClientPlayableGate {
+    fn from_world(world: &mut World) -> Self {
+        Self(
+            world
+                .resource::<crate::config::ClientNetworkConfig>()
+                .headless,
+        )
     }
 }

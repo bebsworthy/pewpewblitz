@@ -5,15 +5,11 @@
 //! replication targets, match results, or map dynamics.
 
 mod failure;
-#[cfg(feature = "client")]
-mod overlay;
 mod process;
 
 pub use failure::{
     FailureCategory, ProcessFailureRecordV1, install_panic_failure_hook, write_failure_record,
 };
-#[cfg(feature = "client")]
-pub use overlay::ClientDiagnosticsOverlayPlugin;
 #[cfg(feature = "server")]
 pub(crate) use process::ProcessDiagnosticsState;
 pub use process::{
@@ -1371,7 +1367,7 @@ pub(crate) fn env_identity(key: &str, fallback: &str) -> String {
 
 /// Current wall-clock unix timestamp in microseconds, saturating on clock failure.
 #[must_use]
-pub(crate) fn unix_micros_now() -> u64 {
+pub fn unix_micros_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| {

@@ -29,7 +29,7 @@ fn has_lobby_session(harness: &Harness, client_id: u64) -> bool {
 fn newcomer_was_welcomed(harness: &Harness, index: usize) -> bool {
     harness.clients[index]
         .world()
-        .get::<brawler::client::ClientLobbyMembership>(harness.client_entities[index])
+        .get::<brawler_client::ClientLobbyMembership>(harness.client_entities[index])
         .is_some()
 }
 
@@ -110,7 +110,7 @@ fn relaunch_with_the_same_account_replaces_a_killed_session_and_its_queue_ticket
     harness.step_until(|harness| {
         harness.clients[1]
             .world()
-            .resource::<brawler::client::ClientProfileModel>()
+            .resource::<brawler_client::ClientProfileModel>()
             .snapshot()
             .is_some()
     });

@@ -2120,23 +2120,18 @@ dependencies = [
 name = "brawler"
 version = "0.1.0"
 dependencies = [
- "arboard",
  "atomic-write-file",
  "avian2d",
  "bevy",
- "bevy_hanabi",
  "brawler-routing",
- "directories",
  "getrandom 0.3.4",
  "lightyear",
- "parley",
  "postcard",
  "ron",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2",
- "skrifa 0.44.0",
  "tiny_http",
  "unicode-normalization",
  "unicode-segmentation",
@@ -2148,8 +2143,32 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "brawler",
+ "brawler-client",
  "libc",
  "ndk",
+]
+
+[[package]]
+name = "brawler-client"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "atomic-write-file",
+ "avian2d",
+ "bevy",
+ "bevy_hanabi",
+ "brawler",
+ "brawler-routing",
+ "directories",
+ "lightyear",
+ "parley",
+ "postcard",
+ "ron",
+ "serde",
+ "serde_json",
+ "skrifa 0.44.0",
+ "unicode-normalization",
+ "unicode-segmentation",
 ]
 
 [[package]]

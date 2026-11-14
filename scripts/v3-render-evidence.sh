@@ -114,8 +114,8 @@ if [[ -e "$report_path" || -e "$peer_report_path" || -e "$client_one_log" || -e 
 fi
 
 commit=$(git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)
-BRAWLER_GIT_COMMIT="$commit" cargo build --locked --release --bin brawler-client \
-    --no-default-features --features client,automation
+BRAWLER_GIT_COMMIT="$commit" cargo build --locked --release -p brawler-client --bin brawler-client \
+    --features automation
 cargo build --locked --bin brawler-server --no-default-features --features server
 cargo build --locked -p brawler-routing --bin brawler-supervisor
 

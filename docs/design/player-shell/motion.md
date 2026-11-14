@@ -35,8 +35,8 @@ Idle breathing, shine, background drift, entrance slides, and reward bursts are 
 
 | Behavior | Native owner |
 |---|---|
-| Release activation and drag-cancel (12 logical px) | `ReleaseActivation` in `src/client/ui/press.rs`, required by flow, shell, match-menu, Practice map and gallery controls |
-| Press squash/drop, release overshoot, entrance, Play breathing and shine | `SurfaceMotion` in `src/client/ui/surface.rs`; scale and drop use `UiTransform`, so layout and hit areas never move |
+| Release activation and drag-cancel (12 logical px) | `ReleaseActivation` in `packages/brawler-client/src/ui/press.rs`, required by flow, shell, match-menu, Practice map and gallery controls |
+| Press squash/drop, release overshoot, entrance, Play breathing and shine | `SurfaceMotion` in `packages/brawler-client/src/ui/surface.rs`; scale and drop use `UiTransform`, so layout and hit areas never move |
 | Lip collapse and shine | `shell_surface.wgsl` (`motion` uniform) |
 | Which surface idles | The owning screen adds `PrimaryIdleMotion`; only Dashboard Play does today |
 | Entrance trigger | The flow records destination changes in `SurfaceEntrance` |

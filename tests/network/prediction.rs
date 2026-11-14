@@ -7,7 +7,6 @@
 use super::harness::Harness;
 use avian2d::prelude::Position;
 use bevy::prelude::{Vec2, With};
-use brawler::client::prediction::{OwnerPrediction, OwnerPredictionStats, OwnerPredictionTuning};
 use brawler::combat::{AuthoritativePose, ExternalMotion, KnockbackFeedback, WorldPoint};
 use brawler::map::{
     MapCatalogResource, MapDynamicState, MapRoot, ResolvedMapSnapshot,
@@ -15,6 +14,7 @@ use brawler::map::{
 };
 use brawler::matchplay::{MatchPhase, MatchRoot as MatchRootMarker, MatchState};
 use brawler::protocol::{Fighter, FighterInput, MatchCommand, MatchCommandRequest, PlayerId};
+use brawler_client::prediction::{OwnerPrediction, OwnerPredictionStats, OwnerPredictionTuning};
 use lightyear::prelude::Controlled;
 
 /// (label, receive-delay ticks): local, ~60 ms RTT, ~120 ms RTT.

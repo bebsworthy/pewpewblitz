@@ -3,7 +3,7 @@
 // Auto/Low/Medium/High in Settings > Display; Auto resolves from detected GPU capability (no
 // compute-capable GPU particles -> low, Android -> medium, otherwise high). Code-owned ceilings
 // (MSAA at most 4 samples, bloom needs HDR, CPU particle caps, the 60 FPS target) live in
-// `src/client/presentation_3d/render_quality.rs`. Outlines, the toon material, and contact
+// `packages/brawler-client/src/presentation_3d/render_quality.rs`. Outlines, the toon material, and contact
 // shadows stay on in every tier because they carry readability.
 (
     schema_version: 1,

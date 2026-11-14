@@ -900,7 +900,7 @@ pub fn record_headless_combat_observation(
     mut observation: ResMut<ClientCombatObservation>,
     mut status: ResMut<ClientCombatEvidenceStatus>,
     config: Res<crate::config::ClientNetworkConfig>,
-    automation: Res<crate::client::HeadlessAutomation>,
+    automation: Res<crate::config::HeadlessAutomation>,
     fighters: Query<
         (
             &NetworkEntityId,

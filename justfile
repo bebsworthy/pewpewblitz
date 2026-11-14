@@ -19,10 +19,10 @@ client:
 # Open the development-only read-only production VFX viewer.
 # Native production-control review surface (no server needed).
 ui-gallery:
-    cargo run --locked --no-default-features --features client,automation --bin brawler-ui-gallery
+    cargo run --locked -p brawler-client --features automation --bin brawler-ui-gallery
 
 vfx-lab args="":
-    cargo run --locked --no-default-features --features client,automation --bin brawler-vfx-lab -- {{args}}
+    cargo run --locked -p brawler-client --features automation --bin brawler-vfx-lab -- {{args}}
 
 # Run the routed server and exactly N interactive clients.
 run clients:
@@ -95,17 +95,18 @@ clean:
 _fmt-check:
     cargo fmt --all -- --check
 
+# The client role is the shared crate's `client` feature plus the `brawler-client` package (BRL-0170).
 _check-client:
-    cargo check --locked --no-default-features --features client --all-targets
+    cargo check --locked -p brawler -p brawler-client --no-default-features --features brawler/client --all-targets
 
 _check-automation:
-    cargo check --locked --no-default-features --features client,automation --all-targets
+    cargo check --locked -p brawler-client --features automation --all-targets
 
 _check-server:
     cargo check --locked --no-default-features --features server --all-targets
 
 _check-network:
-    cargo check --locked --no-default-features --features network-test --tests
+    cargo check --locked -p brawler -p brawler-client --no-default-features --features brawler/network-test,brawler-client/network-test --tests
 
 _check-routing:
     cargo check --locked -p brawler-routing --all-targets
@@ -122,16 +123,16 @@ _clippy-routing:
     cargo clippy --locked -p brawler-routing --all-targets -- -D warnings
 
 _clippy-client:
-    cargo clippy --locked --no-default-features --features client --all-targets -- -D warnings
+    cargo clippy --locked -p brawler -p brawler-client --no-default-features --features brawler/client --all-targets -- -D warnings
 
 _clippy-automation:
-    cargo clippy --locked --no-default-features --features client,automation --all-targets -- -D warnings
+    cargo clippy --locked -p brawler-client --features automation --all-targets -- -D warnings
 
 _clippy-server:
     cargo clippy --locked --no-default-features --features server --all-targets -- -D warnings
 
 _clippy-network:
-    cargo clippy --locked --no-default-features --features network-test --tests -- -D warnings
+    cargo clippy --locked -p brawler -p brawler-client --no-default-features --features brawler/network-test,brawler-client/network-test --tests -- -D warnings
 
 _clippy-balance-lab:
     cargo clippy --locked --no-default-features --features balance-lab --all-targets -- -D warnings
@@ -153,23 +154,23 @@ _lint-exceptions:
 
 # Client unit tests run with automation so the scripted-driver tests run beside player tests.
 _test-client:
-    cargo test --locked --no-default-features --features client,automation --all-targets
+    cargo test --locked -p brawler -p brawler-client --no-default-features --features brawler/client,brawler-client/automation --all-targets
 
 _test-server:
     cargo test --locked --no-default-features --features server --all-targets
 
 _test-balance-lab:
     cargo test --locked --no-default-features --features balance-lab --all-targets
-    cargo test --locked --no-default-features --features network-test,balance-lab --test network builds::revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_values -- --test-threads=1
+    cargo test --locked -p brawler-client --features network-test,balance-lab --test network builds::revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_values -- --test-threads=1
 
 _test-network:
-    cargo test --locked --no-default-features --features network-test --test network -- --test-threads=1
+    cargo test --locked -p brawler-client --features network-test --test network -- --test-threads=1
 
 _test-routing:
     cargo test --locked -p brawler-routing
 
 _test-performance:
-    cargo test --locked --no-default-features --features network-test --test performance -- --nocapture
+    cargo test --locked -p brawler-client --features network-test --test performance -- --nocapture
 
 _e2e-matrix:
     ./scripts/e2e.sh 2

@@ -1,6 +1,6 @@
 // Client-only soft contact shadows (BRL-0152). Presentation only: nothing here feeds simulation or
 // the gameplay content fingerprint. Validation bounds live in
-// `src/client/presentation_3d/contact_shadow.rs`.
+// `packages/brawler-client/src/presentation_3d/contact_shadow.rs`.
 //
 // Static walls and indestructible blockers are grounded by the baked floor darkening of
 // `map_presentation_themes.ron` (`floor.edge_darkening`) instead; everything else gets one soft

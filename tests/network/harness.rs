@@ -374,14 +374,14 @@ impl Harness {
         let client_entity = self.client_entities[client_index];
         self.clients[client_index]
             .world_mut()
-            .resource_mut::<brawler::client::RoutedClientLifecycle>()
+            .resource_mut::<brawler_client::RoutedClientLifecycle>()
             .start_lobby();
         self.clients[client_index]
             .world_mut()
             .entity_mut(client_entity)
-            .insert(brawler::client::RoutedClientSession {
+            .insert(brawler_client::RoutedClientSession {
                 generation: 1,
-                kind: brawler::client::RoutedClientSessionKind::Lobby,
+                kind: brawler_client::RoutedClientSessionKind::Lobby,
             });
         let server_link = self.server_links[client_index];
         let server_entity = self.server_entity;
@@ -572,7 +572,7 @@ impl Harness {
             GameplayContentPlugin,
             ProtocolPlugin,
             AvianNetworkPlugin,
-            brawler::client::ClientReplicatedGameplayPlugin,
+            brawler_client::ClientReplicatedGameplayPlugin,
         ));
         if extra_protocol {
             client.add_plugins(MismatchedProtocolPlugin);

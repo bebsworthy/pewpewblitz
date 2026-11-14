@@ -1,0 +1,183 @@
+use bevy::prelude::*;
+
+use super::VfxRequestSet;
+use crate::vfx::{
+    CombatVisualSignature, PICKUP_COLLECTED_VFX, PICKUP_EXPIRED_VFX, PICKUP_SPAWNED_VFX,
+    PICKUP_VFX_PRODUCER_RANK, VfxAccent, VfxAppExt, VfxAuthoritativeTiming, VfxCarrier,
+    VfxContextOverride, VfxGeometry, VfxPhase, VfxPresentationIdentity, VfxPresentationVariant,
+    VfxRelationship, VfxRequest, VfxRequestCapabilities, VfxRequestOrder, VfxRequestRegistration,
+};
+
+const REGISTRATIONS: [VfxRequestRegistration; 3] = [
+    VfxRequestRegistration::new(
+        PICKUP_SPAWNED_VFX,
+        PICKUP_VFX_PRODUCER_RANK,
+        VfxRequestCapabilities::NONE,
+    ),
+    VfxRequestRegistration::new(
+        PICKUP_COLLECTED_VFX,
+        PICKUP_VFX_PRODUCER_RANK,
+        VfxRequestCapabilities::NONE,
+    ),
+    VfxRequestRegistration::new(
+        PICKUP_EXPIRED_VFX,
+        PICKUP_VFX_PRODUCER_RANK,
+        VfxRequestCapabilities::NONE,
+    ),
+];
+
+pub(crate) struct PickupVfxProducerPlugin;
+
+impl Plugin for PickupVfxProducerPlugin {
+    fn build(&self, app: &mut App) {
+        for registration in REGISTRATIONS {
+            app.try_register_vfx_request(registration)
+                .expect("pickup VFX request registration must be valid");
+        }
+        app.add_systems(
+            Update,
+            produce_pickup_vfx_requests
+                .after(brawler::map::ClientPickupCueSet)
+                .in_set(VfxRequestSet),
+        );
+    }
+}
+
+/// Reads this frame's pickup inbox; the audio pickup producer reads the same inbox.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the inbox is a read-only Bevy system resource"
+)]
+fn produce_pickup_vfx_requests(
+    received: Option<Res<brawler::map::ReceivedPickupCues>>,
+    mut requests: MessageWriter<VfxRequest>,
+    map_states: Query<&brawler::map::MapDynamicState, With<brawler::map::MapRoot>>,
+) {
+    let Some(received) = received else { return };
+    let Ok(map_state) = map_states.single() else {
+        return;
+    };
+    for cue in received.0.iter().copied() {
+        let Some(request) = pickup_vfx_request(cue, map_state.generation_id()) else {
+            continue;
+        };
+        requests.write(request);
+    }
+}
+
+fn pickup_vfx_request(
+    cue: brawler::map::PickupCue,
+    active_generation: brawler::map::MapDynamicGeneration,
+) -> Option<VfxRequest> {
+    let event_id = cue.event_id().0;
+    let (identity, position, tick, key, phase, label) = match cue {
+        brawler::map::PickupCue::Spawned {
+            identity,
+            position,
+            tick,
+            ..
+        } => (
+            identity,
+            position.as_vec2(),
+            tick,
+            PICKUP_SPAWNED_VFX,
+            VfxPhase::Activation,
+            "V10 chest restoration drop",
+        ),
+        brawler::map::PickupCue::Collected {
+            identity,
+            position,
+            tick,
+            ..
+        } => (
+            identity,
+            position.as_vec2(),
+            tick,
+            PICKUP_COLLECTED_VFX,
+            VfxPhase::Impact,
+            "V10 restoration collected",
+        ),
+        brawler::map::PickupCue::Expired {
+            identity,
+            position,
+            tick,
+            ..
+        } => (
+            identity,
+            position.as_vec2(),
+            tick,
+            PICKUP_EXPIRED_VFX,
+            VfxPhase::Expiry,
+            "V10 restoration expired",
+        ),
+    };
+    if identity.generation != active_generation {
+        return None;
+    }
+    VfxRequest::try_new(
+        key,
+        VfxRequestOrder::new(PICKUP_VFX_PRODUCER_RANK, event_id),
+        position,
+        None,
+        None,
+        label,
+    )
+    .and_then(|request| {
+        request.with_signature(CombatVisualSignature {
+            carrier: VfxCarrier::WorldFeedback,
+            phase,
+            accents: [Some(VfxAccent::Restoration), None],
+            relationship: VfxRelationship::Neutral,
+            context: Some(VfxContextOverride::Environment),
+            geometry: VfxGeometry::point(position),
+            identity: VfxPresentationIdentity::CombatEvent(event_id),
+            timing: VfxAuthoritativeTiming::instant(tick),
+            variant: VfxPresentationVariant::Normal,
+        })
+    })
+    .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use brawler::{
+        combat::{CombatEventId, WorldPoint},
+        map::{
+            MapDynamicGeneration, MapInstanceId, MapPlacementId, PickupCue,
+            RestorationPickupDefinitionId, RestorationPickupIdentity,
+        },
+    };
+
+    fn generation(value: u64) -> MapDynamicGeneration {
+        MapDynamicGeneration {
+            map_instance_id: MapInstanceId(7),
+            generation: value,
+        }
+    }
+
+    fn spawned(value: u64) -> PickupCue {
+        PickupCue::Spawned {
+            event_id: CombatEventId(9),
+            tick: 10,
+            identity: RestorationPickupIdentity {
+                generation: generation(value),
+                source_placement_id: MapPlacementId(11),
+            },
+            definition_id: RestorationPickupDefinitionId(12),
+            position: WorldPoint { x: 2.0, y: 3.0 },
+        }
+    }
+
+    #[test]
+    fn generation_gate_rejects_stale_and_maps_current_pickup_cue() {
+        assert!(pickup_vfx_request(spawned(1), generation(2)).is_none());
+        let request = pickup_vfx_request(spawned(2), generation(2)).unwrap();
+        assert_eq!(request.key, PICKUP_SPAWNED_VFX);
+        assert_eq!(request.order.event_id, 9);
+        assert_eq!(request.position, Vec2::new(2.0, 3.0));
+        assert_eq!(request.signature.carrier, VfxCarrier::WorldFeedback);
+        assert_eq!(request.signature.phase, VfxPhase::Activation);
+        assert_eq!(request.signature.accents[0], Some(VfxAccent::Restoration));
+    }
+}

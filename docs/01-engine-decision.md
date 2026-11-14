@@ -48,12 +48,28 @@ these dependencies casually or enable broad default feature sets for convenience
 
 ## Workspace and runtime roles
 
-The workspace has two demonstrated package boundaries:
+The workspace has these demonstrated package boundaries:
 
-- the main `brawler` package owns shared gameplay/data modules and composes the client and
-  authoritative server applications;
+- the root `brawler` package owns shared gameplay/data modules, the protocol, the client-side
+  adapters that live beside their shared domain (combat cues/preview, map presentation readiness,
+  combat evidence), and the authoritative server, lobby, Practice, and Balance Lab composition,
+  plus the `brawler-server` and `brawler-profile-admin` binaries;
+- `packages/brawler-client` owns the player client application (input, session, flow/UI, HUD,
+  3D presentation, audio, VFX, settings, map maker), the `brawler-client`, VfxLab, and UI gallery
+  binaries, and the separate-App `network` and `performance` suites under `tests/`, which need
+  both the client and the server roles. It depends on `brawler` with the `client` feature only;
 - `packages/brawler-routing` owns the transport-neutral route, capability, manifest, IPC, limits,
-  allocation, and supervisor/runtime boundary shared by routed processes.
+  allocation, and supervisor/runtime boundary shared by routed processes; and
+- `packages/brawler-android` is the thin Android `GameActivity` shell over `brawler-client`.
+
+The client package boundary is a demonstrated compile-time boundary (BRL-0170): a client-only
+edit rebuilds `brawler-client` and its binaries without recompiling the shared crate or any server
+artifact. The shared crate deliberately keeps the name `brawler`, because Lightyear's protocol
+registry fingerprint hashes replicated type paths (`brawler::protocol::...`); replicated, message,
+and channel types therefore stay in `brawler`. `brawler` never depends on `brawler-client`, so
+shared code cannot name client-application types; a resource that a shared client adapter reads
+(for example `HeadlessAutomation` or `ClientPlayableGate`) is defined in `brawler` and re-exported
+by `brawler-client`.
 
 The production topology contains several process roles:
 
@@ -83,7 +99,8 @@ separate offline simulation.
 
 Create another package, executable, or public API only for a demonstrated platform, process,
 feature-isolation, compile-time, testing, or reuse boundary. Organize ordinary gameplay concerns as
-focused modules and plugins within the existing package.
+focused modules and plugins within the existing packages. Items that `brawler-client` uses from
+`brawler` are `pub`; keep that cross-crate surface to what the client actually consumes (BRL-0012).
 
 ## Bevy application composition
 
@@ -289,19 +306,26 @@ layer only when a concrete player-facing slice demonstrates the need.
 
 ## Cargo features and role isolation
 
-The main package's feature graph expresses compile-time execution roles:
+The packages' feature graphs express compile-time execution roles:
 
-- `client` is the default and enables the windowed/player client dependency surface; it is the
-  player build used by `just client`, `just run`, `just balance-lab`, the macOS bundle, and future
-  platform shells;
-- `automation` (non-default, implies `client`) adds the scripted client surface: smoke, headless,
+- `brawler/client` is the shared crate's default and enables the windowed/player client dependency
+  surface (client protocol registration, Bevy rendering/windowing/audio/input through
+  `bevy-client`, and the shared client adapters). `brawler-client` always enables it and never
+  `brawler/server`. The player build is `-p brawler-client` without features, used by
+  `just client`, `just run`, `just balance-lab`, the macOS bundle, and the Android shell;
+- `brawler-client/automation` (non-default) adds the scripted client surface: smoke, headless,
   demo, scheduled-capture, and render-report CLI flags and their drivers, the native render report,
   and the developer-only VfxLab and UI gallery binaries. Every E2E, evidence, and dev-tool script
   enables it; `scripts/check-client-features.sh` (in `just lint`) proves the player build excludes it;
-- `server` enables the dedicated-server and worker surface without Bevy presentation features;
-- `network-test` combines the required client/server, `automation`, and in-process transports for
-  integration and performance tests; and
-- `process-metrics` is an isolated measurement feature because its recorder is process-global.
+- `brawler/server` enables the dedicated-server and worker surface without Bevy presentation
+  features;
+- `brawler/network-test` combines the shared crate's client/server roles and in-process transports;
+  `brawler-client/network-test` adds `automation` for the `network` and `performance` suites, and
+  `brawler-client/balance-lab` passes the Balance Lab role through for its network scenario;
+- `brawler/test-support` exposes the shared Bevy app-test helpers to `brawler-client` unit tests
+  only (a dev-dependency feature); and
+- `brawler/process-metrics` is an isolated measurement feature because its recorder is
+  process-global.
 
 Keep role-owned modules gated at their ownership boundary. The server graph must not acquire
 windowing, rendering, PBR, scenes, UI, text rendering, audio, gamepad/keyboard/mouse input, or client

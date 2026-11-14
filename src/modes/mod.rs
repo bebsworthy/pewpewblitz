@@ -14,10 +14,10 @@ mod wipeout;
 mod zombie;
 
 #[cfg(feature = "client")]
-pub(crate) use registry::ModeRegistry;
+pub use registry::ModeRegistry;
 #[cfg(feature = "server")]
 pub(crate) use registry::install_configured_server_mode;
-pub(crate) use registry::{ModeCatalog, ModeRegistryPlugin};
+pub use registry::{ModeCatalog, ModeRegistryPlugin};
 
 #[cfg(feature = "server")]
 use crate::{config::MatchRulesProfile, map::MapPresetId, matchplay::MatchLifecycleRules};
@@ -47,8 +47,8 @@ impl CompatibleMapPolicy {
 
 #[cfg(feature = "client")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ModePresentationProjection {
-    pub(crate) selection_label: &'static str,
+pub struct ModePresentationProjection {
+    pub selection_label: &'static str,
 }
 
 #[cfg(feature = "server")]
@@ -74,15 +74,15 @@ pub(crate) struct ServerModeProjection {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct ModeRegistration {
+pub struct ModeRegistration {
     pub(crate) configured_mode: Option<GameMode>,
-    pub(crate) key: &'static str,
+    pub key: &'static str,
     pub(crate) definition_id: ModeDefinitionId,
     pub(crate) topology: ModeTopologyPolicy,
     #[cfg(feature = "server")]
     pub(crate) server: Option<ServerModeProjection>,
     #[cfg(feature = "client")]
-    pub(crate) presentation: Option<ModePresentationProjection>,
+    pub presentation: Option<ModePresentationProjection>,
 }
 
 impl ModeRegistration {
@@ -170,7 +170,7 @@ pub(crate) enum ModeRuleResolutionError {
     InvalidObjective(&'static str),
 }
 
-pub(crate) struct BuiltInModeRegistrationsPlugin;
+pub struct BuiltInModeRegistrationsPlugin;
 
 impl Plugin for BuiltInModeRegistrationsPlugin {
     fn build(&self, app: &mut App) {

@@ -1,6 +1,6 @@
 // Client-only toon shading tuning (BRL-0150). Presentation only: nothing here feeds simulation or
 // the gameplay content fingerprint. Validation bounds live in
-// `src/client/presentation_3d/toon.rs`; the shader is `assets/shaders/toon.wgsl`.
+// `packages/brawler-client/src/presentation_3d/toon.rs`; the shader is `assets/shaders/toon.wgsl`.
 (
     schema_version: 1,
     // Two-band light ramp on N·L of the directional light (the shadow map also selects the shadow

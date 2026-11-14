@@ -6,7 +6,8 @@
 //! because Android has no command line.
 
 use bevy::prelude::*;
-use brawler::{client::build_app_with_config, config::ClientNetworkConfig};
+use brawler::config::ClientNetworkConfig;
+use brawler_client::build_app_with_config;
 
 /// Optional editable server prefill baked in by `just android-build server=HOST:PORT`.
 const SERVER_PREFILL: Option<&str> = option_env!("BRAWLER_ANDROID_SERVER");

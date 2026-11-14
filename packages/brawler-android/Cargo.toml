@@ -15,6 +15,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # The BRL-0165 player configuration: no automation, evidence, or developer tooling.
 brawler = { path = "../..", default-features = false, features = ["client"] }
+brawler-client = { path = "../brawler-client" }
 bevy = { version = "=0.19.1", default-features = false, features = [
   "android-game-activity",
   "touch",

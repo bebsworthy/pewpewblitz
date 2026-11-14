@@ -84,9 +84,11 @@ work is owned and tracked through the Ticket CLI process defined below.
 
 ## Technical stack
 
-- The main Rust package provides independently buildable macOS-client and headless gameplay-worker
-  configurations; `packages/brawler-routing` owns the completed V2 route/IPC protocol used by the
-  supervisor, lobby worker, and match workers.
+- The root `brawler` package owns shared gameplay, the protocol, and the headless gameplay-worker
+  configuration; `packages/brawler-client` owns the player client application built on
+  `brawler`'s `client` feature (a measured compile-time boundary, BRL-0170);
+  `packages/brawler-routing` owns the completed V2 route/IPC protocol used by the supervisor, lobby
+  worker, and match workers; `packages/brawler-android` is the Android shell.
 - Bevy 0.19 for ECS, application/plugin structure, client-side 3D world rendering, screen-space UI,
   input, assets, animation, and audio.
 - Lightyear 0.29 for client/server transport, input networking, replication, interpolation, and later prediction/rollback where evidence justifies it.
@@ -103,15 +105,17 @@ For architecture decisions, prioritize Brawler's gameplay and authority requirem
 
 ## Current source layout
 
-The crate keeps one public gameplay/application API while organizing implementation by ECS state
-ownership, execution role, plugin composition, and schedule phase:
+The shared `brawler` crate and the `brawler-client` crate organize implementation by ECS state
+ownership, execution role, plugin composition, and schedule phase. Replicated types stay in
+`brawler` (the protocol registry fingerprint hashes their paths); `brawler` never depends on
+`brawler-client`:
 
 ```text
 src/
   lib.rs; gameplay.rs; protocol.rs; config.rs; content.rs; timing.rs
                            crate gates, fixed schedules, wire boundary, validated config,
                            contributor-sealed gameplay content, and timing policy
-  bin/{client,server,profile_admin}.rs
+  bin/{server,profile_admin}.rs
                            thin executable entry points
   abilities/               activation/charge plus focused Dash, Sentry, cloak/reveal,
                            demolition, elemental-field, Big Blob, passive, telemetry ownership
@@ -130,29 +134,36 @@ src/
   movement/                input shaping, authority, arena geometry, and planar collision
   profiles/                saved-brawler model/catalog/server authority/SQLite storage
   weapon_parts/            authored definitions, canonical modifiers, deterministic resolver
-  client/
-    flow/                  ordered action/observation/commit composition; profile, equipment,
-                           and match-flow reducers plus screen-owned presentation
-    queue/                 matchmaking, Practice, loading, and automation
-    session/               routed connection/admission/transitions/commands/observation
-    audio/                 authored mappings, producer registry, semantic requests, playback
-    vfx/                   authored profiles, producer registry, semantic requests
-    presentation_3d/       sole world renderer, combat/environment, object-health projection
-    settings/              persisted calibration/bindings/UI
-    *.rs                   assets, input, HUD, shell, profile, targeting, and evidence adapters
   server/
     admission.rs           manifest validation and pure match-join planning
     fighter_spawn.rs       shared controller-neutral authoritative fighter assembly
     lobby/                 catalog/queue plus profile transaction adapter
     balance_lab/           HTTP/persistence/roster, typed editor adapters, staged transaction
     practice.rs; routed_worker.rs; worker.rs; verification.rs; mod.rs
-  diagnostics/             process closeout/identity/sampling plus failure and client overlay
+  diagnostics/             process closeout/identity/sampling plus failure records
+packages/brawler-client/src/
+                           player client crate (formerly `src/client/`)
+  lib.rs                   client app composition, session/join state, crate re-exports
+  bin/{client,vfx_lab,ui_gallery}.rs
+                           thin client executable entry points
+  flow/                    ordered action/observation/commit composition; profile, equipment,
+                           and match-flow reducers plus screen-owned presentation
+  queue/                   matchmaking, Practice, loading, and automation
+  session/                 routed connection/admission/transitions/commands/observation
+  audio/                   authored mappings, producer registry, semantic requests, playback
+  vfx/                     authored profiles, producer registry, semantic requests
+  presentation_3d/         sole world renderer, combat/environment, object-health projection
+  settings/                persisted calibration/bindings/UI
+  *.rs                     assets, input, HUD, shell, profile, targeting, diagnostics overlay,
+                           and evidence adapters
 packages/brawler-routing/  route envelope, IPC, supervisor/worker protocol
+packages/brawler-android/  thin Android GameActivity shell over brawler-client
 content/{catalogs,maps}/   headless-safe authored gameplay data
 assets/catalogs/           client-only audio/VFX/map presentation data
 tools/balance-lab-web/     TypeScript operator application
 tests/network/             separate-App authority/replication scenarios and reusable harness
-tests/performance.rs       fixed-tick and subsystem performance/capacity gates
+                           (a `brawler-client` test target: it needs both roles)
+tests/performance.rs       fixed-tick and subsystem performance/capacity gates (`brawler-client`)
 ```
 
 `content/catalogs/` owns build-embedded, headless-safe gameplay definitions. `content/maps/` owns

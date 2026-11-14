@@ -158,9 +158,8 @@ fn named_client_combat_sets_preserve_the_locked_update_order() {
 
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, ClientCombatPlugin))
-        .insert_resource(crate::client::PendingLocalActions::default())
         .insert_resource(crate::config::ClientNetworkConfig::new(1))
-        .init_resource::<crate::client::HeadlessAutomation>()
+        .init_resource::<crate::config::HeadlessAutomation>()
         .init_resource::<SetTrace>()
         .add_systems(
             Update,
