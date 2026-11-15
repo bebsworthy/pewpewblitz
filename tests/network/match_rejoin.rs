@@ -155,7 +155,10 @@ fn a_session_lost_beyond_the_timeout_rejoins_the_same_bot_held_fighter() {
             .next()
             .is_some()
     });
-    assert_eq!(harness.controlled_player_id(index).0, PLAYER_ONE.player_id);
+    assert_eq!(
+        harness.controlled_player_ids(index),
+        vec![PLAYER_ONE.player_id]
+    );
 
     // Control is the player's again: their input, not the bot's, moves the fighter.
     let start = harness.server.world().get::<Position>(fighter).unwrap().0;
@@ -167,6 +170,90 @@ fn a_session_lost_beyond_the_timeout_rejoins_the_same_bot_held_fighter() {
         harness.server_match_phase(),
         MatchPhase::Active { .. }
     ));
+}
+
+/// BRL-4zx2: the rejoining client must own only its own fighter while another seat is held by a
+/// server bot. A held fighter must not look "controlled" to a session that connects later, or the
+/// client's first-`Controlled` lookups (HUD owner, camera, self ring, name plate, kill-feed
+/// colour, input target) can land on the opponent.
+#[test]
+fn a_rejoin_while_the_other_seat_is_bot_held_controls_only_its_own_fighter() {
+    let mut harness = active_routed_match();
+    // The opponent's session ends first: its seat is held and a bot drives it.
+    let opponent = lose_session(&mut harness, 1, PLAYER_TWO.player_id);
+    assert!(fighter_is_bot_controlled(harness.server.world(), opponent));
+    let fighter = lose_session(&mut harness, 0, PLAYER_ONE.player_id);
+    assert!(matches!(
+        harness.server_match_phase(),
+        MatchPhase::Active { .. }
+    ));
+
+    let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
+    assert_eq!(reply.refusal, None);
+    let index = reclaim(&mut harness, fighter, 80, 81);
+    assert!(
+        fighter_is_bot_controlled(harness.server.world(), opponent),
+        "the opponent's seat stays bot-held"
+    );
+    harness.step_until(|harness| !harness.controlled_player_ids(index).is_empty());
+    for _ in 0..30 {
+        harness.step();
+    }
+    assert_eq!(
+        harness.admitted_player_id(index),
+        Some(PLAYER_ONE.player_id)
+    );
+    assert_eq!(
+        harness.controlled_player_ids(index),
+        vec![PLAYER_ONE.player_id],
+        "the rejoined client owns its own fighter and nothing else"
+    );
+    // The local input buffer, and so the input target, is the player's own fighter only.
+    let input_targets: Vec<u64> = {
+        let world = harness.clients[index].world_mut();
+        let mut query = world.query_filtered::<&PlayerId, (
+            With<Fighter>,
+            With<lightyear::prelude::input::native::InputMarker<FighterInput>>,
+        )>();
+        query.iter(world).map(|player| player.0).collect()
+    };
+    assert_eq!(input_targets, vec![PLAYER_ONE.player_id]);
+
+    // The player's input reaches their own fighter, and the server authorizes every target.
+    let start = harness.server.world().get::<Position>(fighter).unwrap().0;
+    harness.set_controlled_input(index, FighterInput::from_axes(Vec2::X, Some(Vec2::X), 0));
+    harness.step_until(|harness| {
+        harness.server.world().get::<Position>(fighter).unwrap().0.x > start.x + 20.0
+    });
+    let link = harness.server_links[index];
+    let rejections = harness
+        .server
+        .world()
+        .get::<InputValidationState>(link)
+        .expect("the rejoined link validates input")
+        .ownership_rejections;
+    assert_eq!(
+        rejections, 0,
+        "the client sends input only for its own fighter"
+    );
+    assert!(fighter_is_bot_controlled(harness.server.world(), opponent));
+
+    // The opponent reclaims its seat afterwards: each client owns exactly its own fighter.
+    let reply = rebind(&mut harness, 2, PLAYER_TWO, 90, 91);
+    assert_eq!(reply.refusal, None);
+    let opponent_index = reclaim(&mut harness, opponent, 90, 91);
+    harness.step_until(|harness| !harness.controlled_player_ids(opponent_index).is_empty());
+    for _ in 0..30 {
+        harness.step();
+    }
+    assert_eq!(
+        harness.controlled_player_ids(opponent_index),
+        vec![PLAYER_TWO.player_id]
+    );
+    assert_eq!(
+        harness.controlled_player_ids(index),
+        vec![PLAYER_ONE.player_id]
+    );
 }
 
 #[test]

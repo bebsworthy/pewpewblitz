@@ -958,6 +958,26 @@ impl Harness {
             .expect("active client should own a fighter")
     }
 
+    /// Every fighter this client holds the Lightyear `Controlled` marker for, sorted. A client
+    /// owns exactly one fighter; the HUD, camera, name plates and input all read this marker.
+    pub(super) fn controlled_player_ids(&mut self, index: usize) -> Vec<u64> {
+        let world = self.clients[index].world_mut();
+        let mut query = world.query_filtered::<&PlayerId, (With<Fighter>, With<Controlled>)>();
+        let mut ids: Vec<u64> = query.iter(world).map(|player| player.0).collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// The player ID the server admitted this client as (its Active join status).
+    pub(super) fn admitted_player_id(&mut self, index: usize) -> Option<u64> {
+        let world = self.clients[index].world_mut();
+        let mut query = world.query::<&ClientJoinStatus>();
+        query.iter(world).find_map(|status| match status.phase {
+            ClientJoinPhase::Active { player_id, .. } => Some(player_id.0),
+            _ => None,
+        })
+    }
+
     pub(super) fn controlled_entity(&mut self, index: usize) -> Entity {
         let world = self.clients[index].world_mut();
         let mut query = world.query_filtered::<Entity, (With<Fighter>, With<Controlled>)>();

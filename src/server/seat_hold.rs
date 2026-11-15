@@ -23,7 +23,7 @@ use brawler_routing::{
     RejoinReason, SeatReleasedBody,
 };
 use lightyear::prelude::input::native::{ActionState, NativeBuffer};
-use lightyear::prelude::{ControlledBy, Disconnected, Lifetime, LinkOf};
+use lightyear::prelude::{ControlledBy, ControlledSend, Disconnected, Lifetime, LinkOf};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// How long a lost routed participant's seat is held while the match is Active (owner decision
@@ -290,9 +290,15 @@ fn hold_released_seats(
                 hold_seconds = SEAT_HOLD_DURATION_SECONDS,
                 "brawler match seat held; a server bot controls the fighter"
             );
+            // `ControlledBy` requires the replicated `ControlledSend` marker, and removing the
+            // relationship leaves that marker behind. Lightyear hides it per link only for
+            // entities that still have a `ControlledBy`, so a held fighter that kept it would
+            // arrive as `Controlled` on every session that connects later, including the
+            // rejoining player's (BRL-4zx2). Reclaiming inserts `ControlledBy`, which brings the
+            // marker back visible to its new owner only.
             commands
                 .entity(entity)
-                .remove::<(ControlledBy, NativeBuffer<FighterInput>)>()
+                .remove::<(ControlledBy, ControlledSend, NativeBuffer<FighterInput>)>()
                 .insert((
                     SeatHold {
                         expires_at_tick: tick.0.saturating_add(SEAT_HOLD_TICKS),

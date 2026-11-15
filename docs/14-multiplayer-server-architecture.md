@@ -168,9 +168,14 @@ When its match session ends while the match is `Active`, the match worker *holds
 60 s (`SEAT_HOLD_DURATION_SECONDS`, code-owned session policy): the fighter keeps its identity,
 health, position, score credit and team, counts for its team (a lone player's team does not
 forfeit), and the server-hosted Practice bot policy drives it through the ordinary authoritative
-`ActionState`/`InputFreshness` path with its usual delayed perception. At expiry the fighter is
-removed and today's departure/forfeit rules apply; a session lost in Waiting, loading or countdown
-still removes the fighter at once.
+`ActionState`/`InputFreshness` path with its usual delayed perception. A held fighter has no
+Lightyear control relationship: the hold removes `ControlledBy` together with the replicated
+`ControlledSend` marker it requires, because Lightyear hides that marker per link only while a
+`ControlledBy` names an owner. Otherwise every session that connects during the hold, the
+rejoining player's included, would receive the held fighter as `Controlled` (BRL-4zx2). Reclaiming
+inserts `ControlledBy` for the rebound link, which shows the marker to that link only. At expiry
+the fighter is removed and today's departure/forfeit rules apply; a session lost in Waiting,
+loading or countdown still removes the fighter at once.
 
 The account stays in the lobby. At handoff the lobby records, per `AccountId`, the seat's original
 grant (request, allocation, match, manifest player) in a bounded table (one seat per account,

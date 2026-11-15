@@ -3,9 +3,9 @@ id: BRL-4zx2
 
 title: 'Show the rejoined player''s own fighter after a rejoin'
 
-status: doing
-closed:
-status_changed: 2026-11-15T17:45:03Z
+status: done
+closed: 2026-11-15T18:04:16Z
+status_changed: 2026-11-15T18:04:16Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: []
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
