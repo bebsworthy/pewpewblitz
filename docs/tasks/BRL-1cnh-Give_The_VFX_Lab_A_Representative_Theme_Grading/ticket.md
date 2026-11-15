@@ -3,9 +3,9 @@ id: BRL-1cnh
 
 title: Give the VFX lab a representative theme grading
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-14T13:03:19Z
+status_changed: 2026-11-15T20:38:37Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-farz]
 
 parent: BRL-q5c4
 
-rank: 13172736
+rank: 17367040
 ---
 
 # Description

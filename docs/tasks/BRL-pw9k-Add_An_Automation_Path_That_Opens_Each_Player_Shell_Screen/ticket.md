@@ -3,9 +3,9 @@ id: BRL-pw9k
 
 title: Add an automation path that opens each player-shell screen for native capture
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-14T19:25:47Z
+status_changed: 2026-11-15T20:38:36Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-51zd, BRL-pqzt]
 
 parent: BRL-q5c4
 
-rank: 14090240
+rank: 16973824
 ---
 
 # Description

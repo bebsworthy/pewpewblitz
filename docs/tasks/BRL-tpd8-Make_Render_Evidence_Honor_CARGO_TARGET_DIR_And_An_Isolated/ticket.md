@@ -3,9 +3,9 @@ id: BRL-tpd8
 
 title: Make render evidence honor CARGO_TARGET_DIR and an isolated server data directory
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-14T13:20:27Z
+status_changed: 2026-11-15T20:38:36Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-farz]
 
 parent: BRL-q5c4
 
-rank: 13238272
+rank: 16580608
 ---
 
 # Description

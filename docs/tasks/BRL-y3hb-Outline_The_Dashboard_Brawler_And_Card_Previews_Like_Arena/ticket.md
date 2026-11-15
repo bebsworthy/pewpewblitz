@@ -3,9 +3,9 @@ id: BRL-y3hb
 
 title: Outline the Dashboard brawler and card previews like arena fighters
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-14T14:54:40Z
+status_changed: 2026-11-15T20:38:35Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-kp7d]
 
 parent: BRL-q5c4
 
-rank: 13369344
+rank: 15925248
 ---
 
 # Description

@@ -3,9 +3,9 @@ id: BRL-wegn
 
 title: Let render evidence hold a fixed aim direction for camera look-ahead captures
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-14T16:37:55Z
+status_changed: 2026-11-15T20:38:36Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-1fam, BRL-vptw]
 
 parent: BRL-q5c4
 
-rank: 13697024
+rank: 16842752
 ---
 
 # Description

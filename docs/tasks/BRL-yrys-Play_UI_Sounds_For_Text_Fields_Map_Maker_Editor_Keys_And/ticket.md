@@ -3,9 +3,9 @@ id: BRL-yrys
 
 title: 'Play UI sounds for text fields, Map Maker editor keys and match-menu open/close'
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-14T20:36:28Z
+status_changed: 2026-11-15T20:38:37Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-ek8p]
 
 parent: BRL-q5c4
 
-rank: 14221312
+rank: 17301504
 ---
 
 # Description

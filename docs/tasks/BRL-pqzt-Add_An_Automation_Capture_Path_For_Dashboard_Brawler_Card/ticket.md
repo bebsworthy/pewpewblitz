@@ -3,9 +3,9 @@ id: BRL-pqzt
 
 title: 'Add an automation capture path for Dashboard, brawler card, and weapon previews'
 
-status: backlog
-closed:
-status_changed: 2026-11-14T14:54:40Z
+status: canceled
+closed: 2026-11-15T20:37:55Z
+status_changed: 2026-11-15T20:37:55Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-kp7d, BRL-pw9k]
 
 parent: BRL-q5c4
 
-rank: 13500416
+rank:
 ---
 
 # Description

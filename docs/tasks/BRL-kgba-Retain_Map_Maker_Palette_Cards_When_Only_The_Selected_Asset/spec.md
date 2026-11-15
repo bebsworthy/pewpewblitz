@@ -1,24 +1,29 @@
-# Outcome
+Reviewed 2026-11-15 against HEAD 3437c0d8: valid, spec refreshed with code refs — selection still bumps a full editor rebuild.
 
+# Outcome
 Selecting or cycling to another asset on the same palette page updates the selected-card border and badge in place; the six palette preview viewports are not recreated.
 
 # Context
-
-- BRL-cwm9 retained the grid/symmetry/search/status labels and made rotation, search toggling and non-filtering search keystrokes rebuild-free.
-- `MapMakerSelectAsset` and `MapMakerCycleAsset` still call `bump_render`. `palette_item_button` spawns the selected border and badge only on the selected card, so the selection is structural today.
-- Each rebuild with the drawer open respawns about 97 UI nodes, including 6 `MapPalettePreviewHost` nodes. `presentation_3d/map_palette_preview.rs` gives each new host a fresh render-target image, `Camera3d`, light and visual scene. Clicking a card or wheeling over the palette therefore recreates 6 offscreen cameras.
+- BRL-cwm9 (f08518d8) retained the grid/symmetry/search/status labels (`MapMakerValueLabel`, `packages/brawler-client/src/flow/screens/map_maker.rs:178-185`) and made rotation, search toggling and non-filtering search keystrokes rebuild-free.
+- `MapMakerSelectAsset` (map_maker.rs:569-577) and `MapMakerCycleAsset` -> `cycle_palette` (:566-568, :1022-1041) still call `bump_render` (:952), which bumps `render_revision`; `present_map_editor` respawns the `MapMakerRoot(render_revision)` tree (:2033-2053).
+- `palette_item_button` (:3246-3313) spawns the ACCENT border node and `palette_selection_badge` (:3315) only when `selected`, so the selection is structural today. `SurfaceState.selected` on the card is already kept live by `update_flow_button_chrome` via `MapMakerRuntime::action_selected` (`flow/screens/shared.rs:217`, map_maker.rs:958).
+- The visible window is page-aligned: `palette_window` (:3091-3094), `VISIBLE_PALETTE_ITEMS = 6` (:36). A selection change within the same page leaves the window unchanged; ±1 cycling across a page edge or a page jump (`PALETTE_PAGE_DELTA`) changes it.
+- Each rebuild with the drawer open respawns about 97 UI nodes, including 6 `MapPalettePreviewHost` nodes (:212). `presentation_3d/map_palette_preview.rs::spawn_previews` (:42-125) gives every host without a `ViewportNode` a fresh render-target image, `Camera3d`, directional light and visual scene. Clicking a card or wheeling over the palette therefore recreates 6 offscreen cameras.
 
 # Scope
-
-- Spawn the border/badge on every card and toggle visibility from `runtime.palette_index`. Alternatively, drive it from `SurfaceState.selected` like the existing chrome.
-- Keep the rebuild when the visible page window, category, or filtered entries change.
+- Spawn the border/badge on every card with a marker (e.g. `PaletteSelectionMark(index)`) and toggle `Visibility` from `runtime.palette_index` in a retained-update system (alongside `update_map_editor_values`), or drive it from `SurfaceState.selected`.
+- In `MapMakerSelectAsset` / `cycle_palette`, call `bump_render` only when the visible page window (start of `palette_window`), category, or filtered entries change; otherwise value-only.
 - Optional: keep preview viewports across page changes by reusing hosts per slot.
 
-# Acceptance criteria
+# Plan
+1. Always spawn border + badge, `Visibility::Hidden` unless selected.
+2. Retained system updates visibility when `MapMakerRuntime` changes.
+3. Compute old/new window start in select/cycle; bump only on change.
 
-- ECS test: selecting another card on the same page keeps the same Node entities and `MapPalettePreviewHost` entities.
+# Acceptance criteria
+- ECS test next to `value_only_edits_keep_the_same_editor_ui_nodes` (map_maker.rs:3910): selecting another card on the same page keeps the same Node entities and `MapPalettePreviewHost` entities, and the new card's mark is visible / old hidden; crossing a page edge still rebuilds.
 - Visible behavior unchanged; native check of palette click and wheel.
+- `just lint`, `just test`.
 
 # Out of scope
-
 Map Maker feature work (BRL-6vjz, BRL-tztp).

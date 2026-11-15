@@ -3,9 +3,9 @@ id: BRL-3ebg
 
 title: Tonemap custom VFX shaders on the non-HDR Low quality tier
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-14T13:03:19Z
+status_changed: 2026-11-15T20:38:36Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-farz]
 
 parent: BRL-q5c4
 
-rank: 13107200
+rank: 16318464
 ---
 
 # Description

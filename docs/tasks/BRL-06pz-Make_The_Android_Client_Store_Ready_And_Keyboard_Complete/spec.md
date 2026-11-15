@@ -1,35 +1,31 @@
+Reviewed 2026-11-15 against HEAD 3437c0d8: partly done. Target SDK 37 and the cutout padding have shipped. Soft keyboard, store signing/AAB and the adaptive icon are still open.
+
 # Outcome
 The Android client can be published and fully used without a hardware keyboard.
 
-# Context (deferred from BRL-zj53)
-- Soft keyboard: winit 0.30 never shows the IME for GameActivity unless `set_ime_allowed` is called, and
-  it does not bridge GameTextInput text events, so the Server Select address and name editors cannot be
-  typed into with the on-screen keyboard. BRL-zj53 works around this with a build-time server prefill
-  (`just android-build HOST:PORT`) plus persisted recents. Android paste (`arboard` has no Android
-  backend) reports unavailable.
-- Target SDK: BRL-zj53 targets API 36 because API 37 blocks LAN access unless the app requests the
-  `ACCESS_LOCAL_NETWORK` runtime permission (needs a Java/JNI permission flow).
-- Signing: BRL-zj53 signs the release APK with the local debug keystore; no upload key, no AAB.
-- Icon: BRL-zj53 ships a legacy (non-adaptive) launcher icon generated from the branding lockup with
-  `sips`; it is small inside the launcher mask.
-- Cutout/safe areas: the full-screen landscape surface may place shell UI under the Pixel camera cutout.
+# Already done (do not redo)
+- Target SDK 37 + `ACCESS_LOCAL_NETWORK`: `packages/brawler-android/android/app/build.gradle` has `compileSdk 37` / `targetSdk 37`. The manifest declares the permission. `MainActivity.java` requests it at launch and on return from Settings (L27, L119-L160), with the denial dialog.
+- Cutout: `MainActivity.keepSurfaceOutOfDisplayCutout()` (MainActivity.java L80-L95, BRL-0196) pads the content view by the `displayCutout` insets. The camera side shows a black strip. No shell or HUD UI sits under the cutout. What remains is optional: an in-app safe-area or full-bleed treatment. It is out of scope here unless the owner asks for it.
 
-# Scope
-- Show/hide the on-screen keyboard for the shell's text editors and deliver committed text to them.
-- Target SDK 37 with an `ACCESS_LOCAL_NETWORK` request flow (or picker) and a clear denied state.
-- Upload-key signing configuration (secrets outside git) and an AAB build recipe.
-- Adaptive launcher icon (foreground/background/monochrome) from original art.
-- Respect display-cutout safe insets in shell and HUD layout.
+# Context (still true at HEAD)
+- Soft keyboard: winit 0.30.13 / android-activity 0.6.1 (GameActivity, `androidx.games:games-activity:4.4.0`). Nothing calls `Window::set_ime_allowed` or bridges GameTextInput. A grep for `set_ime_allowed|Ime|GameTextInput` in `packages/` finds nothing. The text editors read `KeyboardInput` only:
+  - Server Select address/name: `packages/brawler-client/src/flow/input.rs` `collect_flow_input` (L205), `edit_name_input` (L687), `insert_editor_text` (L604, address ASCII ≤255, name ≤64).
+  - Map Maker map name: `packages/brawler-client/src/flow/screens/map_maker.rs` (~L1234, `MessageReader<KeyboardInput>`).
+  - Workaround in use: the build-time prefill `just android-build HOST:PORT`, which becomes `BRAWLER_ANDROID_SERVER` → `packages/brawler-android/src/lib.rs` L13, plus persisted recents.
+  - Paste: `arboard` is excluded on Android (`packages/brawler-client/Cargo.toml` L51-53), and `clipboard_text()` (flow/input.rs L590-L605) reports unavailable.
+- Signing: `app/build.gradle` `buildTypes.release.signingConfig signingConfigs.debug`. There is no upload key and no AAB. `scripts/android.sh` runs only `gradle assembleRelease`.
+- Icon: only legacy `res/mipmap-{m,h,xh,xxh,xxxh}dpi/ic_launcher.png`. There is no `mipmap-anydpi-v26`, adaptive XML or monochrome layer.
 
-# Acceptance criteria
-- A Pixel 10 user can enter a server address and names with the on-screen keyboard.
-- The API-37 build connects to a LAN server after the permission prompt.
-- `just` produces a signed AAB; the launcher icon reads clearly; no UI is hidden by the cutout.
+# Plan
+1. Soft keyboard (largest item, likely its own commit):
+   - When an editor gains editing focus, call `Window::set_ime_allowed(true)` (and set `ime_position`). Call it with false on commit or cancel. Verify that winit 0.30.13's Android backend shows the GameActivity soft input. If it does not, add a small JNI hook in `MainActivity` (`InputMethodManager.showSoftInput` / `hideSoftInputFromWindow`) driven from Rust, the same way `back.rs` / `nativeOnBackPressed` bridge Back.
+   - Deliver committed text to the editors. Read `Ime::Commit` (Bevy `Ime` messages) and/or GameTextInput state, and route it through the existing `insert_editor_text` / map-maker insert so the validation and length limits stay shared. Backspace and Enter from the soft keyboard must map to the existing delete and commit paths.
+   - Keep desktop behaviour unchanged. Add flow tests that feed `Ime::Commit` into the address, name and map-name editors.
+2. Store signing / AAB: add a `release` `signingConfig` read from `keystore.properties` or env vars outside git (`.gitignore`). Keep the debug-signed fallback when the secrets are absent. Add `scripts/android.sh bundle` → `gradle bundleRelease` and a `just android-bundle` recipe. Document it in the README Android section.
+3. Adaptive icon: `res/mipmap-anydpi-v26/ic_launcher.xml` with foreground/background/monochrome drawables made from original branding art, keeping the legacy PNGs for API < 26. minSdk is 31, so the adaptive icon always applies.
 
-# Update 2026-11-13: target SDK 37 moved into BRL-zj53
-The owner chose "Target 37 now". BRL-zj53 now targets/compiles against API 37 and its `MainActivity`
-requests `ACCESS_LOCAL_NETWORK` at launch (and on return from Settings), with a player-facing denial
-dialog offering Try again / Open settings / Not now. Remove "Target SDK 37 with an ACCESS_LOCAL_NETWORK
-request flow" and "The API-37 build connects to a LAN server after the permission prompt" from this
-ticket's scope and acceptance criteria; the remaining items (soft keyboard, store signing/AAB, adaptive
-icon, cutout safe areas) stay here.
+# Acceptance
+- `cargo test -p brawler-client` passes, including the new IME commit tests for the address, name and map-name editors. `just android-build` still succeeds.
+- `just android-bundle` (or an equivalent recipe) produces a signed `.aab` when the upload-key secrets are present, and fails with a clear message when they are absent. No secret is committed.
+- **Pixel 8a device check:** tapping the Server Select address and name fields opens the on-screen keyboard. Typed text appears, Backspace and Done work, and the keyboard hides on commit or Back. A server can be joined by typing an address on a build made without the prefill.
+- **Pixel 8a device check:** the launcher icon fills the launcher mask and reads clearly, including in themed (monochrome) icon mode.

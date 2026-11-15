@@ -3,9 +3,9 @@ id: BRL-jxfy
 
 title: Show Results to a rejoining player whose match completed while their seat was held
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-15T00:41:32Z
+status_changed: 2026-11-15T20:38:34Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-yyeg]
 
 parent: BRL-q5c4
 
-rank: 14483456
+rank: 15138816
 ---
 
 # Description

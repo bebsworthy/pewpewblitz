@@ -3,9 +3,9 @@ id: BRL-583f
 
 title: Log the headless automation start line once instead of every pre-match frame
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-14T17:14:01Z
+status_changed: 2026-11-15T20:38:36Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-1fam]
 
 parent: BRL-q5c4
 
-rank: 13762560
+rank: 16777216
 ---
 
 # Description

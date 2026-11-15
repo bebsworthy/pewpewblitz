@@ -4,9 +4,9 @@ was: BRL-0192
 
 title: Redesign the shell focus and selection affordance
 
-status: backlog
+status: todo
 closed:
-status_changed: 2026-11-13T13:02:36Z
+status_changed: 2026-11-15T20:38:37Z
 
 theme: quality
 
@@ -20,7 +20,7 @@ related: [BRL-drny]
 
 parent: BRL-q5c4
 
-rank: 12648448
+rank: 17760256
 ---
 
 # Description

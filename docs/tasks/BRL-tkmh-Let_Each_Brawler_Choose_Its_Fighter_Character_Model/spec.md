@@ -1,16 +1,27 @@
-# Context
+Reviewed 2026-11-15 against HEAD 3437c0d8: valid but not implementable yet: still only one production character (Riff); needs a second character and an owner data decision first.
 
-BRL-57hs made Riff the single default fighter presentation. Choosing a model per brawler needs a
-profile/data decision (where the stable character ID lives, how it replicates, and catalog
-validation) and at least a second production character to be worth building.
+# Context (verified)
 
-# Scope
+- One character asset: `RIFF_ASSET_PATH` `packages/brawler-client/src/presentation_3d/fighter_character.rs:21` (`assets/brawler/models/original/characters/riff/chr_riff.glb`), loaded once in `assets.rs:54` (`model.riff` readiness id l.91), used by gameplay (`setup_imported_character`, `fighter_character.rs:382`) and Dashboard / brawler previews (`dashboard.rs:481` `spawn_imported_character`). Clip contract `CLIP_NAMES` (`fighter_character.rs:53`) is Riff-specific; zombies use Kenney `character-male-d.glb`.
+- Only `asset_src/characters/riff/` exists; no ticket owns a second character.
+- `SavedBrawler` (`src/profiles/model.rs:168`) has no character field. `fighter_profile_id` is the gameplay stat profile (default/lightweight/reinforced, `src/profiles/catalog.rs:111-129`) and must not double as a cosmetic key. Replicated `ResolvedMatchLoadout` (`src/builds/model.rs:416`) carries no presentation identity.
+- BRL-57hs left per-brawler model selection as this follow-up.
 
-- Decide the stable character identity and its owner (profile, build catalog, or presentation-only).
-- Replicate or derive it for every observer; resolve it to a client presentation entry.
-- Brawler screen choice UI.
+# Decisions needed (owner, via `question add`)
 
-# Acceptance criteria
+1. Who owns the identity: saved profile field (`SavedBrawler.character_id: CharacterId(u16)`, validated against an advertised catalog), or presentation-only derived from build? Recommended: profile field, cosmetic, outside the gameplay fingerprint.
+2. How remote observers learn it: extend the replicated fighter identity with the stable numeric ID (no paths).
+3. Where the second character comes from (BRL-57hs sourcing question).
 
-- Two characters selectable and rendered consistently in gameplay and previews.
-- No process-local or asset paths on the wire.
+# Plan (after decisions)
+
+1. Add `CharacterId` + advertised character catalog (ids and display names only); default Riff for existing profiles (storage migration in `src/profiles/storage.rs`).
+2. Create/Edit brawler commands accept it; server validates.
+3. Replicate the ID on the fighter; client maps ID → presentation entry (GLB path, scale, socket, clip set) in a client catalog generalising the Riff constants.
+4. Brawler screen picker (`flow/screens/brawlers.rs`) and Dashboard preview read the selected brawler's character.
+
+# Acceptance
+
+- Two characters selectable and rendered consistently in gameplay, Dashboard and brawler previews; remote fighters render the owner's choice.
+- No process-local or asset paths on the wire; unknown ID falls back to Riff.
+- Profile migration test; `just lint`, `just test`; owner visual check; Pixel 8a check of asset memory with two characters loaded.

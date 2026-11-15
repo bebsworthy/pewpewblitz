@@ -20,7 +20,7 @@ related: [BRL-5e2s, BRL-z2hf]
 
 parent: BRL-q5c4
 
-rank: 14155776
+rank: 16121856
 ---
 
 # Description

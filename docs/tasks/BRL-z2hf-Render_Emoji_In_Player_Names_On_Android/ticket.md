@@ -19,7 +19,7 @@ related: [BRL-5e2s, BRL-cgcf]
 
 parent: BRL-q5c4
 
-rank: 14614528
+rank: 16056320
 ---
 
 # Description
