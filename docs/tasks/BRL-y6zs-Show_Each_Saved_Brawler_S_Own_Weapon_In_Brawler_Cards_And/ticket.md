@@ -3,9 +3,9 @@ id: BRL-y6zs
 
 title: 'Show each saved brawler''s own weapon in brawler cards and details'
 
-status: doing
-closed:
-status_changed: 2026-11-15T23:26:59Z
+status: done
+closed: 2026-11-15T23:46:08Z
+status_changed: 2026-11-15T23:46:08Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-q29d]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description

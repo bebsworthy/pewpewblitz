@@ -27,3 +27,8 @@ BRL-q29d (13f1cedc) makes the Dashboard Riff hold the selected saved brawler's w
 - A card or details portrait shows that brawler's family weapon; creation fighter card follows the draft weapon; native captures with brawlers of 2+ families.
 - `just lint`, `just test`.
 - Pixel 8a device check: brawler list with mixed families scrolls smoothly; correct weapons shown.
+
+# Verified 2026-11-16
+- Implementation: `packages/brawler-client/src/dashboard/card_preview.rs` (per-family targets on layers 34–37, camera marker `BrawlerCardCamera`, which BRL-1gkv/BRL-y3hb can target). ECS tests: distinct layers, different families bind different images, same family shares, at most 4 targets with 12 hosts, baseline cleanup on leaving and on Dashboard exit. `just lint` and `just test` pass.
+- Pixel 8a, release APK: created "Brawler 2" with Impact Blade. The creation fighter card switched from Sidearm to blade when the draft weapon changed. The details portrait of Brawler 2 shows the blade while Brawler 1 (Sidearm) is selected. The list shows Brawler 1 with Sidearm and Brawler 2 with blade. The Dashboard Riff still holds the selected brawler's Sidearm. Evidence: scratchpad y6/y05crop.png, y06s.png, y07s.png, y08s.png.
+- Not covered: scrolling with 3–4 families live (only 2 brawlers on the phone). Native desktop capture was not made because no automation opens the brawler list (BRL-pw9k).
