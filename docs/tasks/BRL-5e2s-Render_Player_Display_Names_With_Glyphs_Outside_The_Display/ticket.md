@@ -4,9 +4,9 @@ was: BRL-0168
 
 title: Render player display names with glyphs outside the display font
 
-status: doing
-closed:
-status_changed: 2026-11-14T05:21:12Z
+status: done
+closed: 2026-11-15T09:37:57Z
+status_changed: 2026-11-15T09:37:57Z
 
 theme: quality
 
@@ -16,11 +16,11 @@ created: 2026-10-23T15:22:16Z
 
 blocks: []
 
-related: [BRL-9k7q, BRL-aj2q, BRL-cgcf, BRL-m1yx]
+related: [BRL-9k7q, BRL-aj2q, BRL-cgcf, BRL-m1yx, BRL-z2hf]
 
 parent: BRL-q5c4
 
-rank: 12582912
+rank:
 ---
 
 # Description

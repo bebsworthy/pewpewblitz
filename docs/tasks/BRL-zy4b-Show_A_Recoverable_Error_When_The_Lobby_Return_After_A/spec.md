@@ -41,3 +41,8 @@ Server), never a dead screen.
 # Closeout (2026-11-14)
 
 Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001 and the phone reached it over Wi-Fi. Input came from adb. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- Completed-match variant: **not reproduced.** The attempt froze the scratch lobby worker (SIGSTOP) during a Practice match so that the post-match lobby return would fail. The supervisor's lobby heartbeat timeout (~5 s) then reaped the lobby *and* its Practice match worker, so it became the lost-match path. The phone showed "The connection to the match was lost, and the match could not be resumed." with BACK, which dismissed to the Dashboard (`z11.jpg`). That is the recoverable path, not a dead screen.
+- Every other match in this session (8) returned to the lobby normally after completion. Reproducing the completed-match variant needs a lobby outage shorter than the heartbeat bound that starts right at completion, or real Wi-Fi loss (left to the owner; system network settings were not touched).

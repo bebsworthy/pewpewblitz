@@ -58,3 +58,7 @@ Run `just ui-gallery` (scroll to the bottom of ICON SET) and `just run 1`: Dashb
 # Owner sign-off (2026-11-14)
 
 Owner reviewed the pennants in `just ui-gallery` and approved them ("nice. approved"). Single orange body with per-mode emblems kept; per-mode body tones not requested.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- Pennant badges render on the Dashboard game tile (Wipeout skull, Zombie) and on all four Choose Game cards (Wipeout, Hot Zone, Heist, Zombie). They show the outline, the two tones and the highlight, with no missing or white textures (`h09-dashboard.jpg`, `s-h10.jpg`, `z01.jpg`). **Pass.**

@@ -16,7 +16,7 @@ created: 2026-11-14T05:52:38Z
 
 blocks: []
 
-related: [BRL-5e2s]
+related: [BRL-5e2s, BRL-z2hf]
 
 parent: BRL-q5c4
 

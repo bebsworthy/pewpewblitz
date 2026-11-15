@@ -139,3 +139,8 @@ Install with `just android-install <mac-lan-ip>:5001`; open Settings from Select
 # Closeout (2026-11-14)
 
 Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- Settings -> Audio: a finger drag on Music moved it 70% -> 10%. A tap on the Master track set 40%. Reset this category restored 100/100/70 (`s-s03.jpg`, `s-s05.jpg`). **Pass.**
+- Not re-checked: persistence across a relaunch, UI scale and touch-tuning sliders (rs10's own walk covered them).

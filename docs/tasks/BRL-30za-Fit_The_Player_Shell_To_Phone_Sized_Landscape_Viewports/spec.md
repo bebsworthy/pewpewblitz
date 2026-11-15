@@ -141,3 +141,8 @@ Also check one desktop window at the default size for regressions.
 # Closeout (2026-11-14)
 
 Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- These screens fit the 2400x1080 landscape viewport with every control reachable and values visible: Select Server (scrolls to SETTINGS/QUIT and the saved list), Create Brawler, Brawlers, Brawler details, Customize Weapon, Customize Abilities, Choose Ultimate (second row below the fold), Dashboard, Dashboard menu, Choose Game, Choose Practice Map, Change Server confirm, Leave Match confirm, Settings (Display/Audio), Connection Lost, Connection Error, the Queue screen and Results.
+- **Pass.** Evidence: `01-launch.jpg`, `05-connect.jpg`, `s-h02.jpg`, `s-h05.jpg`, `h09-dashboard.jpg`, `s-h10.jpg`, `u01.jpg`, `s-n11.jpg`, `r05.jpg`, `k03.jpg`, `z11.jpg`.

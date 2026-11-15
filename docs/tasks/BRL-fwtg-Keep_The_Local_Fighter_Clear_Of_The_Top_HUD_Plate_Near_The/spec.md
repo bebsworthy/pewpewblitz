@@ -30,3 +30,7 @@ Chosen option: a top HUD safe band in the camera rig, built on BRL-vptw's framin
 - The first test draft asserted that the band always leaves the fighter more than one cell ahead of the look target. At 32:9 the wide view loses depth and the limit is about 0.65 cell. Check aspect extremes before writing a numeric invariant.
 - The first native capture ran out of frames before the fighter (70 units/s) reached the wall. Compute the walk time from the capture JSON (spawn position, map bounds, speed) before choosing the capture frames. The evidence script now takes the capture frames from the environment.
 - Clippy `float_cmp` rejects `assert_eq!` on f32 in tests. Use tolerance asserts from the start.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- Practice Wipeout 3v3 on Feature Yard: walked to the north wall and the north-west corner. The local name/health/ammo plate sits just below the score plate with the red wall and green dressing above it (`f01.jpg`). **Pass** (Auto/Medium tier, default UI scale).

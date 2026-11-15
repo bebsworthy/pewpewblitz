@@ -187,3 +187,10 @@ Correction to the playtest setup: the phone is now bound to the logical server i
 # Closeout (2026-11-14)
 
 Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001 and the phone reached it over Wi-Fi. Input came from adb. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- Dash tap re-check, Practice Hot Zone 3v3: an 80 ms tap on the ultimate button with an enemy (Bot 2) to the north. The fighter dashed north toward it with a trail, and the ring went from gold Ready to charging (`s-d0.jpg`). **Pass** (one sample).
+- The touch shell reached Practice on every attempt (BRL-30za resolved the old Dashboard blocker).
+- `server_late_input_mismatch` (lightyear_inputs ERROR, target `lightyear_debug::input`): **0** in the scratch server log (`server.log`, about 30 min, 8 matches over Wi-Fi). Caveat: the input was scripted and sparse (short drags, ~50 fire taps), much lighter than the owner's 5 min of live play that logged 662.
+- Not done: a full touch-only match to the result by hand. It needs the owner's play.

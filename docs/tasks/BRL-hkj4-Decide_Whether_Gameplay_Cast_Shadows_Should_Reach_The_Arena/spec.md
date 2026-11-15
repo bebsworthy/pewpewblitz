@@ -181,3 +181,8 @@ If the owner picks B instead: set `shadow_maps: false` on High in `render_qualit
 # Decision (2026-11-14)
 
 Owner chose Option A after reviewing the Switchback Basin A/B captures: the High tier keeps the single derived cascade (f637fa02); Medium and Low keep shadow maps off. Pixel 8a High-tier cost stays in BRL-xb54. Acceptance criteria met: decision recorded, captures on all three themes, frame cost measured before and after.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- Settings -> Display -> Graphics quality = HIGH (logcat: `tier="HIGH" ... msaa=Sample4 hdr=true bloom=true shadow_maps=true`), Practice Wipeout 2v2 on Feature Yard. The fighter casts a soft directional shadow (ears and body) to its right on the floor. At Auto/Medium only the contact disc shows (`s-shadow.jpg` = High crop above Medium crop; full frames `k09-high.jpg`/`f01.jpg`). The single cascade renders with no artefacts in view. **Pass.**
+- High-tier frame cost on the Pixel 8a: median 33.5 ms (about 34 FPS mean, 2 short samples) versus 16.8 ms at Auto. This feeds BRL-xb54. Restored to Auto afterwards.

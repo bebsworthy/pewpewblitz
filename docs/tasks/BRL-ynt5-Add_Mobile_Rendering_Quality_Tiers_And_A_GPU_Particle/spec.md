@@ -243,3 +243,14 @@ Desktop quality settings beyond sharing the same tier model.
 # Closeout (2026-11-14)
 
 Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- Auto resolves to MEDIUM ("mobile GPU"); logcat shows the tier line with `shadow_maps=false`. Player override cycling Low -> Medium -> High applies live (`render quality tier selected ... reason="player override"`); restored to Auto afterwards.
+- SurfaceFlinger `--latency` samples on the game SurfaceView, ~1 s windows of 62 frames while moving, display at 60 Hz:
+  - Heist 3v3 Auto: median 16.80 ms, p95 33.58, mean 44.0 FPS.
+  - Feature Yard Wipeout 3v3 Auto: median 16.78 ms, p95 33.56, mean 50.6 FPS.
+  - High: median 33.5 ms, p95 33.6-33.9, mean 34 FPS (2 samples).
+  These are consistent with the ynt5 table (Auto 48-52 average, 16/33 ms; High 33 FPS). The samples are short, and adb input ran during them.
+- Cold start: `am start -W` TotalTime about 683 ms.
+- Files: `sf-heist.txt`, `sf-wipeout-auto.txt`, `sf-high-1.txt`, `sf-high-2.txt`.

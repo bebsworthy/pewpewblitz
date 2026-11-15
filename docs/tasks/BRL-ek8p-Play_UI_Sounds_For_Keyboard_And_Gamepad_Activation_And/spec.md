@@ -148,3 +148,10 @@ Awaiting owner playtest.
 # Owner playtest (2026-11-14)
 
 Owner played `just client` against the routed server and accepted the button sound effects ("i'm ok with the sound effect on button"). The shared ui-move tick, pointer/touch slider ticks, carousel wheel ticks and tick volume stay as implemented; no change requested. Remaining silent paths stay in BRL-yrys.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001 and the phone reached it over Wi-Fi. Input came from adb. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- The audio path initialises on device: on every launch `dumpsys audio` shows an AAudio player for the app (`usage=USAGE_MEDIA`, 44.1 kHz stereo, `state:started`). `dumpsys media.audio_flinger` shows the app's track active with non-silent level readings.
+- Cues play: during a 1v1 the client logged `client audio one-shot cap suppressed a cue cue_key="hit-taken"`, so gameplay one-shots were being voiced up to the cap.
+- No audio, decoder or rodio/cpal errors in logcat across 6 launches. The only app ERROR is `bevy_gilrs: Failed to start Gilrs` (no gamepad backend on Android; harmless).
+- UI interactions exercised: Dashboard/menus/Settings sliders/toggles by touch, and Back on every shell screen. I cannot hear them. **Owner must judge by ear** that UI move/click/confirm/back sounds play on the phone. Evidence: `dumpsys-audio-01.txt`, `af-01.txt`, `logcat-final.txt`.

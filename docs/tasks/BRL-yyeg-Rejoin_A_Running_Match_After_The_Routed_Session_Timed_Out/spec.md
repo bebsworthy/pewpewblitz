@@ -252,3 +252,19 @@ are away shows Dashboard, not Results (BRL-jxfy); nobody is told the seat is bot
   race without loosening any limit.
 - Reusable: when a wire change needs a fingerprint change, register a message rather than editing
   a variant, and record before/after `routing-identity` from the old and new server binaries.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599 and a scratch protocol-48 supervisor on 0.0.0.0:5001 over Wi-Fi. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- **Kill-and-relaunch rejoin: pass.** In a running PvP Wipeout 1v1 (phone vs a headless client whose seat was already bot-held):
+  - 09:13:56 `am force-stop`.
+  - 09:14:06 server "match seat held; a server bot controls the fighter player_id=4 hold_seconds=60" (10 s routed bound).
+  - Waited about 15 s, relaunched with `am start`, tapped CONNECT.
+  - 09:14:22 "lobby requested a match rejoin for a held seat" -> worker rebind `refusal=None` -> "delivered a match rejoin grant".
+  - 09:14:23 "match seat reclaimed by a rejoined session player_id=4".
+  - Client: "brawler client is rejoining its running match", then "rejoined its running match player_id=4".
+  - The phone showed the same match (score 2-1 and timer 2:06 continuing), the same fighter with its own name plate, and touch control. Outage about 26 s, inside the 60 s hold. Screens: `s-r02.jpg`, `r04.jpg`. After the opponent's hold expired, Results showed "Victory by forfeit" (`r05.jpg`).
+  - The "Rejoining match…" banner was not caught; screencap takes ~1-2 s and the rejoin took about 0.6 s.
+- BRL-5vc1 did not interfere. The rejoin ran in PvP; a Practice rejoin also worked (below).
+- **Defect: Leave Match is auto-rejoined.** In Practice Zombie, LEAVE MATCH -> confirm started a fresh lobby, and the lobby immediately re-granted the held seat. The 1st-3rd leaves all returned to the same match; only the 4th, after `MAX_REJOINS_PER_SEAT`, reached the Dashboard. Filed **BRL-8y1f**.
+- **Defect, possibly related:** PvP queue -> match handoff leaves the phone on the Dashboard while it plays the match unseen. Filed **BRL-k0tr**.
+- Not run: the Wi-Fi/airplane-mode variant (system network settings are left to the owner), and expiry after 60 s away for the phone's own seat (the opponent's seat expiry did forfeit correctly at 09:10:02 and 09:14:39).

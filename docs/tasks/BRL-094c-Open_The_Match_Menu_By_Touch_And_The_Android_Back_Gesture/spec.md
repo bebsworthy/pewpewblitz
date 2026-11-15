@@ -165,3 +165,11 @@ Shell-screen Back navigation, unless it needs the same key handling.
 # Closeout (2026-11-14)
 
 Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599 (`scripts/android.sh build 192.168.31.211:5001`). A scratch protocol-48 supervisor ran on 0.0.0.0:5001 with a scratch data dir; the phone reached it over Wi-Fi. Input came from adb (`input tap`/`motionevent`/`keyevent KEYCODE_BACK`). Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- Back gesture in Practice Hot Zone 3v3: opened and closed the menu repeatedly (`s-m01.jpg`). **Pass.**
+- Touch: a press of ~200 ms on the HUD menu button opened the menu (`s-q.jpg`), and RESUME/SETTINGS/LEAVE MATCH respond to touch. **Pass.** An instant adb `input tap` (down/up in one frame) did not open it. Filed as low priority: **BRL-5hhp**.
+- Zombie 3p: the teammate strip sits right of the menu button with no overlap (`z03.jpg`).
+- **Regression:** LEAVE MATCH -> LEAVE MATCH no longer reaches the Dashboard. The BRL-yyeg seat hold auto-rejoins the same match, up to 3 times (`s-l04.jpg`, `s-l06.jpg`). Filed **BRL-8y1f**.
+- Defect found while here: match-menu Settings is stuck after the match ends. Filed **BRL-nqnm**.

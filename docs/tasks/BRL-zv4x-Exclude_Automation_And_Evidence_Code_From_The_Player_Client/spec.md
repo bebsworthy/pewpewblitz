@@ -108,3 +108,8 @@ The win is small because Bevy/wgpu/dependencies dominate and the linker already 
 # Closeout (2026-11-14)
 
 Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599. A scratch protocol-48 supervisor ran on 0.0.0.0:5001. Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+- `strings -a` over the built `libbrawler_android.so` (114,880,600 B; APK 121 MB) finds none of the 12 `scripts/check-client-features.sh` automation markers. It also does not contain `BRAWLER_PRODUCT_REJOIN_SMOKE` or `product-rejoin-smoke`. Ordinary protocol strings such as `MatchRejoinStatus` are present, so the scan is effective. **Pass.** Evidence: `so-strings.txt`.
+- On the device the app shows only the player shell; no automation flags or overlays appeared.

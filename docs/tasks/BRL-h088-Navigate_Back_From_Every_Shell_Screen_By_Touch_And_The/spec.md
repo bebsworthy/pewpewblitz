@@ -194,3 +194,15 @@ Report the following:
 # Closeout (2026-11-14)
 
 Moved to done under the owner's process: implementation and agent verification are complete. Owner playtest happens on done tickets; open decisions above stay recorded for that review, and changes come back as a reopen or a new ticket.
+
+# Device check 2026-11-15 (Pixel 8a)
+Setup: Pixel 8a (45171JEKB03025, Android 17), release APK built from HEAD 6a6d6599 (`scripts/android.sh build 192.168.31.211:5001`). A scratch protocol-48 supervisor ran on 0.0.0.0:5001 with a scratch data dir; the phone reached it over Wi-Fi. Input came from adb (`input tap`/`motionevent`/`keyevent KEYCODE_BACK`). Evidence is under /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/.
+Pass. Back = `adb shell input keyevent KEYCODE_BACK`.
+- Brawler details, Create Brawler, Customize Weapon and Customize Abilities each stepped back one level (`s-h02.jpg`, `s-h05.jpg`).
+- Dashboard MENU -> Back closed it (`s-h10.jpg`). Choose Game: Back gesture and touch BACK both returned to the Dashboard with the draft kept. Choose Practice Map: both returned (`s-h13.jpg`, `s-h16.jpg`). Change Server confirm: Back = Stay Connected (`s-h21.jpg`).
+- Select Server: Settings -> Back closed it; address edit -> Back cancelled the edit (`s-h28.jpg`); a Connecting attempt was cancelled by Back (`s-h24.jpg`).
+- At the Dashboard root and the Select Server root, Back moved the task to the background with the same pid, and it resumed on the same screen (`h19-dash-resume.jpg`, `s-h32.jpg`). QUIT ended the process and the relaunch showed Select Server (`h34-relaunch.jpg`).
+- Connection Lost (after 24 s suspended in the background): Back dismissed the panel (`k03.jpg`, `h35-connlost-back.jpg`).
+- Observations:
+  - After a resume, the first tap on QUIT (and once on PLAY) only focused the control. That is the same symptom as BRL-wr0s, but after a resume rather than a fresh launch.
+  - Defect: Settings opened from the match menu becomes a dead screen if the match ends under it, and Back then moves the app to the background. Filed **BRL-nqnm**.
