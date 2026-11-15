@@ -47,6 +47,58 @@ pub(super) fn process_match_route_grant(
     }
 }
 
+/// Observe the lobby's automatic-rejoin status for the current lobby session (BRL-yyeg). It is
+/// ordered before the welcome on `SessionChannel` and runs before the join outcome, so the
+/// rejoin is known before this lobby session can look like a return to Dashboard. A status that
+/// follows a completed match (its result already retained) is ignored: that match is over.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "Bevy system parameters are owned by the schedule"
+)]
+pub(super) fn process_match_rejoin_status(
+    mut lifecycle: ResMut<RoutedClientLifecycle>,
+    result_state: Option<Res<ClientMatchResultState>>,
+    mut receivers: Query<
+        (
+            &RoutedClientSession,
+            Option<&mut MessageReceiver<brawler::lobby::MatchRejoinStatus>>,
+        ),
+        With<Client>,
+    >,
+) {
+    for (session, receiver) in &mut receivers {
+        if session.kind != RoutedClientSessionKind::Lobby
+            || session.generation != lifecycle.generation
+        {
+            continue;
+        }
+        let Some(mut receiver) = receiver else {
+            continue;
+        };
+        for status in receiver.receive() {
+            match status {
+                brawler::lobby::MatchRejoinStatus::Rejoining
+                    if result_state
+                        .as_ref()
+                        .is_none_or(|state| state.context.is_none()) =>
+                {
+                    if lifecycle.begin_rejoin() {
+                        info!("brawler client is rejoining its running match");
+                    }
+                }
+                brawler::lobby::MatchRejoinStatus::Rejoining => {}
+                brawler::lobby::MatchRejoinStatus::Unavailable => {
+                    if lifecycle.rejoin_in_progress() {
+                        info!("brawler client match rejoin is unavailable");
+                    }
+                    lifecycle.abandon_rejoin();
+                }
+            }
+        }
+    }
+}
+
 /// A replicated authoritative completion is the only gameplay signal that starts the routed
 /// match-to-lobby transition. The client intentionally does not wait for a worker Result or
 /// terminal disconnect: the supervisor owns that control-plane fact while the client closes its

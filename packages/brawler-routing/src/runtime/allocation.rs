@@ -357,6 +357,7 @@ impl SupervisorRuntime {
                 route_id,
                 peer_id,
                 capability,
+                rejoins: super::rejoin::SeatRejoins::default(),
             });
         }
         let manifest = build_match_manifest(&request, &context, manifest_participants)?;
@@ -393,6 +394,7 @@ impl SupervisorRuntime {
                 response: None,
                 response_queued: false,
                 result: None,
+                ended_notified: false,
             },
             spec,
         }))
@@ -441,6 +443,7 @@ impl SupervisorRuntime {
                 })),
                 response_queued: false,
                 result: None,
+                ended_notified: false,
             },
         );
     }

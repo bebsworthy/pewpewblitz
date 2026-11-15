@@ -136,6 +136,7 @@ pub(super) fn begin_admission(
     reason = "one ordered authority result pump atomically promotes pending sessions and publishes outcomes"
 )]
 pub(super) fn process_profile_storage_results(
+    time: Res<Time<Real>>,
     mut commands: Commands,
     mut state: ResMut<LobbyState>,
     mut authority: ResMut<crate::profiles::ProfileAuthority>,
@@ -143,10 +144,12 @@ pub(super) fn process_profile_storage_results(
     mut outbox: ResMut<LobbyControlOutbox>,
     catalog: Res<catalog::ResolvedLobbyCatalog>,
     mut publications: ResMut<QueueSnapshotPublication>,
+    mut seats: ResMut<super::rejoin::MatchSeatTable>,
     mut clients: Query<(
         &RemoteId,
         &mut MessageSender<LobbyJoinOutcome>,
         &mut MessageSender<crate::profiles::ProfileOutcome>,
+        &mut MessageSender<crate::lobby::MatchRejoinStatus>,
         Has<Connected>,
         Has<Disconnected>,
     )>,
@@ -159,7 +162,7 @@ pub(super) fn process_profile_storage_results(
             authority.remove_client(completion.client_key);
             continue;
         };
-        let Ok((remote_id, mut sender, _, connected, disconnected)) =
+        let Ok((remote_id, mut sender, _, mut rejoin_status, connected, disconnected)) =
             clients.get_mut(admission.entity)
         else {
             authority.remove_client(completion.client_key);
@@ -208,6 +211,19 @@ pub(super) fn process_profile_storage_results(
             netcode_client_id: session.netcode_client_id,
         });
         if state.mark_welcome_sent(session.netcode_client_id) {
+            // BRL-yyeg: an account whose match seat is held rejoins automatically. `Rejoining`
+            // precedes the welcome on the same ordered channel, so the client never mistakes
+            // this lobby session for a return to Dashboard.
+            if let Some(request) = seats.begin_rejoin(
+                admission.hello.account_id,
+                session.lobby_session_id,
+                session.netcode_client_id,
+                time.elapsed(),
+            ) && outbox.push_rejoin(request)
+            {
+                info!("brawler lobby requested a match rejoin for a held seat");
+                rejoin_status.send::<SessionChannel>(crate::lobby::MatchRejoinStatus::Rejoining);
+            }
             sender.send::<SessionChannel>(LobbyJoinOutcome::Accepted {
                 logical_server_id: state.manifest.common.logical_server_id.get(),
                 player_id: crate::protocol::PlayerId(session.player_id.get()),
@@ -225,7 +241,7 @@ pub(super) fn process_profile_storage_results(
         }
     }
     for (client_key, outcome) in mutations {
-        for (remote_id, _, mut sender, connected, disconnected) in &mut clients {
+        for (remote_id, _, mut sender, _, connected, disconnected) in &mut clients {
             if connected && !disconnected && authenticated_netcode_id(remote_id) == Some(client_key)
             {
                 sender.send::<ProfileChannel>(outcome.clone());

@@ -73,6 +73,7 @@ pub(super) fn finish_product_match_smoke(
         && config.render_measurement.is_none()
         && !config.product_requeue_smoke
         && !config.product_network_change_smoke
+        && !config.product_rejoin_smoke
         && roots
             .iter()
             .any(|state| matches!(state.phase, MatchPhase::Active { .. }))
@@ -274,6 +275,179 @@ fn restore_traffic(
         info!(?previous, %rebound, "network-change smoke: traffic restored from a new source port");
     }
     Ok(())
+}
+
+/// Headless BRL-yyeg rejoin rehearsal phases. Wall-clock, like the routed bounds it exceeds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RejoinStage {
+    #[default]
+    AwaitingActive,
+    Settling {
+        until: core::time::Duration,
+    },
+    Outage {
+        deadline: core::time::Duration,
+    },
+    Rejoining {
+        deadline: core::time::Duration,
+    },
+    Resumed {
+        deadline: core::time::Duration,
+        tick_at_rejoin: u64,
+    },
+    Finished,
+}
+
+#[derive(bevy::prelude::Resource, Debug, Default)]
+pub(super) struct RejoinSmoke {
+    stage: RejoinStage,
+    /// The match session that is lost: its generation, accepted player and match.
+    original: Option<(
+        u64,
+        brawler::protocol::PlayerId,
+        brawler::matchplay::MatchId,
+    )>,
+}
+
+/// Rehearsed outage: longer than every routed session bound (10 s capability idle, 10 s Netcode
+/// keep-alive), so the match session is declared lost by every party.
+const REJOIN_OUTAGE_DEADLINE: core::time::Duration = core::time::Duration::from_secs(16);
+/// Bound for the fresh lobby, the automatic rejoin, and the rejoined match session.
+const REJOIN_DEADLINE: core::time::Duration = core::time::Duration::from_secs(30);
+
+/// Drop all traffic of a Practice match session until it is lost, return to a fresh lobby the
+/// way the product shell does, and require the automatic rejoin to reclaim the same player in
+/// the same running match with fresh authoritative ticks. Runs before the lifecycle observer so
+/// the expected loss is not classified as a terminal disconnect.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "one automation coordinator reads the schedule-owned session state it verifies"
+)]
+pub(super) fn drive_rejoin_smoke(
+    config: Res<crate::ClientAutomationConfig>,
+    time: Res<bevy::prelude::Time<bevy::prelude::Real>>,
+    mut smoke: bevy::prelude::ResMut<RejoinSmoke>,
+    mut lifecycle: bevy::prelude::ResMut<crate::RoutedClientLifecycle>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    ticks: Query<&brawler::combat::AuthoritativeTick>,
+    mut clients: Query<
+        (
+            &RoutedClientSession,
+            &ClientJoinStatus,
+            &mut crate::routed_udp::RoutedUdpIo,
+            bevy::prelude::Has<lightyear::prelude::client::Disconnected>,
+        ),
+        With<Client>,
+    >,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if !config.product_rejoin_smoke {
+        return;
+    }
+    let now = time.elapsed();
+    let newest_tick = ticks.iter().map(|tick| tick.0).max().unwrap_or(0);
+    let match_id = roots.iter().next().map(|state| state.match_id);
+    let match_active = roots
+        .iter()
+        .any(|state| matches!(state.phase, MatchPhase::Active { .. }));
+    let client = clients.iter_mut().next();
+    let mut fail = |smoke: &mut RejoinSmoke, message: &str| {
+        bevy::log::error!(message, "rejoin smoke failed");
+        exit.write(AppExit::error());
+        smoke.stage = RejoinStage::Finished;
+    };
+    match smoke.stage {
+        RejoinStage::AwaitingActive => {
+            let Some((session, status, _, _)) = client else {
+                return;
+            };
+            if let (RoutedClientSessionKind::Match, ClientJoinPhase::Active { player_id, .. }) =
+                (session.kind, &status.phase)
+                && lifecycle.phase == crate::RoutedClientPhase::Match
+                && match_active
+                && let Some(match_id) = match_id
+            {
+                smoke.original = Some((session.generation, *player_id, match_id));
+                smoke.stage = RejoinStage::Settling {
+                    until: now.saturating_add(NETWORK_CHANGE_SETTLE),
+                };
+            }
+        }
+        RejoinStage::Settling { until } if now >= until => {
+            let Some((session, _, mut io, _)) = client else {
+                return fail(&mut smoke, "the routed client entity disappeared");
+            };
+            io.set_simulated_outage(true);
+            info!(
+                generation = session.generation,
+                "rejoin smoke: dropping all routed traffic beyond the session bound"
+            );
+            smoke.stage = RejoinStage::Outage {
+                deadline: now.saturating_add(REJOIN_OUTAGE_DEADLINE),
+            };
+        }
+        RejoinStage::Outage { deadline } => {
+            let lost = client.is_some_and(|(session, _, _, disconnected)| {
+                session.kind == RoutedClientSessionKind::Match && disconnected
+            });
+            if lost && lifecycle.request_return_to_lobby() {
+                info!("rejoin smoke: the match session was lost; returning to a fresh lobby");
+                smoke.stage = RejoinStage::Rejoining {
+                    deadline: now.saturating_add(REJOIN_DEADLINE),
+                };
+            } else if now >= deadline {
+                fail(&mut smoke, "the match session outlived the outage");
+            }
+        }
+        RejoinStage::Rejoining { deadline } => {
+            let Some((original_generation, original_player, original_match)) = smoke.original
+            else {
+                return fail(&mut smoke, "no original match session was recorded");
+            };
+            let rejoined = client.is_some_and(|(session, status, _, _)| {
+                session.kind == RoutedClientSessionKind::Match
+                    && session.generation > original_generation
+                    && matches!(
+                        status.phase,
+                        ClientJoinPhase::Active { player_id, .. } if player_id == original_player
+                    )
+            }) && lifecycle.phase == crate::RoutedClientPhase::Match
+                && match_id == Some(original_match)
+                && match_active;
+            if rejoined {
+                info!(
+                    player_id = original_player.0,
+                    "rejoin smoke: the same player rejoined the same running match"
+                );
+                smoke.stage = RejoinStage::Resumed {
+                    deadline: now.saturating_add(REJOIN_DEADLINE),
+                    tick_at_rejoin: newest_tick,
+                };
+            } else if now >= deadline {
+                fail(&mut smoke, "the automatic rejoin did not complete");
+            }
+        }
+        RejoinStage::Resumed {
+            deadline,
+            tick_at_rejoin,
+        } => {
+            if newest_tick >= tick_at_rejoin.saturating_add(NETWORK_CHANGE_RESUMED_TICKS) {
+                info!(
+                    tick_at_rejoin,
+                    newest_tick,
+                    "rejoin smoke: the rejoined match session receives authoritative ticks"
+                );
+                exit.write(AppExit::Success);
+                smoke.stage = RejoinStage::Finished;
+            } else if now >= deadline {
+                fail(&mut smoke, "no authoritative progress after the rejoin");
+            }
+        }
+        RejoinStage::Settling { .. } | RejoinStage::Finished => {}
+    }
 }
 
 /// Finish the routed process smoke only after the match session has completed, its routes have

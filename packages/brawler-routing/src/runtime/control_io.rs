@@ -186,6 +186,14 @@ impl SupervisorRuntime {
             ControlBody::CancelActivation(fact) => self.forward_cancel_activation(worker_id, fact),
             ControlBody::Activated(fact) => self.forward_activated(worker_id, fact),
             ControlBody::StartFailed(fact) => self.forward_start_failed(worker_id, fact),
+            ControlBody::RejoinRequest(request) if !self.shutting_down => {
+                self.accept_rejoin_request(worker_id, request);
+                Ok(true)
+            }
+            ControlBody::ParticipantRebound(rebound) => {
+                self.complete_participant_rebind(worker_id, rebound);
+                Ok(true)
+            }
             _ => Ok(true),
         };
         match result {

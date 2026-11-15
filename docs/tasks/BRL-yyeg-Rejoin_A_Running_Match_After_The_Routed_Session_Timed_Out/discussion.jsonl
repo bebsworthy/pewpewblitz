@@ -6,3 +6,7 @@
 {"v":1,"eid":"83626de22bd8f8c9","at":"2026-11-14T23:08:34Z","n":1,"op":"question.answer","id":"q-73cycrv","by":"Boyd","text":"Owner: a bot takes control of the held fighter until the player rejoins or the hold expires (server-hosted Practice bot policy)."}
 {"v":1,"eid":"1f4fc3a15008c610","at":"2026-11-14T23:08:34Z","n":2,"op":"question.answer","id":"q-fggtj39","by":"Boyd","text":"Owner: same AccountId only; fresh 256-bit capability, route and PeerId per rejoin; old ones stay revoked; at most 1 live grant and 3 rejoins per seat per match; a relaunched app may rejoin."}
 {"v":1,"eid":"d27de7cbfba7cd2a","at":"2026-11-14T23:08:34Z","n":3,"op":"question.answer","id":"q-f2m2ptw","by":"Boyd","text":"Owner: rejoin automatically with a short 'Rejoining match' status; fall back to today's Dashboard message on failure."}
+{"v":1,"eid":"65484518c81fcda7","at":"2026-11-15T00:41:40Z","n":0,"op":"question.resolve","id":"q-7ay64v4","by":"Boyd","basis":"bdaa371bbf98029e"}
+{"v":1,"eid":"a69030281e0458c3","at":"2026-11-15T00:41:40Z","n":1,"op":"question.resolve","id":"q-73cycrv","by":"Boyd","basis":"83626de22bd8f8c9"}
+{"v":1,"eid":"7e7a10d4df618e23","at":"2026-11-15T00:41:40Z","n":2,"op":"question.resolve","id":"q-fggtj39","by":"Boyd","basis":"1f4fc3a15008c610"}
+{"v":1,"eid":"9d12fd7145b912c8","at":"2026-11-15T00:41:40Z","n":3,"op":"question.resolve","id":"q-f2m2ptw","by":"Boyd","basis":"d27de7cbfba7cd2a"}

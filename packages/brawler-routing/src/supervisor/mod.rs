@@ -669,6 +669,12 @@ impl SupervisorCore {
         self.teardown_route_with_reason(binding.route_id, RoutingErrorCategory::Revoked)
     }
 
+    /// Whether any non-revoked capability still routes to `route_id`.
+    #[must_use]
+    pub fn has_live_capability_for_route(&self, route_id: RouteId) -> bool {
+        self.capabilities.capability_for_route(route_id).is_some()
+    }
+
     #[must_use]
     pub fn capability_status(&self, capability: &Capability) -> Option<CapabilityStatus> {
         self.capabilities.status(capability)

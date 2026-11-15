@@ -146,6 +146,10 @@ pub(super) enum SessionObservation {
     /// The fresh lobby session after a completed or lost match failed while the flow still
     /// presents the match.
     LobbyReturnFailed,
+    /// The lobby announced an automatic rejoin while a lobby screen is shown (a relaunched app).
+    RejoinStarted,
+    /// A rejoined match session was accepted; the earlier loss is resolved.
+    MatchRejoined,
     PracticeRejected(brawler::lobby::PracticeStartRejection),
 }
 

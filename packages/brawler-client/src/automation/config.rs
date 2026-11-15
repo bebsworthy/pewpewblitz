@@ -34,6 +34,10 @@ pub struct ClientAutomationConfig {
     /// Headless BRL-0162 evidence: during the Practice match, drop all traffic for a few seconds,
     /// move to a new local source port, and exit only after the same match session resumes.
     pub product_network_change_smoke: bool,
+    /// Headless BRL-yyeg evidence: during the Practice match, drop all traffic for longer than
+    /// the 10 s routed session bound, return to a fresh lobby, and exit only after the automatic
+    /// rejoin reclaims the same fighter in the same running match.
+    pub product_rejoin_smoke: bool,
     pub product_match_players_per_team: u8,
     pub product_match_game_type: Option<brawler::lobby::GameTypeId>,
     pub headless_move: Option<(i8, i8)>,
@@ -62,6 +66,7 @@ impl Default for ClientAutomationConfig {
             product_practice_smoke: false,
             product_requeue_smoke: false,
             product_network_change_smoke: false,
+            product_rejoin_smoke: false,
             product_match_players_per_team: 2,
             product_match_game_type: None,
             headless_move: None,
@@ -253,6 +258,14 @@ impl ClientAutomationConfig {
         }
         if self.product_network_change_smoke && !self.product_practice_smoke {
             return Err("--product-network-change-smoke requires Practice automation".to_string());
+        }
+        if self.product_rejoin_smoke
+            && (!self.product_practice_smoke || self.product_network_change_smoke)
+        {
+            return Err(
+                "--product-rejoin-smoke requires Practice automation without the network-change smoke"
+                    .to_string(),
+            );
         }
         Ok(())
     }

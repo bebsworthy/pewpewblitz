@@ -91,3 +91,164 @@ open Ticket questions. No code, wire, IPC or manifest change has been made yet.
 - Q2 What the fighter does while its player is disconnected.
 - Q3 Security and rate limits of the rejoin grant, and whether a relaunched app may rejoin.
 - Q4 Whether rejoin is automatic or offered as a button.
+
+# Owner decisions and implementation design (2026-11-15)
+
+The four questions are answered; this section supersedes the "Proposed architecture" where they
+differ.
+
+- **Q1 seat hold (q-7ay64v4):** a routed participant's seat is held 60 s
+  (`SEAT_HOLD_DURATION`, code-owned session policy beside the 10 s routed bound) after its match
+  session ends while the match is `Active`. The held fighter counts for its team, so a lone
+  player's team does not forfeit while held. At expiry the fighter is removed and today's
+  departure/forfeit rules apply. A departure in Waiting/Loading/Countdown keeps today's behavior
+  (the fighter is removed and a countdown departure still fails the start).
+- **Q2 held fighter (q-73cycrv), changes the earlier "stands idle" design:** while held, the
+  existing server-hosted Practice bot policy (`src/bots/`, docs/10) controls the fighter, in PvP
+  and Practice alike. The hold inserts a fresh `PracticeBotController` and neutral
+  `ActionState<FighterInput>` and removes the stale human `NativeBuffer`; the bot therefore
+  writes intent through the same authoritative `ActionState` + `InputFreshness` path that
+  movement, combat and abilities already consume, with the same fair delayed perception (a fresh
+  controller has no observation history, so it acts only after the profile's reaction delay).
+  On rejoin the controller is removed, `ActionState` is reset to neutral and `ControlledBy` is
+  re-attached to the new link, so the next player input is the only intent. The fighter keeps
+  its identity, health, position, score credit and team throughout.
+- **Q3 grant security (q-fggtj39):** only a lobby session authenticated with the same
+  `AccountId` that held the seat at handoff may ask. The account stays in the lobby. The
+  supervisor mints a fresh 256-bit capability on a fresh `RouteId`/`PeerId` (30 s pending, 10 s
+  idle as today); earlier capabilities stay revoked. Supervisor limits per seat per match: at
+  most one live grant (no live capability on any of the seat's routes and no rebind in flight)
+  and at most 3 granted rejoins. The worker rebinds the seat to the new Netcode client ID, so a
+  relaunched app (new Netcode ID, same account) may rejoin.
+- **Q4 trigger (q-f2m2ptw):** automatic. The lobby tells the client `Rejoining` before the
+  welcome, the client shows a short "Rejoining match" status, and on any failure it falls back
+  to today's Dashboard message.
+
+## Wire, IPC and manifest
+- Application protocol 47 -> 48 through the one global handshake. New registered lobby->client
+  message `MatchRejoinStatus { Rejoining, Unavailable }` on `SessionChannel` (registry
+  fingerprint changes). The rejoin grant itself reuses `MatchRouteGrant`, so the existing client
+  grant/unlink/match-connect path carries it. `MatchJoinOutcome` is unchanged.
+- Control IPC 5 -> 6 (`CONTROL_VERSION_CURRENT`): `RejoinRequest` (lobby->supervisor),
+  `ParticipantRebind` (supervisor->match), `ParticipantRebound` (match->supervisor, with an
+  outcome code), `RejoinGranted`/`RejoinRejected` (supervisor->lobby) and `MatchEnded`
+  (supervisor->lobby, `ActivationBody` shape, sent once when an activated allocation's Result
+  arrives or its worker ends). The match manifest schema is unchanged; the worker keeps a
+  runtime rebind overlay on top of the immutable manifest.
+
+## Ownership
+- Match worker: `src/server/seat_hold.rs` owns the hold, bot takeover, expiry and the rebind
+  overlay; admission consults the overlay and admits a rebound held seat in `Active` only.
+- Lobby: `src/server/lobby/rejoin.rs` owns the bounded seat table (one seat per account,
+  released on `MatchEnded`, `ActivationDissolved` or a terminal rejection) and the request/grant
+  forwarding.
+- Supervisor: `packages/brawler-routing/src/runtime/rejoin.rs` owns validation, limits, minting
+  and `MatchEnded`.
+- Client: the session lifecycle owns the rejoin attempt; the flow keeps the Match screen with a
+  "Rejoining match" status and otherwise reuses the existing grant path.
+
+# Implementation (2026-11-15)
+
+- **Routing crate (Bevy-free).** `control.rs`: `ControlType` 21-26 (`RejoinRequest`,
+  `ParticipantRebind`, `ParticipantRebound`, `RejoinGranted`, `RejoinRejected`, `MatchEnded`)
+  with fixed body lengths (80/40/34/152/10/40), a closed `RejoinReason` (terminal vs transient),
+  shared grant encoding and redacted Debug. `CONTROL_VERSION_CURRENT` 5 -> 6;
+  `MAX_REJOINS_PER_SEAT = 3` in `limits.rs`. `runtime/rejoin.rs` owns per-seat state on each
+  `AllocationParticipant` (granted count, granted routes, one in-flight rebind), admission (owning
+  lobby, activated and not ended, known player, no rebind in flight, < 3 grants, no live capability
+  on any seat route), minting a fresh `Capability`/`RouteId`/`PeerId`, binding the route only after
+  the worker accepts, and `MatchEnded` (once, at Result or at worker reclaim; refuses in-flight
+  rejoins). `SupervisorCore::has_live_capability_for_route`. BRL-sqz0's capability registry is
+  untouched: a rejoin capability is an ordinary new record bound to the new lobby session.
+- **Match worker.** `src/server/seat_hold.rs`: routed fighters get `ControlledBy { Persistent }`
+  plus `RoutedSeat`. Before `MatchSet::Lifecycle` a lost owner link in `Active` inserts `SeatHold`
+  (60 s), a fresh `PracticeBotController`, neutral `ActionState` and removes the stale
+  `NativeBuffer`; in any other phase the fighter is removed as before. Expiry removes the fighter
+  (today's departure/forfeit). `ParticipantRebinds` is the runtime overlay on the immutable
+  manifest and also enforces the per-seat limit; `SeatRebindQueue` is fed and drained by the
+  worker control owner. The roster counts a held seat and treats a routed seat without a live
+  link as departed. Admission (`admit_rebound_client`, `MatchHelloValidationContext::rejoinable`)
+  admits mid-match only a rebound held seat under its fresh (Netcode client, peer) pair;
+  `ServerHelloContent::join` reclaims the existing fighter (`reclaim_held_seat`).
+- **Lobby.** `src/server/lobby/rejoin.rs`: bounded `MatchSeatTable` (one seat per `AccountId`,
+  `MAX_WORKERS * MAX_PARTICIPANTS`), recorded at `BeginMatchConnect`, released on `MatchEnded` or
+  a terminal refusal. At welcome the same account gets `MatchRejoinStatus::Rejoining` (before the
+  welcome) and a `RejoinRequest`; a `SeatConnected`/`Busy` refusal is retried every 500 ms for up
+  to 12 s (the earlier session is still inside its 10 s bound); an unanswered request is reported
+  unavailable after the window. Grants are forwarded as an ordinary `MatchRouteGrant`.
+  `ProfileAuthority::account_for_client`.
+- **Protocol.** `SUPPORTED_PROTOCOL_VERSION` 47 -> 48; new registered `MatchRejoinStatus`
+  message (registry fingerprint 18160765825630381060 -> 15212284317352318216; network protocol and
+  content fingerprint unchanged). Manifest schema unchanged.
+- **Client.** `RoutedClientLifecycle::rejoin` (`AwaitingGrant` -> `Connecting` -> cleared on the
+  accepted match join, `rejoined` one-shot); `process_match_rejoin_status` runs before the join
+  outcome. The flow keeps the Match screen with a "Rejoining match…" label
+  (`flow/screens/rejoin_status.rs`), moves a lobby screen (relaunched app) to Match
+  (`RejoinStarted`), clears the loss notice on `MatchRejoined`, and otherwise falls back to the
+  existing "The connection to the match was lost, and the match could not be resumed." Dashboard
+  message. A refused rejoin hello returns to a fresh lobby instead of exiting.
+- **Automation.** `--product-rejoin-smoke`, `BRAWLER_PRODUCT_REJOIN_SMOKE`, `scripts/e2e-rejoin.sh`,
+  `just rejoin-e2e`.
+- **Docs.** docs/14 "Rejoining a running match" (and the continuity/relaunch paragraphs that said
+  rejoin was out of scope); docs/08 protocol 48 / control 6.
+
+Design refinement beyond the original sketch (within the answers): the lobby retries a
+not-yet-released seat for up to 12 s. Without it, a client that notices the loss a few ms before
+the supervisor/worker release the old session (all sides use the same 10 s bound) would always
+fail; limits and security are unchanged.
+
+# Verification (2026-11-15)
+
+All builds used `CARGO_TARGET_DIR` under the session scratchpad; `target/debug/brawler-server`
+and the user's server on UDP 5000 were not touched. E2E runs used patched scratch copies of the
+scripts with an ephemeral `BRAWLER_ROUTED_BIND`, the scratch target binaries and a scratch
+`--data-directory` (never `data/server/`).
+
+- Focused: `cargo test -p brawler-routing` (control round-trip/lengths, `runtime::rejoin` seat
+  admission, `runtime::tests::rejoin_minting` fresh route/peer/capability up to the limit,
+  refusals, `MatchEnded` once); `cargo test -p brawler --no-default-features --features server
+  --lib -- lobby::rejoin seat_hold admission` (seat table, retries, bounds; seat hold, rebind
+  refusal and limit; rebound-seat admission) - pass.
+- `tests/network/match_rejoin.rs` (4 separate-App scenarios on the production match-worker graph):
+  a session lost beyond the timeout is bot-held (fresh bot intent, no forfeit) and a relaunched
+  identity reclaims the same fighter and moves it; an expired hold removes the fighter and
+  forfeits the lone team and refuses a later rebind; another identity (own route, the replaced
+  manifest identity, or the rebound route with another Netcode ID) cannot reclaim, and a
+  connected seat is not rebound; three rejoins succeed and the fourth is `LimitReached` - pass.
+- Routed-process smoke: scratch copy of `scripts/e2e-network-change.sh` with a >10 s outage
+  (`BRAWLER_PRODUCT_REJOIN_SMOKE=1`) - pass: seat held at loss, `Rejoining`, rebind accepted, grant
+  delivered, same player_id rejoined the same match, ticks resumed (about 0.5 s from loss to
+  rejoin).
+- Scratch `e2e 2` - pass; scratch `practice-e2e wipeout-1v1` - pass; scratch short-outage
+  `network-change-e2e wipeout-1v1` - pass.
+- `just check` - pass; `just lint` (VS Code ripgrep first on PATH) - pass; full `just test` after
+  the last edit - pass (routing 92, server lib 538, client lib 588 + 800, network 119 incl. 4 `match_rejoin`, balance-lab, performance; 0 failures).
+
+# Playtest note
+
+Needs a native check by the owner after rebuilding and restarting every role (protocol 48 /
+control 6; old clients are rejected at the handshake). Scenario: start a 1v1 PvP or Practice
+match, then cut the phone's network (airplane mode) or kill the app for 12-50 s and restore it /
+relaunch. Expected: "Rejoining match…" for about a second (up to 12 s after a quick relaunch),
+then the same fighter, under your control, in the same match; meanwhile the fighter was moved by
+a bot and your team did not forfeit. After 60 s away: the fighter is gone and today's forfeit /
+Dashboard message applies. Observe: banner readability, camera/HUD after the rejoin, and whether
+the bot's behaviour while held feels fair. Known limitations: a match that completes while you
+are away shows Dashboard, not Results (BRL-jxfy); nobody is told the seat is bot-controlled
+(BRL-dwqx).
+
+# Learn-from-errors
+
+- *Mistake:* released seats on `ActivationDissolved`; the first routed smoke showed the seat
+  released 60 ms after handoff. *Cause:* a Practice lobby session that closes at its own handoff
+  cancels the activation while the match keeps running (pre-existing, filed as BRL-5vc1).
+  *Prevention:* bind lifecycle bookkeeping to the authoritative end fact (`MatchEnded`), not to a
+  cancellation echo; run the routed smoke before trusting unit tests of cross-process lifecycle.
+- *Mistake:* the network scenarios assumed the 3 s harness timeout; the match-worker graph uses
+  the 10 s routed bound. *Prevention:* derive waits from the graph under test, not from a sibling
+  harness.
+- *Risk found by design review:* all parties release a lost session at about the same 10 s, so a
+  rejoin issued at the client's loss can race the release; the bounded lobby retry removes the
+  race without loosening any limit.
+- Reusable: when a wire change needs a fingerprint change, register a message rather than editing
+  a variant, and record before/after `routing-identity` from the old and new server binaries.

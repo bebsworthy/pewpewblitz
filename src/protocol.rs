@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 47;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 48;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -581,6 +581,8 @@ fn register_queue_protocol(app: &mut App) {
         .add_direction(NetworkDirection::ServerToClient);
     app.register_message::<crate::lobby::PracticeStartRequest>()
         .add_direction(NetworkDirection::ClientToServer);
+    app.register_message::<crate::lobby::MatchRejoinStatus>()
+        .add_direction(NetworkDirection::ServerToClient);
     app.add_channel::<QueueSnapshotChannel>(ChannelSettings {
         mode: ChannelMode::SequencedUnreliable,
         retry_unsent_messages: false,

@@ -58,7 +58,7 @@ use match_commands::{
 use observation::{enforce_client_timeout, log_replicated_roster};
 use routing::{
     advance_routed_transition, disconnect_rejected_client, observe_routed_transition,
-    process_match_route_grant,
+    process_match_rejoin_status, process_match_route_grant,
 };
 
 #[cfg(test)]
@@ -210,9 +210,14 @@ fn configure_automation_drivers(app: &mut App) {
         advance_headless_automation.in_set(brawler::gameplay::GameplaySet::Finalize),
     )
     .init_resource::<automation::NetworkChangeSmoke>()
+    .init_resource::<automation::RejoinSmoke>()
     .add_systems(
         Update,
-        automation::drive_network_change_smoke.in_set(ClientSessionSet::Observe),
+        (
+            automation::drive_network_change_smoke,
+            automation::drive_rejoin_smoke.before(observe_client_lifecycle),
+        )
+            .in_set(ClientSessionSet::Observe),
     )
     .add_systems(
         Update,
@@ -244,6 +249,7 @@ fn configure_network_session_systems(app: &mut App) {
             process_lobby_server_identity,
             ApplyDeferred,
             send_client_hello,
+            process_match_rejoin_status,
             process_join_outcome,
             process_match_route_grant,
             observe_completed_match,

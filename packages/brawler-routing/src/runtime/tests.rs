@@ -381,6 +381,7 @@ fn queued_rejection_is_reclaimed_so_request_ids_can_restart() {
             })),
             response_queued: false,
             result: None,
+            ended_notified: false,
         },
     );
     runtime.queue_allocation_responses();
@@ -400,6 +401,7 @@ fn queued_rejection_is_reclaimed_so_request_ids_can_restart() {
             response: None,
             response_queued: false,
             result: None,
+            ended_notified: false,
         },
     );
     assert_eq!(runtime.allocations.len(), 1);
@@ -496,6 +498,7 @@ fn shutdown_suppresses_pending_runtime_controls_but_still_expires_routes() {
             })),
             response_queued: false,
             result: None,
+            ended_notified: false,
         },
     );
 
@@ -762,4 +765,327 @@ fn lobby_capacity_is_scalar_idempotent_and_tracks_registered_match_workers() {
             free_match_slots: 2
         })
     ));
+}
+
+mod rejoin_minting {
+    use super::*;
+    use crate::{
+        AllocateParticipant, AllocationGrantedBody, Capability, CapabilityBinding,
+        MAX_REJOINS_PER_SEAT, MatchBuildSnapshot, MatchDisplayName, NetcodeClientId,
+        ParticipantReboundBody, PlayerId, RejoinReason, RejoinRequestBody,
+    };
+
+    struct Fixture {
+        runtime: SupervisorRuntime,
+        lobby: WorkerRegistration,
+        match_worker: WorkerRegistration,
+        original_capability: Capability,
+    }
+
+    const REQUEST: u64 = 7;
+    const ALLOCATION: u128 = 70;
+    const MATCH: u128 = 71;
+    const PLAYER: u64 = 5;
+
+    fn fixture() -> Fixture {
+        let mut runtime = SupervisorRuntime::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let lobby = registration(1, WorkerKind::Lobby);
+        let match_worker = registration(2, WorkerKind::Match);
+        runtime.register_worker(lobby).unwrap();
+        runtime.register_worker(match_worker).unwrap();
+        let original_route = route(30, match_worker.worker_id, false);
+        runtime.core_mut().register_route(original_route).unwrap();
+        let original_capability = Capability::from_bytes([3; 32]).unwrap();
+        let core = runtime.config.core;
+        runtime
+            .core_mut()
+            .bind_capability(
+                original_capability.clone(),
+                CapabilityBinding {
+                    logical_server_id: core.logical_server_id.unwrap(),
+                    supervisor_generation: core.supervisor_generation.unwrap(),
+                    worker_id: match_worker.worker_id,
+                    worker_generation: match_worker.generation,
+                    route_id: original_route.route_id,
+                    peer_id: original_route.peer_id,
+                    lobby_session_id: LobbySessionId::new(40).unwrap(),
+                    allocation_id: AllocationId::new(ALLOCATION).unwrap(),
+                    match_id: MatchId::new(MATCH).unwrap(),
+                    network_protocol: core.network_protocol.unwrap(),
+                    content_fingerprint: core.content_fingerprint.unwrap(),
+                },
+                MonotonicMillis(0),
+            )
+            .unwrap();
+        let source = AllocateParticipant {
+            lobby_session_id: LobbySessionId::new(40).unwrap(),
+            player_id: PlayerId::new(PLAYER).unwrap(),
+            netcode_client_id: NetcodeClientId::new(41).unwrap(),
+            team: 0,
+            display_name: MatchDisplayName::new("Pilot").unwrap(),
+            recipe_fingerprint: 1,
+            build_revision: 1,
+            build_snapshot: MatchBuildSnapshot::new(&[1]).unwrap(),
+        };
+        let request = AllocateRequestBody {
+            request_id: RequestId::new(REQUEST).unwrap(),
+            lobby_session_id: LobbySessionId::new(40).unwrap(),
+            mode: GameMode::Wipeout,
+            map_preset: 1,
+            map_revision: 1,
+            map_recipe_fingerprint: 1,
+            map_recipe: Vec::new(),
+            rules_profile: 1,
+            objective_target: 10,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
+            spawn_protection_ticks: 90,
+            completed_input_lock_ticks: 60,
+            wipeout_recent_hostile_damage_credit_ticks: 300,
+            heist_critical_health_percent: 25,
+            team_count: 2,
+            players_per_team: 1,
+            participants: vec![source],
+            bots: Vec::new(),
+        };
+        runtime.allocations.insert(
+            request.request_id,
+            AllocationRecord {
+                request: request.clone(),
+                lobby_worker_id: lobby.worker_id,
+                allocation_id: AllocationId::new(ALLOCATION),
+                match_id: MatchId::new(MATCH),
+                match_worker_id: Some(match_worker.worker_id),
+                participants: vec![AllocationParticipant {
+                    source,
+                    route_id: original_route.route_id,
+                    peer_id: original_route.peer_id,
+                    capability: original_capability.clone(),
+                    rejoins: rejoin::SeatRejoins::default(),
+                }],
+                response: Some(ControlBody::AllocationGranted(AllocationGrantedBody {
+                    request_id: request.request_id,
+                    allocation_id: AllocationId::new(ALLOCATION).unwrap(),
+                    match_id: MatchId::new(MATCH).unwrap(),
+                    worker_id: match_worker.worker_id,
+                    grants: Vec::new(),
+                })),
+                response_queued: true,
+                result: None,
+                ended_notified: false,
+            },
+        );
+        Fixture {
+            runtime,
+            lobby,
+            match_worker,
+            original_capability,
+        }
+    }
+
+    fn rejoin_request(rejoin_id: u64) -> RejoinRequestBody {
+        RejoinRequestBody {
+            rejoin_id: RequestId::new(rejoin_id).unwrap(),
+            request_id: RequestId::new(REQUEST).unwrap(),
+            allocation_id: AllocationId::new(ALLOCATION).unwrap(),
+            match_id: MatchId::new(MATCH).unwrap(),
+            player_id: PlayerId::new(PLAYER).unwrap(),
+            lobby_session_id: LobbySessionId::new(50 + u128::from(rejoin_id)).unwrap(),
+            netcode_client_id: NetcodeClientId::new(60 + rejoin_id).unwrap(),
+        }
+    }
+
+    fn drained(runtime: &mut SupervisorRuntime) -> Vec<(WorkerId, ControlBody)> {
+        runtime
+            .core_mut()
+            .drain_controls(16)
+            .into_iter()
+            .map(|(worker, record)| (worker, ControlFrame::decode(&record).unwrap().body))
+            .collect()
+    }
+
+    /// Run one request through the match worker's acceptance and return the lobby's answer.
+    fn rejoin(fixture: &mut Fixture, rejoin_id: u64) -> ControlBody {
+        let lobby = fixture.lobby.worker_id;
+        fixture
+            .runtime
+            .accept_rejoin_request(lobby, rejoin_request(rejoin_id));
+        let mut controls = drained(&mut fixture.runtime);
+        assert_eq!(controls.len(), 1, "one control answers each request");
+        let (worker, body) = controls.remove(0);
+        if worker == lobby {
+            return body;
+        }
+        assert_eq!(worker, fixture.match_worker.worker_id);
+        let ControlBody::ParticipantRebind(rebind) = body else {
+            panic!("the match worker is asked to rebind the seat, got {body:?}");
+        };
+        assert_eq!(rebind.player_id.get(), PLAYER);
+        assert_eq!(rebind.netcode_client_id.get(), 60 + rejoin_id);
+        fixture.runtime.complete_participant_rebind(
+            fixture.match_worker.worker_id,
+            ParticipantReboundBody {
+                rejoin_id: rebind.rejoin_id,
+                player_id: rebind.player_id,
+                peer_id: rebind.peer_id,
+                refusal: None,
+            },
+        );
+        let mut controls = drained(&mut fixture.runtime);
+        assert_eq!(controls.len(), 1);
+        let (worker, body) = controls.remove(0);
+        assert_eq!(worker, lobby);
+        body
+    }
+
+    #[test]
+    fn a_released_seat_gets_a_fresh_route_peer_and_capability_up_to_the_limit() {
+        let mut fixture = fixture();
+        // The original session is still live: the seat is not released yet.
+        assert!(matches!(
+            rejoin(&mut fixture, 1),
+            ControlBody::RejoinRejected(rejected) if rejected.reason == RejoinReason::SeatConnected
+        ));
+        let original = fixture.original_capability.clone();
+        assert!(fixture.runtime.core_mut().revoke_capability(&original));
+
+        let mut seen_routes = vec![RouteId::new(30).unwrap()];
+        let mut seen_capabilities = vec![original.clone()];
+        for rejoin_id in 2..2 + u64::from(MAX_REJOINS_PER_SEAT) {
+            let ControlBody::RejoinGranted(granted) = rejoin(&mut fixture, rejoin_id) else {
+                panic!("a released seat is granted");
+            };
+            assert_eq!(granted.player_id.get(), PLAYER);
+            assert_eq!(granted.request_id.get(), REQUEST);
+            assert_eq!(
+                granted.grant.lobby_session_id.get(),
+                50 + u128::from(rejoin_id)
+            );
+            assert!(!seen_routes.contains(&granted.grant.route_id));
+            assert!(!seen_capabilities.contains(&granted.grant.capability));
+            assert_eq!(
+                fixture
+                    .runtime
+                    .core()
+                    .capability_status(&granted.grant.capability),
+                Some(crate::CapabilityStatus::Pending)
+            );
+            // Earlier capabilities stay revoked.
+            for earlier in &seen_capabilities {
+                assert_eq!(
+                    fixture.runtime.core().capability_status(earlier),
+                    Some(crate::CapabilityStatus::Revoked)
+                );
+            }
+            // A live grant blocks a second one for the same seat (the limit wins once reached).
+            let expected = if rejoin_id < 1 + u64::from(MAX_REJOINS_PER_SEAT) {
+                RejoinReason::SeatConnected
+            } else {
+                RejoinReason::LimitReached
+            };
+            assert!(matches!(
+                rejoin(&mut fixture, 100 + rejoin_id),
+                ControlBody::RejoinRejected(rejected) if rejected.reason == expected
+            ));
+            assert!(
+                fixture
+                    .runtime
+                    .core_mut()
+                    .revoke_capability(&granted.grant.capability)
+            );
+            seen_routes.push(granted.grant.route_id);
+            seen_capabilities.push(granted.grant.capability);
+        }
+        assert!(matches!(
+            rejoin(&mut fixture, 99),
+            ControlBody::RejoinRejected(rejected) if rejected.reason == RejoinReason::LimitReached
+        ));
+    }
+
+    #[test]
+    fn requests_for_another_lobby_player_or_ended_match_are_refused() {
+        let mut fixture = fixture();
+        let original = fixture.original_capability.clone();
+        fixture.runtime.core_mut().revoke_capability(&original);
+        let lobby = fixture.lobby.worker_id;
+
+        let mut wrong_player = rejoin_request(1);
+        wrong_player.player_id = PlayerId::new(PLAYER + 1).unwrap();
+        fixture.runtime.accept_rejoin_request(lobby, wrong_player);
+        let mut wrong_allocation = rejoin_request(2);
+        wrong_allocation.allocation_id = AllocationId::new(ALLOCATION + 1).unwrap();
+        fixture
+            .runtime
+            .accept_rejoin_request(lobby, wrong_allocation);
+        // Only the lobby that owns the allocation may ask.
+        fixture
+            .runtime
+            .accept_rejoin_request(fixture.match_worker.worker_id, rejoin_request(3));
+        let answers = drained(&mut fixture.runtime);
+        assert_eq!(answers.len(), 3);
+        for (worker, body) in answers {
+            assert!(matches!(
+                body,
+                ControlBody::RejoinRejected(rejected) if rejected.reason == RejoinReason::UnknownSeat
+            ));
+            let expected = if worker == lobby {
+                lobby
+            } else {
+                fixture.match_worker.worker_id
+            };
+            assert_eq!(worker, expected);
+        }
+
+        // A refused rebind is forwarded to the lobby and does not count as a rejoin.
+        fixture
+            .runtime
+            .accept_rejoin_request(lobby, rejoin_request(4));
+        let ControlBody::ParticipantRebind(rebind) = drained(&mut fixture.runtime).remove(0).1
+        else {
+            panic!("rebind requested");
+        };
+        fixture.runtime.complete_participant_rebind(
+            fixture.match_worker.worker_id,
+            ParticipantReboundBody {
+                rejoin_id: rebind.rejoin_id,
+                player_id: rebind.player_id,
+                peer_id: rebind.peer_id,
+                refusal: Some(RejoinReason::SeatExpired),
+            },
+        );
+        assert!(matches!(
+            drained(&mut fixture.runtime).remove(0).1,
+            ControlBody::RejoinRejected(rejected) if rejected.reason == RejoinReason::SeatExpired
+        ));
+        assert_eq!(
+            fixture.runtime.allocations[&RequestId::new(REQUEST).unwrap()].participants[0]
+                .rejoins
+                .granted(),
+            0
+        );
+
+        // Match end refuses an in-flight rejoin and is announced to the lobby exactly once.
+        fixture
+            .runtime
+            .accept_rejoin_request(lobby, rejoin_request(5));
+        let _rebind = drained(&mut fixture.runtime);
+        fixture
+            .runtime
+            .notify_match_ended(RequestId::new(REQUEST).unwrap());
+        fixture
+            .runtime
+            .notify_match_ended(RequestId::new(REQUEST).unwrap());
+        let ended = drained(&mut fixture.runtime);
+        assert_eq!(ended.len(), 2);
+        assert!(matches!(
+            ended[0].1,
+            ControlBody::RejoinRejected(rejected) if rejected.reason == RejoinReason::MatchEnded
+        ));
+        assert!(matches!(
+            ended[1].1,
+            ControlBody::MatchEnded(body)
+                if body.allocation_id.get() == ALLOCATION && body.match_id.get() == MATCH
+        ));
+    }
 }

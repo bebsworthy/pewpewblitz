@@ -123,9 +123,10 @@ Routed sessions created by a routed transition use a 10 s Netcode connect-token 
 the supervisor's idle revocation of an active capability (`CAPABILITY_IDLE_MILLIS`). Netcode applies
 the token timeout on both ends, so a gap shorter than 10 s keeps the same session, fighter, and
 route, and a longer gap (including app suspension) is declared lost by every party at about the
-same time. A lost match session returns the client to a fresh lobby and Dashboard with an
-explanation; a match session is not resumed after that bound. Post-timeout match rejoin and a
-non-UDP fallback transport are not part of this contract.
+same time. A lost match session returns the client to a fresh lobby. If its match still runs, the
+client rejoins it automatically (see [Rejoining a running match](#rejoining-a-running-match));
+otherwise it reaches Dashboard with an explanation. A non-UDP fallback transport is not part of
+this contract.
 
 Security note (BRL-sqz0). Allowing a return does not widen what a capability holder can do. The
 256-bit capability, not the source address, authorizes a route; any holder could already move a
@@ -156,10 +157,41 @@ account. Replacement removes the holder's profile session and records it as a lo
 so its queue ticket, reservation, or Practice formation is cancelled exactly as for a disconnect.
 The holder's Netcode connection is marked disconnected and left to time out, because Lightyear 0.29
 has no public server-side kick. A player in a match holds no lobby session (the lobby connection
-closes at handoff), so a relaunch mid-match reaches Dashboard at once. The old fighter stays in its
-match until that match session times out, and the relaunched client is not re-admitted to it
-(post-timeout rejoin is not part of this contract). No wire, manifest, or control-IPC contract
-carries this policy.
+closes at handoff), so a relaunch mid-match is admitted to the lobby at once and then rejoins its
+held seat once the old match session has been released (below). No wire, manifest, or control-IPC
+contract carries the takeover policy itself.
+
+### Rejoining a running match
+
+BRL-yyeg. A routed participant's fighter has a server-owned (`Lifetime::Persistent`) lifetime.
+When its match session ends while the match is `Active`, the match worker *holds* the seat for
+60 s (`SEAT_HOLD_DURATION_SECONDS`, code-owned session policy): the fighter keeps its identity,
+health, position, score credit and team, counts for its team (a lone player's team does not
+forfeit), and the server-hosted Practice bot policy drives it through the ordinary authoritative
+`ActionState`/`InputFreshness` path with its usual delayed perception. At expiry the fighter is
+removed and today's departure/forfeit rules apply; a session lost in Waiting, loading or countdown
+still removes the fighter at once.
+
+The account stays in the lobby. At handoff the lobby records, per `AccountId`, the seat's original
+grant (request, allocation, match, manifest player) in a bounded table (one seat per account,
+`MAX_WORKERS * MAX_PARTICIPANTS` seats), released on `MatchEnded` (sent once when the worker's
+Result arrives or the worker ends for any reason) or a terminal refusal. When the same `AccountId` completes a later lobby admission, the lobby sends
+`MatchRejoinStatus::Rejoining` before the welcome and a `RejoinRequest` to the supervisor. The
+supervisor admits it only for an activated, not-yet-ended allocation of that lobby, at most one
+live grant per seat (no live capability on any of the seat's routes, no rebind in flight) and at
+most `MAX_REJOINS_PER_SEAT` (3) granted rejoins per seat per match. It mints a fresh 256-bit
+capability on a fresh route and peer (30 s pending, 10 s idle as for any match route) and sends
+`ParticipantRebind` to the worker, which accepts it only for a held seat of an Active match and
+also enforces the per-seat limit. The worker answers `ParticipantRebound`; only then does the
+supervisor register the route, bind the capability and send `RejoinGranted`, which the lobby
+forwards as an ordinary `MatchRouteGrant`. Earlier capabilities are never revived. The immutable
+manifest is unchanged: the worker keeps a runtime rebind overlay, so the seat is admitted only
+under its fresh (Netcode client, routed peer) pair, which lets a relaunched app with a new Netcode
+ID rejoin. A rejoin that finds the seat not yet released (`SeatConnected`, the earlier session
+still inside its 10 s bound) is retried by the lobby every 500 ms for up to 12 s; every other
+failure answers `MatchRejoinStatus::Unavailable` and the client shows today's Dashboard message.
+A seat whose match completes while its player is away is released; that player sees Dashboard,
+not Results.
 
 ## Routed packet transport
 

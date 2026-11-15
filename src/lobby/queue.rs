@@ -110,6 +110,18 @@ pub enum MatchmakingServerPhase {
     },
 }
 
+/// Lobby-to-client status of an automatic rejoin to a still-running match (BRL-yyeg).
+///
+/// `Rejoining` is sent on `SessionChannel` before the lobby welcome of an account whose match
+/// seat is held, so the client keeps its match presentation instead of returning to Dashboard.
+/// The fresh capability then arrives as an ordinary `MatchRouteGrant`; `Unavailable` means no
+/// grant will follow and the client falls back to the Dashboard message.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchRejoinStatus {
+    Rejoining,
+    Unavailable,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PracticeStartRequest {
     pub map_preset_id: Option<crate::map::MapPresetId>,

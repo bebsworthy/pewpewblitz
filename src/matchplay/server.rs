@@ -488,13 +488,20 @@ pub(crate) fn initialize_match_root(
 
 /// A participant belongs to the connected roster only while its owning session is accepted,
 /// its controlling link is present and not disconnected, and its match membership is current.
-/// Fighters without a controlling link (server-local test entities) count as connected.
+/// Fighters without a controlling link (server-hosted bots and server-local test entities) count
+/// as connected. A routed seat counts while its link is live or while its seat is held
+/// (BRL-yyeg); a routed seat with neither has departed.
 fn participant_is_connected(
     controlled: Option<&ControlledBy>,
+    routed_seat: bool,
+    held: bool,
     links: &Query<(Entity, Has<Disconnected>), With<LinkOf>>,
 ) -> bool {
-    let Some(controlled) = controlled else {
+    if held {
         return true;
+    }
+    let Some(controlled) = controlled else {
+        return !routed_seat;
     };
     links
         .get(controlled.owner)
@@ -528,6 +535,8 @@ fn refresh_match_roster(
             Option<&crate::builds::ResolvedPassives>,
             Option<&SpawnState>,
             Option<&ControlledBy>,
+            Has<crate::server::RoutedSeat>,
+            Has<crate::server::SeatHold>,
         ),
         With<Fighter>,
     >,
@@ -552,11 +561,13 @@ fn refresh_match_roster(
         passives,
         spawn,
         controlled,
+        routed_seat,
+        held,
     ) in &participants
     {
         if participant.match_id != state.match_id
             || team.0 > 1
-            || !participant_is_connected(controlled, &links)
+            || !participant_is_connected(controlled, routed_seat, held, &links)
         {
             continue;
         }

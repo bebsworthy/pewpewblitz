@@ -105,6 +105,8 @@ mod lobby_takeover;
 mod local_attack;
 #[path = "network/map.rs"]
 mod map;
+#[path = "network/match_rejoin.rs"]
+mod match_rejoin;
 #[path = "network/match.rs"]
 mod matchplay;
 #[path = "network/movement.rs"]

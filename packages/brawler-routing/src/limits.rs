@@ -4,7 +4,7 @@ pub const ROUTE_VERSION_V1: u8 = 1;
 pub const PACKET_VERSION_V1: u8 = 1;
 pub const CONTROL_VERSION_V1: u8 = 1;
 pub const CONTROL_VERSION_V2: u8 = 2;
-pub const CONTROL_VERSION_CURRENT: u8 = 5;
+pub const CONTROL_VERSION_CURRENT: u8 = 6;
 
 pub const PUBLIC_MAGIC: [u8; 4] = *b"BRTE";
 pub const PACKET_MAGIC: [u8; 4] = *b"BRPK";
@@ -57,6 +57,10 @@ pub const CAPABILITY_REBINDS_PER_WINDOW: usize = 2;
 pub const CAPABILITY_RETURN_GRACE_MILLIS: u64 = 2_000;
 // The retired-source list is bounded by the rebind limit only while the grace fits the window.
 const _: () = assert!(CAPABILITY_RETURN_GRACE_MILLIS <= CAPABILITY_REBIND_WINDOW_MILLIS);
+
+/// Granted rejoins allowed per held match seat per match (BRL-yyeg owner decision Q3). A seat
+/// also has at most one live grant at a time.
+pub const MAX_REJOINS_PER_SEAT: u8 = 3;
 
 pub const PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW: usize = 8;
 pub const PUBLIC_PREAUTH_BYTES_PER_WINDOW: usize = 9_216;

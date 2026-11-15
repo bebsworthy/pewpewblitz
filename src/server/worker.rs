@@ -77,6 +77,7 @@ pub struct LobbyControlOutbox {
     netcode_authenticated: VecDeque<LobbyNetcodeAuthenticatedBody>,
     requests: VecDeque<AllocateRequestBody>,
     activation_cancels: VecDeque<ActivationBody>,
+    rejoins: VecDeque<brawler_routing::RejoinRequestBody>,
 }
 
 #[derive(Resource, Default)]
@@ -102,6 +103,15 @@ impl MatchControlOutbox {
 }
 
 impl LobbyControlOutbox {
+    /// Queue one rejoin request; bounded like the other lobby facts.
+    pub(crate) fn push_rejoin(&mut self, request: brawler_routing::RejoinRequestBody) -> bool {
+        if self.rejoins.len() >= LOBBY_CONTROL_OUTBOX_FRAMES * 8 {
+            return false;
+        }
+        self.rejoins.push_back(request);
+        true
+    }
+
     pub(crate) fn push_activation_cancel(&mut self, fact: ActivationBody) -> bool {
         if self.activation_cancels.len() >= LOBBY_CONTROL_OUTBOX_FRAMES {
             return false;
@@ -690,6 +700,7 @@ fn validate_and_dispatch_control_records(
     worker_entity: Entity,
     state: &mut WorkerControlState,
     lobby_inbox: &mut Option<ResMut<LobbyControlInbox>>,
+    rebinds: &mut Option<ResMut<super::seat_hold::SeatRebindQueue>>,
     commands: &mut Commands,
 ) -> Result<Option<StopBody>, u32> {
     let mut stop = None;
@@ -732,10 +743,23 @@ fn validate_and_dispatch_control_records(
                     return Err(FAILURE_DETAIL_MALFORMED);
                 }
             }
-            ControlBody::ActivationDissolved(_) | ControlBody::Activated(_) => {
+            ControlBody::ActivationDissolved(_)
+            | ControlBody::Activated(_)
+            | ControlBody::RejoinGranted(_)
+            | ControlBody::RejoinRejected(_)
+            | ControlBody::MatchEnded(_) => {
                 if let Some(inbox) = lobby_inbox.as_mut()
                     && !inbox.push(frame.clone())
                 {
+                    return Err(FAILURE_DETAIL_MALFORMED);
+                }
+            }
+            ControlBody::ParticipantRebind(body) => {
+                if state.role == WorkerEntrypointRole::Match
+                    && let Some(queue) = rebinds.as_mut()
+                    && !queue.push_request(*body)
+                {
+                    error!(worker = ?state.worker_id, "brawler routed worker seat rebind queue overflow");
                     return Err(FAILURE_DETAIL_MALFORMED);
                 }
             }
@@ -769,6 +793,27 @@ fn admit_control_stop(
 struct OutboxDrain {
     blocked: bool,
     failed: bool,
+}
+
+fn drain_seat_rebind_replies(
+    worker: &mut RoutedWorker,
+    state: &mut WorkerControlState,
+    queue: &mut super::seat_hold::SeatRebindQueue,
+    drain: &mut OutboxDrain,
+) {
+    while !drain.blocked {
+        let Some(reply) = queue.front_reply() else {
+            break;
+        };
+        match enqueue_control_body(worker, state, ControlBody::ParticipantRebound(reply)) {
+            Ok(()) => queue.pop_reply(),
+            Err(error) if control_outbox_backpressure(&error) => drain.blocked = true,
+            Err(_) => {
+                drain.failed = true;
+                break;
+            }
+        }
+    }
 }
 
 fn drain_match_control_outbox(
@@ -853,6 +898,21 @@ fn drain_lobby_control_outbox(
             }
         }
     }
+    while !drain.blocked {
+        let Some(request) = outbox.rejoins.front().copied() else {
+            break;
+        };
+        match enqueue_control_body(worker, state, ControlBody::RejoinRequest(request)) {
+            Ok(()) => {
+                outbox.rejoins.pop_front();
+            }
+            Err(error) if control_outbox_backpressure(&error) => drain.blocked = true,
+            Err(_) => {
+                drain.failed = true;
+                break;
+            }
+        }
+    }
     if !drain.blocked {
         while let Some(body) = outbox.front().cloned() {
             match enqueue_control_body(worker, state, ControlBody::AllocateRequest(body)) {
@@ -902,6 +962,7 @@ fn worker_control_receive(
     mut lobby_inbox: Option<ResMut<LobbyControlInbox>>,
     mut lobby_outbox: Option<ResMut<LobbyControlOutbox>>,
     mut match_outbox: Option<ResMut<MatchControlOutbox>>,
+    mut rebinds: Option<ResMut<super::seat_hold::SeatRebindQueue>>,
     mut workers: Query<(Entity, &mut RoutedWorker), With<Linked>>,
 ) {
     let Ok((worker_entity, mut worker)) = workers.single_mut() else {
@@ -927,6 +988,7 @@ fn worker_control_receive(
         worker_entity,
         &mut state,
         &mut lobby_inbox,
+        &mut rebinds,
         &mut commands,
     ) {
         Ok(stop) => stop,
@@ -967,6 +1029,9 @@ fn worker_control_receive(
         let mut drain = OutboxDrain::default();
         if let Some(outbox) = match_outbox.as_mut() {
             drain_match_control_outbox(&mut worker, &mut state, outbox, &mut drain);
+            if let Some(queue) = rebinds.as_mut() {
+                drain_seat_rebind_replies(&mut worker, &mut state, queue, &mut drain);
+            }
         }
         if let Some(outbox) = lobby_outbox.as_mut() {
             drain_lobby_control_outbox(&mut worker, &mut state, outbox, &mut drain);

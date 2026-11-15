@@ -9,6 +9,7 @@ mod account_takeover;
 mod catalog;
 mod profile_transactions;
 mod queue;
+mod rejoin;
 
 pub use queue::{
     QueueCommandResult, QueueState, QueueTelemetry, QueueTicket, QueueTicketIdSource,
@@ -1252,6 +1253,7 @@ impl Plugin for LobbyPlugin {
             .init_resource::<QueueSnapshotPublication>()
             .init_resource::<QueueEvidenceSettings>()
             .init_resource::<ProductFormationState>()
+            .init_resource::<rejoin::MatchSeatTable>()
             .add_systems(Startup, initialize_lobby_state)
             .configure_sets(
                 Update,
@@ -1293,6 +1295,8 @@ impl Plugin for LobbyPlugin {
                         apply_practice_start_requests,
                         apply_matchmaking_client_messages,
                         lobby_apply_control_frames,
+                        rejoin::deliver_rejoin_outcomes,
+                        rejoin::retry_pending_rejoins,
                         flush_deferred_product_cancel,
                         apply_product_dissolution,
                         apply_product_activation,
@@ -1759,9 +1763,18 @@ fn authenticated_netcode_id(remote_id: &RemoteId) -> Option<u64> {
     }
 }
 
-fn lobby_apply_control_frames(mut state: ResMut<LobbyState>, mut inbox: ResMut<LobbyControlInbox>) {
+#[allow(clippy::needless_pass_by_value)]
+fn lobby_apply_control_frames(
+    time: Res<Time<Real>>,
+    mut state: ResMut<LobbyState>,
+    mut seats: ResMut<rejoin::MatchSeatTable>,
+    mut inbox: ResMut<LobbyControlInbox>,
+) {
     for frame in inbox.drain() {
-        let _ = state.apply_control_frame(frame);
+        seats.apply_control(&frame.body, time.elapsed());
+        if !rejoin::is_rejoin_control(&frame.body) {
+            let _ = state.apply_control_frame(frame);
+        }
     }
 }
 
@@ -2293,6 +2306,8 @@ fn lobby_deliver_product_grants(
     mut state: ResMut<LobbyState>,
     mut queue: ResMut<QueueState>,
     mut formation: ResMut<ProductFormationState>,
+    authority: Res<crate::profiles::ProfileAuthority>,
+    mut seats: ResMut<rejoin::MatchSeatTable>,
     mut clients: Query<(
         &LobbyClient,
         &mut MessageSender<crate::lobby::MatchmakingServerMessage>,
@@ -2375,6 +2390,14 @@ fn lobby_deliver_product_grants(
         });
         compatibility_sender.send::<SessionChannel>(grant);
         formation.begin_sent.insert(client.lobby_session_id);
+        // Remember the seat by account so a later lobby session of the same account can rejoin
+        // it while the match still runs (BRL-yyeg).
+        if let (Some(account), Some(session)) = (
+            authority.account_for_client(client.client_id.get()),
+            state.session_for_client(client.client_id.get()),
+        ) {
+            seats.record(account, session.player_id, grant);
+        }
     }
 }
 

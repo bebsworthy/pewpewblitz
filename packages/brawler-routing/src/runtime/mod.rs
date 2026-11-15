@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod capacity;
+mod rejoin;
 mod reporting;
 mod routing_io;
 mod worker_lifecycle;
@@ -223,6 +224,7 @@ struct AllocationParticipant {
     route_id: RouteId,
     peer_id: PeerId,
     capability: Capability,
+    rejoins: rejoin::SeatRejoins,
 }
 
 struct AllocationRecord {
@@ -235,6 +237,8 @@ struct AllocationRecord {
     response: Option<ControlBody>,
     response_queued: bool,
     result: Option<crate::ResultBody>,
+    /// `MatchEnded` has been queued to the lobby for this activated allocation.
+    ended_notified: bool,
 }
 
 struct PendingPublicDatagram {

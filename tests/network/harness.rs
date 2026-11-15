@@ -366,6 +366,91 @@ impl Harness {
         harness
     }
 
+    /// Production routed match worker with one immutable manifest (BRL-yyeg). Each participant
+    /// connects through a Crossbeam link carrying its manifest routed peer, exactly as the
+    /// supervisor would bind it; nobody is connected yet.
+    pub(super) fn new_routed_match(
+        participants: &[brawler::testing::TestRoutedParticipant],
+    ) -> Self {
+        brawler::testing::install_network_test_logger();
+        let server_config = ServerNetworkConfig {
+            transport: NetworkTransport::Crossbeam,
+            handshake_timeout: std::time::Duration::from_millis(250),
+            ..Default::default()
+        };
+        let manifest = brawler::testing::routed_wipeout_manifest(&server_config, participants);
+        let mut server = brawler::server::build_match_worker_app(server_config.clone(), manifest)
+            .expect("routed match worker builds");
+        server.finish();
+        server.cleanup();
+        let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);
+        Self {
+            server,
+            server_entity,
+            server_links: Vec::new(),
+            clients: Vec::new(),
+            client_entities: Vec::new(),
+            client_cues: Vec::new(),
+            client_heist_cues: Vec::new(),
+            suspended_clients: Vec::new(),
+            now: Instant::now(),
+        }
+    }
+
+    /// Connect one client to a routed match worker under the given Netcode client and routed
+    /// peer identity. Returns its client index.
+    pub(super) fn add_routed_match_client(
+        &mut self,
+        netcode_client_id: u64,
+        peer_id: u128,
+    ) -> usize {
+        self.add_client(netcode_client_id);
+        let index = self.clients.len() - 1;
+        let server_link = self.server_links[index];
+        let server_entity = self.server_entity;
+        self.server
+            .world_mut()
+            .entity_mut(server_link)
+            .insert(brawler::server::RoutedPeer {
+                worker: server_entity,
+                route_id: brawler_routing::RouteId::new(peer_id + 10_000).unwrap(),
+                peer_id: brawler_routing::PeerId::new(peer_id).unwrap(),
+            });
+        index
+    }
+
+    /// Send the loading-gate check-in a routed product client sends after joining.
+    pub(super) fn check_in_routed_match(&mut self, index: usize) {
+        let client = self.client_entities[index];
+        self.clients[index]
+            .world_mut()
+            .get_mut::<MessageSender<brawler::protocol::MatchLoadingClientMessage>>(client)
+            .expect("client sends match loading messages")
+            .send::<SessionChannel>(brawler::protocol::MatchLoadingClientMessage {
+                request_id: 3,
+                allocation_id: 5,
+                match_id: 4,
+                action: brawler::protocol::MatchLoadingClientAction::Ready,
+            });
+    }
+
+    /// The authoritative fighter entity of one manifest player, if it exists.
+    pub(super) fn server_fighter(&mut self, player_id: u64) -> Option<Entity> {
+        let world = self.server.world_mut();
+        let mut query = world.query_filtered::<(Entity, &PlayerId), With<Fighter>>();
+        query
+            .iter(world)
+            .find(|(_, player)| player.0 == player_id)
+            .map(|(entity, _)| entity)
+    }
+
+    /// The authoritative match phase.
+    pub(super) fn server_match_phase(&mut self) -> MatchPhase {
+        let world = self.server.world_mut();
+        let mut query = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
+        query.single(world).expect("one match root").phase
+    }
+
     /// Connect one more routed lobby client to a product-lobby harness. `account_id` overrides
     /// the account the client presents (by default its Netcode client ID).
     pub(super) fn add_product_lobby_client(&mut self, client_id: u64, account_id: Option<u128>) {

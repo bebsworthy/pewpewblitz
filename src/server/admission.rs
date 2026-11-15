@@ -21,7 +21,7 @@ use bevy::{app::ScheduleRunnerPlugin, prelude::*, state::app::StatesPlugin};
 use brawler_routing::{LobbyManifest, MatchManifestParticipant, MatchManifestV1};
 use lightyear::prelude::server::ServerPlugins;
 use lightyear::prelude::{PeerId, RemoteId};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Server topology selected for one application instance.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,13 +146,36 @@ pub fn admit_manifest_client<'a>(
     peer_id: Option<brawler_routing::PeerId>,
     admitted_client_ids: &BTreeSet<u64>,
 ) -> Result<&'a MatchManifestParticipant, MatchWorkerManifestError> {
+    admit_rebound_client(
+        manifest,
+        &BTreeMap::new(),
+        client_id,
+        peer_id,
+        admitted_client_ids,
+    )
+}
+
+/// [`admit_manifest_client`] with the runtime rebind overlay applied: a participant whose seat
+/// the supervisor rebound is admitted only under its fresh (Netcode client, routed peer) pair,
+/// never under the manifest pair it replaced.
+fn admit_rebound_client<'a>(
+    manifest: &'a MatchManifestV1,
+    rebound: &BTreeMap<u64, super::seat_hold::SeatBinding>,
+    client_id: u64,
+    peer_id: Option<brawler_routing::PeerId>,
+    admitted_client_ids: &BTreeSet<u64>,
+) -> Result<&'a MatchManifestParticipant, MatchWorkerManifestError> {
     if admitted_client_ids.contains(&client_id) {
         return Err(MatchWorkerManifestError::DuplicateClient);
     }
     let mut found = None;
     for participant in &manifest.participants {
-        if participant.netcode_client_id.get() == client_id && Some(participant.peer_id) == peer_id
-        {
+        let (netcode_client_id, participant_peer) =
+            rebound.get(&participant.player_id.get()).map_or(
+                (participant.netcode_client_id, participant.peer_id),
+                |binding| (binding.netcode_client_id, binding.peer_id),
+            );
+        if netcode_client_id.get() == client_id && Some(participant_peer) == peer_id {
             if found.is_some() {
                 return Err(MatchWorkerManifestError::DuplicateClient);
             }
@@ -176,6 +199,8 @@ enum MatchJoinSource {
     Routed {
         participant: Box<MatchManifestParticipant>,
     },
+    /// A rebound held seat reclaimed mid-match; the fighter already exists.
+    Rejoin { player_id: u64 },
 }
 
 #[derive(Clone, Copy)]
@@ -192,6 +217,19 @@ pub(super) struct MatchHelloValidationContext<'a> {
     pub(super) maximum_participants_per_team: u8,
     pub(super) registry_fingerprint: u64,
     pub(super) content_fingerprint: crate::content::GameplayContentFingerprint,
+    /// Rebound identities of the seats that are held right now (BRL-yyeg). Only these may be
+    /// admitted once the match has left Waiting.
+    pub(super) rejoinable: &'a BTreeMap<u64, super::seat_hold::SeatBinding>,
+}
+
+impl ValidatedMatchHello {
+    /// The manifest player whose held seat this hello reclaims, if it is a rejoin.
+    pub(super) const fn rejoin_player_id(&self) -> Option<u64> {
+        match self.source {
+            MatchJoinSource::Rejoin { player_id } => Some(player_id),
+            MatchJoinSource::Direct { .. } | MatchJoinSource::Routed { .. } => None,
+        }
+    }
 }
 
 /// Preserve the public rejection precedence while projecting routed identity into one bounded
@@ -212,6 +250,7 @@ pub(super) fn validate_match_hello(
         maximum_participants_per_team,
         registry_fingerprint,
         content_fingerprint,
+        rejoinable,
     } = context;
     if hello.protocol_version != crate::protocol::SUPPORTED_PROTOCOL_VERSION {
         return Err(MatchJoinRejection::ProtocolVersionMismatch);
@@ -230,8 +269,9 @@ pub(super) fn validate_match_hello(
         Some(manifest) => {
             let participant = authenticated_client_id
                 .and_then(|client_id| {
-                    admit_manifest_client(
+                    admit_rebound_client(
                         manifest,
+                        rejoinable,
                         client_id,
                         routed_peer.map(|peer| peer.peer_id),
                         admitted_client_ids,
@@ -244,7 +284,24 @@ pub(super) fn validate_match_hello(
         None => None,
     };
     if !matches!(match_state.phase, crate::matchplay::MatchPhase::Waiting) {
-        return Err(MatchJoinRejection::MatchInProgress);
+        // Mid-match, only a rebound held seat may be reclaimed (BRL-yyeg). Its fighter already
+        // exists, so join capacity does not apply.
+        return match routed_participant {
+            Some(participant)
+                if matches!(
+                    match_state.phase,
+                    crate::matchplay::MatchPhase::Active { .. }
+                ) && rejoinable.contains_key(&participant.player_id.get()) =>
+            {
+                Ok(ValidatedMatchHello {
+                    source: MatchJoinSource::Rejoin {
+                        player_id: participant.player_id.get(),
+                    },
+                    authenticated_client_id,
+                })
+            }
+            _ => Err(MatchJoinRejection::MatchInProgress),
+        };
     }
     if active_count >= maximum_clients {
         return Err(MatchJoinRejection::ServerFull);
@@ -344,6 +401,9 @@ pub(super) fn plan_match_join(
     let worker_participant = match &validated.source {
         MatchJoinSource::Direct { .. } => None,
         MatchJoinSource::Routed { participant } => Some(participant.as_ref()),
+        MatchJoinSource::Rejoin { .. } => {
+            unreachable!("a rejoin reclaims its existing fighter and is never planned as a join")
+        }
     };
     let worker_loadout = resolve_join_loadout(worker_participant, builds, weapons)?;
     let (baseline_player_id, network_entity_id) = ids
@@ -895,6 +955,7 @@ mod tests {
                 maximum_participants_per_team: 1,
                 registry_fingerprint: 17,
                 content_fingerprint: crate::content::GameplayContentFingerprint(19),
+                rejoinable: &BTreeMap::new(),
             })
             .err()
         };
@@ -957,9 +1018,87 @@ mod tests {
                 maximum_participants_per_team: 1,
                 registry_fingerprint: 17,
                 content_fingerprint: crate::content::GameplayContentFingerprint(19),
+                rejoinable: &BTreeMap::new(),
             })
             .err(),
             Some(MatchJoinRejection::MatchFull)
+        );
+    }
+
+    #[test]
+    fn a_rebound_held_seat_is_admitted_mid_match_only_under_its_fresh_identity() {
+        let routed = ServerRoleResource::match_worker(manifest());
+        let active = crate::matchplay::MatchState {
+            phase: crate::matchplay::MatchPhase::Active { ends_at_tick: 50 },
+            ..waiting_match()
+        };
+        let peer = |peer_id: u128| super::super::RoutedPeer {
+            worker: Entity::PLACEHOLDER,
+            route_id: RouteId::new(peer_id + 500).unwrap(),
+            peer_id: PeerId::new(peer_id).unwrap(),
+        };
+        let mut rejoinable = BTreeMap::new();
+        rejoinable.insert(
+            7,
+            super::super::seat_hold::SeatBinding {
+                peer_id: PeerId::new(51).unwrap(),
+                netcode_client_id: brawler_routing::NetcodeClientId::new(50).unwrap(),
+            },
+        );
+        let hello = valid_hello();
+        let validate =
+            |client_id: u64,
+             peer_id: u128,
+             state: &crate::matchplay::MatchState,
+             rejoinable: &BTreeMap<u64, super::super::seat_hold::SeatBinding>| {
+                let remote_id = RemoteId(lightyear::prelude::PeerId::Netcode(client_id));
+                let routed_peer = peer(peer_id);
+                validate_match_hello(MatchHelloValidationContext {
+                    hello: &hello,
+                    role: &routed,
+                    remote_id: &remote_id,
+                    routed_peer: Some(&routed_peer),
+                    admitted_client_ids: &BTreeSet::new(),
+                    match_state: state,
+                    active_count: 4,
+                    maximum_clients: 4,
+                    team_counts: [2, 2],
+                    maximum_participants_per_team: 2,
+                    registry_fingerprint: 17,
+                    content_fingerprint: crate::content::GameplayContentFingerprint(19),
+                    rejoinable,
+                })
+                .map(|validated| validated.rejoin_player_id())
+            };
+        // The fresh identity reclaims seat 7 even though the match is Active and full.
+        assert_eq!(validate(50, 51, &active, &rejoinable), Ok(Some(7)));
+        // The manifest identity it replaced is no longer that participant.
+        assert_eq!(
+            validate(8, 8, &active, &rejoinable),
+            Err(MatchJoinRejection::MatchFull)
+        );
+        // Another participant's unchanged identity still cannot join mid-match.
+        assert_eq!(
+            validate(11, 11, &active, &rejoinable),
+            Err(MatchJoinRejection::MatchInProgress)
+        );
+        // A fresh identity without a rebind, or a rebind whose seat is no longer held, is not
+        // admitted.
+        assert_eq!(
+            validate(50, 51, &active, &BTreeMap::new()),
+            Err(MatchJoinRejection::MatchFull)
+        );
+        let completed = crate::matchplay::MatchState {
+            phase: crate::matchplay::MatchPhase::Completed {
+                completed_at_tick: 1,
+                restart_unlocked_at_tick: 2,
+                result: crate::matchplay::MatchResult::Draw,
+            },
+            ..waiting_match()
+        };
+        assert_eq!(
+            validate(50, 51, &completed, &rejoinable),
+            Err(MatchJoinRejection::MatchInProgress)
         );
     }
 
@@ -1698,7 +1837,7 @@ mod tests {
                 .query::<(&crate::matchplay::HeistSafe, &avian2d::prelude::Position)>()
                 .iter(world)
                 .map(|(safe, position)| (safe.defending_team, position.0))
-                .collect::<std::collections::BTreeMap<_, _>>()
+                .collect::<BTreeMap<_, _>>()
         };
         drive_bot_schedules(&mut heist, 12);
         assert!(bot_input_points_toward(

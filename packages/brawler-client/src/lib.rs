@@ -181,6 +181,23 @@ pub struct RoutedClientLifecycle {
     pub accepted_grant: Option<MatchRouteGrant>,
     /// Monotonic local generation. Every fresh lobby or match Netcode entity gets a new value.
     pub generation: u64,
+    /// Automatic rejoin of a still-running match (BRL-yyeg), announced by the lobby before its
+    /// welcome. Cleared when the rejoined match session is accepted, when the lobby reports the
+    /// rejoin unavailable, or when a fresh lobby session starts.
+    pub rejoin: RoutedRejoin,
+    /// Set once when a rejoined match session is accepted; the product flow consumes it.
+    pub rejoined: bool,
+}
+
+/// Progress of one automatic match rejoin.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RoutedRejoin {
+    #[default]
+    None,
+    /// The lobby is obtaining a fresh grant for the held seat.
+    AwaitingGrant,
+    /// The grant was accepted; the match session is connecting.
+    Connecting,
 }
 
 impl RoutedClientLifecycle {
@@ -193,6 +210,7 @@ impl RoutedClientLifecycle {
         // grant; generating a local value here would not bind to the server's request namespace.
         self.current_request_id = None;
         self.accepted_grant = None;
+        self.rejoin = RoutedRejoin::None;
     }
 
     /// Accept exactly one authenticated grant for the current lobby request.
@@ -203,7 +221,41 @@ impl RoutedClientLifecycle {
         self.accepted_grant = Some(grant);
         self.current_request_id = Some(grant.request_id);
         self.phase = RoutedClientPhase::AwaitingLobbyUnlink;
+        if self.rejoin == RoutedRejoin::AwaitingGrant {
+            self.rejoin = RoutedRejoin::Connecting;
+        }
         true
+    }
+
+    /// The current lobby session announced an automatic rejoin of a held match seat.
+    pub fn begin_rejoin(&mut self) -> bool {
+        if self.phase != RoutedClientPhase::Lobby || self.accepted_grant.is_some() {
+            return false;
+        }
+        self.rejoin = RoutedRejoin::AwaitingGrant;
+        true
+    }
+
+    /// The lobby reported that no rejoin grant will follow.
+    pub fn abandon_rejoin(&mut self) {
+        if self.rejoin == RoutedRejoin::AwaitingGrant {
+            self.rejoin = RoutedRejoin::None;
+        }
+    }
+
+    /// The rejoined match session was accepted by the match worker.
+    pub fn complete_rejoin(&mut self) -> bool {
+        if self.rejoin != RoutedRejoin::Connecting || self.phase != RoutedClientPhase::Match {
+            return false;
+        }
+        self.rejoin = RoutedRejoin::None;
+        self.rejoined = true;
+        true
+    }
+
+    #[must_use]
+    pub fn rejoin_in_progress(&self) -> bool {
+        self.rejoin != RoutedRejoin::None
     }
 
     /// Request an intentional match-to-lobby transition. The caller still needs the session

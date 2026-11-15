@@ -62,6 +62,7 @@ mod fighter_spawn;
 mod lobby;
 mod practice;
 mod routed_worker;
+mod seat_hold;
 mod verification;
 mod worker;
 pub use admission::{
@@ -78,6 +79,9 @@ pub use lobby::{
 pub use routed_worker::{
     RoutedPeer, RoutedPeerClose, RoutedWorker, RoutedWorkerFailure, RoutedWorkerPlugin,
 };
+pub(crate) use seat_hold::{RoutedSeat, SeatHold};
+#[cfg(feature = "network-test")]
+pub(crate) use seat_hold::{SEAT_HOLD_TICKS, SeatRebindQueue};
 #[cfg(test)]
 #[allow(clippy::wildcard_imports)]
 use verification::*;
@@ -104,6 +108,7 @@ impl Plugin for ServerAuthoritativeGameplayPlugin {
             crate::abilities::ServerAbilityPlugin,
             AuthoritativeMatchPlugin,
             practice::PracticeBotPlugin,
+            seat_hold::SeatHoldPlugin,
         ))
         .add_systems(
             Update,
@@ -599,9 +604,97 @@ fn initialize_sessions(
 }
 
 #[derive(SystemParam)]
-struct ServerHelloContent<'w> {
+struct ServerHelloContent<'w, 's> {
+    role: Res<'w, ServerRoleResource>,
     builds: Res<'w, crate::builds::BuildCatalogResource>,
     weapon_catalog: Res<'w, WeaponCatalogResource>,
+    spawn_points: Res<'w, SpawnPointCatalog>,
+    resolved_map: Res<'w, ResolvedMap>,
+    movement_tuning: Res<'w, MovementTuning>,
+    ids: ResMut<'w, NextSessionIds>,
+    seats: seat_hold::HeldSeats<'w, 's>,
+}
+
+impl ServerHelloContent<'_, '_> {
+    /// Commit one validated hello: a rebound held seat reclaims its fighter, any other hello is
+    /// planned and committed as a fresh fighter join.
+    fn join(
+        &mut self,
+        commands: &mut Commands,
+        (connection, session): (Entity, &mut ServerSession),
+        validated: admission::ValidatedMatchHello,
+        match_state: &MatchState,
+        batch: &mut AdmissionBatchState,
+    ) -> MatchJoinOutcome {
+        if let Some(player_id) = validated.rejoin_player_id() {
+            return commit_seat_rejoin(
+                commands,
+                connection,
+                session,
+                &self.seats,
+                player_id,
+                validated.authenticated_client_id,
+                batch,
+            );
+        }
+        let plan = admission::plan_match_join(admission::MatchJoinPlanningContext {
+            validated,
+            ids: &mut self.ids,
+            living_fighters: &batch.living_fighters,
+            spawn_points: &self.spawn_points,
+            match_state,
+            movement_skin_width: self.movement_tuning.skin_width,
+            builds: &self.builds.0,
+            weapons: &self.weapon_catalog.0,
+            map_instance_id: self.resolved_map.snapshot.identity.instance_id,
+        });
+        match plan {
+            Ok(plan) => commit_fighter_join(
+                commands,
+                connection,
+                session,
+                self.builds.0.fighter_body,
+                plan,
+                batch,
+                self.role.manifest().is_some(),
+            ),
+            Err(reason) => MatchJoinOutcome::Rejected { reason },
+        }
+    }
+}
+
+/// Reclaim a held seat for a rejoined session: the existing fighter is controlled by the new
+/// link again and the session becomes Active with the fighter's unchanged identities.
+fn commit_seat_rejoin(
+    commands: &mut Commands,
+    connection: Entity,
+    session: &mut ServerSession,
+    seats: &seat_hold::HeldSeats,
+    player_id: u64,
+    authenticated_client_id: Option<u64>,
+    batch: &mut AdmissionBatchState,
+) -> MatchJoinOutcome {
+    let Some((fighter, player_id, network_entity_id)) = seats.held_fighter(player_id) else {
+        return MatchJoinOutcome::Rejected {
+            reason: MatchJoinRejection::MatchInProgress,
+        };
+    };
+    seat_hold::reclaim_held_seat(commands, fighter, connection);
+    info!(
+        player_id = player_id.0,
+        "brawler match seat reclaimed by a rejoined session"
+    );
+    session.phase = ServerSessionPhase::Active {
+        player_id,
+        network_entity_id,
+    };
+    if let Some(client_id) = authenticated_client_id {
+        batch.admitted_client_ids.insert(client_id);
+    }
+    MatchJoinOutcome::Accepted {
+        player_id,
+        network_entity_id,
+    }
 }
 
 struct AdmissionBatchState {
@@ -638,6 +731,7 @@ fn commit_fighter_join(
     fighter_body: crate::builds::FighterBody,
     plan: admission::FighterJoinPlan,
     batch: &mut AdmissionBatchState,
+    routed: bool,
 ) -> MatchJoinOutcome {
     let admission::FighterJoinPlan {
         outcome,
@@ -654,10 +748,22 @@ fn commit_fighter_join(
         unreachable!("successful admission plans are accepted");
     };
     let fighter_entity = spawn_authoritative_fighter(commands, fighter_body, spawn_spec);
-    commands.entity(fighter_entity).insert(ControlledBy {
-        owner: connection,
-        lifetime: lightyear::prelude::Lifetime::SessionBased,
-    });
+    if routed {
+        // A routed participant's fighter outlives its session: `seat_hold` decides whether a
+        // lost session holds the seat (Active) or removes the fighter (any other phase).
+        commands.entity(fighter_entity).insert((
+            ControlledBy {
+                owner: connection,
+                lifetime: lightyear::prelude::Lifetime::Persistent,
+            },
+            RoutedSeat,
+        ));
+    } else {
+        commands.entity(fighter_entity).insert(ControlledBy {
+            owner: connection,
+            lifetime: lightyear::prelude::Lifetime::SessionBased,
+        });
+    }
     session.phase = ServerSessionPhase::Active {
         player_id,
         network_entity_id,
@@ -684,15 +790,10 @@ fn commit_fighter_join(
 fn process_client_hellos(
     mut commands: Commands,
     config: Res<ServerNetworkConfig>,
-    role: Res<ServerRoleResource>,
     fingerprint: Res<ProtocolFingerprint>,
     content_fingerprint: Res<crate::content::GameplayContentFingerprint>,
-    spawn_points: Res<SpawnPointCatalog>,
-    resolved_map: Res<ResolvedMap>,
-    movement_tuning: Res<MovementTuning>,
     lifecycle_rules: Res<MatchLifecycleRules>,
-    content: ServerHelloContent,
-    mut ids: ResMut<NextSessionIds>,
+    mut content: ServerHelloContent,
     mut diagnostics: Option<ResMut<crate::diagnostics::ProcessDiagnosticsState>>,
     mut receivers: Query<(
         Entity,
@@ -710,6 +811,7 @@ fn process_client_hellos(
         return;
     };
     let mut batch = collect_fighter_admission_state(match_state, &participants);
+    let rejoinable = content.seats.rejoinable();
     let mut ordered_receivers: Vec<_> = receivers.iter_mut().collect();
     ordered_receivers.sort_by_key(|(_, remote_id, _, _, _, _, _)| remote_id.0.to_bits());
     batch.admitted_client_ids = ordered_receivers
@@ -747,10 +849,10 @@ fn process_client_hellos(
                     }
                 }
                 ServerSessionPhase::AwaitingHello => {
-                    let join_result =
+                    let validated =
                         admission::validate_match_hello(admission::MatchHelloValidationContext {
                             hello: &hello,
-                            role: &role,
+                            role: &content.role,
                             remote_id,
                             routed_peer,
                             admitted_client_ids: &batch.admitted_client_ids,
@@ -762,31 +864,17 @@ fn process_client_hellos(
                                 .maximum_participants_per_team,
                             registry_fingerprint: fingerprint.0,
                             content_fingerprint: *content_fingerprint,
-                        })
-                        .and_then(|validated| {
-                            admission::plan_match_join(admission::MatchJoinPlanningContext {
-                                validated,
-                                ids: &mut ids,
-                                living_fighters: &batch.living_fighters,
-                                spawn_points: &spawn_points,
-                                match_state,
-                                movement_skin_width: movement_tuning.skin_width,
-                                builds: &content.builds.0,
-                                weapons: &content.weapon_catalog.0,
-                                map_instance_id: resolved_map.snapshot.identity.instance_id,
-                            })
+                            rejoinable: &rejoinable,
                         });
-
-                    let outcome = match join_result {
-                        Ok(plan) => commit_fighter_join(
+                    let outcome = match validated {
+                        Err(reason) => MatchJoinOutcome::Rejected { reason },
+                        Ok(validated) => content.join(
                             &mut commands,
-                            connection,
-                            &mut session,
-                            content.builds.0.fighter_body,
-                            plan,
+                            (connection, &mut session),
+                            validated,
+                            match_state,
                             &mut batch,
                         ),
-                        Err(reason) => MatchJoinOutcome::Rejected { reason },
                     };
                     let rejected = matches!(outcome, MatchJoinOutcome::Rejected { .. });
                     sender.send::<SessionChannel>(outcome.clone());

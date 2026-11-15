@@ -200,6 +200,7 @@ impl Plugin for ClientFlowPlugin {
                     spawn_results.run_if(in_state(ClientFlow::Results)),
                     spawn_match_loading.before(update_match_loading),
                     update_match_loading,
+                    screens::rejoin_status::present_rejoin_status,
                     update_connecting_copy,
                     update_rate_limit_try_again.after(present_flow_error_overlay),
                     update_queue_cancel_button,

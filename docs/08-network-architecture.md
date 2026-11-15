@@ -602,3 +602,12 @@ and fingerprint to the reservation. Match-manifest version 5 carries that immuta
 through the supervisor to the worker, which revalidates it and installs it through ordinary map
 runtime. A built-in preset and authored payload are mutually exclusive. Authored Practice remains
 private and never modifies advertised multiplayer or Practice pools.
+
+Protocol 48 adds the lobby-to-client `MatchRejoinStatus { Rejoining, Unavailable }` message on
+`SessionChannel` (BRL-yyeg). `Rejoining` precedes the lobby welcome of an account whose match seat
+is held; the fresh rejoin capability then arrives as an ordinary `MatchRouteGrant`, and the match
+worker admits the rebound identity mid-match with the unchanged `MatchJoinOutcome`. The new
+registration changes the protocol-registry fingerprint. Control IPC version 6 adds the
+`RejoinRequest`, `ParticipantRebind`, `ParticipantRebound`, `RejoinGranted`, `RejoinRejected` and
+`MatchEnded` bodies (see [the routed architecture](./14-multiplayer-server-architecture.md#rejoining-a-running-match));
+the match-manifest schema is unchanged.

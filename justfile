@@ -65,6 +65,10 @@ practice-e2e game_type="wipeout-1v1":
 network-change-e2e game_type="wipeout-1v1":
     ./scripts/e2e-network-change.sh {{game_type}}
 
+# Lose one routed Practice match session beyond the 10 s session bound, then rejoin the same fighter in the still-running match.
+rejoin-e2e game_type="wipeout-1v1":
+    ./scripts/e2e-rejoin.sh {{game_type}}
+
 # Record one bounded routed release-client render report plus paired PNG/JSON captures at 1280x720.
 v3-render-evidence report="target/v3-render-evidence.txt":
     ./scripts/v3-render-evidence.sh {{report}}

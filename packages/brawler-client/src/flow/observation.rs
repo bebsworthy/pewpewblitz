@@ -68,8 +68,19 @@ fn observe_match_scope(
     lobby_return: LobbyReturn,
     match_failed: bool,
     countdown_observed: bool,
+    rejoin: RejoinView,
 ) -> ObservationScope {
-    if flow == ClientFlow::Match && lobby_return == LobbyReturn::Accepted {
+    if flow == ClientFlow::Match && rejoin.rejoined {
+        ObservationScope::Complete(Some(SessionObservation::MatchRejoined))
+    } else if flow == ClientFlow::Match
+        && lobby_return == LobbyReturn::Accepted
+        && rejoin.in_progress
+    {
+        // BRL-yyeg: this lobby session is fetching a rejoin grant; keep the match presented.
+        ObservationScope::Complete(None)
+    } else if rejoin.in_progress && LOBBY_FLOWS.contains(&flow) {
+        ObservationScope::Complete(Some(SessionObservation::RejoinStarted))
+    } else if flow == ClientFlow::Match && lobby_return == LobbyReturn::Accepted {
         ObservationScope::Complete(Some(SessionObservation::FreshLobbyReturn))
     } else if flow == ClientFlow::Match && lobby_return == LobbyReturn::Failed {
         ObservationScope::Complete(Some(SessionObservation::LobbyReturnFailed))
@@ -84,21 +95,30 @@ fn observe_match_scope(
     }
 }
 
+/// Screens presented over an authenticated lobby session.
+const LOBBY_FLOWS: [ClientFlow; 7] = [
+    ClientFlow::Dashboard,
+    ClientFlow::GameTypeSelect,
+    ClientFlow::PracticeMapSelect,
+    ClientFlow::MapLibrary,
+    ClientFlow::MapEditor,
+    ClientFlow::Queue,
+    ClientFlow::Results,
+];
+
+/// The routed lifecycle's automatic-rejoin facts the flow reacts to (BRL-yyeg).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RejoinView {
+    in_progress: bool,
+    rejoined: bool,
+}
+
 fn observe_lobby_scope(
     flow: ClientFlow,
     disconnected: bool,
     queue: &mut ClientQueueModel,
 ) -> ObservationScope {
-    if !matches!(
-        flow,
-        ClientFlow::Dashboard
-            | ClientFlow::GameTypeSelect
-            | ClientFlow::PracticeMapSelect
-            | ClientFlow::MapLibrary
-            | ClientFlow::MapEditor
-            | ClientFlow::Queue
-            | ClientFlow::Results
-    ) {
+    if !LOBBY_FLOWS.contains(&flow) {
         return ObservationScope::Continue;
     }
     let observation = if disconnected {
@@ -209,6 +229,10 @@ pub(super) fn observe_session(
             && result_state.context.is_none()
             && match_disconnected_for_generation,
         countdown_observed,
+        RejoinView {
+            in_progress: routed.rejoin_in_progress(),
+            rejoined: routed.rejoined,
+        },
     ) {
         ObservationScope::Continue => {}
         ObservationScope::Complete(observation) => {
@@ -268,7 +292,13 @@ mod tests {
     #[test]
     fn match_observation_prefers_fresh_lobby_return_over_match_failure() {
         assert!(matches!(
-            observe_match_scope(ClientFlow::Match, LobbyReturn::Accepted, true, false),
+            observe_match_scope(
+                ClientFlow::Match,
+                LobbyReturn::Accepted,
+                true,
+                false,
+                RejoinView::default()
+            ),
             ObservationScope::Complete(Some(SessionObservation::FreshLobbyReturn))
         ));
         assert!(matches!(
@@ -276,7 +306,8 @@ mod tests {
                 ClientFlow::MatchLoading,
                 LobbyReturn::NotObserved,
                 false,
-                false
+                false,
+                RejoinView::default()
             ),
             ObservationScope::Complete(None)
         ));
@@ -285,12 +316,76 @@ mod tests {
     #[test]
     fn failed_lobby_return_during_match_presentation_is_observed_before_match_failure() {
         assert!(matches!(
-            observe_match_scope(ClientFlow::Match, LobbyReturn::Failed, true, false),
+            observe_match_scope(
+                ClientFlow::Match,
+                LobbyReturn::Failed,
+                true,
+                false,
+                RejoinView::default()
+            ),
             ObservationScope::Complete(Some(SessionObservation::LobbyReturnFailed))
         ));
         assert!(matches!(
-            observe_match_scope(ClientFlow::Dashboard, LobbyReturn::Failed, false, false),
+            observe_match_scope(
+                ClientFlow::Dashboard,
+                LobbyReturn::Failed,
+                false,
+                false,
+                RejoinView::default()
+            ),
             ObservationScope::Continue
+        ));
+    }
+
+    #[test]
+    fn a_rejoin_keeps_the_match_presented_and_lobby_screens_move_to_it() {
+        let rejoining = RejoinView {
+            in_progress: true,
+            rejoined: false,
+        };
+        assert!(matches!(
+            observe_match_scope(
+                ClientFlow::Match,
+                LobbyReturn::Accepted,
+                false,
+                false,
+                rejoining
+            ),
+            ObservationScope::Complete(None)
+        ));
+        assert!(matches!(
+            observe_match_scope(
+                ClientFlow::Dashboard,
+                LobbyReturn::Accepted,
+                false,
+                false,
+                rejoining
+            ),
+            ObservationScope::Complete(Some(SessionObservation::RejoinStarted))
+        ));
+        // A lobby failure during the rejoin is still reported.
+        assert!(matches!(
+            observe_match_scope(
+                ClientFlow::Match,
+                LobbyReturn::Failed,
+                false,
+                false,
+                rejoining
+            ),
+            ObservationScope::Complete(Some(SessionObservation::LobbyReturnFailed))
+        ));
+        assert!(matches!(
+            observe_match_scope(
+                ClientFlow::Match,
+                LobbyReturn::NotObserved,
+                false,
+                true,
+                RejoinView {
+                    in_progress: false,
+                    rejoined: true,
+                }
+            ),
+            ObservationScope::Complete(Some(SessionObservation::MatchRejoined))
         ));
     }
 

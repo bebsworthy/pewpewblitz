@@ -12,6 +12,7 @@ pub(super) mod match_loading;
 pub(super) mod overlays;
 pub(super) mod practice_maps;
 pub(super) mod queue;
+pub(super) mod rejoin_status;
 pub(super) mod results;
 pub(super) mod scroll;
 pub(super) mod server_select;

@@ -40,6 +40,18 @@ pub enum ControlType {
     StartFailed = 19,
     /// Supervisor-owned reusable match capacity published only to the lobby worker.
     LobbyCapacity = 20,
+    /// Lobby -> supervisor: request a fresh route for a held match seat (BRL-yyeg).
+    RejoinRequest = 21,
+    /// Supervisor -> match worker: rebind a held seat to a fresh peer and Netcode identity.
+    ParticipantRebind = 22,
+    /// Match worker -> supervisor: the outcome of one rebind.
+    ParticipantRebound = 23,
+    /// Supervisor -> lobby: a fresh capability-bearing grant for a held seat.
+    RejoinGranted = 24,
+    /// Supervisor -> lobby: the rejoin request could not be granted.
+    RejoinRejected = 25,
+    /// Supervisor -> lobby: an activated allocation's match has ended; its seats are released.
+    MatchEnded = 26,
 }
 
 impl TryFrom<u8> for ControlType {
@@ -65,6 +77,12 @@ impl TryFrom<u8> for ControlType {
             18 => Ok(Self::Activated),
             19 => Ok(Self::StartFailed),
             20 => Ok(Self::LobbyCapacity),
+            21 => Ok(Self::RejoinRequest),
+            22 => Ok(Self::ParticipantRebind),
+            23 => Ok(Self::ParticipantRebound),
+            24 => Ok(Self::RejoinGranted),
+            25 => Ok(Self::RejoinRejected),
+            26 => Ok(Self::MatchEnded),
             other => Err(CodecError::UnsupportedType(other)),
         }
     }
@@ -422,6 +440,39 @@ impl AllocationGrant {
     }
 }
 
+/// Encoded width of one [`AllocationGrant`].
+const GRANT_BYTES: usize = 16 + 16 + 16 + 32 + 8 + 8;
+
+fn encode_grant(encoder: &mut Encoder, grant: &AllocationGrant) {
+    encoder.put_u128(grant.lobby_session_id.get());
+    encoder.put_u128(grant.route_id.get());
+    encoder.put_u128(grant.peer_id.get());
+    encoder.put_bytes(grant.capability.expose_bytes());
+    encoder.put_u64(grant.activation_expiry_unix_ms);
+    encoder.put_u64(grant.route_expiry_unix_ms);
+}
+
+fn decode_grant(decoder: &mut Decoder<'_>) -> Result<AllocationGrant, CodecError> {
+    let lobby_session_id = LobbySessionId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
+    let route_id = RouteId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
+    let peer_id = PeerId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
+    let capability = Capability::from_bytes(
+        decoder
+            .take(32)?
+            .try_into()
+            .expect("exact capability width"),
+    )
+    .ok_or(CodecError::InvalidValue)?;
+    Ok(AllocationGrant {
+        lobby_session_id,
+        route_id,
+        peer_id,
+        capability,
+        activation_expiry_unix_ms: decoder.u64()?,
+        route_expiry_unix_ms: decoder.u64()?,
+    })
+}
+
 /// Successful match-worker allocation response.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AllocationGrantedBody {
@@ -450,6 +501,128 @@ pub struct AllocationRejectedBody {
     pub request_id: RequestId,
     pub reason: u16,
     pub retry_after_ms: u32,
+}
+
+/// Why a rejoin request or a seat rebind was refused. Terminal reasons mean no later request for
+/// this seat can succeed; the others may succeed on a later lobby admission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub enum RejoinReason {
+    /// No activated allocation, participant or seat matches the request.
+    UnknownSeat = 1,
+    /// The match has completed or its worker has ended.
+    MatchEnded = 2,
+    /// The seat has already used its bounded number of rejoins.
+    LimitReached = 3,
+    /// The seat still has a live route, so its earlier session has not been released yet.
+    SeatConnected = 4,
+    /// Another rejoin for this seat is in flight.
+    Busy = 5,
+    /// The supervisor or worker could not mint or register the grant.
+    Internal = 6,
+    /// The match worker no longer holds the seat (the hold expired or the match is not Active).
+    SeatExpired = 7,
+}
+
+impl RejoinReason {
+    /// Whether no later request for the same seat can succeed.
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::UnknownSeat | Self::MatchEnded | Self::LimitReached | Self::SeatExpired
+        )
+    }
+}
+
+impl TryFrom<u16> for RejoinReason {
+    type Error = CodecError;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::UnknownSeat),
+            2 => Ok(Self::MatchEnded),
+            3 => Ok(Self::LimitReached),
+            4 => Ok(Self::SeatConnected),
+            5 => Ok(Self::Busy),
+            6 => Ok(Self::Internal),
+            7 => Ok(Self::SeatExpired),
+            _ => Err(CodecError::InvalidValue),
+        }
+    }
+}
+
+/// Lobby-to-supervisor request for a fresh route to a held seat. `request_id`, `allocation_id`,
+/// `match_id` and `player_id` name the seat exactly as the original grant did; the lobby session
+/// and Netcode client are the current ones that will use the new route.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct RejoinRequestBody {
+    pub rejoin_id: RequestId,
+    pub request_id: RequestId,
+    pub allocation_id: AllocationId,
+    pub match_id: MatchId,
+    pub player_id: crate::PlayerId,
+    pub lobby_session_id: LobbySessionId,
+    pub netcode_client_id: NetcodeClientId,
+}
+
+impl fmt::Debug for RejoinRequestBody {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RejoinRequestBody")
+            .field("rejoin_id", &self.rejoin_id)
+            .field("request_id", &self.request_id)
+            .field("identity", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Supervisor-to-match-worker rebind of one held seat to a fresh routed peer and Netcode client.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ParticipantRebindBody {
+    pub rejoin_id: RequestId,
+    pub player_id: crate::PlayerId,
+    pub peer_id: PeerId,
+    pub netcode_client_id: NetcodeClientId,
+}
+
+impl fmt::Debug for ParticipantRebindBody {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ParticipantRebindBody")
+            .field("rejoin_id", &self.rejoin_id)
+            .field("identity", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Match-worker outcome of one rebind; `refusal` is `None` when the seat now accepts the new
+/// peer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParticipantReboundBody {
+    pub rejoin_id: RequestId,
+    pub player_id: crate::PlayerId,
+    pub peer_id: PeerId,
+    pub refusal: Option<RejoinReason>,
+}
+
+/// Supervisor-to-lobby fresh grant for a held seat. The grant is a bearer secret and stays
+/// redacted by `AllocationGrant`'s Debug implementation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RejoinGrantedBody {
+    pub rejoin_id: RequestId,
+    pub request_id: RequestId,
+    pub allocation_id: AllocationId,
+    pub match_id: MatchId,
+    pub player_id: crate::PlayerId,
+    pub grant: AllocationGrant,
+}
+
+/// Supervisor-to-lobby refusal of one rejoin request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RejoinRejectedBody {
+    pub rejoin_id: RequestId,
+    pub reason: RejoinReason,
 }
 
 /// Peer unlink request/notification.
@@ -769,6 +942,12 @@ pub enum ControlBody {
     Activated(ActivationBody),
     StartFailed(ActivationBody),
     LobbyCapacity(LobbyCapacityBody),
+    RejoinRequest(RejoinRequestBody),
+    ParticipantRebind(ParticipantRebindBody),
+    ParticipantRebound(ParticipantReboundBody),
+    RejoinGranted(RejoinGrantedBody),
+    RejoinRejected(RejoinRejectedBody),
+    MatchEnded(ActivationBody),
 }
 
 impl fmt::Debug for ControlBody {
@@ -815,6 +994,25 @@ impl fmt::Debug for ControlBody {
             Self::LobbyCapacity(value) => {
                 formatter.debug_tuple("LobbyCapacity").field(value).finish()
             }
+            Self::RejoinRequest(value) => {
+                formatter.debug_tuple("RejoinRequest").field(value).finish()
+            }
+            Self::ParticipantRebind(value) => formatter
+                .debug_tuple("ParticipantRebind")
+                .field(value)
+                .finish(),
+            Self::ParticipantRebound(value) => formatter
+                .debug_tuple("ParticipantRebound")
+                .field(value)
+                .finish(),
+            Self::RejoinGranted(value) => {
+                formatter.debug_tuple("RejoinGranted").field(value).finish()
+            }
+            Self::RejoinRejected(value) => formatter
+                .debug_tuple("RejoinRejected")
+                .field(value)
+                .finish(),
+            Self::MatchEnded(value) => formatter.debug_tuple("MatchEnded").field(value).finish(),
         }
     }
 }
@@ -853,6 +1051,12 @@ impl ControlBody {
             Self::Activated(_) => ControlType::Activated,
             Self::StartFailed(_) => ControlType::StartFailed,
             Self::LobbyCapacity(_) => ControlType::LobbyCapacity,
+            Self::RejoinRequest(_) => ControlType::RejoinRequest,
+            Self::ParticipantRebind(_) => ControlType::ParticipantRebind,
+            Self::ParticipantRebound(_) => ControlType::ParticipantRebound,
+            Self::RejoinGranted(_) => ControlType::RejoinGranted,
+            Self::RejoinRejected(_) => ControlType::RejoinRejected,
+            Self::MatchEnded(_) => ControlType::MatchEnded,
         }
     }
 
@@ -895,7 +1099,14 @@ impl ControlBody {
                 }
                 value.validate()
             }
-            Self::Failure(_) | Self::Exit(_) | Self::LobbyCapacity(_) => Ok(()),
+            // Every identity in the rejoin bodies is a nonzero type; nothing else to validate.
+            Self::Failure(_)
+            | Self::Exit(_)
+            | Self::LobbyCapacity(_)
+            | Self::RejoinRequest(_)
+            | Self::ParticipantRebind(_)
+            | Self::ParticipantRebound(_)
+            | Self::RejoinRejected(_) => Ok(()),
             Self::LobbyAuthenticated(value) => {
                 if value.route_id.get() == 0
                     || value.peer_id.get() == 0
@@ -917,10 +1128,12 @@ impl ControlBody {
                     Ok(())
                 }
             }
+            Self::RejoinGranted(value) => value.grant.validate(),
             Self::CancelActivation(value)
             | Self::ActivationDissolved(value)
             | Self::Activated(value)
-            | Self::StartFailed(value) => {
+            | Self::StartFailed(value)
+            | Self::MatchEnded(value) => {
                 if value.request_id.get() == 0
                     || value.allocation_id.get() == 0
                     || value.match_id.get() == 0
@@ -1006,12 +1219,7 @@ impl ControlBody {
                 encoder.put_u128(value.worker_id.get());
                 encoder.put_u8(u8::try_from(value.grants.len()).map_err(|_| CodecError::Oversize)?);
                 for grant in &value.grants {
-                    encoder.put_u128(grant.lobby_session_id.get());
-                    encoder.put_u128(grant.route_id.get());
-                    encoder.put_u128(grant.peer_id.get());
-                    encoder.put_bytes(grant.capability.expose_bytes());
-                    encoder.put_u64(grant.activation_expiry_unix_ms);
-                    encoder.put_u64(grant.route_expiry_unix_ms);
+                    encode_grant(&mut encoder, grant);
                 }
             }
             Self::AllocationRejected(value) => {
@@ -1064,12 +1272,46 @@ impl ControlBody {
             Self::CancelActivation(value)
             | Self::ActivationDissolved(value)
             | Self::Activated(value)
-            | Self::StartFailed(value) => {
+            | Self::StartFailed(value)
+            | Self::MatchEnded(value) => {
                 encoder.put_u64(value.request_id.get());
                 encoder.put_u128(value.allocation_id.get());
                 encoder.put_u128(value.match_id.get());
             }
             Self::LobbyCapacity(value) => encoder.put_u8(value.free_match_slots),
+            Self::RejoinRequest(value) => {
+                encoder.put_u64(value.rejoin_id.get());
+                encoder.put_u64(value.request_id.get());
+                encoder.put_u128(value.allocation_id.get());
+                encoder.put_u128(value.match_id.get());
+                encoder.put_u64(value.player_id.get());
+                encoder.put_u128(value.lobby_session_id.get());
+                encoder.put_u64(value.netcode_client_id.get());
+            }
+            Self::ParticipantRebind(value) => {
+                encoder.put_u64(value.rejoin_id.get());
+                encoder.put_u64(value.player_id.get());
+                encoder.put_u128(value.peer_id.get());
+                encoder.put_u64(value.netcode_client_id.get());
+            }
+            Self::ParticipantRebound(value) => {
+                encoder.put_u64(value.rejoin_id.get());
+                encoder.put_u64(value.player_id.get());
+                encoder.put_u128(value.peer_id.get());
+                encoder.put_u16(value.refusal.map_or(0, |reason| reason as u16));
+            }
+            Self::RejoinGranted(value) => {
+                encoder.put_u64(value.rejoin_id.get());
+                encoder.put_u64(value.request_id.get());
+                encoder.put_u128(value.allocation_id.get());
+                encoder.put_u128(value.match_id.get());
+                encoder.put_u64(value.player_id.get());
+                encode_grant(&mut encoder, &value.grant);
+            }
+            Self::RejoinRejected(value) => {
+                encoder.put_u64(value.rejoin_id.get());
+                encoder.put_u16(value.reason as u16);
+            }
         }
         Ok(encoder.finish())
     }
@@ -1088,16 +1330,20 @@ impl ControlBody {
             ControlType::Ready => Some(44),
             ControlType::Heartbeat => Some(38),
             ControlType::AllocationRejected | ControlType::Stop => Some(14),
-            ControlType::PeerClose => Some(34),
+            ControlType::PeerClose | ControlType::ParticipantRebound => Some(34),
             ControlType::Failure => Some(16),
-            ControlType::Exit => Some(10),
+            ControlType::Exit | ControlType::RejoinRejected => Some(10),
             ControlType::LobbyAuthenticated => Some(56),
             ControlType::LobbyNetcodeAuthenticated
             | ControlType::CancelActivation
             | ControlType::ActivationDissolved
             | ControlType::Activated
-            | ControlType::StartFailed => Some(40),
+            | ControlType::StartFailed
+            | ControlType::ParticipantRebind
+            | ControlType::MatchEnded => Some(40),
             ControlType::LobbyCapacity => Some(1),
+            ControlType::RejoinRequest => Some(80),
+            ControlType::RejoinGranted => Some(56 + GRANT_BYTES),
         };
         if expected_length.is_some_and(|length| length != body_length) {
             return Err(CodecError::LengthMismatch);
@@ -1209,25 +1455,7 @@ impl ControlBody {
                 }
                 let mut grants = Vec::with_capacity(count);
                 for _ in 0..count {
-                    let lobby_session_id =
-                        LobbySessionId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
-                    let route_id = RouteId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
-                    let peer_id = PeerId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?;
-                    let capability = Capability::from_bytes(
-                        decoder
-                            .take(32)?
-                            .try_into()
-                            .expect("exact capability width"),
-                    )
-                    .ok_or(CodecError::InvalidValue)?;
-                    grants.push(AllocationGrant {
-                        lobby_session_id,
-                        route_id,
-                        peer_id,
-                        capability,
-                        activation_expiry_unix_ms: decoder.u64()?,
-                        route_expiry_unix_ms: decoder.u64()?,
-                    });
+                    grants.push(decode_grant(decoder)?);
                 }
                 Self::AllocationGranted(AllocationGrantedBody {
                     request_id,
@@ -1298,7 +1526,8 @@ impl ControlBody {
             ControlType::CancelActivation
             | ControlType::ActivationDissolved
             | ControlType::Activated
-            | ControlType::StartFailed => {
+            | ControlType::StartFailed
+            | ControlType::MatchEnded => {
                 let value = ActivationBody {
                     request_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
                     allocation_id: AllocationId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
@@ -1309,11 +1538,50 @@ impl ControlBody {
                     ControlType::ActivationDissolved => Self::ActivationDissolved(value),
                     ControlType::Activated => Self::Activated(value),
                     ControlType::StartFailed => Self::StartFailed(value),
+                    ControlType::MatchEnded => Self::MatchEnded(value),
                     _ => unreachable!("activation kinds were matched above"),
                 }
             }
             ControlType::LobbyCapacity => Self::LobbyCapacity(LobbyCapacityBody {
                 free_match_slots: decoder.u8()?,
+            }),
+            ControlType::RejoinRequest => Self::RejoinRequest(RejoinRequestBody {
+                rejoin_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                request_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                allocation_id: AllocationId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                match_id: MatchId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                player_id: crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                lobby_session_id: LobbySessionId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                netcode_client_id: NetcodeClientId::new(decoder.u64()?)
+                    .ok_or(CodecError::ZeroId)?,
+            }),
+            ControlType::ParticipantRebind => Self::ParticipantRebind(ParticipantRebindBody {
+                rejoin_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                player_id: crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                peer_id: PeerId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                netcode_client_id: NetcodeClientId::new(decoder.u64()?)
+                    .ok_or(CodecError::ZeroId)?,
+            }),
+            ControlType::ParticipantRebound => Self::ParticipantRebound(ParticipantReboundBody {
+                rejoin_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                player_id: crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                peer_id: PeerId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                refusal: match decoder.u16()? {
+                    0 => None,
+                    reason => Some(RejoinReason::try_from(reason)?),
+                },
+            }),
+            ControlType::RejoinGranted => Self::RejoinGranted(RejoinGrantedBody {
+                rejoin_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                request_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                allocation_id: AllocationId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                match_id: MatchId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                player_id: crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                grant: decode_grant(decoder)?,
+            }),
+            ControlType::RejoinRejected => Self::RejoinRejected(RejoinRejectedBody {
+                rejoin_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                reason: RejoinReason::try_from(decoder.u16()?)?,
             }),
         };
         body.validate()?;
@@ -1815,6 +2083,111 @@ mod tests {
             52 + 825
         );
         assert_eq!(CONTROL_PREFIXED_MAX_BYTES, CONTROL_MAX_RECORD_BYTES + 4);
+    }
+
+    #[test]
+    fn rejoin_bodies_round_trip_with_their_fixed_lengths_and_redact_secrets() {
+        let grant = AllocationGrant {
+            lobby_session_id: id128(1),
+            route_id: id128(2),
+            peer_id: id128(3),
+            capability: Capability::from_bytes([0x6b; 32]).unwrap(),
+            activation_expiry_unix_ms: 4,
+            route_expiry_unix_ms: 5,
+        };
+        let bodies = [
+            (
+                ControlBody::RejoinRequest(RejoinRequestBody {
+                    rejoin_id: id64(1),
+                    request_id: id64(2),
+                    allocation_id: id128(3),
+                    match_id: id128(4),
+                    player_id: id64(5),
+                    lobby_session_id: id128(6),
+                    netcode_client_id: id64(7),
+                }),
+                80,
+            ),
+            (
+                ControlBody::ParticipantRebind(ParticipantRebindBody {
+                    rejoin_id: id64(1),
+                    player_id: id64(2),
+                    peer_id: id128(3),
+                    netcode_client_id: id64(4),
+                }),
+                40,
+            ),
+            (
+                ControlBody::ParticipantRebound(ParticipantReboundBody {
+                    rejoin_id: id64(1),
+                    player_id: id64(2),
+                    peer_id: id128(3),
+                    refusal: None,
+                }),
+                34,
+            ),
+            (
+                ControlBody::ParticipantRebound(ParticipantReboundBody {
+                    rejoin_id: id64(1),
+                    player_id: id64(2),
+                    peer_id: id128(3),
+                    refusal: Some(RejoinReason::SeatExpired),
+                }),
+                34,
+            ),
+            (
+                ControlBody::RejoinGranted(RejoinGrantedBody {
+                    rejoin_id: id64(1),
+                    request_id: id64(2),
+                    allocation_id: id128(3),
+                    match_id: id128(4),
+                    player_id: id64(5),
+                    grant,
+                }),
+                152,
+            ),
+            (
+                ControlBody::RejoinRejected(RejoinRejectedBody {
+                    rejoin_id: id64(1),
+                    reason: RejoinReason::LimitReached,
+                }),
+                10,
+            ),
+            (
+                ControlBody::MatchEnded(ActivationBody {
+                    request_id: id64(1),
+                    allocation_id: id128(2),
+                    match_id: id128(3),
+                }),
+                40,
+            ),
+        ];
+        for (body, length) in bodies {
+            let encoded = frame(body.clone()).encode().unwrap();
+            assert_eq!(encoded.len(), CONTROL_HEADER_BYTES + length, "{body:?}");
+            assert_eq!(ControlFrame::decode(&encoded).unwrap().body, body);
+            assert!(
+                !format!("{body:?}").contains("107"),
+                "capability bytes are redacted"
+            );
+        }
+        // An unknown refusal code is malformed, not a new reason.
+        let mut rebound = frame(ControlBody::ParticipantRebound(ParticipantReboundBody {
+            rejoin_id: id64(1),
+            player_id: id64(2),
+            peer_id: id128(3),
+            refusal: None,
+        }))
+        .encode()
+        .unwrap();
+        let last = rebound.len() - 1;
+        rebound[last] = 99;
+        assert_eq!(
+            ControlFrame::decode(&rebound),
+            Err(CodecError::InvalidValue)
+        );
+        assert!(RejoinReason::SeatExpired.is_terminal());
+        assert!(!RejoinReason::SeatConnected.is_terminal());
     }
 
     #[test]

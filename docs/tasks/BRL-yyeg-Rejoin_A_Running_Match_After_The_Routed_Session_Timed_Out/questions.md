@@ -2,43 +2,9 @@
 
 # Questions · BRL-yyeg
 
-## q-7ay64v4 · answered · by Boyd
+## Resolved
 
-Q1 Seat hold: how long does the match keep a disconnected player's seat, and does that seat still count for the team (so 1v1, or a team whose teammates already left, does not forfeit at once)? Today the fighter is despawned and a team with no connected players forfeits on the same tick. Recommendation: hold for 60 s (a third of the 180 s match), counting for the team; at expiry, remove the fighter and apply today's forfeit rules. Waiting/loading/countdown departures keep failing the start as today.
-
-- [ ] Hold 60 s and count for the team (recommended)
-- [ ] Hold until the match ends
-- [ ] Hold 30 s
-- [ ] Only team matches with a connected teammate or bots; 1v1 still forfeits at once
-
-> **Answer** (2026-11-14 23:08 · by Boyd): Owner: hold the seat 60 s, counting for the team; then today's forfeit rules apply.
-
-## q-73cycrv · answered · by Boyd
-
-Q2 Fighter while disconnected: what does the held fighter do? Recommendation: it stays where it is with neutral input (no move, fire or ultimate), stays visible and can be damaged, killed and respawned normally, so opponents are not penalised. No bot takeover in PvP (bots are Practice-only today).
-
-- [ ] Stand idle and stay vulnerable (recommended)
-- [ ] Idle and invulnerable/untargetable while held
-- [ ] A Practice bot controls it while held
-
-> **Answer** (2026-11-14 23:08 · by Boyd): Owner: a bot takes control of the held fighter until the player rejoins or the hold expires (server-hosted Practice bot policy).
-
-## q-fggtj39 · answered · by Boyd
-
-Q3 Rejoin grant security: who can get a rejoin grant? Recommendation: only a lobby session that authenticated with the same AccountId (the existing device-held development credential) that held the seat at handoff. The account stays in the lobby, never in the manifest or supervisor. The supervisor mints a fresh 256-bit capability on a fresh route and PeerId (30 s pending, 10 s idle, as today), old capabilities stay revoked, at most one live rejoin grant per seat and at most 3 rejoins per seat per match. The worker rebinds the seat to the new Netcode client ID, so a relaunched app (new Netcode ID, same account) can also rejoin.
-
-- [ ] Same AccountId, fresh capability, 1 live / 3 per match, relaunch allowed (recommended)
-- [ ] Same as recommended, but only within the same app process (same Netcode ID); no relaunch rejoin
-- [ ] Other limits (please state)
-
-> **Answer** (2026-11-14 23:08 · by Boyd): Owner: same AccountId only; fresh 256-bit capability, route and PeerId per rejoin; old ones stay revoked; at most 1 live grant and 3 rejoins per seat per match; a relaunched app may rejoin.
-
-## q-f2m2ptw · answered · by Boyd
-
-Q4 Rejoin trigger: after the fresh lobby session sees a held seat, does the client rejoin automatically, or show Dashboard with a 'Rejoin match' button? Recommendation: automatic, with a short 'Rejoining match' status; if it fails, today's Dashboard message. A relaunched app also rejoins automatically after Connect.
-
-- [ ] Automatic (recommended)
-- [ ] Dashboard button 'Rejoin match'
-- [ ] Automatic after a network loss, button after a relaunch
-
-> **Answer** (2026-11-14 23:08 · by Boyd): Owner: rejoin automatically with a short 'Rejoining match' status; fall back to today's Dashboard message on failure.
+- q-7ay64v4
+- q-73cycrv
+- q-fggtj39
+- q-f2m2ptw

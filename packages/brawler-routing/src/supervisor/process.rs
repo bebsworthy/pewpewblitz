@@ -1455,7 +1455,13 @@ fn process_control_frame(
         | ControlBody::ActivationDissolved(_)
         | ControlBody::Activated(_)
         | ControlBody::StartFailed(_)
-        | ControlBody::LobbyCapacity(_) => {
+        | ControlBody::LobbyCapacity(_)
+        | ControlBody::RejoinRequest(_)
+        | ControlBody::ParticipantRebind(_)
+        | ControlBody::ParticipantRebound(_)
+        | ControlBody::RejoinGranted(_)
+        | ControlBody::RejoinRejected(_)
+        | ControlBody::MatchEnded(_) => {
             // Other control bodies belong to the routing/worker protocol.  They are decoded and
             // sequence-checked here, but their domain semantics stay outside process supervision.
         }

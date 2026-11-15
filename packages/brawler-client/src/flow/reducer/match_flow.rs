@@ -108,6 +108,18 @@ pub(super) fn resolve_observation(
             match_failure.0 = true;
             let _ = routed.request_return_to_lobby();
         }
+        SessionObservation::RejoinStarted => {
+            // BRL-yyeg: a relaunched app's lobby announced a rejoin. Present the match while the
+            // grant arrives; a failure falls back to the same Dashboard message as a lost match.
+            match_failure.0 = true;
+            commit.next_flow = Some(ClientFlow::Match);
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
+        SessionObservation::MatchRejoined => {
+            routed.rejoined = false;
+            match_failure.0 = false;
+            commit.overlay = Some(OverlayCommit::Clear);
+        }
         SessionObservation::PracticeRejected(reason) => {
             if matches!(
                 reason,

@@ -4,9 +4,9 @@ was: BRL-0204
 
 title: Rejoin a running match after the routed session timed out
 
-status: doing
-closed:
-status_changed: 2026-11-14T22:58:38Z
+status: done
+closed: 2026-11-15T00:52:44Z
+status_changed: 2026-11-15T00:52:44Z
 
 theme:
 
@@ -16,11 +16,11 @@ created: 2026-11-14T01:07:43Z
 
 blocks: []
 
-related: [BRL-g57a]
+related: [BRL-5vc1, BRL-dwqx, BRL-g57a, BRL-jxfy]
 
 parent: BRL-q5c4
 
-rank: 12648448
+rank:
 ---
 
 # Description

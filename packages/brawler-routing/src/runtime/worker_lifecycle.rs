@@ -373,6 +373,8 @@ impl SupervisorRuntime {
             })
             .collect::<Vec<_>>();
         for request_id in match_requests {
+            // A match worker that ended without a Result still releases its lobby seats.
+            self.notify_match_ended(request_id);
             let Some(record) = self.allocations.get(&request_id) else {
                 continue;
             };
@@ -559,6 +561,7 @@ impl SupervisorRuntime {
             ));
         }
         record.result = Some(result);
+        self.notify_match_ended(request_id);
         let worker = self
             .workers
             .get_mut(&worker_id)

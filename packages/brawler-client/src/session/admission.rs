@@ -283,7 +283,7 @@ pub(super) fn process_join_outcome(
     >,
     config: Res<ClientNetworkConfig>,
     automation: AutomationHooks,
-    routed: Res<RoutedClientLifecycle>,
+    mut routed: ResMut<RoutedClientLifecycle>,
     mut classification: ResMut<brawler::diagnostics::ProcessExitClassification>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
@@ -303,7 +303,7 @@ pub(super) fn process_join_outcome(
                 &mut status,
                 &config,
                 &automation,
-                &routed,
+                &mut routed,
                 &mut classification,
                 &mut app_exit,
             );
@@ -335,7 +335,7 @@ fn process_match_join_outcomes(
     status: &mut ClientJoinStatus,
     config: &ClientNetworkConfig,
     automation: &AutomationHooks,
-    routed: &RoutedClientLifecycle,
+    routed: &mut RoutedClientLifecycle,
     classification: &mut brawler::diagnostics::ProcessExitClassification,
     app_exit: &mut MessageWriter<AppExit>,
 ) {
@@ -344,7 +344,26 @@ fn process_match_join_outcomes(
             MatchJoinOutcome::Accepted {
                 player_id,
                 network_entity_id,
-            } => accept_match_join(status, config, automation, player_id, network_entity_id),
+            } => {
+                if routed.complete_rejoin() {
+                    info!(
+                        player_id = player_id.0,
+                        "brawler client rejoined its running match"
+                    );
+                }
+                accept_match_join(status, config, automation, player_id, network_entity_id);
+            }
+            MatchJoinOutcome::Rejected { reason }
+                if routed.rejoin == crate::RoutedRejoin::Connecting =>
+            {
+                // The held seat was released between the grant and this hello (BRL-yyeg). This
+                // is a recoverable rejoin failure, not an incompatible client: return to a
+                // fresh lobby, which reports the rejoin unavailable.
+                warn!(?reason, "brawler client match rejoin was refused");
+                routed.rejoin = crate::RoutedRejoin::None;
+                status.phase = ClientJoinPhase::Rejected(reason);
+                let _ = routed.request_return_to_lobby();
+            }
             MatchJoinOutcome::Rejected { reason }
                 if routed_join_rejection_is_stale(config, routed) =>
             {

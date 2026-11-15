@@ -306,6 +306,14 @@ impl ProfileAuthority {
             .copied()
     }
 
+    /// The account of an accepted profile session.
+    #[must_use]
+    pub fn account_for_client(&self, client_key: u64) -> Option<AccountId> {
+        self.sessions
+            .get(&client_key)
+            .map(|session| session.account_id)
+    }
+
     #[must_use]
     pub fn snapshot(&self, client_key: u64) -> Option<&ProfileSnapshot> {
         self.sessions
