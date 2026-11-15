@@ -3,9 +3,9 @@ id: BRL-nqnm
 
 title: Close in-match Settings when the match ends under it
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T09:33:36Z
+status_changed: 2026-11-15T21:27:50Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-094c, BRL-h088]
 
 parent: BRL-q5c4
 
-rank: 14680064
+rank: 11337728
 ---
 
 # Description
