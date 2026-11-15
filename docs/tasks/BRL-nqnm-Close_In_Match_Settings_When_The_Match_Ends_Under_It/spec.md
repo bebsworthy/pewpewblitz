@@ -37,3 +37,8 @@ Expected: the match-owned Settings (and the match menu) close when the match lea
 - **Pixel 8a device check:** repeat the repro and reach Results without a force-stop. Results buttons and Back work.
 
 Evidence: /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/x02.jpg (Settings opened in match), x03.jpg (after completion), s-x04.jpg (touch BACK and Back gesture with no effect), k03.jpg, h35-connlost-back.jpg, k05-k07.jpg (first occurrence), server.log 09:24 and 09:30.
+
+# Verified 2026-11-16 (commit 6b1e8772)
+- Tests: `match_completion_closes_settings_opened_from_the_match_menu` and `connection_lost_over_match_settings_leaves_only_the_error_interactive` fail without the fix and pass with it. `just lint` and `just test` pass.
+- Pixel 8a (release APK, server 192.168.31.211:5000): Practice Wipeout 2v2 on Feature Yard. Opened Match menu → SETTINGS and stayed on that screen. At 00:18:12 the match completed (flow Match → Results), Settings closed by itself and Results showed (DEFEAT 7–10). DASHBOARD on Results worked. Dashboard MENU → SETTINGS → BACK still works. No force-stop needed.
+- Evidence: scratchpad nq/n06s.png (Settings in match), n08s.png (Results after completion), n09s.png, n11s.png, n12s.png.
