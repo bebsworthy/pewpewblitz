@@ -9,7 +9,7 @@ use crate::{
     ActivationBody, AllocationGrant, Capability, CapabilityBinding, ControlBody, LobbySessionId,
     MAX_REJOINS_PER_SEAT, ParticipantRebindBody, ParticipantReboundBody, PeerId, RejoinGrantedBody,
     RejoinReason, RejoinRejectedBody, RejoinRequestBody, RequestId, RouteId, RouteRegistration,
-    RoutingErrorCategory, WorkerId, WorkerKind,
+    RoutingErrorCategory, SeatReleasedBody, WorkerId, WorkerKind,
 };
 
 use super::{SupervisorRuntime, random_id128, unix_now_millis};
@@ -33,16 +33,22 @@ pub(super) struct SeatRejoins {
     /// `MAX_REJOINS_PER_SEAT` entries.
     routes: Vec<RouteId>,
     pending: Option<PendingRejoin>,
+    /// The participant left the match on purpose (BRL-8y1f); the seat is never offered again.
+    released: bool,
 }
 
 impl SeatRejoins {
-    /// Apply the per-seat limits: no rebind in flight, fewer than the maximum granted rejoins,
-    /// and no live capability on any of the seat's routes (at most one live grant per seat).
+    /// Apply the per-seat limits: a seat its player left is gone, no rebind in flight, fewer
+    /// than the maximum granted rejoins, and no live capability on any of the seat's routes (at
+    /// most one live grant per seat).
     fn admit(
         &self,
         original_route: RouteId,
         route_is_live: impl Fn(RouteId) -> bool,
     ) -> Result<(), RejoinReason> {
+        if self.released {
+            return Err(RejoinReason::SeatExpired);
+        }
         if self.pending.is_some() {
             return Err(RejoinReason::Busy);
         }
@@ -334,6 +340,37 @@ impl SupervisorRuntime {
         );
     }
 
+    /// Accept a match worker's fact that one participant left on purpose (BRL-8y1f): refuse every
+    /// later rejoin of that seat and tell the owning lobby, once, so it never announces one. A
+    /// fact naming another worker's allocation is a protocol conflict; a repeat is ignored.
+    pub(super) fn release_seat(
+        &mut self,
+        match_worker_id: WorkerId,
+        released: SeatReleasedBody,
+    ) -> Result<(), RoutingErrorCategory> {
+        let record = self
+            .allocations
+            .get_mut(&released.request_id)
+            .filter(|record| {
+                record.match_worker_id == Some(match_worker_id)
+                    && record.allocation_id == Some(released.allocation_id)
+                    && record.match_id == Some(released.match_id)
+            })
+            .ok_or(RoutingErrorCategory::WorkerProtocolConflict)?;
+        let participant = record
+            .participants
+            .iter_mut()
+            .find(|participant| participant.source.player_id == released.player_id)
+            .ok_or(RoutingErrorCategory::WorkerProtocolConflict)?;
+        if participant.rejoins.released {
+            return Ok(());
+        }
+        participant.rejoins.released = true;
+        let lobby_worker_id = record.lobby_worker_id;
+        let _ = self.queue_control_body(lobby_worker_id, ControlBody::SeatReleased(released));
+        Ok(())
+    }
+
     /// Tell the lobby, once, that an activated allocation's match has ended, and refuse any
     /// rejoin still in flight for it. Called when the worker's Result arrives and again when its
     /// allocation record is reclaimed, so a worker that dies without a Result still releases its
@@ -406,6 +443,19 @@ mod tests {
             Err(RejoinReason::LimitReached)
         );
         assert_eq!(seat.granted(), MAX_REJOINS_PER_SEAT);
+    }
+
+    #[test]
+    fn a_released_seat_is_never_admitted_again() {
+        let seat = SeatRejoins {
+            released: true,
+            ..SeatRejoins::default()
+        };
+        assert_eq!(
+            seat.admit(route(1), |_| false),
+            Err(RejoinReason::SeatExpired)
+        );
+        assert!(RejoinReason::SeatExpired.is_terminal());
     }
 
     #[test]

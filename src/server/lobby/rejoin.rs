@@ -15,7 +15,7 @@ use crate::{
 use bevy::prelude::*;
 use brawler_routing::{
     ActivationBody, ControlBody, LobbySessionId, MAX_PARTICIPANTS, MAX_WORKERS, NetcodeClientId,
-    RejoinGrantedBody, RejoinRejectedBody, RejoinRequestBody, RequestId,
+    RejoinGrantedBody, RejoinRejectedBody, RejoinRequestBody, RequestId, SeatReleasedBody,
 };
 use lightyear::prelude::MessageSender;
 use std::{
@@ -315,6 +315,31 @@ impl MatchSeatTable {
         }
     }
 
+    /// Forget the seat its player left on purpose (BRL-8y1f), so a later lobby admission of the
+    /// account is an ordinary welcome rather than a rejoin. A rejoin already in flight for it is
+    /// answered as unavailable.
+    pub(super) fn release_seat(&mut self, released: SeatReleasedBody) {
+        let Some(account) = self.seats.iter().find_map(|(account, seat)| {
+            (seat.grant.request_id == released.request_id
+                && seat.grant.allocation_id == released.allocation_id
+                && seat.grant.match_id == released.match_id
+                && seat.player_id == released.player_id)
+                .then_some(*account)
+        }) else {
+            return;
+        };
+        let Some(seat) = self.seats.remove(&account) else {
+            return;
+        };
+        info!(
+            match_id = released.match_id.get(),
+            "brawler lobby released a match seat its player left"
+        );
+        if let Some(pending) = seat.pending {
+            self.push_delivery(pending.lobby_session_id, RejoinDelivery::Unavailable);
+        }
+    }
+
     fn push_delivery(&mut self, lobby_session_id: LobbySessionId, delivery: RejoinDelivery) {
         // At most one rejoin is in flight per seat, so this stays within the seat bound.
         if self.deliveries.len() < MAX_MATCH_SEATS {
@@ -327,11 +352,11 @@ impl MatchSeatTable {
         match body {
             ControlBody::RejoinGranted(granted) => self.apply_granted(granted.clone()),
             ControlBody::RejoinRejected(rejected) => self.apply_rejected(*rejected, now),
-            // Only the supervisor's end fact releases seats. `ActivationDissolved` is not one: a
-            // Practice lobby session that closes at its own handoff still cancels the
-            // activation while its match runs on; a start that really fails ends the worker,
-            // and that end is announced as `MatchEnded`.
+            // Only the supervisor's end fact releases seats. `ActivationDissolved` is not one:
+            // the lobby forgets an activation once its handoff completes, and a start that
+            // really fails ends the worker, which is announced as `MatchEnded`.
             ControlBody::MatchEnded(ended) => self.release_allocation(*ended),
+            ControlBody::SeatReleased(released) => self.release_seat(*released),
             _ => {}
         }
     }
@@ -381,7 +406,10 @@ pub(super) fn retry_pending_rejoins(
 pub(super) const fn is_rejoin_control(body: &ControlBody) -> bool {
     matches!(
         body,
-        ControlBody::RejoinGranted(_) | ControlBody::RejoinRejected(_) | ControlBody::MatchEnded(_)
+        ControlBody::RejoinGranted(_)
+            | ControlBody::RejoinRejected(_)
+            | ControlBody::MatchEnded(_)
+            | ControlBody::SeatReleased(_)
     )
 }
 
@@ -634,6 +662,45 @@ mod tests {
             table
                 .begin_rejoin(account(2), session(36), client(37), NOW)
                 .is_none()
+        );
+    }
+
+    /// BRL-8y1f: a seat its player left is forgotten, so the next admission of that account is
+    /// an ordinary welcome; a rejoin already in flight is answered unavailable.
+    #[test]
+    fn a_voluntarily_released_seat_is_forgotten() {
+        let mut table = MatchSeatTable::default();
+        table.record(account(1), player(5), grant(7));
+        table.record(account(2), player(6), grant(7));
+        let released = |player_id| SeatReleasedBody {
+            request_id: grant(7).request_id,
+            allocation_id: grant(7).allocation_id,
+            match_id: grant(7).match_id,
+            player_id: player(player_id),
+        };
+        // Another seat of the same match, or an unknown seat, is untouched.
+        table.apply_control(&ControlBody::SeatReleased(released(9)), NOW);
+        assert_eq!(table.seat_count(), 2);
+
+        table.apply_control(&ControlBody::SeatReleased(released(5)), NOW);
+        assert_eq!(table.seat_count(), 1);
+        assert!(
+            table
+                .begin_rejoin(account(1), session(30), client(31), NOW)
+                .is_none(),
+            "no rejoin is offered for a seat its player left"
+        );
+        assert!(table.deliveries.is_empty());
+
+        let in_flight = table
+            .begin_rejoin(account(2), session(40), client(41), NOW)
+            .unwrap();
+        assert_eq!(in_flight.player_id, player(6));
+        table.apply_control(&ControlBody::SeatReleased(released(6)), NOW);
+        assert_eq!(table.seat_count(), 0);
+        assert_eq!(
+            table.deliveries.pop_front(),
+            Some((session(40), RejoinDelivery::Unavailable))
         );
     }
 

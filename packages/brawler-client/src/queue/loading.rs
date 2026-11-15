@@ -83,6 +83,18 @@ impl ClientMatchLoadingModel {
         true
     }
 
+    /// Apply one lobby matchmaking phase exactly as the transport observer does, for flow tests
+    /// that drive the real loading model without a Lightyear lobby session.
+    #[cfg(test)]
+    pub(crate) fn observe_phase_for_test(
+        &mut self,
+        practice: &mut ClientPracticeModel,
+        lifecycle: &mut crate::RoutedClientLifecycle,
+        phase: brawler::lobby::MatchmakingServerPhase,
+    ) {
+        observe_matchmaking_phase(self, practice, lifecycle, phase);
+    }
+
     pub fn take_returned(&mut self) -> bool {
         core::mem::take(&mut self.returned_observation)
     }
@@ -204,6 +216,19 @@ fn observe_matchmaking_phase(
         }
         brawler::lobby::MatchmakingServerPhase::Status { phase, .. } => {
             model.phase = Some(phase);
+        }
+        brawler::lobby::MatchmakingServerPhase::Removed { reservation_id, .. }
+            if lifecycle.accepted_grant.is_some()
+                && model
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| active.reservation_id == reservation_id) =>
+        {
+            // BRL-k0tr: this client already accepted the reservation's match grant and is on its
+            // way to the match. The lobby can no longer return it to the queue, and the match
+            // session reports any start failure itself, so the stale removal must not pull the
+            // flow back to the Dashboard under a running match.
+            info!("brawler client ignored a match-start removal after its match handoff");
         }
         brawler::lobby::MatchmakingServerPhase::Removed { .. } => {
             model.active = None;

@@ -7,7 +7,7 @@
 use super::*;
 use brawler::testing::{
     SEAT_HOLD_TICKS, TestRoutedParticipant, expire_seat_hold_at, fighter_is_bot_controlled,
-    queue_seat_rebind, seat_hold_expiry, take_seat_rebind_replies,
+    queue_seat_rebind, seat_hold_expiry, take_seat_rebind_replies, take_seat_releases,
 };
 use brawler_routing::{ParticipantRebindBody, ParticipantReboundBody, RejoinReason};
 
@@ -248,4 +248,97 @@ fn a_seat_rejoins_at_most_three_times_per_match() {
     }
     assert!(!harness.client_is_active(index));
     assert!(seat_hold_expiry(harness.server.world(), fighter).is_some());
+}
+
+/// BRL-8y1f: Leave Match through the product path. The client tells the worker it is leaving and
+/// only then disconnects; the worker releases the seat (one `SeatReleased` fact for the
+/// supervisor and lobby), never holds it, removes the fighter under today's departure rules (a
+/// lone 1v1 team forfeits) and refuses any later rebind of the seat.
+#[test]
+fn leaving_on_purpose_releases_the_seat_instead_of_holding_it() {
+    let mut harness = active_routed_match();
+    let fighter = harness.server_fighter(PLAYER_ONE.player_id).unwrap();
+    {
+        let mut lifecycle = harness.clients[0]
+            .world_mut()
+            .resource_mut::<brawler_client::RoutedClientLifecycle>();
+        lifecycle.phase = brawler_client::RoutedClientPhase::Match;
+        assert!(lifecycle.request_leave_match());
+    }
+    // The client returns to the lobby only after the worker answered its leave.
+    let mut releases = Vec::new();
+    harness.step_until(|harness| {
+        releases.extend(take_seat_releases(harness.server.world_mut()));
+        harness.clients[0]
+            .world()
+            .resource::<brawler_client::RoutedClientLifecycle>()
+            .phase
+            == brawler_client::RoutedClientPhase::AwaitingMatchUnlink
+    });
+    releases.extend(take_seat_releases(harness.server.world_mut()));
+    assert_eq!(releases.len(), 1, "the left seat is released exactly once");
+    assert_eq!(releases[0].player_id.get(), PLAYER_ONE.player_id);
+    assert!(
+        harness.server_fighter(PLAYER_ONE.player_id).is_some(),
+        "the fighter stays until the session ends"
+    );
+
+    // The session ends; a pre-BRL-yyeg departure follows instead of a held seat.
+    let client = harness.client_entities[0];
+    harness.clients[0]
+        .world_mut()
+        .trigger(Disconnect { entity: client });
+    for _ in 0..SESSION_LOSS_TICKS {
+        harness.step();
+        assert!(
+            seat_hold_expiry(harness.server.world(), fighter).is_none(),
+            "a seat its player left is never held"
+        );
+        if harness.server_fighter(PLAYER_ONE.player_id).is_none() {
+            break;
+        }
+    }
+    harness.suspend_client(0);
+    assert_eq!(harness.server_fighter(PLAYER_ONE.player_id), None);
+    for _ in 0..10 {
+        harness.step();
+    }
+    assert!(matches!(
+        harness.server_match_phase(),
+        MatchPhase::Completed {
+            result: brawler::matchplay::MatchResult::Forfeit {
+                winner: TeamId(1),
+                departed_team: TeamId(0),
+            },
+            ..
+        }
+    ));
+    let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
+    assert_eq!(reply.refusal, Some(RejoinReason::SeatExpired));
+    assert!(take_seat_releases(harness.server.world_mut()).is_empty());
+}
+
+/// BRL-8y1f: a leave refuses rebinds even while the leaving session is still connected, so a
+/// lobby rejoin request that races the release can never put the player back in.
+#[test]
+fn a_seat_its_player_left_refuses_a_racing_rebind() {
+    let mut harness = active_routed_match();
+    let match_id = {
+        let world = harness.server.world_mut();
+        let mut query = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
+        query.single(world).expect("one match").match_id
+    };
+    harness.send_match_command(
+        0,
+        MatchCommandRequest {
+            request_id: 90,
+            match_id,
+            command: MatchCommand::LeaveMatch,
+        },
+    );
+    harness.step_until(|harness| !take_seat_releases(harness.server.world_mut()).is_empty());
+    let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
+    assert_eq!(reply.refusal, Some(RejoinReason::SeatExpired));
+    // The other participant's seat is untouched.
+    assert!(harness.server_fighter(PLAYER_TWO.player_id).is_some());
 }

@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 48;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 49;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -438,6 +438,11 @@ impl<'de> Deserialize<'de> for MatchRouteGrant {
 pub enum MatchCommand {
     SetReady(bool),
     ReadyForRestart,
+    /// The player leaves this match on purpose (BRL-8y1f). The worker treats the end of this
+    /// session as a departure, never as a lost connection: the seat is not held, the fighter is
+    /// removed under today's departure/forfeit rules, and the seat is never offered for rejoin.
+    /// The client disconnects once it has the outcome.
+    LeaveMatch,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

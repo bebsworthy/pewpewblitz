@@ -193,6 +193,26 @@ failure answers `MatchRejoinStatus::Unavailable` and the client shows today's Da
 A seat whose match completes while its player is away is released; that player sees Dashboard,
 not Results.
 
+Leaving on purpose is not a lost session (BRL-8y1f). Netcode reports a requested disconnect and a
+timeout identically to the server, so the client states the intent: confirming Leave Match sends
+`MatchCommand::LeaveMatch` on the match session and disconnects when the worker answers (at most
+2 s later; only a broken link falls back to the hold above). The worker marks the seat left, sends
+one `SeatReleased {request, allocation, match, player}` fact to the supervisor, and removes the
+fighter when that session ends, in every phase, under today's departure/forfeit rules (a lone
+player's team in a two-team match forfeits; Practice teams keep their bots). A left seat is never
+held and refuses every rebind (`SeatExpired`). The supervisor validates the fact against that
+worker's allocation, refuses later rejoins of the seat and forwards it once to the owning lobby,
+which forgets the account's seat (a rejoin already in flight is answered `Unavailable`), so the
+player's next lobby session is an ordinary welcome to Dashboard.
+
+A queue or Practice handoff is complete for the lobby once every participant has its
+`BeginMatchConnect` (BRL-k0tr): the lobby completes the reservation and forgets the activation at
+that point. Each participant then closes its lobby session on purpose, and that close is not a
+participant loss, so it neither cancels the running activation nor sends `Removed` to a
+participant whose lobby session closes a few frames later. A client also ignores a `Removed` for a
+reservation whose match grant it already accepted. Match-start failures after the handoff are
+reported by the match worker on the match session.
+
 ## Routed packet transport
 
 Lightyear 0.29 exposes `Link` as its transport-neutral boundary: concrete IO pushes opaque received

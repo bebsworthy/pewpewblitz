@@ -194,6 +194,10 @@ impl SupervisorRuntime {
                 self.complete_participant_rebind(worker_id, rebound);
                 Ok(true)
             }
+            ControlBody::SeatReleased(released) => self
+                .release_seat(worker_id, released)
+                .map(|()| true)
+                .map_err(RuntimeError::Routing),
             _ => Ok(true),
         };
         match result {

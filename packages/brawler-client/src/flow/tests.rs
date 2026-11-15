@@ -507,6 +507,132 @@ fn match_transition_observations_preserve_loading_match_and_overlay_commits() {
     assert_eq!(commit.overlay, Some(OverlayCommit::Clear));
 }
 
+fn current_flow(app: &App) -> ClientFlow {
+    *app.world().resource::<State<ClientFlow>>().get()
+}
+
+/// Apply one lobby matchmaking phase through the real loading model, then run one frame.
+fn observe_matchmaking_phase(app: &mut App, phase: brawler::lobby::MatchmakingServerPhase) {
+    app.world_mut().resource_scope(
+        |world, mut loading: Mut<super::super::ClientMatchLoadingModel>| {
+            world.resource_scope(
+                |world, mut practice: Mut<super::super::ClientPracticeModel>| {
+                    let mut lifecycle = world.resource_mut::<RoutedClientLifecycle>();
+                    loading.observe_phase_for_test(&mut practice, &mut lifecycle, phase);
+                },
+            );
+        },
+    );
+    app.update();
+}
+
+/// BRL-k0tr: a queue (`PvP`) handoff reaches the match even when the lobby removes the reservation
+/// after this client already accepted its match grant (another participant's lobby session
+/// closed first). Before the fix the stale removal committed the Dashboard under the match.
+#[test]
+fn a_queue_handoff_reaches_the_match_even_after_a_late_reservation_removal() {
+    let membership = lobby_membership_with_brawler();
+    let joined = queue_membership(&membership);
+    let mut app = configured_lobby_flow_app_with(membership, |app| {
+        app.insert_resource(super::super::ClientInputContext::Shell);
+    });
+    app.world_mut()
+        .resource_mut::<RoutedClientLifecycle>()
+        .start_lobby();
+
+    inject_session_observation(
+        &mut app,
+        SessionObservation::QueueOutcome(brawler::lobby::QueueCommandOutcome {
+            request_id: brawler::lobby::QueueRequestId::new(1).unwrap(),
+            decision: brawler::lobby::QueueDecision::Joined(joined.clone()),
+        }),
+    );
+    app.update();
+    assert_eq!(current_flow(&app), ClientFlow::Queue);
+
+    let reservation_id = brawler::lobby::MatchReservationId::new(9).unwrap();
+    observe_matchmaking_phase(
+        &mut app,
+        brawler::lobby::MatchmakingServerPhase::ReservationStarted(
+            brawler::lobby::ReservationStarted {
+                reservation_id,
+                ticket_id: Some(joined.ticket_id),
+                game_type_id: joined.game_type_id.clone(),
+                mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+                map_preset_id: Some(brawler::map::MapPresetId(1)),
+                map_recipe_id: brawler::map::MapRecipeId(1),
+                map_recipe_revision: 1,
+                map_recipe_fingerprint: brawler::map::MapRecipeFingerprint(1),
+                team_count: 2,
+                players_per_team: 1,
+                accepted_build: joined.accepted_build,
+                loading_deadline_millis: 30_000,
+            },
+        ),
+    );
+    app.update();
+    assert_eq!(current_flow(&app), ClientFlow::MatchLoading);
+
+    let grant = brawler::protocol::MatchRouteGrant {
+        request_id: brawler_routing::RequestId::new(1).unwrap(),
+        allocation_id: brawler_routing::AllocationId::new(2).unwrap(),
+        match_id: brawler_routing::MatchId::new(3).unwrap(),
+        route_id: brawler_routing::RouteId::new(4).unwrap(),
+        peer_id: brawler_routing::PeerId::new(5).unwrap(),
+        game_mode: brawler::config::GameMode::Wipeout,
+        capability: brawler::protocol::RouteCapability::from_bytes([7; 32]).unwrap(),
+        activation_expiry_unix_ms: 10,
+        route_expiry_unix_ms: 20,
+    };
+    observe_matchmaking_phase(
+        &mut app,
+        brawler::lobby::MatchmakingServerPhase::BeginMatchConnect(
+            brawler::lobby::BeginMatchConnect {
+                reservation_id,
+                generation: 1,
+                grant,
+            },
+        ),
+    );
+    assert_eq!(
+        app.world()
+            .resource::<RoutedClientLifecycle>()
+            .accepted_grant,
+        Some(grant)
+    );
+
+    // The other participant's lobby session closed first; the lobby removes the reservation and
+    // this still-open lobby session receives the removal after the grant.
+    observe_matchmaking_phase(
+        &mut app,
+        brawler::lobby::MatchmakingServerPhase::Removed {
+            reservation_id,
+            ticket_id: Some(joined.ticket_id),
+            reason: brawler::lobby::MatchStartFailure::ParticipantLost,
+        },
+    );
+    app.update();
+    assert_eq!(
+        current_flow(&app),
+        ClientFlow::MatchLoading,
+        "a removal after the match grant must not return the flow to the Dashboard"
+    );
+
+    // The match session then reaches its countdown and the match is presented.
+    app.world_mut().spawn((
+        brawler::matchplay::MatchRoot,
+        brawler::matchplay::MatchState {
+            match_id: brawler::matchplay::MatchId(3),
+            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            phase: brawler::matchplay::MatchPhase::Countdown { starts_at_tick: 60 },
+            rules_revision: 1,
+        },
+    ));
+    app.update();
+    app.update();
+    assert_eq!(current_flow(&app), ClientFlow::Match);
+}
+
 #[test]
 fn queue_outcomes_preserve_join_cancel_and_stale_content_policies() {
     let membership = lobby_membership_with_brawler();

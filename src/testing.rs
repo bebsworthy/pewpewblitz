@@ -242,3 +242,25 @@ pub fn expire_seat_hold_at(world: &mut World, fighter: Entity, expires_at_tick: 
         .expect("held seat")
         .expires_at_tick = expires_at_tick;
 }
+
+/// How many activation cancels the lobby worker has queued for the supervisor (BRL-k0tr).
+#[must_use]
+pub fn lobby_activation_cancel_count(world: &World) -> usize {
+    world
+        .get_resource::<crate::server::LobbyControlOutbox>()
+        .map_or(
+            0,
+            crate::server::LobbyControlOutbox::activation_cancel_count,
+        )
+}
+
+/// Take the match worker's queued seat-release facts, as its control stream would (BRL-8y1f).
+pub fn take_seat_releases(world: &mut World) -> Vec<brawler_routing::SeatReleasedBody> {
+    let mut queue = world.resource_mut::<crate::server::SeatRebindQueue>();
+    let mut releases = Vec::new();
+    while let Some(released) = queue.front_release() {
+        releases.push(released);
+        queue.pop_release();
+    }
+    releases
+}

@@ -6,8 +6,98 @@ use super::{
     MatchLoadingServerMessage, MatchLoadingStatus, MatchParticipant, MatchPhase, MatchRoot,
     MatchState, MessageReceiver, MessageSender, NetworkTransport, PendingLocalActions, Query, Real,
     Remote, Res, ResMut, Resource, RoutedClientLifecycle, RoutedClientPhase, SessionChannel, Time,
-    With,
+    With, info, warn,
 };
+
+/// How long a confirmed Leave Match waits for the worker's answer before disconnecting anyway.
+/// Only a broken link reaches it; the seat is then held as for any lost session (BRL-8y1f).
+pub(super) const MATCH_LEAVE_ANSWER_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// What the leave driver does this frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LeaveStep {
+    Idle,
+    Send,
+    Wait,
+    Disconnect,
+}
+
+/// Decide the next step of a confirmed Leave Match from the facts this frame.
+fn leave_step(
+    requested: bool,
+    sent: Option<(u64, Duration)>,
+    answered_request: Option<u64>,
+    can_send: bool,
+    now: Duration,
+) -> LeaveStep {
+    if !requested {
+        return LeaveStep::Idle;
+    }
+    match sent {
+        None if can_send => LeaveStep::Send,
+        None => LeaveStep::Disconnect,
+        Some((request_id, _)) if answered_request == Some(request_id) => LeaveStep::Disconnect,
+        Some((_, sent_at)) if now.saturating_sub(sent_at) >= MATCH_LEAVE_ANSWER_TIMEOUT => {
+            LeaveStep::Disconnect
+        }
+        Some(_) => LeaveStep::Wait,
+    }
+}
+
+/// Drive a confirmed Leave Match: tell the match worker, then disconnect once it answered or the
+/// bounded wait passed (BRL-8y1f). Disconnecting without telling it would look like a lost
+/// connection, and the lobby would put the player straight back into the match.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+pub(super) fn drive_match_leave(
+    time: Res<Time<Real>>,
+    mut routed: ResMut<RoutedClientLifecycle>,
+    mut state: ResMut<MatchCommandState>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    mut senders: Query<&mut MessageSender<MatchCommandRequest>, With<Client>>,
+) {
+    if routed.leave_requested && routed.phase != RoutedClientPhase::Match {
+        routed.leave_requested = false;
+    }
+    let match_id = roots.single().ok().map(|root| root.match_id);
+    let step = leave_step(
+        routed.leave_requested,
+        state.leave_sent,
+        state.last_outcome.map(|outcome| outcome.request_id),
+        match_id.is_some() && senders.single().is_ok(),
+        time.elapsed(),
+    );
+    match step {
+        LeaveStep::Idle => state.leave_sent = None,
+        LeaveStep::Wait => {}
+        LeaveStep::Send => {
+            let (Some(match_id), Ok(mut sender)) = (match_id, senders.single_mut()) else {
+                return;
+            };
+            state.next_request_id = state.next_request_id.saturating_add(1).max(1);
+            sender.send::<SessionChannel>(MatchCommandRequest {
+                request_id: state.next_request_id,
+                match_id,
+                command: MatchCommand::LeaveMatch,
+            });
+            state.leave_sent = Some((state.next_request_id, time.elapsed()));
+            info!("brawler client told the match worker it is leaving");
+        }
+        LeaveStep::Disconnect => {
+            if state.leave_sent.is_some_and(|(request_id, _)| {
+                state.last_outcome.map(|o| o.request_id) != Some(request_id)
+            }) {
+                warn!("brawler client left the match without the worker's answer");
+            }
+            routed.leave_requested = false;
+            state.leave_sent = None;
+            let _ = routed.request_return_to_lobby();
+        }
+    }
+}
 
 pub(super) fn process_match_command_outcomes(
     mut state: ResMut<MatchCommandState>,
@@ -278,8 +368,51 @@ pub(crate) fn should_rearm_headless_match_command(
 
 #[cfg(test)]
 mod tests {
-    use super::{MatchLoadingCommandState, match_loading_ready_to_send, ready_retry_due};
+    use super::{
+        LeaveStep, MATCH_LEAVE_ANSWER_TIMEOUT, MatchLoadingCommandState, leave_step,
+        match_loading_ready_to_send, ready_retry_due,
+    };
     use core::time::Duration;
+
+    #[test]
+    fn a_confirmed_leave_tells_the_worker_and_waits_a_bounded_time_for_its_answer() {
+        let sent_at = Duration::from_secs(10);
+        assert_eq!(
+            leave_step(false, None, None, true, sent_at),
+            LeaveStep::Idle
+        );
+        assert_eq!(leave_step(true, None, None, true, sent_at), LeaveStep::Send);
+        // Without a match session to tell, the client leaves at once.
+        assert_eq!(
+            leave_step(true, None, None, false, sent_at),
+            LeaveStep::Disconnect
+        );
+        let sent = Some((4, sent_at));
+        assert_eq!(leave_step(true, sent, None, true, sent_at), LeaveStep::Wait);
+        assert_eq!(
+            leave_step(true, sent, Some(3), true, sent_at),
+            LeaveStep::Wait,
+            "an earlier command's answer is not the leave's"
+        );
+        assert_eq!(
+            leave_step(true, sent, Some(4), true, sent_at),
+            LeaveStep::Disconnect
+        );
+        assert_eq!(
+            leave_step(
+                true,
+                sent,
+                None,
+                true,
+                sent_at + MATCH_LEAVE_ANSWER_TIMEOUT.saturating_sub(Duration::from_millis(1))
+            ),
+            LeaveStep::Wait
+        );
+        assert_eq!(
+            leave_step(true, sent, None, true, sent_at + MATCH_LEAVE_ANSWER_TIMEOUT),
+            LeaveStep::Disconnect
+        );
+    }
 
     #[test]
     fn match_loading_readiness_requires_every_owned_fact() {

@@ -1150,6 +1150,7 @@ fn failed_initial_countdown(gate: &MatchLoadingGate, phase: MatchPhase) -> bool 
 
 #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 fn process_match_commands(
+    mut commands: Commands,
     tick: Res<crate::timing::SimulationTick>,
     match_root: Query<&MatchState, With<MatchRoot>>,
     mut sessions: Query<(
@@ -1161,6 +1162,7 @@ fn process_match_commands(
     )>,
     mut fighters: Query<
         (
+            Entity,
             &ControlledBy,
             &mut MatchParticipant,
             Option<&crate::combat::ResolvedWeapon>,
@@ -1200,11 +1202,17 @@ fn process_match_commands(
             }
             let participant = fighters
                 .iter_mut()
-                .find(|(controlled, _, _)| controlled.owner == connection);
+                .find(|(_, controlled, _, _)| controlled.owner == connection);
             let decision = if request.match_id != match_state.match_id {
                 MatchCommandDecision::WrongMatch
-            } else if let Some((_, mut participant, selected)) = participant {
+            } else if let Some((fighter, _, mut participant, selected)) = participant {
                 match (request.command, match_state.phase) {
+                    // A leave is honoured in every phase; `seat_hold` turns the end of this
+                    // session into a departure and releases the seat (BRL-8y1f).
+                    (MatchCommand::LeaveMatch, _) => {
+                        commands.entity(fighter).insert(seat_hold::LeftSeat);
+                        MatchCommandDecision::Accepted
+                    }
                     (MatchCommand::SetReady(value), MatchPhase::Waiting) if selected.is_some() => {
                         participant.ready = value;
                         MatchCommandDecision::Accepted

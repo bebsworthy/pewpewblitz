@@ -52,6 +52,9 @@ pub enum ControlType {
     RejoinRejected = 25,
     /// Supervisor -> lobby: an activated allocation's match has ended; its seats are released.
     MatchEnded = 26,
+    /// Match worker -> supervisor -> lobby: a participant left its match on purpose, so its seat
+    /// is released and must never be offered for rejoin (BRL-8y1f).
+    SeatReleased = 27,
 }
 
 impl TryFrom<u8> for ControlType {
@@ -83,6 +86,7 @@ impl TryFrom<u8> for ControlType {
             24 => Ok(Self::RejoinGranted),
             25 => Ok(Self::RejoinRejected),
             26 => Ok(Self::MatchEnded),
+            27 => Ok(Self::SeatReleased),
             other => Err(CodecError::UnsupportedType(other)),
         }
     }
@@ -606,6 +610,17 @@ pub struct ParticipantReboundBody {
     pub refusal: Option<RejoinReason>,
 }
 
+/// One participant's seat released by a voluntary leave (BRL-8y1f). The match worker names the
+/// seat exactly as its manifest does; the supervisor validates it against that worker's
+/// allocation and forwards the same body to the owning lobby.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SeatReleasedBody {
+    pub request_id: RequestId,
+    pub allocation_id: AllocationId,
+    pub match_id: MatchId,
+    pub player_id: crate::PlayerId,
+}
+
 /// Supervisor-to-lobby fresh grant for a held seat. The grant is a bearer secret and stays
 /// redacted by `AllocationGrant`'s Debug implementation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -948,6 +963,7 @@ pub enum ControlBody {
     RejoinGranted(RejoinGrantedBody),
     RejoinRejected(RejoinRejectedBody),
     MatchEnded(ActivationBody),
+    SeatReleased(SeatReleasedBody),
 }
 
 impl fmt::Debug for ControlBody {
@@ -1013,6 +1029,9 @@ impl fmt::Debug for ControlBody {
                 .field(value)
                 .finish(),
             Self::MatchEnded(value) => formatter.debug_tuple("MatchEnded").field(value).finish(),
+            Self::SeatReleased(value) => {
+                formatter.debug_tuple("SeatReleased").field(value).finish()
+            }
         }
     }
 }
@@ -1057,6 +1076,7 @@ impl ControlBody {
             Self::RejoinGranted(_) => ControlType::RejoinGranted,
             Self::RejoinRejected(_) => ControlType::RejoinRejected,
             Self::MatchEnded(_) => ControlType::MatchEnded,
+            Self::SeatReleased(_) => ControlType::SeatReleased,
         }
     }
 
@@ -1106,7 +1126,8 @@ impl ControlBody {
             | Self::RejoinRequest(_)
             | Self::ParticipantRebind(_)
             | Self::ParticipantRebound(_)
-            | Self::RejoinRejected(_) => Ok(()),
+            | Self::RejoinRejected(_)
+            | Self::SeatReleased(_) => Ok(()),
             Self::LobbyAuthenticated(value) => {
                 if value.route_id.get() == 0
                     || value.peer_id.get() == 0
@@ -1312,6 +1333,12 @@ impl ControlBody {
                 encoder.put_u64(value.rejoin_id.get());
                 encoder.put_u16(value.reason as u16);
             }
+            Self::SeatReleased(value) => {
+                encoder.put_u64(value.request_id.get());
+                encoder.put_u128(value.allocation_id.get());
+                encoder.put_u128(value.match_id.get());
+                encoder.put_u64(value.player_id.get());
+            }
         }
         Ok(encoder.finish())
     }
@@ -1342,6 +1369,7 @@ impl ControlBody {
             | ControlType::ParticipantRebind
             | ControlType::MatchEnded => Some(40),
             ControlType::LobbyCapacity => Some(1),
+            ControlType::SeatReleased => Some(48),
             ControlType::RejoinRequest => Some(80),
             ControlType::RejoinGranted => Some(56 + GRANT_BYTES),
         };
@@ -1582,6 +1610,12 @@ impl ControlBody {
             ControlType::RejoinRejected => Self::RejoinRejected(RejoinRejectedBody {
                 rejoin_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
                 reason: RejoinReason::try_from(decoder.u16()?)?,
+            }),
+            ControlType::SeatReleased => Self::SeatReleased(SeatReleasedBody {
+                request_id: RequestId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
+                allocation_id: AllocationId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                match_id: MatchId::new(decoder.u128()?).ok_or(CodecError::ZeroId)?,
+                player_id: crate::PlayerId::new(decoder.u64()?).ok_or(CodecError::ZeroId)?,
             }),
         };
         body.validate()?;
@@ -2188,6 +2222,22 @@ mod tests {
         );
         assert!(RejoinReason::SeatExpired.is_terminal());
         assert!(!RejoinReason::SeatConnected.is_terminal());
+    }
+
+    #[test]
+    fn seat_released_round_trips_with_its_fixed_length() {
+        let body = ControlBody::SeatReleased(SeatReleasedBody {
+            request_id: id64(1),
+            allocation_id: id128(2),
+            match_id: id128(3),
+            player_id: id64(4),
+        });
+        let encoded = frame(body.clone()).encode().unwrap();
+        assert_eq!(encoded.len(), CONTROL_HEADER_BYTES + 48);
+        assert_eq!(ControlFrame::decode(&encoded).unwrap().body, body);
+        let mut short = encoded;
+        short.pop();
+        assert!(ControlFrame::decode(&short).is_err());
     }
 
     #[test]

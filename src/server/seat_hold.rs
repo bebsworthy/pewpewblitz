@@ -7,6 +7,10 @@
 //! client that may reclaim the seat; admission then re-attaches control to the same fighter. At
 //! expiry, or for a departure outside `Active`, the fighter is removed and today's
 //! departure/forfeit rules apply.
+//!
+//! A player who leaves on purpose (`MatchCommand::LeaveMatch`, BRL-8y1f) is not a lost session:
+//! the seat is marked [`LeftSeat`], released to the supervisor and lobby at once, and the end of
+//! that session removes the fighter in every phase, exactly like a departure before BRL-yyeg.
 
 use crate::{
     matchplay::{MatchParticipant, MatchPhase, MatchRoot, MatchState},
@@ -16,11 +20,11 @@ use crate::{
 use bevy::{ecs::system::SystemParam, prelude::*};
 use brawler_routing::{
     MAX_PARTICIPANTS, MAX_REJOINS_PER_SEAT, ParticipantRebindBody, ParticipantReboundBody,
-    RejoinReason,
+    RejoinReason, SeatReleasedBody,
 };
 use lightyear::prelude::input::native::{ActionState, NativeBuffer};
 use lightyear::prelude::{ControlledBy, Disconnected, Lifetime, LinkOf};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// How long a lost routed participant's seat is held while the match is Active (owner decision
 /// Q1). This is code-owned session policy beside the 10 s routed session bound, not balance.
@@ -45,6 +49,11 @@ pub(crate) struct SeatHold {
     pub(crate) expires_at_tick: u64,
 }
 
+/// The fighter's player chose to leave the match (BRL-8y1f). Inserted by the accepted
+/// `MatchCommand::LeaveMatch`; the end of its session is then a departure, never a held seat.
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct LeftSeat;
+
 /// The routed identity that may reclaim one participant's seat, overriding the immutable
 /// manifest identity once the supervisor has rebound the seat.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +68,8 @@ pub(crate) struct SeatBinding {
 pub(crate) struct ParticipantRebinds {
     bindings: BTreeMap<u64, SeatBinding>,
     accepted: BTreeMap<u64, u8>,
+    /// Seats whose players left on purpose; they never accept a rebind again.
+    left: BTreeSet<u64>,
 }
 
 impl ParticipantRebinds {
@@ -82,6 +93,16 @@ impl ParticipantRebinds {
     fn release(&mut self, player_id: u64) {
         self.bindings.remove(&player_id);
     }
+
+    /// Record a voluntary leave; `false` when the seat was already left.
+    fn leave(&mut self, player_id: u64) -> bool {
+        self.release(player_id);
+        self.left.insert(player_id)
+    }
+
+    fn has_left(&self, player_id: u64) -> bool {
+        self.left.contains(&player_id)
+    }
 }
 
 /// Bounded supervisor rebind requests and the worker's replies. The worker control owner pushes
@@ -90,6 +111,8 @@ impl ParticipantRebinds {
 pub(crate) struct SeatRebindQueue {
     requests: VecDeque<ParticipantRebindBody>,
     replies: VecDeque<ParticipantReboundBody>,
+    /// One release fact per left seat, bounded by the participant count (BRL-8y1f).
+    releases: VecDeque<SeatReleasedBody>,
 }
 
 impl SeatRebindQueue {
@@ -109,6 +132,14 @@ impl SeatRebindQueue {
 
     pub(crate) fn pop_reply(&mut self) {
         let _ = self.replies.pop_front();
+    }
+
+    pub(crate) fn front_release(&self) -> Option<SeatReleasedBody> {
+        self.releases.front().copied()
+    }
+
+    pub(crate) fn pop_release(&mut self) {
+        let _ = self.releases.pop_front();
     }
 }
 
@@ -157,7 +188,14 @@ impl Plugin for SeatHoldPlugin {
                     .in_set(crate::gameplay::GameplaySet::Lifecycle)
                     .before(crate::matchplay::MatchSet::Lifecycle),
             )
-            .add_systems(Update, answer_participant_rebinds);
+            .add_systems(
+                Update,
+                (
+                    release_left_seats.after(super::ServerSessionSet::CommitCommands),
+                    answer_participant_rebinds,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -169,8 +207,47 @@ fn owner_lost(
     controlled.is_none_or(|controlled| !links.get(controlled.owner).is_ok_and(|lost| !lost))
 }
 
+/// Release the seat of every routed participant whose leave was just accepted (BRL-8y1f): it
+/// can no longer be rebound, and the supervisor and lobby learn it at once so the lobby never
+/// announces a rejoin to the player's next lobby session.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "Bevy system parameters are owned by the schedule"
+)]
+fn release_left_seats(
+    role: Res<super::ServerRoleResource>,
+    mut rebinds: ResMut<ParticipantRebinds>,
+    mut queue: ResMut<SeatRebindQueue>,
+    left: Query<&PlayerId, (With<Fighter>, With<RoutedSeat>, Added<LeftSeat>)>,
+) {
+    for player in &left {
+        if !rebinds.leave(player.0) {
+            continue;
+        }
+        info!(
+            player_id = player.0,
+            "brawler match participant left; its seat is released"
+        );
+        let (Some(manifest), Some(player_id)) =
+            (role.manifest(), brawler_routing::PlayerId::new(player.0))
+        else {
+            continue;
+        };
+        if queue.releases.len() < MAX_PARTICIPANTS {
+            queue.releases.push_back(SeatReleasedBody {
+                request_id: manifest.request_id,
+                allocation_id: manifest.allocation_id,
+                match_id: manifest.match_id,
+                player_id,
+            });
+        }
+    }
+}
+
 /// Begin a hold for every routed fighter whose session ended while the match is Active, and
-/// remove the fighter of a session lost in any other phase (today's departure behavior).
+/// remove the fighter of a session lost in any other phase (today's departure behavior). A
+/// fighter whose player left on purpose is always removed: leaving is a departure.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -182,18 +259,30 @@ fn hold_released_seats(
     roots: Query<&MatchState, With<MatchRoot>>,
     links: Query<Has<Disconnected>, With<LinkOf>>,
     fighters: Query<
-        (Entity, &PlayerId, &MatchParticipant, Option<&ControlledBy>),
+        (
+            Entity,
+            &PlayerId,
+            &MatchParticipant,
+            Option<&ControlledBy>,
+            Has<LeftSeat>,
+        ),
         (With<Fighter>, With<RoutedSeat>, Without<SeatHold>),
     >,
 ) {
     let Ok(state) = roots.single() else {
         return;
     };
-    for (entity, player, participant, controlled) in &fighters {
+    for (entity, player, participant, controlled, left) in &fighters {
         if !owner_lost(controlled, &links) {
             continue;
         }
-        if matches!(state.phase, MatchPhase::Active { .. })
+        if left {
+            info!(
+                player_id = player.0,
+                "brawler match participant departed after leaving; the fighter is removed"
+            );
+            commands.entity(entity).try_despawn();
+        } else if matches!(state.phase, MatchPhase::Active { .. })
             && participant.match_id == state.match_id
         {
             info!(
@@ -249,10 +338,11 @@ enum SeatState {
 fn rebind_refusal(
     phase_active: bool,
     seat: SeatState,
+    left: bool,
     limit_reached: bool,
 ) -> Option<RejoinReason> {
     match seat {
-        _ if !phase_active => Some(RejoinReason::SeatExpired),
+        _ if !phase_active || left => Some(RejoinReason::SeatExpired),
         SeatState::Gone => Some(RejoinReason::SeatExpired),
         _ if limit_reached => Some(RejoinReason::LimitReached),
         SeatState::Connected => Some(RejoinReason::SeatConnected),
@@ -286,6 +376,7 @@ fn answer_participant_rebinds(
         let refusal = rebind_refusal(
             phase_active,
             seat,
+            rebinds.has_left(request.player_id.get()),
             rebinds.limit_reached(request.player_id.get()),
         );
         if refusal.is_none() {
@@ -339,23 +430,30 @@ mod tests {
 
     #[test]
     fn only_a_held_seat_of_an_active_match_accepts_a_rebind() {
-        assert_eq!(rebind_refusal(true, SeatState::Held, false), None);
+        assert_eq!(rebind_refusal(true, SeatState::Held, false, false), None);
         assert_eq!(
-            rebind_refusal(true, SeatState::Connected, false),
+            rebind_refusal(true, SeatState::Connected, false, false),
             Some(RejoinReason::SeatConnected)
         );
         assert_eq!(
-            rebind_refusal(true, SeatState::Gone, false),
+            rebind_refusal(true, SeatState::Gone, false, false),
             Some(RejoinReason::SeatExpired)
         );
         assert_eq!(
-            rebind_refusal(false, SeatState::Held, false),
+            rebind_refusal(false, SeatState::Held, false, false),
             Some(RejoinReason::SeatExpired)
         );
         assert_eq!(
-            rebind_refusal(true, SeatState::Held, true),
+            rebind_refusal(true, SeatState::Held, false, true),
             Some(RejoinReason::LimitReached)
         );
+        // A seat its player left is never rebound, whether or not the session has ended yet.
+        for seat in [SeatState::Held, SeatState::Connected, SeatState::Gone] {
+            assert_eq!(
+                rebind_refusal(true, seat, true, false),
+                Some(RejoinReason::SeatExpired)
+            );
+        }
     }
 
     #[test]

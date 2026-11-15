@@ -36,8 +36,8 @@ pub use control::{
     HeartbeatBody, LobbyAuthenticated, LobbyAuthenticatedBody, LobbyCapacityBody,
     LobbyNetcodeAuthenticatedBody, Manifest, ManifestBody, ParticipantRebindBody,
     ParticipantReboundBody, PeerClose, PeerCloseBody, Ready, ReadyBody, RejoinGrantedBody,
-    RejoinReason, RejoinRejectedBody, RejoinRequestBody, ResultBody, SequenceDisposition, Stop,
-    StopBody,
+    RejoinReason, RejoinRejectedBody, RejoinRequestBody, ResultBody, SeatReleasedBody,
+    SequenceDisposition, Stop, StopBody,
 };
 pub use digest::{MANIFEST_DIGEST_DOMAIN, RESULT_DIGEST_DOMAIN, manifest_digest, result_digest};
 pub use error::{CodecError, RoutingErrorCategory};

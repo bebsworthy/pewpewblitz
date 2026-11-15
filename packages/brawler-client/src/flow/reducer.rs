@@ -517,6 +517,10 @@ pub(super) fn resolve_flow_action(
         return;
     }
     if let Some(observation) = actions.session.take() {
+        // Session facts are rare (one per lifecycle step), so each is logged with the screen it
+        // was reduced on; with the flow-change record in `commit_flow` this explains every
+        // navigation on a device without a debugger (BRL-k0tr).
+        info!(flow = ?flow.get(), ?observation, "brawler client flow observed a session fact");
         if matches!(
             observation,
             SessionObservation::UnexpectedLoss
@@ -886,6 +890,7 @@ pub(super) fn commit_flow(
     mut overlay: ResMut<ClientOverlay>,
     mut navigation: ResMut<FlowNavigation>,
     burst: Option<ResMut<super::screens::shared::FlowBurst>>,
+    current: Res<State<ClientFlow>>,
 ) {
     if let Some(error) = &commit.error {
         *overlay = ClientOverlay::Error(error.clone());
@@ -954,6 +959,9 @@ pub(super) fn commit_flow(
         );
     }
     if let Some(flow) = commit.next_flow {
+        if flow != *current.get() {
+            info!(from = ?current.get(), to = ?flow, "brawler client flow changed");
+        }
         next_flow.set(flow);
         if flow != ClientFlow::Connecting {
             commands.remove_resource::<PendingConnection>();

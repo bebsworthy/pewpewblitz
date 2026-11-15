@@ -358,3 +358,135 @@ fn product_lobby_cross_pool_snapshots_are_shared_but_membership_is_private() {
             .is_some()
     );
 }
+
+/// Feed one supervisor control body to the product lobby, as its control stream would.
+fn apply_lobby_control(harness: &mut Harness, sequence: u64, body: brawler_routing::ControlBody) {
+    let frame = brawler_routing::ControlFrame::from_raw_sequence(
+        sequence,
+        brawler_routing::ProcessId::new(2).unwrap(),
+        brawler_routing::WorkerId::new(3).unwrap(),
+        body,
+    )
+    .unwrap();
+    harness
+        .server
+        .world_mut()
+        .resource_mut::<brawler::server::LobbyState>()
+        .apply_control_frame(frame)
+        .unwrap();
+}
+
+/// Wait for the lobby's allocation request and grant every participant a route, as the
+/// supervisor would after starting the match worker.
+fn grant_pending_allocation(harness: &mut Harness, sequence: u64) {
+    let mut request = None;
+    for _ in 0..600 {
+        harness.step();
+        request = harness
+            .server
+            .world_mut()
+            .resource_mut::<brawler::server::LobbyState>()
+            .pending_allocate_request()
+            .unwrap();
+        if request.is_some() {
+            break;
+        }
+    }
+    let request = request.expect("the reservation requests an allocation");
+    let grants = request
+        .participants
+        .iter()
+        .zip(1_u8..)
+        .map(|(participant, index)| brawler_routing::AllocationGrant {
+            lobby_session_id: participant.lobby_session_id,
+            route_id: brawler_routing::RouteId::new(500 + u128::from(index)).unwrap(),
+            peer_id: brawler_routing::PeerId::new(600 + u128::from(index)).unwrap(),
+            capability: brawler_routing::Capability::from_bytes([index; 32]).unwrap(),
+            activation_expiry_unix_ms: 1,
+            route_expiry_unix_ms: 2,
+        })
+        .collect();
+    apply_lobby_control(
+        harness,
+        sequence,
+        brawler_routing::ControlBody::AllocationGranted(brawler_routing::AllocationGrantedBody {
+            request_id: request.request_id,
+            allocation_id: brawler_routing::AllocationId::new(70).unwrap(),
+            match_id: brawler_routing::MatchId::new(71).unwrap(),
+            worker_id: brawler_routing::WorkerId::new(72).unwrap(),
+            grants,
+        }),
+    );
+}
+
+/// BRL-k0tr: once every participant has its `BeginMatchConnect`, each client closes its lobby
+/// session on purpose. A participant whose lobby session closes first must not cancel the running
+/// activation or send `Removed` to a participant whose lobby session closes a few frames later
+/// (a phone on Wi-Fi), which pulled that client's flow back to the Dashboard under its match.
+#[test]
+fn a_handed_off_lobby_session_closing_first_does_not_remove_the_other_participant() {
+    let mut harness = Harness::new_product_lobby(2);
+    wait_for_product_lobby(&mut harness);
+    apply_lobby_control(
+        &mut harness,
+        1,
+        brawler_routing::ControlBody::LobbyCapacity(brawler_routing::LobbyCapacityBody {
+            free_match_slots: 1,
+        }),
+    );
+    let game_index = harness.clients[0]
+        .world()
+        .get::<brawler_client::ClientLobbyMembership>(harness.client_entities[0])
+        .unwrap()
+        .game_types
+        .iter()
+        .position(|game| game.id.as_str() == "wipeout-1v1")
+        .expect("the 1v1 Wipeout game is advertised");
+    start_product_join(&mut harness, 0, game_index);
+    start_product_join(&mut harness, 1, game_index);
+    grant_pending_allocation(&mut harness, 2);
+
+    // Both clients accept their BeginMatchConnect grant.
+    harness.step_until(|harness| {
+        harness.clients.iter().all(|client| {
+            client
+                .world()
+                .resource::<brawler_client::RoutedClientLifecycle>()
+                .accepted_grant
+                .is_some()
+        })
+    });
+
+    // The first participant's lobby session closes at its handoff; the second one stays open
+    // for a while longer, as a slower phone's does.
+    let first = harness.client_entities[0];
+    harness.clients[0]
+        .world_mut()
+        .trigger(Disconnect { entity: first });
+    harness.step_until(|harness| {
+        harness.clients[0]
+            .world()
+            .get::<Disconnected>(first)
+            .is_some()
+    });
+    for _ in 0..30 {
+        harness.step();
+    }
+
+    assert_eq!(
+        brawler::testing::lobby_activation_cancel_count(harness.server.world()),
+        0,
+        "a completed handoff never cancels the activation of the match it started"
+    );
+    let loading = harness.clients[1]
+        .world()
+        .resource::<brawler_client::ClientMatchLoadingModel>();
+    assert!(
+        loading.active().is_some(),
+        "the second participant is still on its way to the match"
+    );
+    assert_eq!(
+        loading.phase(),
+        Some(brawler::lobby::MatchLoadingPhase::Connecting)
+    );
+}

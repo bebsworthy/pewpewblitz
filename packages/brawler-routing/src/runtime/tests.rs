@@ -1088,4 +1088,52 @@ mod rejoin_minting {
                 if body.allocation_id.get() == ALLOCATION && body.match_id.get() == MATCH
         ));
     }
+
+    /// BRL-8y1f: a participant who left on purpose releases its seat. The owning lobby is told
+    /// once, and every later rejoin of that seat is refused for a terminal reason.
+    #[test]
+    fn a_seat_released_by_a_voluntary_leave_is_never_granted_again() {
+        let mut fixture = fixture();
+        let original = fixture.original_capability.clone();
+        fixture.runtime.core_mut().revoke_capability(&original);
+        let released = crate::SeatReleasedBody {
+            request_id: RequestId::new(REQUEST).unwrap(),
+            allocation_id: AllocationId::new(ALLOCATION).unwrap(),
+            match_id: MatchId::new(MATCH).unwrap(),
+            player_id: PlayerId::new(PLAYER).unwrap(),
+        };
+        // Only the allocation's own match worker may release its seats.
+        assert_eq!(
+            fixture
+                .runtime
+                .release_seat(fixture.lobby.worker_id, released),
+            Err(RoutingErrorCategory::WorkerProtocolConflict)
+        );
+        let mut unknown = released;
+        unknown.player_id = PlayerId::new(PLAYER + 1).unwrap();
+        assert_eq!(
+            fixture
+                .runtime
+                .release_seat(fixture.match_worker.worker_id, unknown),
+            Err(RoutingErrorCategory::WorkerProtocolConflict)
+        );
+        assert!(drained(&mut fixture.runtime).is_empty());
+
+        for _ in 0..2 {
+            fixture
+                .runtime
+                .release_seat(fixture.match_worker.worker_id, released)
+                .unwrap();
+        }
+        let forwarded = drained(&mut fixture.runtime);
+        assert_eq!(forwarded.len(), 1, "the lobby is told exactly once");
+        assert_eq!(forwarded[0].0, fixture.lobby.worker_id);
+        assert_eq!(forwarded[0].1, ControlBody::SeatReleased(released));
+
+        // Without the release this seat would now be granted (see the minting test above).
+        assert!(matches!(
+            rejoin(&mut fixture, 1),
+            ControlBody::RejoinRejected(rejected) if rejected.reason == RejoinReason::SeatExpired
+        ));
+    }
 }

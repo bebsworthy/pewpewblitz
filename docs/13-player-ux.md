@@ -250,7 +250,9 @@ Delete Brawler, Leave Match, and Change Server share the same fullscreen confirm
 white display type with an `ink` stroke and slanted cut-corner actions. Safe actions use `panel`;
 confirming actions use `play`. Wide windows place actions side by side; compact windows stack them with vertical scrolling
 and focus reveal. Arrow keys or gamepad navigation move between actions; cancel returns safely.
-The Leave Match confirmation does not pause simulation.
+The Leave Match confirmation does not pause simulation. Confirming it is a departure: the player
+returns to Dashboard, the fighter is removed under the usual departure/forfeit rules, and the
+automatic rejoin of a lost connection never applies to a match the player chose to leave.
 
 Game Type Select edits a private draft from the current bounded server advertisement. Confirm
 commits an exact current `GameTypeId` and revision; Back discards the draft. The UI describes the

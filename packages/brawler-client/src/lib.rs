@@ -187,6 +187,9 @@ pub struct RoutedClientLifecycle {
     pub rejoin: RoutedRejoin,
     /// Set once when a rejoined match session is accepted; the product flow consumes it.
     pub rejoined: bool,
+    /// The player confirmed Leave Match (BRL-8y1f). The session tells the match worker it is
+    /// leaving and only then disconnects, so the worker releases the seat instead of holding it.
+    pub leave_requested: bool,
 }
 
 /// Progress of one automatic match rejoin.
@@ -211,6 +214,7 @@ impl RoutedClientLifecycle {
         self.current_request_id = None;
         self.accepted_grant = None;
         self.rejoin = RoutedRejoin::None;
+        self.leave_requested = false;
     }
 
     /// Accept exactly one authenticated grant for the current lobby request.
@@ -256,6 +260,17 @@ impl RoutedClientLifecycle {
     #[must_use]
     pub fn rejoin_in_progress(&self) -> bool {
         self.rejoin != RoutedRejoin::None
+    }
+
+    /// The player chose to leave the running match (BRL-8y1f). Unlike a lost connection this
+    /// must release the seat, so the session first sends `MatchCommand::LeaveMatch` and returns to
+    /// the lobby when the worker answers (or after a bounded wait).
+    pub fn request_leave_match(&mut self) -> bool {
+        if self.phase != RoutedClientPhase::Match {
+            return false;
+        }
+        self.leave_requested = true;
+        true
     }
 
     /// Request an intentional match-to-lobby transition. The caller still needs the session
@@ -385,6 +400,8 @@ struct MatchCommandState {
     next_request_id: u64,
     sent_for_phase: Option<(brawler::matchplay::MatchId, MatchPhase)>,
     last_outcome: Option<MatchCommandOutcome>,
+    /// The `LeaveMatch` request in flight and when it was sent (BRL-8y1f).
+    leave_sent: Option<(u64, Duration)>,
 }
 
 /// Marker proving that the windowed presentation composition is installed.

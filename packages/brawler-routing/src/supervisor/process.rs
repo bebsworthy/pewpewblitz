@@ -1417,9 +1417,7 @@ fn process_control_frame(
                 exit: *exit,
             });
         }
-        ControlBody::Failure(_) => {
-            return Err(RoutingErrorCategory::WorkerReportedFailure);
-        }
+        ControlBody::Failure(_) => return Err(RoutingErrorCategory::WorkerReportedFailure),
         ControlBody::Result(result) => {
             let expected = if worker.spec.registration.kind == WorkerKind::Match {
                 MatchManifestV1::decode(&worker.spec.manifest.manifest)
@@ -1461,7 +1459,8 @@ fn process_control_frame(
         | ControlBody::ParticipantRebound(_)
         | ControlBody::RejoinGranted(_)
         | ControlBody::RejoinRejected(_)
-        | ControlBody::MatchEnded(_) => {
+        | ControlBody::MatchEnded(_)
+        | ControlBody::SeatReleased(_) => {
             // Other control bodies belong to the routing/worker protocol.  They are decoded and
             // sequence-checked here, but their domain semantics stay outside process supervision.
         }

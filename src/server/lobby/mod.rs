@@ -2306,6 +2306,7 @@ fn lobby_deliver_product_grants(
     mut state: ResMut<LobbyState>,
     mut queue: ResMut<QueueState>,
     mut formation: ResMut<ProductFormationState>,
+    mut frame: ResMut<LobbyQueueFrame>,
     authority: Res<crate::profiles::ProfileAuthority>,
     mut seats: ResMut<rejoin::MatchSeatTable>,
     mut clients: Query<(
@@ -2399,6 +2400,30 @@ fn lobby_deliver_product_grants(
             seats.record(account, session.player_id, grant);
         }
     }
+    if formation.begin_sent.len() == participant_count {
+        frame.snapshot_changed |= formation.practice.is_none();
+        complete_product_handoff(&mut state, &mut queue, &mut formation, reservation_id);
+    }
+}
+
+/// Every participant has its `BeginMatchConnect`, so the lobby's part of this formation is over
+/// (BRL-k0tr). Each client now closes its lobby session on purpose; that close is the handoff,
+/// not a lost participant. Completing the reservation here means the closes find no reservation
+/// to cancel: no `CancelActivation` for a match that runs on and no `Removed` to a participant
+/// whose lobby session closes a few frames later than another's. Match-start failures from here
+/// on are reported by the match worker on the match session.
+fn complete_product_handoff(
+    state: &mut LobbyState,
+    queue: &mut QueueState,
+    formation: &mut ProductFormationState,
+    reservation_id: crate::lobby::MatchReservationId,
+) {
+    if formation.practice.is_none() {
+        let _handed_off = queue.complete_reservation(reservation_id);
+    }
+    formation.clear_active();
+    state.complete_product_activation();
+    info!("brawler lobby completed a match handoff");
 }
 
 fn lobby_deliver_grants(

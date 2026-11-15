@@ -610,7 +610,9 @@ fn resolve_results_replay_action(
         }
         FlowUiAction::ConfirmLeaveMatch => {
             result_state.context = None;
-            let _ = routed.request_return_to_lobby();
+            // BRL-8y1f: a deliberate leave releases the seat; the session tells the match
+            // worker before it disconnects, so no automatic rejoin follows.
+            let _ = routed.request_leave_match();
             commit.overlay = Some(OverlayCommit::Clear);
         }
         _ => unreachable!("Results/replay action was routed to the wrong reducer"),

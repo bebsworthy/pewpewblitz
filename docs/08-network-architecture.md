@@ -611,3 +611,10 @@ registration changes the protocol-registry fingerprint. Control IPC version 6 ad
 `RejoinRequest`, `ParticipantRebind`, `ParticipantRebound`, `RejoinGranted`, `RejoinRejected` and
 `MatchEnded` bodies (see [the routed architecture](./14-multiplayer-server-architecture.md#rejoining-a-running-match));
 the match-manifest schema is unchanged.
+
+Protocol 49 adds `MatchCommand::LeaveMatch` to the existing `MatchCommandRequest` (BRL-8y1f): a
+player who confirms Leave Match tells the match worker before disconnecting, so the end of that
+session is a departure rather than a held seat. The new enum variant changes the canonical
+encoding but not the registered types, so the protocol-registry fingerprint is unchanged and only
+`SUPPORTED_PROTOCOL_VERSION` guards it. Control IPC version 7 adds the 48-byte `SeatReleased`
+body (match worker -> supervisor -> lobby) that releases a left seat.

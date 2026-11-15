@@ -112,6 +112,12 @@ impl LobbyControlOutbox {
         true
     }
 
+    /// Activation cancels waiting for the supervisor; observed by integration tests.
+    #[cfg(feature = "network-test")]
+    pub(crate) fn activation_cancel_count(&self) -> usize {
+        self.activation_cancels.len()
+    }
+
     pub(crate) fn push_activation_cancel(&mut self, fact: ActivationBody) -> bool {
         if self.activation_cancels.len() >= LOBBY_CONTROL_OUTBOX_FRAMES {
             return false;
@@ -747,7 +753,8 @@ fn validate_and_dispatch_control_records(
             | ControlBody::Activated(_)
             | ControlBody::RejoinGranted(_)
             | ControlBody::RejoinRejected(_)
-            | ControlBody::MatchEnded(_) => {
+            | ControlBody::MatchEnded(_)
+            | ControlBody::SeatReleased(_) => {
                 if let Some(inbox) = lobby_inbox.as_mut()
                     && !inbox.push(frame.clone())
                 {
@@ -801,6 +808,19 @@ fn drain_seat_rebind_replies(
     queue: &mut super::seat_hold::SeatRebindQueue,
     drain: &mut OutboxDrain,
 ) {
+    while !drain.blocked {
+        let Some(released) = queue.front_release() else {
+            break;
+        };
+        match enqueue_control_body(worker, state, ControlBody::SeatReleased(released)) {
+            Ok(()) => queue.pop_release(),
+            Err(error) if control_outbox_backpressure(&error) => drain.blocked = true,
+            Err(_) => {
+                drain.failed = true;
+                break;
+            }
+        }
+    }
     while !drain.blocked {
         let Some(reply) = queue.front_reply() else {
             break;

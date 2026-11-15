@@ -52,8 +52,8 @@ use connection::{
     spawn_client_entity,
 };
 use match_commands::{
-    MatchLoadingCommandState, drive_match_loading_check_in, process_match_command_outcomes,
-    send_match_command,
+    MatchLoadingCommandState, drive_match_leave, drive_match_loading_check_in,
+    process_match_command_outcomes, send_match_command,
 };
 use observation::{enforce_client_timeout, log_replicated_roster};
 use routing::{
@@ -281,6 +281,7 @@ fn configure_network_session_systems(app: &mut App) {
         (
             drive_match_loading_check_in,
             process_match_command_outcomes,
+            drive_match_leave,
             send_match_command,
             disconnect_rejected_client,
         )
