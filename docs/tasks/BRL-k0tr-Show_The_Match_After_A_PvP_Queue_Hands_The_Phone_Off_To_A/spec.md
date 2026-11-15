@@ -88,3 +88,15 @@ the participants' lobby sessions close at different times, which a phone on Wi-F
   Practice and filed it as harmless because nobody else received the message.
 - Product-flow outcomes were only checked on devices. Driving the real loading model in a flow
   test, plus logging flow transitions, makes this class of bug visible on desktop.
+
+# Device check 2026-11-15 (Pixel 8a), b97a8888
+Setup: release APK built from b97a8888 code (11:49), installed with `adb install -r`. Server `BRAWLER_ROUTED_BIND=0.0.0.0:5000 RUST_LOG=info just server`, data target/dev/server. Opponent: headless `target/debug/brawler-client --auto-connect --headless --product-match-smoke-1v1 --product-game-type wipeout-1v1` against 127.0.0.1:5000, built with `automation` at HEAD (cargo no-op).
+
+Result: PASS, 6 of 6 handoffs. The phone flow went Queue -> MatchLoading -> Match every time (logcat "flow changed"), and never to Dashboard:
+- k1: phone waiting on QUEUE, opponent queued after it (18:22:51).
+- k2: opponent queued first, then phone PLAY (18:24:31).
+- k3: phone PLAY, opponent about 1 s later, the original 09:08 timing (18:26:44).
+- k4/k5/k6: three more phone-first runs (18:29, 18:32, 18:35).
+Each handoff's server log has "brawler lobby recorded a handed-off match seat" x2 and "brawler lobby completed a match handoff". No activation cancel or dissolve follows, and the match ran to its normal end or to a forfeit.
+
+Evidence (/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/vc): k1-queue.jpg, k1-1..6.jpg (k1-6 = match HUD), k1-logcat.txt, k2-logcat.txt, k3-logcat.txt, k4-logcat.txt, k6-logcat.txt, server.log, opp-1..6.log.

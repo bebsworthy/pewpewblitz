@@ -3,9 +3,9 @@ id: BRL-5vc1
 
 title: Stop a Practice lobby handoff from cancelling an activation whose match runs on
 
-status: backlog
-closed:
-status_changed: 2026-11-15T00:41:32Z
+status: done
+closed: 2026-11-15T17:39:02Z
+status_changed: 2026-11-15T17:39:02Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-k0tr, BRL-yyeg]
 
 parent: BRL-q5c4
 
-rank: 14614528
+rank:
 ---
 
 # Description

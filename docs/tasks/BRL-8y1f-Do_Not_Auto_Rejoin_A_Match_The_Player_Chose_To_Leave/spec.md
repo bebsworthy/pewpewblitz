@@ -91,3 +91,16 @@ worker), and the worker reports the release up the control plane.
   (here: Leave Match, match completion, rejected rejoin, loading cancel) and test each one.
 - The rejoin tests covered only the loss path; a negative test (a deliberate leave must NOT
   rejoin) would have caught this before the device run.
+
+# Device check 2026-11-15 (Pixel 8a), b97a8888
+Same setup as the BRL-k0tr device check of this date (server.log with RUST_LOG=info).
+
+- PvP Leave Match: PASS. Wipeout 1v1 vs headless: menu -> LEAVE MATCH -> LEAVE MATCH reached the Dashboard on the first try (18:23:46: "told the match worker it is leaving", then FreshLobbyReturn, then Dashboard, about 0.3 s). Server 17:23:44: "participant left; its seat is released player_id=1", "lobby released a match seat its player left", "departed after leaving; the fighter is removed". No seat hold for the phone, no rejoin request, the 1v1 ended by forfeit.
+- Practice Leave Match: PASS. Wipeout 2v2 Practice (Feature Yard): Dashboard on the first try (18:31:43), still on the Dashboard 15 s later. Server 17:31:43: seat released / lobby released the left seat / fighter removed for player 11, no hold, no rejoin. (The bots-only Practice match ran on until its timer ended at 17:32:54, as documented: "Practice teams keep their bots".)
+- Involuntary loss still rejoins: PASS with defects. 3 of 4 force-stop -> about 15 s -> relaunch -> CONNECT cycles rejoined the same match and the same player_id (5, 8, 15; "seat reclaimed by a rejoined session", logcat "rejoined its running match", flow Dashboard -> Match). The other attempts failed for other reasons, filed separately:
+  - BRL-q73k: on the first attempt the match worker exited by signal with no log, so there was no match to rejoin.
+  - BRL-2nsg: on one relaunch the phone timed out at Connecting for about 2 min, so its hold expired.
+  - BRL-4zx2: after every successful rejoin, the phone showed the match as the opponent's fighter (name plate, HUD score, kill feed).
+- No server "requested a match rejoin" ever followed a Leave Match. All 3 rejoin requests (17:27:38, 17:29:46, 17:36:22) followed force-stops.
+
+Evidence (/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/vc): l1-menu.jpg, l1-confirm.jpg, l1-after-1..4.jpg, l1-logcat.txt; pl-menu.jpg, pl-confirm.jpg, pl-after.jpg, pl-after15.jpg, pl-logcat.txt; f2-before.jpg, f2-rejoin.jpg, f2-logcat.txt, r3-*.jpg, r3-logcat.txt, r5-*.jpg, r5-logcat.txt; server.log.
