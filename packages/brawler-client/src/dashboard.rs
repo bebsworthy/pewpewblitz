@@ -2,7 +2,7 @@
 
 use super::{
     ClientFlow,
-    flow::{BrawlerCardPreview, BrawlerDetailsPreviewHost, DashboardPreviewHost},
+    flow::{BrawlerDetailsPreviewHost, DashboardPreviewHost},
 };
 use bevy::{
     asset::RenderAssetUsages,
@@ -16,6 +16,7 @@ use bevy::{
 };
 use core::time::Duration;
 
+mod card_preview;
 mod weapon_preview;
 
 const DASHBOARD_RENDER_LAYER: usize = 29;
@@ -77,6 +78,7 @@ pub(super) struct ClientDashboardPlugin;
 impl Plugin for ClientDashboardPlugin {
     fn build(&self, app: &mut App) {
         weapon_preview::install(app);
+        card_preview::install(app);
         app.add_plugins(super::ui::surface::SurfacePlugin);
         app.add_plugins(UiMaterialPlugin::<DashboardBackgroundMaterial>::default())
             .add_systems(
@@ -91,8 +93,8 @@ impl Plugin for ClientDashboardPlugin {
                 (
                     spawn_dashboard_preview,
                     bind_dashboard_preview_host,
-                    ensure_brawler_card_target,
-                    bind_brawler_card_previews,
+                    card_preview::ensure,
+                    card_preview::bind,
                     upgrade_dashboard_preview,
                     sync_dashboard_preview_weapon,
                 )
@@ -110,7 +112,7 @@ impl Plugin for ClientDashboardPlugin {
                 (
                     release_dashboard_preview_target,
                     release_dashboard_background_target,
-                    release_brawler_card_target,
+                    card_preview::release,
                 ),
             )
             .add_observer(setup_dashboard_imported_scene);
@@ -341,118 +343,6 @@ fn bind_dashboard_preview_host(
     target.host = desired_host;
 }
 
-// One fixed-aspect browser target shares the existing character scene. Its
-// framing must not depend on the hidden Dashboard viewport's responsive layout.
-#[derive(Resource)]
-struct BrawlerCardTarget {
-    image: Handle<Image>,
-    camera: Entity,
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are passed by value"
-)]
-fn ensure_brawler_card_target(
-    mut commands: Commands,
-    hosts: Query<(), With<BrawlerCardPreview>>,
-    mut images: ResMut<Assets<Image>>,
-    target: Option<Res<BrawlerCardTarget>>,
-    look: Res<super::presentation_3d::WorldLookCatalog>,
-) {
-    if hosts.is_empty() {
-        if let Some(target) = target {
-            commands.entity(target.camera).despawn();
-            images.remove(target.image.id());
-            commands.remove_resource::<BrawlerCardTarget>();
-        }
-        return;
-    }
-    if target.is_some() {
-        return;
-    }
-    let mut image = Image::new_uninit(
-        bevy::render::render_resource::Extent3d {
-            width: 768,
-            height: 768,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        TextureFormat::Bgra8UnormSrgb,
-        RenderAssetUsages::all(),
-    );
-    image.texture_descriptor.usage =
-        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
-    let image = images.add(image);
-    let camera = commands
-        .spawn((
-            Camera3d::default(),
-            Camera {
-                order: -3,
-                clear_color: ClearColorConfig::Custom(Color::NONE),
-                ..default()
-            },
-            RenderTarget::Image(image.clone().into()),
-            Projection::Perspective(PerspectiveProjection {
-                fov: 0.42,
-                ..default()
-            }),
-            look.preview_camera_look(),
-            look.preview_ambient_light(),
-            Transform::from_xyz(205.0, 72.0, 125.0).looking_at(Vec3::new(0.0, 34.0, 0.0), Vec3::Y),
-            RenderLayers::layer(DASHBOARD_RENDER_LAYER),
-        ))
-        .id();
-    commands.insert_resource(BrawlerCardTarget { image, camera });
-}
-
-#[allow(
-    clippy::type_complexity,
-    clippy::needless_pass_by_value,
-    reason = "fit shared render target inside each card after layout"
-)]
-fn bind_brawler_card_previews(
-    mut commands: Commands,
-    mut hosts: Query<(Entity, &ChildOf, &mut Node, Option<&ImageNode>), With<BrawlerCardPreview>>,
-    frames: Query<&ComputedNode>,
-    images: Res<Assets<Image>>,
-    target: Option<Res<BrawlerCardTarget>>,
-) {
-    let Some(target) = target else {
-        return;
-    };
-    let Some(image) = images.get(&target.image) else {
-        return;
-    };
-    let source = image.size().as_vec2();
-    for (host, parent, mut node, image_node) in &mut hosts {
-        let Ok(frame) = frames.get(parent.parent()) else {
-            continue;
-        };
-        let bounds = frame.size() * frame.inverse_scale_factor();
-        let size = contained_preview_size(source, bounds);
-        node.width = px(size.x);
-        node.height = px(size.y);
-        if image_node.is_none() {
-            commands
-                .entity(host)
-                .insert(ImageNode::new(target.image.clone()));
-        }
-    }
-}
-
-fn release_brawler_card_target(
-    mut commands: Commands,
-    target: Option<Res<BrawlerCardTarget>>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    if let Some(target) = target {
-        commands.entity(target.camera).despawn();
-        images.remove(target.image.id());
-        commands.remove_resource::<BrawlerCardTarget>();
-    }
-}
-
 fn contained_preview_size(source: Vec2, bounds: Vec2) -> Vec2 {
     if source.min_element() <= 0.0 || bounds.min_element() <= 0.0 {
         return Vec2::ZERO;
@@ -637,6 +527,7 @@ fn release_dashboard_background_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
 
     #[test]
     fn card_preview_fits_wide_and_tall_targets_without_distortion() {
@@ -687,11 +578,17 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Assets<Image>>()
             .init_resource::<Assets<DashboardBackgroundMaterial>>()
+            .init_resource::<card_preview::Targets>()
+            .insert_resource(
+                super::super::presentation_3d::WorldLookCatalog::embedded()
+                    .expect("embedded world look"),
+            )
             .add_systems(
                 Update,
                 (
                     release_dashboard_preview_target,
                     release_dashboard_background_target,
+                    card_preview::release,
                 ),
             );
         let image_baseline = app.world().resource::<Assets<Image>>().len();
@@ -722,7 +619,34 @@ mod tests {
             });
             app.world_mut()
                 .insert_resource(DashboardBackgroundTarget(material));
+            // Brawler cards of two families still on screen as the Dashboard exits.
+            let frame = app.world_mut().spawn(ComputedNode::default()).id();
+            for family in [
+                super::super::presentation_3d::WeaponFamily::OneHanded,
+                super::super::presentation_3d::WeaponFamily::Melee,
+            ] {
+                app.world_mut().spawn((
+                    super::super::flow::BrawlerCardPreview(family),
+                    Node::default(),
+                    ChildOf(frame),
+                ));
+            }
+            app.world_mut()
+                .run_system_once(card_preview::ensure)
+                .unwrap();
+            assert_eq!(
+                app.world().resource::<Assets<Image>>().len(),
+                image_baseline + 3
+            );
             app.update();
+            assert!(
+                app.world_mut()
+                    .query_filtered::<(), With<card_preview::BrawlerCardCamera>>()
+                    .iter(app.world())
+                    .next()
+                    .is_none()
+            );
+            app.world_mut().entity_mut(frame).despawn();
             assert!(!app.world().contains_resource::<DashboardPreviewTarget>());
             assert!(!app.world().contains_resource::<DashboardBackgroundTarget>());
             assert_eq!(

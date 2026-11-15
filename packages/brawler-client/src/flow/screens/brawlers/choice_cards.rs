@@ -10,7 +10,8 @@ use bevy::prelude::*;
 
 #[derive(Clone, Copy)]
 pub(super) enum ChoiceArt {
-    Fighter,
+    /// The Riff card preview holding this weapon family (the draft's weapon).
+    Fighter(crate::presentation_3d::WeaponFamily),
     /// The held model of this weapon family (`dashboard/weapon_preview.rs`).
     Weapon(crate::presentation_3d::WeaponFamily),
     Icon(&'static str),
@@ -147,9 +148,9 @@ impl ChoiceCards<'_> {
             ..default()
         })
         .with_children(|art| match illustration {
-            ChoiceArt::Fighter => {
+            ChoiceArt::Fighter(family) => {
                 art.spawn((
-                    BrawlerCardPreview,
+                    BrawlerCardPreview(family),
                     Node {
                         width: px(0),
                         height: px(0),

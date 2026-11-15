@@ -205,7 +205,7 @@ pub(crate) struct WorldLookCatalog {
 }
 
 impl WorldLookCatalog {
-    pub(super) fn embedded() -> Result<Self, String> {
+    pub(crate) fn embedded() -> Result<Self, String> {
         Self::from_ron(WORLD_LOOK_CATALOG)
     }
 

@@ -112,8 +112,9 @@ pub(in crate::flow) struct BrawlerListRoot {
 #[derive(Component)]
 pub(in crate::flow) struct BrawlerListScrollArea;
 
-#[derive(Component)]
-pub(crate) struct BrawlerCardPreview;
+/// A brawler card Riff preview holding this weapon family's model (`dashboard/card_preview.rs`).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BrawlerCardPreview(pub(crate) crate::presentation_3d::WeaponFamily);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(in crate::flow) struct BrawlerDetailsRoot {
@@ -431,7 +432,10 @@ fn spawn_brawler_list_row(
             })
             .with_children(|frame| {
                 frame.spawn((
-                    BrawlerCardPreview,
+                    BrawlerCardPreview(crate::presentation_3d::advertised_weapon_family(
+                        catalog,
+                        brawler.weapon_base_id,
+                    )),
                     Node {
                         width: px(0),
                         height: px(0),

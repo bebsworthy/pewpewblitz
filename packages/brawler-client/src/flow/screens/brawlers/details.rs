@@ -361,7 +361,10 @@ impl DetailsView<'_> {
             })
             .with_children(|frame| {
                 frame.spawn((
-                    BrawlerCardPreview,
+                    BrawlerCardPreview(crate::presentation_3d::advertised_weapon_family(
+                        self.catalog,
+                        self.brawler.weapon_base_id,
+                    )),
                     UiTransform::from_scale(Vec2::splat(1.18)),
                     Node {
                         width: px(0),

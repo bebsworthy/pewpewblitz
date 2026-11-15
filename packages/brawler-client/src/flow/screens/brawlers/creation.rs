@@ -197,7 +197,10 @@ impl CreationView<'_> {
                         "FIGHTER",
                         advertised_fighter_name(self.catalog, self.draft.fighter_profile_id),
                         "Health · Speed · Reveal range",
-                        ChoiceArt::Fighter,
+                        ChoiceArt::Fighter(crate::presentation_3d::advertised_weapon_family(
+                            self.catalog,
+                            self.draft.weapon_base_id,
+                        )),
                         columns,
                         height,
                     );
@@ -364,7 +367,10 @@ impl CreationView<'_> {
                             f.stats.movement_speed,
                             f.stats.reveal_proximity_radius
                         ),
-                        ChoiceArt::Fighter,
+                        ChoiceArt::Fighter(crate::presentation_3d::advertised_weapon_family(
+                            self.catalog,
+                            self.draft.weapon_base_id,
+                        )),
                         columns,
                         300.,
                     );
