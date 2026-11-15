@@ -4105,3 +4105,126 @@ fn dashboard_keyboard_moves_and_activation_publish_feedback_with_the_surface_rol
         vec![UiFeedback::Activated(Some(Surface::Primary))]
     );
 }
+
+/// BRL-nqnm: a lobby app with the real shell, in a match, with Settings opened from the
+/// match menu.
+fn match_settings_app(membership: &ClientLobbyMembership, name: &str) -> App {
+    let path = std::env::temp_dir().join(format!(
+        "brawler-brl-nqnm-{name}-{}-settings.ron",
+        std::process::id()
+    ));
+    let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
+        crate::shell::flow_test_support::add_shell(app, path);
+    });
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::Match);
+    app.update();
+    assert_eq!(current_flow(&app), ClientFlow::Match);
+    *app.world_mut()
+        .resource_mut::<super::super::ClientInputContext>() =
+        super::super::ClientInputContext::Menu;
+    app.world_mut()
+        .resource_mut::<super::super::MatchSettingsRequest>()
+        .0 = true;
+    app.update();
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::Settings
+    );
+    assert_eq!(
+        crate::shell::flow_test_support::overlay_root_count(app.world_mut()),
+        1
+    );
+    assert!(crate::shell::flow_test_support::has_settings_drafts(
+        app.world()
+    ));
+    assert!(crate::shell::flow_test_support::returns_to_match_menu(
+        app.world()
+    ));
+    app
+}
+
+fn assert_match_settings_closed(app: &mut App) {
+    assert_eq!(
+        crate::shell::flow_test_support::overlay_root_count(app.world_mut()),
+        0,
+        "the match-owned Settings outlived the match"
+    );
+    assert!(!crate::shell::flow_test_support::has_settings_drafts(
+        app.world()
+    ));
+    assert!(!crate::shell::flow_test_support::returns_to_match_menu(
+        app.world()
+    ));
+    assert_eq!(
+        *app.world().resource::<super::super::ClientInputContext>(),
+        super::super::ClientInputContext::Shell
+    );
+}
+
+#[test]
+fn match_completion_closes_settings_opened_from_the_match_menu() {
+    let membership = lobby_membership_with_brawler();
+    let game_type_id = membership.game_types[0].id.clone();
+    let mut app = match_settings_app(&membership, "results");
+    app.world_mut()
+        .resource_mut::<super::super::ClientMatchResultState>()
+        .context = Some(match_result_context(game_type_id));
+
+    inject_session_observation(&mut app, SessionObservation::FreshLobbyReturn);
+    app.update();
+    app.update();
+
+    assert_eq!(current_flow(&app), ClientFlow::Results);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::None
+    );
+    assert_match_settings_closed(&mut app);
+    press_flow_button(&mut app, &FlowUiAction::ReturnToDashboard);
+    app.update();
+    assert_eq!(current_flow(&app), ClientFlow::Dashboard);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::None
+    );
+    assert_match_settings_closed(&mut app);
+}
+
+#[test]
+fn connection_lost_over_match_settings_leaves_only_the_error_interactive() {
+    let membership = lobby_membership_with_brawler();
+    let mut app = match_settings_app(&membership, "error");
+    app.world_mut()
+        .resource_mut::<RoutedClientLifecycle>()
+        .phase = RoutedClientPhase::Match;
+
+    inject_session_observation(&mut app, SessionObservation::MatchFailed);
+    inject_session_observation(&mut app, SessionObservation::FreshLobbyReturn);
+    app.update();
+    app.update();
+
+    let ClientOverlay::Error(error) = app.world().resource::<ClientOverlay>().clone() else {
+        panic!("the lost match must show the connection error");
+    };
+    assert_eq!(error.kind, FlowErrorKind::Connection);
+    assert_eq!(current_flow(&app), ClientFlow::Dashboard);
+    assert_eq!(count_error_roots(&mut app), 1);
+    assert_eq!(
+        crate::shell::flow_test_support::active_shell_buttons(app.world_mut()),
+        0
+    );
+    assert_match_settings_closed(&mut app);
+
+    press_flow_button(&mut app, &FlowUiAction::DismissError);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::None
+    );
+    assert_eq!(count_error_roots(&mut app), 0);
+    assert_eq!(current_flow(&app), ClientFlow::Dashboard);
+    assert_match_settings_closed(&mut app);
+}

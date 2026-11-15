@@ -248,6 +248,7 @@ impl Plugin for ClientPresentationPlugin {
         app.init_resource::<ClientPresentation>()
             .init_resource::<MatchMenuState>()
             .add_systems(Startup, match_menu::spawn_pause_overlay)
+            .add_systems(OnExit(ClientFlow::Match), close_match_menu)
             .add_systems(
                 Update,
                 (
@@ -268,6 +269,12 @@ impl Plugin for ClientPresentationPlugin {
             ));
         app.add_plugins(presentation_3d::WorldPresentationPlugin);
     }
+}
+
+/// The match menu and its latched scoreboard end with the match (BRL-nqnm); the flow's own
+/// exit returns input to the shell, which hides the pause overlay.
+fn close_match_menu(mut menu: ResMut<MatchMenuState>) {
+    *menu = MatchMenuState::default();
 }
 
 fn exit_on_close_requested(

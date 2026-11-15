@@ -174,6 +174,7 @@ impl Plugin for ClientShellPlugin {
         .init_resource::<SettingsReturnTarget>()
         .add_systems(Startup, load_persistent_settings)
         .add_systems(OnEnter(ClientFlow::Dashboard), enter_dashboard_shell)
+        .add_systems(OnExit(ClientFlow::Match), forget_match_settings_return)
         .add_systems(
             Update,
             (
@@ -202,6 +203,7 @@ impl Plugin for ClientShellPlugin {
                     controls::sample_sticks,
                     settings_screen::responsive,
                     settings_screen::refresh,
+                    close_externally_cleared_overlay,
                     present_flow_requested_overlay,
                     restore_match_menu_after_settings,
                     rebuild_navigation,
@@ -257,6 +259,34 @@ fn load_persistent_settings(
 )]
 fn enter_dashboard_shell(mut context: ResMut<ClientInputContext>) {
     *context = ClientInputContext::Shell;
+}
+
+/// Leaving the match ends its menu, so Settings closed later must not reopen it.
+fn forget_match_settings_return(mut target: ResMut<SettingsReturnTarget>) {
+    *target = SettingsReturnTarget::ProductFlow;
+}
+
+/// BRL-nqnm: the flow may replace or clear the overlay under the shell (match completion,
+/// a connection error). The shell then closes its Settings or Credits root exactly as Back
+/// does; `settings_screen::autosave` has already committed the draft earlier in the frame.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+fn close_externally_cleared_overlay(
+    mut commands: Commands,
+    overlay: Res<ClientOverlay>,
+    roots: Query<Entity, With<OverlayRoot>>,
+) {
+    if roots.is_empty()
+        || matches!(
+            overlay.as_ref(),
+            ClientOverlay::Settings | ClientOverlay::Credits
+        )
+    {
+        return;
+    }
+    discard_overlays(&mut commands, &roots);
 }
 
 #[allow(
@@ -740,12 +770,21 @@ fn handle_shell_actions(
 )]
 fn restore_match_menu_after_settings(
     overlay: Res<ClientOverlay>,
+    flow: Res<State<ClientFlow>>,
+    next_flow: Res<NextState<ClientFlow>>,
     mut target: ResMut<SettingsReturnTarget>,
     mut context: ResMut<ClientInputContext>,
 ) {
     if *target == SettingsReturnTarget::MatchMenu && matches!(overlay.as_ref(), ClientOverlay::None)
     {
-        *context = ClientInputContext::Menu;
+        // A match that is ending under Settings has no menu to return to (BRL-nqnm).
+        let leaving_match = match next_flow.as_ref() {
+            NextState::Pending(next) | NextState::PendingIfNeq(next) => *next != ClientFlow::Match,
+            NextState::Unchanged => false,
+        };
+        if *flow.get() == ClientFlow::Match && !leaving_match {
+            *context = ClientInputContext::Menu;
+        }
         *target = SettingsReturnTarget::ProductFlow;
     }
 }
@@ -756,6 +795,13 @@ fn despawn_overlays(commands: &mut Commands, roots: &Query<Entity, With<OverlayR
     }
 }
 
+/// Despawns the shell overlay roots and their settings drafts.
+fn discard_overlays(commands: &mut Commands, roots: &Query<Entity, With<OverlayRoot>>) {
+    despawn_overlays(commands, roots);
+    commands.remove_resource::<InputSettingsDraft>();
+    commands.remove_resource::<ShellSettingsDraft>();
+}
+
 fn close_overlay(
     commands: &mut Commands,
     overlay: &mut ClientOverlay,
@@ -763,9 +809,7 @@ fn close_overlay(
     dirty: &mut NavigationDirty,
     focus: ShellControlId,
 ) {
-    despawn_overlays(commands, roots);
-    commands.remove_resource::<InputSettingsDraft>();
-    commands.remove_resource::<ShellSettingsDraft>();
+    discard_overlays(commands, roots);
     *overlay = ClientOverlay::None;
     dirty.0 = Some(focus);
 }
@@ -1060,26 +1104,22 @@ fn keep_focused_control_visible(
     }
 }
 
+/// Lets flow tests compose the real shell over the product flow (BRL-nqnm).
 #[cfg(test)]
-mod tests {
+pub(crate) mod flow_test_support {
     use super::*;
+    use crate::ClientSettingsUiSet;
     use crate::settings::ui::adjust_input_settings_from_pause_keys;
-    use crate::{ClientSettingsUiSet, FlowError, FlowErrorAction, FlowErrorKind};
-    use bevy::input_focus::directional_navigation::NavNeighbor;
 
-    pub(super) fn shell_test_app(path: std::path::PathBuf) -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(bevy::state::app::StatesPlugin)
-            .add_message::<MouseWheel>()
+    /// Adds the shell and the resources a windowed app gives it; the caller owns `ClientFlow`.
+    pub(crate) fn add_shell(app: &mut App, path: std::path::PathBuf) {
+        app.add_message::<MouseWheel>()
             .add_message::<AppExit>()
             .insert_resource(ClientSettingsPath(path))
             .insert_resource(UiScale::default())
-            .insert_resource(ButtonInput::<KeyCode>::default())
             .init_resource::<ClientInputContext>()
             .init_resource::<ClientInputSettings>()
             .init_resource::<InputSettingsSelection>()
-            .init_state::<ClientFlow>()
             .init_resource::<ClientOverlay>()
             .init_resource::<ClientLocalLoadFailures>()
             .configure_sets(
@@ -1096,6 +1136,46 @@ mod tests {
                 adjust_input_settings_from_pause_keys.in_set(ClientSettingsUiSet::Capture),
             )
             .add_plugins(ClientShellPlugin);
+    }
+
+    pub(crate) fn overlay_root_count(world: &mut World) -> usize {
+        let mut query = world.query_filtered::<Entity, With<OverlayRoot>>();
+        query.iter(world).count()
+    }
+
+    pub(crate) fn has_settings_drafts(world: &World) -> bool {
+        world.contains_resource::<InputSettingsDraft>()
+            || world.contains_resource::<ShellSettingsDraft>()
+    }
+
+    pub(crate) fn returns_to_match_menu(world: &World) -> bool {
+        *world.resource::<SettingsReturnTarget>() == SettingsReturnTarget::MatchMenu
+    }
+
+    /// Shell buttons of the topmost interactive layer for the current overlay.
+    pub(crate) fn active_shell_buttons(world: &mut World) -> usize {
+        let layer = active_layer(world.resource::<ClientOverlay>());
+        let mut query = world.query::<&ShellButton>();
+        query
+            .iter(world)
+            .filter(|button| button.layer == layer && button.action.is_some())
+            .count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{FlowError, FlowErrorAction, FlowErrorKind};
+    use bevy::input_focus::directional_navigation::NavNeighbor;
+
+    pub(super) fn shell_test_app(path: std::path::PathBuf) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(bevy::state::app::StatesPlugin)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .init_state::<ClientFlow>();
+        flow_test_support::add_shell(&mut app, path);
         app.world_mut()
             .resource_mut::<NextState<ClientFlow>>()
             .set(ClientFlow::Dashboard);
