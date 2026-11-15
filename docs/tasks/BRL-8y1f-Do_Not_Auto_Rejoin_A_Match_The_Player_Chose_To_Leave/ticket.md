@@ -3,9 +3,9 @@ id: BRL-8y1f
 
 title: Do not auto-rejoin a match the player chose to leave
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T09:33:15Z
+status_changed: 2026-11-15T09:56:10Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-094c, BRL-yyeg]
 
 parent: BRL-q5c4
 
-rank: 14548992
+rank: 11337728
 ---
 
 # Description

@@ -3,9 +3,9 @@ id: BRL-k0tr
 
 title: Show the match after a PvP queue hands the phone off to a match
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T09:32:48Z
+status_changed: 2026-11-15T09:56:10Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-5vc1, BRL-yyeg]
 
 parent: BRL-q5c4
 
-rank: 14483456
+rank: 11403264
 ---
 
 # Description
