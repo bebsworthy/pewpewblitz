@@ -27,3 +27,25 @@ Device check 2026-11-15 (Pixel 8a), HEAD b97a8888, server on 0.0.0.0:5000. Seen 
 - **Pixel 8a device check:** 10 force-stop/relaunch cycles during a match. Each relaunch connects on the first attempt and reclaims the held seat inside the 60 s hold, or the ingress outcome is logged for any miss.
 
 Evidence (/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/vc): r4-ss.jpg, r4-c.jpg, r4-logcat2.txt, r4-logcat3.txt, r4-logcat4.txt, probe.log, server.log (17:32:36-17:35:16).
+
+
+# Progress 2026-11-16
+**Host repro (subagent):** no failure. A phone-style `kill -9` mid-match, then a relaunch on the same or a different source port, at 0-23 s delays: the lobby connected in about 0.13 s and the seat was always reclaimed.
+- Ruled out for the incident: each relaunch attempt uses a new random port and a new client id, and lightyear logs every refusal except `Ignored`. A stale lobby route (lead b) is real but bounded at 10 s, and only for a kill while in the lobby. With the same client id, `ClientIdInUse` refusals can use up the 8-datagram pre-auth budget.
+- Latent margin: with a lobby round trip of 700 ms or more, the pre-auth budget runs out before the challenge-response is sent, so the client can never connect.
+
+**Diagnostics committed (70a46541):**
+- Supervisor `brawler-supervisor ingress dropped reason=… source=…` (rate-limited), a per-window `summary`, and `lobby-route-reused … route_age_ms idle_ms connection_request`.
+- Client `routed UDP socket bound local_addr=… route="lobby"|"match"`.
+
+**Pixel 8a cycles (HEAD 70a46541, server 0.0.0.0:5000):** Wipeout 1v1 against a headless opponent that leaves at Active (seat held), then force-stop 8 s into the match, relaunch, CONNECT.
+- Valid cycles 1, 2, 3 and 5: rejoined 5-6 s after relaunch with `seat reclaimed by a rejoined session`, first connect attempt each time. (Cycle 4 is invalid: a failed adb `logcat -c` left a stale flow.)
+- **Cycle 6, new failure, before any kill:** the lobby to match handoff connect timed out.
+  - Phone 20:26:49.79Z: `socket bound local_addr=0.0.0.0:36991 route="match"`, then 10 s later `client connect failed. connection request timed out`.
+  - Server: the match worker was spawned and ready at 20:26:48.96, the lobby completed the handoff, and the opponent connected to the match at 49.13. **There was no ingress drop line and no `New connection` for the phone.** The worker later exited (code 0, then `worker failed category=WorkerExitMismatch`).
+  - So the phone's netcode requests either never reached the supervisor, or reached the match worker and were silently `Ignored` by lightyear_netcode (unlogged), for example because of a token or address check.
+  - The same signature as the original incident: no challenge and no server-side trace.
+  - The phone then stayed on "Match loading / Connecting" indefinitely (filed separately).
+- Earlier the same day, two other "first connect timed out" cases had environmental causes: the server was unreachable after the Mac hibernated, and once the phone was on another Wi-Fi subnet.
+
+**Next:** count, per route, the public datagrams the supervisor forwards to a match worker, and log why lightyear_netcode ignores a connection request in the worker. Then repeat the device cycles until the handoff timeout recurs.
