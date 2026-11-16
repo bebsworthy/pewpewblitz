@@ -1,389 +1,227 @@
 # Brawler repository guide
 
-## Quick orientation
-
 PewPew Blitz (repository and crate identifier `brawler`) is an original, cross-platform top-down
-arena shooter built around player-authored fighter builds. Combat readability, meaningful build
-tradeoffs, short matches, reusable content primitives, and server-authoritative networking are the
-core product constraints.
+arena shooter built around player-authored fighter builds. Product constraints: readable combat,
+meaningful build tradeoffs, short matches, reusable content primitives, and server-authoritative
+networking.
 
-For current work, start with `ticket list` and `ticket task <ID>`. Ticket descriptions and specs
-own active scope, status, acceptance criteria, and evidence. `docs/tasks/` contains readable Ticket
-mirrors but is never the agent write path.
+Current work lives in Ticket (project `BRL`), never in version or milestone files. Start with
+`ticket list` and `ticket task <ID>`; see [Ticket workflow](#ticket-workflow).
 
-Start with:
+## Where to look
 
-1. `docs/README.md` and `docs/00-product-direction.md` for the durable document map, product intent,
-   and non-goals.
-2. `docs/01-engine-decision.md` and `docs/08-network-architecture.md` for the current Bevy/ECS,
-   authority, schedule, plugin, compatibility, registry, and content-fingerprint contracts.
-3. `docs/02-fighter-model.md` and `docs/03-weapons-and-abilities.md` for authored definitions,
-   immutable resolved loadouts, runtime capabilities, combat transactions, and extension rules.
-4. `docs/04-maps-and-game-modes.md`, `docs/16-grid-map-asset-system.md`, and
-   `docs/18-damageable-world-objects-and-heist.md` for maps, effect-tile capability projection,
-   local mode/object-reaction registration, and environment authority.
-5. `docs/10-bots.md` and `docs/17-concealment.md` for server-hosted Practice policy, semantic
-   observations, fair delayed perception, and observer-specific replication.
-6. `docs/11-art-and-presentation-direction.md` for renderer, audio/VFX request boundaries,
-   readability, assets, provenance, and degradation.
-7. `docs/13-player-ux.md`, `docs/14-multiplayer-server-architecture.md`, and
-   `docs/15-balance-lab.md` for player flow, routed processes, and the current tuning contract.
-8. `docs/implementation/v1/` through `docs/implementation/v12/` only when historical delivery,
-   feedback, or evidence is relevant. Later draft version documents are context, not active scope.
+| Topic | Documents |
+|---|---|
+| Doc map, product intent, non-goals | `docs/README.md`, `docs/00-product-direction.md` |
+| Bevy/ECS, authority, schedules, protocol compatibility, registry and content fingerprints | `docs/01-engine-decision.md`, `docs/08-network-architecture.md` |
+| Fighter definitions, resolved loadouts, combat transactions, extension rules | `docs/02-fighter-model.md`, `docs/03-weapons-and-abilities.md` |
+| Maps, effect tiles, modes, world objects | `docs/04-maps-and-game-modes.md`, `docs/16-grid-map-asset-system.md`, `docs/18-damageable-world-objects-and-heist.md` |
+| Practice bots, perception, concealment | `docs/10-bots.md`, `docs/17-concealment.md` |
+| Renderer, audio/VFX boundaries, assets, degradation | `docs/11-art-and-presentation-direction.md` |
+| Player flow, routed processes, Balance Lab | `docs/13-player-ux.md`, `docs/14-multiplayer-server-architecture.md`, `docs/15-balance-lab.md` |
+| History (V1–V12, completed 2026-08-18 to 2026-08-27) | `docs/implementation/v*/` — evidence for past decisions only |
 
-V1 completed on 2026-08-18 as a server-authoritative gameplay MVP after the final basic user
-playtest. It is not a release-ready claim: controller feel, audio, HUD/readability, balance, pacing,
-and related tuning remain tracked as `POST-V1-RELEASE-POLISH`. V2 completed and was accepted on
-2026-08-20. V3 completed and was accepted on 2026-08-20. M01 completed after the user accepted the 3D
-feasibility result and its projectile-origin corrections. M02 completed on 2026-08-20 after its
-default 3D arena/map/terrain/camera/input cutover, projectile-placement feedback fix, removal of the
-obsolete projectile sprite/XY writer, affected verification, and user acceptance. M03 completed on
-2026-08-20 after its independent fighter/combat visual implementation, canonical verification,
-native smoke, and accepted playtest handoff. M04 completed after renderer retirement, lifecycle and
-readability verification, iterative fighter-presentation feedback, documentation reconciliation,
-and its learning review. V4 M01 completed after its accepted first presentation pass and learning
-review. V4 M02 completed on 2026-08-21 after canonical verification and a user playtest confirmed
-that the storage migration preserved the accepted presentation. V4 M03 and V4 completed on
-2026-08-21 after Ashen Court and the second theme passed canonical/native verification, the
-detached-overhead feedback fix was accepted, and the learning review was recorded. V5 completed and
-was accepted on 2026-08-22 after auto-connect, the responsive Player Dashboard, connected-loop
-convergence, recovery/lifecycle hardening, routed 1v1/2v2/3v3 E2E, and native Dashboard/gameplay
-render evidence passed closeout.
+V1–V12 are closed historical records. Later draft version documents are context, not active scope.
+Durable product or technical behavior belongs in the owning `docs/` document, not only in a ticket.
 
-V6 completed and was accepted on 2026-08-22 after the Balance Lab's routed Practice workflow,
-validated persistence, isolation, and native operator checks passed. V7 completed and was accepted
-on 2026-08-23 after persistent saved-brawler profiles and four-slot weapon-part equipment passed
-storage, routed handoff, recovery, and player-flow verification. V8 completed and was accepted on
-2026-08-23 after its hard map-system cutover, domain-organized active content, legacy removal, and
-canonical/E2E/native verification. V9 completed and was accepted on 2026-08-24 after all three
-concealment sources, observer-specific reveal, Reveal Scan, the server-authoritative brawler
-catalog, saved-brawler UX remediation, full verification, native gameplay confirmation, and its
-learning review passed closeout.
+## Stack
 
-V10 completed and was accepted on 2026-08-25 after damageable oil barrels, mirrored Heist, the
-Feature Yard Wipeout/Hot Zone/Heist 1v1/2v2/3v3 family, treasure chests, restoration pickups,
-Balance Lab evolution, full routed/capacity/native verification, accepted presentation and point-
-blank collision feedback, documentation reconciliation, and its learning review passed closeout.
+- Bevy 0.19.1 (ECS, plugins, 3D world, UI, input, assets, animation, audio), Lightyear 0.29.0
+  (transport, input, replication, interpolation, owner prediction), Avian 2D 0.7.0 (authoritative
+  planar collision and map colliders; no 3D physics).
+- Fixed-tick, dedicated-server-authoritative simulation. macOS is the primary dev target; Android
+  (Pixel) is the mobile target.
+- Bevy's `World` is the gameplay model. Prefer Bevy-native patterns, the local references, and
+  verified Bevy 0.19 APIs over general Rust architecture advice. DDD/hexagonal is not the governing
+  model; use ports/adapters only at a concrete external boundary with an observed problem.
 
-V11 completed and was accepted on 2026-08-26 after playable deterministic server-hosted Practice
-bots, fair delayed perception and concealment, bounded resumable navigation, Pulse/Dash combat,
-Wipeout/Hot Zone/Heist objective behavior, full automated/routed/native verification, accepted
-objective-priority and perimeter-recovery feedback corrections, documentation reconciliation, and
-its learning review passed closeout.
+## Source layout
 
-V12 completed and was accepted on 2026-08-27 after its three purpose-built 3v3 maps, dynamic
-map/viewport framing, matched one-cell fighter footprint, Balance Lab correctness and presentation,
-server-authoritative health/ammunition recovery, instant paired evidence capture, projectile
-geometry/readability correction, final gameplay balance pass, full verification, documentation
-reconciliation, and learning review passed closeout.
-
-V1–V12 are historical delivery records. Brawler no longer uses large numbered versions or
-milestone roadmaps to plan, sequence, or report current progress. Existing later draft documents
-may provide research or design context, but they do not establish active scope or status. Current
-work is owned and tracked through the Ticket CLI process defined below.
-
-## Technical stack
-
-- The root `brawler` package owns shared gameplay, the protocol, and the headless gameplay-worker
-  configuration; `packages/brawler-client` owns the player client application built on
-  `brawler`'s `client` feature (a measured compile-time boundary, BRL-0170);
-  `packages/brawler-routing` owns the completed V2 route/IPC protocol used by the supervisor, lobby
-  worker, and match workers; `packages/brawler-android` is the Android shell.
-- Bevy 0.19 for ECS, application/plugin structure, client-side 3D world rendering, screen-space UI,
-  input, assets, animation, and audio.
-- Lightyear 0.29 for client/server transport, input networking, replication, interpolation, and later prediction/rollback where evidence justifies it.
-- Avian 2D 0.7 for authoritative planar collision and map-asset colliders. V3 does not
-  replace it with 3D physics.
-- Fixed-tick, dedicated-server-authoritative simulation from the first gameplay code.
-- macOS is the initial client development target; local dedicated-server and multi-client testing are required.
-
-Use Bevy's `World` as the runtime gameplay model. Keep authored definitions, selected builds, runtime ECS state, networking registration, and client presentation distinct without assuming that each concern needs a crate or architectural layer. The dedicated-server configuration must exclude rendering, windowing, audio, device input, and client assets. Networked types use stable player, match, and definition IDs rather than exposing process-local ECS entity identity across the wire.
-
-Group focused systems, components, resources, and messages into cohesive plugins. Share a gameplay system between server and client only when it genuinely executes in both places, such as measured client prediction. Keep server-only authority rules on the server and presentation systems on the client. Create another package or public API only for a demonstrated feature-isolation, platform, compile-time, testing, or reuse boundary.
-
-For architecture decisions, prioritize Brawler's gameplay and authority requirements, the local Lightyear material, verified Bevy 0.19 APIs, and Bevy-native patterns before general Rust architecture advice. Server-oriented DDD or hexagonal architecture is not the governing model; use ports/adapters only at a concrete external boundary where they solve an observed problem.
-
-## Current source layout
-
-The shared `brawler` crate and the `brawler-client` crate organize implementation by ECS state
-ownership, execution role, plugin composition, and schedule phase. Replicated types stay in
-`brawler` (the protocol registry fingerprint hashes their paths); `brawler` never depends on
-`brawler-client`:
+Code is organized by ECS state ownership, execution role, plugin composition, and schedule phase.
+Replicated types stay in `brawler` (the protocol registry fingerprint hashes their paths), and
+`brawler` never depends on `brawler-client`.
 
 ```text
-src/
-  lib.rs; gameplay.rs; protocol.rs; config.rs; content.rs; timing.rs
-                           crate gates, fixed schedules, wire boundary, validated config,
-                           contributor-sealed gameplay content, and timing policy
+src/                       shared `brawler` crate: gameplay, protocol, headless server config
+  lib.rs gameplay.rs protocol.rs config.rs content.rs timing.rs
   bin/{server,profile_admin}.rs
-                           thin executable entry points
-  abilities/               activation/charge plus focused Dash, Sentry, cloak/reveal,
-                           demolition, elemental-field, Big Blob, passive, telemetry ownership
-  bots/                    private Practice policy, behavior registry, observations, navigation,
-                           team/objective projections, diagnostics, and tests
-  builds/                  authored catalog, shared passive/ultimate bounds, loadout resolution
-  combat/                  definitions/model/cues/outcomes/telemetry/evidence; attack/emission;
-                           delivery/projectiles; staged effect planning/application/runtime;
-                           combat-owned environment damage; client/server adapters
-  concealment/             authored rules, fields, observer-specific relevance, telemetry
-  map/                     catalog/model/resolution/effect-tile capabilities/client/server
-    runtime/               installation, dynamics, effect-tile authority, object authority,
-                           and sealed terminal-reaction registry
-  modes/                   bounded local registry plus Wipeout/Hot Zone/Heist registrations
-  matchplay/               common lifecycle/spawns/server plus focused mode rule plugins
-  movement/                input shaping, authority, arena geometry, and planar collision
-  profiles/                saved-brawler model/catalog/server authority/SQLite storage
-  weapon_parts/            authored definitions, canonical modifiers, deterministic resolver
-  server/
-    admission.rs           manifest validation and pure match-join planning
-    fighter_spawn.rs       shared controller-neutral authoritative fighter assembly
-    lobby/                 catalog/queue plus profile transaction adapter
-    balance_lab/           HTTP/persistence/roster, typed editor adapters, staged transaction
-    practice.rs; routed_worker.rs; worker.rs; verification.rs; mod.rs
-  diagnostics/             process closeout/identity/sampling plus failure records
-packages/brawler-client/src/
-                           player client crate (formerly `src/client/`)
-  lib.rs                   client app composition, session/join state, crate re-exports
-  bin/{client,vfx_lab,ui_gallery}.rs
-                           thin client executable entry points
-  flow/                    ordered action/observation/commit composition; profile, equipment,
-                           and match-flow reducers plus screen-owned presentation
-  queue/                   matchmaking, Practice, loading, and automation
-  session/                 routed connection/admission/transitions/commands/observation
-  audio/                   authored mappings, producer registry, semantic requests, playback
-  vfx/                     authored profiles, producer registry, semantic requests
-  presentation_3d/         sole world renderer, combat/environment, object-health projection
-  settings/                persisted calibration/bindings/UI
-  *.rs                     assets, input, HUD, shell, profile, targeting, diagnostics overlay,
-                           and evidence adapters
+  abilities/ builds/ combat/ concealment/ movement/ weapon_parts/ profiles/
+  map/  map/runtime/       catalog/resolution/effect tiles; installation, dynamics, object authority
+  modes/                   bounded local registry: Wipeout, Hot Zone, Heist (+ Zombie)
+  matchplay/               lifecycle, spawns, per-mode rule plugins
+  bots/                    private Practice policy, observations, navigation
+  server/                  admission, fighter spawn, lobby, balance_lab, practice, workers
+  diagnostics/             process closeout, sampling, failure records
+packages/brawler-client/   player client (Bevy app; `client` feature boundary)
+  src/{flow,queue,session,audio,vfx,presentation_3d,settings,touch,ui,hud,…}
+  src/bin/{client,vfx_lab,ui_gallery}.rs
 packages/brawler-routing/  route envelope, IPC, supervisor/worker protocol
-packages/brawler-android/  thin Android GameActivity shell over brawler-client
-content/{catalogs,maps}/   headless-safe authored gameplay data
-assets/catalogs/           client-only audio/VFX/map presentation data
-tools/balance-lab-web/     TypeScript operator application
-tests/network/             separate-App authority/replication scenarios and reusable harness
-                           (a `brawler-client` test target: it needs both roles)
-tests/performance.rs       fixed-tick and subsystem performance/capacity gates (`brawler-client`)
+packages/brawler-android/  thin Android GameActivity shell
+content/{catalogs,maps}/   headless-safe authored gameplay data (in the gameplay fingerprint)
+assets/catalogs/           client-only audio/VFX/map presentation data (outside the fingerprint)
+config/server/             game types, formation deadlines
+tools/balance-lab-web/     TypeScript operator app
+tests/network/             separate-App authority/replication scenarios + `harness.rs`
+                           (a `brawler-client` test target, feature `network-test`)
+tests/performance.rs       fixed-tick and capacity gates
+references/                read-only upstream snapshots (Bevy, Lightyear, Avian)
 ```
 
-`content/catalogs/` owns build-embedded, headless-safe gameplay definitions. `content/maps/` owns
-the built-in map index and one sparse map-asset recipe per built-in. `assets/catalogs/` owns
-client-only visual paths and presentation data. Schema versions live in the documents and Rust
-compatibility constants, not directory names. `references/` contains read-only upstream material
-and is not part of Brawler's production module layout.
+Schema versions live in documents and Rust compatibility constants, not directory names.
 
-The routed supervisor, route envelope, IPC transport, and isolated lobby/match-worker composition
-are completed V2 production paths. `just server`, `just client`, `just run`, and `just e2e` exercise
-that routed topology; `scripts/network.sh` remains only the explicitly named legacy direct-UDP
-diagnostic baseline. V3's `WorldPresentationPlugin` is the sole gameplay-world renderer; the
-primitive override validates 3D degradation and is not a renderer selector.
+## Commands
 
-## Code organization rules
+The `justfile` and `README.md` own canonical commands; don't invent substitutes.
 
-- Treat each `mod.rs` as a composition and intentional public-API surface, not an implementation
-  dumping ground. It may define shared system sets/resources, install plugins/schedules, and
-  re-export the small API used by sibling concerns. Put focused algorithms and lifecycle work in
-  owned submodules.
-- Choose a module boundary from responsibility and runtime ownership, not line count alone. Split
-  when code has different state owners, execution roles, feature gates, schedule phases, reasons to
-  change, or independently testable algorithms. Do not create one plugin, architectural layer, or
-  file per type merely to make files shorter.
-- A schedule-facing Bevy system should coordinate a recognizable phase. When it grows to combine
-  validation, candidate collection, deterministic ordering, mutation, telemetry, and cue emission,
-  extract named helpers or focused systems while keeping ordering explicit. Moving one giant
+- `just lint` — fmt, Clippy for every role, server/client feature isolation, layout checks. Needs
+  `ripgrep` on `PATH` for the shell scripts.
+- `just test` — all deterministic suites, including network and performance gates. Focused network
+  tests: `cargo test -p brawler-client --features network-test --test network <filter>`.
+- `just practice-e2e`, `just rejoin-e2e`, `just network-change-e2e`, `just e2e N` — real-process
+  routed checks.
+- `just server` — routed supervisor (default `127.0.0.1:5000`, data in `target/dev/server`). Set
+  `BRAWLER_ROUTED_BIND=0.0.0.0:5000` so a phone on the LAN can reach it.
+- `just client`, `just run N` — native clients against the routed topology.
+- `just android-build <host:port>` / `just android-install` — release APK with the server address
+  prefilled.
+- Scripts that start `brawler-supervisor` without `--data-directory` write the tracked
+  `data/server/`; point new automation at a `target/` directory.
+- `scripts/network.sh` is only the legacy direct-UDP diagnostic baseline.
+  `BRAWLER_FORCE_PRIMITIVE_WORLD` swaps in primitive meshes inside the single 3D renderer; it is
+  not a renderer choice or content mode.
+
+## Invariants
+
+- Server authority holds in every mode, including in-process and offline development. Clients send
+  intent, never positions, hits, damage, scores, status triggers, or map edits.
+- The server feature graph never pulls in windowing, rendering, audio, device input, or client
+  assets. Feature-gate role-owned modules at their ownership boundary and run the role-specific
+  checks after moving types across it.
+- Authoritative mutation lives in server-gated combat, movement, or session modules. Client modules
+  sample intent and present replicated state and cues. Evidence and verification code may observe
+  gameplay but never mutate it. Share a system between roles only when it truly runs in both, such
+  as measured owner prediction.
+- Keep authored definitions, selected/resolved builds, runtime ECS state, protocol registration,
+  telemetry/evidence, and presentation separate. A shared wire shape doesn't authorize shared
+  execution of server-only rules.
+- Network registrations live in `protocol.rs`. Never put a process-local `Entity` on the wire; use
+  stable player, match, and definition IDs. Organization-only changes preserve public module paths
+  and wire contracts. Protocol evolution follows `docs/08-network-architecture.md`: one global
+  compatibility handshake, no per-message versions or compatibility decoders.
+- Use `src/timing.rs` conversions, never literal 60 Hz math. Formation deadlines come from
+  `config/server/game-types.ron` and diagnostic loadouts from `content/catalogs/builds.ron`, never
+  from catalog order or literals.
+- Player-facing balance goes in authored catalogs or validated operator config. Representation,
+  protocol, capacity, overflow, and geometry ceilings stay in code. Shared passive, weapon, and
+  ultimate bounds live beside their typed model and serve both the authoritative validator and the
+  Balance Lab adapters.
+- Every new headless gameplay catalog registers canonical fingerprint material through its content
+  plugin.
+- Registration builders exist only during plugin composition: stable IDs, capacity, duplicate and
+  coverage rules, deterministic sort, then seal into immutable resources. They never open stable
+  wire enums or load executable mods at runtime.
+- Cross-domain authoritative work is collect, validate, plan, commit, publish when atomicity or
+  ordering matters. Map owns object selection and topology; combat alone commits fighter and
+  deployable health, lifecycle, outcomes, and cues for environmental damage.
+- Presentation producers emit stable-key `VfxRequest` / `AudioRequest` messages. Generic client
+  adapters own profile lookup and Bevy materialization. Presentation never becomes the authority
+  for navigation, saving, networking, shutdown, or gameplay state.
+- AI consumes semantic mode, objective, world-object, and effect-tile projections, never concrete
+  asset IDs or mode-specific resources. Modes install through `src/modes/`; the routed `GameMode`
+  protocol stays closed. Effect tiles resolve to focused runtime capabilities. Add a generic handler
+  registry only after a second real mechanic shows the shape.
+
+## Code organization
+
+- Split modules by responsibility, state owner, execution role, feature gate, schedule phase, or
+  independently testable algorithm, not by line count. Don't create a plugin, layer, or file per
+  type. A large but cohesive file may grow only with code of the same ownership and lifecycle.
+- `mod.rs` is composition and intentional API: system sets, shared resources, plugin installation,
+  small re-exports. Algorithms and lifecycle work go in owned submodules.
+- A schedule-facing system coordinates one recognizable phase. When it mixes validation, collection,
+  ordering, mutation, telemetry, and cue emission, extract named helpers or systems. Moving a giant
   function unchanged into another file is not decomposition.
-- Preserve fixed-tick ordering and deferred-command boundaries during extraction. Keep meaningful
-  `SystemSet`, `.before`/`.after`, `.chain()`, physics refresh, and `ApplyDeferred` relationships
-  visible at the composition point; add schedule tests when changing them.
-- Keep execution roles strict. Authoritative mutation belongs to server-gated combat, movement, or
-  session modules. Client modules sample intent and present replicated state/cues. Process evidence
-  and verification may observe gameplay but must not become a second gameplay or mutation path.
-- Keep authored definitions, selected/resolved builds, mutable ECS runtime state, protocol
-  registration, telemetry/evidence, and presentation as separate concerns. A shared wire shape does
-  not authorize shared execution of server-only rules.
-- Treat data-only extension and semantic-family extension differently. New instances composed from
-  existing typed mechanics belong in authored catalogs. A new behavior family adds a bounded typed
-  schema or runtime capability plus its focused plugin/handler/system; do not add built-in-ID
-  branches to unrelated coordinators.
-- Registration builders exist only during plugin composition. They use stable IDs, enforce capacity,
-  duplicate and required-coverage rules, sort deterministically, then seal immutable resources.
-  Process-local registries do not open stable wire enums or create runtime-loaded executable mods.
-- Every new shared headless gameplay catalog registers canonical fingerprint material through its
-  content plugin. Client audio/VFX and other presentation catalogs remain outside the gameplay
-  fingerprint and the server feature graph.
-- Model authoritative cross-domain work as collect/validate/plan/commit/publish when atomicity or
-  ordering matters. Map owns object selection and topology; combat alone commits fighter/deployable
-  health, lifecycle, outcomes, and cues for environmental damage.
-- Presentation feature producers emit stable-key `VfxRequest` or `AudioRequest` messages. Generic
-  client adapters own authored-profile lookup and Bevy materialization; producers do not select
-  renderer/material families, asset handles, playback policy, or reduced-effects behavior.
-- AI consumes semantic mode, objective, world-object, and effect-tile projections rather than
-  recognizing concrete asset IDs or inspecting mode-specific resources. Mode installation goes
-  through `src/modes/` registrations while the routed `GameMode` protocol remains closed.
-- Effect tiles currently resolve to focused runtime capabilities; there is no generic executable
-  handler registry. Add one only after a second real mechanic demonstrates a reusable handler shape.
-- Keep network registrations in `protocol.rs`; keep stable shared protocol/gameplay types in the
-  appropriate shared model/cue/definition module. Never expose process-local `Entity` identity on
-  the wire. Preserve public module paths and wire contracts during organization-only changes unless
-  the active ticket explicitly approves and tests a protocol change.
-- Follow `docs/08-network-architecture.md` for application protocol evolution: use the one global
-  compatibility handshake and current schema, and do not introduce per-message versions or
-  compatibility decoders without a new validated architecture decision.
-- Default new items and submodules to private. Use `pub(crate)` for demonstrated cross-module use
-  and public re-exports only for the crate API consumed by another role, integration tests, or a
-  genuine external boundary. Avoid wildcard re-exports that accidentally turn implementation
-  details into API.
-- Feature-gate role-owned modules at their ownership boundary. The server feature graph must not
-  acquire windowing, rendering, audio, device input, or client assets through a convenient shared
-  module. Run role-specific checks after moving imports or types across client/server boundaries.
-- Avoid module/file-wide complexity suppressions. A necessary Clippy exception for a Bevy system
-  query or deterministic orchestration function should be attached narrowly to that item and remain
-  reviewable. New `too_many_lines`/`too_many_arguments` findings are prompts to inspect ownership
-  and decomposition before adding an allow.
-- Place pure rule tests beside the owning module, using `tests.rs` when a focused module's tests
-  would otherwise obscure production code. Put separate-App authority/replication behavior under
-  `tests/network/`, reuse `harness.rs`, and group scenarios by behavior rather than accumulating
-  them in `tests/network.rs` or duplicating harness setup.
-- When a file is already large but cohesive, add new code only if it shares that exact ownership and
-  lifecycle. A new concern should get a named submodule; recurring growth inside one system should
-  be decomposed into testable helpers. Do not use a hard line limit as a substitute for this review.
+- Keep `SystemSet`, `.before`/`.after`, `.chain()`, physics refresh, and `ApplyDeferred` ordering
+  visible at the composition point. Add schedule tests when changing it.
+- New behavior: a new instance of an existing typed mechanic goes in an authored catalog. A new
+  behavior family adds a bounded typed schema or runtime capability and its own focused
+  plugin/system. Never add built-in-ID branches to unrelated coordinators.
+- Default to private. Use `pub(crate)` for demonstrated cross-module use and `pub` only for the API
+  another role, integration test, or external boundary consumes. No wildcard re-exports.
+- No module- or file-wide lint suppressions. Attach a necessary Clippy allow narrowly to the item
+  with a reason. A new `too_many_lines` / `too_many_arguments` finding means reconsider ownership
+  first.
 
-## Value, maintainability, and no-over-engineering rules
+## Scope and simplicity
 
-- Deliver a complete player-visible vertical slice before building general infrastructure. A
-  feature ticket should end with functional value a player can exercise, not only reusable
-  machinery.
-- Build for current demonstrated requirements. Do not model future screens, states, protocol
-  variants, settings migrations, widget variants, or extension points before an owned use exists.
-- Start with local, direct code. Extract a helper, module, plugin, crate, or public API only after
-  duplication, distinct ownership, platform separation, testing needs, or another concrete cost
-  demonstrates the boundary. A second real use is evidence; an imagined future use is not.
-- Prefer Bevy-native components, resources, systems, states, messages, assets, and UI before
-  adding a custom framework or dependency. Add another abstraction only when the native approach
-  creates a specific observed problem.
-- Optimize for obvious ownership and readable execution flow, not the number of layers. A small
-  action enum and coordinating system are preferable to reducers, command buses, callbacks, or
-  multi-stage state machines when the feature does not require those mechanisms.
-- Preserve the boundaries that protect the product: server authority, execution-role isolation,
-  stable wire identity, recoverable persistence, bounded state, and accepted automation paths.
-  Avoid generalizing behavior outside those boundaries without evidence.
-- Keep presentation optional around behavior. Animation, audio, effects, and transitions must not
-  become the authority for navigation, saving, networking, shutdown, or gameplay state.
-- Organize by responsibility and lifecycle rather than line count. A cohesive file may remain
-  moderately large; split it when responsibilities or owners diverge and the resulting boundary is
-  easier to understand and verify.
-- Test costly risks and important contracts, not every combination. Use focused pure/ECS tests,
-  representative integration cases, and a small visual/manual matrix. Do not multiply every state,
-  input, resolution, scale, timing sample, and failure into a Cartesian suite without evidence.
-- Reuse production components, canonical commands, and existing harnesses. Do not create a general
-  abstraction solely to make one test possible unless production code also benefits from the seam.
-- Record deferred polish and known limitations in the owning ticket or create a separate backlog
-  ticket. Do not expand the current slice incidentally to solve future work.
-- Prefer the smallest clear implementation that owns today's behavior and is easy to change when a
-  new requirement becomes real. Maintainability means clear ownership, limited scope, and safe
-  change—not maximum abstraction.
+- Deliver a complete player-visible slice before general infrastructure. Build for current
+  demonstrated requirements: no speculative screens, states, protocol variants, settings
+  migrations, widget variants, or extension points.
+- Start local and direct. Extract a helper, module, plugin, crate, or public API only when a second
+  real use, distinct ownership, platform separation, or a testing need demonstrates the boundary.
+- Prefer Bevy-native components, resources, systems, states, messages, assets, and UI over custom
+  frameworks or new dependencies. A small action enum plus a coordinating system beats reducers,
+  command buses, or multi-stage state machines the feature doesn't need.
+- Record deferred polish and known limitations in the owning ticket or a new backlog ticket. Don't
+  expand the current slice to absorb them.
 
-## Implementation and verification rules
+## Testing
 
-- The active ticket description and spec are the implementation scope contract. Update them through
-  the Ticket CLI and revalidate acceptance criteria before materially changing scope or
-  architecture.
-- Server authority is not optional, including in-process and offline development modes.
-- Clients send intent, not positions, hits, damage, scores, status triggers, or map edits.
-- Separate authored definitions, selected builds, and runtime state.
-- Keep gameplay facts/messages independent from rendering, audio, camera, and HUD presentation.
-- Put player-facing balance in authored catalogs or validated operator configuration. Keep
-  representation, protocol, capacity, overflow, and deterministic-geometry ceilings code-owned.
-  Shared passive/weapon/ultimate bounds live beside their typed model and are consumed by both the
-  authoritative validator and private Balance Lab adapters.
-- Use `src/timing.rs` conversions rather than literal 60-Hz math. Resolve formation deadlines from
-  `config/server/game-types.ron` and direct-diagnostic loadouts from
-  `content/catalogs/builds.ron`; do not infer either from catalog order or literals.
-- Use focused pure-function tests where a rule is naturally independent of ECS. Test component, resource, lifecycle, and state behavior with small `App`/`World` schedule tests; add headless integration tests for authority and replication.
-- Advance Bevy fixed time or explicitly run the relevant schedule in time-dependent tests rather than waiting on wall-clock sleeps.
-- Visual verification complements automated tests; it does not replace them.
-- Preserve unrelated user changes and keep deferred work visible in separate backlog tickets.
+- Pure rules: unit tests beside the owning module (`tests.rs` when inline tests would obscure the
+  code). Components, resources, lifecycle, and schedules: small `App`/`World` tests. Authority and
+  replication: `tests/network/`, reusing `harness.rs` and grouped by behavior.
+- Advance Bevy fixed time or run the schedule explicitly; never wait on wall-clock sleeps.
+- Test costly risks and important contracts, not Cartesian products of every state, input,
+  resolution, and timing. Reuse production components and existing harnesses; add a seam only if
+  production code also benefits.
+- Visual and on-device checks complement automated tests; they don't replace them.
 
-Canonical build, test, process, closeout, and playtest commands already live in `justfile` and the
-root `README.md`; use those rather than inventing substitutes. The completed V3 renderer has no 2D
-gameplay-world fallback or user-facing renderer choice. `BRAWLER_FORCE_PRIMITIVE_WORLD` selects
-deterministic meshes inside the same 3D composition and must not become a permanent content mode.
+## Local references
 
+`references/` is read-only upstream material; update it only on explicit request. Check it before
+guessing an API, and read the example's `README.md`, source, and `Cargo.toml` together, since
+feature flags and app topology matter. Adapt the smallest relevant pattern; don't copy whole
+examples.
 
-## Local implementation references
+- `references/bevy/examples/` — Bevy examples. The snapshot is **0.20-dev**; confirm exact APIs
+  against Bevy 0.19 source or docs.
+- `references/lightyear/examples/` (`simple_setup`, `simple_box`, `avian_2d`) and
+  `references/lightyear/book/src/SUMMARY.md` — targets Bevy 0.19.
+- `references/avian/crates/avian2d/examples/`.
 
-Use the checked-in source and examples before guessing an API or copying an unrelated internet snippet, but verify snapshot versions before transferring exact APIs:
+Use the internet only when the snapshots are insufficient, prefer primary documentation, and record
+why in the ticket.
 
-- `references/bevy/examples/` — official Bevy example source. Start with `README.md`, then locate focused examples with `rg`; useful foundation examples include `app/headless.rs`, `app/plugin.rs`, and `app/plugin_group.rs`.
-- `references/lightyear/examples/` — official Lightyear example projects and their `Cargo.toml` feature sets. Start with `README.md`; use `simple_setup` for minimal client/server composition, `simple_box` for authoritative replication/prediction/interpolation, and `avian_2d` only when physics integration is in scope.
-- `references/lightyear/book/` — local Lightyear book. Start with `src/SUMMARY.md`, then read the relevant tutorial or concept pages for protocol, transport, replication, inputs, system ordering, shared plugins, client/server setup, prediction, interpolation, and Avian integration.
-- `references/avian/crates/avian2d/examples` — official Avian 2D examples project and their `Cargo.toml` feature sets.
+## Ticket workflow
 
-The Lightyear 0.29 snapshot targets Bevy 0.19, while the checked-in Bevy source is currently 0.20-dev. Use the Bevy snapshot for architectural examples, but confirm exact APIs against Bevy 0.19 source or official documentation before implementation.
+Ticket is the source of truth for planning and progress; the project code is `BRL`. Ticket is
+young software: when the CLI misbehaves or could work better, file it with
+`ticket task new --project TCK <title>`, not in `BRL`.
 
-Treat `references/` as read-only upstream material unless the user explicitly requests a snapshot update. Inspect the example README, source, and `Cargo.toml` together because feature flags and application topology are part of the example. Adapt the smallest relevant pattern to Brawler's authority and dependency boundaries; do not copy whole examples blindly.
+1. Search (`ticket list`, `ticket search`) before creating, and continue an existing ticket whose
+   scope matches. One independently reviewable outcome per ticket: the description states the
+   outcome, and the spec owns scope, decisions, acceptance criteria, constraints, verification, and
+   playtest needs.
+2. Statuses are `idea`, `backlog`, `todo`, `doing`, `done`, and `canceled`. Move to `doing` when
+   work starts. `todo` is work still to do.
+3. Inspect local source, docs, and references before guessing. Record research findings and
+   consequential decisions in the spec, and record material scope or architecture changes there
+   before implementing. If a choice exceeds the owner's existing direction, add a Ticket question
+   and wait for the answer.
+4. Implement without silently broadening scope; file deferred work as a linked backlog ticket.
+5. Verify in proportion to risk. Record commands, results, and anything manual or unavailable in
+   the ticket.
+6. If a native or subjective playtest is needed, put the run path, controls, scenario, known limits,
+   and what to observe in the spec. Don't hold the ticket in `doing` waiting for it.
+7. Record every feedback item as implemented, deferred (with its ticket), rejected (with the reason),
+   or awaiting evidence.
+8. For substantial work, record mistakes, causes, and prevention in the ticket. Create or improve a
+   skill only for a lesson that recurs.
+9. Move to `done` once the implementation, the agent's own verification, durable docs, and learning
+   are complete. The owner and other testers test `done` work and reopen it or file a new ticket.
+   Run `ticket sync` before handoff and report the ticket ID. If sync reports a conflict, stop and
+   surface it; never choose a side.
 
-When research still requires the internet, prefer current primary documentation and record why the local snapshot was insufficient.
-
-## Ticket-driven work tracking
-
-Ticket is the source of truth for active planning and progress. Do not create a new big numbered
-version, version roadmap, or milestone file to track current work. The completed V1–V12 material
-under `docs/implementation/` remains historical evidence for prior decisions, implementation,
-verification, feedback, and learning. Durable product or technical behavior still belongs in the
-owning main documentation rather than being defined only in a ticket.
-
-This repository's Ticket project code is `BRL`; create and update Brawler work in that project.
-Ticket itself is a new application and may still contain defects or workflow rough edges. When use
-of the CLI reveals a Ticket bug or a concrete way the tool could work better, create a ticket for
-the Ticket application with `ticket task new --project TCK <title>` rather than adding it to the
-`BRL` backlog.
-
-Use the repository's `ticket` CLI and its installed skill for every new task:
-
-- Search or list existing tickets before creating one, and continue the existing ticket when its
-  scope matches rather than creating a duplicate.
-- Give each independently reviewable task one ticket. Its description states the outcome; its spec
-  owns scope, decisions, acceptance criteria, implementation constraints, verification, playtest
-  needs, feedback disposition, and closeout learning.
-- Use the actual Ticket statuses: `idea`, `backlog`, `todo`, `doing`, `done`, and `canceled`. Move a
-  ticket to `doing` when implementation starts and to `done` once the agent has done everything it
-  can and verified it as well as it is able. `todo` is work still to do. The owner and other testers
-  test `done` work and reopen the ticket or file a new one when something must change.
-- Record material scope or architecture changes in the ticket spec before implementing them. If a
-  required choice exceeds the user's existing direction, add a Ticket question and wait for its
-  answer; resolve answered questions after incorporating the decision.
-- Create another linked or clearly referenced backlog ticket for deferred work instead of silently
-  expanding the active ticket.
-- Use `ticket task <ID> desc|spec|comment|question|link` commands for mutations. Never edit
-  `.ticket/` or `docs/tasks/` directly. Those files are Ticket-owned state and readable mirrors.
-- Run `ticket sync` before handoff. If it reports a conflict, stop and surface the exact conflict;
-  never choose a side on behalf of the user.
-
-## Ticket task process
-
-For active work:
-
-1. Inspect `ticket list`, `ticket search`, and any referenced ticket. Create a ticket only when no
-   existing ticket owns the request.
-2. Set a concise outcome-oriented description and a concrete spec with acceptance criteria,
-   relevant constraints, and proportional verification. Move it to `doing` when work begins.
-3. Inspect the relevant local source, documentation, and Bevy/Lightyear references before guessing.
-   Add research findings and any consequential decision to the ticket spec.
-4. Implement the ticket without silently broadening its scope. Keep authoritative ownership,
-   execution-role isolation, stable wire identity, persistence, and bounded-state contracts intact.
-5. Run focused and canonical verification proportional to risk. Record commands, results, and any
-   intentionally manual or unavailable evidence in the ticket.
-6. When native or subjective playtesting is required, provide the run path, controls, scenario,
-   known limitations, and requested observations in the spec. Do not hold the ticket in `doing`
-   waiting for that playtest; keep it in `doing` only while agent-side work or a check the agent
-   can still run remains.
-7. Record every feedback item as implemented, deferred to another ticket, rejected with rationale,
-   or awaiting evidence. Re-run affected verification after accepted corrections.
-8. Perform a learn-from-errors review for substantial work. Record mistakes, causes, prevention,
-   and reusable lessons in the ticket; create or improve a skill only when the learning genuinely
-   recurs.
-9. Move the ticket to `done` when the implementation, the agent's verification, durable
-   documentation, and required learning are complete; record any open owner decisions in the spec.
-   Owner feedback on `done` work reopens the ticket or creates a new one. Run `ticket sync` and
-   report the ticket ID in the handoff.
+Change tickets only through `ticket task <ID> desc|spec|comment|question|link|move`. Never edit
+`.ticket/` or `docs/tasks/` (Ticket-owned state and read-only mirrors). Preserve unrelated user
+changes.
