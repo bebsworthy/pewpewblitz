@@ -3,9 +3,9 @@ id: BRL-fk77
 
 title: Fix float_cmp clippy failure in the balance-lab network build scenario
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T10:00:33Z
+status_changed: 2026-11-16T23:30:46Z
 
 theme: quality
 
@@ -19,7 +19,7 @@ related: [BRL-qrb8]
 
 parent: BRL-q5c4
 
-rank: 15204352
+rank: 11337728
 ---
 
 # Description
