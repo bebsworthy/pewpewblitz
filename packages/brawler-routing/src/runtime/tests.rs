@@ -571,6 +571,160 @@ fn a_lobby_route_reused_after_silence_is_reported_with_its_age_and_idle_time() {
     assert_eq!(*folded, 0);
 }
 
+/// Have `match_worker` send one packet back on `match_route` and wait until it is queued to the
+/// public socket.
+fn reply_once(
+    runtime: &mut SupervisorRuntime,
+    worker_io: &mut UnixWorkerChannels,
+    match_worker: WorkerRegistration,
+    match_route: RouteRegistration,
+) {
+    let reply = PacketRecord::new(
+        PacketDirection::WorkerToSupervisor,
+        match_worker.worker_id,
+        match_route.route_id,
+        match_route.peer_id,
+        vec![0x12; 40],
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
+    worker_io.enqueue_packet(&reply).unwrap();
+    worker_io.flush_packet(1).unwrap();
+    let mut replied = 0;
+    for _ in 0..8 {
+        replied += runtime
+            .poll_once(Some(Duration::from_millis(10)))
+            .unwrap()
+            .packets_to_public;
+        if replied == 1 {
+            break;
+        }
+    }
+    assert_eq!(replied, 1);
+}
+
+/// Bind a fresh capability to `match_route` on `match_worker`, as an allocation grant does.
+fn bind_match_capability(
+    runtime: &mut SupervisorRuntime,
+    match_worker: WorkerRegistration,
+    match_route: RouteRegistration,
+) -> Capability {
+    let capability = Capability::from_bytes([3; crate::CAPABILITY_BYTES]).unwrap();
+    let core = runtime.config.core;
+    let bound_at = runtime.now();
+    runtime
+        .core_mut()
+        .bind_capability(
+            capability.clone(),
+            crate::CapabilityBinding {
+                logical_server_id: core.logical_server_id.unwrap(),
+                supervisor_generation: core.supervisor_generation.unwrap(),
+                worker_id: match_worker.worker_id,
+                worker_generation: match_worker.generation,
+                route_id: match_route.route_id,
+                peer_id: match_route.peer_id,
+                lobby_session_id: LobbySessionId::new(40).unwrap(),
+                allocation_id: AllocationId::new(41).unwrap(),
+                match_id: MatchId::new(42).unwrap(),
+                network_protocol: core.network_protocol.unwrap(),
+                content_fingerprint: core.content_fingerprint.unwrap(),
+            },
+            bound_at,
+        )
+        .unwrap();
+    capability
+}
+
+#[test]
+fn a_match_route_reports_its_first_datagram_per_source_and_the_handshake_window() {
+    let mut runtime = SupervisorRuntime::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let match_worker = registration(2, WorkerKind::Match);
+    runtime.register_worker(match_worker).unwrap();
+    let match_route = route(30, match_worker.worker_id, false);
+    runtime.core_mut().register_route(match_route).unwrap();
+    let mut worker_io = attach_worker(&mut runtime, match_worker);
+    let capability = bind_match_capability(&mut runtime, match_worker, match_route);
+    let client = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let source = client.local_addr().unwrap();
+    // A Netcode connection request: prefix byte 0 and the exact 1078-byte request size.
+    let request = PublicEnvelope::new(RouteSelector::Capability(capability), vec![0_u8; 1_078])
+        .unwrap()
+        .encode()
+        .unwrap();
+    for _ in 0..3 {
+        client
+            .send_to(&request, runtime.public_addr().unwrap())
+            .unwrap();
+    }
+    let report = poll_until_received(&mut runtime, 3);
+    assert_eq!(report.public_dropped, 0);
+    assert_eq!(
+        report.ingress_diagnostics,
+        vec![IngressDiagnostic::CapabilityRouteFirstSeen {
+            route_id: match_route.route_id,
+            worker_id: match_worker.worker_id,
+            worker_kind: Some(WorkerKind::Match),
+            source,
+            payload_len: 1_078,
+            connection_request: true,
+        }],
+        "three requests from one source make one first-seen line"
+    );
+
+    // The worker answers once (a Netcode challenge in production).
+    let mut forwarded = 0;
+    for _ in 0..8 {
+        forwarded += worker_io.packet_read_ready(8).unwrap().records.len();
+        if forwarded == 3 {
+            break;
+        }
+        runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+    }
+    assert_eq!(forwarded, 3, "every request reached the worker");
+    reply_once(&mut runtime, &mut worker_io, match_worker, match_route);
+
+    let mut out = Vec::new();
+    let window_end = MonotonicMillis(runtime.now().0 + crate::PUBLIC_WINDOW_MILLIS);
+    runtime.ingress_diagnostics.flush(window_end, &mut out);
+    let [
+        IngressDiagnostic::CapabilityRouteWindow {
+            route_id,
+            worker_id,
+            new_sources,
+            forwarded,
+            connection_requests,
+            forwarded_bytes,
+            replies,
+            ..
+        },
+        IngressDiagnostic::Summary {
+            capability_first_seen,
+            capability_connection_requests,
+            ..
+        },
+    ] = out.as_slice()
+    else {
+        panic!("expected one route window and a summary, got {out:?}");
+    };
+    assert_eq!(*route_id, match_route.route_id);
+    assert_eq!(*worker_id, match_worker.worker_id);
+    assert_eq!(
+        (
+            *new_sources,
+            *forwarded,
+            *connection_requests,
+            *forwarded_bytes,
+            *replies
+        ),
+        (1, 3, 3, 3 * 1_078, 1)
+    );
+    assert_eq!(
+        (*capability_first_seen, *capability_connection_requests),
+        (1, 3)
+    );
+}
+
 #[test]
 fn queued_rejection_is_reclaimed_so_request_ids_can_restart() {
     let mut runtime = SupervisorRuntime::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();

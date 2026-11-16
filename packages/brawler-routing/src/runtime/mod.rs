@@ -32,7 +32,9 @@ mod reporting;
 mod routing_io;
 mod worker_lifecycle;
 
-pub use ingress_diagnostics::{IngressDiagnostic, IngressDropReason};
+pub use ingress_diagnostics::{
+    IngressDiagnostic, IngressDropReason, looks_like_netcode_connection_request,
+};
 use reporting::{report_lifecycle_event, report_runtime_observations};
 
 #[cfg(test)]

@@ -355,6 +355,19 @@ built-in Practice; local draft persistence remains client-owned.
   payload arrives on a route older than 1 s. A per-window `ingress summary` counts every drop.
   Clients log `routed UDP socket bound local_addr=...` on every connect attempt so these lines
   can be matched to a device (BRL-2nsg).
+- Capability (match and rejoin) routes are observable too. The supervisor logs
+  `ingress capability-route-first-seen route=… worker=… kind=… source=… payload_len=…
+  connection_request=…` once per route and source, and, for a route that saw a new source or a
+  Netcode connection request in a window, one `ingress capability-route-window` line with
+  `forwarded`, `connection_requests`, `forwarded_bytes` and `replies` (worker datagrams queued
+  back to the source). The worker logs `brawler routed worker peer opened` on a route's first
+  packet, `peer handshake completed`, or `peer handshake stalled … challenge_sent=<bool>` 2 s
+  after a first packet that never reached Netcode `Connected`, and rate-limited
+  `dropped packet for a closed route or peer`. Netcode refusals are already `Netcode error`
+  warnings; the only silent case, `Ignored` (a non-request packet with no Netcode client), is
+  debug level: run the server with
+  `RUST_LOG=info,wgpu=error,naga=warn,lightyear_netcode::error=debug,lightyear_netcode::server=debug`
+  (workers inherit the supervisor's environment) to see it.
 
 ## Reusable foundation, not a throwaway spike
 

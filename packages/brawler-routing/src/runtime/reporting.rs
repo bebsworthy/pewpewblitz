@@ -2,7 +2,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::{LifecycleEvent, ProcessStatus};
+use crate::{LifecycleEvent, ProcessStatus, WorkerKind};
 
 use super::{IngressDiagnostic, IngressDropReason, RuntimePollReport, RuntimeTimingEvent};
 
@@ -55,6 +55,31 @@ fn report_ingress_diagnostic(diagnostic: &IngressDiagnostic, elapsed: Duration) 
             "brawler-supervisor ingress lobby-route-reused source={source} route={} route_age_ms={route_age_millis} idle_ms={idle_millis} connection_request={connection_request} folded={folded} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}",
             route_id.get(),
         ),
+        IngressDiagnostic::CapabilityRouteFirstSeen {
+            route_id,
+            worker_id,
+            worker_kind,
+            source,
+            payload_len,
+            connection_request,
+        } => eprintln!(
+            "brawler-supervisor ingress capability-route-first-seen route={} worker={worker_id} kind={} source={source} payload_len={payload_len} connection_request={connection_request} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}",
+            route_id.get(),
+            worker_kind_label(worker_kind),
+        ),
+        IngressDiagnostic::CapabilityRouteWindow {
+            route_id,
+            worker_id,
+            window_millis,
+            new_sources,
+            forwarded,
+            connection_requests,
+            forwarded_bytes,
+            replies,
+        } => eprintln!(
+            "brawler-supervisor ingress capability-route-window route={} worker={worker_id} window_ms={window_millis} new_sources={new_sources} forwarded={forwarded} connection_requests={connection_requests} forwarded_bytes={forwarded_bytes} replies={replies} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}",
+            route_id.get(),
+        ),
         IngressDiagnostic::Summary {
             window_millis,
             suppressed,
@@ -63,10 +88,20 @@ fn report_ingress_diagnostic(diagnostic: &IngressDiagnostic, elapsed: Duration) 
             source_limited,
             route_rejected,
             lobby_route_reuses,
+            capability_first_seen,
+            capability_connection_requests,
             sources,
         } => eprintln!(
-            "brawler-supervisor ingress summary window_ms={window_millis} suppressed={suppressed} malformed={malformed} lobby_not_ready={lobby_not_ready} source_limited={source_limited} route_rejected={route_rejected} lobby_route_reuses={lobby_route_reuses} sources={sources} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}"
+            "brawler-supervisor ingress summary window_ms={window_millis} suppressed={suppressed} malformed={malformed} lobby_not_ready={lobby_not_ready} source_limited={source_limited} route_rejected={route_rejected} lobby_route_reuses={lobby_route_reuses} capability_first_seen={capability_first_seen} capability_connection_requests={capability_connection_requests} sources={sources} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}"
         ),
+    }
+}
+
+const fn worker_kind_label(kind: Option<WorkerKind>) -> &'static str {
+    match kind {
+        Some(WorkerKind::Lobby) => "lobby",
+        Some(WorkerKind::Match) => "match",
+        None => "unknown",
     }
 }
 

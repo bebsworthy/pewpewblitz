@@ -13,7 +13,7 @@ use super::{
     PUBLIC_TOKEN, PendingPublicDatagram, RuntimeError, RuntimePollReport, SupervisorRuntime,
     ingress_diagnostics::{
         IngressDiagnostic, IngressDropReason, LOBBY_ROUTE_REUSE_AGE_MILLIS,
-        LOBBY_ROUTE_REUSE_IDLE_MILLIS, looks_like_connection_request,
+        LOBBY_ROUTE_REUSE_IDLE_MILLIS, looks_like_netcode_connection_request,
     },
 };
 
@@ -81,11 +81,11 @@ impl SupervisorRuntime {
                 matches!(envelope.selector(), crate::RouteSelector::Capability(_));
             match self.core.route_public(&envelope, source, now) {
                 Ok(route) => {
-                    if self
+                    let worker_kind = self
                         .workers
                         .get(&route.worker_id)
-                        .is_some_and(|worker| worker.registration.kind == WorkerKind::Match)
-                    {
+                        .map(|worker| worker.registration.kind);
+                    if worker_kind == Some(WorkerKind::Match) {
                         self.metrics
                             .match_inner_ingress
                             .observe_datagram(envelope.payload().len());
@@ -93,6 +93,15 @@ impl SupervisorRuntime {
                     }
                     if capability_selector {
                         self.ingress.promote_authenticated(source, now);
+                        self.ingress_diagnostics.capability_forwarded(
+                            route.route_id,
+                            route.worker_id,
+                            worker_kind,
+                            source,
+                            envelope.payload(),
+                            now,
+                            &mut report.ingress_diagnostics,
+                        );
                     }
                     self.packet_enqueue_started
                         .entry(route.route_id)
@@ -161,7 +170,7 @@ impl SupervisorRuntime {
         };
         let idle_millis = now.0.saturating_sub(route.last_seen.0);
         let route_age_millis = now.0.saturating_sub(route.created.0);
-        let connection_request = looks_like_connection_request(payload);
+        let connection_request = looks_like_netcode_connection_request(payload);
         if idle_millis < LOBBY_ROUTE_REUSE_IDLE_MILLIS
             && !(connection_request && route_age_millis >= LOBBY_ROUTE_REUSE_AGE_MILLIS)
         {
@@ -289,6 +298,7 @@ impl SupervisorRuntime {
                         break;
                     };
                     let inner_bytes = packet.payload.len();
+                    let route_id = packet.route_id;
                     let envelope = PublicEnvelope::new(selector, packet.payload)
                         .map_err(|_| RuntimeError::Routing(RoutingErrorCategory::IpcMalformed))?
                         .encode()
@@ -300,6 +310,7 @@ impl SupervisorRuntime {
                         match_worker,
                         worker_packet_started,
                     ) {
+                        self.ingress_diagnostics.capability_reply(route_id);
                         report.packets_to_public += 1;
                     }
                 }

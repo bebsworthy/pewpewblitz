@@ -8,19 +8,27 @@
 use bevy::prelude::*;
 use brawler_routing::{
     CodecError, IpcIoError, PacketDirection, PacketRecord, PeerId, ROUTED_LINK_MTU, RouteId,
-    UnixWorkerChannels, WorkerId,
+    UnixWorkerChannels, WorkerId, looks_like_netcode_connection_request,
 };
 use lightyear::core::time::Instant;
 use lightyear::link::{
     Link, LinkMtu, LinkReceiveSystems, LinkSystems, RecvPayload, SendPayload, Unlink, UnlinkReason,
     recv_payload_from_bytes,
 };
-use lightyear::prelude::{LinkOf, Linked};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use lightyear::prelude::{Connected, Connecting, LinkOf, Linked};
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    time::{Duration, Instant as MonotonicInstant},
+};
 
 const DEFAULT_RECEIVE_BURST: usize = 64;
 const DEFAULT_SEND_BURST: usize = 64;
 const MAX_CLOSED_PEERS: usize = 128;
+/// A routed peer whose Netcode handshake has not completed this long after its first packet is
+/// reported once (BRL-2nsg). A healthy handshake completes in one round trip.
+const HANDSHAKE_STALL_REPORT_AFTER: Duration = Duration::from_secs(2);
+/// A packet dropped for a closed route or peer is logged at most once per key per interval.
+const CLOSED_DROP_LOG_INTERVAL: Duration = Duration::from_secs(10);
 /// Maximum number of already-Netcode-wrapped payloads retained by the adapter for one peer.
 ///
 /// The routed adapter runs after Lightyear's Netcode send systems.  It must take ownership of
@@ -41,6 +49,82 @@ pub struct RoutedPeer {
     pub route_id: RouteId,
     /// Stable routed peer identity.
     pub peer_id: PeerId,
+}
+
+/// Handshake progress of one routed peer, kept from its first packet until Netcode reports it
+/// `Connected` (BRL-2nsg). Lightyear Netcode refuses a bad connection request with a
+/// `Netcode error` warning but drops anything it cannot attribute to a client at debug level,
+/// so a peer that keeps sending requests and never gets `Connecting` (the marker Netcode inserts
+/// when it sends a challenge) is named here instead.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct RoutedPeerHandshake {
+    opened_at: MonotonicInstant,
+    packets: u32,
+    connection_requests: u32,
+    stall_reported: bool,
+}
+
+impl RoutedPeerHandshake {
+    fn opened(payload: &[u8], now: MonotonicInstant) -> Self {
+        let mut handshake = Self {
+            opened_at: now,
+            packets: 0,
+            connection_requests: 0,
+            stall_reported: false,
+        };
+        handshake.observe(payload);
+        handshake
+    }
+
+    fn observe(&mut self, payload: &[u8]) {
+        self.packets = self.packets.saturating_add(1);
+        if looks_like_netcode_connection_request(payload) {
+            self.connection_requests = self.connection_requests.saturating_add(1);
+        }
+    }
+
+    /// What, if anything, to report now. `Completed` ends tracking; `Stalled` is returned once.
+    fn report(
+        &mut self,
+        elapsed: Duration,
+        connecting: bool,
+        connected: bool,
+    ) -> Option<HandshakeReport> {
+        if connected {
+            return Some(HandshakeReport::Completed);
+        }
+        if self.stall_reported || elapsed < HANDSHAKE_STALL_REPORT_AFTER {
+            return None;
+        }
+        self.stall_reported = true;
+        Some(HandshakeReport::Stalled {
+            challenge_sent: connecting,
+        })
+    }
+}
+
+/// A routed peer link with its handshake tracking and Netcode connection markers.
+type HandshakeProgress = (
+    Entity,
+    &'static RoutedPeer,
+    &'static mut RoutedPeerHandshake,
+    Has<Connecting>,
+    Has<Connected>,
+);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HandshakeReport {
+    Completed,
+    /// `challenge_sent` is whether Netcode accepted a request and answered with a challenge.
+    Stalled {
+        challenge_sent: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ClosedDropLine {
+    logged_at: MonotonicInstant,
+    folded: u32,
 }
 
 /// A control-plane indication that the worker's packet/control stream has failed.
@@ -88,6 +172,8 @@ pub struct RoutedWorker {
     suppress_peer_closes: BTreeSet<(RouteId, PeerId)>,
     closed_peers: VecDeque<(RouteId, PeerId)>,
     closed_set: BTreeSet<(RouteId, PeerId)>,
+    /// Rate limiter for closed-route drop lines, bounded by `MAX_CLOSED_PEERS`.
+    closed_drop_lines: BTreeMap<(RouteId, PeerId), ClosedDropLine>,
     send_cursor: usize,
     receive_burst: usize,
     send_burst: usize,
@@ -124,6 +210,7 @@ impl RoutedWorker {
             suppress_peer_closes: BTreeSet::new(),
             closed_peers: VecDeque::new(),
             closed_set: BTreeSet::new(),
+            closed_drop_lines: BTreeMap::new(),
             send_cursor: 0,
             receive_burst: receive_burst.max(1),
             send_burst: send_burst.max(1),
@@ -186,6 +273,35 @@ impl RoutedWorker {
                 self.closed_set.remove(&evicted);
             }
         }
+    }
+
+    /// Count one packet dropped for a closed route or peer and return `Some(folded)` when it earns
+    /// its own line: the first per key, then at most one per `CLOSED_DROP_LOG_INTERVAL`.
+    fn note_closed_drop(&mut self, key: (RouteId, PeerId), now: MonotonicInstant) -> Option<u32> {
+        if let Some(line) = self.closed_drop_lines.get_mut(&key) {
+            if now.saturating_duration_since(line.logged_at) < CLOSED_DROP_LOG_INTERVAL {
+                line.folded = line.folded.saturating_add(1);
+                return None;
+            }
+            line.logged_at = now;
+            return Some(std::mem::take(&mut line.folded));
+        }
+        if self.closed_drop_lines.len() >= MAX_CLOSED_PEERS {
+            self.closed_drop_lines.retain(|_, line| {
+                now.saturating_duration_since(line.logged_at) < CLOSED_DROP_LOG_INTERVAL
+            });
+            if self.closed_drop_lines.len() >= MAX_CLOSED_PEERS {
+                return None;
+            }
+        }
+        self.closed_drop_lines.insert(
+            key,
+            ClosedDropLine {
+                logged_at: now,
+                folded: 0,
+            },
+        );
+        Some(0)
     }
 
     fn remove_peer(&mut self, key: (RouteId, PeerId)) -> Option<Entity> {
@@ -368,9 +484,13 @@ impl RoutedWorkerPlugin {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the receive phase keeps decode, identity checks, and child creation in one explicit schedule boundary"
+    )]
     fn receive(
         mut worker_query: Query<(Entity, &mut RoutedWorker), With<Linked>>,
-        mut links: Query<&mut Link>,
+        mut links: Query<(&mut Link, Option<&mut RoutedPeerHandshake>)>,
         mut commands: Commands,
     ) {
         for (worker_entity, mut worker) in &mut worker_query {
@@ -426,12 +546,29 @@ impl RoutedWorkerPlugin {
                 {
                     // A stale frame from a closed generation is a bounded drop.  Reconnects use
                     // fresh route/peer identities, so this cannot resurrect a child link.
+                    // Routine after a peer leaves (late keep-alives), but a connection request
+                    // here means a client is talking to a route this worker already closed.
+                    if let Some(folded) = worker.note_closed_drop(key, MonotonicInstant::now()) {
+                        info!(
+                            worker = %worker.worker_id,
+                            route = packet.route_id.get(),
+                            peer = packet.peer_id.get(),
+                            payload_len = packet.payload.len(),
+                            connection_request =
+                                looks_like_netcode_connection_request(&packet.payload),
+                            folded,
+                            "brawler routed worker dropped packet for a closed route or peer"
+                        );
+                    }
                     continue;
                 }
 
                 if let Some(entity) = worker.peers.get(&key).copied() {
                     match links.get_mut(entity) {
-                        Ok(mut link) => {
+                        Ok((mut link, handshake)) => {
+                            if let Some(mut handshake) = handshake {
+                                handshake.observe(&packet.payload);
+                            }
                             link.recv.push(recv_payload(packet.payload), Instant::now());
                         }
                         Err(_) => {
@@ -456,6 +593,16 @@ impl RoutedWorkerPlugin {
                     break;
                 }
 
+                let handshake =
+                    RoutedPeerHandshake::opened(&packet.payload, MonotonicInstant::now());
+                info!(
+                    worker = %worker.worker_id,
+                    route = packet.route_id.get(),
+                    peer = packet.peer_id.get(),
+                    payload_len = packet.payload.len(),
+                    connection_request = handshake.connection_requests > 0,
+                    "brawler routed worker peer opened"
+                );
                 let mut link = Link::default().with_mtu(LinkMtu::new(ROUTED_LINK_MTU));
                 link.recv.push(recv_payload(packet.payload), Instant::now());
                 let child = commands
@@ -469,6 +616,7 @@ impl RoutedWorkerPlugin {
                             route_id: packet.route_id,
                             peer_id: packet.peer_id,
                         },
+                        handshake,
                         Linked,
                     ))
                     .id();
@@ -486,6 +634,38 @@ impl RoutedWorkerPlugin {
                         "worker packet IPC reached EOF".to_string(),
                     ),
                 });
+            }
+        }
+    }
+
+    /// Report each routed peer's Netcode handshake once: completed, or stalled with whether a
+    /// challenge was ever sent (BRL-2nsg). Runs after Netcode's receive phase.
+    fn report_handshakes(mut peers: Query<HandshakeProgress>, mut commands: Commands) {
+        let now = MonotonicInstant::now();
+        for (entity, peer, mut handshake, connecting, connected) in &mut peers {
+            let elapsed = now.saturating_duration_since(handshake.opened_at);
+            match handshake.report(elapsed, connecting, connected) {
+                None => {}
+                Some(HandshakeReport::Completed) => {
+                    info!(
+                        route = peer.route_id.get(),
+                        peer = peer.peer_id.get(),
+                        elapsed_ms = elapsed.as_millis(),
+                        packets = handshake.packets,
+                        connection_requests = handshake.connection_requests,
+                        "brawler routed worker peer handshake completed"
+                    );
+                    commands.entity(entity).remove::<RoutedPeerHandshake>();
+                }
+                Some(HandshakeReport::Stalled { challenge_sent }) => warn!(
+                    route = peer.route_id.get(),
+                    peer = peer.peer_id.get(),
+                    elapsed_ms = elapsed.as_millis(),
+                    packets = handshake.packets,
+                    connection_requests = handshake.connection_requests,
+                    challenge_sent,
+                    "brawler routed worker peer handshake stalled; any Netcode refusal is logged as a `Netcode error` warning, an unattributable packet only at lightyear_netcode debug"
+                ),
             }
         }
     }
@@ -865,6 +1045,7 @@ impl Plugin for RoutedWorkerPlugin {
                 .in_set(LinkReceiveSystems::BufferToLink),
         );
         app.add_systems(PostUpdate, Self::send.in_set(LinkSystems::Send));
+        app.add_systems(Update, Self::report_handshakes);
     }
 }
 
@@ -1040,6 +1221,79 @@ mod tests {
         assert_eq!(link.recv.len(), 1);
         assert_eq!(peers[0].1.route_id, RouteId::new(10).unwrap());
         assert_eq!(peers[0].1.peer_id, PeerId::new(20).unwrap());
+    }
+
+    #[test]
+    fn a_new_peer_counts_its_connection_requests_until_netcode_connects() {
+        let (mut app, mut supervisor, _) = app_with_worker();
+        let request = vec![0_u8; 1_078];
+        send_packet(&mut supervisor, 10, 20, &request);
+        app.update();
+        send_packet(&mut supervisor, 10, 20, &request);
+        send_packet(&mut supervisor, 10, 20, b"keep-alive");
+        app.update();
+        let peers = routed_peers(&mut app);
+        let handshake = *app.world().get::<RoutedPeerHandshake>(peers[0].0).unwrap();
+        assert_eq!((handshake.packets, handshake.connection_requests), (3, 2));
+    }
+
+    #[test]
+    fn a_handshake_is_reported_stalled_once_and_says_whether_a_challenge_was_sent() {
+        let mut handshake = RoutedPeerHandshake::opened(&[0_u8; 1_078], MonotonicInstant::now());
+        let early = HANDSHAKE_STALL_REPORT_AFTER
+            .checked_sub(Duration::from_millis(1))
+            .unwrap();
+        assert_eq!(handshake.report(early, false, false), None);
+        assert_eq!(
+            handshake.report(HANDSHAKE_STALL_REPORT_AFTER, false, false),
+            Some(HandshakeReport::Stalled {
+                challenge_sent: false
+            })
+        );
+        assert_eq!(
+            handshake.report(HANDSHAKE_STALL_REPORT_AFTER * 5, true, false),
+            None,
+            "a stall is reported once"
+        );
+        assert_eq!(
+            handshake.report(HANDSHAKE_STALL_REPORT_AFTER * 5, true, true),
+            Some(HandshakeReport::Completed)
+        );
+
+        let mut challenged = RoutedPeerHandshake::opened(b"x", MonotonicInstant::now());
+        assert_eq!(
+            challenged.report(HANDSHAKE_STALL_REPORT_AFTER, true, false),
+            Some(HandshakeReport::Stalled {
+                challenge_sent: true
+            })
+        );
+    }
+
+    #[test]
+    fn closed_route_drops_are_logged_once_per_key_and_interval() {
+        let (worker_channels, _) = channels();
+        let mut worker = RoutedWorker::new(WorkerId::new(7).unwrap(), worker_channels);
+        let key = (RouteId::new(10).unwrap(), PeerId::new(20).unwrap());
+        let start = MonotonicInstant::now();
+        assert_eq!(worker.note_closed_drop(key, start), Some(0));
+        for _ in 0..5 {
+            assert_eq!(worker.note_closed_drop(key, start), None);
+        }
+        assert_eq!(
+            worker.note_closed_drop(key, start + CLOSED_DROP_LOG_INTERVAL),
+            Some(5)
+        );
+        for route in 100..100 + MAX_CLOSED_PEERS as u128 {
+            let other = (RouteId::new(route).unwrap(), PeerId::new(20).unwrap());
+            let _ = worker.note_closed_drop(other, start + CLOSED_DROP_LOG_INTERVAL);
+        }
+        assert_eq!(worker.closed_drop_lines.len(), MAX_CLOSED_PEERS);
+        let late = (RouteId::new(99).unwrap(), PeerId::new(20).unwrap());
+        assert_eq!(
+            worker.note_closed_drop(late, start + CLOSED_DROP_LOG_INTERVAL * 3),
+            Some(0),
+            "stale lines are evicted to make room"
+        );
     }
 
     #[test]

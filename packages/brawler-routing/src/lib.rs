@@ -62,7 +62,7 @@ pub use packet::{PacketDirection, PacketRecord};
 pub use public_envelope::{PublicEnvelope, RouteSelector};
 pub use runtime::{
     IngressDiagnostic, IngressDropReason, RuntimeConfig, RuntimeError, RuntimePollReport,
-    RuntimeTimingEvent, StopHandle, SupervisorRuntime,
+    RuntimeTimingEvent, StopHandle, SupervisorRuntime, looks_like_netcode_connection_request,
 };
 pub use supervisor::{
     Authorization, CapabilityBinding, CapabilityStatus, CleanupReport, CoreConfig, CoreMetrics,
