@@ -149,3 +149,25 @@ because the score and stats live only in the worker.
 - Restoring the Play-again target after a relaunch; telling others the seat is bot-held
   (BRL-dwqx); relaunch connectivity (BRL-2nsg).
 - Persisting results or progression server-side.
+
+
+# Resolution 2026-11-16 (commit 721f68cc)
+Implemented as planned. Beyond the plan:
+- The worker latches the first Completed `MatchState` and builds `Result` from it, because the root can return to Waiting once the roster empties.
+- The client waits for its join outcome before capturing the result context, because the Completed snapshot can arrive before `Accepted`.
+
+New automation flags: `--leave-match-cue`, `--product-completed-rejoin-smoke`, plus `just completed-rejoin-e2e`. No protocol or IPC change; routing identity is unchanged.
+
+**Tests:**
+- The network tests from the acceptance list, with the full network suite at 128/128.
+- Unit tests for seat_hold, admission, routing ordering and the client flow.
+- `just check`, `lint` and `test` pass, as do `rejoin-e2e`, `completed-rejoin-e2e` (3 consecutive runs), `e2e 2` and `practice-e2e`.
+
+**Pixel 8a (server 0.0.0.0:5000, APK from 721f68cc):** Wipeout 1v1 against a headless opponent with `--leave-match-cue`. Force-stop the phone 5 s into Active. After its seat is held (10 s), cue the opponent to leave (forfeit). Then relaunch and CONNECT.
+- Cycles 1, 3 and 4: Results "Victory by forfeit, Wipeout 1v1" with the score board reached 20 s after the kill.
+- Server, each time: `seat held` → `match completed; result deferred for held seats held=1` → `seat reclaimed by a rejoined session` → `reclaimed after completion; its seat is released` → `worker stopped forced=false`.
+- Play Again was present.
+- After Results → Dashboard, a second relaunch went straight to Dashboard, with no rejoin.
+- Cycle 2 is invalid: both CONNECT taps were swallowed right after launch, no flow was logged, and nothing reached the server. That is BRL-gv67.
+
+**Found, filed separately:** `WorkerExitMismatch` after a match formation failure.
