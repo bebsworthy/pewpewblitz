@@ -37,3 +37,7 @@ Facts:
 # Acceptance criteria
 - The test passes in repeated full-suite runs (for example 10 consecutive `just _test-network` runs, plus one full `just test`).
 - `just lint` passes.
+
+
+# Related flake (2026-11-16)
+In one full `just test` during BRL-2nsg, `local_attack::server_rejected_ultimate_is_rejected_locally_and_authority_is_unchanged` needed 21 frames against its bound of 20. It passed in isolation and on the rerun. This is likely the same wall-clock timing source as this ticket; check both when fixing.
