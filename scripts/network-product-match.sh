@@ -7,7 +7,7 @@ set -eu
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
-# Keep automated runs out of the tracked data/server/ profile store (the supervisor's default).
+# Keep automated runs out of the supervisor's default data/server/ profile store.
 server_data_dir=${BRAWLER_SERVER_DATA_DIR:-$project_dir/target/e2e/server}
 timeout_seconds=${BRAWLER_ROUTED_TIMEOUT_SECONDS:-60}
 players_per_team=${BRAWLER_PRODUCT_PLAYERS_PER_TEAM:-2}

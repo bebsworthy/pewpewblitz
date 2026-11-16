@@ -84,8 +84,8 @@ The `justfile` and `README.md` own canonical commands; don't invent substitutes.
 - `just client`, `just run N` — native clients against the routed topology.
 - `just android-build <host:port>` / `just android-install` — release APK with the server address
   prefilled.
-- Scripts that start `brawler-supervisor` without `--data-directory` write the tracked
-  `data/server/`; point new automation at a `target/` directory.
+- Scripts that start `brawler-supervisor` without `--data-directory` write the local,
+  gitignored `data/server/`; point new automation at a `target/` directory.
 - `scripts/network.sh` is only the legacy direct-UDP diagnostic baseline.
   `BRAWLER_FORCE_PRIMITIVE_WORLD` swaps in primitive meshes inside the single 3D renderer; it is
   not a renderer choice or content mode.
