@@ -18,3 +18,13 @@
 
 # Out of scope
 - Restructuring lint recipes into a feature matrix, and workspace crate split (BRL-qrb8).
+
+
+# Resolution 2026-11-16
+- `tests/network/builds.rs`: `assert!((movement_speed - 444.0).abs() < f32::EPSILON)`, the same convention as combat_splash and combat_spray.
+- `justfile`: new `_clippy-network-balance-lab` (`cargo clippy --locked -p brawler-client --features network-test,balance-lab --tests -- -D warnings`), added to `lint` after `_clippy-balance-lab`.
+
+**Verified:**
+- The new recipe fails on the old line (`error: strict comparison of f32 or f64`) and passes with the fix.
+- `just lint` passes and runs the new recipe.
+- The focused `builds::revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_values` test passes.

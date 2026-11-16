@@ -89,7 +89,7 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
         canonical.primary_weapon.recipe_fingerprint
     );
     assert_eq!(server_loadout.fighter_stats.maximum_health, 222);
-    assert_eq!(server_loadout.fighter_stats.movement_speed, 444.0);
+    assert!((server_loadout.fighter_stats.movement_speed - 444.0).abs() < f32::EPSILON);
     assert_eq!(server_loadout.fighter_stats.cold_capacity, 750);
     assert_eq!(
         server_loadout.fighter_stats.cold_resistance_basis_points,
