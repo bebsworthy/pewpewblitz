@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::{LifecycleEvent, ProcessStatus};
 
-use super::{RuntimePollReport, RuntimeTimingEvent};
+use super::{IngressDiagnostic, IngressDropReason, RuntimePollReport, RuntimeTimingEvent};
 
 pub(super) fn report_runtime_observations(report: &RuntimePollReport, elapsed: Duration) {
     for event in &report.lifecycle_events {
@@ -12,6 +12,61 @@ pub(super) fn report_runtime_observations(report: &RuntimePollReport, elapsed: D
     }
     for event in &report.timing_events {
         report_timing_event(event, elapsed);
+    }
+    for diagnostic in &report.ingress_diagnostics {
+        report_ingress_diagnostic(diagnostic, elapsed);
+    }
+}
+
+fn drop_reason_fields(reason: IngressDropReason) -> String {
+    match reason {
+        IngressDropReason::Suppressed => "reason=suppressed".to_owned(),
+        IngressDropReason::Malformed(category) => format!("reason=malformed category={category:?}"),
+        IngressDropReason::LobbyNotReady => "reason=lobby-not-ready".to_owned(),
+        IngressDropReason::SourceLimited => "reason=source-limited".to_owned(),
+        IngressDropReason::RouteRejected(category) => {
+            format!("reason=route-rejected category={category:?}")
+        }
+    }
+}
+
+/// Render one bounded ingress diagnostic. The source address is the public peer the supervisor
+/// already answers; no capability, route secret, or payload byte is printed.
+fn report_ingress_diagnostic(diagnostic: &IngressDiagnostic, elapsed: Duration) {
+    let timestamp_ms = wall_clock_millis();
+    let elapsed_ms = elapsed.as_millis();
+    match *diagnostic {
+        IngressDiagnostic::Drop {
+            reason,
+            source,
+            folded,
+        } => eprintln!(
+            "brawler-supervisor ingress dropped {} source={source} folded={folded} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}",
+            drop_reason_fields(reason),
+        ),
+        IngressDiagnostic::LobbyRouteReuse {
+            source,
+            route_id,
+            route_age_millis,
+            idle_millis,
+            connection_request,
+            folded,
+        } => eprintln!(
+            "brawler-supervisor ingress lobby-route-reused source={source} route={} route_age_ms={route_age_millis} idle_ms={idle_millis} connection_request={connection_request} folded={folded} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}",
+            route_id.get(),
+        ),
+        IngressDiagnostic::Summary {
+            window_millis,
+            suppressed,
+            malformed,
+            lobby_not_ready,
+            source_limited,
+            route_rejected,
+            lobby_route_reuses,
+            sources,
+        } => eprintln!(
+            "brawler-supervisor ingress summary window_ms={window_millis} suppressed={suppressed} malformed={malformed} lobby_not_ready={lobby_not_ready} source_limited={source_limited} route_rejected={route_rejected} lobby_route_reuses={lobby_route_reuses} sources={sources} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}"
+        ),
     }
 }
 

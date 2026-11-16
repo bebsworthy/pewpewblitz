@@ -347,6 +347,14 @@ built-in Practice; local draft persistence remains client-owned.
 - IPC endpoints and inherited handles are private to the supervisor/worker relationship.
 - Metrics cover packets, routes, queue depth/drop, handoff, worker start/exit, CPU, memory, and fixed
   tick without logging capability secrets.
+- Public ingress drops are never silent. The supervisor logs at most one line per source and
+  reason per 10 s window: `brawler-supervisor ingress dropped reason=<suppressed | malformed |
+  lobby-not-ready | source-limited | route-rejected> source=<addr> folded=<n>`. It also logs
+  `ingress lobby-route-reused` (route age and idle time) when a default-lobby datagram resumes an
+  existing per-source lobby route after at least 1 s of silence, or when a Netcode-request-shaped
+  payload arrives on a route older than 1 s. A per-window `ingress summary` counts every drop.
+  Clients log `routed UDP socket bound local_addr=...` on every connect attempt so these lines
+  can be matched to a device (BRL-2nsg).
 
 ## Reusable foundation, not a throwaway spike
 

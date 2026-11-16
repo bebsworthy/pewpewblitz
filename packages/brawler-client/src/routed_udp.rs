@@ -234,6 +234,28 @@ impl RoutedUdpIo {
             return;
         };
 
+        // One line per connect attempt: the supervisor keys its ingress limiter and lobby routes
+        // by this source, so its diagnostics can only be matched to a device by this address
+        // (BRL-2nsg).
+        let route = match routed.selector {
+            RouteSelector::DefaultLobby => "lobby",
+            RouteSelector::Capability(_) => "match",
+        };
+        match socket.local_addr() {
+            Ok(bound) => info!(
+                local_addr = %bound,
+                server = %routed.public_peer,
+                route,
+                "routed UDP socket bound"
+            ),
+            Err(error) => warn!(
+                %error,
+                server = %routed.public_peer,
+                route,
+                "routed UDP socket bound; local address unavailable"
+            ),
+        }
+
         // NetcodeClient may have supplied a default Link before this transport was inserted.
         // LinkStart is the transport boundary, so normalize it here while no session is active.
         *link = routed_link();

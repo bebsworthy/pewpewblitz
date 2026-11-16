@@ -96,6 +96,8 @@ impl SupervisorRuntime {
     pub(super) fn expire(&mut self, report: &mut RuntimePollReport) {
         let now = self.now();
         self.ingress.expire(now);
+        self.ingress_diagnostics
+            .flush(now, &mut report.ingress_diagnostics);
         let teardowns = self.core.expire(now);
         if self.shutting_down {
             // Route expiry still revokes routes/capabilities above, but its PeerClose controls

@@ -26,11 +26,13 @@ use crate::{
 };
 
 mod capacity;
+mod ingress_diagnostics;
 mod rejoin;
 mod reporting;
 mod routing_io;
 mod worker_lifecycle;
 
+pub use ingress_diagnostics::{IngressDiagnostic, IngressDropReason};
 use reporting::{report_lifecycle_event, report_runtime_observations};
 
 #[cfg(test)]
@@ -147,6 +149,9 @@ pub struct RuntimePollReport {
     /// rendered as redacted log markers by the production owner; no capability or manifest bytes
     /// cross this observability boundary.
     pub timing_events: Vec<RuntimeTimingEvent>,
+    /// Rate-limited public-ingress drop and lobby-route reuse observations (BRL-2nsg). They name
+    /// the public source address but never a capability or payload byte.
+    pub ingress_diagnostics: Vec<IngressDiagnostic>,
 }
 
 /// Correlated supervisor timing facts. Client-side markers use the same `RequestId` and wall-clock
@@ -286,6 +291,7 @@ pub struct SupervisorRuntime {
     next_token: usize,
     incoming: Vec<u8>,
     ingress: SourceIngressLimiter,
+    ingress_diagnostics: ingress_diagnostics::IngressDiagnostics,
     outgoing: std::collections::VecDeque<PendingPublicDatagram>,
     started: Instant,
     outgoing_bytes: usize,
@@ -358,6 +364,7 @@ impl SupervisorRuntime {
             next_token: 2,
             incoming: vec![0; crate::PUBLIC_MAX_DATAGRAM_BYTES + 1],
             ingress: SourceIngressLimiter::default(),
+            ingress_diagnostics: ingress_diagnostics::IngressDiagnostics::default(),
             outgoing: std::collections::VecDeque::new(),
             started: Instant::now(),
             outgoing_bytes: 0,

@@ -5,12 +5,16 @@ use std::{io, net::SocketAddr, time::Instant};
 use mio::Interest;
 
 use crate::{
-    PacketDirection, PacketRecord, PublicEnvelope, RouteId, RoutingErrorCategory,
+    MonotonicMillis, PacketDirection, PacketRecord, PublicEnvelope, RouteId, RoutingErrorCategory,
     UnixWorkerChannels, WorkerId, WorkerKind,
 };
 
 use super::{
     PUBLIC_TOKEN, PendingPublicDatagram, RuntimeError, RuntimePollReport, SupervisorRuntime,
+    ingress_diagnostics::{
+        IngressDiagnostic, IngressDropReason, LOBBY_ROUTE_REUSE_AGE_MILLIS,
+        LOBBY_ROUTE_REUSE_IDLE_MILLIS, looks_like_connection_request,
+    },
 };
 
 impl SupervisorRuntime {
@@ -31,26 +35,13 @@ impl SupervisorRuntime {
             if self.ingress.is_suppressed(source, now) {
                 report.public_dropped += 1;
                 self.core.note_error(RoutingErrorCategory::SourceLimited);
+                self.note_ingress_drop(IngressDropReason::Suppressed, source, now, report);
                 continue;
             }
             let envelope = match PublicEnvelope::decode(&self.incoming[..length]) {
                 Ok(envelope) => envelope,
                 Err(error) => {
-                    report.public_dropped += 1;
-                    let category = match error {
-                        crate::CodecError::Oversize => RoutingErrorCategory::PublicOversize,
-                        crate::CodecError::UnsupportedVersion(_)
-                        | crate::CodecError::UnsupportedType(_) => {
-                            RoutingErrorCategory::PublicUnsupported
-                        }
-                        _ => RoutingErrorCategory::PublicMalformed,
-                    };
-                    self.core.note_error(category);
-                    if self.ingress.record_malformed(source, now)
-                        == crate::IngressDecision::Suppressed
-                    {
-                        self.core.note_error(RoutingErrorCategory::SourceLimited);
-                    }
+                    self.drop_malformed(error, source, now, report);
                     continue;
                 }
             };
@@ -59,52 +50,135 @@ impl SupervisorRuntime {
                 .inner_ingress
                 .observe_datagram(envelope.payload().len());
             self.metrics.inner_ingress.observe_frame();
+            let default_lobby = matches!(envelope.selector(), crate::RouteSelector::DefaultLobby);
             // The lobby route is published only after the worker's Ready handshake.  A client
             // may legitimately send Netcode handshake retries in that startup window; dropping
             // them here keeps the pre-auth limiter reserved for packets that can actually reach
             // an admitted route, while retaining the exact 8-datagram/9-KiB budget thereafter.
             // Boundary counters still include these valid envelopes so public/inner accounting
             // remains an exact per-datagram relation even when readiness races the first retry.
-            if matches!(envelope.selector(), crate::RouteSelector::DefaultLobby)
-                && !self.core.default_lobby_ready()
-            {
+            if default_lobby && !self.core.default_lobby_ready() {
                 report.public_dropped += 1;
+                self.note_ingress_drop(IngressDropReason::LobbyNotReady, source, now, report);
                 continue;
             }
-            if matches!(envelope.selector(), crate::RouteSelector::DefaultLobby)
-                && self.ingress.admit_default(source, length, now)
-                    != crate::IngressDecision::Allowed
-            {
-                report.public_dropped += 1;
-                self.core.note_error(RoutingErrorCategory::SourceLimited);
-                continue;
+            if default_lobby {
+                let decision = self.ingress.admit_default(source, length, now);
+                if decision != crate::IngressDecision::Allowed {
+                    report.public_dropped += 1;
+                    self.core.note_error(RoutingErrorCategory::SourceLimited);
+                    let reason = if decision == crate::IngressDecision::Suppressed {
+                        IngressDropReason::Suppressed
+                    } else {
+                        IngressDropReason::SourceLimited
+                    };
+                    self.note_ingress_drop(reason, source, now, report);
+                    continue;
+                }
+                self.note_lobby_route_reuse(source, envelope.payload(), now, report);
             }
             let capability_selector =
                 matches!(envelope.selector(), crate::RouteSelector::Capability(_));
-            let routed = self.core.route_public(&envelope, source, now);
-            if let Ok(route) = routed {
-                if self
-                    .workers
-                    .get(&route.worker_id)
-                    .is_some_and(|worker| worker.registration.kind == WorkerKind::Match)
-                {
-                    self.metrics
-                        .match_inner_ingress
-                        .observe_datagram(envelope.payload().len());
-                    self.metrics.match_inner_ingress.observe_frame();
+            match self.core.route_public(&envelope, source, now) {
+                Ok(route) => {
+                    if self
+                        .workers
+                        .get(&route.worker_id)
+                        .is_some_and(|worker| worker.registration.kind == WorkerKind::Match)
+                    {
+                        self.metrics
+                            .match_inner_ingress
+                            .observe_datagram(envelope.payload().len());
+                        self.metrics.match_inner_ingress.observe_frame();
+                    }
+                    if capability_selector {
+                        self.ingress.promote_authenticated(source, now);
+                    }
+                    self.packet_enqueue_started
+                        .entry(route.route_id)
+                        .or_default()
+                        .push_back(public_received_at);
                 }
-                if capability_selector {
-                    self.ingress.promote_authenticated(source, now);
+                Err(category) => {
+                    report.public_dropped += 1;
+                    self.note_ingress_drop(
+                        IngressDropReason::RouteRejected(category),
+                        source,
+                        now,
+                        report,
+                    );
                 }
-                self.packet_enqueue_started
-                    .entry(route.route_id)
-                    .or_default()
-                    .push_back(public_received_at);
-            } else {
-                report.public_dropped += 1;
             }
         }
         Ok(())
+    }
+
+    fn drop_malformed(
+        &mut self,
+        error: crate::CodecError,
+        source: SocketAddr,
+        now: MonotonicMillis,
+        report: &mut RuntimePollReport,
+    ) {
+        report.public_dropped += 1;
+        let category = match error {
+            crate::CodecError::Oversize => RoutingErrorCategory::PublicOversize,
+            crate::CodecError::UnsupportedVersion(_) | crate::CodecError::UnsupportedType(_) => {
+                RoutingErrorCategory::PublicUnsupported
+            }
+            _ => RoutingErrorCategory::PublicMalformed,
+        };
+        self.core.note_error(category);
+        if self.ingress.record_malformed(source, now) == crate::IngressDecision::Suppressed {
+            self.core.note_error(RoutingErrorCategory::SourceLimited);
+        }
+        self.note_ingress_drop(IngressDropReason::Malformed(category), source, now, report);
+    }
+
+    fn note_ingress_drop(
+        &mut self,
+        reason: IngressDropReason,
+        source: SocketAddr,
+        now: MonotonicMillis,
+        report: &mut RuntimePollReport,
+    ) {
+        self.ingress_diagnostics
+            .drop(reason, source, now, &mut report.ingress_diagnostics);
+    }
+
+    /// Report a default-lobby datagram that is about to reuse its source's existing lobby route
+    /// after that route went quiet, or a Netcode connection request on an established route: a
+    /// relaunched app that got its old UDP source port back would talk through the old session.
+    fn note_lobby_route_reuse(
+        &mut self,
+        source: SocketAddr,
+        payload: &[u8],
+        now: MonotonicMillis,
+        report: &mut RuntimePollReport,
+    ) {
+        let Some(route) = self.core.lobby_source_route(source) else {
+            return;
+        };
+        let idle_millis = now.0.saturating_sub(route.last_seen.0);
+        let route_age_millis = now.0.saturating_sub(route.created.0);
+        let connection_request = looks_like_connection_request(payload);
+        if idle_millis < LOBBY_ROUTE_REUSE_IDLE_MILLIS
+            && !(connection_request && route_age_millis >= LOBBY_ROUTE_REUSE_AGE_MILLIS)
+        {
+            return;
+        }
+        self.ingress_diagnostics.lobby_route_reuse(
+            IngressDiagnostic::LobbyRouteReuse {
+                source,
+                route_id: route.route_id,
+                route_age_millis,
+                idle_millis,
+                connection_request,
+                folded: 0,
+            },
+            now,
+            &mut report.ingress_diagnostics,
+        );
     }
 
     pub(super) fn handle_packet(

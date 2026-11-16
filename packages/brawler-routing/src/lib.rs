@@ -61,8 +61,8 @@ pub use metrics::{LatencyHistogram, RoutingMetrics, TrafficCounters};
 pub use packet::{PacketDirection, PacketRecord};
 pub use public_envelope::{PublicEnvelope, RouteSelector};
 pub use runtime::{
-    RuntimeConfig, RuntimeError, RuntimePollReport, RuntimeTimingEvent, StopHandle,
-    SupervisorRuntime,
+    IngressDiagnostic, IngressDropReason, RuntimeConfig, RuntimeError, RuntimePollReport,
+    RuntimeTimingEvent, StopHandle, SupervisorRuntime,
 };
 pub use supervisor::{
     Authorization, CapabilityBinding, CapabilityStatus, CleanupReport, CoreConfig, CoreMetrics,

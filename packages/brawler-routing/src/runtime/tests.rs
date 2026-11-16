@@ -416,6 +416,161 @@ fn lobby_startup_retries_do_not_spend_preauth_budget_before_ready() {
     assert_eq!(runtime.core().metrics().source_limited, 1);
 }
 
+fn lobby_runtime_without_ready_route() -> (SupervisorRuntime, WorkerRegistration, UnixWorkerChannels)
+{
+    let mut runtime = SupervisorRuntime::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let worker = registration(1, WorkerKind::Lobby);
+    runtime.register_worker(worker).unwrap();
+    let channels = attach_worker(&mut runtime, worker);
+    (runtime, worker, channels)
+}
+
+fn poll_until_received(runtime: &mut SupervisorRuntime, expected: usize) -> RuntimePollReport {
+    let mut merged = RuntimePollReport::default();
+    for _ in 0..8 {
+        let report = runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+        merged.public_received += report.public_received;
+        merged.public_dropped += report.public_dropped;
+        merged
+            .ingress_diagnostics
+            .extend(report.ingress_diagnostics);
+        if merged.public_received >= expected {
+            break;
+        }
+    }
+    assert_eq!(merged.public_received, expected);
+    merged
+}
+
+#[test]
+fn ingress_drops_name_their_reason_and_source_once_per_window() {
+    let (mut runtime, worker, _channels) = lobby_runtime_without_ready_route();
+    let client = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let source = client.local_addr().unwrap();
+    let envelope = PublicEnvelope::new(RouteSelector::DefaultLobby, vec![1])
+        .unwrap()
+        .encode()
+        .unwrap();
+    for _ in 0..3 {
+        client
+            .send_to(&envelope, runtime.public_addr().unwrap())
+            .unwrap();
+    }
+    let report = poll_until_received(&mut runtime, 3);
+    assert_eq!(
+        report.ingress_diagnostics,
+        vec![IngressDiagnostic::Drop {
+            reason: IngressDropReason::LobbyNotReady,
+            source,
+            folded: 0,
+        }],
+        "three not-ready drops from one source make one line"
+    );
+
+    runtime
+        .core_mut()
+        .register_route(route(2, worker.worker_id, true))
+        .unwrap();
+    let datagrams = crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW + 2;
+    for _ in 0..datagrams {
+        client
+            .send_to(&envelope, runtime.public_addr().unwrap())
+            .unwrap();
+    }
+    let report = poll_until_received(&mut runtime, datagrams);
+    assert_eq!(report.public_dropped, 2);
+    assert_eq!(
+        report.ingress_diagnostics,
+        vec![IngressDiagnostic::Drop {
+            reason: IngressDropReason::SourceLimited,
+            source,
+            folded: 0,
+        }]
+    );
+
+    let stranger = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let capability = PublicEnvelope::new(
+        RouteSelector::Capability(Capability::from_bytes([9; crate::CAPABILITY_BYTES]).unwrap()),
+        vec![1],
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
+    stranger
+        .send_to(&capability, runtime.public_addr().unwrap())
+        .unwrap();
+    let report = poll_until_received(&mut runtime, 1);
+    assert_eq!(
+        report.ingress_diagnostics,
+        vec![IngressDiagnostic::Drop {
+            reason: IngressDropReason::RouteRejected(RoutingErrorCategory::CapabilityUnknown),
+            source: stranger.local_addr().unwrap(),
+            folded: 0,
+        }]
+    );
+}
+
+#[test]
+fn a_lobby_route_reused_after_silence_is_reported_with_its_age_and_idle_time() {
+    let (mut runtime, worker, _channels) = lobby_runtime_without_ready_route();
+    runtime
+        .core_mut()
+        .register_route(route(2, worker.worker_id, true))
+        .unwrap();
+    let client = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let source = client.local_addr().unwrap();
+    let keepalive = PublicEnvelope::new(RouteSelector::DefaultLobby, vec![0x11; 32])
+        .unwrap()
+        .encode()
+        .unwrap();
+    for _ in 0..2 {
+        client
+            .send_to(&keepalive, runtime.public_addr().unwrap())
+            .unwrap();
+    }
+    let report = poll_until_received(&mut runtime, 2);
+    assert!(
+        report.ingress_diagnostics.is_empty(),
+        "steady traffic on a fresh route is not a reuse: {:?}",
+        report.ingress_diagnostics
+    );
+    let lobby_route = runtime.core().lobby_source_route(source).unwrap().route_id;
+
+    std::thread::sleep(Duration::from_millis(1_100));
+    let mut request = vec![0_u8; 1_078];
+    request[1] = 1;
+    let request = PublicEnvelope::new(RouteSelector::DefaultLobby, request)
+        .unwrap()
+        .encode()
+        .unwrap();
+    client
+        .send_to(&request, runtime.public_addr().unwrap())
+        .unwrap();
+    let report = poll_until_received(&mut runtime, 1);
+    let [
+        IngressDiagnostic::LobbyRouteReuse {
+            source: reported_source,
+            route_id,
+            route_age_millis,
+            idle_millis,
+            connection_request,
+            folded,
+        },
+    ] = report.ingress_diagnostics.as_slice()
+    else {
+        panic!(
+            "expected one reuse line, got {:?}",
+            report.ingress_diagnostics
+        );
+    };
+    assert_eq!(*reported_source, source);
+    assert_eq!(*route_id, lobby_route);
+    assert!(*idle_millis >= 1_000, "idle {idle_millis}");
+    assert!(*route_age_millis >= *idle_millis);
+    assert!(*connection_request);
+    assert_eq!(*folded, 0);
+}
+
 #[test]
 fn queued_rejection_is_reclaimed_so_request_ids_can_restart() {
     let mut runtime = SupervisorRuntime::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();

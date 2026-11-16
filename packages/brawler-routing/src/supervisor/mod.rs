@@ -214,6 +214,14 @@ pub struct RouteTeardown {
     pub reason: RoutingErrorCategory,
 }
 
+/// A dynamic lobby route mapped to one public source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LobbySourceRoute {
+    pub(crate) route_id: RouteId,
+    pub(crate) created: MonotonicMillis,
+    pub(crate) last_seen: MonotonicMillis,
+}
+
 #[derive(Clone, Debug)]
 struct WorkerState {
     registration: WorkerRegistration,
@@ -231,6 +239,8 @@ pub struct SupervisorCore {
     route_sources: HashMap<RouteId, SocketAddr>,
     lobby_sources: HashMap<SocketAddr, RouteRegistration>,
     lobby_route_last_seen: HashMap<RouteId, MonotonicMillis>,
+    /// When each dynamic lobby route was allocated, for reuse diagnostics (BRL-2nsg).
+    lobby_route_created: HashMap<RouteId, MonotonicMillis>,
     /// Routes torn down while their worker lives, newest last and bounded by `max_routes`. A
     /// worker may already have written packets for a route before it reads the `PeerClose`
     /// that announces the teardown; those packets are dropped as `RouteExpired` instead of
@@ -253,6 +263,7 @@ impl SupervisorCore {
             route_sources: HashMap::new(),
             lobby_sources: HashMap::new(),
             lobby_route_last_seen: HashMap::new(),
+            lobby_route_created: HashMap::new(),
             retired_routes: VecDeque::new(),
             metrics: CoreMetrics::default(),
         }
@@ -423,6 +434,24 @@ impl SupervisorCore {
         }
     }
 
+    /// The dynamic lobby route a default-lobby datagram from `source` would reuse, with when it
+    /// was allocated and when it last carried a datagram.
+    #[must_use]
+    pub(crate) fn lobby_source_route(&self, source: SocketAddr) -> Option<LobbySourceRoute> {
+        let route_id = self.lobby_sources.get(&source)?.route_id;
+        let last_seen = self.lobby_route_last_seen.get(&route_id).copied()?;
+        let created = self
+            .lobby_route_created
+            .get(&route_id)
+            .copied()
+            .unwrap_or(last_seen);
+        Some(LobbySourceRoute {
+            route_id,
+            created,
+            last_seen,
+        })
+    }
+
     /// Route one already-decoded public envelope while keeping its payload opaque.
     pub fn route_public(
         &mut self,
@@ -445,6 +474,7 @@ impl SupervisorCore {
                         .ok_or(RoutingErrorCategory::ManifestIdentity)?;
                     let route = self.allocate_lobby_route(template, source)?;
                     self.lobby_sources.insert(source, route);
+                    self.lobby_route_created.insert(route.route_id, now);
                     route
                 }
             }
@@ -778,6 +808,7 @@ impl SupervisorCore {
         let route = self.routes.remove(&route_id)?;
         self.route_sources.remove(&route_id);
         self.lobby_route_last_seen.remove(&route_id);
+        self.lobby_route_created.remove(&route_id);
         if self.config.max_routes > 0 {
             while self.retired_routes.len() >= self.config.max_routes {
                 self.retired_routes.pop_front();
@@ -873,6 +904,7 @@ impl SupervisorCore {
             self.routes.remove(route_id);
             self.route_sources.remove(route_id);
             self.lobby_route_last_seen.remove(route_id);
+            self.lobby_route_created.remove(route_id);
         }
         self.lobby_sources
             .retain(|_, route| route.worker_id != worker_id);
