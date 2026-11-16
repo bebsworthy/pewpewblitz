@@ -24,6 +24,18 @@ const VISIBLE_DELTA_UNITS: f32 = 0.5;
 
 /// Two clients in an active Wipeout match; client 0 is measured with the given delay.
 fn joined_harness(delay: usize) -> Harness {
+    let mut harness = activated_harness(delay, walk(Vec2::X));
+    harness.set_controlled_input(0, FighterInput::default());
+    for _ in 0..30 + delay {
+        harness.step();
+    }
+    assert!(owner(&mut harness).is_some());
+    harness
+}
+
+/// Two clients readied into a Wipeout match, returned on the first step on which the server
+/// match is `Active`. Client 0 holds `held` from before readying (with the given delay).
+fn activated_harness(delay: usize, held: FighterInput) -> Harness {
     let mut harness = Harness::new_match(2);
     harness.set_replication_delay(0, delay);
     harness.step_until(|harness| {
@@ -36,7 +48,7 @@ fn joined_harness(delay: usize) -> Harness {
         query.single(world).expect("one match").match_id
     };
     // Input held before activation is not predicted: the server holds inactive fighters.
-    harness.set_controlled_input(0, walk(Vec2::X));
+    harness.set_controlled_input(0, held);
     for index in 0..2 {
         harness.send_match_command(
             index,
@@ -59,11 +71,6 @@ fn joined_harness(delay: usize) -> Harness {
         presented(&mut harness).distance(start) < 0.05,
         "no prediction before the match is active"
     );
-    harness.set_controlled_input(0, FighterInput::default());
-    for _ in 0..30 + delay {
-        harness.step();
-    }
-    assert!(owner(&mut harness).is_some());
     harness
 }
 
@@ -227,6 +234,70 @@ fn steady_walking_reconciles_without_corrections_and_settles_on_authority() {
             "[{profile}] presented pose settles on authority"
         );
     }
+}
+
+/// The first step of a match: the server applies the client's walking input from the
+/// activation tick, while the client starts predicting only once the first authoritative pose
+/// arrives, a round trip later. The prediction must still match authority for every tick.
+#[test]
+fn first_walk_after_match_start_reconciles_without_correction() {
+    let mut failures = Vec::new();
+    for (profile, delay) in PROFILES {
+        // (case, input held through activation, ticks after activation before pressing walk,
+        // largest allowed first-walk error).
+        let cases = [
+            ("held through activation", walk(Vec2::X), 0, 0.1),
+            ("pressed on activation", FighterInput::default(), 0, 0.1),
+            // Pressing walk once prediction runs is an ordinary idle-to-walk input change.
+            // Under simulated latency the harness delivers that change one tick late, so the
+            // server repeats one idle tick: the one-tick misprediction (about 1.2 units) that
+            // steady walking tolerates, not a match-start error.
+            (
+                "pressed after activation",
+                FighterInput::default(),
+                2,
+                if delay == 0 { 0.1 } else { 2.0 },
+            ),
+        ];
+        for (case, held, press_after, limit) in cases {
+            let mut harness = activated_harness(delay, held);
+            reset_stats(&mut harness);
+            for _ in 0..press_after {
+                harness.step();
+            }
+            harness.set_controlled_input(0, walk(Vec2::X));
+            for _ in 0..90 {
+                harness.step();
+            }
+            // Measure the walk itself; releasing is a separate input change.
+            let walking = stats(&harness);
+            harness.set_controlled_input(0, FighterInput::default());
+            for _ in 0..60 {
+                harness.step();
+            }
+            let settled = presented(&mut harness).distance(server_pose(&mut harness));
+            println!(
+                "owner first walk [{profile} delay={delay}] {case}: {walking:?}, settled \
+                 {settled:.3}"
+            );
+            if walking.reconciliations < 60
+                || walking.snaps != 0
+                || walking.max_smoothed_error >= limit
+                || settled >= 0.05
+            {
+                failures.push(format!(
+                    "[{profile}] {case}: reconciliations {}, snaps {}, max smoothed error \
+                     {:.3} (limit {limit}), settled {settled:.3}",
+                    walking.reconciliations, walking.snaps, walking.max_smoothed_error
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "the first walk after match start reconciles with no correction:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]

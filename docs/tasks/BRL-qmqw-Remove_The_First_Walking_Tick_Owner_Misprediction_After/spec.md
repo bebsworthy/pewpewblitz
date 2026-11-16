@@ -18,3 +18,24 @@ BRL-sh10 (BRL-0169, commits eba755e9 / 08b7f789) found the cause in native trace
 - The first walk after match start reconciles with no visible correction (offset < 0.1 u).
 - A regression test in tests/network/prediction.rs that walks immediately after activation and asserts `max_smoothed_error < 0.1` and `snaps == 0` at delays from `PROFILES`.
 - `just test`, `just lint`, `just practice-e2e` pass.
+
+
+# Resolution 2026-11-16
+**Root cause:** the server writes no `AuthoritativePose` while a fighter is inactive. On the activation tick (`starts_at_tick`) it applies the held walk input and writes its first pose. The client attaches `OwnerPrediction` only when that pose arrives, about a round trip later. With no prediction history, `reconcile` rebased the sample's position onto the current local tick and dropped the server's motion for the ticks in between. The next sample then corrected 2-4 ticks of motion (3.5 u at delay 4). This was not a tick-alignment bug and not the server repeating a stale input.
+
+**Fix (client only, `packages/brawler-client/src/prediction.rs`):** `OwnerPrediction::reconcile_replaying` handles a sample with no matching prediction (the first one after attach, or a history overrun). It rebases onto the sample, then re-simulates every local input tick between the sample and the current tick, using the Lightyear input buffer (`NativeBuffer<FighterInput>`) and the same movement step as prediction (the new `OwnerStepWorld` / `OwnerStepState`). For the first sample, only the attach pose versus authority counts as a correction. No protocol or server change.
+
+**Tests:**
+- `tests/network/prediction.rs` `first_walk_after_match_start_reconciles_without_correction` uses the new `activated_harness`. It covers walk held through activation, pressed on activation, and pressed 2 ticks after activation, at delays 0, 4 and 7.
+  - Before the fix: max error 2.33-3.5 u. After: 0.000.
+  - The "pressed 2 ticks after" case keeps the existing one-tick 1.167 u idle-to-walk error at delay > 0. That is the same tolerance steady walking already has (< 2.0).
+- Unit test `the_first_sample_replays_the_inputs_the_server_already_applied`.
+- `just lint`, `just test` (2458 tests) and `just practice-e2e` pass.
+
+**Native check:** a headless routed client walked from the start (`--move-axis 1,0 --product-network-change-smoke`, wipeout-1v1) against the local supervisor, with a temporary probe logging every reconciliation error above 0.01 u.
+- HEAD baseline: `Smoothed { error: 3.50 }` at the first walking sample.
+- With the fix: 4 of 4 runs had no correction at match start. The only logged snaps (about 262 u) follow the smoke's deliberate 4 s traffic outage, as on baseline.
+
+**Possible follow-ups (not filed):**
+- If the `MatchState` change to Active arrives after the fighter's first pose, the replay treats the ticks as suspended.
+- Respawn has the same late start, but the respawn teleport snaps it anyway.

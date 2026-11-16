@@ -3,9 +3,9 @@ id: BRL-qmqw
 
 title: Remove the first-walking-tick owner misprediction after match start
 
-status: doing
-closed:
-status_changed: 2026-11-16T10:45:31Z
+status: done
+closed: 2026-11-16T11:16:52Z
+status_changed: 2026-11-16T11:16:52Z
 
 theme: core
 
@@ -19,7 +19,7 @@ related: [BRL-sh10]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description

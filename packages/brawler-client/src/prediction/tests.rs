@@ -100,6 +100,48 @@ fn samples_without_a_matching_prediction_rebase_onto_authority() {
 }
 
 #[test]
+fn the_first_sample_replays_the_inputs_the_server_already_applied() {
+    let tuning = OwnerPredictionTuning::default();
+    // Attached from the first authoritative pose, which arrives a round trip after the server
+    // started applying the walking input.
+    let mut prediction = OwnerPrediction::from_pose(Vec2::new(1.0, 0.0), 0.0);
+    let mut replayed = Vec::new();
+    let outcome = prediction.reconcile_replaying(
+        sample(101, Vec2::new(1.0, 0.0)),
+        tuning,
+        Tick(105),
+        |tick, position| {
+            replayed.push(tick.0);
+            ReplayedStep {
+                position: position + Vec2::X,
+                aim: None,
+                suspended: false,
+            }
+        },
+    );
+    assert_eq!(
+        replayed,
+        [102, 103, 104],
+        "every input after the sample, before now"
+    );
+    assert_eq!(outcome, Reconciliation::Rebased { error: 0.0 });
+    assert_eq!(prediction.position, Vec2::new(4.0, 0.0));
+    assert_eq!(
+        prediction.presented_position(),
+        prediction.position,
+        "replayed motion is prediction, not a correction"
+    );
+    // The next sample for a replayed tick matches without a correction.
+    let outcome = prediction.reconcile_replaying(
+        sample(102, Vec2::new(2.0, 0.0)),
+        tuning,
+        Tick(106),
+        |_, _| unreachable!("a matched sample replays nothing"),
+    );
+    assert_eq!(outcome, Reconciliation::Smoothed { error: 0.0 });
+}
+
+#[test]
 fn samples_older_than_the_prediction_wait_for_their_round_trip() {
     let tuning = OwnerPredictionTuning::default();
     let mut prediction = predicted_walk(Vec2::ZERO, 100, 3, Vec2::X);

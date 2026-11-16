@@ -14,6 +14,8 @@
 //! replicated map snapshot and dynamic state for presentation only.
 
 use avian2d::prelude::{Position, Rotation};
+use bevy::ecs::query::QueryData;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use brawler::builds::{AbilityState, PassiveKind, PassiveRuntimeState, ResolvedMatchLoadout};
 use brawler::combat::{
@@ -29,7 +31,7 @@ use brawler::movement::{
     resolved_movement_velocity,
 };
 use brawler::protocol::{Fighter, FighterInput};
-use lightyear::prelude::input::native::ActionState;
+use lightyear::prelude::input::native::{ActionState, NativeBuffer};
 use lightyear::prelude::{
     ConfirmHistory, ConfirmedHistory, Controlled, InterpolationSystems, LocalTimeline,
     ReplicationCheckpointMap, Tick,
@@ -90,6 +92,15 @@ pub(crate) enum Reconciliation {
     Pending,
     /// Local movement was suspended, so the authoritative motion is presented directly.
     Followed { error: f32 },
+}
+
+/// One locally re-simulated fixed step: the input timeline tick's predicted position, the facing
+/// its input committed, and whether movement was suspended for it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ReplayedStep {
+    pub position: Vec2,
+    pub aim: Option<Vec2>,
+    pub suspended: bool,
 }
 
 /// Client-only predicted pose of the controlled fighter. Never replicated or authoritative.
@@ -173,9 +184,7 @@ impl OwnerPrediction {
     /// Estimated server simulation tick for a local input tick, once a sample has arrived.
     #[must_use]
     pub(crate) fn simulation_tick_at(&self, tick: Tick) -> Option<u64> {
-        self.server_clock.map(|(confirmed, simulation)| {
-            simulation.saturating_add_signed(i64::from(tick - confirmed))
-        })
+        simulation_tick_at(self.server_clock, tick)
     }
 
     /// The Lightyear tick of the newest authoritative sample folded into the prediction.
@@ -201,12 +210,38 @@ impl OwnerPrediction {
         self.server_clock = Some((tick, simulation_tick));
     }
 
-    /// Fold one authoritative sample into the prediction.
+    /// Fold one authoritative sample into the prediction without re-simulating any input.
+    #[cfg(test)]
     pub(crate) fn reconcile(
         &mut self,
         sample: AuthoritativeSample,
         tuning: OwnerPredictionTuning,
     ) -> Reconciliation {
+        self.reconcile_replaying(sample, tuning, sample.tick + 1, |_, position| {
+            ReplayedStep {
+                position,
+                aim: None,
+                suspended: true,
+            }
+        })
+    }
+
+    /// Fold one authoritative sample into the prediction before predicting the `current` input
+    /// timeline tick.
+    ///
+    /// A sample without a matching prediction (the first sample after prediction attaches, or a
+    /// history overrun) rebases onto authority and then re-simulates, with `replay`, every
+    /// local input tick after the sample and before `current`: the server applies those inputs
+    /// too, so starting the prediction from the sample at `current` would drop their motion and
+    /// reconcile it later as a correction (the first walk after a match starts).
+    pub(crate) fn reconcile_replaying(
+        &mut self,
+        sample: AuthoritativeSample,
+        tuning: OwnerPredictionTuning,
+        current: Tick,
+        mut replay: impl FnMut(Tick, Vec2) -> ReplayedStep,
+    ) -> Reconciliation {
+        let attached_pose = self.last_sample_tick.is_none().then_some(self.position);
         self.last_sample_tick = Some(sample.tick);
         let predicted_at = self
             .history
@@ -232,9 +267,33 @@ impl OwnerPrediction {
             }
             self.present_correction(error, tuning, false)
         } else {
-            let error = sample.position - self.position;
             self.history.clear();
-            self.position = sample.position;
+            let mut position = sample.position;
+            let gap = current - sample.tick;
+            if gap > 1 && usize::try_from(gap).is_ok_and(|gap| gap <= OWNER_PREDICTION_HISTORY) {
+                let mut tick = sample.tick + 1;
+                while current - tick > 0 {
+                    let step = replay(tick, position);
+                    position = step.position;
+                    self.following_authority = step.suspended;
+                    if let Some(aim) = step.aim {
+                        self.facing = aim.y.atan2(aim.x);
+                    }
+                    self.history.push_back(PredictedStep {
+                        tick,
+                        position,
+                        aimed: step.aim.is_some(),
+                    });
+                    tick = tick + 1;
+                }
+            }
+            // The first sample measures the attach pose against authority; the replayed inputs
+            // are prediction, presented as such. A later rebase compares like with like: the
+            // replayed and the previous prediction for the same input tick.
+            let error = attached_pose.map_or(position - self.position, |attached| {
+                sample.position - attached
+            });
+            self.position = position;
             self.present_correction(error, tuning, true)
         };
         if !self.history.iter().any(|step| step.aimed) {
@@ -299,6 +358,14 @@ impl OwnerPrediction {
             self.correction_offset = Vec2::ZERO;
         }
     }
+}
+
+/// Estimated server simulation tick for a local input tick from a (confirmed tick, simulation
+/// tick) server clock pair.
+fn simulation_tick_at(server_clock: Option<(Tick, u64)>, tick: Tick) -> Option<u64> {
+    server_clock.map(|(confirmed, simulation)| {
+        simulation.saturating_add_signed(i64::from(tick - confirmed))
+    })
 }
 
 /// Bounded measured facts for tests and diagnostics.
@@ -410,20 +477,113 @@ fn attach_owner_prediction(
     }
 }
 
+/// The world the shared owner movement step reads: fixed time, tuning, builds, and the current
+/// replicated map blockers and match phase.
+#[derive(SystemParam)]
+struct OwnerStepWorld<'w, 's> {
+    time: Res<'w, Time<Fixed>>,
+    input_tuning: Res<'w, InputTuning>,
+    movement_tuning: Res<'w, MovementTuning>,
+    builds: Res<'w, brawler::builds::BuildCatalogResource>,
+    catalog: Res<'w, MapCatalogResource>,
+    maps: Query<'w, 's, (&'static ResolvedMapSnapshot, &'static MapDynamicState), With<MapRoot>>,
+    matches: Query<'w, 's, &'static MatchState>,
+}
+
+/// The controlled fighter's replicated movement state the shared step reads.
+#[derive(QueryData)]
+struct OwnerStepState {
+    loadout: Option<&'static ResolvedMatchLoadout>,
+    effects: Option<&'static ActiveEffects>,
+    tile: Option<&'static EffectTileOccupancy>,
+    passive_state: Option<&'static PassiveRuntimeState>,
+    knockback: Option<&'static KnockbackFeedback>,
+    ability: Option<&'static AbilityState>,
+    defeated: Has<Defeated>,
+    participant: Has<MatchParticipant>,
+    respawning: Has<RespawnState>,
+}
+
+impl OwnerStepWorld<'_, '_> {
+    /// One owner movement step from `position` with `input`, using the shared movement rules
+    /// and the current map blockers.
+    fn step(
+        &self,
+        state: &OwnerStepStateItem<'_, '_>,
+        simulation_tick: Option<u64>,
+        input: FighterInput,
+        mut position: Vec2,
+    ) -> ReplayedStep {
+        let delta = self.time.delta().as_secs_f32();
+        let match_active = self
+            .matches
+            .iter()
+            .next()
+            .is_none_or(|state| matches!(state.phase, MatchPhase::Active { .. }));
+        let intent = movement_intent(input, &self.input_tuning);
+        let suspended = movement_is_suspended(
+            state.ability,
+            state.defeated,
+            state.participant && (!match_active || state.respawning),
+        );
+        if let (false, Some(loadout), Some(simulation_tick)) =
+            (suspended, state.loadout, simulation_tick)
+        {
+            let velocity = resolved_movement_velocity(
+                simulation_tick,
+                intent.movement,
+                loadout.fighter_stats.movement_speed,
+                MovementModifiers {
+                    active_effects: state.effects,
+                    effect_tile: state.tile,
+                    adrenal_response: loadout
+                        .passives
+                        .iter()
+                        .find(|passive| passive.kind == PassiveKind::AdrenalResponse)
+                        .copied(),
+                    passive_state: state.passive_state,
+                    external_motion: state.knockback.map(|knockback| ExternalMotion {
+                        velocity: Vec2::new(knockback.velocity.x, knockback.velocity.y),
+                        expires_at_tick: knockback.expires_at_tick,
+                    }),
+                },
+            );
+            position += velocity * delta;
+        }
+        if let Ok((snapshot, map_state)) = self.maps.single() {
+            position = resolve_circle_against_blocking_map(
+                position,
+                owner_contact_radius(&self.builds, &self.movement_tuning),
+                snapshot,
+                map_state,
+                &self.catalog.0,
+            );
+        }
+        ReplayedStep {
+            position,
+            aim: (!suspended).then_some(intent.aim).flatten(),
+            suspended,
+        }
+    }
+}
+
 /// Fold the newest confirmed authoritative pose into the prediction.
 ///
 /// Replicon confirms the whole fighter entity at a Lightyear server tick; the raw replicated
 /// `Position`/`Rotation` histories (kept by interpolation) hold the latest authoritative values
 /// at or before that tick, including dash, knockback, and respawn motion that
 /// `AuthoritativePose` does not record. `AuthoritativePose` supplies the server simulation tick.
+/// A rebase re-simulates the local inputs (from the input buffer) after the sample tick.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
 fn reconcile_owner_prediction(
+    timeline: Res<LocalTimeline>,
     tuning: Res<OwnerPredictionTuning>,
     checkpoints: Res<ReplicationCheckpointMap>,
+    step_world: OwnerStepWorld,
     mut stats: ResMut<OwnerPredictionStats>,
     mut owners: Query<
         (
@@ -432,11 +592,15 @@ fn reconcile_owner_prediction(
             Option<&ConfirmedHistory<Rotation>>,
             Ref<AuthoritativePose>,
             &mut OwnerPrediction,
+            Option<&NativeBuffer<FighterInput>>,
+            OwnerStepState,
         ),
         (With<Fighter>, With<Controlled>),
     >,
 ) {
-    for (confirm_history, positions, rotations, pose, mut prediction) in &mut owners {
+    let current = timeline.tick();
+    for (confirm_history, positions, rotations, pose, mut prediction, inputs, state) in &mut owners
+    {
         let Some(tick) = checkpoints.get(confirm_history.last_tick()) else {
             continue;
         };
@@ -452,13 +616,21 @@ fn reconcile_owner_prediction(
         let facing = rotations
             .and_then(|rotations| rotations.get_present(tick))
             .map_or(prediction.facing, |rotation| rotation.as_radians());
-        let outcome = prediction.reconcile(
+        let clock = prediction.server_clock;
+        let outcome = prediction.reconcile_replaying(
             AuthoritativeSample {
                 tick,
                 position: position.0,
                 facing,
             },
             *tuning,
+            current,
+            |input_tick, from| {
+                let input = inputs
+                    .and_then(|inputs| inputs.get(input_tick))
+                    .map_or(FighterInput::default(), |action| action.0);
+                step_world.step(&state, simulation_tick_at(clock, input_tick), input, from)
+            },
         );
         stats.record(outcome);
     }
@@ -469,103 +641,33 @@ fn reconcile_owner_prediction(
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
-    clippy::too_many_arguments,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
 fn predict_owner_movement(
     timeline: Res<LocalTimeline>,
-    time: Res<Time<Fixed>>,
     tuning: Res<OwnerPredictionTuning>,
-    input_tuning: Res<InputTuning>,
-    movement_tuning: Res<MovementTuning>,
-    builds: Res<brawler::builds::BuildCatalogResource>,
-    catalog: Res<MapCatalogResource>,
+    step_world: OwnerStepWorld,
     mut stats: ResMut<OwnerPredictionStats>,
-    maps: Query<(&ResolvedMapSnapshot, &MapDynamicState), With<MapRoot>>,
-    matches: Query<&MatchState>,
     mut owners: Query<
         (
             &mut OwnerPrediction,
             Option<&ActionState<FighterInput>>,
-            Option<&ResolvedMatchLoadout>,
-            (
-                Option<&ActiveEffects>,
-                Option<&EffectTileOccupancy>,
-                Option<&PassiveRuntimeState>,
-                Option<&KnockbackFeedback>,
-            ),
-            (
-                Option<&AbilityState>,
-                Has<Defeated>,
-                Has<MatchParticipant>,
-                Has<RespawnState>,
-            ),
+            OwnerStepState,
         ),
         (With<Fighter>, With<Controlled>),
     >,
 ) {
     let tick = timeline.tick();
-    let delta = time.delta().as_secs_f32();
-    let map = maps.single().ok();
-    let contact_radius = owner_contact_radius(&builds, &movement_tuning);
-    let match_active = matches
-        .iter()
-        .next()
-        .is_none_or(|state| matches!(state.phase, MatchPhase::Active { .. }));
-    for (
-        mut prediction,
-        action,
-        loadout,
-        (effects, tile, passive_state, knockback),
-        (ability, defeated, participant, respawning),
-    ) in &mut owners
-    {
-        let intent = movement_intent(
+    let delta = step_world.time.delta().as_secs_f32();
+    for (mut prediction, action, state) in &mut owners {
+        let step = step_world.step(
+            &state,
+            prediction.simulation_tick_at(tick),
             action.map_or(FighterInput::default(), |action| action.0),
-            &input_tuning,
+            prediction.position,
         );
-        let suspended = movement_is_suspended(
-            ability,
-            defeated,
-            participant && (!match_active || respawning),
-        );
-        let simulation_tick = prediction.simulation_tick_at(tick);
-        let mut position = prediction.position;
-        if let (false, Some(loadout), Some(simulation_tick)) = (suspended, loadout, simulation_tick)
-        {
-            let velocity = resolved_movement_velocity(
-                simulation_tick,
-                intent.movement,
-                loadout.fighter_stats.movement_speed,
-                MovementModifiers {
-                    active_effects: effects,
-                    effect_tile: tile,
-                    adrenal_response: loadout
-                        .passives
-                        .iter()
-                        .find(|passive| passive.kind == PassiveKind::AdrenalResponse)
-                        .copied(),
-                    passive_state,
-                    external_motion: knockback.map(|knockback| ExternalMotion {
-                        velocity: Vec2::new(knockback.velocity.x, knockback.velocity.y),
-                        expires_at_tick: knockback.expires_at_tick,
-                    }),
-                },
-            );
-            position += velocity * delta;
-        }
-        if let Some((snapshot, state)) = map {
-            position = resolve_circle_against_blocking_map(
-                position,
-                contact_radius,
-                snapshot,
-                state,
-                &catalog.0,
-            );
-        }
-        let aim = (!suspended).then_some(intent.aim).flatten();
-        prediction.following_authority = suspended;
-        prediction.record_step(tick, position, aim, *tuning, delta);
+        prediction.following_authority = step.suspended;
+        prediction.record_step(tick, step.position, step.aim, *tuning, delta);
         stats.predicted_ticks = stats.predicted_ticks.saturating_add(1);
     }
 }
