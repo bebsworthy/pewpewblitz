@@ -3,9 +3,9 @@ id: BRL-r8ev
 
 title: Apply the cheaper dev debuginfo profile and a just sweep recipe
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T10:00:33Z
+status_changed: 2026-11-16T23:32:46Z
 
 theme: quality
 
@@ -19,7 +19,7 @@ related: [BRL-qrb8]
 
 parent: BRL-q5c4
 
-rank: 15269888
+rank: 11337728
 ---
 
 # Description
