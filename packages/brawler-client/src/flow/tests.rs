@@ -4228,3 +4228,129 @@ fn connection_lost_over_match_settings_leaves_only_the_error_interactive() {
     assert_eq!(current_flow(&app), ClientFlow::Dashboard);
     assert_match_settings_closed(&mut app);
 }
+
+/// BRL-wr0s: the first tap after launch activates a Server Select control on the phone viewport,
+/// however its touch start and end fall across frames and layout.
+mod first_tap {
+    use super::*;
+    use bevy::input::touch::{TouchInput, TouchPhase};
+
+    fn server_select_app() -> App {
+        let mut app = phone_layout_flow_app();
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::ServerSelect);
+        app
+    }
+
+    fn quit(app: &mut App) -> Entity {
+        let mut buttons = app.world_mut().query::<(Entity, &FlowButton)>();
+        buttons
+            .iter(app.world())
+            .find(|(_, button)| button.action == FlowUiAction::Quit)
+            .map(|(entity, _)| entity)
+            .expect("Server Select QUIT")
+    }
+
+    fn quit_center() -> Vec2 {
+        let mut app = server_select_app();
+        settle_layout(&mut app);
+        let quit = quit(&mut app);
+        crate::ui::layout_harness::node_rect(app.world(), quit)
+            .unwrap()
+            .center()
+    }
+
+    fn send(app: &mut App, phase: TouchPhase, position: Vec2) {
+        let window = app
+            .world_mut()
+            .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().write_message(TouchInput {
+            phase,
+            position,
+            window,
+            force: None,
+            id: 1,
+        });
+    }
+
+    /// Runs `frames` frames, counting the app exits requested along the way.
+    fn exits(app: &mut App, frames: usize) -> usize {
+        (0..frames)
+            .map(|_| {
+                app.update();
+                let mut reader = app
+                    .world_mut()
+                    .remove_resource::<ExitReader>()
+                    .unwrap_or_default();
+                let count = reader
+                    .0
+                    .read(app.world().resource::<Messages<AppExit>>())
+                    .count();
+                app.world_mut().insert_resource(reader);
+                count
+            })
+            .sum()
+    }
+
+    #[derive(Resource, Default)]
+    struct ExitReader(bevy::ecs::message::MessageCursor<AppExit>);
+
+    #[test]
+    fn a_tap_within_one_frame_on_server_select_quit_quits_once() {
+        let at = quit_center();
+        let mut app = server_select_app();
+        settle_layout(&mut app);
+        send(&mut app, TouchPhase::Started, at);
+        send(&mut app, TouchPhase::Ended, at);
+        assert_eq!(exits(&mut app, 4), 1);
+    }
+
+    #[test]
+    fn a_press_and_release_on_separate_frames_on_server_select_quit_quits_once() {
+        let at = quit_center();
+        let mut app = server_select_app();
+        settle_layout(&mut app);
+        send(&mut app, TouchPhase::Started, at);
+        let mut count = exits(&mut app, 1);
+        send(&mut app, TouchPhase::Ended, at);
+        count += exits(&mut app, 4);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn a_finger_down_before_server_select_is_laid_out_still_quits_on_release() {
+        let at = quit_center();
+        let mut app = server_select_app();
+        // The finger lands on the launch frame that first builds the screen, before layout.
+        send(&mut app, TouchPhase::Started, at);
+        let mut count = exits(&mut app, 1);
+        settle_layout(&mut app);
+        send(&mut app, TouchPhase::Ended, at);
+        count += exits(&mut app, 4);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn a_ui_scale_change_mid_press_keeps_server_select_quit_and_quits_once() {
+        let at = quit_center();
+        let mut app = server_select_app();
+        settle_layout(&mut app);
+        let before = quit(&mut app);
+        send(&mut app, TouchPhase::Started, at);
+        let mut count = exits(&mut app, 1);
+        // The shell's viewport fit settles once the real window height arrives.
+        app.world_mut().resource_mut::<UiScale>().0 *= 1.02;
+        count += exits(&mut app, 2);
+        assert_eq!(
+            quit(&mut app),
+            before,
+            "a scale change does not rebuild the screen"
+        );
+        send(&mut app, TouchPhase::Ended, at);
+        count += exits(&mut app, 4);
+        assert_eq!(count, 1);
+    }
+}
