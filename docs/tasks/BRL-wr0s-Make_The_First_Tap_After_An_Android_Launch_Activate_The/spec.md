@@ -23,3 +23,10 @@ Reviewed 2026-11-15 against HEAD 3437c0d8: valid, spec refreshed. Not fixed. `ui
 # Acceptance
 - New focused tests in `ui/press.rs` (or `flow/tests.rs`) for the first-ever touch, same-frame and rebuild cases pass. The existing `press.rs` tests (L141-L234), `touch/tests.rs` and the slider tests still pass: `cargo test -p brawler-client press slider touch`.
 - **Pixel 8a device check:** after `am force-stop` + `am start`, a single `adb shell input tap` on QUIT (and on CONNECT) on Select Server activates it. Repeat 3 times.
+
+# Verified 2026-11-16 (commit ea2d3608)
+- Cause on host: the same-frame theory was wrong, because Bevy 0.19.1 `first_pressed_position` falls back to `just_pressed`. Two real losses were found and fixed in `ui/press.rs`: a finger down before the control is laid out where it ends up, and a control rebuilt between press and release. A same-frame drag now cancels too. Tests: `press::tests::touch::*` (8) and `flow::tests::first_tap::*` (4). `just lint` and `just test` pass.
+- Pixel 8a, release build with a temporary TouchInput probe (since removed). After force-stop and launch, one `input tap` on the saved-server row at 1.8, 2.0, 2.2, 2.4, 2.6 and 2.8 s:
+  - Every tap that reached the app activated on the first tap and connected (2.4 s onwards).
+  - Taps at 1.8–2.2 s never reached the app. `WindowFocusChanged -- 0` fired right after the tap, and `dumpsys input` showed the focused window as `Embedded{}`, a TRUSTED_OVERLAY owned by `com.google.android.gms.ui` (pid 24580) covering the screen. That is an OS / Play Services overlay during launch, not this code. Follow-up: BRL ticket "Investigate the Play Services overlay that swallows taps in the first seconds after launch".
+- The original "first tap only moves focus" symptom did not reproduce on 2026-11-16. Taps at 3 s or later activated on the first tap, both before and after the fix.
