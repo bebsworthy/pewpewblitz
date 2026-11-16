@@ -3,9 +3,9 @@ id: BRL-5hhp
 
 title: Open the HUD match menu on a tap that starts and ends in one frame
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T20:38:34Z
+status_changed: 2026-11-16T08:15:20Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-094c, BRL-rs10, BRL-wr0s]
 
 parent: BRL-q5c4
 
-rank: 14876672
+rank: 11337728
 ---
 
 # Description
