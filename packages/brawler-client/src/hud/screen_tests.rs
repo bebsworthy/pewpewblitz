@@ -27,7 +27,7 @@ const NAMES: [&str; 6] = [
     "Fox",
 ];
 
-fn hud_app(width: u16, height: u16, mode: brawler::map::ModeDefinitionId) -> App {
+pub(crate) fn hud_app(width: u16, height: u16, mode: brawler::map::ModeDefinitionId) -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     add_layout(&mut app, u32::from(width), u32::from(height));
@@ -124,6 +124,14 @@ fn hud_app(width: u16, height: u16, mode: brawler::map::ModeDefinitionId) -> App
         app.update();
     }
     app
+}
+
+/// The drawn HUD menu button's screen rect, for rigs that tap it.
+pub(crate) fn menu_button_rect(app: &mut App) -> Rect {
+    control_rects(app)
+        .into_iter()
+        .find_map(|(label, rect)| (label == "menu").then_some(rect))
+        .expect("a visible HUD menu button")
 }
 
 fn visible_rect<F: bevy::ecs::query::QueryFilter>(

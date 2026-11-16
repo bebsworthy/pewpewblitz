@@ -461,3 +461,27 @@ fn menu_button_released_off_the_button_does_nothing() {
     );
     assert!(test.controls().menu.is_none());
 }
+
+#[test]
+fn menu_button_tap_within_one_frame_opens_the_match_menu() {
+    let mut test = TouchApp::new(resolved_arc_launcher_loadout());
+    let menu = TouchLayout::new(VIEWPORT, &ClientInputSettings::default()).menu;
+    // `adb shell input tap`: down and up land before the same frame.
+    test.touch(1, TouchPhase::Started, menu.center());
+    test.touch(1, TouchPhase::Ended, menu.center());
+    let pending = test.frame();
+    assert_eq!(pending.latched_buttons, 0);
+    assert_eq!(
+        *test.app.world().resource::<ClientInputContext>(),
+        ClientInputContext::Menu
+    );
+    for _ in 0..3 {
+        test.frame();
+        assert_eq!(
+            *test.app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Menu,
+            "the same tap never closes the menu again"
+        );
+    }
+    assert!(test.controls().menu.is_none());
+}

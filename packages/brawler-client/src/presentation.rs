@@ -398,4 +398,116 @@ mod tests {
         app.update();
         assert!(!app.world().resource::<MatchMenuState>().scoreboard_latched);
     }
+
+    /// The production chain around one HUD menu-button tap whose down and up land in the same
+    /// frame (`adb shell input tap`, BRL-5hhp): real HUD and pause overlay layout, `bevy_ui` focus,
+    /// the shared release tracker and its unseen-tap replay (BRL-wr0s), touch sampling in
+    /// `BeforeFixedMainLoop`, and the match menu systems.
+    #[test]
+    fn a_same_frame_tap_on_the_hud_menu_button_opens_the_menu_and_keeps_it_open() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::time::TimeUpdateStrategy;
+        use core::time::Duration;
+
+        #[derive(Resource, Default)]
+        struct FixedTicks(u32);
+
+        let tick = brawler::timing::SIMULATION_TICK;
+        // No fixed step on a fast frame, several on a slow one.
+        for (step, slow) in [(Duration::ZERO, false), (tick * 3, true)] {
+            let mut app =
+                hud::screen_tests::hud_app(914, 411, brawler::map::WIPEOUT_MODE_DEFINITION);
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(step))
+                .insert_resource(ClientPlayableGate(true))
+                .init_resource::<MatchMenuState>()
+                .init_resource::<InputDeviceActivity>()
+                .init_resource::<FixedTicks>()
+                .add_message::<ui::feedback::UiFeedback>()
+                .add_plugins(ui::press::ReleaseActivationPlugin)
+                .add_systems(
+                    RunFixedMainLoop,
+                    (sample_local_input, touch::apply_touch_controls)
+                        .chain()
+                        .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+                )
+                .add_systems(FixedUpdate, |mut ticks: ResMut<FixedTicks>| ticks.0 += 1)
+                .add_systems(
+                    Update,
+                    (
+                        handle_match_menu_input,
+                        update_match_menu_chrome,
+                        update_pause_overlay,
+                    )
+                        .chain(),
+                );
+            app.world_mut()
+                .run_system_once(match_menu::spawn_pause_overlay)
+                .unwrap();
+            for _ in 0..3 {
+                app.update();
+            }
+            let context = |app: &App| *app.world().resource::<ClientInputContext>();
+            assert_eq!(context(&app), ClientInputContext::Gameplay);
+            let center = hud::screen_tests::menu_button_rect(&mut app).center();
+            let window = app
+                .world_mut()
+                .query_filtered::<Entity, With<PrimaryWindow>>()
+                .single(app.world())
+                .unwrap();
+            for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                app.world_mut().write_message(TouchInput {
+                    phase,
+                    position: center,
+                    window,
+                    force: None,
+                    id: 1,
+                });
+            }
+            let before = app.world().resource::<FixedTicks>().0;
+            app.update();
+            let ticks = app.world().resource::<FixedTicks>().0 - before;
+            // The warm-up frames ran on real time, so the fixed accumulator may hold a partial tick.
+            if slow {
+                assert!(
+                    ticks >= 2,
+                    "a slow frame runs several fixed steps, got {ticks}"
+                );
+            } else {
+                assert_eq!(ticks, 0, "a fast frame runs no fixed step");
+            }
+            assert_eq!(context(&app), ClientInputContext::Menu, "step {step:?}");
+            for _ in 0..5 {
+                app.update();
+                assert_eq!(
+                    context(&app),
+                    ClientInputContext::Menu,
+                    "the tap never closes the menu again (step {step:?})"
+                );
+            }
+            let overlay_visible = app
+                .world_mut()
+                .query_filtered::<&InheritedVisibility, With<PauseOverlay>>()
+                .single(app.world())
+                .unwrap()
+                .get();
+            assert!(overlay_visible, "the pause overlay shows");
+            assert_eq!(app.world().resource::<MatchMenuState>().selected, 0);
+
+            // A second same-frame tap on the same spot, now under the open overlay, does not
+            // reach a menu row or the hidden HUD button: the menu stays open.
+            for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                app.world_mut().write_message(TouchInput {
+                    phase,
+                    position: center,
+                    window,
+                    force: None,
+                    id: 2,
+                });
+            }
+            for _ in 0..3 {
+                app.update();
+            }
+            assert_eq!(context(&app), ClientInputContext::Menu);
+        }
+    }
 }

@@ -13,7 +13,7 @@ mod kill_feed;
 mod layout;
 mod plate;
 #[cfg(test)]
-mod screen_tests;
+pub(crate) mod screen_tests;
 
 pub(crate) use layout::HudControlLayout;
 pub(crate) use plate::PLATE_BOTTOM as HUD_PLATE_BOTTOM;
