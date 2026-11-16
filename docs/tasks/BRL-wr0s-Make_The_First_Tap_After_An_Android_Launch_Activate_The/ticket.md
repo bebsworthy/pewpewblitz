@@ -4,9 +4,9 @@ was: BRL-0209
 
 title: Make the first tap after an Android launch activate the control
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T02:19:50Z
+status_changed: 2026-11-16T03:12:43Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-5hhp, BRL-h088]
 
 parent: BRL-q5c4
 
-rank: 14811136
+rank: 11337728
 ---
 
 # Description
