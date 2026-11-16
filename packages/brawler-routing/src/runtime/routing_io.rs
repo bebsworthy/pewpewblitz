@@ -197,9 +197,16 @@ impl SupervisorRuntime {
                         failed = true;
                         break;
                     }
-                    let Ok(destination) = self.core.accept_worker_packet(&packet) else {
-                        failed = true;
-                        break;
+                    let destination = match self.core.accept_worker_packet(&packet) {
+                        Ok(destination) => destination,
+                        // A packet the worker wrote before it read the route's PeerClose: the
+                        // peer is gone, so drop it. Killing the worker here ended whole matches
+                        // when a seat's link timed out (BRL-q73k).
+                        Err(RoutingErrorCategory::RouteExpired) => continue,
+                        Err(_) => {
+                            failed = true;
+                            break;
+                        }
                     };
                     let Some(selector) = self.core.public_selector_for_route(packet.route_id)
                     else {

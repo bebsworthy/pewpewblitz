@@ -7,6 +7,8 @@ set -eu
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
+# Keep automated runs out of the tracked data/server/ profile store (the supervisor's default).
+server_data_dir=${BRAWLER_SERVER_DATA_DIR:-$project_dir/target/e2e/server}
 timeout_seconds=${BRAWLER_ROUTED_TIMEOUT_SECONDS:-60}
 players_per_team=${BRAWLER_PRODUCT_PLAYERS_PER_TEAM:-2}
 game_type=${BRAWLER_PRODUCT_GAME_TYPE:-}
@@ -168,6 +170,7 @@ target/debug/brawler-supervisor \
     --content-fingerprint "$content_fingerprint" \
     --worker-executable "$project_dir/target/debug/brawler-server" \
     --game-types "$project_dir/config/server/game-types.ron" \
+    --data-directory "$server_data_dir" \
     --bind "$bind_addr" &
 supervisor_pid=$!
 

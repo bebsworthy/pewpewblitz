@@ -302,6 +302,9 @@ pub struct SupervisorRuntime {
     last_process_poll: Option<Instant>,
     allocations: HashMap<RequestId, AllocationRecord>,
     packet_enqueue_started: HashMap<RouteId, std::collections::VecDeque<Instant>>,
+    /// Lifecycle events raised where no poll report is at hand (a runtime cleanup that kills a
+    /// live worker). The next `poll_once` publishes them, so such a kill is never silent.
+    deferred_lifecycle_events: Vec<LifecycleEvent>,
 }
 
 impl SupervisorRuntime {
@@ -367,6 +370,7 @@ impl SupervisorRuntime {
             last_process_poll: None,
             allocations: HashMap::new(),
             packet_enqueue_started: HashMap::new(),
+            deferred_lifecycle_events: Vec::new(),
         })
     }
 
@@ -526,6 +530,9 @@ impl SupervisorRuntime {
         // Readable worker controls are handled before child reconciliation. A worker is allowed
         // to send Exit and close its control stream in one write/exit turn; try_wait must not
         // classify that as a missing-exit crash before the typed Exit body is observed.
+        report
+            .lifecycle_events
+            .append(&mut self.deferred_lifecycle_events);
         self.poll_processes(&mut report)?;
         if !self.shutting_down {
             self.activate_ready_routes(&mut report);
@@ -553,6 +560,9 @@ impl SupervisorRuntime {
         if !self.shutting_down {
             self.flush_public(&mut report)?;
         }
+        report
+            .lifecycle_events
+            .append(&mut self.deferred_lifecycle_events);
         Ok(report)
     }
 
@@ -575,8 +585,12 @@ impl SupervisorRuntime {
         self.reject_allocation_for_worker(worker_id, ALLOCATION_REJECT_INTERNAL);
         if let Some(processes) = self.processes.as_mut()
             && processes.worker_phase(worker_id).is_some()
+            && let Ok(events) =
+                processes.fail_worker(worker_id, RoutingErrorCategory::IpcPacketClosed)
         {
-            let _ = processes.fail_worker(worker_id, RoutingErrorCategory::IpcPacketClosed);
+            // `fail_worker` kills a live child; publish its `Failed` so the reaped line that
+            // follows is explained (BRL-q73k).
+            self.deferred_lifecycle_events.extend(events);
         }
         let Some(mut worker) = self.workers.remove(&worker_id) else {
             return;

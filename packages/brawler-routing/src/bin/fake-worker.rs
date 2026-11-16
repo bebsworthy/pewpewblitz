@@ -77,6 +77,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    if mode == "malformed-packet" {
+        // A complete packet frame that is not a valid record: the supervisor's runtime cleans
+        // the worker up from its packet path, which must still publish a lifecycle failure.
+        let mut packet_writer = packet.try_clone()?;
+        packet_writer.write_all(&4_u32.to_be_bytes())?;
+        packet_writer.write_all(&[0; 4])?;
+        packet_writer.flush()?;
+        thread::park();
+    }
+
     if mode == "crash-after-ready" {
         // Give the owner loop a chance to observe Ready and install a route before the child
         // exits. This distinguishes a match crash after admission from a failed launch.

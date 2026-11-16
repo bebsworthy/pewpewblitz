@@ -185,13 +185,19 @@ pub enum LifecyclePhase {
 pub struct ProcessStatus {
     pub success: bool,
     pub code: Option<i32>,
+    /// The signal that terminated the child, when it did not exit normally.  `code` is `None`
+    /// exactly when this is `Some`, so a reaped line can name the cause of a silent death.
+    pub signal: Option<i32>,
 }
 
 impl From<ExitStatus> for ProcessStatus {
     fn from(status: ExitStatus) -> Self {
+        use std::os::unix::process::ExitStatusExt;
+
         Self {
             success: status.success(),
             code: status.code(),
+            signal: status.signal(),
         }
     }
 }

@@ -426,6 +426,103 @@ fn worker_to_public_requires_the_registered_route_peer() {
     );
 }
 
+/// BRL-q73k: a match worker can write packets for a peer's route before it reads the
+/// `PeerClose` for that route's expiry. Those packets are dropped as `RouteExpired`; only a
+/// route the worker never owned stays an identity fault that fails the worker.
+#[test]
+fn packets_racing_a_route_teardown_are_expired_not_identity_faults() {
+    let (mut core, route) = configured_core();
+    let capability = capability(24);
+    core.bind_capability(capability.clone(), binding(route), MonotonicMillis(0))
+        .unwrap();
+    let envelope = PublicEnvelope::new(RouteSelector::Capability(capability), vec![1]).unwrap();
+    core.route_public(&envelope, source(1), MonotonicMillis(1))
+        .unwrap();
+    let packet = |route_id: RouteId, peer_id: PeerId| {
+        PacketRecord::new(
+            PacketDirection::WorkerToSupervisor,
+            route.worker_id,
+            route_id,
+            peer_id,
+            vec![2],
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        core.accept_worker_packet(&packet(route.route_id, route.peer_id)),
+        Ok(source(1))
+    );
+
+    let teardown = core.teardown_route(route.route_id).unwrap();
+    assert_eq!(teardown.reason, RoutingErrorCategory::RouteExpired);
+    assert_eq!(
+        core.accept_worker_packet(&packet(route.route_id, route.peer_id)),
+        Err(RoutingErrorCategory::RouteExpired),
+        "a packet already in flight when its route expired is dropped"
+    );
+    let other_peer = PeerId::new(route.peer_id.get() + 1).unwrap();
+    assert_eq!(
+        core.accept_worker_packet(&packet(route.route_id, other_peer)),
+        Err(RoutingErrorCategory::ManifestIdentity),
+        "a retired route still names exactly one peer"
+    );
+    assert_eq!(
+        core.accept_worker_packet(&packet(id128(999), route.peer_id)),
+        Err(RoutingErrorCategory::ManifestIdentity),
+        "a route this worker never owned is still a fault"
+    );
+
+    core.cleanup_worker(route.worker_id).unwrap();
+    core.register_worker(worker(1, WorkerKind::Match)).unwrap();
+    assert_eq!(
+        core.accept_worker_packet(&packet(route.route_id, route.peer_id)),
+        Err(RoutingErrorCategory::ManifestIdentity),
+        "worker cleanup forgets its retired routes"
+    );
+}
+
+#[test]
+fn retired_routes_are_bounded_by_the_route_limit() {
+    let config = CoreConfig {
+        max_routes: 2,
+        ..CoreConfig::default()
+    };
+    let mut core = SupervisorCore::new(config);
+    let match_worker = worker(1, WorkerKind::Match);
+    core.register_worker(match_worker).unwrap();
+    let routes = [
+        route(10, match_worker.worker_id, false),
+        route(20, match_worker.worker_id, false),
+        route(30, match_worker.worker_id, false),
+    ];
+    for registered in routes {
+        core.register_route(registered).unwrap();
+        core.teardown_route(registered.route_id).unwrap();
+    }
+    let expired = |core: &mut SupervisorCore, registered: RouteRegistration| {
+        let packet = PacketRecord::new(
+            PacketDirection::WorkerToSupervisor,
+            registered.worker_id,
+            registered.route_id,
+            registered.peer_id,
+            vec![2],
+        )
+        .unwrap();
+        core.accept_worker_packet(&packet)
+    };
+    assert_eq!(
+        expired(&mut core, routes[0]),
+        Err(RoutingErrorCategory::ManifestIdentity),
+        "the oldest retired route is evicted"
+    );
+    for registered in &routes[1..] {
+        assert_eq!(
+            expired(&mut core, *registered),
+            Err(RoutingErrorCategory::RouteExpired)
+        );
+    }
+}
+
 #[test]
 fn lobby_authentication_fact_promotes_only_the_exact_authenticated_route_source() {
     let mut core = SupervisorCore::default();

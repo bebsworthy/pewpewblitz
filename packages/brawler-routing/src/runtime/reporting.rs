@@ -2,7 +2,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::LifecycleEvent;
+use crate::{LifecycleEvent, ProcessStatus};
 
 use super::{RuntimePollReport, RuntimeTimingEvent};
 
@@ -59,8 +59,8 @@ pub(super) fn report_lifecycle_event(event: &LifecycleEvent, elapsed: Duration) 
             "brawler-supervisor worker exit-received worker={worker_id} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}"
         ),
         LifecycleEvent::ChildReaped { worker_id, status } => eprintln!(
-            "brawler-supervisor worker reaped worker={worker_id} success={} code={:?} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}",
-            status.success, status.code,
+            "brawler-supervisor worker reaped worker={worker_id} {} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}",
+            reaped_status_fields(status),
         ),
         LifecycleEvent::Failed {
             worker_id,
@@ -96,5 +96,63 @@ pub(super) fn report_lifecycle_event(event: &LifecycleEvent, elapsed: Duration) 
         LifecycleEvent::ResultReceived { worker_id, .. } => eprintln!(
             "brawler-supervisor worker result-received worker={worker_id} elapsed_ms={elapsed_ms} ts_ms={timestamp_ms}"
         ),
+    }
+}
+
+/// The status fields of the "worker reaped" line.  `signal=` names the terminating signal (for
+/// example `Some(9)` for SIGKILL, `Some(11)` for SIGSEGV) so a `code=None` exit is never silent.
+fn reaped_status_fields(status: &ProcessStatus) -> String {
+    format!(
+        "success={} code={:?} signal={:?}",
+        status.success, status.code, status.signal,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use super::*;
+
+    fn status_of(script: &str) -> ProcessStatus {
+        let status = Command::new("/bin/sh")
+            .args(["-c", script])
+            .status()
+            .expect("spawn /bin/sh");
+        ProcessStatus::from(status)
+    }
+
+    #[test]
+    fn reaped_line_names_the_terminating_signal() {
+        let status = status_of("kill -9 $$");
+        assert_eq!(
+            status,
+            ProcessStatus {
+                success: false,
+                code: None,
+                signal: Some(9),
+            }
+        );
+        assert_eq!(
+            reaped_status_fields(&status),
+            "success=false code=None signal=Some(9)"
+        );
+
+        let segv = status_of("kill -SEGV $$");
+        assert_eq!(segv.signal, Some(11));
+        assert_eq!(segv.code, None);
+    }
+
+    #[test]
+    fn reaped_line_reports_no_signal_for_a_normal_exit() {
+        let status = status_of("exit 3");
+        assert_eq!(
+            reaped_status_fields(&status),
+            "success=false code=Some(3) signal=None"
+        );
+        assert_eq!(
+            reaped_status_fields(&status_of("exit 0")),
+            "success=true code=Some(0) signal=None"
+        );
     }
 }

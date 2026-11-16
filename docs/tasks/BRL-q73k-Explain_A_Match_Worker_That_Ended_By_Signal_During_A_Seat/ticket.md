@@ -3,9 +3,9 @@ id: BRL-q73k
 
 title: Explain a match worker that ended by signal during a seat hold
 
-status: doing
-closed:
-status_changed: 2026-11-16T16:42:35Z
+status: done
+closed: 2026-11-16T17:39:05Z
+status_changed: 2026-11-16T17:39:05Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: []
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description

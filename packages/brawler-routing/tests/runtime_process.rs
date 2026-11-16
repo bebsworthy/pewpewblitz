@@ -274,6 +274,67 @@ fn runtime_reconciles_exit_before_immediate_child_reap() {
     runtime.run().unwrap();
 }
 
+/// BRL-q73k: a worker the runtime cleans up from its packet path is killed by the lifecycle
+/// owner. That kill must publish `Failed` before the child's reap, so a `success=false` reap is
+/// never left unexplained in the supervisor log.
+#[test]
+fn runtime_cleanup_kill_publishes_failed_before_the_reap() {
+    let logical_server_id = id128(1);
+    let supervisor_generation = id64(2);
+    let mut runtime = SupervisorRuntime::new(RuntimeConfig {
+        public_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        core: CoreConfig::with_identity(logical_server_id, supervisor_generation, 3, 4),
+        process_supervisor: Some(ProcessSupervisorConfig::new(
+            logical_server_id,
+            supervisor_generation,
+            3,
+            4,
+        )),
+        ..RuntimeConfig::default()
+    })
+    .unwrap();
+    let worker_id = id128(7);
+    runtime
+        .spawn_worker(launch_spec_mode("malformed-packet"))
+        .unwrap();
+
+    let mut events = Vec::new();
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(4) {
+        let report = runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+        events.extend(report.lifecycle_events);
+        if events.iter().any(|event| {
+            matches!(event, LifecycleEvent::ChildReaped { worker_id: id, .. } if *id == worker_id)
+        }) {
+            break;
+        }
+    }
+    let failed = events.iter().position(|event| {
+        matches!(
+            event,
+            LifecycleEvent::Failed {
+                worker_id: id,
+                category: brawler_routing::RoutingErrorCategory::IpcPacketClosed,
+            } if *id == worker_id
+        )
+    });
+    let reaped = events.iter().position(|event| {
+        matches!(event, LifecycleEvent::ChildReaped { worker_id: id, status }
+            if *id == worker_id && status.signal == Some(9))
+    });
+    assert!(
+        failed.is_some(),
+        "the cleanup kill published no Failed: {events:?}"
+    );
+    assert!(
+        reaped.is_some(),
+        "the killed worker was not reaped by SIGKILL: {events:?}"
+    );
+    assert!(failed < reaped, "Failed precedes the reap: {events:?}");
+    runtime.stop_handle().request().unwrap();
+    runtime.run().unwrap();
+}
+
 #[test]
 fn runtime_restarts_crashed_lobby_after_bounded_backoff() {
     let logical_server_id = id128(1);

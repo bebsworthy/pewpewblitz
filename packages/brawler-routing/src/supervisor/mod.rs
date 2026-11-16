@@ -3,7 +3,7 @@ mod process;
 mod queues;
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, VecDeque},
     net::SocketAddr,
 };
 
@@ -231,6 +231,11 @@ pub struct SupervisorCore {
     route_sources: HashMap<RouteId, SocketAddr>,
     lobby_sources: HashMap<SocketAddr, RouteRegistration>,
     lobby_route_last_seen: HashMap<RouteId, MonotonicMillis>,
+    /// Routes torn down while their worker lives, newest last and bounded by `max_routes`. A
+    /// worker may already have written packets for a route before it reads the `PeerClose`
+    /// that announces the teardown; those packets are dropped as `RouteExpired` instead of
+    /// being mistaken for a worker identity fault (BRL-q73k).
+    retired_routes: VecDeque<RouteRegistration>,
     metrics: CoreMetrics,
 }
 
@@ -248,6 +253,7 @@ impl SupervisorCore {
             route_sources: HashMap::new(),
             lobby_sources: HashMap::new(),
             lobby_route_last_seen: HashMap::new(),
+            retired_routes: VecDeque::new(),
             metrics: CoreMetrics::default(),
         }
     }
@@ -607,9 +613,18 @@ impl SupervisorCore {
             return Err(RoutingErrorCategory::ManifestIdentity);
         };
         let Some(route) = self.routes.get(&packet.route_id) else {
-            self.metrics
-                .count_error(RoutingErrorCategory::ManifestIdentity);
-            return Err(RoutingErrorCategory::ManifestIdentity);
+            let category = if self.retired_routes.iter().any(|retired| {
+                retired.route_id == packet.route_id
+                    && retired.worker_id == packet.worker_id
+                    && retired.peer_id == packet.peer_id
+            }) {
+                // The worker wrote this packet before it observed the route's teardown.
+                RoutingErrorCategory::RouteExpired
+            } else {
+                RoutingErrorCategory::ManifestIdentity
+            };
+            self.metrics.count_error(category);
+            return Err(category);
         };
         if route.worker_id != packet.worker_id
             || route.peer_id != packet.peer_id
@@ -763,6 +778,12 @@ impl SupervisorCore {
         let route = self.routes.remove(&route_id)?;
         self.route_sources.remove(&route_id);
         self.lobby_route_last_seen.remove(&route_id);
+        if self.config.max_routes > 0 {
+            while self.retired_routes.len() >= self.config.max_routes {
+                self.retired_routes.pop_front();
+            }
+            self.retired_routes.push_back(route);
+        }
         self.lobby_sources
             .retain(|_, mapped| mapped.route_id != route_id);
         self.packets.remove_route(route_id);
@@ -855,6 +876,8 @@ impl SupervisorCore {
         }
         self.lobby_sources
             .retain(|_, route| route.worker_id != worker_id);
+        self.retired_routes
+            .retain(|route| route.worker_id != worker_id);
         let packet_frames_removed = self.packets.remove_worker(worker_id);
         let control_frames_removed = self.controls.remove_worker(worker_id);
         let capabilities_revoked = self.capabilities.revoke_worker(worker_id);

@@ -25,3 +25,19 @@ Device check 2026-11-15 (Pixel 8a), HEAD b97a8888, server on 0.0.0.0:5000 with R
 - Supervisor reaped line reports the signal; `just test`, `just lint`, `just rejoin-e2e` pass.
 
 Evidence (/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/vc): server.log lines 36-50 (17:24:29-17:25:11), f-launch.jpg, f-rejoin.jpg, f-logcat.txt; server-4zx2.log (post-4zx2 runs) has no `success=false`. Scratchpad is temporary; copy what matters into docs/tasks/BRL-q73k-*/ if needed.
+
+
+# Resolution 2026-11-16: supervisor bug, reproduced and fixed
+**Cause:** when a seat's link times out, the supervisor expires that peer's route and sends `PeerClose` to the match worker. The worker can already have written packets for that peer. When one arrives, `SupervisorCore::accept_worker_packet` finds no route and returns `ManifestIdentity`. `read_worker_packets` treats that as a worker fault, so `routing_io.rs:142` calls `cleanup_worker` → `fail_worker`, which SIGKILLs the match. Its `Failed` event was discarded (`let _ =`), so the log showed only `reaped success=false code=None`. The same race can hit lobby workers on idle route expiry.
+
+**Repro:** a real supervisor with lobby and Wipeout 1v1 worker processes. A leaves (seat 1 held with a bot); after D = 0-19 s, B is `kill -9`ed (seat 2 held). Before the fix: 6 of 31 valid iterations ended with `signal=Some(9)`. Instrumented run z14 showed `accept_worker_packet refused category=ManifestIdentity` → `cleanup_worker kills live worker caller=routing_io.rs:142` → reaped `signal=Some(9)`, 10.08 s after B was killed. After the fix: 20 of 20 had both seats held and clean exits.
+
+**Fix (packages/brawler-routing, no protocol or IPC change):**
+- The core keeps routes torn down while their worker lives (`retired_routes`, capped at `max_routes`, cleared on worker cleanup). A packet for a retired route with the same route, worker and peer is `RouteExpired` and is dropped, not counted as a worker fault.
+- `cleanup_worker` keeps `fail_worker`'s events and `poll_once` publishes them, so a runtime cleanup kill always logs `worker failed` before the reap.
+- The reaped line now reports `signal=` (`ExitStatusExt::signal()`).
+- `scripts/network-product-match.sh` passes `--data-directory` (default `target/e2e/server`) so e2e runs stop writing the tracked `data/server/`. Other scripts still use the default; not changed.
+
+**Tests:** `packets_racing_a_route_teardown_are_expired_not_identity_faults`, `retired_routes_are_bounded_by_the_route_limit`, `worker_packets_racing_a_route_expiry_are_dropped_without_failing_the_worker`, `runtime_cleanup_kill_publishes_failed_before_the_reap` (fake-worker `malformed-packet` mode), plus signal reporting tests. `just lint`, `just test` (2464 tests) and `just rejoin-e2e` pass.
+
+The 2026-11-16 06:49Z lobby reap on the dev server is unrelated: `worker failed category=HeartbeatTimeout` after the Mac woke from hibernation, which is expected.

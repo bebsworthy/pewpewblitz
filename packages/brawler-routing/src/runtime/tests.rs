@@ -154,6 +154,84 @@ fn public_udp_routes_opaque_payload_to_packet_ipc_and_back() {
     assert_eq!(routing.worker_packet_to_public_send.count(), 1);
 }
 
+/// BRL-q73k: when a peer's route expires, the worker may already have written packets for it
+/// before it reads the `PeerClose`. Those packets are dropped; they must not fail (and, for a
+/// lifecycle-owned worker, SIGKILL) the worker that still serves its other peers.
+#[test]
+fn worker_packets_racing_a_route_expiry_are_dropped_without_failing_the_worker() {
+    let mut runtime = SupervisorRuntime::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let worker = registration(1, WorkerKind::Lobby);
+    runtime.register_worker(worker).unwrap();
+    runtime
+        .core_mut()
+        .register_route(route(2, worker.worker_id, true))
+        .unwrap();
+    let mut worker_channels = attach_worker(&mut runtime, worker);
+    let client = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let public = PublicEnvelope::new(RouteSelector::DefaultLobby, vec![7])
+        .unwrap()
+        .encode()
+        .unwrap();
+    client
+        .send_to(&public, runtime.public_addr().unwrap())
+        .unwrap();
+    runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+    let inbound = worker_channels
+        .packet_read_ready(1)
+        .unwrap()
+        .records
+        .pop()
+        .expect("packet reached worker");
+    let inbound = PacketRecord::decode(&inbound, PacketDirection::SupervisorToWorker).unwrap();
+    assert_eq!(
+        runtime.core().route_count(),
+        2,
+        "the source has its own route"
+    );
+
+    // The source goes idle and its route expires; the PeerClose is queued to the worker.
+    runtime.started = Instant::now()
+        .checked_sub(Duration::from_millis(
+            crate::PUBLIC_LOBBY_ROUTE_IDLE_MILLIS + 1,
+        ))
+        .expect("idle-route duration fits before the current instant");
+    runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+    assert_eq!(runtime.core().route_count(), 1, "the idle route expired");
+
+    // A packet the worker wrote before it read that PeerClose arrives afterwards.
+    let late = PacketRecord::new(
+        PacketDirection::WorkerToSupervisor,
+        worker.worker_id,
+        inbound.route_id,
+        inbound.peer_id,
+        vec![4],
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
+    worker_channels.enqueue_packet(&late).unwrap();
+    worker_channels.flush_packet(1).unwrap();
+    for _ in 0..3 {
+        runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+    }
+    assert!(
+        runtime.workers.contains_key(&worker.worker_id),
+        "the worker is not cleaned up for a late packet"
+    );
+    assert_eq!(runtime.core().worker_count(), 1);
+    assert_eq!(
+        runtime
+            .core()
+            .metrics()
+            .error_counts
+            .get(&RoutingErrorCategory::RouteExpired)
+            .copied(),
+        Some(1),
+        "the late packet is counted as expired"
+    );
+    assert_eq!(runtime.metrics().public_egress.datagrams, 0);
+}
+
 #[test]
 fn public_ipv6_udp_routes_dynamic_source_and_opaque_payload_to_packet_ipc_and_back() {
     let mut runtime =
