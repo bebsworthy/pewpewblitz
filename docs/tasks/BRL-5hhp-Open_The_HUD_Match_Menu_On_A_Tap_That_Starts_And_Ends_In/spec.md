@@ -33,3 +33,15 @@ At the ~30 fps High tier, or when frames drop, a real quick thumb tap can fall i
 Priority: low. Real fingers usually span frames at 60 fps.
 
 Evidence: /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/s-m01.jpg, s-m05.jpg, m07-touch-hold-open.jpg, s-q.jpg.
+
+
+# Device check 2026-11-16 (Pixel 8a, HEAD a11a5905, wr0s probe build)
+Practice Hot Zone 3v3 on Feature Yard. The HUD menu button was tapped at physical (213,93), logical (35,35) in 914x411.
+- **Auto (Medium), ~60 fps:** 7 of 7 opened the menu. That is 5 `input tap` presses plus 2 `input swipe … 150` (150 ms hold). Every `input tap` arrived as Started+Ended in one frame. After each one, the following Resume press hit a live menu control (`hit_controls=1 pressed=1`), so the menu was open, and it stayed open (screenshots a1–a5, as1–as2).
+- **High, ~30 fps (dt 27-37 ms):** 7 of 7, same pattern (h1–h5, hs1–hs2).
+- No double toggle, no flip-back and no missed tap. The same-frame path (`TouchControls::track` → `GestureRelease::Tap`) works on device.
+- The earlier misses were most likely the BRL-wr0s launch-time focus loss (Play Services overlay, BRL-gv67) or taps sent before `ClientPlayableGate` opened. They were not a same-frame defect.
+- Same-frame coverage now: menu (`touch/tests.rs` `menu_button_tap_within_one_frame_opens_the_match_menu`, plus the full-HUD `presentation.rs` test), attack (`quick_tap_fires_with_auto_aim_…`) and ultimate (`ultimate_tap_activates_immediately_…`).
+Evidence: /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/hm/
+
+Clean HEAD APK (no probe) reinstalled afterwards; graphics quality restored to Auto.
