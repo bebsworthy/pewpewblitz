@@ -81,3 +81,25 @@ A fresh app launch, then CONNECT to 192.168.31.47:5000. The phone (`socket bound
 **Cause class:** the lobby worker accepted the first connection request and sent a challenge, then treated the route or peer as closed about 100 ms later. Every retry and the challenge response were then discarded by the worker, until the 8-datagram pre-auth budget was used and the supervisor rate-limited the source. Phone↔Mac RTT at the time was 60-80 ms.
 
 Evidence: scratchpad/hm/server-2nsg-repro.log and 2nsg-repro-logcat.txt.
+
+
+# Root cause and fix (2026-11-16, commit 1bea10fd)
+**Cause:** a same-burst race in `RoutedWorkerPlugin::receive` (`src/server/routed_worker.rs`).
+- The first packet of a new (route, peer) queued its child `LinkOf` spawn through deferred Commands and mapped the peer at once.
+- A second packet for the same key in the same IPC read burst found the mapping, but `links.get_mut` failed because the spawn hadn't been applied yet. The `Err` branch then called `remove_peer`, which added the key to `closed_set`. Nothing was logged and no PeerClose was sent.
+- The child was still spawned with only the first payload, and Netcode sent a challenge. Every retry and the challenge response were then dropped as closed, until the client's pre-auth budget ran out and it timed out.
+- Phones on Wi-Fi often deliver their first two connection requests together (radio wake or flush). Loopback spaces them about 100 ms apart, so the host never hit it.
+
+**Fix:**
+- A burst now collects packets for the peers it opens and spawns each child once after the loop. The identity-conflict check covers peers opened in the same burst, and a failed burst spawns nothing.
+- `closed_set` records the reason (supervisor-peer-close, link-unlinked, link-missing, endpoint-unlinked) and the time. The closed-drop line reports `closed_reason`, `closed_ago_ms` and `closed_match`.
+- The remaining missing-link closes now `warn!` instead of closing silently.
+
+**Tests:**
+- New `routed_worker::tests::a_new_peers_first_burst_with_several_packets_keeps_the_peer_open`. It fails at HEAD (the peer gets unmapped) and passes with the fix.
+- Host repro with a coalescing proxy (scratchpad/repro/coalesce_proxy.py): 3 of 3 fail at HEAD with the phone's exact signature, and 3 of 3 connect with the fix.
+- `just lint`, `just test` (2490 tests), `just rejoin-e2e` and `just completed-rejoin-e2e` pass.
+
+**Device (Pixel 8a, server on 1bea10fd with tracing):** 15 of 15 fresh launch-and-connect runs reached the Dashboard on the first attempt. There were no closed-peer drops or stalls for live handshakes. The only lines were the previous app process's stale 48-byte packets right after the server restart, and one `closed a peer whose child link is gone` for a late packet from a force-stopped session whose Netcode client had just timed out, which is expected. Together with the earlier 14 of 14 relaunch rejoins, this closes the ticket.
+
+The match handoff goes through the same receive path, so BRL-d3hb (the cycle-6 handoff timeout) was most likely this bug too. See the note there.

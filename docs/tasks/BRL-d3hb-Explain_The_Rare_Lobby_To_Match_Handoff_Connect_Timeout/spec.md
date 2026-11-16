@@ -11,3 +11,7 @@ Fix according to the class, with a test.
 
 # Acceptance
 The cause is recorded with logs, then fixed or shown to be environmental.
+
+
+# Likely explained (2026-11-16)
+BRL-2nsg's root cause, a same-burst race in `routed_worker.rs receive` that silently closed a new peer when its first two packets arrived in one IPC burst (fixed in 1bea10fd), applies to match capability routes as well. The cycle-6 signature, a timeout with no server-side trace before the diagnostics existed, fits it. Keep this ticket open until the handoff runs clean across more device sessions; on a recurrence, the closed-drop line now names `closed_reason`.
