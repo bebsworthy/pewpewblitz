@@ -618,3 +618,11 @@ session is a departure rather than a held seat. The new enum variant changes the
 encoding but not the registered types, so the protocol-registry fingerprint is unchanged and only
 `SUPPORTED_PROTOCOL_VERSION` guards it. Control IPC version 7 adds the 48-byte `SeatReleased`
 body (match worker -> supervisor -> lobby) that releases a left seat.
+
+BRL-jxfy changes when existing control facts are sent, not their shapes, so protocol 49, the
+registry fingerprint and control IPC version 7 are unchanged. `Result` may follow completion by up
+to the seat hold while a seat is held: the match worker defers it until no seat can still rejoin
+the completed match (see [the routed architecture](./14-multiplayer-server-architecture.md#rejoining-a-running-match)).
+`SeatReleased` now also releases every seat that can no longer be rejoined: at completion for each
+seat that is not held, and later for a held seat once it is reclaimed or expires. A rejoined
+session is admitted in `Completed` with the unchanged `MatchJoinOutcome`.

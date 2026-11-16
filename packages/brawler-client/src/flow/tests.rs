@@ -820,6 +820,55 @@ fn match_failure_and_fresh_lobby_return_preserve_result_and_one_shot_error_paths
     );
 }
 
+/// BRL-jxfy: a player whose match completed while their seat was held rejoins it in Completed.
+/// The rejoin is presented as the match, the accepted rejoin resolves the earlier loss, the
+/// completed snapshot captures the result context, and the fresh lobby return shows Results with
+/// no "could not be resumed" message. The snapshot may also arrive in the same frame as the
+/// accepted rejoin, before the flow observes it.
+#[test]
+fn a_rejoin_into_a_completed_match_reaches_results_without_the_lost_match_message() {
+    let membership = lobby_membership_with_brawler();
+    let game_type_id = membership.game_types[0].id.clone();
+    for snapshot_with_rejoin in [false, true] {
+        let mut app = configured_lobby_flow_app(membership.clone());
+        app.world_mut()
+            .insert_resource(super::super::ClientInputContext::Shell);
+        inject_session_observation(&mut app, SessionObservation::RejoinStarted);
+        assert_eq!(
+            app.world().resource::<FlowCommit>().next_flow,
+            Some(ClientFlow::Match)
+        );
+        let context = || match_result_context(game_type_id.clone());
+        if snapshot_with_rejoin {
+            app.world_mut()
+                .resource_mut::<super::super::ClientMatchResultState>()
+                .context = Some(context());
+        }
+        app.world_mut()
+            .resource_mut::<RoutedClientLifecycle>()
+            .rejoined = true;
+        inject_session_observation(&mut app, SessionObservation::MatchRejoined);
+        assert!(!app.world().resource::<RoutedClientLifecycle>().rejoined);
+        assert!(app.world().resource::<FlowCommit>().error.is_none());
+        if !snapshot_with_rejoin {
+            app.world_mut()
+                .resource_mut::<super::super::ClientMatchResultState>()
+                .context = Some(context());
+        }
+        inject_session_observation(&mut app, SessionObservation::FreshLobbyReturn);
+        let commit = app.world().resource::<FlowCommit>();
+        assert_eq!(
+            commit.next_flow,
+            Some(ClientFlow::Results),
+            "snapshot with rejoin: {snapshot_with_rejoin}"
+        );
+        assert!(
+            commit.error.is_none(),
+            "a resolved rejoin shows no lost-match message"
+        );
+    }
+}
+
 #[test]
 fn practice_queue_again_uses_fresh_generation_game_and_selected_brawler() {
     let membership = lobby_membership_with_brawler();

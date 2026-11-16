@@ -216,6 +216,7 @@ fn configure_automation_drivers(app: &mut App) {
         (
             automation::drive_network_change_smoke,
             automation::drive_rejoin_smoke.before(observe_client_lifecycle),
+            automation::drive_leave_match_cue,
         )
             .in_set(ClientSessionSet::Observe),
     )

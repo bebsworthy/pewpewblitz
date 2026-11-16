@@ -389,6 +389,26 @@ mod tests {
         ));
     }
 
+    /// BRL-jxfy: a rejoin into a completed match returns to the lobby right after it is
+    /// accepted. The accepted rejoin is still observed first, so the loss it resolves never
+    /// reaches the fresh lobby return.
+    #[test]
+    fn an_accepted_rejoin_is_observed_before_the_fresh_lobby_return() {
+        assert!(matches!(
+            observe_match_scope(
+                ClientFlow::Match,
+                LobbyReturn::Accepted,
+                false,
+                true,
+                RejoinView {
+                    in_progress: false,
+                    rejoined: true,
+                }
+            ),
+            ObservationScope::Complete(Some(SessionObservation::MatchRejoined))
+        ));
+    }
+
     #[test]
     fn scoped_observation_replaces_resolver_fallback() {
         let mut actions = PendingFlowActions::default();

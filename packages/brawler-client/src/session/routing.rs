@@ -163,6 +163,16 @@ pub(crate) fn observe_completed_match(
     ) else {
         return;
     };
+    // A session that rejoins a completed match (BRL-jxfy) can receive the completed snapshot
+    // before its join outcome; wait for the outcome so the Results know the local player.
+    if statuses.iter().any(|status| {
+        matches!(
+            status.phase,
+            ClientJoinPhase::Connecting | ClientJoinPhase::AwaitingOutcome
+        )
+    }) {
+        return;
+    }
     if let Some(mut result_state) = result_state
         && result_state.context.is_none()
     {

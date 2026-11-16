@@ -315,8 +315,9 @@ impl MatchSeatTable {
         }
     }
 
-    /// Forget the seat its player left on purpose (BRL-8y1f), so a later lobby admission of the
-    /// account is an ordinary welcome rather than a rejoin. A rejoin already in flight for it is
+    /// Forget a seat that can no longer be rejoined (left on purpose, BRL-8y1f, or released by
+    /// its match's completion, BRL-jxfy), so a later lobby admission of the account is an
+    /// ordinary welcome rather than a rejoin. A rejoin already in flight for it is
     /// answered as unavailable.
     pub(super) fn release_seat(&mut self, released: SeatReleasedBody) {
         let Some(account) = self.seats.iter().find_map(|(account, seat)| {
@@ -333,7 +334,7 @@ impl MatchSeatTable {
         };
         info!(
             match_id = released.match_id.get(),
-            "brawler lobby released a match seat its player left"
+            "brawler lobby released a match seat that can no longer be rejoined"
         );
         if let Some(pending) = seat.pending {
             self.push_delivery(pending.lobby_session_id, RejoinDelivery::Unavailable);

@@ -284,14 +284,13 @@ pub(super) fn validate_match_hello(
         None => None,
     };
     if !matches!(match_state.phase, crate::matchplay::MatchPhase::Waiting) {
-        // Mid-match, only a rebound held seat may be reclaimed (BRL-yyeg). Its fighter already
+        // Mid-match, only a rebound held seat may be reclaimed (BRL-yyeg), also once the match
+        // completed so its player still receives the Results (BRL-jxfy). Its fighter already
         // exists, so join capacity does not apply.
         return match routed_participant {
             Some(participant)
-                if matches!(
-                    match_state.phase,
-                    crate::matchplay::MatchPhase::Active { .. }
-                ) && rejoinable.contains_key(&participant.player_id.get()) =>
+                if super::seat_hold::phase_admits_rejoin(&match_state.phase)
+                    && rejoinable.contains_key(&participant.player_id.get()) =>
             {
                 Ok(ValidatedMatchHello {
                     source: MatchJoinSource::Rejoin {
@@ -1096,8 +1095,23 @@ mod tests {
             },
             ..waiting_match()
         };
+        // BRL-jxfy: a completed match still admits the rebound held seat, so its player
+        // receives the Results, and nobody else.
+        assert_eq!(validate(50, 51, &completed, &rejoinable), Ok(Some(7)));
         assert_eq!(
-            validate(50, 51, &completed, &rejoinable),
+            validate(11, 11, &completed, &rejoinable),
+            Err(MatchJoinRejection::MatchInProgress)
+        );
+        assert_eq!(
+            validate(50, 51, &completed, &BTreeMap::new()),
+            Err(MatchJoinRejection::MatchFull)
+        );
+        let countdown = crate::matchplay::MatchState {
+            phase: crate::matchplay::MatchPhase::Countdown { starts_at_tick: 3 },
+            ..waiting_match()
+        };
+        assert_eq!(
+            validate(50, 51, &countdown, &rejoinable),
             Err(MatchJoinRejection::MatchInProgress)
         );
     }

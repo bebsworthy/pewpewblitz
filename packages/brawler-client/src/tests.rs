@@ -1681,6 +1681,92 @@ fn routed_return_to_lobby_is_an_intentional_nonterminal_transition() {
     assert!(!lifecycle.request_return_to_lobby());
 }
 
+/// BRL-jxfy: a session rejoining a completed match may receive the completed snapshot before its
+/// join outcome; the result waits for the outcome so the Results know the local player.
+#[test]
+fn a_completed_snapshot_before_the_join_outcome_waits_for_the_local_player() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.transport = NetworkTransport::RoutedUdp;
+    let mut app = App::new();
+    app.insert_resource(config)
+        .insert_resource(RoutedClientLifecycle {
+            phase: RoutedClientPhase::Match,
+            generation: 4,
+            ..default()
+        })
+        .init_resource::<ClientMatchResultState>()
+        .init_resource::<SelectedGameType>();
+    app.add_systems(Update, observe_completed_match);
+    let result = brawler::matchplay::MatchResult::Forfeit {
+        winner: brawler::combat::TeamId(0),
+        departed_team: brawler::combat::TeamId(1),
+    };
+    app.world_mut().spawn((
+        MatchRoot,
+        MatchState {
+            match_id: brawler::matchplay::MatchId(9),
+            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            phase: MatchPhase::Completed {
+                completed_at_tick: 12,
+                restart_unlocked_at_tick: 72,
+                result,
+            },
+            rules_revision: 1,
+        },
+        brawler::matchplay::WipeoutState {
+            match_id: Some(brawler::matchplay::MatchId(9)),
+            completed_result: Some(result),
+            ..default()
+        },
+    ));
+    app.world_mut()
+        .spawn((Fighter, PlayerId(4), brawler::combat::TeamId(0)));
+    let client = app
+        .world_mut()
+        .spawn((
+            Client,
+            ClientJoinStatus {
+                phase: ClientJoinPhase::AwaitingOutcome,
+                started_at: Duration::ZERO,
+                disconnect_requested: false,
+            },
+        ))
+        .id();
+    app.update();
+    assert_eq!(
+        app.world().resource::<RoutedClientLifecycle>().phase,
+        RoutedClientPhase::Match,
+        "wait for the join outcome"
+    );
+    assert!(
+        app.world()
+            .resource::<ClientMatchResultState>()
+            .context
+            .is_none()
+    );
+    app.world_mut()
+        .get_mut::<ClientJoinStatus>(client)
+        .unwrap()
+        .phase = ClientJoinPhase::Active {
+        player_id: PlayerId(4),
+        network_entity_id: NetworkEntityId(40),
+    };
+    app.update();
+    assert_eq!(
+        app.world().resource::<RoutedClientLifecycle>().phase,
+        RoutedClientPhase::AwaitingMatchUnlink
+    );
+    let context = app
+        .world()
+        .resource::<ClientMatchResultState>()
+        .context
+        .as_ref()
+        .unwrap();
+    assert_eq!(context.result, result);
+    assert_eq!(context.local_player, Some(PlayerId(4)));
+    assert_eq!(context.local_team, Some(brawler::combat::TeamId(0)));
+}
+
 #[test]
 fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
     let mut config = ClientNetworkConfig::new(1);

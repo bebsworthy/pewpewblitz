@@ -7,7 +7,8 @@
 use super::*;
 use brawler::testing::{
     SEAT_HOLD_TICKS, TestRoutedParticipant, expire_seat_hold_at, fighter_is_bot_controlled,
-    queue_seat_rebind, seat_hold_expiry, take_seat_rebind_replies, take_seat_releases,
+    queue_seat_rebind, ready_match_result, seat_hold_expiry, take_seat_rebind_replies,
+    take_seat_releases,
 };
 use brawler_routing::{ParticipantRebindBody, ParticipantReboundBody, RejoinReason};
 
@@ -294,7 +295,27 @@ fn another_identity_cannot_reclaim_a_held_seat() {
     let reply = rebind(&mut harness, 1, PLAYER_TWO, 90, 91);
     assert_eq!(reply.refusal, Some(RejoinReason::SeatConnected));
 
-    let reply = rebind(&mut harness, 2, PLAYER_ONE, 80, 81);
+    only_the_rebound_identity_reclaims(&mut harness, fighter, 2);
+}
+
+/// BRL-jxfy: the identity rules are unchanged once the match completed while the seat is held.
+#[test]
+fn another_identity_cannot_reclaim_a_held_seat_after_completion() {
+    let mut harness = active_routed_match();
+    let fighter = lose_session(&mut harness, 0, PLAYER_ONE.player_id);
+    leave_on_purpose(&mut harness, 1, PLAYER_TWO.player_id);
+    harness.step_until(|harness| server_match_result(harness).is_some());
+
+    // The seat that left (and completion released) is never rebound.
+    let reply = rebind(&mut harness, 1, PLAYER_TWO, 90, 91);
+    assert_eq!(reply.refusal, Some(RejoinReason::SeatExpired));
+
+    only_the_rebound_identity_reclaims(&mut harness, fighter, 2);
+    assert!(server_match_result(&mut harness).is_some());
+}
+
+fn only_the_rebound_identity_reclaims(harness: &mut Harness, fighter: Entity, rejoin_id: u64) {
+    let reply = rebind(harness, rejoin_id, PLAYER_ONE, 80, 81);
     assert_eq!(reply.refusal, None);
     // Neither another Netcode client on its own route, nor the replaced manifest identity, nor
     // another client on the rebound route is admitted.
@@ -309,7 +330,7 @@ fn another_identity_cannot_reclaim_a_held_seat() {
         assert!(fighter_is_bot_controlled(harness.server.world(), fighter));
     }
     // The rebound identity still reclaims it.
-    reclaim(&mut harness, fighter, 80, 81);
+    reclaim(harness, fighter, 80, 81);
     assert_eq!(harness.server_fighter(PLAYER_ONE.player_id), Some(fighter));
 }
 
@@ -402,7 +423,11 @@ fn leaving_on_purpose_releases_the_seat_instead_of_holding_it() {
     ));
     let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
     assert_eq!(reply.refusal, Some(RejoinReason::SeatExpired));
-    assert!(take_seat_releases(harness.server.world_mut()).is_empty());
+    // Completion releases the remaining connected seat (BRL-jxfy); the left one is not repeated.
+    assert_eq!(
+        released_players(&take_seat_releases(harness.server.world_mut())),
+        vec![PLAYER_TWO.player_id]
+    );
 }
 
 /// BRL-8y1f: a leave refuses rebinds even while the leaving session is still connected, so a
@@ -428,4 +453,255 @@ fn a_seat_its_player_left_refuses_a_racing_rebind() {
     assert_eq!(reply.refusal, Some(RejoinReason::SeatExpired));
     // The other participant's seat is untouched.
     assert!(harness.server_fighter(PLAYER_TWO.player_id).is_some());
+}
+
+/// Leave the match through the product path (BRL-8y1f) and end that session, collecting the
+/// seat releases the worker queues meanwhile. Returns once the leaver's fighter is removed.
+fn leave_on_purpose(
+    harness: &mut Harness,
+    index: usize,
+    player_id: u64,
+) -> Vec<brawler_routing::SeatReleasedBody> {
+    {
+        let mut lifecycle = harness.clients[index]
+            .world_mut()
+            .resource_mut::<brawler_client::RoutedClientLifecycle>();
+        lifecycle.phase = brawler_client::RoutedClientPhase::Match;
+        assert!(lifecycle.request_leave_match());
+    }
+    let mut releases = Vec::new();
+    harness.step_until(|harness| {
+        releases.extend(take_seat_releases(harness.server.world_mut()));
+        harness.clients[index]
+            .world()
+            .resource::<brawler_client::RoutedClientLifecycle>()
+            .phase
+            == brawler_client::RoutedClientPhase::AwaitingMatchUnlink
+    });
+    let client = harness.client_entities[index];
+    harness.clients[index]
+        .world_mut()
+        .trigger(Disconnect { entity: client });
+    for _ in 0..SESSION_LOSS_TICKS {
+        harness.step();
+        releases.extend(take_seat_releases(harness.server.world_mut()));
+        if harness.server_fighter(player_id).is_none() {
+            break;
+        }
+    }
+    harness.suspend_client(index);
+    assert_eq!(harness.server_fighter(player_id), None);
+    releases
+}
+
+/// `Harness::step_until` with a caller-chosen bound, for conditions that wait on a session bound.
+fn step_until_within(
+    harness: &mut Harness,
+    ticks: usize,
+    mut condition: impl FnMut(&mut Harness) -> bool,
+) {
+    for _ in 0..ticks {
+        harness.step();
+        if condition(harness) {
+            return;
+        }
+    }
+    panic!("condition did not become true within {ticks} ticks");
+}
+
+fn released_players(releases: &[brawler_routing::SeatReleasedBody]) -> Vec<u64> {
+    releases
+        .iter()
+        .map(|released| released.player_id.get())
+        .collect()
+}
+
+const PLAYER_ONE_FORFEIT_VICTORY: brawler::matchplay::MatchResult =
+    brawler::matchplay::MatchResult::Forfeit {
+        winner: TeamId(0),
+        departed_team: TeamId(1),
+    };
+
+fn server_match_result(harness: &mut Harness) -> Option<brawler::matchplay::MatchResult> {
+    match harness.server_match_phase() {
+        MatchPhase::Completed { result, .. } => Some(result),
+        _ => None,
+    }
+}
+
+/// BRL-jxfy: player one's session is lost and held; player two leaves, so the lone team
+/// forfeits and the match completes while player one's seat is held. The worker defers its
+/// Result, releases only the seats that cannot rejoin, and admits player one's rebound session in
+/// Completed; that session receives the completed match (and so its Results), and the Result
+/// goes out once it disconnects.
+#[test]
+fn a_match_that_completes_while_a_seat_is_held_defers_its_result_until_the_rejoin() {
+    let mut harness = active_routed_match();
+    let fighter = lose_session(&mut harness, 0, PLAYER_ONE.player_id);
+    let mut releases = leave_on_purpose(&mut harness, 1, PLAYER_TWO.player_id);
+    harness.step_until(|harness| server_match_result(harness).is_some());
+    assert_eq!(
+        server_match_result(&mut harness),
+        Some(PLAYER_ONE_FORFEIT_VICTORY)
+    );
+    for _ in 0..120 {
+        harness.step();
+        releases.extend(take_seat_releases(harness.server.world_mut()));
+        assert!(
+            ready_match_result(harness.server.world()).is_none(),
+            "no Result while a seat is held"
+        );
+    }
+    assert!(seat_hold_expiry(harness.server.world(), fighter).is_some());
+    assert_eq!(
+        released_players(&releases),
+        vec![PLAYER_TWO.player_id],
+        "only the seat that cannot rejoin is released, once"
+    );
+
+    // The supervisor's rebind is accepted in Completed, and the rebound identity is admitted.
+    let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
+    assert_eq!(reply.refusal, None);
+    let index = reclaim(&mut harness, fighter, 80, 81);
+    assert_eq!(harness.server_fighter(PLAYER_ONE.player_id), Some(fighter));
+    assert_eq!(
+        harness.admitted_player_id(index),
+        Some(PLAYER_ONE.player_id)
+    );
+    // The rejoined client sees the completed match with its own fighter and team.
+    harness.step_until(|harness| {
+        let world = harness.clients[index].world_mut();
+        let completed = world
+            .query_filtered::<&MatchState, With<MatchRootMarker>>()
+            .iter(world)
+            .any(|state| {
+                matches!(
+                    state.phase,
+                    MatchPhase::Completed { result, .. } if result == PLAYER_ONE_FORFEIT_VICTORY
+                )
+            });
+        let own_team = world
+            .query_filtered::<(&PlayerId, &TeamId), With<Fighter>>()
+            .iter(world)
+            .any(|(player, team)| player.0 == PLAYER_ONE.player_id && *team == TeamId(0));
+        completed && own_team
+    });
+    assert_eq!(
+        harness.controlled_player_ids(index),
+        vec![PLAYER_ONE.player_id]
+    );
+    // The reclaimed seat is released at once, so the player's next lobby welcome is ordinary.
+    let reclaimed_releases = take_seat_releases(harness.server.world_mut());
+    assert_eq!(
+        released_players(&reclaimed_releases),
+        vec![PLAYER_ONE.player_id]
+    );
+    assert!(
+        ready_match_result(harness.server.world()).is_none(),
+        "the Result waits while the rejoined session is connected"
+    );
+    // Another rebind of the reclaimed seat is refused.
+    let reply = rebind(&mut harness, 2, PLAYER_ONE, 82, 83);
+    assert_eq!(reply.refusal, Some(RejoinReason::SeatExpired));
+
+    // The client leaves for its Results; the Result follows and the match stays completed.
+    let client = harness.client_entities[index];
+    harness.clients[index]
+        .world_mut()
+        .trigger(Disconnect { entity: client });
+    step_until_within(&mut harness, SESSION_LOSS_TICKS, |harness| {
+        ready_match_result(harness.server.world()).is_some()
+    });
+    harness.suspend_client(index);
+    assert_eq!(
+        ready_match_result(harness.server.world()),
+        Some(PLAYER_ONE_FORFEIT_VICTORY),
+        "the Result describes the completed match"
+    );
+    assert!(take_seat_releases(harness.server.world_mut()).is_empty());
+}
+
+/// BRL-jxfy: without a rejoin, a held seat's expiry after completion releases the Result, and a
+/// later rebind is refused.
+#[test]
+fn a_held_seat_that_expires_after_completion_releases_the_result() {
+    let mut harness = active_routed_match();
+    let fighter = lose_session(&mut harness, 0, PLAYER_ONE.player_id);
+    let expiry = seat_hold_expiry(harness.server.world(), fighter).unwrap();
+    let mut releases = leave_on_purpose(&mut harness, 1, PLAYER_TWO.player_id);
+    harness.step_until(|harness| server_match_result(harness).is_some());
+    assert!(ready_match_result(harness.server.world()).is_none());
+    // The hold keeps counting in Completed: step the full remaining hold, never early.
+    while harness.server_simulation_tick() + 1 < expiry {
+        harness.step();
+        releases.extend(take_seat_releases(harness.server.world_mut()));
+        assert!(
+            ready_match_result(harness.server.world()).is_none(),
+            "the Result waits for the whole hold"
+        );
+    }
+    harness.step_until(|harness| ready_match_result(harness.server.world()).is_some());
+    assert!(harness.server_simulation_tick() >= expiry);
+    assert_eq!(harness.server_fighter(PLAYER_ONE.player_id), None);
+    releases.extend(take_seat_releases(harness.server.world_mut()));
+    assert_eq!(
+        released_players(&releases),
+        vec![PLAYER_TWO.player_id, PLAYER_ONE.player_id],
+        "the expired seat is released too"
+    );
+    let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
+    assert_eq!(reply.refusal, Some(RejoinReason::SeatExpired));
+}
+
+/// BRL-jxfy regression: with no held seat, the Result is ready on the completion frame, and every
+/// seat is released then.
+#[test]
+fn a_match_with_no_held_seat_sends_its_result_at_completion() {
+    let mut harness = active_routed_match();
+    {
+        let mut lifecycle = harness.clients[1]
+            .world_mut()
+            .resource_mut::<brawler_client::RoutedClientLifecycle>();
+        lifecycle.phase = brawler_client::RoutedClientPhase::Match;
+        assert!(lifecycle.request_leave_match());
+    }
+    let mut releases = Vec::new();
+    harness.step_until(|harness| {
+        releases.extend(take_seat_releases(harness.server.world_mut()));
+        harness.clients[1]
+            .world()
+            .resource::<brawler_client::RoutedClientLifecycle>()
+            .phase
+            == brawler_client::RoutedClientPhase::AwaitingMatchUnlink
+    });
+    assert_eq!(released_players(&releases), vec![PLAYER_TWO.player_id]);
+    let client = harness.client_entities[1];
+    harness.clients[1]
+        .world_mut()
+        .trigger(Disconnect { entity: client });
+    let mut completed = false;
+    for _ in 0..SESSION_LOSS_TICKS {
+        harness.step();
+        releases.extend(take_seat_releases(harness.server.world_mut()));
+        let result = server_match_result(&mut harness);
+        assert_eq!(
+            ready_match_result(harness.server.world()),
+            result,
+            "the Result is ready exactly from the completion frame"
+        );
+        if let Some(result) = result {
+            assert_eq!(result, PLAYER_ONE_FORFEIT_VICTORY);
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed, "the lone team forfeits");
+    harness.suspend_client(1);
+    // Player one is connected and sees its Results now; its seat cannot be rejoined.
+    assert_eq!(
+        released_players(&releases),
+        vec![PLAYER_TWO.player_id, PLAYER_ONE.player_id]
+    );
+    let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
+    assert_eq!(reply.refusal, Some(RejoinReason::SeatExpired));
 }

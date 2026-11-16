@@ -610,9 +610,11 @@ pub struct ParticipantReboundBody {
     pub refusal: Option<RejoinReason>,
 }
 
-/// One participant's seat released by a voluntary leave (BRL-8y1f). The match worker names the
-/// seat exactly as its manifest does; the supervisor validates it against that worker's
-/// allocation and forwards the same body to the owning lobby.
+/// One participant's seat that can no longer be rejoined: released by a voluntary leave
+/// (BRL-8y1f), or by the match's completion for a seat that is not held, or for a held seat once
+/// it is reclaimed or expires after completion (BRL-jxfy). The match worker names the seat
+/// exactly as its manifest does; the supervisor validates it against that worker's allocation
+/// and forwards the same body to the owning lobby.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SeatReleasedBody {
     pub request_id: RequestId,

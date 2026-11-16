@@ -11,7 +11,7 @@ use brawler_client::{
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
 
-pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]]";
+pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]]";
 
 fn parse_value<T: core::str::FromStr>(flag: &str, value: Option<String>) -> Result<T, String> {
     value
@@ -59,6 +59,8 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
     let mut product_practice_smoke = false;
     let mut product_network_change_smoke = false;
     let mut product_rejoin_smoke = false;
+    let mut product_completed_rejoin_cue = None;
+    let mut leave_match_cue = None;
     let mut product_requeue_smoke = false;
     let mut product_match_players_per_team = 2;
     let mut product_match_game_type = None;
@@ -116,6 +118,18 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
                 product_match_smoke = true;
                 product_practice_smoke = true;
                 product_rejoin_smoke = true;
+            }
+            "--product-completed-rejoin-smoke" => {
+                product_completed_rejoin_cue = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| format!("{flag} requires a cue file path"))?,
+                ));
+            }
+            "--leave-match-cue" => {
+                leave_match_cue = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| format!("{flag} requires a cue file path"))?,
+                ));
             }
             "--product-requeue-smoke" => {
                 product_match_smoke = true;
@@ -253,6 +267,8 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
         product_requeue_smoke,
         product_network_change_smoke,
         product_rejoin_smoke,
+        product_completed_rejoin_cue,
+        leave_match_cue,
         product_match_players_per_team,
         product_match_game_type,
         headless_move,

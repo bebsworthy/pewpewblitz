@@ -61,8 +61,17 @@ case "$rejoin_smoke" in
         }
         practice_flag=--product-rejoin-smoke
         ;;
+    completed)
+        # BRL-jxfy: client 1 loses its session beyond the session bound and cues client 2 to
+        # leave; the lone team forfeits while client 1's seat is held, and client 1 rejoins the
+        # completed match for its Results.
+        { [ "$practice_smoke" = 0 ] && [ "$requeue_smoke" = 0 ] && [ "$players_per_team" = 1 ]; } || {
+            echo "brawler product match: BRAWLER_PRODUCT_REJOIN_SMOKE=completed requires one PvP 1v1 roster" >&2
+            exit 2
+        }
+        ;;
     *)
-        echo "brawler product match: BRAWLER_PRODUCT_REJOIN_SMOKE must be 0 or 1" >&2
+        echo "brawler product match: BRAWLER_PRODUCT_REJOIN_SMOKE must be 0, 1 or completed" >&2
         exit 2
         ;;
 esac
@@ -124,13 +133,21 @@ if [ "$requeue_smoke" = 1 ] && { [ "$players_per_team" -ne 1 ] || [ "$client_cou
     echo "brawler product match: requeue smoke requires exactly one 1v1 roster" >&2
     exit 2
 fi
+if [ "$rejoin_smoke" = completed ] && [ "$client_count" -ne 2 ]; then
+    echo "brawler product match: the completed rejoin smoke requires exactly one 1v1 roster" >&2
+    exit 2
+fi
 
 supervisor_pid=
 watchdog_pid=
 client_1= client_2= client_3= client_4= client_5= client_6=
+cue_dir=
 
 cleanup() {
     trap - INT TERM EXIT
+    if [ -n "$cue_dir" ]; then
+        rm -rf "$cue_dir"
+    fi
     for pid in "$watchdog_pid" "$client_1" "$client_2" "$client_3" "$client_4" "$client_5" "$client_6"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null || true
@@ -188,6 +205,40 @@ while [ "$index" -le "$client_count" ]; do
                 "$practice_flag" \
                 --product-game-type "$game_type" \
                 --weapon-preset 1 &
+        elif [ "$rejoin_smoke" = completed ]; then
+            if [ "$index" -eq 1 ]; then
+                role_flag=--product-completed-rejoin-smoke
+            else
+                role_flag=--leave-match-cue
+            fi
+            if [ -z "$cue_dir" ]; then
+                mkdir -p "$project_dir/target/e2e"
+                cue_dir=$(mktemp -d "$project_dir/target/e2e/completed-rejoin.XXXXXX")
+            fi
+            if [ "$index" -eq 1 ]; then
+                target/debug/brawler-client \
+                    --client-id $((5000 + index)) \
+                    --server "$bind_addr" \
+                    --transport routed-udp \
+                    --auto-connect \
+                    --headless \
+                    "$match_flag" \
+                    --product-game-type "${game_type:-wipeout-1v1}" \
+                    "$role_flag" "$cue_dir/leave" \
+                    --weapon-preset 1 &
+            else
+                target/debug/brawler-client \
+                    --client-id $((5000 + index)) \
+                    --server "$bind_addr" \
+                    --transport routed-udp \
+                    --auto-connect \
+                    --headless \
+                    "$match_flag" \
+                    --product-game-type "${game_type:-wipeout-1v1}" \
+                    "$role_flag" "$cue_dir/leave" \
+                    --exit-after-lobby-return \
+                    --weapon-preset 1 &
+            fi
         elif [ "$requeue_smoke" = 1 ]; then
             if [ "$index" -eq 1 ]; then aim_axis=1,0; else aim_axis=-1,0; fi
             target/debug/brawler-client \
@@ -278,7 +329,9 @@ wait "$supervisor_pid"
 supervisor_pid=
 if [ "$headless" = 1 ]; then
     roster_count=$((client_count / roster_size))
-    if [ "$rejoin_smoke" = 1 ]; then
+    if [ "$rejoin_smoke" = completed ]; then
+        echo "brawler product match: ${game_type:-wipeout-1v1} completed by forfeit while a seat was held, and that player rejoined it for its Results"
+    elif [ "$rejoin_smoke" = 1 ]; then
         echo "brawler product match: Practice $game_type rejoined the same running match after an outage beyond the session bound"
     elif [ "$network_change_smoke" = 1 ]; then
         echo "brawler product match: Practice $game_type kept its match session across a source-port change and a return to the original port"

@@ -38,6 +38,14 @@ pub struct ClientAutomationConfig {
     /// the 10 s routed session bound, return to a fresh lobby, and exit only after the automatic
     /// rejoin reclaims the same fighter in the same running match.
     pub product_rejoin_smoke: bool,
+    /// Headless BRL-jxfy evidence, for one player-versus-player client: drop all traffic beyond the routed
+    /// session bound, write this cue file so the opponent leaves (and its team forfeits) while
+    /// the seat is held, then come back, rejoin the completed match and exit after its forfeit
+    /// result was captured and a fresh lobby was accepted.
+    pub product_completed_rejoin_cue: Option<std::path::PathBuf>,
+    /// Headless opponent for rejoin checks: send Leave Match once this file exists while the
+    /// match is Active (BRL-jxfy). A person can create it by hand during a device check.
+    pub leave_match_cue: Option<std::path::PathBuf>,
     pub product_match_players_per_team: u8,
     pub product_match_game_type: Option<brawler::lobby::GameTypeId>,
     pub headless_move: Option<(i8, i8)>,
@@ -67,6 +75,8 @@ impl Default for ClientAutomationConfig {
             product_requeue_smoke: false,
             product_network_change_smoke: false,
             product_rejoin_smoke: false,
+            product_completed_rejoin_cue: None,
+            leave_match_cue: None,
             product_match_players_per_team: 2,
             product_match_game_type: None,
             headless_move: None,
@@ -266,6 +276,19 @@ impl ClientAutomationConfig {
                 "--product-rejoin-smoke requires Practice automation without the network-change smoke"
                     .to_string(),
             );
+        }
+        let pvp_match =
+            self.product_match_smoke && !self.product_practice_smoke && !self.product_requeue_smoke;
+        if self.product_completed_rejoin_cue.is_some()
+            && (!pvp_match || self.leave_match_cue.is_some())
+        {
+            return Err(
+                "--product-completed-rejoin-smoke requires PvP match automation without --leave-match-cue"
+                    .to_string(),
+            );
+        }
+        if self.leave_match_cue.is_some() && !pvp_match {
+            return Err("--leave-match-cue requires PvP match automation".to_string());
         }
         Ok(())
     }

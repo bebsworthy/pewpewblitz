@@ -229,6 +229,21 @@ pub fn fighter_is_bot_controlled(world: &World, fighter: Entity) -> bool {
         .is_some()
 }
 
+/// The result the match worker may send now, or `None` while the match has not completed or a
+/// held seat can still rejoin it (BRL-jxfy). The routed worker's control owner queues `Result`
+/// exactly when this becomes `Some`; it keeps the first completed result even if the root later
+/// restarts.
+#[must_use]
+pub fn ready_match_result(world: &World) -> Option<crate::matchplay::MatchResult> {
+    let state = world
+        .resource::<crate::server::CompletedSeats>()
+        .ready_result()?;
+    match state.phase {
+        crate::matchplay::MatchPhase::Completed { result, .. } => Some(result),
+        _ => None,
+    }
+}
+
 /// The seat hold applied to a routed participant whose session is lost mid-match.
 pub const SEAT_HOLD_TICKS: u64 = crate::server::SEAT_HOLD_TICKS;
 

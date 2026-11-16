@@ -74,6 +74,8 @@ pub(super) fn finish_product_match_smoke(
         && !config.product_requeue_smoke
         && !config.product_network_change_smoke
         && !config.product_rejoin_smoke
+        && config.product_completed_rejoin_cue.is_none()
+        && config.leave_match_cue.is_none()
         && roots
             .iter()
             .any(|state| matches!(state.phase, MatchPhase::Active { .. }))
@@ -288,7 +290,16 @@ enum RejoinStage {
     Outage {
         deadline: core::time::Duration,
     },
+    /// Completed variant: the session is lost and the opponent was cued to leave; stay away
+    /// while the match completes with this seat held.
+    Offline {
+        until: core::time::Duration,
+    },
     Rejoining {
+        deadline: core::time::Duration,
+    },
+    /// Completed variant: the forfeit result was captured; wait for the fresh lobby after it.
+    AwaitingFreshLobby {
         deadline: core::time::Duration,
     },
     Resumed {
@@ -314,11 +325,21 @@ pub(super) struct RejoinSmoke {
 const REJOIN_OUTAGE_DEADLINE: core::time::Duration = core::time::Duration::from_secs(16);
 /// Bound for the fresh lobby, the automatic rejoin, and the rejoined match session.
 const REJOIN_DEADLINE: core::time::Duration = core::time::Duration::from_secs(30);
+/// Completed variant: time to stay offline after cueing the opponent, so its Leave Match and
+/// the forfeit land while this seat is held (BRL-jxfy). It stays below the 10 s automation
+/// connect timeout after which the routed recovery would return to the lobby on its own.
+const COMPLETED_REJOIN_OFFLINE: core::time::Duration = core::time::Duration::from_secs(6);
 
 /// Drop all traffic of a Practice match session until it is lost, return to a fresh lobby the
 /// way the product shell does, and require the automatic rejoin to reclaim the same player in
 /// the same running match with fresh authoritative ticks. Runs before the lifecycle observer so
 /// the expected loss is not classified as a terminal disconnect.
+///
+/// The completed variant (BRL-jxfy, a player-versus-player 1v1 client) writes its cue file once the session is
+/// lost so the opponent leaves, stays offline while the match completes by forfeit with this
+/// seat held, and then requires the automatic rejoin to land in the completed match: the rejoined
+/// session must capture the forfeit result with its own team as the winner, never see the match
+/// running again, and return to a fresh lobby.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -333,10 +354,11 @@ pub(super) fn drive_rejoin_smoke(
     mut lifecycle: bevy::prelude::ResMut<crate::RoutedClientLifecycle>,
     roots: Query<&MatchState, With<MatchRoot>>,
     ticks: Query<&brawler::combat::AuthoritativeTick>,
+    result_state: Res<crate::ClientMatchResultState>,
     mut clients: Query<
         (
             &RoutedClientSession,
-            &ClientJoinStatus,
+            &mut ClientJoinStatus,
             &mut crate::routed_udp::RoutedUdpIo,
             bevy::prelude::Has<lightyear::prelude::client::Disconnected>,
         ),
@@ -344,7 +366,8 @@ pub(super) fn drive_rejoin_smoke(
     >,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if !config.product_rejoin_smoke {
+    let completed_cue = config.product_completed_rejoin_cue.as_deref();
+    if !config.product_rejoin_smoke && completed_cue.is_none() {
         return;
     }
     let now = time.elapsed();
@@ -390,16 +413,110 @@ pub(super) fn drive_rejoin_smoke(
             };
         }
         RejoinStage::Outage { deadline } => {
-            let lost = client.is_some_and(|(session, _, _, disconnected)| {
-                session.kind == RoutedClientSessionKind::Match && disconnected
-            });
-            if lost && lifecycle.request_return_to_lobby() {
+            let Some((session, mut status, _, disconnected)) = client else {
+                return fail(&mut smoke, "the routed client entity disappeared");
+            };
+            let lost = session.kind == RoutedClientSessionKind::Match && disconnected;
+            if lost && let Some(cue) = completed_cue {
+                // An offline app has not noticed the loss yet: keep the lost session in place
+                // while the opponent leaves and the match completes with this seat held. Marked
+                // disconnected it is not a terminal failure, and restarting its clock keeps the
+                // automatic routed recovery (one connect timeout) from returning to the lobby
+                // before this smoke does.
+                status.phase = ClientJoinPhase::Disconnected;
+                status.started_at = now;
+                if let Err(error) = std::fs::write(cue, b"leave\n") {
+                    bevy::log::error!(%error, path = %cue.display(), "completed rejoin smoke could not write its cue");
+                    return fail(&mut smoke, "the leave cue could not be written");
+                }
+                info!(
+                    path = %cue.display(),
+                    "completed rejoin smoke: the match session was lost; cued the opponent to leave"
+                );
+                smoke.stage = RejoinStage::Offline {
+                    until: now.saturating_add(COMPLETED_REJOIN_OFFLINE),
+                };
+            } else if lost && lifecycle.request_return_to_lobby() {
                 info!("rejoin smoke: the match session was lost; returning to a fresh lobby");
                 smoke.stage = RejoinStage::Rejoining {
                     deadline: now.saturating_add(REJOIN_DEADLINE),
                 };
             } else if now >= deadline {
                 fail(&mut smoke, "the match session outlived the outage");
+            }
+        }
+        RejoinStage::Offline { until } if now >= until => {
+            if lifecycle.request_return_to_lobby() {
+                info!("completed rejoin smoke: coming back; returning to a fresh lobby");
+                smoke.stage = RejoinStage::Rejoining {
+                    deadline: now.saturating_add(REJOIN_DEADLINE),
+                };
+            } else {
+                fail(
+                    &mut smoke,
+                    "the lost match session could not return to the lobby",
+                );
+            }
+        }
+        RejoinStage::Rejoining { deadline } if completed_cue.is_some() => {
+            let Some((original_generation, original_player, _)) = smoke.original else {
+                return fail(&mut smoke, "no original match session was recorded");
+            };
+            let rejoined_session = client.is_some_and(|(session, status, _, _)| {
+                session.kind == RoutedClientSessionKind::Match
+                    && session.generation > original_generation
+                    && matches!(
+                        status.phase,
+                        ClientJoinPhase::Active { player_id, .. } if player_id == original_player
+                    )
+            });
+            if rejoined_session && match_active {
+                return fail(&mut smoke, "the rejoin found the match still running");
+            }
+            if let Some(context) = result_state.context.as_ref() {
+                let own_forfeit_victory = matches!(
+                    context.result,
+                    brawler::matchplay::MatchResult::Forfeit { winner, .. }
+                        if context.local_team == Some(winner)
+                );
+                if context.local_player != Some(original_player) || !own_forfeit_victory {
+                    bevy::log::error!(?context.result, ?context.local_team, ?context.local_player, "completed rejoin smoke captured an unexpected result");
+                    return fail(
+                        &mut smoke,
+                        "the captured result is not this player's forfeit victory",
+                    );
+                }
+                info!(
+                    player_id = original_player.0,
+                    result = ?context.result,
+                    "completed rejoin smoke: the rejoined session captured the completed match's forfeit result"
+                );
+                smoke.stage = RejoinStage::AwaitingFreshLobby {
+                    deadline: now.saturating_add(REJOIN_DEADLINE),
+                };
+            } else if now >= deadline {
+                fail(
+                    &mut smoke,
+                    "the rejoin into the completed match did not complete",
+                );
+            }
+        }
+        RejoinStage::AwaitingFreshLobby { deadline } => {
+            let Some((original_generation, _, _)) = smoke.original else {
+                return fail(&mut smoke, "no original match session was recorded");
+            };
+            // Generations: original match, rejoin lobby, rejoined match, then this fresh lobby.
+            let fresh_lobby = client.is_some_and(|(session, status, _, _)| {
+                session.kind == RoutedClientSessionKind::Lobby
+                    && session.generation >= original_generation.saturating_add(3)
+                    && matches!(status.phase, ClientJoinPhase::LobbyActive { .. })
+            });
+            if fresh_lobby && !lifecycle.rejoin_in_progress() {
+                info!("completed rejoin smoke: returned to a fresh lobby after the Results");
+                exit.write(AppExit::Success);
+                smoke.stage = RejoinStage::Finished;
+            } else if now >= deadline {
+                fail(&mut smoke, "no fresh lobby after the completed match");
             }
         }
         RejoinStage::Rejoining { deadline } => {
@@ -446,7 +563,39 @@ pub(super) fn drive_rejoin_smoke(
                 fail(&mut smoke, "no authoritative progress after the rejoin");
             }
         }
-        RejoinStage::Settling { .. } | RejoinStage::Finished => {}
+        RejoinStage::Settling { .. } | RejoinStage::Offline { .. } | RejoinStage::Finished => {}
+    }
+}
+
+/// Headless opponent for rejoin checks (BRL-jxfy): once the cue file exists while the routed
+/// match is Active, leave the match through the product Leave Match path. The cue is polled at
+/// most four times a second.
+#[allow(clippy::needless_pass_by_value)]
+pub(super) fn drive_leave_match_cue(
+    config: Res<crate::ClientAutomationConfig>,
+    time: Res<bevy::prelude::Time<bevy::prelude::Real>>,
+    mut lifecycle: bevy::prelude::ResMut<crate::RoutedClientLifecycle>,
+    roots: Query<&MatchState, With<MatchRoot>>,
+    mut next_poll: bevy::prelude::Local<core::time::Duration>,
+    mut left: bevy::prelude::Local<bool>,
+) {
+    let Some(cue) = config.leave_match_cue.as_deref() else {
+        return;
+    };
+    let now = time.elapsed();
+    if *left
+        || now < *next_poll
+        || lifecycle.phase != crate::RoutedClientPhase::Match
+        || !roots
+            .iter()
+            .any(|state| matches!(state.phase, MatchPhase::Active { .. }))
+    {
+        return;
+    }
+    *next_poll = now.saturating_add(core::time::Duration::from_millis(250));
+    if cue.exists() && lifecycle.request_leave_match() {
+        *left = true;
+        info!(path = %cue.display(), "leave-match cue: leaving the match");
     }
 }
 

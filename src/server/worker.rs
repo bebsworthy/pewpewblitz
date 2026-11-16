@@ -638,13 +638,20 @@ fn canonical_allocation_result(
     canonical_match_result(state)
 }
 
-/// Emit exactly one result after the authoritative match root first becomes Completed. This is
-/// in Last so the completed state is final for the frame and the result is queued before the
-/// worker's control flush; a supervisor Stop can therefore only arrive after Result.
+/// Emit exactly one result once the authoritative match root is Completed and no held seat can
+/// still rejoin it (BRL-jxfy, [`super::seat_hold::CompletedSeats`]); with no held seat that is
+/// the completion frame. This is in Last so the completed state is final for the frame and the
+/// result is queued before the worker's control flush; a supervisor Stop can therefore only
+/// arrive after Result.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are owned by the schedule"
+)]
 fn worker_control_emit_result(
     mut state: ResMut<WorkerControlState>,
     mut workers: Query<&mut RoutedWorker, With<Linked>>,
     roots: Query<&MatchState, With<MatchRoot>>,
+    completed_seats: Option<Res<super::seat_hold::CompletedSeats>>,
 ) {
     if state.role != WorkerEntrypointRole::Match || state.result_sent {
         return;
@@ -652,7 +659,11 @@ fn worker_control_emit_result(
     let Some((match_id, allocation_id)) = state.result_identity else {
         return;
     };
-    let Ok(match_state) = roots.single() else {
+    let match_state = match completed_seats.as_deref() {
+        Some(seats) => seats.ready_result(),
+        None => roots.single().ok(),
+    };
+    let Some(match_state) = match_state else {
         return;
     };
     let Some(result) = canonical_allocation_result(match_state, match_id) else {

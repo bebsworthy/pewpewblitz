@@ -340,8 +340,9 @@ impl SupervisorRuntime {
         );
     }
 
-    /// Accept a match worker's fact that one participant left on purpose (BRL-8y1f): refuse every
-    /// later rejoin of that seat and tell the owning lobby, once, so it never announces one. A
+    /// Accept a match worker's fact that one participant's seat can no longer be rejoined (a
+    /// voluntary leave, BRL-8y1f, or the match's completion, BRL-jxfy): refuse every later
+    /// rejoin of that seat and tell the owning lobby, once, so it never announces one. A
     /// fact naming another worker's allocation is a protocol conflict; a repeat is ignored.
     pub(super) fn release_seat(
         &mut self,

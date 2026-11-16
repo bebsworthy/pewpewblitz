@@ -69,6 +69,10 @@ network-change-e2e game_type="wipeout-1v1":
 rejoin-e2e game_type="wipeout-1v1":
     ./scripts/e2e-rejoin.sh {{game_type}}
 
+# Complete a PvP 1v1 match by forfeit while one player's seat is held, then require that player to rejoin it for its Results.
+completed-rejoin-e2e game_type="wipeout-1v1":
+    ./scripts/e2e-completed-rejoin.sh {{game_type}}
+
 # Record one bounded routed release-client render report plus paired PNG/JSON captures at 1280x720.
 v3-render-evidence report="target/v3-render-evidence.txt":
     ./scripts/v3-render-evidence.sh {{report}}

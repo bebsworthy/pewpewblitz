@@ -1523,4 +1523,53 @@ mod rejoin_minting {
             ControlBody::RejoinRejected(rejected) if rejected.reason == RejoinReason::SeatExpired
         ));
     }
+
+    /// BRL-jxfy: a match worker that defers its Result releases the seats that cannot rejoin at
+    /// completion, before its Result. The lobby is told about each seat once, and the later
+    /// Result still announces the match end exactly once.
+    #[test]
+    fn a_seat_released_before_the_result_is_forwarded_once_and_the_end_follows() {
+        let mut fixture = fixture();
+        let released = crate::SeatReleasedBody {
+            request_id: RequestId::new(REQUEST).unwrap(),
+            allocation_id: AllocationId::new(ALLOCATION).unwrap(),
+            match_id: MatchId::new(MATCH).unwrap(),
+            player_id: PlayerId::new(PLAYER).unwrap(),
+        };
+        let worker = fixture.match_worker.worker_id;
+        fixture.runtime.release_seat(worker, released).unwrap();
+        let forwarded = drained(&mut fixture.runtime);
+        assert_eq!(
+            forwarded,
+            vec![(fixture.lobby.worker_id, ControlBody::SeatReleased(released))]
+        );
+
+        fixture
+            .runtime
+            .complete_match_result(
+                worker,
+                ResultBody::new(
+                    MatchId::new(MATCH).unwrap(),
+                    AllocationId::new(ALLOCATION).unwrap(),
+                    vec![1],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // A repeated release after the Result is accepted and not forwarded again.
+        fixture.runtime.release_seat(worker, released).unwrap();
+        // The allocation's reclaim announces the end only once.
+        fixture
+            .runtime
+            .notify_match_ended(RequestId::new(REQUEST).unwrap());
+        let ended = drained(&mut fixture.runtime);
+        assert_eq!(ended.len(), 1, "only the match end follows: {ended:?}");
+        assert!(matches!(
+            ended[0],
+            (lobby, ControlBody::MatchEnded(body))
+                if lobby == fixture.lobby.worker_id
+                    && body.allocation_id.get() == ALLOCATION
+                    && body.match_id.get() == MATCH
+        ));
+    }
 }

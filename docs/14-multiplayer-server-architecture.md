@@ -186,8 +186,8 @@ supervisor admits it only for an activated, not-yet-ended allocation of that lob
 live grant per seat (no live capability on any of the seat's routes, no rebind in flight) and at
 most `MAX_REJOINS_PER_SEAT` (3) granted rejoins per seat per match. It mints a fresh 256-bit
 capability on a fresh route and peer (30 s pending, 10 s idle as for any match route) and sends
-`ParticipantRebind` to the worker, which accepts it only for a held seat of an Active match and
-also enforces the per-seat limit. The worker answers `ParticipantRebound`; only then does the
+`ParticipantRebind` to the worker, which accepts it only for a held seat of an Active or
+Completed match and also enforces the per-seat limit. The worker answers `ParticipantRebound`; only then does the
 supervisor register the route, bind the capability and send `RejoinGranted`, which the lobby
 forwards as an ordinary `MatchRouteGrant`. Earlier capabilities are never revived. The immutable
 manifest is unchanged: the worker keeps a runtime rebind overlay, so the seat is admitted only
@@ -195,8 +195,23 @@ under its fresh (Netcode client, routed peer) pair, which lets a relaunched app 
 ID rejoin. A rejoin that finds the seat not yet released (`SeatConnected`, the earlier session
 still inside its 10 s bound) is retried by the lobby every 500 ms for up to 12 s; every other
 failure answers `MatchRejoinStatus::Unavailable` and the client shows today's Dashboard message.
-A seat whose match completes while its player is away is released; that player sees Dashboard,
-not Results.
+A match that completes while a seat is held keeps that seat rejoinable (BRL-jxfy). The match
+worker defers its `Result` while any seat held at completion is still held (each bounded by its
+own 60 s hold, which keeps counting in `Completed`) and while a seat reclaimed in `Completed`
+keeps its session connected, for at most the 10 s routed session bound after the reclaim. With no
+held seat the `Result` goes out on the completion frame, as before; at worst it follows completion
+by about 70 s. Because the allocation has not ended, the supervisor and lobby carry the rejoin
+unchanged, and the worker admits the rebound held seat in `Completed`: the rejoined client
+receives the replicated completed state and shows that match's Results (score, Wipeout stats
+board, objective result) through the ordinary completed-match path; the client captures that
+result only once its join outcome has arrived, because the completed snapshot can precede it and
+the Results need the local player. When the root first becomes
+`Completed`, the worker sends `SeatReleased` for every routed seat that is not held (its player
+already sees Results or has gone), and later one for a held seat once it is reclaimed or its hold
+expires, so each player's next lobby welcome after Results is ordinary. `MatchEnded` still follows
+the `Result` once and releases any remaining seat. A match that completes while the lost session
+is still inside its 10 s bound (not yet held) still releases the seat, and that player sees
+Dashboard.
 
 Leaving on purpose is not a lost session (BRL-8y1f). Netcode reports a requested disconnect and a
 timeout identically to the server, so the client states the intent: confirming Leave Match sends
@@ -205,7 +220,8 @@ timeout identically to the server, so the client states the intent: confirming L
 one `SeatReleased {request, allocation, match, player}` fact to the supervisor, and removes the
 fighter when that session ends, in every phase, under today's departure/forfeit rules (a lone
 player's team in a two-team match forfeits; Practice teams keep their bots). A left seat is never
-held and refuses every rebind (`SeatExpired`). The supervisor validates the fact against that
+held and refuses every rebind (`SeatExpired`). The same fact releases any seat that can no longer
+be rejoined after completion (above). The supervisor validates the fact against that
 worker's allocation, refuses later rejoins of the seat and forwards it once to the owning lobby,
 which forgets the account's seat (a rejoin already in flight is answered `Unavailable`), so the
 player's next lobby session is an ordinary welcome to Dashboard.

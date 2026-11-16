@@ -79,9 +79,9 @@ pub use lobby::{
 pub use routed_worker::{
     RoutedPeer, RoutedPeerClose, RoutedWorker, RoutedWorkerFailure, RoutedWorkerPlugin,
 };
-pub(crate) use seat_hold::{RoutedSeat, SeatHold};
 #[cfg(feature = "network-test")]
-pub(crate) use seat_hold::{SEAT_HOLD_TICKS, SeatRebindQueue};
+pub(crate) use seat_hold::{CompletedSeats, SEAT_HOLD_TICKS, SeatRebindQueue};
+pub(crate) use seat_hold::{RoutedSeat, SeatHold};
 #[cfg(test)]
 #[allow(clippy::wildcard_imports)]
 use verification::*;
