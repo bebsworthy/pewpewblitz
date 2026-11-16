@@ -49,3 +49,23 @@ Evidence (/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996
 - Earlier the same day, two other "first connect timed out" cases had environmental causes: the server was unreachable after the Mac hibernated, and once the phone was on another Wi-Fi subnet.
 
 **Next:** count, per route, the public datagrams the supervisor forwards to a match worker, and log why lightyear_netcode ignores a connection request in the worker. Then repeat the device cycles until the handoff timeout recurs.
+
+
+# Resolution 2026-11-16
+**Device verification (Pixel 8a, HEAD 2359aa41, server with full tracing and `lightyear_netcode` debug logs):** the force-stop/relaunch rejoin path passed **14 of 14 valid cycles** (1, 2, 3, 5 and 7-16).
+- Each relaunch connected on the first attempt (`socket bound … route="lobby"` once) and was back in the match 5-6 s after relaunch, 9-11 s after the kill, with `brawler match seat reclaimed by a rejoined session`.
+- Cycles 7-16: 61 `handshake completed` lines, no `Netcode error` warnings, and no ingress drops for the phone.
+- Two log lines are false positives, both an 18-byte stray non-request packet from the phone's just-closed lobby session: one `handshake stalled … packets=1 connection_requests=0` and one `dropped packet for a closed route`.
+- The `Netcode error: Ignored` debug lines are trailing lobby packets after each handoff, and harmless.
+
+**Not reproduced:** neither the original lobby-connect outage nor the cycle-6 match-handoff timeout came back in 24 device cycles plus the host matrix. A recurrence is now fully attributable from logs:
+- no `capability-route-first-seen` / `ingress dropped` line for the phone's source means the packets never reached the Mac;
+- `peer handshake stalled challenge_sent=true` or `replies>0` means the return path dropped the replies (`routed_udp.rs` drops replies whose source differs from the server it sent to);
+- `challenge_sent=false` together with a `Netcode error` warning means a refusal.
+
+**Follow-ups:**
+- BRL-hjmq: the stuck "Match loading" screen after a connect timeout.
+- A new backlog ticket for the rare handoff timeout, with this grep guide.
+- A new backlog ticket for the pre-auth budget, which fails at a lobby round trip of 700 ms or more.
+
+Owner: if it recurs, run `RUST_LOG=info,wgpu=error,naga=warn,lightyear_netcode::error=debug,lightyear_netcode::server=debug BRAWLER_ROUTED_BIND=0.0.0.0:5000 just server` and keep the phone's logcat.
