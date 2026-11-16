@@ -3,9 +3,9 @@ id: BRL-2nsg
 
 title: Let a relaunched phone reconnect while its match seat is held
 
-status: done
-closed: 2026-11-16T21:16:59Z
-status_changed: 2026-11-16T21:16:59Z
+status: doing
+closed:
+status_changed: 2026-11-16T22:16:21Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-d3hb, BRL-hjmq, BRL-jx6p]
 
 parent: BRL-q5c4
 
-rank:
+rank: 11403264
 ---
 
 # Description

@@ -69,3 +69,15 @@ Evidence (/private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996
 - A new backlog ticket for the pre-auth budget, which fails at a lobby round trip of 700 ms or more.
 
 Owner: if it recurs, run `RUST_LOG=info,wgpu=error,naga=warn,lightyear_netcode::error=debug,lightyear_netcode::server=debug BRAWLER_ROUTED_BIND=0.0.0.0:5000 just server` and keep the phone's logcat.
+
+
+# Reopened 2026-11-16 22:15Z: reproduced with the new tracing (HEAD 721f68cc)
+A fresh app launch, then CONNECT to 192.168.31.47:5000. The phone (`socket bound local_addr=0.0.0.0:41768 route="lobby"`) timed out after 10 s. Server, in order:
+- `22:14:53.927 routed worker peer opened worker=<lobby> route=136528…015 peer=140579…221 payload_len=1078 connection_request=true`
+- `22:14:54.024 routed worker dropped packet for a closed route or peer … route=136528…015 … connection_request=true` (about 100 ms after open; later drops are folded)
+- `supervisor ingress dropped reason=source-limited source=192.168.31.63:41768`, with `source_limited=84` in that window
+- `22:14:55.945 peer handshake stalled … packets=1 connection_requests=1 challenge_sent=true`
+
+**Cause class:** the lobby worker accepted the first connection request and sent a challenge, then treated the route or peer as closed about 100 ms later. Every retry and the challenge response were then discarded by the worker, until the 8-datagram pre-auth budget was used and the supervisor rate-limited the source. Phone↔Mac RTT at the time was 60-80 ms.
+
+Evidence: scratchpad/hm/server-2nsg-repro.log and 2nsg-repro-logcat.txt.
