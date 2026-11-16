@@ -121,6 +121,37 @@ enum HandshakeReport {
     },
 }
 
+/// Why the worker stopped accepting packets for a routed peer, named on every closed-route
+/// drop line so a closed handshake is attributable from the log alone (BRL-2nsg).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClosedReason {
+    /// The supervisor sent `PeerClose` (route expiry, revocation, or lobby replacement).
+    SupervisorPeerClose,
+    /// Lightyear unlinked the child link (a Netcode disconnect or link failure).
+    LinkUnlinked,
+    /// The mapped child entity no longer has a `Link` (despawned outside the adapter).
+    LinkMissing,
+    /// The worker endpoint itself unlinked (stop or transport failure).
+    EndpointUnlinked,
+}
+
+impl ClosedReason {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::SupervisorPeerClose => "supervisor-peer-close",
+            Self::LinkUnlinked => "link-unlinked",
+            Self::LinkMissing => "link-missing",
+            Self::EndpointUnlinked => "endpoint-unlinked",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ClosedPeer {
+    reason: ClosedReason,
+    closed_at: MonotonicInstant,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ClosedDropLine {
     logged_at: MonotonicInstant,
@@ -171,7 +202,7 @@ pub struct RoutedWorker {
     pending_sends: BTreeMap<(RouteId, PeerId), VecDeque<SendPayload>>,
     suppress_peer_closes: BTreeSet<(RouteId, PeerId)>,
     closed_peers: VecDeque<(RouteId, PeerId)>,
-    closed_set: BTreeSet<(RouteId, PeerId)>,
+    closed_set: BTreeMap<(RouteId, PeerId), ClosedPeer>,
     /// Rate limiter for closed-route drop lines, bounded by `MAX_CLOSED_PEERS`.
     closed_drop_lines: BTreeMap<(RouteId, PeerId), ClosedDropLine>,
     send_cursor: usize,
@@ -209,7 +240,7 @@ impl RoutedWorker {
             pending_sends: BTreeMap::new(),
             suppress_peer_closes: BTreeSet::new(),
             closed_peers: VecDeque::new(),
-            closed_set: BTreeSet::new(),
+            closed_set: BTreeMap::new(),
             closed_drop_lines: BTreeMap::new(),
             send_cursor: 0,
             receive_burst: receive_burst.max(1),
@@ -264,8 +295,12 @@ impl RoutedWorker {
         Ok(())
     }
 
-    fn remember_closed(&mut self, key: (RouteId, PeerId)) {
-        if self.closed_set.insert(key) {
+    fn remember_closed(&mut self, key: (RouteId, PeerId), reason: ClosedReason) {
+        if let std::collections::btree_map::Entry::Vacant(entry) = self.closed_set.entry(key) {
+            entry.insert(ClosedPeer {
+                reason,
+                closed_at: MonotonicInstant::now(),
+            });
             self.closed_peers.push_back(key);
             if self.closed_peers.len() > MAX_CLOSED_PEERS
                 && let Some(evicted) = self.closed_peers.pop_front()
@@ -304,7 +339,19 @@ impl RoutedWorker {
         Some(0)
     }
 
-    fn remove_peer(&mut self, key: (RouteId, PeerId)) -> Option<Entity> {
+    /// The closed entry that blocks a packet for `key`: the key itself, or another closed key
+    /// sharing its route or its peer identity.
+    fn closed_entry(&self, key: (RouteId, PeerId)) -> Option<((RouteId, PeerId), ClosedPeer)> {
+        if let Some(closed) = self.closed_set.get(&key) {
+            return Some((key, *closed));
+        }
+        self.closed_set
+            .iter()
+            .find(|((route_id, peer_id), _)| *route_id == key.0 || *peer_id == key.1)
+            .map(|(closed_key, closed)| (*closed_key, *closed))
+    }
+
+    fn remove_peer(&mut self, key: (RouteId, PeerId), reason: ClosedReason) -> Option<Entity> {
         let entity = self.peers.remove(&key);
         // During endpoint teardown, the child link's transformed payloads are detached into the
         // adapter-owned FIFO and must survive the child `Unlinked` observer.  A normal peer close
@@ -314,7 +361,7 @@ impl RoutedWorker {
             self.pending_sends.remove(&key);
         }
         if entity.is_some() {
-            self.remember_closed(key);
+            self.remember_closed(key, reason);
         }
         entity
     }
@@ -336,7 +383,7 @@ impl RoutedWorker {
         let peers = self.peers.keys().copied().collect::<Vec<_>>();
         let entities = self.peers.values().copied().collect::<Vec<_>>();
         for key in peers {
-            self.remember_closed(key);
+            self.remember_closed(key, ClosedReason::EndpointUnlinked);
         }
         self.peers.clear();
         self.send_cursor = 0;
@@ -499,6 +546,8 @@ impl RoutedWorkerPlugin {
             }
 
             let receive_burst = worker.receive_burst;
+            let mut opened: BTreeMap<(RouteId, PeerId), (Link, RoutedPeerHandshake)> =
+                BTreeMap::new();
             let progress = match worker.channels.packet_read_ready(receive_burst) {
                 Ok(progress) => progress,
                 Err(error) => {
@@ -539,16 +588,13 @@ impl RoutedWorkerPlugin {
                 }
 
                 let key = (packet.route_id, packet.peer_id);
-                if worker.closed_set.contains(&key)
-                    || worker.closed_set.iter().any(|(closed_route, closed_peer)| {
-                        *closed_route == packet.route_id || *closed_peer == packet.peer_id
-                    })
-                {
+                if let Some((closed_key, closed)) = worker.closed_entry(key) {
                     // A stale frame from a closed generation is a bounded drop.  Reconnects use
                     // fresh route/peer identities, so this cannot resurrect a child link.
                     // Routine after a peer leaves (late keep-alives), but a connection request
                     // here means a client is talking to a route this worker already closed.
-                    if let Some(folded) = worker.note_closed_drop(key, MonotonicInstant::now()) {
+                    let now = MonotonicInstant::now();
+                    if let Some(folded) = worker.note_closed_drop(key, now) {
                         info!(
                             worker = %worker.worker_id,
                             route = packet.route_id.get(),
@@ -556,6 +602,15 @@ impl RoutedWorkerPlugin {
                             payload_len = packet.payload.len(),
                             connection_request =
                                 looks_like_netcode_connection_request(&packet.payload),
+                            closed_reason = closed.reason.as_str(),
+                            closed_ago_ms = now.saturating_duration_since(closed.closed_at).as_millis(),
+                            closed_match = if closed_key == key {
+                                "route-and-peer"
+                            } else if closed_key.0 == key.0 {
+                                "route"
+                            } else {
+                                "peer"
+                            },
                             folded,
                             "brawler routed worker dropped packet for a closed route or peer"
                         );
@@ -563,26 +618,43 @@ impl RoutedWorkerPlugin {
                     continue;
                 }
 
+                // A peer opened earlier in this same burst has no queryable child yet; its later
+                // packets join the payloads its child will be spawned with (BRL-2nsg).
+                if let Some((link, handshake)) = opened.get_mut(&key) {
+                    handshake.observe(&packet.payload);
+                    link.recv.push(recv_payload(packet.payload), Instant::now());
+                    continue;
+                }
+
                 if let Some(entity) = worker.peers.get(&key).copied() {
-                    match links.get_mut(entity) {
-                        Ok((mut link, handshake)) => {
-                            if let Some(mut handshake) = handshake {
-                                handshake.observe(&packet.payload);
-                            }
-                            link.recv.push(recv_payload(packet.payload), Instant::now());
+                    if let Ok((mut link, handshake)) = links.get_mut(entity) {
+                        if let Some(mut handshake) = handshake {
+                            handshake.observe(&packet.payload);
                         }
-                        Err(_) => {
-                            worker.remove_peer(key);
-                        }
+                        link.recv.push(recv_payload(packet.payload), Instant::now());
+                    } else {
+                        warn!(
+                            worker = %worker.worker_id,
+                            route = packet.route_id.get(),
+                            peer = packet.peer_id.get(),
+                            ?entity,
+                            "brawler routed worker closed a peer whose child link is gone"
+                        );
+                        worker.remove_peer(key, ClosedReason::LinkMissing);
                     }
                     continue;
                 }
 
                 // Both dimensions are identity-bound.  A route or peer being reused with a
                 // different counterpart is a protocol conflict, not a new connection.
-                if worker.peers.keys().any(|(route_id, peer_id)| {
-                    *route_id == packet.route_id || *peer_id == packet.peer_id
-                }) {
+                if worker
+                    .peers
+                    .keys()
+                    .chain(opened.keys())
+                    .any(|(route_id, peer_id)| {
+                        *route_id == packet.route_id || *peer_id == packet.peer_id
+                    })
+                {
                     worker.mark_failed();
                     commands.trigger(RoutedWorkerFailure {
                         worker: worker_entity,
@@ -605,6 +677,18 @@ impl RoutedWorkerPlugin {
                 );
                 let mut link = Link::default().with_mtu(LinkMtu::new(ROUTED_LINK_MTU));
                 link.recv.push(recv_payload(packet.payload), Instant::now());
+                opened.insert(key, (link, handshake));
+            }
+
+            // Spawn each child opened by this burst with every payload the burst carried for it.
+            // The explicit ApplyDeferred in the plugin makes these children and their payloads
+            // visible to Netcode in this same frame's connection receive phase.  A burst that
+            // failed the worker spawns nothing: the endpoint's Unlink fan-out is already queued
+            // and would miss a child spawned after it.
+            if worker.failed {
+                opened.clear();
+            }
+            for ((route_id, peer_id), (link, handshake)) in std::mem::take(&mut opened) {
                 let child = commands
                     .spawn((
                         LinkOf {
@@ -613,17 +697,14 @@ impl RoutedWorkerPlugin {
                         link,
                         RoutedPeer {
                             worker: worker_entity,
-                            route_id: packet.route_id,
-                            peer_id: packet.peer_id,
+                            route_id,
+                            peer_id,
                         },
                         handshake,
                         Linked,
                     ))
                     .id();
-                // Insert before the deferred spawn is applied.  The explicit ApplyDeferred in
-                // the plugin makes this child and its triggering payload visible to Netcode in
-                // this same frame's connection receive phase.
-                worker.peers.insert(key, child);
+                worker.peers.insert((route_id, peer_id), child);
             }
 
             if progress.eof {
@@ -714,11 +795,17 @@ impl RoutedWorkerPlugin {
             let mut overflowed = None;
             for key in keys.iter().copied() {
                 let Some(entity) = worker.peers.get(&key).copied() else {
-                    worker.remove_peer(key);
                     continue;
                 };
                 let Ok(mut link) = links.get_mut(entity) else {
-                    worker.remove_peer(key);
+                    warn!(
+                        worker = %worker.worker_id,
+                        route = key.0.get(),
+                        peer = key.1.get(),
+                        ?entity,
+                        "brawler routed worker closed a peer whose child link is gone"
+                    );
+                    worker.remove_peer(key, ClosedReason::LinkMissing);
                     continue;
                 };
                 let pending_len = worker.pending_sends.get(&key).map_or(0, VecDeque::len);
@@ -895,7 +982,7 @@ impl RoutedWorkerPlugin {
         };
         let key = (trigger.route_id, trigger.peer_id);
         worker.suppress_peer_close(key);
-        let Some(entity) = worker.remove_peer(key) else {
+        let Some(entity) = worker.remove_peer(key, ClosedReason::SupervisorPeerClose) else {
             return;
         };
         commands.trigger(Unlink {
@@ -921,7 +1008,7 @@ impl RoutedWorkerPlugin {
             return;
         };
         if let Ok(mut worker) = workers.get_mut(peer.worker) {
-            worker.remove_peer((peer.route_id, peer.peer_id));
+            worker.remove_peer((peer.route_id, peer.peer_id), ClosedReason::LinkUnlinked);
         }
         // ServerLinkPlugin owns the deferred child despawn. Keeping only mapping removal here
         // avoids enqueueing a second despawn command against the same entity generation.
@@ -1237,6 +1324,40 @@ mod tests {
         assert_eq!((handshake.packets, handshake.connection_requests), (3, 2));
     }
 
+    /// BRL-2nsg: a phone on Wi-Fi can deliver a fresh route's first two connection requests
+    /// together, so they reach the worker in one packet IPC burst. The second one must join the
+    /// link spawned (deferred) for the first, not close the route because that link is not yet
+    /// queryable; a closed route silently dropped every later retry and the challenge response.
+    #[test]
+    fn a_new_peers_first_burst_with_several_packets_keeps_the_peer_open() {
+        let (mut app, mut supervisor, _) = app_with_worker();
+        let request = vec![0_u8; 1_078];
+        send_packet(&mut supervisor, 10, 20, &request);
+        send_packet(&mut supervisor, 10, 20, &request);
+        app.update();
+        send_packet(&mut supervisor, 10, 20, &request);
+        send_packet(&mut supervisor, 10, 20, b"challenge-response");
+        app.update();
+
+        let peers = routed_peers(&mut app);
+        assert_eq!(peers.len(), 1);
+        let worker = app
+            .world_mut()
+            .query::<&RoutedWorker>()
+            .single(app.world())
+            .unwrap();
+        let key = (RouteId::new(10).unwrap(), PeerId::new(20).unwrap());
+        assert_eq!(worker.peers.get(&key), Some(&peers[0].0));
+        assert!(
+            worker.closed_set.is_empty(),
+            "the open peer was marked closed"
+        );
+        let handshake = *app.world().get::<RoutedPeerHandshake>(peers[0].0).unwrap();
+        assert_eq!((handshake.packets, handshake.connection_requests), (4, 3));
+        let link = app.world().get::<Link>(peers[0].0).unwrap();
+        assert_eq!(link.recv.len(), 4, "no payload of the burst was lost");
+    }
+
     #[test]
     fn a_handshake_is_reported_stalled_once_and_says_whether_a_challenge_was_sent() {
         let mut handshake = RoutedPeerHandshake::opened(&[0_u8; 1_078], MonotonicInstant::now());
@@ -1541,6 +1662,16 @@ mod tests {
                 .unwrap()
                 .is_failed()
         );
+
+        let worker = app.world().get::<RoutedWorker>(endpoint).unwrap();
+        let (closed_key, closed) = worker
+            .closed_entry((RouteId::new(10).unwrap(), PeerId::new(21).unwrap()))
+            .unwrap();
+        assert_eq!(
+            closed_key,
+            (RouteId::new(10).unwrap(), PeerId::new(20).unwrap())
+        );
+        assert_eq!(closed.reason, ClosedReason::SupervisorPeerClose);
 
         send_packet(&mut supervisor, 10, 21, b"conflict");
         app.update();

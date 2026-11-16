@@ -379,7 +379,11 @@ built-in Practice; local draft persistence remains client-owned.
   back to the source). The worker logs `brawler routed worker peer opened` on a route's first
   packet, `peer handshake completed`, or `peer handshake stalled … challenge_sent=<bool>` 2 s
   after a first packet that never reached Netcode `Connected`, and rate-limited
-  `dropped packet for a closed route or peer`. Netcode refusals are already `Netcode error`
+  `dropped packet for a closed route or peer`, which names `closed_reason`
+  (`supervisor-peer-close | link-unlinked | link-missing | endpoint-unlinked`), `closed_ago_ms`
+  and `closed_match` (whether the route, the peer or both matched the closed entry). Every packet
+  of a new route's first IPC burst joins the one child link spawned for it: a Wi-Fi client can
+  deliver its first two connection requests together (BRL-2nsg). Netcode refusals are already `Netcode error`
   warnings; the only silent case, `Ignored` (a non-request packet with no Netcode client), is
   debug level: run the server with
   `RUST_LOG=info,wgpu=error,naga=warn,lightyear_netcode::error=debug,lightyear_netcode::server=debug`
