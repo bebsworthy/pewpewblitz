@@ -228,11 +228,19 @@ errors (respawn, teleport) snap. `AuthoritativePose.tick` maps local ticks to se
 deadlines. The predicted pose replaces the owner's interpolated `Position`/`Rotation` after
 Lightyear interpolation, so renderer, camera, overhead UI, and aim origin share it. Between fixed
 ticks the presented pose extrapolates the newest predicted step's realized velocity across
-`Time<Fixed>::overstep()` (clamped to one tick, zero while following authority), resolves that
+`Time<Fixed>::overstep()` (clamped to one tick), resolves that
 partial step against the same replicated map blockers as prediction so it stops at the wall
 contact the next tick realizes, and decays the correction offset for the same time, so high-refresh frames advance without tick stepping or an
 added frame of input latency; at a tick boundary it equals the committed prediction exactly
-(BRL-0169). Lightyear's `FrameInterpolationPlugin` is not used because it renders one tick
+(BRL-0169). While a dash suspends local movement, the presented pose instead extrapolates the
+displacement per tick that the two newest confirmed samples folded into the prediction (which
+also withdraws walking predicted before the client learned of the dash), from the newest fold by
+the fixed ticks since it plus the overstep, at most one tick ahead and never past the replicated
+`AbilityPhase::Dashing { ends_at_tick }` (the dash path is linear and its last step runs at
+`ends_at_tick - 1`), so a dash advances every frame without overshooting its end. A late sample
+holds the pose at the next confirmed pose rather than running further ahead. Defeat and inactive
+phases, which have no deadline, are not extrapolated. This uses only replicated state;
+`DashRuntime` stays server-only (BRL-qfby). Lightyear's `FrameInterpolationPlugin` is not used because it renders one tick
 behind. The prediction
 is never sent, never mutates server state, and does not change the protocol; remote fighters,
 projectiles, hits, damage, and objectives remain interpolated authoritative state.

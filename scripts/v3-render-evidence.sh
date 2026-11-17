@@ -5,6 +5,8 @@ project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 report_path=${1:-target/v3-render-evidence.txt}
 peer_report_path=${report_path}.peer
 capture_dir=${report_path}.captures
+# Supervisor profile/session data for this run stays beside the report, never in data/server/.
+server_data_dir=${report_path}.server-data
 bind_addr=${BRAWLER_RENDER_BIND:-127.0.0.1:5024}
 game_mode=${BRAWLER_RENDER_MODE:-wipeout}
 players_per_team=${BRAWLER_RENDER_PLAYERS_PER_TEAM:-}
@@ -62,8 +64,14 @@ case "$combat_smoke" in
         measured_combat_flags='--aim-axis 1,0 --fire --ultimate'
         peer_combat_flags='--aim-axis -1,0 --fire --ultimate'
         ;;
+    dummy)
+        # Chase and shoot the nearest opponent (a Practice bot), using the ultimate (Dash for
+        # the default build) whenever it is charged: exercises followed-authority motion.
+        measured_combat_flags='--aim-dummy --fire --ultimate'
+        peer_combat_flags='--aim-dummy --fire --ultimate'
+        ;;
     *)
-        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_COMBAT must be 0 or 1' >&2
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_COMBAT must be 0, 1, or dummy' >&2
         exit 2
         ;;
 esac
@@ -120,7 +128,7 @@ for duration in "$warmup_seconds" "$measure_seconds"; do
 done
 
 cd "$project_dir"
-if [[ -e "$report_path" || -e "$peer_report_path" || -e "$client_one_log" || -e "$client_two_log" || -e "$capture_dir" ]]; then
+if [[ -e "$report_path" || -e "$peer_report_path" || -e "$client_one_log" || -e "$client_two_log" || -e "$capture_dir" || -e "$server_data_dir" ]]; then
     printf '%s\n' 'brawler render evidence: refusing to overwrite an existing report, client log, or capture directory' >&2
     exit 2
 fi
@@ -178,6 +186,7 @@ target/debug/brawler-supervisor \
     --content-fingerprint "$content_fingerprint" \
     --worker-executable "$project_dir/target/debug/brawler-server" \
     --game-types "$project_dir/config/server/game-types.ron" \
+    --data-directory "$server_data_dir" \
     --mode "$game_mode" \
     --match-rules production \
     --bind "$bind_addr" &

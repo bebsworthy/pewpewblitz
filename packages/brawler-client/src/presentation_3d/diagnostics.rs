@@ -84,6 +84,13 @@ const REPORT_FIELDS: &[&str] = &[
     "owner_pullback_max",
     "owner_correction_frames",
     "owner_correction_max",
+    "owner_followed_frames",
+    "owner_followed_stalled_frames",
+    "owner_followed_ratio_p05",
+    "owner_followed_ratio_p50",
+    "owner_followed_ratio_p95",
+    "owner_followed_pullback_frames",
+    "owner_followed_pullback_max",
     "result",
     "first_failure",
 ];
@@ -159,6 +166,11 @@ struct RenderMeasurementState {
 /// presentation keeps the ratio near 1. Independently of the predicted step, a frame whose
 /// presented displacement reverses the previous frame's direction by more than
 /// [`OWNER_PULLBACK_DISTANCE`] counts as a pull-back (wall-contact overshoot snapping back).
+///
+/// While the owner follows authority (dash, defeat, inactive), the expected speed is the
+/// followed velocity the two newest confirmed samples folded in instead, and the same ratio
+/// is kept separately as followed frames (BRL-qfby), so a dash stepping once per fixed tick
+/// shows as stalled followed frames.
 #[derive(Default)]
 struct OwnerMotionSamples {
     previous: Option<(Entity, Vec2)>,
@@ -173,7 +185,19 @@ struct OwnerMotionSamples {
     /// shows here as a standing offset into the wall that bounces back once input stops.
     corrections: usize,
     max_correction: f32,
+    followed_stalled: usize,
+    followed_ratios: Vec<f32>,
+    /// Whether the previous frame followed moving authority, so the frame a dash ends on
+    /// still attributes an end-of-dash overshoot snapping back.
+    previous_followed_moving: bool,
+    /// Pull-backs on frames following moving authority or the frame right after.
+    followed_pullbacks: usize,
+    max_followed_pullback: f32,
 }
+
+/// One rendered frame of the presented owner: entity, presented planar position, the expected
+/// planar velocity, and whether that velocity is followed authority rather than prediction.
+type OwnerMotionFrame = (Entity, Vec2, Vec2, bool);
 
 /// Presented-to-predicted speed ratio below which a moving frame counts as stalled.
 const OWNER_STALLED_RATIO: f32 = 0.05;
@@ -183,10 +207,11 @@ const OWNER_MOVING_SPEED: f32 = 1.0;
 const OWNER_PULLBACK_DISTANCE: f32 = 0.05;
 
 impl OwnerMotionSamples {
-    fn sample(&mut self, owner: Option<(Entity, Vec2, Vec2)>, delta_seconds: f32) {
-        let Some((entity, presented, step_velocity)) = owner else {
+    fn sample(&mut self, owner: Option<OwnerMotionFrame>, delta_seconds: f32) {
+        let Some((entity, presented, expected_velocity, followed)) = owner else {
             self.previous = None;
             self.previous_direction = None;
+            self.previous_followed_moving = false;
             return;
         };
         let previous = self.previous.replace((entity, presented));
@@ -195,29 +220,43 @@ impl OwnerMotionSamples {
         };
         if previous_entity != entity {
             self.previous_direction = None;
+            self.previous_followed_moving = false;
             return;
         }
         let displacement = presented - previous_position;
+        let expected = expected_velocity.length();
+        let moving = delta_seconds > 0.0 && expected >= OWNER_MOVING_SPEED;
+        let followed_moving = followed && moving;
+        let near_followed_motion = followed_moving || self.previous_followed_moving;
+        self.previous_followed_moving = followed_moving;
         if let Some(direction) = self.previous_direction {
             let backward = -displacement.dot(direction);
             if backward > OWNER_PULLBACK_DISTANCE {
                 self.pullbacks += 1;
                 self.max_pullback = self.max_pullback.max(backward);
+                if near_followed_motion {
+                    self.followed_pullbacks += 1;
+                    self.max_followed_pullback = self.max_followed_pullback.max(backward);
+                }
             }
         }
         if displacement.length() > OWNER_PULLBACK_DISTANCE {
             self.previous_direction = Some(displacement.normalize());
         }
-        let expected = step_velocity.length();
-        if delta_seconds <= 0.0 || expected < OWNER_MOVING_SPEED {
+        if !moving {
             return;
         }
         let ratio = presented.distance(previous_position) / delta_seconds / expected;
-        if self.ratios.len() < SAMPLE_CAPACITY {
+        let (ratios, stalled) = if followed {
+            (&mut self.followed_ratios, &mut self.followed_stalled)
+        } else {
+            (&mut self.ratios, &mut self.stalled)
+        };
+        if ratios.len() < SAMPLE_CAPACITY {
             if ratio < OWNER_STALLED_RATIO {
-                self.stalled += 1;
+                *stalled += 1;
             }
-            self.ratios.push(ratio);
+            ratios.push(ratio);
         }
     }
 
@@ -230,14 +269,46 @@ impl OwnerMotionSamples {
     }
 
     fn percentiles(&self) -> [f64; 3] {
-        let mut sorted = self
-            .ratios
-            .iter()
-            .map(|ratio| f64::from(*ratio))
-            .collect::<Vec<_>>();
-        sorted.sort_by(f64::total_cmp);
-        [5, 50, 95].map(|percentage| percentile(&sorted, percentage))
+        ratio_percentiles(&self.ratios)
     }
+
+    fn followed_percentiles(&self) -> [f64; 3] {
+        ratio_percentiles(&self.followed_ratios)
+    }
+
+    /// The report's `owner_*` lines, each newline-terminated.
+    fn report_fields(&self) -> String {
+        let ratios = self.percentiles();
+        let followed = self.followed_percentiles();
+        format!(
+            "owner_moving_frames={}\nowner_stalled_frames={}\nowner_speed_ratio_p05={:.3}\nowner_speed_ratio_p50={:.3}\nowner_speed_ratio_p95={:.3}\nowner_pullback_frames={}\nowner_pullback_max={:.3}\nowner_correction_frames={}\nowner_correction_max={:.3}\nowner_followed_frames={}\nowner_followed_stalled_frames={}\nowner_followed_ratio_p05={:.3}\nowner_followed_ratio_p50={:.3}\nowner_followed_ratio_p95={:.3}\nowner_followed_pullback_frames={}\nowner_followed_pullback_max={:.3}\n",
+            self.ratios.len(),
+            self.stalled,
+            ratios[0],
+            ratios[1],
+            ratios[2],
+            self.pullbacks,
+            self.max_pullback,
+            self.corrections,
+            self.max_correction,
+            self.followed_ratios.len(),
+            self.followed_stalled,
+            followed[0],
+            followed[1],
+            followed[2],
+            self.followed_pullbacks,
+            self.max_followed_pullback,
+        )
+    }
+}
+
+fn ratio_percentiles(ratios: &[f32]) -> [f64; 3] {
+    let mut sorted = ratios
+        .iter()
+        .map(|ratio| f64::from(*ratio))
+        .collect::<Vec<_>>();
+    sorted.sort_by(f64::total_cmp);
+    [5, 50, 95].map(|percentage| percentile(&sorted, percentage))
 }
 
 type DashboardOwnedFilter = Or<(With<flow::DashboardRoot>, With<dashboard::DashboardOwned>)>;
@@ -409,6 +480,7 @@ fn sample_owner_motion(
     mut state: ResMut<RenderMeasurementState>,
     real: Res<Time<Real>>,
     time: Res<Time>,
+    fixed: Res<Time<Fixed>>,
     owners: Query<
         (Entity, &Position, &prediction::OwnerPrediction),
         (With<Fighter>, With<Controlled>),
@@ -426,8 +498,19 @@ fn sample_owner_motion(
             .owner_motion
             .sample_correction(prediction.correction_offset);
     }
-    let owner = owner
-        .map(|(entity, position, prediction)| (entity, position.0, prediction.step_velocity()));
+    let fixed_step = fixed.timestep().as_secs_f32();
+    let owner = owner.map(|(entity, position, prediction)| {
+        if prediction.is_following_authority() {
+            (
+                entity,
+                position.0,
+                prediction.followed_velocity(fixed_step),
+                true,
+            )
+        } else {
+            (entity, position.0, prediction.step_velocity(), false)
+        }
+    });
     state.owner_motion.sample(owner, time.delta_secs());
 }
 
@@ -513,9 +596,8 @@ fn compose_report(
         measured_map.map_or_else(|| "unknown".to_string(), |value| format!("{:?}", value.2));
     let theme_id = measured_map.map_or(0, |value| value.3.0);
     let context = state.context.unwrap_or_default().name();
-    let owner_ratios = state.owner_motion.percentiles();
     format!(
-        "schema=6\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\nowner_moving_frames={}\nowner_stalled_frames={}\nowner_speed_ratio_p05={:.3}\nowner_speed_ratio_p50={:.3}\nowner_speed_ratio_p95={:.3}\nowner_pullback_frames={}\nowner_pullback_max={:.3}\nowner_correction_frames={}\nowner_correction_max={:.3}\nresult={}\nfirst_failure={}\n",
+        "schema=7\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\n{}result={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -573,15 +655,7 @@ fn compose_report(
         recipe_id,
         mode_id,
         theme_id,
-        state.owner_motion.ratios.len(),
-        state.owner_motion.stalled,
-        owner_ratios[0],
-        owner_ratios[1],
-        owner_ratios[2],
-        state.owner_motion.pullbacks,
-        state.owner_motion.max_pullback,
-        state.owner_motion.corrections,
-        state.owner_motion.max_correction,
+        state.owner_motion.report_fields(),
         if failed.is_none() { "pass" } else { "fail" },
         failed.unwrap_or("none"),
     )
@@ -650,7 +724,7 @@ mod tests {
             if frame_index % 2 == 0 {
                 x += 2.0;
             }
-            stepped.sample(Some((owner, Vec2::new(x, 0.0), velocity)), frame);
+            stepped.sample(Some((owner, Vec2::new(x, 0.0), velocity, false)), frame);
         }
         assert_eq!(stepped.ratios.len(), 8);
         assert_eq!(stepped.stalled, 4);
@@ -660,17 +734,61 @@ mod tests {
         let mut smooth = OwnerMotionSamples::default();
         for frame_index in 0..9_u8 {
             let x = f32::from(frame_index) * velocity.x * frame;
-            smooth.sample(Some((owner, Vec2::new(x, 0.0), velocity)), frame);
+            smooth.sample(Some((owner, Vec2::new(x, 0.0), velocity, false)), frame);
         }
         assert_eq!(smooth.stalled, 0);
         assert_eq!(smooth.pullbacks, 0);
         let [p05, p50, p95] = smooth.percentiles();
         assert!((p05 - 1.0).abs() < 1e-3 && (p50 - 1.0).abs() < 1e-3 && (p95 - 1.0).abs() < 1e-3);
         // Standing still or losing the owner records nothing.
-        smooth.sample(Some((owner, Vec2::ZERO, Vec2::ZERO)), frame);
+        smooth.sample(Some((owner, Vec2::ZERO, Vec2::ZERO, false)), frame);
         smooth.sample(None, frame);
         assert_eq!(smooth.ratios.len(), 8);
         assert_eq!(stepped.pullbacks, 0, "tick stepping never moves backward");
+    }
+
+    #[test]
+    fn owner_motion_counts_followed_dash_frames_separately() {
+        let owner = Entity::from_raw_u32(7).expect("valid entity index");
+        // A dash followed from authority: 20 units per 60 Hz tick, presented at 120 Hz.
+        let velocity = Vec2::new(1_200.0, 0.0);
+        let frame = 1.0 / 120.0;
+        let mut stepped = OwnerMotionSamples::default();
+        let mut x = 0.0;
+        for frame_index in 0..9 {
+            if frame_index % 2 == 0 {
+                x += 20.0;
+            }
+            stepped.sample(Some((owner, Vec2::new(x, 0.0), velocity, true)), frame);
+        }
+        assert_eq!(stepped.followed_ratios.len(), 8);
+        assert_eq!(stepped.followed_stalled, 4);
+        assert!(stepped.ratios.is_empty() && stepped.stalled == 0);
+        let [p05, _, p95] = stepped.followed_percentiles();
+        assert!(p05 < 0.01 && (p95 - 2.0).abs() < 1e-3, "{p05} {p95}");
+        let mut smooth = OwnerMotionSamples::default();
+        for frame_index in 0..9_u8 {
+            let x = f32::from(frame_index) * velocity.x * frame;
+            smooth.sample(Some((owner, Vec2::new(x, 0.0), velocity, true)), frame);
+        }
+        assert_eq!(smooth.followed_stalled, 0);
+        let [p05, p50, p95] = smooth.followed_percentiles();
+        assert!((p05 - 1.0).abs() < 1e-3 && (p50 - 1.0).abs() < 1e-3 && (p95 - 1.0).abs() < 1e-3);
+        assert_eq!(smooth.followed_pullbacks, 0);
+        // An end-of-dash overshoot snapping back on the first frame after following counts as
+        // a followed pull-back; following a stationary authority (defeat, inactive) records no
+        // followed frames.
+        smooth.sample(
+            Some((owner, Vec2::new(70.0, 0.0), Vec2::ZERO, false)),
+            frame,
+        );
+        smooth.sample(Some((owner, Vec2::new(70.0, 0.0), Vec2::ZERO, true)), frame);
+        assert_eq!(smooth.followed_ratios.len(), 8);
+        assert_eq!((smooth.pullbacks, smooth.followed_pullbacks), (1, 1));
+        assert!((smooth.max_followed_pullback - 10.0).abs() < 1e-3);
+        // A later reversal away from followed motion (a respawn) is not attributed to it.
+        smooth.sample(Some((owner, Vec2::new(80.0, 0.0), Vec2::ZERO, true)), frame);
+        assert_eq!((smooth.pullbacks, smooth.followed_pullbacks), (2, 1));
     }
 
     #[test]
@@ -681,7 +799,7 @@ mod tests {
         let mut samples = OwnerMotionSamples::default();
         // Walking forward, overshooting by 0.5, then snapping back to the contact and holding.
         for x in [0.0, 1.0, 2.0, 2.5, 2.0, 2.0, 2.0] {
-            samples.sample(Some((owner, Vec2::new(x, 0.0), velocity)), frame);
+            samples.sample(Some((owner, Vec2::new(x, 0.0), velocity, false)), frame);
         }
         assert_eq!(samples.pullbacks, 1);
         assert!((samples.max_pullback - 0.5).abs() < 1e-5);

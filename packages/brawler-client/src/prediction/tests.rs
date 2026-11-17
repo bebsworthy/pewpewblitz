@@ -342,7 +342,7 @@ fn suspended_and_frozen_owners_do_not_integrate_input() {
         .spawn((
             base.clone(),
             AbilityState {
-                phase: brawler::builds::AbilityPhase::Dashing { ends_at_tick: 500 },
+                phase: AbilityPhase::Dashing { ends_at_tick: 500 },
                 ..Default::default()
             },
         ))
@@ -809,4 +809,150 @@ fn sliding_along_a_wall_stays_smooth() {
             );
         }
     }
+}
+
+/// Fold one followed-authority sample confirmed at `tick` (server simulation tick `1000 + tick -
+/// 100`) and record the suspended step for the input tick after it, as the fixed loop does.
+fn follow_tick(prediction: &mut OwnerPrediction, tick: u32, position: Vec2, ends_at: Option<u64>) {
+    let tuning = OwnerPredictionTuning::default();
+    prediction.following_authority = true;
+    prediction.observe_server_clock(Tick(tick), 1_000 + u64::from(tick - 100));
+    prediction.reconcile_replaying(sample(tick, position), tuning, Tick(tick + 1), |_, from| {
+        ReplayedStep {
+            position: from,
+            aim: None,
+            suspended: true,
+        }
+    });
+    stale_follow_tick(prediction, tick + 1, ends_at);
+}
+
+/// Record a suspended step for input tick `tick` without a new authoritative sample.
+fn stale_follow_tick(prediction: &mut OwnerPrediction, tick: u32, ends_at: Option<u64>) {
+    prediction.set_followed_motion_end(ends_at);
+    let position = prediction.position;
+    prediction.record_step(
+        Tick(tick),
+        position,
+        None,
+        OwnerPredictionTuning::default(),
+        DT,
+    );
+}
+
+fn presented_x_at(prediction: &OwnerPrediction, overstep: f32) -> f32 {
+    prediction
+        .presented_position_at(
+            overstep,
+            DT,
+            OwnerPredictionTuning::default(),
+            core::convert::identity,
+        )
+        .x
+}
+
+#[test]
+fn followed_dash_presents_authoritative_motion_between_ticks_without_overshoot() {
+    // An 18-tick dash at 20 units per tick ends at simulation tick 1006: the final step lands on
+    // the endpoint at simulation tick 1005.
+    let ends_at = Some(1_006);
+    let mut prediction = OwnerPrediction::from_pose(Vec2::ZERO, 0.0);
+    follow_tick(&mut prediction, 100, Vec2::ZERO, ends_at);
+    assert!(
+        (presented_x_at(&prediction, DT / 2.0)).abs() < 1e-4,
+        "one sample measures no velocity yet"
+    );
+    follow_tick(&mut prediction, 101, Vec2::new(20.0, 0.0), ends_at);
+    assert!((prediction.followed_velocity(DT).x - 20.0 / DT).abs() < 1e-2);
+    assert!((presented_x_at(&prediction, 0.0) - 20.0).abs() < 1e-4);
+    assert!((presented_x_at(&prediction, DT / 2.0) - 30.0).abs() < 1e-4);
+    assert!(
+        (presented_x_at(&prediction, DT) - 40.0).abs() < 1e-4,
+        "a full overstep meets the next confirmed pose"
+    );
+    // A late sample holds the presented pose at the next confirmed pose, so a next sample
+    // arriving alone continues from there instead of pulling back.
+    stale_follow_tick(&mut prediction, 103, ends_at);
+    assert!((presented_x_at(&prediction, 0.0) - 40.0).abs() < 1e-4);
+    assert!((presented_x_at(&prediction, DT / 2.0) - 40.0).abs() < 1e-4);
+    follow_tick(&mut prediction, 102, Vec2::new(40.0, 0.0), ends_at);
+    assert!((presented_x_at(&prediction, 0.0) - 40.0).abs() < 1e-4);
+    assert!((presented_x_at(&prediction, DT / 2.0) - 50.0).abs() < 1e-4);
+    stale_follow_tick(&mut prediction, 105, ends_at);
+    // Delayed samples arrive together; only the newest is folded and the pose catches up.
+    follow_tick(&mut prediction, 104, Vec2::new(80.0, 0.0), ends_at);
+    assert!((presented_x_at(&prediction, DT / 2.0) - 90.0).abs() < 1e-4);
+    // Simulation tick 1004 is followed by the final step: travel stops at the endpoint.
+    assert!((presented_x_at(&prediction, DT) - 100.0).abs() < 1e-4);
+    stale_follow_tick(&mut prediction, 106, ends_at);
+    assert!(
+        (presented_x_at(&prediction, DT) - 100.0).abs() < 1e-4,
+        "a late final sample never presents past the dash end"
+    );
+    follow_tick(&mut prediction, 105, Vec2::new(100.0, 0.0), ends_at);
+    assert!(
+        (presented_x_at(&prediction, DT) - 100.0).abs() < 1e-4,
+        "the final dash pose is presented without extrapolation"
+    );
+}
+
+#[test]
+fn followed_motion_without_a_dash_end_or_after_a_snap_is_not_extrapolated() {
+    // Defeat or an inactive phase follows authority without a dash deadline.
+    let mut defeated = OwnerPrediction::from_pose(Vec2::ZERO, 0.0);
+    follow_tick(&mut defeated, 100, Vec2::ZERO, None);
+    follow_tick(&mut defeated, 101, Vec2::new(5.0, 0.0), None);
+    assert!((presented_x_at(&defeated, DT / 2.0) - 5.0).abs() < 1e-4);
+    // A respawn teleport snaps; its displacement is not presented as followed velocity.
+    let mut respawned = OwnerPrediction::from_pose(Vec2::ZERO, 0.0);
+    follow_tick(&mut respawned, 100, Vec2::ZERO, Some(2_000));
+    follow_tick(&mut respawned, 101, Vec2::new(900.0, 0.0), Some(2_000));
+    assert_eq!(respawned.followed_velocity(DT), Vec2::ZERO);
+    assert!((presented_x_at(&respawned, DT / 2.0) - 900.0).abs() < 1e-4);
+    // Resuming predicted movement drops the followed velocity.
+    let mut resumed = OwnerPrediction::from_pose(Vec2::ZERO, 0.0);
+    follow_tick(&mut resumed, 100, Vec2::ZERO, Some(2_000));
+    follow_tick(&mut resumed, 101, Vec2::new(20.0, 0.0), Some(2_000));
+    resumed.following_authority = false;
+    assert_eq!(resumed.followed_velocity(DT), Vec2::ZERO);
+}
+
+#[test]
+fn followed_velocity_includes_withdrawn_walking_steps_so_extrapolation_never_pulls_back() {
+    // Before the client learned of the dash it predicted two walking steps of 5 units past the
+    // newest sample; each dash sample withdraws one, so the presented pose advances 15 per tick.
+    let ends_at = Some(1_020);
+    let tuning = OwnerPredictionTuning::default();
+    let mut prediction = OwnerPrediction::from_pose(Vec2::ZERO, 0.0);
+    prediction.observe_server_clock(Tick(100), 1_000);
+    prediction.reconcile(sample(100, Vec2::ZERO), tuning);
+    prediction.record_step(Tick(101), Vec2::new(5.0, 0.0), None, tuning, DT);
+    prediction.record_step(Tick(102), Vec2::new(10.0, 0.0), None, tuning, DT);
+    prediction.following_authority = true;
+    prediction.set_followed_motion_end(ends_at);
+    prediction.record_step(Tick(103), Vec2::new(10.0, 0.0), None, tuning, DT);
+    let mut previous_presented = presented_x_at(&prediction, DT);
+    for (tick, dash_x) in [(101_u32, 20.0_f32), (102, 40.0), (103, 60.0)] {
+        prediction.reconcile_replaying(
+            sample(tick, Vec2::new(dash_x, 0.0)),
+            tuning,
+            Tick(tick + 3),
+            |_, from| ReplayedStep {
+                position: from,
+                aim: None,
+                suspended: true,
+            },
+        );
+        prediction.record_step(Tick(tick + 3), prediction.position, None, tuning, DT);
+        let start = presented_x_at(&prediction, 0.0);
+        assert!(
+            start + 1e-4 >= previous_presented,
+            "tick {tick}: {start} < {previous_presented}"
+        );
+        previous_presented = presented_x_at(&prediction, DT);
+    }
+    assert!(
+        (prediction.followed_velocity(DT).x - 20.0 / DT).abs() < 1e-2,
+        "walking withdrawn"
+    );
 }

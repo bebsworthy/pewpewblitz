@@ -17,7 +17,9 @@ use avian2d::prelude::{Position, Rotation};
 use bevy::ecs::query::QueryData;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use brawler::builds::{AbilityState, PassiveKind, PassiveRuntimeState, ResolvedMatchLoadout};
+use brawler::builds::{
+    AbilityPhase, AbilityState, PassiveKind, PassiveRuntimeState, ResolvedMatchLoadout,
+};
 use brawler::combat::{
     ActiveEffects, AuthoritativePose, Defeated, ExternalMotion, KnockbackFeedback,
 };
@@ -68,6 +70,26 @@ struct PredictedStep {
     position: Vec2,
     /// Whether this step's input committed a new facing.
     aimed: bool,
+}
+
+/// Lightyear ticks between two confirmed samples beyond which their displacement is no longer
+/// read as one followed motion (a stall or a long packet gap).
+const MAX_FOLLOWED_SAMPLE_GAP: i32 = 4;
+
+/// Most fixed ticks of followed motion presented ahead of the newest confirmed sample: exactly
+/// the tick until the next sample. A late sample holds the presented pose at the next
+/// confirmed pose instead of running further ahead, because the next sample may then arrive
+/// alone (the stream shifted by a tick) and a longer extrapolation would pull back.
+const MAX_FOLLOWED_EXTRAPOLATION_TICKS: u16 = 1;
+
+/// The newest confirmed authoritative sample folded into the prediction.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ConfirmedSample {
+    tick: Tick,
+    /// Estimated server simulation tick of the sample, for the dash deadline.
+    simulation_tick: Option<u64>,
+    /// The local input tick predicted right after the sample was folded.
+    folded_before: Tick,
 }
 
 /// One authoritative pose paired with the Lightyear server tick at which it was confirmed.
@@ -121,6 +143,15 @@ pub struct OwnerPrediction {
     /// The newest (Lightyear tick, server simulation tick) pair from `AuthoritativePose`, used
     /// to estimate the server simulation tick that status/tile/knockback deadlines refer to.
     server_clock: Option<(Tick, u64)>,
+    /// The newest confirmed sample folded into the prediction.
+    confirmed: Option<ConfirmedSample>,
+    /// Planar displacement per tick the two newest confirmed samples folded into the
+    /// prediction; zero after a snap or a gap above [`MAX_FOLLOWED_SAMPLE_GAP`].
+    followed_step: Vec2,
+    /// Server simulation tick at which the followed motion ends (the replicated dash deadline);
+    /// `None` while following authority without one (defeat, inactive), which never
+    /// extrapolates.
+    followed_ends_at: Option<u64>,
 }
 
 impl OwnerPrediction {
@@ -135,6 +166,9 @@ impl OwnerPrediction {
             following_authority: false,
             last_sample_tick: None,
             server_clock: None,
+            confirmed: None,
+            followed_step: Vec2::ZERO,
+            followed_ends_at: None,
         }
     }
 
@@ -153,6 +187,12 @@ impl OwnerPrediction {
     /// [`Self::presented_position`] exactly. Resolving the extrapolation stops the presented
     /// pose at the wall contact the next tick will realize instead of overshooting into the
     /// wall and snapping back.
+    ///
+    /// While following a dash from authority, the extrapolated motion is instead the
+    /// displacement per tick the two newest confirmed samples folded in, advanced from the
+    /// newest fold by the ticks since it plus the overstep fraction, at most
+    /// [`MAX_FOLLOWED_EXTRAPOLATION_TICKS`] and never past the replicated dash deadline (the
+    /// dash is a linear path, and its final step lands on the endpoint).
     #[must_use]
     pub fn presented_position_at(
         &self,
@@ -162,6 +202,18 @@ impl OwnerPrediction {
         resolve_body: impl FnOnce(Vec2) -> Vec2,
     ) -> Vec2 {
         let overstep = overstep.clamp(0.0, fixed_step.max(0.0));
+        if self.following_authority {
+            let fraction = if fixed_step > 0.0 {
+                overstep / fixed_step
+            } else {
+                0.0
+            };
+            let presented = self
+                .followed_travel(fraction)
+                .map_or(self.position, |travel| resolve_body(self.position + travel));
+            let half_life = tuning.correction_half_life_seconds.max(f32::EPSILON);
+            return presented + self.correction_offset * 0.5_f32.powf(overstep / half_life);
+        }
         if overstep <= 0.0 {
             return self.presented_position();
         }
@@ -174,11 +226,53 @@ impl OwnerPrediction {
         extrapolated + self.correction_offset * 0.5_f32.powf(overstep / half_life)
     }
 
+    /// Followed authoritative travel `fraction` of a tick after the newest predicted tick, or
+    /// `None` when there is no dash deadline, no measured motion, or the dash has ended.
+    fn followed_travel(&self, fraction: f32) -> Option<Vec2> {
+        let confirmed = self.confirmed?;
+        let ends_at = self.followed_ends_at?;
+        if self.followed_step == Vec2::ZERO {
+            return None;
+        }
+        // The final dash step runs at simulation tick `ends_at - 1`.
+        let remaining = ends_at
+            .saturating_sub(1)
+            .saturating_sub(confirmed.simulation_tick?)
+            .min(u64::from(MAX_FOLLOWED_EXTRAPOLATION_TICKS));
+        let remaining = u16::try_from(remaining).ok()?;
+        let newest = self
+            .history
+            .back()
+            .map_or(confirmed.folded_before, |step| step.tick);
+        let elapsed = u16::try_from((newest - confirmed.folded_before).max(0))
+            .unwrap_or(MAX_FOLLOWED_EXTRAPOLATION_TICKS);
+        let ticks = (f32::from(elapsed) + fraction).min(f32::from(remaining));
+        (ticks > 0.0).then(|| self.followed_step * ticks)
+    }
+
+    /// Record the server simulation tick at which the followed motion ends: the replicated
+    /// dash deadline, or `None` while not dashing.
+    pub(crate) const fn set_followed_motion_end(&mut self, ends_at: Option<u64>) {
+        self.followed_ends_at = ends_at;
+    }
+
     /// Realized velocity of the newest predicted step (zero while following authority).
     #[cfg(any(test, feature = "automation"))]
     #[must_use]
     pub(crate) const fn step_velocity(&self) -> Vec2 {
         self.step_velocity
+    }
+
+    /// Planar velocity the two newest confirmed samples folded in while following authority
+    /// (dash, defeat, inactive); zero while local movement is predicted.
+    #[cfg(any(test, feature = "automation"))]
+    #[must_use]
+    pub(crate) fn followed_velocity(&self, fixed_step: f32) -> Vec2 {
+        if self.following_authority && fixed_step > 0.0 {
+            self.followed_step / fixed_step
+        } else {
+            Vec2::ZERO
+        }
     }
 
     /// Estimated server simulation tick for a local input tick, once a sample has arrived.
@@ -242,6 +336,7 @@ impl OwnerPrediction {
         mut replay: impl FnMut(Tick, Vec2) -> ReplayedStep,
     ) -> Reconciliation {
         let attached_pose = self.last_sample_tick.is_none().then_some(self.position);
+        let unfolded = self.position;
         self.last_sample_tick = Some(sample.tick);
         let predicted_at = self
             .history
@@ -256,6 +351,7 @@ impl OwnerPrediction {
         {
             // The sample predates every local prediction (prediction just started or the
             // input timeline moved ahead); its round trip has not completed yet.
+            self.observe_confirmed(sample.tick, current, Vec2::ZERO);
             return Reconciliation::Pending;
         }
         self.history.retain(|step| step.tick - sample.tick > 0);
@@ -299,7 +395,38 @@ impl OwnerPrediction {
         if !self.history.iter().any(|step| step.aimed) {
             self.facing = sample.facing;
         }
+        let folded = if matches!(outcome, Reconciliation::Snapped { .. }) {
+            Vec2::ZERO
+        } else {
+            self.position - unfolded
+        };
+        self.observe_confirmed(sample.tick, current, folded);
         outcome
+    }
+
+    /// Record the per-tick displacement the newest confirmed sample folded into the prediction
+    /// (`folded`, spread over the ticks since the previous sample).
+    ///
+    /// While following authority this is the motion the next sample will present: the
+    /// authoritative step, less one leftover walking step predicted before the client learned
+    /// of the dash (each sample withdraws one), so extrapolating it does not overshoot and pull
+    /// back once per tick. A snap's displacement is never extrapolated.
+    fn observe_confirmed(&mut self, tick: Tick, current: Tick, folded: Vec2) {
+        self.followed_step = self
+            .confirmed
+            .and_then(|previous| {
+                let gap = tick - previous.tick;
+                let ticks = u16::try_from(gap).ok()?;
+                (1..=MAX_FOLLOWED_SAMPLE_GAP)
+                    .contains(&gap)
+                    .then(|| folded / f32::from(ticks))
+            })
+            .unwrap_or(Vec2::ZERO);
+        self.confirmed = Some(ConfirmedSample {
+            tick,
+            simulation_tick: simulation_tick_at(self.server_clock, tick),
+            folded_before: current,
+        });
     }
 
     fn present_correction(
@@ -667,6 +794,10 @@ fn predict_owner_movement(
             prediction.position,
         );
         prediction.following_authority = step.suspended;
+        prediction.set_followed_motion_end(state.ability.and_then(|ability| match ability.phase {
+            AbilityPhase::Dashing { ends_at_tick } => Some(ends_at_tick),
+            _ => None,
+        }));
         prediction.record_step(tick, step.position, step.aim, *tuning, delta);
         stats.predicted_ticks = stats.predicted_ticks.saturating_add(1);
     }
