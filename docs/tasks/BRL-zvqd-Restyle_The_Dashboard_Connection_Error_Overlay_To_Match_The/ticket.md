@@ -4,9 +4,9 @@ was: BRL-0207
 
 title: Restyle the Dashboard connection-error overlay to match the shell
 
-status: doing
-closed:
-status_changed: 2026-11-17T23:28:57Z
+status: done
+closed: 2026-11-17T23:57:11Z
+status_changed: 2026-11-17T23:57:11Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-g57a]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description

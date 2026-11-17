@@ -4,9 +4,9 @@ was: BRL-0210
 
 title: Replace the in-match scoreboard text panel with a phone-readable scoreboard
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T03:23:49Z
+status_changed: 2026-11-17T23:57:11Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-094c]
 
 parent: BRL-q5c4
 
-rank: 15597568
+rank: 11337728
 ---
 
 # Description
