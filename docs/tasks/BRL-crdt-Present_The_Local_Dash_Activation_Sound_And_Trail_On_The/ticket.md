@@ -3,9 +3,9 @@ id: BRL-crdt
 
 title: Present the local Dash activation sound and trail on the input frame
 
-status: doing
-closed:
-status_changed: 2026-11-17T23:14:43Z
+status: done
+closed: 2026-11-17T23:28:57Z
+status_changed: 2026-11-17T23:28:57Z
 
 theme: core
 
@@ -19,7 +19,7 @@ related: [BRL-1w27, BRL-qfby]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
