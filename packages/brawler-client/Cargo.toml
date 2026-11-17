@@ -58,6 +58,9 @@ brawler = { path = "../..", default-features = false, features = ["client", "tes
 skrifa = "=0.44.0"
 # Display-name fallback tests lay text out through the same parley version as `bevy_text`.
 parley = { version = "=0.9.0", default-features = false, features = ["std"] }
+# The network harness orders its deterministic link-latency pin after Lightyear's ping receive
+# (`PingSystems`), which the `lightyear` facade does not re-export (BRL-thwh).
+lightyear_sync = { version = "=0.29.0", default-features = false }
 
 [[bin]]
 name = "brawler-client"

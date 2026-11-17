@@ -49,6 +49,35 @@ fn delay_packets(
     }
 }
 
+/// Fixed loopback-scale round trip every harness link reports to Lightyear (BRL-thwh).
+///
+/// It is non-zero because a zero RTT gives reliable channels a zero resend delay, which
+/// Lightyear treats as "never resend", and it is below one tick like the unloaded host
+/// measurements (about 1-9 ms) that the suite's tick-exact scenarios were written against.
+/// Modelled latency comes only from the receive-delay line.
+const HARNESS_LINK_RTT: std::time::Duration = std::time::Duration::from_millis(1);
+
+/// Lightyear's ping/pong RTT and jitter come from host `Instant::now()` (`lightyear_sync`
+/// `PingPlugin`), not from the harness's manual virtual clock, so they tracked how long each
+/// harness step took on the host. They feed the client's sync objective (RTT/2 plus four times
+/// jitter), its remote-tick estimate, and reliable resend timing, so CPU load shifted the client's
+/// lead and its time-dilation corrections, sometimes presenting two simulation ticks in one frame.
+/// Every harness app pins the estimate to [`HARNESS_LINK_RTT`] with zero jitter right after ping
+/// receive, so the whole schedule is a function of the manual clock.
+fn pin_link_latency(mut links: Query<(&mut lightyear::prelude::PingManager, &mut Link)>) {
+    for (mut ping, mut link) in &mut links {
+        let stats = &mut ping.rtt_estimator_ewma.final_stats;
+        stats.rtt = HARNESS_LINK_RTT;
+        stats.jitter = std::time::Duration::ZERO;
+        link.stats.rtt = HARNESS_LINK_RTT;
+        link.stats.jitter = std::time::Duration::ZERO;
+    }
+}
+
+fn link_latency_pin() -> bevy::ecs::schedule::ScheduleConfigs<bevy::ecs::system::ScheduleSystem> {
+    pin_link_latency.after(lightyear_sync::ping::plugin::PingSystems::Receive)
+}
+
 #[derive(Resource, Debug, Default)]
 pub(super) struct DeterministicPacketImpairment {
     pub(super) armed: bool,
@@ -345,6 +374,7 @@ impl Harness {
         .unwrap();
         let mut server = brawler::server::build_lobby_worker_app(server_config.clone(), manifest)
             .expect("product lobby app builds");
+        server.add_systems(PreUpdate, link_latency_pin());
         server.finish();
         server.cleanup();
         let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);
@@ -381,6 +411,7 @@ impl Harness {
         let manifest = brawler::testing::routed_wipeout_manifest(&server_config, participants);
         let mut server = brawler::server::build_match_worker_app(server_config.clone(), manifest)
             .expect("routed match worker builds");
+        server.add_systems(PreUpdate, link_latency_pin());
         server.finish();
         server.cleanup();
         let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);
@@ -580,7 +611,7 @@ impl Harness {
             HarnessMode::HotZone => server.add_plugins(brawler::matchplay::HotZoneModePlugin),
             HarnessMode::Heist => server.add_plugins(brawler::matchplay::HeistModePlugin),
         };
-        server.add_systems(PreUpdate, blackout_systems());
+        server.add_systems(PreUpdate, (blackout_systems(), link_latency_pin()));
         server.add_systems(
             bevy::prelude::Update,
             activate_legacy_test_fighters
@@ -677,6 +708,7 @@ impl Harness {
                         .before(TransportSystems::Receive)
                         .before(MessageSystems::Receive),
                     blackout_systems(),
+                    link_latency_pin(),
                 ),
             );
         client.insert_resource(CaptureCombatCues::default());

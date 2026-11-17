@@ -2161,6 +2161,7 @@ dependencies = [
  "brawler-routing",
  "directories",
  "lightyear",
+ "lightyear_sync",
  "parley",
  "postcard",
  "ron",
