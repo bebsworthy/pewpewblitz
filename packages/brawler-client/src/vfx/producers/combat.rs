@@ -165,8 +165,14 @@ fn produce_local_attack_vfx_requests(
         let shot = match local.kind {
             LocalAttackKind::PrimaryFire(shot) => shot,
             LocalAttackKind::Ultimate { kind, cast } => {
-                if let Some(request) =
-                    local_ultimate_launch_request(local, kind, cast, loadout.ultimate.id, &cache)
+                if crate::local_attack::presents_cast_motion_locally(kind)
+                    && let Some(request) = local_ultimate_launch_request(
+                        local,
+                        kind,
+                        cast,
+                        loadout.ultimate.id,
+                        &cache,
+                    )
                 {
                     requests.write(request);
                 }
@@ -1062,6 +1068,19 @@ mod tests {
             facing: 0.0,
             simulation_tick: 100,
         });
+        // A local Dash is sound only: no launch flash before the authoritative dash motion.
+        app.world_mut().write_message(LocalAttackPresented {
+            fighter,
+            owner: NetworkEntityId(12),
+            team: brawler::combat::TeamId(1),
+            kind: LocalAttackKind::Ultimate {
+                kind: brawler::builds::UltimateKind::Dash,
+                cast: crate::local_attack::LocalCastId(cast.0 + 1),
+            },
+            origin: Vec2::new(2.0, 3.0),
+            facing: 0.0,
+            simulation_tick: 100,
+        });
         app.world_mut()
             .write_message(DeduplicatedCombatCue(CombatCue::ElementalFieldActivated {
                 event_id: CombatEventId(40),
@@ -1080,7 +1099,7 @@ mod tests {
         assert_eq!(
             captured.len(),
             2,
-            "launch flash plus the authoritative field"
+            "launch flash plus the authoritative field (no Dash flash)"
         );
         let launch = captured
             .iter()

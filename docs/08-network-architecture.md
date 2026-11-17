@@ -255,12 +255,15 @@ shots, and the replicated plus locally tracked cooldown. The estimated server si
 from the owner-prediction server clock. When the gate passes, the shoot animation, a small
 presentation-only recoil, the muzzle `VfxRequest`, the fire `AudioRequest`, and, for straight-family
 recipes, cosmetic projectiles start immediately. An ultimate's rising edge with full replicated
-charge and no earlier cast still unanswered (Dash excluded: its sound accompanies the
-authoritative dash motion) starts the animation, recoil, a short launch flash at the caster, and,
-when the activation sound is a launch (Self Cloak, Reveal Scan, Sentry, Concealment Field, the
-elemental fields), that sound. The authoritative activation signal of the same kind (the
-activation cue, or the replicated Sentry or Concealment Field, within the same tick window) is
-recorded as an activation echo whose sound the audio producers skip. Demolition Strike's sound is
+charge and no earlier cast still unanswered starts the animation, recoil, a short launch flash at
+the caster, and, when the activation sound is a launch (Self Cloak, Reveal Scan, Sentry,
+Concealment Field, the elemental fields, Dash), that sound. A local Dash is sound only (BRL-crdt):
+its whoosh starts on the press while the animation, flash, shake, dash motion, and trail follow the
+authoritative `Dashing` phase. The authoritative activation signal of the same kind (the
+activation cue, the replicated Sentry or Concealment Field, or the controlled fighter's replicated
+`Dashing { ends_at_tick }` at activation tick `ends_at_tick - duration_ticks`, within the same tick
+window) is recorded as an activation echo whose sound the audio producers skip; a rejected dash
+leaves only its short whoosh. Demolition Strike's sound is
 its explosion and Big Blob has none, so both stay authoritative; every area outcome, its effects,
 and cloak state stay cue- or replication-driven. An unanswered cast is rejected after the same
 confirmation margin and only frees the charge; its launch flash is a bounded transient. The later authoritative

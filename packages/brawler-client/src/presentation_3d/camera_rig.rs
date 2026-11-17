@@ -650,7 +650,13 @@ pub(super) fn accumulate_camera_trauma(
     for local_attack in local_attacks.read() {
         trauma += match local_attack.kind {
             LocalAttackKind::PrimaryFire(_) => local_fire,
-            LocalAttackKind::Ultimate { .. } => triggers.local_ultimate,
+            LocalAttackKind::Ultimate { kind, .. } => {
+                if local_attack::presents_cast_motion_locally(kind) {
+                    triggers.local_ultimate
+                } else {
+                    0.0
+                }
+            }
         };
     }
     for DeduplicatedCombatCue(cue) in cues.read() {

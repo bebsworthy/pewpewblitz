@@ -429,6 +429,11 @@ pub(in super::super) fn animate_attack_acceptance(
         }
     };
     for local in local_attacks.read() {
+        if let local_attack::LocalAttackKind::Ultimate { kind, .. } = local.kind
+            && !local_attack::presents_cast_motion_locally(kind)
+        {
+            continue;
+        }
         if let Some(&visual_entity) = visuals_by_owner.get(&local.fighter) {
             start(visual_entity);
         }

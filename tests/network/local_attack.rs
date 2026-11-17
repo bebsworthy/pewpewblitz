@@ -5,7 +5,7 @@
 
 use super::harness::Harness;
 use bevy::prelude::{Vec2, With};
-use brawler::builds::{AbilityPhase, AbilityState, ResolvedMatchLoadout};
+use brawler::builds::{AbilityPhase, AbilityState, ResolvedMatchLoadout, UltimateKind};
 use brawler::combat::{CombatTelemetry, WeaponPhase, WeaponState};
 use brawler::matchplay::{MatchPhase, MatchRoot as MatchRootMarker, MatchState};
 use brawler::protocol::{Fighter, FighterInput, MatchCommand, MatchCommandRequest, PlayerId};
@@ -265,6 +265,14 @@ fn cloak_harness(delay: usize) -> Harness {
 }
 
 fn set_server_ability(harness: &mut Harness, state: impl Fn(u16) -> AbilityState) {
+    set_server_ability_of(harness, UltimateKind::SelfCloak, state);
+}
+
+fn set_server_ability_of(
+    harness: &mut Harness,
+    kind: UltimateKind,
+    state: impl Fn(u16) -> AbilityState,
+) {
     let player = harness.controlled_player_id(0);
     let world = harness.server.world_mut();
     let mut query = world
@@ -273,10 +281,7 @@ fn set_server_ability(harness: &mut Harness, state: impl Fn(u16) -> AbilityState
         .iter_mut(world)
         .find(|(id, ..)| **id == player)
         .expect("the measured server fighter");
-    assert_eq!(
-        loadout.ultimate.kind,
-        brawler::builds::UltimateKind::SelfCloak
-    );
+    assert_eq!(loadout.ultimate.kind, kind);
     *ability = state(loadout.ultimate.charge_policy.maximum);
 }
 
@@ -425,6 +430,141 @@ fn server_rejected_ultimate_is_rejected_locally_and_authority_is_unchanged() {
         assert_eq!(
             server_ability(&mut harness),
             spent,
+            "[{profile}] authority unchanged by the local presentation"
+        );
+    }
+}
+
+/// Client 0 casts Dash (ultimate 1) with full charge.
+fn dash_harness(delay: usize) -> Harness {
+    let mut harness = active_harness_with(delay, |harness| {
+        harness.install_saved_brawler_loadout(0, 1, 1, [4, 6]);
+    });
+    set_server_ability_of(&mut harness, UltimateKind::Dash, |maximum| AbilityState {
+        charge: maximum,
+        phase: AbilityPhase::Ready,
+    });
+    for _ in 0..20 + 2 * delay {
+        harness.step();
+    }
+    harness
+}
+
+/// The controlled fighter's replicated dash end tick on client 0, if it is dashing.
+fn client_dash_end(harness: &mut Harness) -> Option<u64> {
+    let world = harness.clients[0].world_mut();
+    let mut query = world
+        .query_filtered::<&AbilityState, (With<Fighter>, With<lightyear::prelude::Controlled>)>();
+    query.iter(world).find_map(|ability| match ability.phase {
+        AbilityPhase::Dashing { ends_at_tick } => Some(ends_at_tick),
+        _ => None,
+    })
+}
+
+#[test]
+fn local_dash_sounds_on_the_input_frame_and_the_replicated_dash_is_its_echo() {
+    for (profile, delay) in PROFILES {
+        let mut harness = dash_harness(delay);
+        let start = stats(&harness);
+        harness.set_controlled_input(0, ultimate());
+        let mut presented = None;
+        let mut replicated = None;
+        let mut echo_on_arrival = None;
+        for frame in 1..=90 {
+            harness.step();
+            if frame == 3 {
+                harness.set_controlled_input(0, FighterInput::default());
+            }
+            let now = stats(&harness);
+            if presented.is_none() && now.ultimates_presented > start.ultimates_presented {
+                presented = Some(frame);
+            }
+            if replicated.is_none()
+                && let Some(ends_at_tick) = client_dash_end(&mut harness)
+            {
+                replicated = Some(frame);
+                // The ability audio producer plays `dash` on this frame's replicated phase
+                // change unless reconciliation already recorded it as an echo.
+                echo_on_arrival = Some(
+                    harness.clients[0]
+                        .world()
+                        .resource::<LocalAttackLedger>()
+                        .is_activation_echo_dash(ends_at_tick),
+                );
+            }
+        }
+        let stats = stats(&harness);
+        let presented = presented.expect("dash whoosh presented locally");
+        let replicated = replicated.expect("the server dashed and its phase replicated");
+        println!(
+            "local dash input-to-sound [{profile} delay={delay}]: local {presented} frame(s), \
+             replicated Dashing (before: sound start) {replicated} frame(s); echo on arrival \
+             {echo_on_arrival:?}"
+        );
+        assert_eq!(presented, 1, "[{profile}] whoosh on the input frame");
+        assert!(
+            replicated > presented,
+            "[{profile}] local sound leads the dash"
+        );
+        assert_eq!(
+            echo_on_arrival,
+            Some(true),
+            "[{profile}] the replicated dash is paired before the producer sees it (no double \
+             playback)"
+        );
+        assert_eq!(
+            (
+                stats.ultimates_presented - start.ultimates_presented,
+                stats.ultimate_activation_echoes - start.ultimate_activation_echoes,
+                stats.unmatched_own_activations - start.unmatched_own_activations,
+                stats.ultimates_rejected - start.ultimates_rejected,
+            ),
+            (1, 1, 0, 0),
+            "[{profile}] one cast, one echo, nothing unmatched or rejected"
+        );
+    }
+}
+
+#[test]
+fn server_rejected_dash_leaves_only_the_local_sound() {
+    for (profile, delay) in PROFILES.into_iter().skip(1) {
+        let mut harness = dash_harness(delay);
+        // Authority spends the charge; the client still sees the stale full charge.
+        set_server_ability_of(&mut harness, UltimateKind::Dash, |_| AbilityState {
+            charge: 0,
+            phase: AbilityPhase::Charging,
+        });
+        let start = stats(&harness);
+        harness.set_controlled_input(0, ultimate());
+        harness.step();
+        harness.set_controlled_input(0, FighterInput::default());
+        let mut rejected_after = None;
+        let mut dashed = false;
+        for frame in 2..=90 {
+            harness.step();
+            dashed |= client_dash_end(&mut harness).is_some();
+            if rejected_after.is_none()
+                && stats(&harness).ultimates_rejected > start.ultimates_rejected
+            {
+                rejected_after = Some(frame);
+            }
+        }
+        let stats = stats(&harness);
+        println!(
+            "rejected dash [{profile} delay={delay}]: presented {}, rejected after {rejected_after:?} \
+             frame(s)",
+            stats.ultimates_presented - start.ultimates_presented,
+        );
+        assert_eq!(stats.ultimates_presented - start.ultimates_presented, 1);
+        assert!(!dashed, "[{profile}] the server never dashed");
+        assert_eq!(stats.ultimates_confirmed, start.ultimates_confirmed);
+        let rejected_after = rejected_after.expect("the unanswered dash is rejected");
+        assert!(
+            rejected_after <= 2 * delay + 12,
+            "[{profile}] rejected within a bounded time"
+        );
+        assert!(
+            matches!(server_ability(&mut harness).phase, AbilityPhase::Charging),
             "[{profile}] authority unchanged by the local presentation"
         );
     }

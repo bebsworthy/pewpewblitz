@@ -53,20 +53,23 @@ pub(super) fn register_reload(app: &mut App) {
 /// producer's disjoint local range).
 const LOCAL_ULTIMATE_AUDIO_OCCURRENCE: u64 = super::combat::LOCAL_ULTIMATE_AUDIO_OCCURRENCE;
 
-/// The ability producer's spawn sound of a locally cast ultimate, when it is a launch.
-const fn local_ultimate_spawn_cue(kind: UltimateKind) -> Option<AudioCueKey> {
+/// The ability producer's sound of a locally cast ultimate (dash whoosh or spawn), when it is a
+/// launch.
+const fn local_ultimate_ability_cue(kind: UltimateKind) -> Option<AudioCueKey> {
     if !crate::local_attack::presents_activation_sound_locally(kind) {
         return None;
     }
     match kind {
         UltimateKind::Sentry => Some(cue_keys::SENTRY_SPAWN),
         UltimateKind::ConcealmentField => Some(cue_keys::CONCEALMENT_FIELD_SPAWN),
+        UltimateKind::Dash => Some(cue_keys::DASH),
         _ => None,
     }
 }
 
-/// Ability transitions plus the local player's Sentry and Concealment Field spawn sounds on the
-/// input frame; a replicated spawn that echoes a locally presented cast stays silent.
+/// Ability transitions plus the local player's Dash whoosh and Sentry and Concealment Field spawn
+/// sounds on the input frame; a replicated `Dashing` phase or spawn that echoes a locally
+/// presented cast stays silent.
 #[allow(
     clippy::type_complexity,
     clippy::needless_pass_by_value,
@@ -92,7 +95,7 @@ pub(super) fn produce_ability_audio_requests(
 ) {
     for local in local_attacks.read() {
         if let LocalAttackKind::Ultimate { kind, cast } = local.kind
-            && let Some(cue_key) = local_ultimate_spawn_cue(kind)
+            && let Some(cue_key) = local_ultimate_ability_cue(kind)
         {
             requests.write(AudioRequest::for_occurrence(
                 cue_key,
@@ -108,7 +111,10 @@ pub(super) fn produce_ability_audio_requests(
     };
     for ability in &abilities {
         let cue_key = match ability.phase {
-            AbilityPhase::Dashing { .. } => Some(cue_keys::DASH),
+            AbilityPhase::Dashing { ends_at_tick } => (!ledger
+                .as_deref()
+                .is_some_and(|ledger| ledger.is_activation_echo_dash(ends_at_tick)))
+            .then_some(cue_keys::DASH),
             AbilityPhase::Ready => Some(cue_keys::CHARGE_READY),
             AbilityPhase::Charging
             | AbilityPhase::Deployed { .. }

@@ -965,7 +965,7 @@ fn ecs_local_fire_follows_the_loadout_and_damage_follows_the_hit() {
     let ultimate = trauma_after(
         &mut app,
         LocalAttackKind::Ultimate {
-            kind: brawler::builds::UltimateKind::Dash,
+            kind: brawler::builds::UltimateKind::SelfCloak,
             cast: local_attack::LocalCastId(1),
         },
         None,

@@ -15,14 +15,15 @@
 //! shots stay matchable so a late cue still cannot double-play. Nothing here is sent to the
 //! server or mutates authoritative state.
 //!
-//! Ultimate casts follow the same timeline. A non-Dash cast is announced on the ULTIMATE rising
-//! edge with full replicated charge; presentation plays the shoot motion, a short launch flash at
-//! the caster, and, for ultimates whose activation sound is a launch
-//! ([`presents_activation_sound_locally`]), the activation sound. The ledger pairs the cast with
-//! the authoritative activation signal of the same kind (its activation cue or the spawned
-//! sentry/concealment field, within the same tick tolerance) and records that signal as an
-//! activation echo, so the authoritative activation sound does not replay. Area outcomes (fields,
-//! scans, strikes, sentry placement, cloak state) and their effects stay authoritative.
+//! Ultimate casts follow the same timeline. A cast is announced on the ULTIMATE rising edge with
+//! full replicated charge; presentation plays the shoot motion and a short launch flash at the
+//! caster ([`presents_cast_motion_locally`]), and, for ultimates whose activation sound is a
+//! launch ([`presents_activation_sound_locally`]), the activation sound. The ledger pairs the cast
+//! with the authoritative activation signal of the same kind (its activation cue, the spawned
+//! sentry/concealment field, or the replicated `Dashing` phase, within the same tick tolerance)
+//! and records that signal as an activation echo, so the authoritative activation sound does not
+//! replay. Area outcomes (fields, scans, strikes, sentry placement, cloak state), the dash motion
+//! and trail, and their effects stay authoritative.
 
 use crate::prediction::{OwnerPrediction, OwnerPredictionSet};
 use bevy::prelude::*;
@@ -78,7 +79,7 @@ pub enum LocalAttackKind {
 /// Self Cloak, Reveal Scan, the elemental fields, Sentry, and Concealment Field play their
 /// activation sound when the cast starts. Demolition Strike's sound is its explosion at the
 /// target (an area outcome) and Big Blob has no activation sound, so both stay authoritative.
-/// Dash is not cast locally at all: its sound accompanies the authoritative dash motion.
+/// Dash plays its short whoosh on the press; its motion and trail stay authoritative.
 #[must_use]
 pub const fn presents_activation_sound_locally(kind: UltimateKind) -> bool {
     match kind {
@@ -89,16 +90,25 @@ pub const fn presents_activation_sound_locally(kind: UltimateKind) -> bool {
         | UltimateKind::PoisonField
         | UltimateKind::RestorationField
         | UltimateKind::Sentry
-        | UltimateKind::ConcealmentField => true,
-        UltimateKind::Dash | UltimateKind::DemolitionStrike | UltimateKind::BigBlob => false,
+        | UltimateKind::ConcealmentField
+        | UltimateKind::Dash => true,
+        UltimateKind::DemolitionStrike | UltimateKind::BigBlob => false,
     }
 }
 
-/// Whether the server announces this ultimate's activation with a cue or a replicated entity the
-/// ledger can pair (Big Blob has neither; Dash is never cast locally).
+/// Whether a local cast also starts the shoot motion, recoil, launch flash, and camera shake.
+/// A local Dash is sound only: the dash motion and trail follow authority, so a fighter-bound
+/// launch effect would play one round trip before the fighter moves.
+#[must_use]
+pub const fn presents_cast_motion_locally(kind: UltimateKind) -> bool {
+    !matches!(kind, UltimateKind::Dash)
+}
+
+/// Whether the server announces this ultimate's activation with a cue, a replicated entity, or a
+/// replicated phase the ledger can pair (Big Blob has none).
 #[must_use]
 pub(crate) const fn has_activation_signal(kind: UltimateKind) -> bool {
-    !matches!(kind, UltimateKind::BigBlob | UltimateKind::Dash)
+    !matches!(kind, UltimateKind::BigBlob)
 }
 
 /// One authoritative activation signal of the local player's ultimate whose sound already
@@ -109,6 +119,8 @@ pub enum UltimateActivationEcho {
     Cue(CombatEventId),
     /// A replicated activation entity (Sentry, Concealment Field).
     Spawned(Entity),
+    /// The controlled fighter's replicated `Dashing` phase, identified by its end tick.
+    Dash { ends_at_tick: u64 },
 }
 
 /// Server agreement with one locally presented ultimate cast.
@@ -195,6 +207,9 @@ pub struct LocalAttackLedger {
     ultimate_was_held: bool,
     casts: VecDeque<LocalUltimateCast>,
     ultimate_echoes: VecDeque<UltimateActivationEcho>,
+    /// End tick of the newest replicated dash already folded in (the phase stays visible for the
+    /// whole dash, so each dash is observed once).
+    observed_dash_end: Option<u64>,
     casts_confirmed: u64,
 }
 
@@ -333,6 +348,32 @@ impl LocalAttackLedger {
     pub fn is_activation_echo_entity(&self, entity: Entity) -> bool {
         self.ultimate_echoes
             .contains(&UltimateActivationEcho::Spawned(entity))
+    }
+
+    /// Whether the replicated dash ending at `ends_at_tick` already sounded on the input frame.
+    #[must_use]
+    pub fn is_activation_echo_dash(&self, ends_at_tick: u64) -> bool {
+        self.ultimate_echoes
+            .contains(&UltimateActivationEcho::Dash { ends_at_tick })
+    }
+
+    /// Fold the controlled fighter's replicated `Dashing` phase into the ledger. The server sets
+    /// `ends_at_tick = activation tick + duration_ticks`, so the activation tick pairs with the
+    /// local cast exactly like an activation cue.
+    pub(crate) fn observe_own_dash(
+        &mut self,
+        ends_at_tick: u64,
+        duration_ticks: u64,
+    ) -> OwnActivationObservation {
+        if self.observed_dash_end == Some(ends_at_tick) {
+            return OwnActivationObservation::Repeated;
+        }
+        self.observed_dash_end = Some(ends_at_tick);
+        self.observe_own_activation(
+            UltimateKind::Dash,
+            ends_at_tick.saturating_sub(duration_ticks),
+            Some(UltimateActivationEcho::Dash { ends_at_tick }),
+        )
     }
 
     /// Record one locally presented ultimate cast.
@@ -612,7 +653,6 @@ fn present_local_attacks(
     };
     let ultimate = loadout.ultimate;
     if ultimate_pressed
-        && ultimate.kind != UltimateKind::Dash
         && !ledger.ultimate_outstanding()
         && ability.is_some_and(|state| local_ultimate_ready(*state, ultimate.charge_policy.maximum))
     {
@@ -700,6 +740,7 @@ fn reconcile_local_attacks(
     };
     let ultimate = loadout.map(|loadout| loadout.ultimate);
     let mut activations = Vec::new();
+    let mut dash = None;
     for DeduplicatedCombatCue(cue) in cues.read() {
         match cue {
             CombatCue::AttackAccepted {
@@ -724,6 +765,16 @@ fn reconcile_local_attacks(
         }
     }
     if let Some(ultimate) = ultimate {
+        if let (
+            brawler::builds::UltimateParameters::Dash { duration_ticks, .. },
+            Some(AbilityState {
+                phase: AbilityPhase::Dashing { ends_at_tick },
+                ..
+            }),
+        ) = (ultimate.parameters, ability)
+        {
+            dash = Some((*ends_at_tick, duration_ticks));
+        }
         for (entity, identity, deadline) in &spawned.sentries {
             if identity.owner_network_id != *owner {
                 continue;
@@ -749,21 +800,24 @@ fn reconcile_local_attacks(
             }
         }
     }
+    let mut record = |observation| match observation {
+        OwnActivationObservation::Matched(_) => {
+            stats.ultimate_activation_echoes = stats.ultimate_activation_echoes.saturating_add(1);
+        }
+        OwnActivationObservation::Unmatched => {
+            stats.unmatched_own_activations = stats.unmatched_own_activations.saturating_add(1);
+        }
+        OwnActivationObservation::Repeated => {}
+    };
     for (kind, tick, echo) in activations {
         // Teammates share team-scoped signals; only the local fighter's own kind can pair.
         if ultimate.is_none_or(|ultimate| ultimate.kind != kind) {
             continue;
         }
-        match ledger.observe_own_activation(kind, tick, echo) {
-            OwnActivationObservation::Matched(_) => {
-                stats.ultimate_activation_echoes =
-                    stats.ultimate_activation_echoes.saturating_add(1);
-            }
-            OwnActivationObservation::Unmatched => {
-                stats.unmatched_own_activations = stats.unmatched_own_activations.saturating_add(1);
-            }
-            OwnActivationObservation::Repeated => {}
-        }
+        record(ledger.observe_own_activation(kind, tick, echo));
+    }
+    if let Some((ends_at_tick, duration_ticks)) = dash {
+        record(ledger.observe_own_dash(ends_at_tick, duration_ticks));
     }
     if let (Some(ultimate), Some(ability)) = (ultimate, ability)
         && !local_ultimate_ready(*ability, ultimate.charge_policy.maximum)

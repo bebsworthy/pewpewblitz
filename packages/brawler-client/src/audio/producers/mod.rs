@@ -420,6 +420,114 @@ mod tests {
         assert_eq!(count(cue_keys::ULTIMATE_STRIKE), 0);
     }
 
+    /// Stand-in for the local attack reconciler: folds the controlled fighter's replicated dash
+    /// phase into the ledger (duration 18 ticks).
+    fn pair_dash_echoes(
+        mut ledger: ResMut<crate::local_attack::LocalAttackLedger>,
+        fighters: Query<&AbilityState, With<Controlled>>,
+    ) {
+        for ability in &fighters {
+            if let AbilityPhase::Dashing { ends_at_tick } = ability.phase {
+                ledger.observe_own_dash(ends_at_tick, 18);
+            }
+        }
+    }
+
+    #[test]
+    fn dash_sounds_once_per_dash_with_and_without_a_local_cast() {
+        use crate::local_attack::{
+            LocalAttackKind, LocalAttackLedger, LocalAttackPresented, LocalAttackSet,
+        };
+        use brawler::builds::{AbilityPhase, AbilityState, UltimateKind};
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<AudioRequest>()
+            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientPlayableGate(false))
+            .insert_resource(ClientMapReadiness::Ready)
+            .init_resource::<LocalAttackLedger>()
+            .init_resource::<ObservedRequests>()
+            .add_plugins(AudioRegistryPlugin)
+            .add_plugins(AudioProducersPlugin)
+            .add_systems(Update, pair_dash_echoes.in_set(LocalAttackSet::Reconcile))
+            .add_systems(Update, observe_requests.after(AudioProducerSet));
+        brawler::test_app::finalize(&mut app);
+        let fighter = app
+            .world_mut()
+            .spawn((
+                Fighter,
+                Controlled,
+                AbilityState {
+                    charge: 0,
+                    phase: AbilityPhase::Charging,
+                },
+            ))
+            .id();
+        app.update();
+        let dashes = |app: &mut App| {
+            let observed =
+                std::mem::take(&mut app.world_mut().resource_mut::<ObservedRequests>().0);
+            observed
+                .iter()
+                .filter(|request| request.cue_key == cue_keys::DASH)
+                .count()
+        };
+        dashes(&mut app);
+
+        // With a local cast: the whoosh plays on the input frame ...
+        let cast = app
+            .world_mut()
+            .resource_mut::<LocalAttackLedger>()
+            .record_cast(UltimateKind::Dash, lightyear::prelude::Tick(1), 100);
+        app.world_mut().write_message(LocalAttackPresented {
+            fighter,
+            owner: NetworkEntityId(12),
+            team: brawler::combat::TeamId(1),
+            kind: LocalAttackKind::Ultimate {
+                kind: UltimateKind::Dash,
+                cast,
+            },
+            origin: Vec2::ZERO,
+            facing: 0.0,
+            simulation_tick: 100,
+        });
+        app.update();
+        assert_eq!(dashes(&mut app), 1, "local whoosh on the input frame");
+        // ... and the authoritative phase one round trip later (applied 4 ticks late) is silent,
+        // including later changes to the same dash's state.
+        for charge in [0, 1] {
+            app.world_mut().entity_mut(fighter).insert(AbilityState {
+                charge,
+                phase: AbilityPhase::Dashing {
+                    ends_at_tick: 104 + 18,
+                },
+            });
+            app.update();
+            assert_eq!(dashes(&mut app), 0, "the replicated dash is an echo");
+        }
+
+        // Without a local cast (for example a dash the client never presented): one whoosh from
+        // the replicated phase, as before.
+        app.world_mut().entity_mut(fighter).insert(AbilityState {
+            charge: 0,
+            phase: AbilityPhase::Charging,
+        });
+        app.update();
+        app.world_mut().entity_mut(fighter).insert(AbilityState {
+            charge: 0,
+            phase: AbilityPhase::Dashing {
+                ends_at_tick: 400 + 18,
+            },
+        });
+        app.update();
+        assert_eq!(
+            dashes(&mut app),
+            1,
+            "an unpaired dash sounds from authority"
+        );
+    }
+
     #[test]
     fn released_controls_request_their_surface_role_sound_and_disabled_controls_stay_silent() {
         use crate::ui::{press::ReleaseActivation, surface::Surface};

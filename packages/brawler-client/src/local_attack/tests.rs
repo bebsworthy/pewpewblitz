@@ -413,7 +413,7 @@ fn suspended_frozen_and_targeted_ultimate_owners_do_not_present_fire() {
 
 #[test]
 fn ultimate_rising_edge_with_full_charge_presents_one_cast() {
-    for (ultimate, expected) in [(3, 1), (1, 0)] {
+    for (ultimate, expected) in [(3, 1), (1, 1)] {
         let mut app = plugin_app();
         let owner = spawn_owner(&mut app, 0);
         let loadout = loadout_with_ultimate(ultimate);
@@ -443,7 +443,7 @@ fn ultimate_rising_edge_with_full_charge_presents_one_cast() {
             .count();
         assert_eq!(
             casts, expected,
-            "ultimate {ultimate}: only the rising edge casts (Dash has its own feedback)"
+            "ultimate {ultimate}: only the rising edge casts"
         );
     }
 }
@@ -625,16 +625,123 @@ fn only_launch_type_ultimates_present_their_activation_sound_locally() {
         UltimateKind::FireField,
         UltimateKind::PoisonField,
         UltimateKind::RestorationField,
+        UltimateKind::Dash,
     ] {
         assert!(presents_activation_sound_locally(kind), "{kind:?}");
     }
-    for kind in [
-        UltimateKind::Dash,
-        UltimateKind::DemolitionStrike,
-        UltimateKind::BigBlob,
-    ] {
+    for kind in [UltimateKind::DemolitionStrike, UltimateKind::BigBlob] {
         assert!(!presents_activation_sound_locally(kind), "{kind:?}");
+        assert!(presents_cast_motion_locally(kind), "{kind:?}");
     }
+    assert!(
+        !presents_cast_motion_locally(UltimateKind::Dash),
+        "a local Dash is sound only; its motion and trail follow authority"
+    );
+}
+
+/// Dash ultimate duration in the embedded build catalog (ultimate 1).
+fn dash_duration_ticks() -> u64 {
+    let brawler::builds::UltimateParameters::Dash { duration_ticks, .. } =
+        loadout_with_ultimate(1).ultimate.parameters
+    else {
+        panic!("dash ultimate");
+    };
+    duration_ticks
+}
+
+#[test]
+fn replicated_dash_phase_pairs_with_the_local_cast_on_time_late_and_after_rejection() {
+    let duration = dash_duration_ticks();
+    // On time: the activation tick (ends_at - duration) equals the estimated cast tick.
+    let mut ledger = LocalAttackLedger::default();
+    let cast = ledger.record_cast(UltimateKind::Dash, Tick(10), 100);
+    assert_eq!(
+        ledger.observe_own_dash(100 + duration, duration),
+        OwnActivationObservation::Matched(cast)
+    );
+    assert!(ledger.is_activation_echo_dash(100 + duration));
+    assert_eq!(ledger.cast_status(cast), Some(LocalCastStatus::Confirmed));
+    assert_eq!(
+        ledger.observe_own_dash(100 + duration, duration),
+        OwnActivationObservation::Repeated,
+        "the phase stays replicated for the whole dash and is folded in once"
+    );
+
+    // Late: the input reached the server six ticks late; one tick more is another dash.
+    let mut ledger = LocalAttackLedger::default();
+    let cast = ledger.record_cast(UltimateKind::Dash, Tick(10), 100);
+    let beyond = 100 + MATCH_LATE_TOLERANCE_TICKS + 1 + duration;
+    assert_eq!(
+        ledger.observe_own_dash(beyond, duration),
+        OwnActivationObservation::Unmatched
+    );
+    assert!(!ledger.is_activation_echo_dash(beyond));
+    let late = 100 + MATCH_LATE_TOLERANCE_TICKS + duration;
+    assert_eq!(
+        ledger.observe_own_dash(late, duration),
+        OwnActivationObservation::Matched(cast)
+    );
+    assert!(ledger.is_activation_echo_dash(late));
+
+    // Rejected: the server never dashes, so the cast is rejected and frees the charge; nothing
+    // else is presented. A dash that still arrives late pairs and never sounds twice.
+    let mut ledger = LocalAttackLedger::default();
+    let cast = ledger.record_cast(UltimateKind::Dash, Tick(10), 100);
+    assert_eq!(ledger.observe_charge_spent(), 0, "Dash has its own signal");
+    assert_eq!(
+        ledger.expire_casts(Some(Tick(10) + CONFIRMATION_MARGIN_TICKS), Tick(20)),
+        1
+    );
+    assert_eq!(ledger.cast_status(cast), Some(LocalCastStatus::Rejected));
+    assert!(!ledger.ultimate_outstanding());
+    assert_eq!(
+        ledger.observe_own_dash(103 + duration, duration),
+        OwnActivationObservation::Matched(cast)
+    );
+    assert!(ledger.is_activation_echo_dash(103 + duration));
+}
+
+#[test]
+fn dash_press_presents_a_cast_and_the_replicated_dash_becomes_its_echo() {
+    let mut app = plugin_app();
+    let owner = spawn_owner(&mut app, 0);
+    let loadout = loadout_with_ultimate(1);
+    let maximum = loadout.ultimate.charge_policy.maximum;
+    app.world_mut().entity_mut(owner).insert((
+        loadout,
+        AbilityState {
+            charge: maximum,
+            phase: AbilityPhase::Ready,
+        },
+    ));
+    app.world_mut().resource_mut::<Presented>().0.clear();
+    set_buttons(&mut app, owner, FighterInput::ULTIMATE);
+    fixed_tick(&mut app);
+    let [(UltimateKind::Dash, cast, simulation_tick)] = presented_casts(&app)[..] else {
+        panic!("one dash cast");
+    };
+    // The server applies the dash four ticks late; its phase replicates for the whole dash.
+    let ends_at_tick = simulation_tick + 4 + dash_duration_ticks();
+    for _ in 0..3 {
+        app.world_mut().entity_mut(owner).insert(AbilityState {
+            charge: 0,
+            phase: AbilityPhase::Dashing { ends_at_tick },
+        });
+        app.world_mut().run_schedule(Update);
+    }
+    let ledger = app.world().resource::<LocalAttackLedger>();
+    assert!(ledger.is_activation_echo_dash(ends_at_tick));
+    assert_eq!(ledger.cast_status(cast), Some(LocalCastStatus::Confirmed));
+    let stats = app.world().resource::<LocalAttackStats>();
+    assert_eq!(
+        (
+            stats.ultimates_presented,
+            stats.ultimates_confirmed,
+            stats.ultimate_activation_echoes,
+            stats.unmatched_own_activations
+        ),
+        (1, 1, 1, 0)
+    );
 }
 
 /// A controlled Self Cloak fighter with full charge, pressing ULTIMATE.
