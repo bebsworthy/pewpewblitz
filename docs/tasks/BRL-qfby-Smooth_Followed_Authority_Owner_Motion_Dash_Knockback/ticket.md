@@ -4,9 +4,9 @@ was: BRL-0217
 
 title: 'Smooth followed-authority owner motion (dash, knockback follow) between fixed ticks'
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T06:29:37Z
+status_changed: 2026-11-17T18:56:57Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-crdt, BRL-sh10]
 
 parent: BRL-q5c4
 
-rank: 15400960
+rank: 11337728
 ---
 
 # Description
