@@ -4,9 +4,9 @@ was: BRL-0212
 
 title: Make the owner-prediction dash convergence test deterministic in the full network suite
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T04:44:38Z
+status_changed: 2026-11-17T06:50:10Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-rz4s]
 
 parent: BRL-q5c4
 
-rank: 15335424
+rank: 11337728
 ---
 
 # Description
