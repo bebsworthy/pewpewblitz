@@ -4403,3 +4403,201 @@ mod first_tap {
         assert_eq!(count, 1);
     }
 }
+
+/// The Dashboard error that a lost, unresumable match leaves behind (`match_flow.rs`).
+fn lost_match_dashboard_error() -> ClientOverlay {
+    ClientOverlay::Error(FlowError {
+        kind: FlowErrorKind::Connection,
+        message: "The connection to the match was lost, and the match could not be resumed."
+            .to_string(),
+        return_flow: ClientFlow::Dashboard,
+        actions: [Some(FlowErrorAction::Back), None],
+    })
+}
+
+fn cancel_match_start_overlay() -> ClientOverlay {
+    ClientOverlay::Confirmation(CancelMatchStartConfirmation {
+        reservation_id: brawler::lobby::MatchReservationId::new(1).unwrap(),
+        generation: 1,
+    })
+}
+
+fn overlay_root<C: Component>(app: &mut App) -> Entity {
+    let world = app.world_mut();
+    let mut roots = world.query_filtered::<Entity, With<C>>();
+    let found: Vec<_> = roots.iter(world).collect();
+    assert_eq!(found.len(), 1, "exactly one overlay root");
+    found[0]
+}
+
+fn overlay_panel_entity(app: &App, root: Entity) -> Entity {
+    let world = app.world();
+    world
+        .entity(root)
+        .get::<Children>()
+        .into_iter()
+        .flatten()
+        .copied()
+        .find(|child| world.get::<Surface>(*child) == Some(&Surface::Panel))
+        .expect("the overlay content sits in the shell Surface::Panel")
+}
+
+/// BRL-zvqd: every in-flow overlay uses the shell panel, the shell font and Surface-role
+/// buttons, like the full-screen Connection Lost surface.
+fn assert_shell_overlay(app: &mut App, root: Entity, screen: &str) {
+    let font = app
+        .world()
+        .resource::<crate::ClientAssetHandles>()
+        .dashboard_font
+        .clone();
+    overlay_panel_entity(app, root);
+    let world = app.world_mut();
+    let mut entities = Vec::new();
+    let mut pending = vec![root];
+    while let Some(entity) = pending.pop() {
+        entities.push(entity);
+        pending.extend(world.get::<Children>(entity).into_iter().flatten().copied());
+    }
+    let mut texts = 0;
+    let mut buttons = 0;
+    for entity in entities {
+        if world.get::<Text>(entity).is_some() {
+            texts += 1;
+            assert_eq!(
+                world.get::<TextFont>(entity).map(|text| text.font.clone()),
+                Some(FontSource::Handle(font.clone())),
+                "{screen}: text {:?} uses the shell font",
+                world.get::<Text>(entity).map(|text| text.0.clone())
+            );
+        }
+        if world.get::<FlowButton>(entity).is_some() {
+            buttons += 1;
+            assert!(
+                world.get::<Surface>(entity).is_some(),
+                "{screen}: every overlay button has a Surface role"
+            );
+        }
+    }
+    assert!(
+        texts >= 2 && buttons >= 1,
+        "{screen}: {texts} texts, {buttons} buttons"
+    );
+}
+
+#[test]
+fn dashboard_error_and_cancel_confirmation_use_the_shell_panel_font_and_surfaces() {
+    let font = bevy::asset::uuid_handle!("6f1f5c7e-2d6b-4a4e-9a51-0f4d3f6f9b21");
+    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+    app.insert_resource(crate::ClientAssetHandles::with_font_for_test(font));
+
+    *app.world_mut().resource_mut::<ClientOverlay>() = lost_match_dashboard_error();
+    app.update();
+    let root = overlay_root::<FlowErrorRoot>(&mut app);
+    assert_shell_overlay(&mut app, root, "Dashboard connection error");
+    let world = app.world_mut();
+    let mut buttons = world.query::<(&FlowButton, &Surface)>();
+    let back: Vec<_> = buttons
+        .iter(world)
+        .filter(|(button, _)| button.error_action)
+        .map(|(button, surface)| (button.index, button.action.clone(), *surface))
+        .collect();
+    assert_eq!(
+        back,
+        [(1_000, FlowUiAction::DismissError, Surface::Secondary)]
+    );
+    assert_eq!(app.world().resource::<FlowNavigation>().selected, 1_000);
+
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+        kind: FlowErrorKind::Queue,
+        message: "Queue commands are temporarily limited".to_string(),
+        return_flow: ClientFlow::Dashboard,
+        actions: [
+            Some(FlowErrorAction::TryAgainQueue),
+            Some(FlowErrorAction::Disconnect),
+        ],
+    });
+    app.update();
+    let root = overlay_root::<FlowErrorRoot>(&mut app);
+    assert_shell_overlay(&mut app, root, "Rate-limited queue error");
+    let world = app.world_mut();
+    let mut try_again =
+        world.query_filtered::<(&FlowButton, &Surface, Has<InteractionDisabled>), With<RateLimitTryAgain>>();
+    let (button, surface, disabled) = try_again.single(world).expect("one Try Again button");
+    assert_eq!(
+        (button.index, &button.action, *surface),
+        (1_000, &FlowUiAction::TryAgainQueue, Surface::Primary)
+    );
+    assert!(
+        !disabled,
+        "no rate-limit window is pending, so Try Again is enabled"
+    );
+
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
+    app.update();
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::MatchLoading);
+    *app.world_mut().resource_mut::<ClientOverlay>() = cancel_match_start_overlay();
+    app.update();
+    app.update();
+    let root = overlay_root::<screens::overlays::CancelConfirmationRoot>(&mut app);
+    assert_shell_overlay(&mut app, root, "Cancel match start");
+}
+
+/// BRL-zvqd: the restyled overlays fit the Pixel 8a landscape viewports and the default desktop
+/// window with every action reachable and the panel fully on screen.
+#[test]
+fn shell_overlays_fit_phone_and_desktop_viewports() {
+    for (width, height) in [(868, 411), (914, 411), (1280, 720)] {
+        let membership = lobby_membership_with_brawler();
+        let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
+            crate::ui::layout_harness::add_layout(app, width, height);
+        });
+        crate::ui::layout_harness::apply_viewport_fit(&mut app);
+        app.world_mut()
+            .resource_mut::<super::super::ClientProfileModel>()
+            .set_snapshot_for_test(membership.profile.clone());
+        let screen = format!("Dashboard error at {width}x{height}");
+        *app.world_mut().resource_mut::<ClientOverlay>() = lost_match_dashboard_error();
+        assert_phone_reachable(&mut app, &screen);
+        let root = overlay_root::<FlowErrorRoot>(&mut app);
+        let panel = overlay_panel_entity(&app, root);
+        assert!(
+            crate::ui::layout_harness::on_screen(app.world_mut(), panel),
+            "{screen}: the panel is not fully on screen"
+        );
+
+        let screen = format!("Two-action error at {width}x{height}");
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Persistence,
+            message: "Your brawler changes could not be saved to this device. Check free storage, then retry or continue without saving.".to_string(),
+            return_flow: ClientFlow::Dashboard,
+            actions: [
+                Some(FlowErrorAction::RetrySave),
+                Some(FlowErrorAction::ContinueWithoutSaving),
+            ],
+        });
+        assert_phone_reachable(&mut app, &screen);
+        let root = overlay_root::<FlowErrorRoot>(&mut app);
+        let panel = overlay_panel_entity(&app, root);
+        assert!(
+            crate::ui::layout_harness::on_screen(app.world_mut(), panel),
+            "{screen}: the panel is not fully on screen"
+        );
+
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
+        app.update();
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::MatchLoading);
+        *app.world_mut().resource_mut::<ClientOverlay>() = cancel_match_start_overlay();
+        let screen = format!("Cancel confirmation at {width}x{height}");
+        assert_phone_reachable(&mut app, &screen);
+        let root = overlay_root::<screens::overlays::CancelConfirmationRoot>(&mut app);
+        let panel = overlay_panel_entity(&app, root);
+        assert!(
+            crate::ui::layout_harness::on_screen(app.world_mut(), panel),
+            "{screen}: the panel is not fully on screen"
+        );
+    }
+}

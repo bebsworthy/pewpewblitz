@@ -43,6 +43,26 @@ pub(crate) struct ClientAssetHandles {
 }
 
 impl ClientAssetHandles {
+    /// Placeholder handles with a caller-chosen shell font, so headless flow tests can tell the
+    /// shell typography from Bevy's default font.
+    #[cfg(test)]
+    pub(crate) fn with_font_for_test(dashboard_font: Handle<Font>) -> Self {
+        Self {
+            audio: BTreeMap::new(),
+            character: Handle::default(),
+            zombie_character: Handle::default(),
+            weapons: std::array::from_fn(|_| Handle::default()),
+            loading_logo: Handle::default(),
+            wordmark: Handle::default(),
+            dashboard_logo: Handle::default(),
+            dashboard_badges: std::array::from_fn(|_| Handle::default()),
+            dashboard_identity_panel: Handle::default(),
+            dashboard_icons: std::array::from_fn(|_| Handle::default()),
+            dashboard_underline: Handle::default(),
+            dashboard_font,
+        }
+    }
+
     fn load(asset_server: &AssetServer) -> Self {
         let audio = audio_asset_paths()
             .expect("embedded client asset manifest is valid")

@@ -100,45 +100,6 @@ pub(in crate::flow) fn spawn_heading(parent: &mut ChildSpawnerCommands, text: &s
     ));
 }
 
-pub(in crate::flow) fn spawn_flow_error_button(
-    parent: &mut ChildSpawnerCommands,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-) {
-    spawn_flow_error_button_disabled(parent, index, action, label, false);
-}
-
-pub(in crate::flow) fn spawn_flow_error_button_disabled(
-    parent: &mut ChildSpawnerCommands,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    disabled: bool,
-) {
-    let mut entity = parent.spawn((
-        Button,
-        FlowButton {
-            index,
-            action,
-            error_action: true,
-        },
-        Node {
-            width: percent(92),
-            min_height: px(44),
-            padding: UiRect::axes(px(12), px(8)),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-
-            ..default()
-        },
-    ));
-    if disabled {
-        entity.insert(InteractionDisabled);
-    }
-    entity.with_child((Text::new(label), TextFont::from_font_size(18.0)));
-}
-
 // Flow owns action semantics and input scope; Surface owns all visual policy.
 #[allow(
     clippy::needless_pass_by_value,

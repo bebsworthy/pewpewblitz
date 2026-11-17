@@ -10,12 +10,12 @@ use crate::{
                 action_node, root_background, root_node, spawn_action, spawn_background,
                 spawn_logo, spawn_text,
             },
-            shared::{FlowButton, FlowNavigation, spawn_flow_error_button, spawn_heading},
+            shared::FlowNavigation,
         },
     },
     ui::{
         surface::Surface,
-        theme::{INK, PANEL, PLAY, PLAY_HIGHLIGHT, TEXT, font},
+        theme::{INK, TEXT, font},
     },
 };
 use bevy::{prelude::*, ui::InteractionDisabled};
@@ -30,41 +30,61 @@ pub(in crate::flow) struct FlowErrorRoot(FlowError);
 pub(in crate::flow) struct RateLimitTryAgain;
 
 #[derive(Component)]
-pub(in crate::flow) struct RateLimitTryAgainLabel;
-
-#[derive(Component)]
 pub(in crate::flow) struct CancelConfirmationRoot;
 
-fn spawn_rate_limit_try_again_button(
-    parent: &mut ChildSpawnerCommands,
-    index: usize,
-    action: FlowUiAction,
-) {
-    parent
-        .spawn((
-            Button,
-            InteractionDisabled,
-            RateLimitTryAgain,
-            FlowButton {
-                index,
-                action,
-                error_action: true,
-            },
-            Node {
-                width: percent(92),
-                min_height: px(44),
-                padding: UiRect::axes(px(12), px(8)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
+/// The dimmed full-screen scrim every in-flow overlay sits on.
+fn overlay_scrim() -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(0),
+            right: px(0),
+            top: px(0),
+            bottom: px(0),
+            display: Display::Flex,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            padding: UiRect::all(px(24)),
+            ..default()
+        },
+        BackgroundColor(INK.with_alpha(0.72)),
+        GlobalZIndex(500),
+    )
+}
 
-                ..default()
-            },
-        ))
-        .with_child((
-            RateLimitTryAgainLabel,
-            Text::new("TRY AGAIN"),
-            TextFont::from_font_size(18.0),
-        ));
+/// The shell panel an overlay's copy and actions sit in; `Surface` owns its chrome.
+fn overlay_panel() -> impl Bundle {
+    (
+        Surface::Panel,
+        Node {
+            width: percent(88),
+            max_width: px(720),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: px(14),
+            padding: UiRect::axes(px(40), px(28)),
+            ..default()
+        },
+        BackgroundColor(Color::NONE),
+        BorderColor::all(Color::NONE),
+    )
+}
+
+/// A column that keeps overlay actions one width, as on the Connection Lost surface.
+fn overlay_actions() -> Node {
+    Node {
+        width: percent(100),
+        max_width: px(560),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        row_gap: px(10),
+        margin: UiRect::top(px(6)),
+        ..default()
+    }
+}
+
+fn overlay_action_node() -> Node {
+    action_node(percent(100), 56.0)
 }
 
 #[allow(
@@ -105,59 +125,58 @@ pub(in crate::flow) fn present_flow_error_overlay(
         .spawn((
             FlowErrorRoot(error.clone()),
             DespawnOnExit(error.return_flow),
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(0),
-                bottom: px(0),
-                display: Display::Flex,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::all(px(24)),
-                ..default()
-            },
-            BackgroundColor(INK.with_alpha(0.72)),
-            GlobalZIndex(500),
+            overlay_scrim(),
         ))
         .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: percent(88),
-                    max_width: px(720),
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: px(12),
-                    padding: UiRect::all(px(24)),
-                    border: UiRect::all(px(2)),
-                    ..default()
-                },
-                BackgroundColor(PANEL),
-                BorderColor::all(PLAY),
-            ))
-            .with_children(|panel| {
-                spawn_heading(panel, error.kind.title());
-                panel.spawn((Text::new(error.message.clone()), TextColor(PLAY_HIGHLIGHT)));
-                for (offset, action) in error.actions.into_iter().flatten().enumerate() {
-                    let (ui_action, label) = flow_error_action_button(action);
-                    if action == FlowErrorAction::TryAgainQueue {
-                        spawn_rate_limit_try_again_button(
-                            panel,
-                            ERROR_BUTTON_BASE + offset,
-                            ui_action,
-                        );
-                    } else {
-                        spawn_flow_error_button(
-                            panel,
-                            ERROR_BUTTON_BASE + offset,
-                            ui_action,
-                            label,
-                        );
-                    }
-                }
+            root.spawn(overlay_panel()).with_children(|panel| {
+                spawn_text(panel, assets.as_deref(), error.kind.title(), 40.0);
+                panel.spawn((
+                    Text::new(error.message.clone()),
+                    font(assets.as_deref(), 22.0),
+                    TextColor(TEXT),
+                    TextLayout::new(Justify::Center, LineBreak::WordBoundary),
+                    Node {
+                        max_width: px(600),
+                        ..default()
+                    },
+                ));
+                panel.spawn(overlay_actions()).with_children(|actions| {
+                    spawn_flow_error_actions(actions, error, assets.as_deref());
+                });
             });
         });
+}
+
+fn spawn_flow_error_actions(
+    actions: &mut ChildSpawnerCommands,
+    error: &FlowError,
+    assets: Option<&ClientAssetHandles>,
+) {
+    for (offset, action) in error.actions.into_iter().flatten().enumerate() {
+        let (ui_action, label) = flow_error_action_button(action);
+        let role = if offset == 0 && leads_forward(action) {
+            Surface::Primary
+        } else {
+            Surface::Secondary
+        };
+        let button = spawn_action(
+            actions,
+            assets,
+            ERROR_BUTTON_BASE + offset,
+            ui_action,
+            label,
+            Some(role),
+            true,
+            overlay_action_node(),
+        );
+        if action == FlowErrorAction::TryAgainQueue {
+            // Enabled by `update_rate_limit_try_again` once the rate-limit window passes.
+            actions
+                .commands()
+                .entity(button)
+                .insert((RateLimitTryAgain, InteractionDisabled));
+        }
+    }
 }
 
 fn spawn_connection_recovery(
@@ -287,8 +306,8 @@ pub(in crate::flow) fn update_rate_limit_try_again(
     mut commands: Commands,
     time: Res<Time<Real>>,
     queue: Res<ClientQueueModel>,
-    buttons: Query<Entity, With<RateLimitTryAgain>>,
-    mut labels: Query<&mut Text, With<RateLimitTryAgainLabel>>,
+    buttons: Query<(Entity, &Children), With<RateLimitTryAgain>>,
+    mut labels: Query<&mut Text>,
 ) {
     let remaining = queue
         .pending()
@@ -297,20 +316,36 @@ pub(in crate::flow) fn update_rate_limit_try_again(
             deadline.saturating_sub(time.elapsed())
         });
     let enabled = remaining.is_zero();
-    for entity in &buttons {
+    let copy = if enabled {
+        "TRY AGAIN".to_string()
+    } else {
+        format!("TRY AGAIN IN {:.1}s", remaining.as_secs_f32())
+    };
+    for (entity, children) in &buttons {
         if enabled {
             commands.entity(entity).remove::<InteractionDisabled>();
         } else {
             commands.entity(entity).insert(InteractionDisabled);
         }
+        let mut labels = labels.iter_many_mut(children);
+        while let Some(mut label) = labels.fetch_next() {
+            if label.0 != copy {
+                label.0.clone_from(&copy);
+            }
+        }
     }
-    for mut label in &mut labels {
-        label.0 = if enabled {
-            "TRY AGAIN".to_string()
-        } else {
-            format!("TRY AGAIN IN {:.1}s", remaining.as_secs_f32())
-        };
-    }
+}
+
+/// Actions that retry or continue the player's path lead the panel; dismissals stay secondary.
+fn leads_forward(action: FlowErrorAction) -> bool {
+    matches!(
+        action,
+        FlowErrorAction::RetryConnection
+            | FlowErrorAction::RetrySave
+            | FlowErrorAction::RetryQueue
+            | FlowErrorAction::TryAgainQueue
+            | FlowErrorAction::ContinueWithDefaults
+    )
 }
 
 fn flow_error_action_button(action: FlowErrorAction) -> (FlowUiAction, &'static str) {
@@ -342,6 +377,7 @@ pub(in crate::flow) fn present_cancel_confirmation(
     overlay: Res<ClientOverlay>,
     roots: Query<Entity, With<CancelConfirmationRoot>>,
     mut navigation: ResMut<FlowNavigation>,
+    assets: Option<Res<ClientAssetHandles>>,
 ) {
     let ClientOverlay::Confirmation(_) = overlay.as_ref() else {
         for entity in &roots {
@@ -353,45 +389,43 @@ pub(in crate::flow) fn present_cancel_confirmation(
         return;
     }
     navigation.selected = 0;
+    let assets = assets.as_deref();
     commands
         .spawn((
             CancelConfirmationRoot,
             DespawnOnExit(ClientFlow::MatchLoading),
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(0),
-                bottom: px(0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(INK.with_alpha(0.72)),
-            GlobalZIndex(500),
+            overlay_scrim(),
         ))
         .with_children(|root| {
-            root.spawn((
-                Node {
-                    width: percent(88),
-                    max_width: px(640),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: px(12),
-                    padding: UiRect::all(px(24)),
-                    ..default()
-                },
-                BackgroundColor(PANEL),
-            ))
-            .with_children(|panel| {
-                spawn_heading(panel, "CANCEL MATCH START?");
-                spawn_flow_error_button(panel, 0, FlowUiAction::KeepLoading, "KEEP LOADING");
-                spawn_flow_error_button(
-                    panel,
-                    1,
-                    FlowUiAction::ConfirmCancelMatchStart,
-                    "CANCEL MATCH START",
-                );
+            root.spawn(overlay_panel()).with_children(|panel| {
+                spawn_text(panel, assets, "CANCEL MATCH START?", 40.0);
+                panel.spawn(overlay_actions()).with_children(|actions| {
+                    for (index, action, label, role) in [
+                        (
+                            0,
+                            FlowUiAction::KeepLoading,
+                            "KEEP LOADING",
+                            Surface::Primary,
+                        ),
+                        (
+                            1,
+                            FlowUiAction::ConfirmCancelMatchStart,
+                            "CANCEL MATCH START",
+                            Surface::Secondary,
+                        ),
+                    ] {
+                        spawn_action(
+                            actions,
+                            assets,
+                            index,
+                            action,
+                            label,
+                            Some(role),
+                            true,
+                            overlay_action_node(),
+                        );
+                    }
+                });
             });
         });
 }
