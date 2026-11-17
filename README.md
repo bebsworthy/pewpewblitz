@@ -143,6 +143,7 @@ Run `just` to list the supported everyday surface.
 | `just android-build [HOST:PORT]` / `just android-install [HOST:PORT]` | Build the Android player APK (and install/launch it over adb); see [Android client](#android-client) |
 | `just ci` | Run lint, deterministic tests, the complete 2/4/6-client E2E matrix, and all nine Practice game types |
 | `just clean` | Remove Cargo build artifacts |
+| `just sweep [dry] [N]` | Prune `target/debug` artifacts and `target/brl*`/`agent-*` scratch dirs older than N days (default 2), keeping the newest artifact per crate, `target/dev`, `release`, Android outputs, and running binaries; `dry` only prints |
 
 E2E runs choose an unused loopback port by default and may run beside an interactive server. Set
 `BRAWLER_ROUTED_BIND` only when a fixed test address is required.

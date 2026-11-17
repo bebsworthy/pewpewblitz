@@ -105,6 +105,10 @@ ci: lint test _e2e-matrix _practice-e2e-matrix
 clean:
     cargo clean
 
+# Prune stale target/ artifacts and brl*/agent-* scratch dirs older than N days (default 2); `just sweep dry` only prints.
+sweep *args:
+    python3 scripts/sweep.py {{args}}
+
 _fmt-check:
     cargo fmt --all -- --check
 
