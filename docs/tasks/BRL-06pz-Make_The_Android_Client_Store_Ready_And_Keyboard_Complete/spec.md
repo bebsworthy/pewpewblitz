@@ -104,3 +104,36 @@ Known limits: the 30-frame mirror-settle window means a keystroke landing in the
 
 ## Rebase onto main (2026-11-18)
 Rebased onto `main` 40fc1563. The only conflict was in `flow/screens/map_maker.rs`: BRL-yrys `KeyedMapNameCommit` sat next to the new `edit_map_name` helper. Kept both, and added `Ime` to the new BRL-yrys map-library test app. The new commits are `34f42cd1` (soft keyboard) and `2da726b3` (signing/AAB/icon). After the rebase: `just lint` passes, `just test` passes (24 suites, 2572 tests, 0 failed), and Android clippy (`-D warnings`) is clean. The AAB was not rebuilt.
+
+## Device fix: blank landscape extract editor and EXECUTE key (2026-11-18, commit `4df8736f`)
+
+**Owner device check (main c6e18e2b).** These worked:
+- The URL layout, and the field text pre-filled in the keyboard.
+- Backspace and digits.
+- Done commits and hides the keyboard.
+- Back cancels and reverts the name.
+- Typing an address and joining the server.
+- The adaptive icon.
+
+**Bug:** in landscape, Gboard's full-screen extract editor was blank, so the player typed blind (owner screenshots `/Users/boyd/wip/brawler/target/brl-06pz/s2.png` and `s3.png`). The action key also read "EXECUTE".
+
+**Decision: option (b), no extract UI, plus a game-drawn strip.** Option (a) would need GameTextInput's `getExtractedText` and `updateExtractedText` support, which we do not own. Option (b) is small and does not depend on any one keyboard app.
+- `soft_keyboard.rs`: the keyboard opens with `IME_FLAG_NO_FULLSCREEN | IMG_FLAG_NO_EXTRACT_UI`. The Enter key's action Done is now set in the imeOptions action bits through `ImeOptions::set_action`. Before this change only `actionId` was set, and the keyboard reads the action from imeOptions. On the device, `dumpsys input_method` now shows `imeOptions=0x12000006` and the action key is a check mark.
+- The shell sets `TextEntryFocus::set_on_screen_keyboard(true)` while a field is being edited.
+- `text_entry.rs`: `present_text_entry_strip` (PostUpdate, before `UiSystems::Prepare`) shows the field label and its text with a caret in an INK strip across the top of the screen. That strip sits in the area the landscape keyboard leaves uncovered, so fields that the keyboard hides (the name at y≈476, Map Maker dialogs) stay readable. Desktop never sets the flag, so it never shows the strip.
+- New test: `the_strip_shows_the_field_only_while_an_on_screen_keyboard_edits_it`.
+
+**Device verification** (Pixel 8a, `just android-install` with no address prefill; screenshots in `target/brl-06pz/` of the BRL-06pz worktree):
+
+| Field | Screenshots | Result |
+|---|---|---|
+| Server address | `after-1-address-open.png`, `after-2-address-typed.png`, `after-3-address-done.png` | The keyboard opens inline below the game. The strip reads `Server address: 192.168.31.47:5000\|`. Typing `0` and two Backspaces leaves `…:500` in both the strip and the field. Done (check mark) commits and hides the keyboard. |
+| Player name | `after-4-name-typed.png`, `after-5-name-back.png` | The field sits under the keyboard; the strip shows `Your name: Brawler-42DDX\|`. Back hides the keyboard and reverts the name to `Brawler-42DD`. |
+| Join | `after-6-dashboard.png` | Connect joined the port-5000 server. |
+| Map Maker, Create Map name | `after-10-mapname-open.png`, `after-11-mapname-typed.png`, `after-12-mapname-back.png` | The strip shows `Map name: Untitled Map Z\|`, after one Backspace removed `1` and `Z` was typed. Back cancels the dialog. |
+
+`just lint` passes. `just test` passes: 24 suites, 2574 tests, 0 failed.
+
+Known limits:
+- The strip covers the top ~50 logical px of the screen (titles) while the keyboard is up.
+- Gboard still shows word suggestions for name fields, even though NO_SUGGESTIONS is set.
