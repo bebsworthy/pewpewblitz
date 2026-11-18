@@ -4,9 +4,9 @@ was: BRL-0214
 
 title: Reject display names containing code points no font can draw
 
-status: doing
-closed:
-status_changed: 2026-11-18T03:22:57Z
+status: done
+closed: 2026-11-18T03:39:55Z
+status_changed: 2026-11-18T03:39:55Z
 
 theme: quality
 
@@ -20,7 +20,7 @@ related: [BRL-5e2s]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description

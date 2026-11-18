@@ -3,9 +3,9 @@ id: BRL-75dh
 
 title: Scale camera shake from barrel and other environment damage to the local fighter
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T20:38:36Z
+status_changed: 2026-11-18T03:39:55Z
 
 theme: core
 
@@ -19,7 +19,7 @@ related: [BRL-16aj]
 
 parent: BRL-q5c4
 
-rank: 16252928
+rank: 11337728
 ---
 
 # Description
