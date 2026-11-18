@@ -32,6 +32,14 @@ combat_smoke=${BRAWLER_RENDER_COMBAT:-0}
 # content/catalogs/builds.ron. The client validates it against the embedded catalog and selects,
 # or creates and selects, a saved brawler with that weapon through the canonical profile commands.
 render_weapon=${BRAWLER_RENDER_WEAPON:-}
+# Optional fixed aim for the measured client only (BRL-wegn): up, down, left, right, or a signed
+# X,Y axis. It replaces the combat-smoke aim (the peer keeps its own) so the captures show the
+# camera look-ahead toward one screen edge. Simulation +Y renders toward the top of the screen
+# (coordinates.rs maps it to render -Z; camera.rs looks along -Z from +Z with +Y up).
+render_aim=${BRAWLER_RENDER_AIM:-}
+# Optional measured-client move axis (signed X,Y). Defaults to 1,0, or 0,0 while an aim is held
+# so the lean is not mixed with follow motion.
+render_move=${BRAWLER_RENDER_MOVE:-}
 client_one_log=${report_path}.client-1.log
 client_two_log=${report_path}.client-2.log
 # The measured client requests exactly this many paired frame/state captures.
@@ -67,15 +75,17 @@ case "$reduced_effects" in
         ;;
 esac
 case "$combat_smoke" in
-    0) measured_combat_flags=; peer_combat_flags= ;;
+    0) measured_aim_flags=; measured_action_flags=; peer_combat_flags= ;;
     1)
-        measured_combat_flags='--aim-axis 1,0 --fire --ultimate'
+        measured_aim_flags='--aim-axis 1,0'
+        measured_action_flags='--fire --ultimate'
         peer_combat_flags='--aim-axis -1,0 --fire --ultimate'
         ;;
     dummy)
         # Chase and shoot the nearest opponent (a Practice bot), using the ultimate (Dash for
         # the default build) whenever it is charged: exercises followed-authority motion.
-        measured_combat_flags='--aim-dummy --fire --ultimate'
+        measured_aim_flags='--aim-dummy'
+        measured_action_flags='--fire --ultimate'
         peer_combat_flags='--aim-dummy --fire --ultimate'
         ;;
     *)
@@ -91,6 +101,43 @@ case "$render_weapon" in
         ;;
     *) measured_weapon_flags="--weapon-preset $render_weapon" ;;
 esac
+# Accept a signed X,Y pair whose components fit the client's i8 axis parser.
+is_axis() {
+    local value=$1 x y
+    [[ "$value" =~ ^-?[0-9]{1,3},-?[0-9]{1,3}$ ]] || return 1
+    x=${value%%,*}
+    y=${value#*,}
+    ((10#${x#-} <= 127 && 10#${y#-} <= 127))
+}
+case "$render_aim" in
+    '') measured_aim_axis= ;;
+    up) measured_aim_axis=0,1 ;;
+    down) measured_aim_axis=0,-1 ;;
+    left) measured_aim_axis=-1,0 ;;
+    right) measured_aim_axis=1,0 ;;
+    *)
+        if ! is_axis "$render_aim" || [[ "$render_aim" =~ ^-?0+,-?0+$ ]]; then
+            printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_AIM must be up, down, left, right, or a non-zero signed X,Y' >&2
+            exit 2
+        fi
+        measured_aim_axis=$render_aim
+        ;;
+esac
+if [[ -n "$measured_aim_axis" ]]; then
+    measured_aim_flags="--aim-axis $measured_aim_axis"
+fi
+measured_combat_flags="$measured_aim_flags${measured_aim_flags:+${measured_action_flags:+ }}$measured_action_flags"
+if [[ -n "$render_move" ]]; then
+    if ! is_axis "$render_move"; then
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_MOVE must be a signed X,Y axis' >&2
+        exit 2
+    fi
+    measured_move_axis=$render_move
+elif [[ -n "$measured_aim_axis" ]]; then
+    measured_move_axis=0,0
+else
+    measured_move_axis=1,0
+fi
 if [[ "$practice_smoke" == 1 ]]; then
     validate_peer=0
 fi
@@ -217,7 +264,7 @@ supervisor_pid=$!
 
 if [[ "$practice_smoke" == 1 ]]; then
     BRAWLER_CLIENT_DATA_DIR="$client_data_dir/1" "$target_dir"/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
-        --auto-connect --product-practice-smoke --product-game-type "$game_type" --move-axis 1,0 \
+        --auto-connect --product-practice-smoke --product-game-type "$game_type" --move-axis "$measured_move_axis" \
         --window-size "$window_size" \
         --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
         --screenshot-count "$capture_count" \
@@ -228,7 +275,7 @@ if [[ "$practice_smoke" == 1 ]]; then
         >"$client_one_log" 2>&1 &
 else
     BRAWLER_CLIENT_DATA_DIR="$client_data_dir/1" "$target_dir"/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
-        --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis 1,0 \
+        --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis "$measured_move_axis" \
         --window-size "$window_size" \
         --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
         --screenshot-count "$capture_count" \
@@ -311,13 +358,17 @@ if [[ "$png_count" -ne "$capture_count" || "$json_count" -ne "$capture_count" ]]
         "$capture_count" "$png_count" "$json_count" "$capture_dir" >&2
     exit 1
 fi
+aim_summary=
+if [[ -n "$measured_aim_axis" ]]; then
+    aim_summary="; aim=${render_aim} (${measured_aim_axis}); move=${measured_move_axis}"
+fi
 if [[ "$practice_smoke" == 1 ]]; then
-    printf 'brawler render evidence: Practice %s passed; report=%s; captures=%s\n' \
-        "$game_type" "$report_path" "$capture_dir"
+    printf 'brawler render evidence: Practice %s passed; report=%s; captures=%s%s\n' \
+        "$game_type" "$report_path" "$capture_dir" "$aim_summary"
 elif [[ "$validate_peer" == 1 ]]; then
-    printf 'brawler render evidence: passed; reports=%s,%s; captures=%s\n' \
-        "$report_path" "$peer_report_path" "$capture_dir"
+    printf 'brawler render evidence: passed; reports=%s,%s; captures=%s%s\n' \
+        "$report_path" "$peer_report_path" "$capture_dir" "$aim_summary"
 else
-    printf 'brawler render evidence: passed; report=%s; pacing-peer=%s; captures=%s\n' \
-        "$report_path" "$peer_report_path" "$capture_dir"
+    printf 'brawler render evidence: passed; report=%s; pacing-peer=%s; captures=%s%s\n' \
+        "$report_path" "$peer_report_path" "$capture_dir" "$aim_summary"
 fi
