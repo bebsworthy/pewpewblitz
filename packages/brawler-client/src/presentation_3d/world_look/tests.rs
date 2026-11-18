@@ -223,6 +223,40 @@ fn non_glow_effect_shaders_stay_below_the_peak() {
     }
 }
 
+/// BRL-3ebg: on a non-HDR camera every custom effect shader finishes through the shared
+/// `effect_output` step, which tonemaps and grades under `TONEMAP_IN_SHADER`.
+#[test]
+fn custom_effect_shaders_finish_through_the_shared_output_step() {
+    let output = include_str!("../../../../../assets/shaders/effect_output.wgsl");
+    assert!(output.contains("#ifdef TONEMAP_IN_SHADER"));
+    assert!(output.contains("tone_mapping(color, view.color_grading)"));
+    let shaders = [
+        include_str!("../../../../../assets/shaders/fire_area.wgsl"),
+        include_str!("../../../../../assets/shaders/elemental_support_area.wgsl"),
+        include_str!("../../../../../assets/shaders/splash_area.wgsl"),
+        include_str!("../../../../../assets/shaders/sticky_blob.wgsl"),
+        include_str!("../../../../../assets/shaders/dash_trail.wgsl"),
+        include_str!("../../../../../assets/shaders/cone_spray.wgsl"),
+        include_str!("../../../../../assets/shaders/straight_projectile_trail.wgsl"),
+    ];
+    for source in shaders {
+        assert!(source.contains("#import \"shaders/effect_output.wgsl\"::effect_output"));
+        let fragment = source
+            .split("@fragment")
+            .nth(1)
+            .expect("effect shader has a fragment entry point");
+        for line in fragment
+            .lines()
+            .filter(|line| line.trim().starts_with("return "))
+        {
+            assert!(
+                line.contains("return effect_output("),
+                "fragment return bypasses effect_output: {line}"
+            );
+        }
+    }
+}
+
 /// Unlit materials ignore `emissive` (Bevy `pbr.wgsl` unlit branch), so the shared palette
 /// authors none; only the glow set's unlit materials carry HDR `base_color`.
 #[test]

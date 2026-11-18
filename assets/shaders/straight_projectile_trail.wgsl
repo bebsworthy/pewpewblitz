@@ -1,6 +1,7 @@
 // Deliberate glow part (BRL-0176): the trail belongs to the projectile glow set, so its
 // white-hot head wrap and team color may exceed the bloom knee next to the HDR core.
 #import bevy_pbr::forward_io::VertexOutput
+#import "shaders/effect_output.wgsl"::effect_output
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)
 var<uniform> params: vec4<f32>;
@@ -39,5 +40,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let white_hot = vec3<f32>(2.8, 3.2, 3.4);
     let wrap_light = max(hot_center * head * 0.62, wrap_rim * head_wrap * 0.46);
     let color = mix(trail_color.rgb * (0.42 + filament * 0.58), white_hot, wrap_light);
-    return vec4<f32>(color, alpha);
+    return effect_output(vec4<f32>(color, alpha));
 }

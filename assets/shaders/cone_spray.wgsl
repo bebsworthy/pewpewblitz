@@ -2,6 +2,7 @@
 // NON_GLOW_HDR_PEAK in presentation_3d/world_look.rs, so blended output stays under the
 // bloom knee. Only projectile cores, muzzle/explosion flashes, and pickups bloom.
 #import bevy_pbr::forward_io::VertexOutput
+#import "shaders/effect_output.wgsl"::effect_output
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)
 var<uniform> params: vec4<f32>;
@@ -39,7 +40,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if quality > 1.5 {
         let pulse = sin(radial * 8.0 - time * 1.1) * 0.5 + 0.5;
         let color = mix(vec3<f32>(0.025, 0.22, 0.10), vec3<f32>(0.10, 0.78, 0.35), pulse);
-        return vec4<f32>(color, 0.075 + boundary * 0.13);
+        return effect_output(vec4<f32>(color, 0.075 + boundary * 0.13));
     }
 
     let broad_warp = value_noise(point * 0.58 + vec2<f32>(-time * 0.22, time * 0.08));
@@ -84,5 +85,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let lit = vec3<f32>(0.26, 1.55, 0.72);
     var color = mix(shadow, gas, billow);
     color = mix(color, lit, filament * 0.82 + boundary * 0.42);
-    return vec4<f32>(color, alpha);
+    return effect_output(vec4<f32>(color, alpha));
 }

@@ -266,8 +266,12 @@ value in `base_color` and the shared unlit palette authors no `emissive` at all.
 shaders (fire, poison, and restoration fields, Splash, Sticky, cone spray, and the Dash wake) keep
 every authored color at or below a 2.0 peak, under the 2.25 bloom knee, so blended area, status,
 and trail effects never bloom (BRL-0176); the straight projectile trail belongs to the projectile
-glow set. On the `Low` tier (no HDR) custom effect shaders write untonemapped values that clip at
-1.0 per channel.
+glow set. Without HDR (the `Low` tier) Bevy sets `TONEMAP_IN_SHADER` for every material, and
+the seven custom effect shaders end in the shared `assets/shaders/effect_output.wgsl` step, which
+then applies the camera's tonemapper and grading to rgb (alpha kept) like `StandardMaterial` and the
+toon material, so effects roll off instead of clipping at 1.0 per channel; with HDR it is a no-op
+and the post pass grades them (BRL-3ebg). The fighter outline keeps its flat authored ink colour
+untonemapped on non-HDR cameras.
 
 **Quality tiers (BRL-0161).** The world presentation runs at one of three tiers authored in
 `assets/catalogs/render_quality.ron` (client-only, outside the gameplay fingerprint): `High` is the
