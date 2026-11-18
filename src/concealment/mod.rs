@@ -179,12 +179,15 @@ mod server {
                 Option<&crate::matchplay::RespawnState>,
                 Option<&crate::matchplay::SpawnProtection>,
                 Has<Defeated>,
+                Option<&crate::server::SeatHold>,
             ),
             With<Fighter>,
         >,
         mut projections: Query<(Entity, &mut crate::matchplay::PublicParticipantState)>,
     ) {
-        use crate::matchplay::{PublicParticipantState, PublicParticipantStatus};
+        use crate::matchplay::{
+            ParticipantControl, PublicParticipantState, PublicParticipantStatus,
+        };
         use lightyear::prelude::{NetworkTarget, Replicate};
         let mut active_ids = HashSet::new();
         for (
@@ -198,6 +201,7 @@ mod server {
             respawn,
             protection,
             defeated,
+            hold,
         ) in &fighters
         {
             active_ids.insert(network.0);
@@ -227,6 +231,13 @@ mod server {
                 selected: selected.is_some(),
                 weapon_preset_id: weapon.and_then(|value| value.source_preset_id.map(|id| id.0)),
                 status,
+                // Only a held routed seat is bot-controlled; the hold is server-owned, so
+                // clients learn it from this fact and never infer it (BRL-dwqx).
+                control: hold.map_or(ParticipantControl::Player, |hold| {
+                    ParticipantControl::HeldByBot {
+                        expires_at_tick: hold.expires_at_tick,
+                    }
+                }),
             };
             if let Some((_, mut existing)) = projections
                 .iter_mut()

@@ -354,3 +354,73 @@ fn public_participant_projection_consumes_weapon_without_replicated_loadout() {
             .is_none()
     );
 }
+
+/// BRL-dwqx: a held routed seat is published as bot-controlled with the hold's expiry, and a
+/// reclaimed seat (hold removed) or a Practice bot that was a bot from the start is `Player`.
+#[cfg(feature = "server")]
+#[test]
+fn public_participant_projection_publishes_a_held_seat_as_bot_controlled() {
+    use crate::{
+        combat::TeamId,
+        matchplay::{
+            FighterDisplayName, MatchId, MatchParticipant, ParticipantControl,
+            PublicParticipantState,
+        },
+        protocol::{Fighter, NetworkEntityId, PlayerId},
+        server::SeatHold,
+    };
+    use bevy::prelude::*;
+
+    let mut app = App::new();
+    app.add_systems(Update, server::sync_public_participant_projections);
+    let participant = MatchParticipant {
+        match_id: MatchId(9),
+        ready: true,
+        restart_ready: false,
+    };
+    let held = app
+        .world_mut()
+        .spawn((
+            Fighter,
+            PlayerId(1),
+            NetworkEntityId(7),
+            TeamId(0),
+            FighterDisplayName("held".to_owned()),
+            participant,
+            SeatHold {
+                expires_at_tick: 4_321,
+            },
+        ))
+        .id();
+    app.world_mut().spawn((
+        Fighter,
+        PlayerId(2),
+        NetworkEntityId(8),
+        TeamId(1),
+        FighterDisplayName("practice bot".to_owned()),
+        participant,
+        crate::bots::PracticeBotController::new(2),
+    ));
+    let control = |app: &mut App, network: u64| {
+        let world = app.world_mut();
+        let mut query = world.query::<&PublicParticipantState>();
+        query
+            .iter(world)
+            .find(|state| state.fighter_network_id == NetworkEntityId(network))
+            .expect("projection exists")
+            .control
+    };
+
+    app.update();
+    assert_eq!(
+        control(&mut app, 7),
+        ParticipantControl::HeldByBot {
+            expires_at_tick: 4_321
+        }
+    );
+    assert_eq!(control(&mut app, 8), ParticipantControl::Player);
+
+    app.world_mut().entity_mut(held).remove::<SeatHold>();
+    app.update();
+    assert_eq!(control(&mut app, 7), ParticipantControl::Player);
+}

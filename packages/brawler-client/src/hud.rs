@@ -64,6 +64,8 @@ struct CachedRosterEntry {
     display_name: String,
     status: CachedRosterStatus,
     connected: bool,
+    /// The server-published hold expiry while a bot drives this disconnected player's seat.
+    held_until: Option<u64>,
     health: Option<(u16, u16)>,
     boost_stacks: u8,
 }
@@ -146,6 +148,7 @@ impl Plugin for ClientReadinessHudPlugin {
             .init_resource::<PlateState>()
             .init_resource::<ScoreboardState>()
             .init_resource::<kill_feed::KillFeed>()
+            .init_resource::<kill_feed::SeatControlTransitions>()
             .init_resource::<touch::TouchControls>()
             .add_systems(Startup, spawn_readiness_hud)
             .add_systems(
@@ -554,6 +557,7 @@ fn team_strip_rows(
             let seconds = |tick: u64| tick.saturating_sub(now.unwrap_or(tick)).div_ceil(60);
             let status = if entry.connected {
                 match entry.status {
+                    _ if entry.held_until.is_some() => "BOT".to_string(),
                     CachedRosterStatus::Defeated => "DOWN".to_string(),
                     CachedRosterStatus::Respawning(at) => format!("{}s", seconds(at)),
                     _ => format!("+{}", entry.boost_stacks),
@@ -816,6 +820,12 @@ fn sync_roster_and_collect_phase_facts<'a>(
                     }
                 },
                 connected: true,
+                held_until: match public.control {
+                    brawler::matchplay::ParticipantControl::Player => None,
+                    brawler::matchplay::ParticipantControl::HeldByBot { expires_at_tick } => {
+                        Some(expires_at_tick)
+                    }
+                },
                 health: None,
                 boost_stacks: 0,
             },
@@ -1025,6 +1035,36 @@ fn readiness_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BRL-dwqx: a seat the server publishes as held shows BOT in the Zombie team strip, which
+    /// stays distinct from OFF (projection missing this frame).
+    #[test]
+    fn team_strip_marks_a_bot_held_seat() {
+        let entry = |held_until, connected| CachedRosterEntry {
+            team: TeamId(0),
+            display_name: "Ana".to_string(),
+            status: CachedRosterStatus::Alive,
+            connected,
+            held_until,
+            health: Some((50, 100)),
+            boost_stacks: 1,
+        };
+        let roster = MatchRosterPresentation {
+            match_id: None,
+            entries: [
+                (1, entry(None, true)),
+                (2, entry(Some(900), true)),
+                (3, entry(None, false)),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let statuses: Vec<_> = team_strip_rows(&roster, Some(1), Some(TeamId(0)), Some(0))
+            .into_iter()
+            .map(|row| row.status)
+            .collect();
+        assert_eq!(statuses, ["+1", "BOT", "OFF"]);
+    }
 
     #[test]
     fn retained_hud_text_queries_are_disjoint_in_runtime_composition() {

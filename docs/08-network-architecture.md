@@ -637,3 +637,11 @@ the completed match (see [the routed architecture](./14-multiplayer-server-archi
 `SeatReleased` now also releases every seat that can no longer be rejoined: at completion for each
 seat that is not held, and later for a held seat once it is reclaimed or expires. A rejoined
 session is admitted in `Completed` with the unchanged `MatchJoinOutcome`.
+
+Protocol 50 adds `PublicParticipantState::control: ParticipantControl { Player, HeldByBot {
+expires_at_tick } }` (BRL-dwqx): the match worker publishes a held seat (BRL-yyeg) on the
+always-public roster projection so other players can see that a server bot drives it (see
+[the routed architecture](./14-multiplayer-server-architecture.md#rejoining-a-running-match)). The
+new field changes the canonical encoding but not the registered types, so the protocol-registry
+fingerprint is unchanged (15212284317352318216) and only `SUPPORTED_PROTOCOL_VERSION` guards it.
+Control IPC version 7 and the match manifest are unchanged. Every role must be rebuilt.

@@ -169,6 +169,20 @@ pub enum PublicParticipantStatus {
     Protected { expires_at_tick: u64 },
 }
 
+/// Who drives a participant's fighter, as the public roster tells every player (BRL-dwqx).
+///
+/// Orthogonal to [`PublicParticipantStatus`]: a held fighter can also be respawning or defeated.
+/// Practice bots that were bots from the start are `Player`; only a held routed seat (its
+/// player's session was lost mid-match) is `HeldByBot` until it is reclaimed or expires.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ParticipantControl {
+    #[default]
+    Player,
+    HeldByBot {
+        expires_at_tick: u64,
+    },
+}
+
 /// Always-public roster projection kept separate from the cullable spatial fighter.
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PublicParticipantState {
@@ -180,6 +194,7 @@ pub struct PublicParticipantState {
     pub selected: bool,
     pub weapon_preset_id: Option<u16>,
     pub status: PublicParticipantStatus,
+    pub control: ParticipantControl,
 }
 
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

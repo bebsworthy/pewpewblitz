@@ -48,7 +48,7 @@ pub(crate) use lifecycle::{
 pub(crate) use model::BotObjectiveView;
 pub use model::{
     ActiveCombatant, FighterDisplayName, MatchClock, MatchId, MatchMember, MatchParticipant,
-    MatchPhase, MatchResult, MatchRoot, MatchState, PublicParticipantState,
+    MatchPhase, MatchResult, MatchRoot, MatchState, ParticipantControl, PublicParticipantState,
     PublicParticipantStatus, ResolvedMatchCapacity, RespawnState, SpawnProtection,
     TeamSlotCapacity,
 };

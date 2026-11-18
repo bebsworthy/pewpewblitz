@@ -141,7 +141,10 @@ fn scoreboard_row(
         tick.saturating_sub(now.unwrap_or(tick))
             .div_ceil(brawler::timing::SIMULATION_TICK_HZ)
     };
-    let (status, status_tone) = if entry.connected {
+    let (status, status_tone) = if let (true, Some(until)) = (entry.connected, entry.held_until) {
+        // A bot drives the disconnected player's held seat until it is reclaimed or expires.
+        (format!("BOT {}s", seconds(until)), StatusTone::Offline)
+    } else if entry.connected {
         match entry.status {
             CachedRosterStatus::Alive => ("ALIVE".to_string(), StatusTone::Normal),
             CachedRosterStatus::Ready | CachedRosterStatus::RestartReady if in_play => {
@@ -621,6 +624,7 @@ mod tests {
             display_name: name.to_string(),
             status,
             connected: true,
+            held_until: None,
             health: Some((40, 100)),
             boost_stacks: 0,
         }
@@ -676,6 +680,8 @@ mod tests {
         let mut boosted = entry(0, "Buff", CachedRosterStatus::Alive);
         boosted.boost_stacks = 2;
         boosted.health = None;
+        let mut held = entry(0, "Held", CachedRosterStatus::Respawning(100 + tick));
+        held.held_until = Some(100 + 42 * tick);
         let roster = roster_of([
             (1, entry(0, "Down", CachedRosterStatus::Defeated)),
             (
@@ -688,6 +694,7 @@ mod tests {
             ),
             (4, offline),
             (5, boosted),
+            (6, held),
         ]);
         let state = scoreboard_state(&roster, None, Some(TeamId(0)), Some(100), true);
         let rows = &state.sections[0].rows;
@@ -703,6 +710,7 @@ mod tests {
                 ("HP 40/100", "PROTECTED 1s", StatusTone::Protected),
                 ("HP 40/100", "DISCONNECTED", StatusTone::Offline),
                 ("HP --", "ALIVE  BOOST +2", StatusTone::Normal),
+                ("HP 40/100", "BOT 42s", StatusTone::Offline),
             ]
         );
         assert_eq!(

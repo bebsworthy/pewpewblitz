@@ -26,6 +26,15 @@ const PLAYER_NAME_MAX_WIDTH: f32 = OVERHEAD_WIDTH - 2.0 * PLAYER_NAME_SIDE_PADDI
 /// Lilita One maps U+2026, so truncation uses the single-glyph ellipsis.
 const PLAYER_NAME_ELLIPSIS: &str = "\u{2026}";
 const PLAYER_NAME_HEIGHT: f32 = 19.0;
+/// Fixed width of the BOT chip shown before a held seat's name (BRL-dwqx), so the name's fit
+/// budget is known without measuring the chip.
+const BOT_CHIP_WIDTH: f32 = 30.0;
+const BOT_CHIP_HEIGHT: f32 = 15.0;
+const BOT_CHIP_FONT_SIZE: f32 = 11.0;
+/// Space between the BOT chip and the name.
+const BOT_CHIP_GAP: f32 = 4.0;
+/// Widest fitted name beside the BOT chip, so chip plus name stay inside the plate.
+const HELD_PLAYER_NAME_MAX_WIDTH: f32 = PLAYER_NAME_MAX_WIDTH - BOT_CHIP_WIDTH - BOT_CHIP_GAP;
 const HEALTH_BAR_WIDTH: f32 = 96.0;
 const HEALTH_BAR_HEIGHT: f32 = 22.0;
 const HEALTH_BAR_OUTLINE: f32 = 2.0;
@@ -51,6 +60,7 @@ pub(in super::super) struct ColdPieAssets {
 pub(in super::super) struct FighterOverheadUi {
     visual_root: Entity,
     player_name: Entity,
+    bot_chip: Entity,
     health_amount: Entity,
     fill: Entity,
     cold_pie: Entity,
@@ -76,8 +86,14 @@ pub(in super::super) struct FighterOverheadTextUi;
 #[derive(Component, Default)]
 pub(in super::super) struct FighterOverheadNameUi {
     full: String,
+    /// The BOT chip shares the name row, so a held seat's name fits a narrower budget.
+    held: bool,
     fitted: bool,
 }
+
+/// The compact BOT chip before the name of a fighter whose held seat a server bot drives.
+#[derive(Component)]
+pub(in super::super) struct FighterBotChipUi;
 
 #[derive(Component)]
 pub(in super::super) struct FighterAmmoRowUi;
@@ -103,9 +119,64 @@ type OverheadFighterQuery<'w, 's> = Query<
         Option<&'static brawler::combat::WeaponState>,
         Option<&'static brawler::matchplay::BoostStacks>,
         Has<Controlled>,
+        Option<&'static NetworkEntityId>,
     ),
     With<Fighter>,
 >;
+
+type BotChipQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static mut Node,
+    (
+        With<FighterBotChipUi>,
+        Without<FighterHealthFillUi>,
+        Without<FighterAmmoSegmentFillUi>,
+    ),
+>;
+
+/// The overhead name labels and BOT chips, and the public roster that says which seats a server
+/// bot holds (BRL-dwqx).
+#[derive(bevy::ecs::system::SystemParam)]
+pub(in super::super) struct OverheadNames<'w, 's> {
+    labels: Query<'w, 's, &'static mut FighterOverheadNameUi>,
+    participants: Query<'w, 's, &'static brawler::matchplay::PublicParticipantState>,
+    chips: BotChipQuery<'w, 's>,
+}
+
+impl OverheadNames<'_, '_> {
+    /// Fighter network IDs whose seats the server publishes as held by a bot.
+    fn held_fighters(&self) -> Vec<u64> {
+        self.participants
+            .iter()
+            .filter(|participant| {
+                matches!(
+                    participant.control,
+                    brawler::matchplay::ParticipantControl::HeldByBot { .. }
+                )
+            })
+            .map(|participant| participant.fighter_network_id.0)
+            .collect()
+    }
+
+    /// Shows the BOT chip for a held seat and refits the name when it or the chip changed.
+    fn present(&mut self, overhead: &FighterOverheadUi, name: &str, held: bool) {
+        if let Ok(mut chip) = self.chips.get_mut(overhead.bot_chip) {
+            let display = if held { Display::Flex } else { Display::None };
+            if chip.display != display {
+                chip.display = display;
+            }
+        }
+        if let Ok(mut label) = self.labels.get_mut(overhead.player_name)
+            && (label.full != name || label.held != held)
+        {
+            label.full.clear();
+            label.full.push_str(name);
+            label.held = held;
+            label.fitted = false;
+        }
+    }
+}
 
 type AmmoFillQuery<'w, 's> = Query<
     'w,
@@ -261,17 +332,7 @@ fn spawn_fighter_overhead(
     visual_root: Entity,
     font: &Handle<Font>,
 ) {
-    let (player_name_container, player_name) = spawn_overhead_text(
-        commands,
-        font,
-        0.0,
-        PLAYER_NAME_HEIGHT,
-        PLAYER_NAME_FONT_SIZE,
-        "V3 fighter overhead player name",
-    );
-    commands
-        .entity(player_name)
-        .insert(FighterOverheadNameUi::default());
+    let (player_name_container, player_name, bot_chip) = spawn_overhead_name_row(commands, font);
     // The number sits centered inside the bar, above the fill.
     let (health_amount_container, health_amount) = spawn_overhead_text(
         commands,
@@ -336,6 +397,7 @@ fn spawn_fighter_overhead(
             FighterOverheadUi {
                 visual_root,
                 player_name,
+                bot_chip,
                 health_amount,
                 fill,
                 cold_pie,
@@ -392,6 +454,7 @@ fn spawn_overhead_text(
                 height: px(height),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
+                column_gap: px(BOT_CHIP_GAP),
                 // Backstop for text the fitter has not measured yet: nothing paints past the
                 // fixed plate width that overlap resolution assumes.
                 overflow: Overflow::clip_x(),
@@ -403,6 +466,61 @@ fn spawn_overhead_text(
         .add_child(text)
         .id();
     (container, text)
+}
+
+/// The centered name row: the fitted name label, preceded by the hidden BOT chip. Returns the row
+/// container, the name label and the chip.
+fn spawn_overhead_name_row(
+    commands: &mut Commands,
+    font: &Handle<Font>,
+) -> (Entity, Entity, Entity) {
+    let (container, player_name) = spawn_overhead_text(
+        commands,
+        font,
+        0.0,
+        PLAYER_NAME_HEIGHT,
+        PLAYER_NAME_FONT_SIZE,
+        "V3 fighter overhead player name",
+    );
+    commands
+        .entity(player_name)
+        .insert(FighterOverheadNameUi::default());
+    let bot_chip = spawn_bot_chip(commands, font);
+    commands.entity(container).insert_children(0, &[bot_chip]);
+    (container, player_name, bot_chip)
+}
+
+/// The hidden BOT chip; it takes no row space until a held seat shows it.
+fn spawn_bot_chip(commands: &mut Commands, font: &Handle<Font>) -> Entity {
+    commands
+        .spawn((
+            FighterBotChipUi,
+            Node {
+                display: Display::None,
+                width: px(BOT_CHIP_WIDTH),
+                height: px(BOT_CHIP_HEIGHT),
+                flex_shrink: 0.0,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(4.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.16, 0.18, 0.26, 0.92)),
+            Name::new("V3 fighter overhead BOT chip"),
+        ))
+        .with_child((
+            Text::new("BOT"),
+            ui::theme::hud_text(font, BOT_CHIP_FONT_SIZE),
+            TextColor(Color::srgb(0.84, 0.87, 0.94)),
+            TextLayout::new(Justify::Center, LineBreak::NoWrap),
+        ))
+        .id()
+}
+
+/// A held seat's name is the relation color toward gray, so the BOT chip reads first.
+fn held_overhead_name_color(relation: GroundMarkerRelation) -> Color {
+    use bevy::color::Mix as _;
+    overhead_name_color(relation).mix(&Color::srgb(0.62, 0.64, 0.7), 0.55)
 }
 
 fn overhead_name_color(relation: GroundMarkerRelation) -> Color {
@@ -645,7 +763,7 @@ pub(in super::super) fn update_fighter_overhead_state(
     >,
     mut fill_nodes: AmmoFillQuery,
     mut overhead_texts: Query<(&mut Text, &mut TextColor), With<FighterOverheadTextUi>>,
-    mut overhead_names: Query<&mut FighterOverheadNameUi>,
+    mut overhead_names: OverheadNames,
     mut overhead_colors: Query<
         &mut BackgroundColor,
         Or<(With<FighterHealthFillUi>, With<FighterAmmoSegmentUi>)>,
@@ -664,9 +782,10 @@ pub(in super::super) fn update_fighter_overhead_state(
     let controlled_team =
         fighters
             .iter()
-            .find_map(|(_, _, _, _, _, _, team, _, _, _, is_controlled)| {
+            .find_map(|(_, _, _, _, _, _, team, _, _, _, is_controlled, _)| {
                 is_controlled.then_some(*team)
             });
+    let held_fighters = overhead_names.held_fighters();
     for (owner, mut overhead, mut visibility) in &mut overhead_roots {
         let Ok((
             _,
@@ -680,6 +799,7 @@ pub(in super::super) fn update_fighter_overhead_state(
             weapon,
             boost_stacks,
             is_controlled,
+            network_id,
         )) = fighters.get(owner.0)
         else {
             *visibility = Visibility::Hidden;
@@ -712,15 +832,16 @@ pub(in super::super) fn update_fighter_overhead_state(
         if let Ok(mut color) = overhead_colors.get_mut(overhead.fill) {
             color.0 = overhead_health_color(relation);
         }
+        // Never on the local fighter: a rejoined player's own seat is Player by construction.
+        let held =
+            !is_controlled && network_id.is_some_and(|network| held_fighters.contains(&network.0));
+        overhead_names.present(&overhead, name, held);
         if let Ok((_, mut color)) = overhead_texts.get_mut(overhead.player_name) {
-            color.set_if_neq(TextColor(overhead_name_color(relation)));
-        }
-        if let Ok(mut label) = overhead_names.get_mut(overhead.player_name)
-            && label.full != name
-        {
-            label.full.clear();
-            label.full.push_str(name);
-            label.fitted = false;
+            color.set_if_neq(TextColor(if held {
+                held_overhead_name_color(relation)
+            } else {
+                overhead_name_color(relation)
+            }));
         }
         if overhead.last_health != Some(current) {
             if let Ok((mut text, _)) = overhead_texts.get_mut(overhead.health_amount) {
@@ -784,7 +905,12 @@ pub(in super::super) fn fit_overhead_player_names(
             continue;
         };
         let font_size = text_font.font_size.eval(Vec2::ZERO, PLAYER_NAME_FONT_SIZE);
-        let shown = fit_overhead_name(&label.full, PLAYER_NAME_MAX_WIDTH, |candidate| {
+        let budget = if label.held {
+            HELD_PLAYER_NAME_MAX_WIDTH
+        } else {
+            PLAYER_NAME_MAX_WIDTH
+        };
+        let shown = fit_overhead_name(&label.full, budget, |candidate| {
             measure_text_width(&mut font_cx, &mut layout_cx, &family, font_size, candidate)
         });
         if text.0 != shown {
@@ -1108,6 +1234,96 @@ mod tests {
         assert_eq!(plates(&mut app), 0);
     }
 
+    /// BRL-dwqx: the BOT chip shows only on a non-local fighter whose seat the server publishes
+    /// as held, the name then fits the narrower budget beside it, and a reclaimed seat clears it.
+    #[test]
+    fn bot_chip_marks_only_a_held_non_local_fighter() {
+        use brawler::matchplay::{
+            MatchId, MatchParticipant, ParticipantControl, PublicParticipantState,
+            PublicParticipantStatus,
+        };
+        let mut app = App::new();
+        app.insert_resource(ColdPieAssets { frames: Vec::new() })
+            .add_systems(
+                Update,
+                (reconcile_fighter_overheads, update_fighter_overhead_state).chain(),
+            );
+        let loadout = crate::tests::resolved_reveal_scan_loadout();
+        let held = ParticipantControl::HeldByBot {
+            expires_at_tick: 3_600,
+        };
+        let fighter = |app: &mut App, network: u64, controlled: bool| {
+            let mut entity = app.world_mut().spawn((
+                Fighter,
+                brawler::combat::CurrentHealth(100),
+                brawler::combat::TeamId(u8::from(!controlled)),
+                loadout.clone(),
+                NetworkEntityId(network),
+            ));
+            if controlled {
+                entity.insert(Controlled);
+            }
+            let fighter = entity.id();
+            app.world_mut().spawn((
+                V3FighterVisual {
+                    last_position: Vec2::ZERO,
+                    moving: false,
+                    shoot_seconds: 0.0,
+                    recoil_seconds: 0.0,
+                },
+                CombatVisualOwner(fighter),
+            ));
+            app.world_mut()
+                .spawn(PublicParticipantState {
+                    player_id: PlayerId(network),
+                    fighter_network_id: NetworkEntityId(network),
+                    team_id: brawler::combat::TeamId(u8::from(!controlled)),
+                    display_name: format!("P{network}"),
+                    participant: MatchParticipant {
+                        match_id: MatchId(1),
+                        ready: true,
+                        restart_ready: false,
+                    },
+                    selected: true,
+                    weapon_preset_id: None,
+                    status: PublicParticipantStatus::Alive,
+                    // Even a (never published) held local seat must not show the chip.
+                    control: held,
+                })
+                .id()
+        };
+        let local_projection = fighter(&mut app, 1, true);
+        let remote_projection = fighter(&mut app, 2, false);
+        // Spawn plates, then reconcile their state with the plate entities in place.
+        app.update();
+        app.update();
+        let chips = |app: &mut App| {
+            let world = app.world_mut();
+            let mut overheads = world.query::<(&CombatVisualOwner, &FighterOverheadUi)>();
+            let mut chip_display = Vec::new();
+            for (owner, overhead) in overheads.iter(world) {
+                let network = world.get::<NetworkEntityId>(owner.0).unwrap().0;
+                let display = world.get::<Node>(overhead.bot_chip).unwrap().display;
+                let label = world
+                    .get::<FighterOverheadNameUi>(overhead.player_name)
+                    .unwrap();
+                chip_display.push((network, display == Display::Flex, label.held));
+            }
+            chip_display.sort_unstable();
+            chip_display
+        };
+        assert_eq!(chips(&mut app), [(1, false, false), (2, true, true)]);
+
+        for projection in [local_projection, remote_projection] {
+            app.world_mut()
+                .get_mut::<PublicParticipantState>(projection)
+                .unwrap()
+                .control = ParticipantControl::Player;
+        }
+        app.update();
+        assert_eq!(chips(&mut app), [(1, false, false), (2, false, false)]);
+    }
+
     /// Longest names the lobby accepts: 24 graphemes, or 21 three-byte CJK characters under the
     /// 64-byte cap, plus a mixed-script name that needs several fallback fonts.
     const MAX_LATIN_NAME: &str = "WWWWWWWWWWWWWWWWWWWWWWWW";
@@ -1227,6 +1443,7 @@ mod tests {
                 .spawn((
                     FighterOverheadNameUi {
                         full: name.to_owned(),
+                        held: false,
                         fitted: false,
                     },
                     Text::new(""),

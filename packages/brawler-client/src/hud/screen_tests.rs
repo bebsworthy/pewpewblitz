@@ -83,6 +83,7 @@ pub(crate) fn hud_app(width: u16, height: u16, mode: brawler::map::ModeDefinitio
                 selected: true,
                 weapon_preset_id: None,
                 status: brawler::matchplay::PublicParticipantStatus::Alive,
+                control: brawler::matchplay::ParticipantControl::Player,
             });
         let mut fighter = app.world_mut().spawn((
             Fighter,

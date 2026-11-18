@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 49;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 50;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -1002,6 +1002,40 @@ mod tests {
         let bytes = postcard::to_allocvec(&message).expect("message serializes");
         let decoded: MatchJoinOutcome = postcard::from_bytes(&bytes).expect("message deserializes");
         assert_eq!(decoded, message);
+    }
+
+    /// Protocol 50 (BRL-dwqx) adds `PublicParticipantState::control`; the field changes the
+    /// canonical encoding, so the global handshake version guards it.
+    #[test]
+    fn public_participant_control_is_part_of_protocol_50() {
+        use crate::matchplay::{
+            MatchId, MatchParticipant, ParticipantControl, PublicParticipantStatus,
+        };
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 50);
+        let state = PublicParticipantState {
+            player_id: PlayerId(7),
+            fighter_network_id: NetworkEntityId(11),
+            team_id: TeamId(1),
+            display_name: "Held".to_owned(),
+            participant: MatchParticipant {
+                match_id: MatchId(3),
+                ready: true,
+                restart_ready: false,
+            },
+            selected: true,
+            weapon_preset_id: None,
+            status: PublicParticipantStatus::Respawning {
+                respawn_at_tick: 900,
+            },
+            control: ParticipantControl::HeldByBot {
+                expires_at_tick: 4_200,
+            },
+        };
+        let bytes = postcard::to_allocvec(&state).expect("projection serializes");
+        let decoded: PublicParticipantState =
+            postcard::from_bytes(&bytes).expect("projection deserializes");
+        assert_eq!(decoded, state);
+        assert_eq!(ParticipantControl::default(), ParticipantControl::Player);
     }
 
     #[test]

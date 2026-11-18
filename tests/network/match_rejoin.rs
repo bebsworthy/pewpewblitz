@@ -5,6 +5,7 @@
 //! the worker's own control queue.
 
 use super::*;
+use brawler::matchplay::{ParticipantControl, PublicParticipantState};
 use brawler::testing::{
     SEAT_HOLD_TICKS, TestRoutedParticipant, expire_seat_hold_at, fighter_is_bot_controlled,
     queue_seat_rebind, ready_match_result, seat_hold_expiry, take_seat_rebind_replies,
@@ -96,6 +97,95 @@ fn reclaim(harness: &mut Harness, fighter: Entity, netcode_client_id: u64, peer_
             && seat_hold_expiry(harness.server.world(), fighter).is_none()
     });
     index
+}
+
+/// The control fact client `index` sees in `player_id`'s public projection, if it has one.
+fn client_seat_control(
+    harness: &mut Harness,
+    index: usize,
+    player_id: u64,
+) -> Option<ParticipantControl> {
+    let world = harness.clients[index].world_mut();
+    let mut query = world.query::<&PublicParticipantState>();
+    query
+        .iter(world)
+        .find(|state| state.player_id.0 == player_id)
+        .map(|state| state.control)
+}
+
+/// BRL-dwqx: the other player learns from the public roster that a bot holds the seat, with the
+/// server's own hold expiry, while its own seat stays `Player`.
+#[test]
+fn a_held_seat_is_published_as_bot_controlled_to_the_other_players() {
+    let mut harness = active_routed_match();
+    assert_eq!(
+        client_seat_control(&mut harness, 1, PLAYER_ONE.player_id),
+        Some(ParticipantControl::Player)
+    );
+    let fighter = lose_session(&mut harness, 0, PLAYER_ONE.player_id);
+    let expires_at_tick = seat_hold_expiry(harness.server.world(), fighter).unwrap();
+    let held = ParticipantControl::HeldByBot { expires_at_tick };
+    step_until_within(&mut harness, 60, |harness| {
+        client_seat_control(harness, 1, PLAYER_ONE.player_id) == Some(held)
+    });
+    assert_eq!(
+        client_seat_control(&mut harness, 1, PLAYER_TWO.player_id),
+        Some(ParticipantControl::Player),
+        "the connected player's own seat stays Player"
+    );
+}
+
+/// BRL-dwqx: a reclaimed seat is `Player` again for everyone, and the rejoined client never sees
+/// its own seat as bot-held.
+#[test]
+fn a_reclaimed_seat_is_published_as_player_again() {
+    let mut harness = active_routed_match();
+    let fighter = lose_session(&mut harness, 0, PLAYER_ONE.player_id);
+    step_until_within(&mut harness, 60, |harness| {
+        matches!(
+            client_seat_control(harness, 1, PLAYER_ONE.player_id),
+            Some(ParticipantControl::HeldByBot { .. })
+        )
+    });
+    let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
+    assert_eq!(reply.refusal, None);
+    let index = harness.add_routed_match_client(80, 81);
+    let mut observed_own = Vec::new();
+    for _ in 0..240 {
+        harness.step();
+        if let Some(control) = client_seat_control(&mut harness, index, PLAYER_ONE.player_id) {
+            observed_own.push(control);
+        }
+        if harness.client_is_active(index)
+            && seat_hold_expiry(harness.server.world(), fighter).is_none()
+            && client_seat_control(&mut harness, 1, PLAYER_ONE.player_id)
+                == Some(ParticipantControl::Player)
+            && !observed_own.is_empty()
+        {
+            break;
+        }
+    }
+    assert_eq!(
+        client_seat_control(&mut harness, 1, PLAYER_ONE.player_id),
+        Some(ParticipantControl::Player),
+        "the other player sees the seat reclaimed"
+    );
+    assert!(
+        !observed_own.is_empty(),
+        "the rejoined client sees its seat"
+    );
+    for _ in 0..30 {
+        harness.step();
+        if let Some(control) = client_seat_control(&mut harness, index, PLAYER_ONE.player_id) {
+            observed_own.push(control);
+        }
+    }
+    assert!(
+        observed_own
+            .iter()
+            .all(|control| *control == ParticipantControl::Player),
+        "the rejoined client never sees its own seat held: {observed_own:?}"
+    );
 }
 
 #[test]
@@ -265,12 +355,22 @@ fn an_expired_hold_removes_the_fighter_and_forfeits_a_lone_team() {
         harness.server_match_phase(),
         MatchPhase::Active { .. }
     ));
+    step_until_within(&mut harness, 60, |harness| {
+        matches!(
+            client_seat_control(harness, 1, PLAYER_ONE.player_id),
+            Some(ParticipantControl::HeldByBot { .. })
+        )
+    });
     let now = harness.server_simulation_tick();
     expire_seat_hold_at(harness.server.world_mut(), fighter, now + 1);
     for _ in 0..10 {
         harness.step();
     }
     assert_eq!(harness.server_fighter(PLAYER_ONE.player_id), None);
+    // BRL-dwqx: the expired seat's public projection goes with the fighter.
+    step_until_within(&mut harness, 60, |harness| {
+        client_seat_control(harness, 1, PLAYER_ONE.player_id).is_none()
+    });
     assert!(matches!(
         harness.server_match_phase(),
         MatchPhase::Completed {

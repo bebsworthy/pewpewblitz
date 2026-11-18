@@ -143,3 +143,59 @@ clients never infer it.
 - Lobby/supervisor/IPC/manifest changes; hold duration or rejoin limits.
 - Notices for voluntary Leave Match (BRL-8y1f departures already remove the fighter; the
   projection simply disappears without a notice because it was never `HeldByBot`).
+
+
+# Implementation (2026-11-18, at HEAD 2f796701)
+## Decisions and adjustments to the plan
+- `ParticipantControl { Player (default), HeldByBot { expires_at_tick } }` in `src/matchplay/model.rs`,
+  re-exported from `matchplay`; new field `PublicParticipantState::control`. The server projection
+  (`concealment::server::sync_public_participant_projections`) reads `Option<&crate::server::SeatHold>`
+  (already `pub(crate)` re-exported at HEAD after BRL-jxfy); no schedule or seat_hold changes.
+- Protocol 49 -> 50. Routing identity (`target/debug/brawler-server routing-identity`) identical
+  before and after: network_protocol=4778953997791089217, protocol_registry_fingerprint=15212284317352318216,
+  content_fingerprint=7772007507332977560. No test pinned 49, so a new
+  `protocol::tests::public_participant_control_is_part_of_protocol_50` pins 50 and round-trips a held projection.
+- Scoreboard (BRL-ejag, `hud/scoreboard.rs`): `CachedRosterEntry.held_until`; a held, connected row's
+  status reads `BOT Ns` (hold seconds left, `SIMULATION_TICK_HZ`) in the dim Offline tone, replacing the
+  status (boost suffix kept). Zombie team strip shows `BOT`. `DISCONNECTED`/`OFF` keep meaning "projection missing".
+- Overhead (BRL-9k7q, `fighter_ui.rs`): a fixed-width 30 px BOT chip (11 px text, neutral slate) is the
+  first child of the centered name row, `Display::None` unless held; held names are dimmed toward gray.
+  `FighterOverheadNameUi.held` changes the fit budget to `PLAYER_NAME_MAX_WIDTH - 30 - 4` (98 px), so chip +
+  gap + fitted name never exceed the 132 px name budget inside the 140 px plate; a held change refits.
+  Never on the local (`Controlled`) fighter. Name/chip state is grouped in an `OverheadNames` SystemParam
+  (clippy line limits).
+- Feed (`hud/kill_feed.rs`): `KillFeedEntry { line: FeedLine::{Defeat, Seat{name, notice}} }`, same 4-row/4 s
+  list; a seat row is name (relation color) + unbounded notice text, skull hidden. `SeatControlTransitions`
+  resource, updated inside `collect_kill_feed`, emits exactly: Player->HeldByBot "disconnected - bot playing",
+  HeldByBot->Player "is back", held projection gone while Active "left". First observation = baseline, never
+  for the local player, reset on match id change.
+- Acceptance 4 (Practice bot from start publishes Player) is covered by the server unit test, not a
+  network scenario: tests/network has no Practice-bot match harness.
+- Known limit: in a 1v1 the hold expiry forfeits the lone team in the same tick, so the client sees
+  Completed and no "left" notice (spec: only while Active). "left" shows in team modes where the match continues.
+
+## Verification
+- `just lint` pass (with VS Code ripgrep on PATH); `just test` pass (network 132 tests, all suites);
+  `just rejoin-e2e` pass ("Practice wipeout-1v1 rejoined the same running match ...").
+- New tests: network `a_held_seat_is_published_as_bot_controlled_to_the_other_players`,
+  `a_reclaimed_seat_is_published_as_player_again` (rejoined client's every observation of its own seat is
+  Player), expiry assertion added to `an_expired_hold_removes_the_fighter_and_forfeits_a_lone_team`; server
+  `concealment::tests::public_participant_projection_publishes_a_held_seat_as_bot_controlled` (held, reclaimed,
+  Practice bot); client `seat_control_transitions_emit_only_the_three_notices`,
+  `seat_notices_reach_the_feed_from_the_public_roster`, `team_strip_marks_a_bot_held_seat`,
+  scoreboard `rows_use_readable_health_and_status_labels` (BOT 42s), overhead
+  `bot_chip_marks_only_a_held_non_local_fighter`.
+
+## Native desktop capture
+- Own supervisor 127.0.0.1:5037, `--data-directory target/dwqx/run-kill/server-data`, protocol 50 roles;
+  windowed release client 6001 (1280x720, `--render-report` keeps the windowed smoke alive,
+  `--leave-match-cue` never written) and headless client 6002, SIGKILLed 5 s into Active. Seat held after
+  the 10 s bound, expired 60 s later (1v1 forfeit). Logs in target/dwqx/run-kill/.
+- target/dwqx/dwqx-notice-bot-playing.png: feed row "Brawler-1772 disconnected - bot playing" (enemy red name).
+- target/dwqx/dwqx-bot-chip.png, dwqx-bot-chip-2.png: BOT chip before the dimmed enemy name, local plate unchanged.
+- Not captured natively: scoreboard `BOT Ns` (needs a held Tab; covered by unit test), "is back" (needs a
+  relaunch with the same account), "left" (1v1 forfeits). These remain for the owner's Pixel check.
+
+
+# Closeout (2026-11-18)
+Pixel not connected; device check left as playtest (steps above). Port-5000 test server restarted on protocol 50; rebuild/reinstall the APK before testing on device. 1v1 forfeit at hold expiry shows no "left" notice (match already Completed) - by the spec rule; reopen if a forfeit notice is wanted.

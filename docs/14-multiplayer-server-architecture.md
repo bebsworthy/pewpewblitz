@@ -177,6 +177,19 @@ inserts `ControlledBy` for the rebound link, which shows the marker to that link
 the fighter is removed and today's departure/forfeit rules apply; a session lost in Waiting,
 loading or countdown still removes the fighter at once.
 
+The other players are told (BRL-dwqx). The always-public roster projection
+`PublicParticipantState` carries `control: ParticipantControl`, which the match worker sets to
+`HeldByBot { expires_at_tick }` from the server-only `SeatHold` while the seat is held and back to
+`Player` when it is reclaimed; at expiry the fighter, and so the projection, is removed. Practice
+bots that were bots from the start stay `Player`. Clients present the fact and never infer it: a
+non-local fighter's overhead name shows a compact BOT chip (inside the name's fit budget), the
+scoreboard row reads `BOT Ns` with the hold's remaining seconds, the Zombie team strip shows
+`BOT`, and the kill feed rows add "<name> disconnected - bot playing", "<name> is back" and, for a
+held seat whose projection disappears while the match is Active, "<name> left". A participant's
+first observation (joining, a rejoining client's first snapshot) is only a baseline, the local
+player never gets a notice about itself, and the baseline resets with the match ID. The held
+player is not shown its own hold.
+
 The account stays in the lobby. At handoff the lobby records, per `AccountId`, the seat's original
 grant (request, allocation, match, manifest player) in a bounded table (one seat per account,
 `MAX_WORKERS * MAX_PARTICIPANTS` seats), released on `MatchEnded` (sent once when the worker's
