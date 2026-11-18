@@ -3,9 +3,9 @@ id: BRL-evqm
 
 title: Author input-frame cast sounds for Demolition Strike and Big Blob
 
-status: doing
-closed:
-status_changed: 2026-11-18T04:02:03Z
+status: done
+closed: 2026-11-18T04:10:21Z
+status_changed: 2026-11-18T04:10:21Z
 
 theme: core
 
@@ -19,7 +19,7 @@ related: [BRL-1w27]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
