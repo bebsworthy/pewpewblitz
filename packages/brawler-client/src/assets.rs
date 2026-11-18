@@ -360,7 +360,7 @@ fn validate_manifest(source: &str) -> Result<(), String> {
 /// no URL: it points at its checked-in generator and the repository's original-audio notice.
 fn valid_license(entry: &AssetManifestEntry) -> bool {
     match entry.license.as_str() {
-        "CC0-1.0" | "OFL-1.1" => {
+        "CC0-1.0" | "OFL-1.1" | "CC-BY-4.0" => {
             entry.license_url.starts_with("https://") && entry.source_url.starts_with("https://")
         }
         "Original" => {

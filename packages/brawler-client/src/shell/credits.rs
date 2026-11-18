@@ -12,7 +12,7 @@ struct ThirdPartyCredit {
     license: &'static str,
 }
 
-const THIRD_PARTY: [ThirdPartyCredit; 6] = [
+const THIRD_PARTY: [ThirdPartyCredit; 7] = [
     ThirdPartyCredit {
         pack: "Mini Characters",
         used_for: "zombie NPC",
@@ -48,6 +48,12 @@ const THIRD_PARTY: [ThirdPartyCredit; 6] = [
         used_for: "Bevy default font",
         author: "Mozilla Foundation / Telefonica",
         license: "OFL-1.1",
+    },
+    ThirdPartyCredit {
+        pack: "Twemoji Mozilla",
+        used_for: "Android emoji font",
+        author: "Twitter, Inc and other contributors / Mozilla",
+        license: "CC-BY-4.0",
     },
 ];
 
@@ -88,6 +94,7 @@ fn license_label(spdx: &str) -> &'static str {
     match spdx {
         "CC0-1.0" => "CC0 1.0",
         "OFL-1.1" => "SIL OFL 1.1",
+        "CC-BY-4.0" => "CC BY 4.0",
         other => panic!("Credits has no display label for license {other}"),
     }
 }

@@ -59,6 +59,8 @@ arboard = { version = "3.6", default-features = false }
 brawler = { path = "../..", default-features = false, features = ["client", "test-support"] }
 # Glyph-coverage tests read the shipped display font's character map.
 skrifa = "=0.44.0"
+# The bundled emoji font test drives `bevy_text`'s glyph rasterizer with a swash scaler (BRL-z2hf).
+swash = "=0.2.10"
 # The network harness orders its deterministic link-latency pin after Lightyear's ping receive
 # (`PingSystems`), which the `lightyear` facade does not re-export (BRL-thwh).
 lightyear_sync = { version = "=0.29.0", default-features = false }

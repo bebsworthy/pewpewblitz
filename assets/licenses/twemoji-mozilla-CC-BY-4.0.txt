@@ -1,0 +1,34 @@
+Twemoji Mozilla (0.7.0)
+
+Shipped file:  assets/brawler/ui/fonts/twemoji-mozilla.ttf (byte-identical to the release asset)
+Release asset: https://github.com/mozilla/twemoji-colr/releases/download/v0.7.0/Twemoji.Mozilla.ttf
+SHA-256:       6d90152ee0d29e82fe2a87793af5aa4b7ad13e6538360889e141e81ed299ee8e
+Project:       https://github.com/mozilla/twemoji-colr
+Used for:      colour emoji fallback in player names on Android only (BRL-z2hf)
+
+------------------------------
+
+Emoji artwork
+
+  Twemoji, Copyright Twitter, Inc and other contributors.
+  https://github.com/twitter/twemoji
+
+  Licensed under the Creative Commons Attribution 4.0 International license (CC BY 4.0):
+  https://creativecommons.org/licenses/by/4.0/
+  Full legal code: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Changes
+
+  Mozilla converted the Twemoji SVG artwork into this COLRv0/CPAL TrueType font
+  (twemoji-colr). PewPew Blitz ships that font unmodified.
+
+Font build code
+
+  The twemoji-colr build tooling is Copyright Mozilla and licensed under the Apache
+  License 2.0 (https://www.apache.org/licenses/LICENSE-2.0). That code is not shipped;
+  only the generated font is.
+
+------------------------------
+
+The full CC BY 4.0 legal code is not reproduced here; the licence permits satisfying
+attribution with its URI (section 3(a)(1)(C)), given above.

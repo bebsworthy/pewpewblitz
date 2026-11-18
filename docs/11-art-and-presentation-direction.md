@@ -100,8 +100,13 @@ tickets tune them through native review but do not change the direction.
   HUD.
 - Lilita One covers ASCII and Latin-1 only. The client enables Bevy's `system_font_discovery`, so
   any other glyph (extended Latin, Greek, Cyrillic, CJK, emoji) in a player name or other text
-  falls back per script to the platform's own font instead of a missing-glyph box. No fallback font
-  is bundled, so APK size is unaffected.
+  falls back per script to the platform's own font instead of a missing-glyph box.
+- Emoji are the one bundled fallback (BRL-z2hf). Bevy's swash rasterizer paints COLRv0, CBDT/sbix
+  bitmaps and outlines but not COLRv1, which is what Android's system Noto Color Emoji now is, so
+  emoji rendered as nothing on Android. The Android client loads Twemoji Mozilla 0.7.0 (COLRv0,
+  CC BY 4.0, about 0.7 MB deflated in the APK) and puts it first in fontique's `Emoji` generic
+  family, ahead of the system emoji font. Desktop ships the file but never loads it; macOS keeps
+  Apple Color Emoji (sbix).
 - Fallback glyphs match the heavy sans display face (`ui::fonts`): display `TextFont`s request
   bold, which selects each fallback family's heavy face while Lilita One's single face renders
   unchanged (Bevy applies no synthetic bold), and a startup system replaces platform script
