@@ -140,6 +140,7 @@ Run `just` to list the supported everyday surface.
 | `just practice-e2e [game type]` | Run one exact real-process Practice match with one human and server-filled bots; default is `wipeout-1v1` |
 | `just network-change-e2e [game type]` | Keep one routed Practice match session alive across two 4 s outages: to a new client source port, then back to the original (BRL-g57a, BRL-sqz0) |
 | `just v3-render-evidence [path]` | Record the bounded native release render report; the historical recipe name is retained |
+| `just shell-capture [route] [size]` | Open each player-shell screen through flow actions against a scratch server and save PNG/JSON pairs under `target/shell-capture/<size>/` (default: every route at 1280x720 and 914x411) |
 | `just android-build [HOST:PORT]` / `just android-install [HOST:PORT]` | Build the Android player APK (and install/launch it over adb); see [Android client](#android-client) |
 | `just ci` | Run lint, deterministic tests, the complete 2/4/6-client E2E matrix, and all nine Practice game types |
 | `just clean` | Remove Cargo build artifacts |
@@ -238,7 +239,11 @@ Evidence captures are saved as matching PNG/JSON pairs under the platform Pictur
 `PewPew Blitz/Captures` (or the application data directory when Pictures is unavailable).
 `BRAWLER_CAPTURE_DIR` overrides that destination for troubleshooting and automation. The
 automation build's `--screenshot-dir` scheduled visual-verification path writes the same paired
-capture format into its explicit directory.
+capture format into its explicit directory. With `--shell-capture <route>` the interactive shell
+instead opens one named screen through the ordinary flow actions (creating the first brawler on an
+empty profile), saves `<route>.png|json` there once the screen has settled, and exits; the JSON
+`client.flow`/`client.overlay` fields name the presented screen. Live-match routes (Results, match
+menu) are not covered yet (BRL-wqst).
 
 Recovery is authored per fighter profile and weapon. The Default fighter recovers `100` health per
 second; Lightweight and Reinforced recover `10`, all after `3.0` seconds without a server-accepted
@@ -380,6 +385,7 @@ Advanced scripts remain available for focused evidence and historical comparison
 | Script | Role |
 |---|---|
 | [`scripts/v3-render-evidence.sh`](scripts/v3-render-evidence.sh) | Bounded routed native render report used by the retained `just v3-render-evidence` recipe |
+| [`scripts/shell-capture.sh`](scripts/shell-capture.sh) | Native player-shell screen captures used by `just shell-capture` |
 | [`scripts/network-routed-evidence.py`](scripts/network-routed-evidence.py) | Cold routed worker lifecycle, resource, traffic, latency, and cleanup evidence |
 | [`scripts/network-routed.sh`](scripts/network-routed.sh) | Focused production routed-process smoke, including explicit IPv6 runs |
 | [`scripts/network-routed-capture.sh`](scripts/network-routed-capture.sh) | macOS loopback packet capture and MTU/fragment verification |

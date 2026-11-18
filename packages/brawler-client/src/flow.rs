@@ -53,6 +53,8 @@ use screens::{
 };
 
 mod actions;
+#[cfg(feature = "automation")]
+mod automation;
 mod connection;
 mod input;
 mod model;
@@ -61,6 +63,10 @@ mod persistence;
 mod reducer;
 mod screens;
 
+#[cfg(feature = "automation")]
+pub use automation::ShellCaptureRoute;
+#[cfg(feature = "automation")]
+pub(super) use automation::install_shell_capture;
 pub use model::{
     CancelMatchStartConfirmation, ClientFlow, ClientOverlay, FlowError, FlowErrorAction,
     FlowErrorKind, SelectedGameType, SessionPurpose,

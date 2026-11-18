@@ -5,13 +5,13 @@
 use super::{default_local_addr, parse_transport, parse_window_size, random_nonzero_client_id};
 use brawler::config::{ClientNetworkConfig, NetworkTransport};
 use brawler_client::{
-    ClientAutomationConfig, RenderMeasurementConfig, ScreenshotSchedule, WindowedCombatDemo,
-    WindowedControllerDemo,
+    ClientAutomationConfig, RenderMeasurementConfig, ScreenshotSchedule, ShellCaptureRoute,
+    WindowedCombatDemo, WindowedControllerDemo,
 };
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
 
-pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]]";
+pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]]";
 
 fn parse_value<T: core::str::FromStr>(flag: &str, value: Option<String>) -> Result<T, String> {
     value
@@ -75,9 +75,10 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
     let mut windowed_controller_demo = false;
     let mut window_size = None;
     let mut screenshot_dir = None;
-    let mut screenshot_first: u32 = 30;
-    let mut screenshot_every: u32 = 60;
-    let mut screenshot_count: u32 = 1;
+    let mut screenshot_first: Option<u32> = None;
+    let mut screenshot_every: Option<u32> = None;
+    let mut screenshot_count: Option<u32> = None;
+    let mut shell_capture = None;
     let mut render_report = None;
     let mut render_warmup_seconds: u64 = 10;
     let mut render_measure_seconds: u64 = 30;
@@ -165,9 +166,15 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
                     .ok_or_else(|| format!("{flag} requires a value"))?;
                 screenshot_dir = Some(PathBuf::from(value));
             }
-            "--screenshot-first" => screenshot_first = parse_value(&flag, args.next())?,
-            "--screenshot-every" => screenshot_every = parse_value(&flag, args.next())?,
-            "--screenshot-count" => screenshot_count = parse_value(&flag, args.next())?,
+            "--screenshot-first" => screenshot_first = Some(parse_value(&flag, args.next())?),
+            "--screenshot-every" => screenshot_every = Some(parse_value(&flag, args.next())?),
+            "--screenshot-count" => screenshot_count = Some(parse_value(&flag, args.next())?),
+            "--shell-capture" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("{flag} requires a route"))?;
+                shell_capture = Some(ShellCaptureRoute::from_name(&value)?);
+            }
             "--render-report" => {
                 render_report = Some(PathBuf::from(
                     args.next()
@@ -254,6 +261,14 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
         config.connect_timeout = Duration::from_secs(10);
     }
     config.window_size = window_size;
+    if shell_capture.is_some()
+        && (screenshot_first.is_some() || screenshot_every.is_some() || screenshot_count.is_some())
+    {
+        return Err(
+            "--shell-capture captures its settled screen once; drop --screenshot-first/every/count"
+                .to_string(),
+        );
+    }
     if render_report.is_none() && render_reduced_effects {
         return Err("--render-reduced-effects requires --render-report".to_string());
     }
@@ -283,10 +298,11 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
         windowed_controller_demo: windowed_controller_demo.then_some(WindowedControllerDemo),
         screenshot_schedule: screenshot_dir.map(|dir| ScreenshotSchedule {
             dir,
-            first_update: screenshot_first,
-            interval: screenshot_every,
-            count: screenshot_count,
+            first_update: screenshot_first.unwrap_or(30),
+            interval: screenshot_every.unwrap_or(60),
+            count: screenshot_count.unwrap_or(1),
         }),
+        shell_capture,
         render_measurement: render_report.map(|report_path| RenderMeasurementConfig {
             report_path,
             warmup: Duration::from_secs(render_warmup_seconds),

@@ -36,3 +36,24 @@ A development-only automation flag opens a named shell screen with seeded scratc
 
 # Absorbs BRL-pqzt (2026-11-15)
 BRL-pqzt (automation capture of the Dashboard, brawler card, details and weapon previews) was a subset of this ticket and is canceled. Its targets are part of this ticket's acceptance: the `--shell-capture` run must save Dashboard, brawler card, brawler details and weapon preview frames. See BRL-pqzt's spec for the per-screen notes.
+
+# Result (2026-11-18)
+
+Implemented; absorbs BRL-pqzt (Dashboard, brawler card/list, details, weapon preview frames are all captured).
+
+- `packages/brawler-client/src/flow/automation.rs` (automation-gated, installed from `compose_client_app`): `ShellCaptureRoute` route table plus one driver system in `ClientFlowSet::CollectFlowInput` after `collect_flow_input`. It writes only `PendingFlowActions.ordinary`. Each step waits for its expected `ClientFlow`/`ClientOverlay` (state-driven, with timeouts), the last step settles for 90 unchanged frames, and the capture goes through `request_scheduled_evidence_capture` (`CaptureFeedback::LogOnly`). Then the process exits 0, or 1 on timeout or when the screen changes during settling. On an empty profile it seeds through `ConfirmCreateBrawler` -> `BackToBrawlerList` -> `CloseBrawlerList`.
+- CLI: `--shell-capture <route>` needs `--screenshot-dir`, the interactive shell, and no `--screenshot-first/every/count`. Validation is in `ClientAutomationConfig`. Capture JSON now records `client.flow` and `client.overlay`.
+- `scripts/shell-capture.sh` and `just shell-capture route="all" size="all"`: per size, a fresh scratch supervisor on `127.0.0.1:5031` (refuses :5000) with `--data-directory target/shell-capture/<size>.run/server-data`. One release automation client runs per route, sharing `BRAWLER_CLIENT_DATA_DIR` in that run dir. Binaries come from `${CARGO_TARGET_DIR:-target}`.
+- `scripts/check-client-features.sh`: gates `flow.rs: mod automation;`. Markers are `--shell-capture` and the driver log line.
+- Routes (19): first-brawler, dashboard, dashboard-menu, settings, credits, change-server, brawler-list, brawler-details, brawler-create, brawler-editor, ultimate-picker, weapon-equipment, weapon-parts, delete-brawler, game-select, practice-maps, map-library, map-editor, queue.
+- Deferred to BRL-wqst (linked): results, match-menu, leave-confirmation, and match-loading. The match menu is `ClientInputContext::Menu`, not a flow action, and Results needs a completed match.
+- Tests: `flow::tests::shell_capture_route_steps_match_the_reducer` runs every route's steps through the flow harness. The harness injector now runs before `resolve_map_maker_action`, as production input does. Also added driver state-machine tests and a config validation test.
+
+Verification:
+- `just shell-capture` passed, writing 19 PNG/JSON pairs each to `target/shell-capture/1280x720/` (2560x1440 physical) and `target/shell-capture/914x411/` (1828x822). `git status --porcelain data/server` was empty.
+- Contact sheets `target/pw9k/sheet-<size>.png` (route order, row-major) were reviewed. Each frame shows its intended screen settled, and the JSON flow/overlay matches the route.
+- The player `cargo build -p brawler-client` rejects `--shell-capture` ("unknown flag"). `BRAWLER_CLIENT_FEATURES_POSITIVE_CONTROL=1 scripts/check-client-features.sh` passed.
+- `just lint` and `just test` passed. Logs are in `target/pw9k/`.
+
+Not done: mid-burst capture offsets for accepted equipment or Results (not needed for the shell routes), and route order in the script is a hand-kept copy of `ShellCaptureRoute::ALL`.
+Mistake and its prevention: the first draft exceeded clippy's `too_many_lines` in the route table and the driver. I split the step constructors into helpers and moved the driver into a pure `advance` state machine, which is now unit-tested.

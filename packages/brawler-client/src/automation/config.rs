@@ -60,6 +60,9 @@ pub struct ClientAutomationConfig {
     pub windowed_combat_demo: Option<WindowedCombatDemo>,
     pub windowed_controller_demo: Option<WindowedControllerDemo>,
     pub screenshot_schedule: Option<ScreenshotSchedule>,
+    /// Opens one named player-shell screen through flow actions and saves it into the
+    /// screenshot directory instead of following the frame schedule (BRL-pw9k).
+    pub shell_capture: Option<crate::ShellCaptureRoute>,
     pub render_measurement: Option<RenderMeasurementConfig>,
 }
 
@@ -89,6 +92,7 @@ impl Default for ClientAutomationConfig {
             windowed_combat_demo: None,
             windowed_controller_demo: None,
             screenshot_schedule: None,
+            shell_capture: None,
             render_measurement: None,
         }
     }
@@ -230,6 +234,27 @@ impl ClientAutomationConfig {
         }
         self.validate_screenshot_schedule(headless)?;
         self.validate_render_measurement(headless)?;
+        self.validate_shell_capture(network)?;
+        Ok(())
+    }
+
+    /// A shell capture drives the interactive product shell only, and needs a capture directory.
+    fn validate_shell_capture(&self, network: &ClientNetworkConfig) -> Result<(), String> {
+        if self.shell_capture.is_none() {
+            return Ok(());
+        }
+        if !network.presents_product_shell() {
+            return Err(
+                "--shell-capture requires the interactive product shell (no --auto-connect, --headless, or demo)"
+                    .to_string(),
+            );
+        }
+        if self.screenshot_schedule.is_none() {
+            return Err("--shell-capture requires --screenshot-dir".to_string());
+        }
+        if self.render_measurement.is_some() {
+            return Err("--shell-capture conflicts with --render-report".to_string());
+        }
         Ok(())
     }
 
@@ -508,6 +533,34 @@ mod tests {
         assert!(config.validate(&network).is_err());
         config.weapon_preset = Some(0);
         assert!(config.validate(&network).is_err());
+    }
+
+    #[test]
+    fn shell_capture_needs_the_interactive_shell_and_a_capture_directory() {
+        let mut config = ClientAutomationConfig {
+            shell_capture: Some(crate::ShellCaptureRoute::Dashboard),
+            ..ClientAutomationConfig::default()
+        };
+        assert!(
+            config
+                .validate(&windowed())
+                .is_err_and(|error| error.contains("--screenshot-dir"))
+        );
+        config.screenshot_schedule = Some(ScreenshotSchedule {
+            dir: "target/shell-capture".into(),
+            first_update: 30,
+            interval: 60,
+            count: 1,
+        });
+        assert!(config.validate(&windowed()).is_ok());
+        let mut connecting = windowed();
+        connecting.auto_connect = true;
+        assert!(
+            config
+                .validate(&connecting)
+                .is_err_and(|error| error.contains("interactive product shell"))
+        );
+        assert!(config.validate(&headless()).is_err());
     }
 
     #[test]

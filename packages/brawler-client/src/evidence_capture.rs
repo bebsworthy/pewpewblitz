@@ -367,6 +367,9 @@ fn collect_client_context(world: &World) -> Value {
         "routed_phase": world.get_resource::<RoutedClientLifecycle>().map(|state| format!("{:?}", state.phase)),
         "playable": world.get_resource::<ClientPlayableGate>().is_some_and(|gate| gate.0),
         "input_context": world.get_resource::<ClientInputContext>().map(|context| format!("{context:?}")),
+        // The presented shell screen, so a frame names the destination it shows.
+        "flow": world.get_resource::<State<crate::ClientFlow>>().map(|flow| format!("{:?}", flow.get())),
+        "overlay": world.get_resource::<crate::ClientOverlay>().map(|overlay| format!("{overlay:?}")),
         "pending_input": pending_input,
     })
 }

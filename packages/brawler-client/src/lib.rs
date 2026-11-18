@@ -11,6 +11,8 @@ pub use automation::{
 #[cfg(feature = "automation")]
 pub use brawler::config::HeadlessAutomation;
 pub use brawler::map::ClientPlayableGate;
+#[cfg(feature = "automation")]
+pub use flow::ShellCaptureRoute;
 
 /// Repository root that owns `assets/` and `asset_src/`; this package lives two levels below it.
 pub(crate) const REPOSITORY_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
@@ -642,10 +644,15 @@ fn compose_client_app(mut app: App, config: ClientNetworkConfig) -> App {
     let render_profile = config.render_profile;
     let window_size = config.window_size;
     #[cfg(feature = "automation")]
-    let screenshot_schedule = app
+    let (screenshot_schedule, shell_capture) = app
         .world()
         .get_resource::<ClientAutomationConfig>()
-        .and_then(|automation| automation.screenshot_schedule.clone());
+        .map_or((None, None), |automation| {
+            (
+                automation.screenshot_schedule.clone(),
+                automation.shell_capture,
+            )
+        });
     app.insert_resource(config);
     if headless {
         app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
@@ -717,9 +724,15 @@ fn compose_client_app(mut app: App, config: ClientNetworkConfig) -> App {
                 dashboard::ClientDashboardPlugin,
             ));
         }
+        // A shell capture saves its one settled screen into the screenshot directory instead of
+        // following the frame schedule (validated in `ClientAutomationConfig`).
         #[cfg(feature = "automation")]
-        if let Some(schedule) = screenshot_schedule {
-            automation::install_scheduled_screenshots(&mut app, schedule);
+        match (screenshot_schedule, shell_capture) {
+            (Some(schedule), Some(route)) => {
+                flow::install_shell_capture(&mut app, route, schedule.dir);
+            }
+            (Some(schedule), None) => automation::install_scheduled_screenshots(&mut app, schedule),
+            (None, _) => {}
         }
     }
     app

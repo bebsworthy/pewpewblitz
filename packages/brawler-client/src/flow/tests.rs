@@ -94,6 +94,7 @@ fn flow_action_test_app_with(extend: impl FnOnce(&mut App)) -> App {
     app.init_resource::<InjectedFlowActions>().add_systems(
         Update,
         inject_flow_actions
+            .before(resolve_map_maker_action)
             .before(resolve_flow_action)
             .in_set(ClientFlowSet::ResolveFlowAction),
     );
@@ -4798,5 +4799,69 @@ fn shell_overlays_fit_phone_and_desktop_viewports() {
             crate::ui::layout_harness::on_screen(app.world_mut(), panel),
             "{screen}: the panel is not fully on screen"
         );
+    }
+}
+
+/// BRL-pw9k: every shell-capture route step names exactly the screen the reducer commits for
+/// its action, from an idle connected Dashboard with one saved brawler.
+#[cfg(feature = "automation")]
+#[test]
+fn shell_capture_route_steps_match_the_reducer() {
+    let membership = lobby_membership_with_brawler();
+    let brawler = membership.profile.selected_brawler_id;
+    for route in ShellCaptureRoute::ALL {
+        // The Map Maker editor loads palette images, so this harness carries an asset server.
+        let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
+            app.add_plugins(AssetPlugin::default())
+                .init_asset::<Image>()
+                .init_resource::<brawler::map::MapCatalogResource>();
+        });
+        app.world_mut()
+            .resource_mut::<super::super::ClientProfileModel>()
+            .set_snapshot_for_test(membership.profile.clone());
+        app.update();
+        assert_eq!(
+            shell_position(&app),
+            (ClientFlow::Dashboard, ClientOverlay::None),
+            "{}: the route starts from an idle Dashboard",
+            route.name()
+        );
+        for (index, step) in route.steps().iter().enumerate() {
+            let action = step
+                .action(brawler)
+                .unwrap_or_else(|| panic!("{} step {index}: no action", route.name()));
+            inject_action(&mut app, action);
+            app.update();
+            if step
+                .expected(brawler)
+                .is_some_and(|(flow, _)| flow == ClientFlow::Queue)
+            {
+                // The Queue screen opens on the server's join acceptance, not on the request.
+                assert!(
+                    app.world()
+                        .resource::<super::super::ClientQueueModel>()
+                        .pending()
+                        .is_some(),
+                    "{} step {index}: the join was not requested",
+                    route.name()
+                );
+                inject_session_observation(
+                    &mut app,
+                    SessionObservation::QueueOutcome(brawler::lobby::QueueCommandOutcome {
+                        request_id: brawler::lobby::QueueRequestId::new(1).unwrap(),
+                        decision: brawler::lobby::QueueDecision::Joined(queue_membership(
+                            &membership,
+                        )),
+                    }),
+                );
+                app.update();
+            }
+            assert_eq!(
+                Some(shell_position(&app)),
+                step.expected(brawler),
+                "{} step {index}",
+                route.name()
+            );
+        }
     }
 }

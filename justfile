@@ -77,6 +77,10 @@ completed-rejoin-e2e game_type="wipeout-1v1":
 v3-render-evidence report="target/v3-render-evidence.txt":
     ./scripts/v3-render-evidence.sh {{report}}
 
+# Capture player-shell screens natively (PNG + state JSON) under target/shell-capture/<size>/; route and size default to all.
+shell-capture route="all" size="all":
+    ./scripts/shell-capture.sh {{route}} {{size}}
+
 # Rebuild the per-family fighter weapon GLBs, source master, and review sheet (headless). Rebuild
 # Riff afterwards: his two-handed clips read the weapons' support-grip anchors.
 weapon-assets blender="/Applications/Blender.app/Contents/MacOS/Blender":

@@ -5,8 +5,9 @@
 #      `brawler` crate has no automation feature;
 #   2. automation-owned module declarations stay behind `#[cfg(feature = "automation")]`;
 #   3. the built player binary contains none of the automation marker strings, including the
-#      automation-only configuration validation, the legacy direct-UDP client combat evidence, and
-#      client process closeout/window sampling that live in the shared crate (BRL-3p70).
+#      automation-only configuration validation, the legacy direct-UDP client combat evidence,
+#      client process closeout/window sampling that live in the shared crate (BRL-3p70), and the
+#      `--shell-capture` flag and its flow driver (BRL-pw9k).
 # Set BRAWLER_CLIENT_FEATURES_POSITIVE_CONTROL=1 to also build the automation client and assert
 # that it contains every marker, proving the markers are real.
 set -euo pipefail
@@ -45,6 +46,7 @@ for target in package["targets"]:
 gated_declarations=(
     "packages/brawler-client/src/lib.rs:mod automation;"
     "packages/brawler-client/src/lib.rs:mod vfx_lab;"
+    "packages/brawler-client/src/flow.rs:mod automation;"
     "packages/brawler-client/src/queue/mod.rs:mod automation;"
     "packages/brawler-client/src/session/mod.rs:mod automation;"
     "packages/brawler-client/src/ui/mod.rs:pub(crate) mod gallery;"
@@ -81,6 +83,8 @@ markers=(
     "headless client is extending its run until combat evidence completes"
     "BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE"
     "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE"
+    "--shell-capture"
+    "shell capture route reached a step"
 )
 for marker in "${markers[@]}"; do
     if ! grep -rqF -- "$marker" packages/brawler-client/src src; then
