@@ -1,6 +1,7 @@
 //! Native Map Maker library, editor presentation, and input ownership.
 
 use super::shared::{FlowButton, FlowRoot, surface_role};
+use crate::text_entry::TextEdit;
 use crate::ui::icons;
 use crate::{
     ArenaCamera, ClientLobbyMembership, ClientPracticeModel, MapDraftDocument, MapDraftId,
@@ -17,11 +18,7 @@ use crate::{
     },
 };
 use bevy::{
-    input::{
-        ButtonState,
-        keyboard::KeyboardInput,
-        mouse::{AccumulatedMouseMotion, MouseWheel},
-    },
+    input::mouse::{AccumulatedMouseMotion, MouseWheel},
     prelude::*,
     ui::InteractionDisabled,
     window::PrimaryWindow,
@@ -138,6 +135,15 @@ pub(in crate::flow) struct MapMakerRuntime {
     return_to_editor: bool,
     camera_center: Vec2,
     camera_zoom: f32,
+}
+
+impl MapMakerRuntime {
+    /// The new or renamed map name being typed in the library, if any.
+    pub(in crate::flow) fn editing_map_name(&self) -> Option<&str> {
+        self.creating
+            .as_deref()
+            .or(self.renaming.as_ref().map(|(_, name)| name.as_str()))
+    }
 }
 
 impl Default for MapMakerRuntime {
@@ -1227,6 +1233,28 @@ pub(in crate::flow) enum KeyedMapNameCommit {
     Rename,
 }
 
+/// Applies typed edits to a new or renamed map's name: Backspace removes the last character and
+/// inserted characters stop at the authored name bound.
+fn edit_map_name(name: &mut String, edits: &[TextEdit]) {
+    for edit in edits {
+        match edit {
+            TextEdit::Backspace => {
+                name.pop();
+            }
+            TextEdit::Insert(text) => {
+                for character in text.chars().filter(|character| !character.is_control()) {
+                    if name.len() + character.len_utf8()
+                        <= brawler::map::authoring::MAX_AUTHORED_MAP_NAME_BYTES
+                    {
+                        name.push(character);
+                    }
+                }
+            }
+            TextEdit::Delete => {}
+        }
+    }
+}
+
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -1238,7 +1266,7 @@ pub(in crate::flow) fn map_maker_input(
     flow: Res<State<ClientFlow>>,
     keyboard: Res<ButtonInput<KeyCode>>,
     back: Res<crate::BackInput>,
-    mut keyboard_events: MessageReader<KeyboardInput>,
+    mut typed: crate::text_entry::TypedText,
     mouse: Option<Res<ButtonInput<MouseButton>>>,
     mouse_motion: Option<Res<AccumulatedMouseMotion>>,
     mut mouse_wheel: MessageReader<MouseWheel>,
@@ -1297,22 +1325,7 @@ pub(in crate::flow) fn map_maker_input(
     }
     if *flow.get() == ClientFlow::MapLibrary {
         if let Some(name) = runtime.creating.as_mut() {
-            for event in keyboard_events.read() {
-                if event.state != ButtonState::Pressed {
-                    continue;
-                }
-                if event.key_code == KeyCode::Backspace {
-                    name.pop();
-                } else if let Some(text) = event.text.as_deref() {
-                    for character in text.chars().filter(|character| !character.is_control()) {
-                        if name.len() + character.len_utf8()
-                            <= brawler::map::authoring::MAX_AUTHORED_MAP_NAME_BYTES
-                        {
-                            name.push(character);
-                        }
-                    }
-                }
-            }
+            edit_map_name(name, &typed.edits());
             if keyboard.just_pressed(KeyCode::Enter) {
                 queue_ui_action(&mut actions, FlowUiAction::ConfirmCreateMap);
                 *name_commit = Some(KeyedMapNameCommit::Create);
@@ -1323,22 +1336,7 @@ pub(in crate::flow) fn map_maker_input(
             return;
         }
         if let Some((_, name)) = runtime.renaming.as_mut() {
-            for event in keyboard_events.read() {
-                if event.state != ButtonState::Pressed {
-                    continue;
-                }
-                if event.key_code == KeyCode::Backspace {
-                    name.pop();
-                } else if let Some(text) = event.text.as_deref() {
-                    for character in text.chars().filter(|character| !character.is_control()) {
-                        if name.len() + character.len_utf8()
-                            <= brawler::map::authoring::MAX_AUTHORED_MAP_NAME_BYTES
-                        {
-                            name.push(character);
-                        }
-                    }
-                }
-            }
+            edit_map_name(name, &typed.edits());
             if keyboard.just_pressed(KeyCode::Enter) {
                 queue_ui_action(&mut actions, FlowUiAction::ConfirmRenameMapDraft);
                 *name_commit = Some(KeyedMapNameCommit::Rename);
@@ -1363,22 +1361,20 @@ pub(in crate::flow) fn map_maker_input(
             .as_deref()
             .map(|catalog| palette_layout(&catalog.0, &runtime));
         let mut changed = false;
-        for event in keyboard_events.read() {
-            if event.state != ButtonState::Pressed {
-                continue;
-            }
-            if event.key_code == KeyCode::Slash && runtime.palette_query.is_empty() {
-                continue;
-            }
-            if event.key_code == KeyCode::Backspace {
-                changed |= runtime.palette_query.pop().is_some();
-            } else if let Some(text) = event.text.as_deref() {
-                for character in text.chars().filter(|character| !character.is_control()) {
-                    if runtime.palette_query.len() + character.len_utf8() <= 48 {
-                        runtime.palette_query.push(character);
-                        changed = true;
+        for edit in typed.edits() {
+            match edit {
+                // The Slash press that opened search is read on the next frame.
+                TextEdit::Insert(text) if text == "/" && runtime.palette_query.is_empty() => {}
+                TextEdit::Backspace => changed |= runtime.palette_query.pop().is_some(),
+                TextEdit::Insert(text) => {
+                    for character in text.chars().filter(|character| !character.is_control()) {
+                        if runtime.palette_query.len() + character.len_utf8() <= 48 {
+                            runtime.palette_query.push(character);
+                            changed = true;
+                        }
                     }
                 }
+                TextEdit::Delete => {}
             }
         }
         if keyboard.just_pressed(KeyCode::Enter) {
@@ -3667,6 +3663,7 @@ pub(in crate::flow) fn return_to_editor_after_practice(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::input::{ButtonState, keyboard::KeyboardInput};
 
     #[test]
     fn editor_control_selection_is_owned_by_runtime_state() {
@@ -3818,6 +3815,7 @@ mod tests {
             brawler::timing::SIMULATION_TICK,
         ))
         .add_message::<KeyboardInput>()
+        .add_message::<Ime>()
         .add_message::<MouseWheel>()
         .insert_resource(ButtonInput::<KeyCode>::default())
         .insert_resource(ButtonInput::<MouseButton>::default())
@@ -3899,6 +3897,63 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn ime_commits_type_a_new_map_name_within_its_bound() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .add_message::<KeyboardInput>()
+            .add_message::<Ime>()
+            .add_message::<MouseWheel>()
+            .add_message::<crate::ui::feedback::UiFeedback>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(PendingFlowActions::default())
+            .init_resource::<crate::BackInput>()
+            .insert_resource(MapMakerRuntime {
+                creating: Some("Arena".to_string()),
+                ..MapMakerRuntime::default()
+            })
+            .insert_state(ClientFlow::MapLibrary)
+            .add_systems(Update, map_maker_input);
+        let commit = |app: &mut App, value: &str| {
+            app.world_mut().write_message(Ime::Commit {
+                window: Entity::PLACEHOLDER,
+                value: value.to_string(),
+            });
+            app.update();
+        };
+        let name = |app: &App| {
+            app.world()
+                .resource::<MapMakerRuntime>()
+                .editing_map_name()
+                .map(str::to_string)
+        };
+
+        commit(&mut app, " Two");
+        assert_eq!(name(&app).as_deref(), Some("Arena Two"));
+        // An on-screen keyboard's deletion arrives as Backspace before its commit.
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Backspace,
+            logical_key: bevy::input::keyboard::Key::Backspace,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        commit(&mut app, "o\u{7}");
+        assert_eq!(name(&app).as_deref(), Some("Arena Two"));
+        commit(&mut app, &"x".repeat(200));
+        assert_eq!(
+            name(&app).map(|name| name.len()),
+            Some(brawler::map::authoring::MAX_AUTHORED_MAP_NAME_BYTES)
+        );
+        assert!(
+            app.world()
+                .resource::<PendingFlowActions>()
+                .ordinary
+                .is_none()
+        );
+    }
+
     fn press_editor_key(app: &mut App, key: KeyCode, text: Option<&str>) {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -3932,6 +3987,7 @@ mod tests {
         ))
         .init_asset::<Image>()
         .add_message::<KeyboardInput>()
+        .add_message::<Ime>()
         .add_message::<MouseWheel>()
         .insert_resource(ButtonInput::<KeyCode>::default())
         .insert_resource(ButtonInput::<MouseButton>::default())
@@ -4364,6 +4420,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
             .add_message::<KeyboardInput>()
+            .add_message::<Ime>()
             .add_message::<MouseWheel>()
             .insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(PendingFlowActions::default())

@@ -92,6 +92,7 @@ mod session;
 mod settings;
 mod shell;
 mod targeting;
+mod text_entry;
 mod touch;
 mod ui;
 pub(crate) mod vfx;
@@ -136,6 +137,7 @@ pub use settings::{
     KeyboardBindings, MAX_CALIBRATION, MIN_TRIGGER_HYSTERESIS,
 };
 pub use shell::ClientShellPlugin;
+pub use text_entry::{TextEntry, TextEntryEdit, TextEntryField, TextEntryFocus};
 #[cfg(feature = "automation")]
 pub use ui::gallery::build_ui_gallery_app;
 #[cfg(feature = "automation")]

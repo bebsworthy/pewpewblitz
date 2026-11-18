@@ -63,6 +63,32 @@ public class MainActivity extends GameActivity {
     private native boolean nativeOnBackPressed();
 
     /**
+     * The on-screen keyboard's action key (Done) confirms the edited field (BRL-06pz). The game
+     * loop's GameActivity glue drops this event, so it is forwarded to the game directly.
+     */
+    @Override
+    public void onEditorAction(int action) {
+        super.onEditorAction(action);
+        nativeOnImeAction();
+    }
+
+    /**
+     * Hiding the keyboard with Back or its own control cancels the edited field, as Back does
+     * elsewhere in the game (BRL-06pz).
+     */
+    @Override
+    public void onSoftwareKeyboardVisibilityChanged(boolean visible) {
+        super.onSoftwareKeyboardVisibilityChanged(visible);
+        nativeOnSoftKeyboardVisibilityChanged(visible);
+    }
+
+    /** Implemented by {@code libbrawler_android.so}; only records the press. */
+    private native void nativeOnImeAction();
+
+    /** Implemented by {@code libbrawler_android.so}; only records the change. */
+    private native void nativeOnSoftKeyboardVisibilityChanged(boolean visible);
+
+    /**
      * The native game loop runs once per process: winit cannot recreate its event loop, so a new
      * activity in this process would hang on the splash. Once this activity is finishing (QUIT
      * returned from the game loop, or the system finished it) the process ends with it, and the

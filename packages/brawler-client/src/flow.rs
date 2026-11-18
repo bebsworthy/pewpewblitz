@@ -6,7 +6,7 @@ use super::{
 use actions::{FlowCommit, PendingFlowActions, begin_flow_frame};
 use bevy::{ecs::schedule::ApplyDeferred, prelude::*, ui::UiSystems};
 use connection::{ConnectionGeneration, ResolverState, start_initial_connection};
-use input::{collect_flow_input, publish_back_root};
+use input::{collect_flow_input, publish_back_root, publish_text_entry};
 use observation::observe_session;
 use persistence::load_connection_state;
 use reducer::{
@@ -102,6 +102,7 @@ impl Plugin for ClientFlowPlugin {
         super::ui::press::add_release_activation(app);
         super::ui::touch_target::add_touch_targets(app);
         super::back::add_back_input(app);
+        super::text_entry::add_text_entry(app);
         super::ui::feedback::add_ui_feedback(app);
         app.init_state::<ClientFlow>()
             .init_resource::<ClientOverlay>()
@@ -148,8 +149,9 @@ impl Plugin for ClientFlowPlugin {
                 )
                     .chain(),
             )
-            // The root flag reflects this frame's committed screen for the platform Back adapter.
-            .add_systems(Last, publish_back_root)
+            // The root flag and the edited field reflect this frame's committed screen for the
+            // platform Back and on-screen keyboard adapters.
+            .add_systems(Last, (publish_back_root, publish_text_entry))
             .configure_sets(
                 Update,
                 (

@@ -26,6 +26,8 @@ fn main() {
             frame_pacing::install(&mut app);
             #[cfg(target_os = "android")]
             back::install(&mut app);
+            #[cfg(target_os = "android")]
+            soft_keyboard::install(&mut app);
             app.run();
         }
         Err(error) => error!("PewPew Blitz could not start: {error}"),
@@ -36,3 +38,5 @@ fn main() {
 mod back;
 #[cfg(target_os = "android")]
 mod frame_pacing;
+#[cfg(target_os = "android")]
+mod soft_keyboard;

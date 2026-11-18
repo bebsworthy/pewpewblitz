@@ -4692,6 +4692,81 @@ fn connection_lost_over_match_settings_leaves_only_the_error_interactive() {
     assert_match_settings_closed(&mut app);
 }
 
+fn commit_ime_text(app: &mut App, value: &str) {
+    app.world_mut().write_message(Ime::Commit {
+        window: Entity::PLACEHOLDER,
+        value: value.to_string(),
+    });
+    app.update();
+}
+
+fn published_text_entry(app: &App) -> Option<(crate::TextEntryField, String)> {
+    app.world()
+        .resource::<crate::TextEntryFocus>()
+        .active()
+        .map(|entry| (entry.field(), entry.text().to_string()))
+}
+
+/// BRL-06pz: on-screen keyboard text arrives as `Ime::Commit` and keeps each field's bounds.
+#[test]
+fn ime_commits_edit_the_server_address_and_name_within_their_bounds() {
+    let mut app = flow_test_app();
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    app.update();
+    {
+        let mut model = app.world_mut().resource_mut::<ServerSelectModel>();
+        model.address = "10.0".to_string();
+        model.editing = Some(EditingField::Address);
+        model.caret = 4;
+    }
+    app.update();
+    assert_eq!(
+        published_text_entry(&app),
+        Some((crate::TextEntryField::ServerAddress, "10.0".to_string()))
+    );
+
+    commit_ime_text(&mut app, ".0.1:5000");
+    let model = app.world().resource::<ServerSelectModel>();
+    assert_eq!((model.address.as_str(), model.caret), ("10.0.0.1:5000", 13));
+    assert_eq!(
+        published_text_entry(&app),
+        Some((
+            crate::TextEntryField::ServerAddress,
+            "10.0.0.1:5000".to_string()
+        ))
+    );
+    // Address validation still rejects non-ASCII committed text.
+    commit_ime_text(&mut app, "é");
+    let model = app.world().resource::<ServerSelectModel>();
+    assert_eq!(model.address, "10.0.0.1:5000");
+    assert!(model.inline_error.is_some());
+
+    {
+        let mut model = app.world_mut().resource_mut::<ServerSelectModel>();
+        model.name = "Zo".to_string();
+        model.editing = Some(EditingField::Name);
+        model.caret = 2;
+        model.inline_error = None;
+    }
+    commit_ime_text(&mut app, "ë");
+    assert_eq!(app.world().resource::<ServerSelectModel>().name, "Zoë");
+    // The name keeps its 64-byte bound for committed text.
+    commit_ime_text(&mut app, &"n".repeat(64));
+    let model = app.world().resource::<ServerSelectModel>();
+    assert_eq!(model.name, "Zoë");
+    assert!(model.inline_error.is_some());
+    assert_eq!(
+        published_text_entry(&app),
+        Some((crate::TextEntryField::PlayerName, "Zoë".to_string()))
+    );
+
+    app.world_mut().resource_mut::<ServerSelectModel>().editing = None;
+    app.update();
+    assert_eq!(published_text_entry(&app), None);
+}
+
 /// BRL-wr0s: the first tap after launch activates a Server Select control on the phone viewport,
 /// however its touch start and end fall across frames and layout.
 mod first_tap {
