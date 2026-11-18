@@ -1,11 +1,11 @@
 //! Small production-asset viewports for the Map Maker palette.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    Material3dAssets, Primitive3dAssets, RenderAssetUsages, ToonScene, WorldAssetRoot,
+    WorldInstanceReady, WorldLookCatalog, environment_assets, render_quality,
+};
 use crate::flow::{MapPalettePreviewHost, MapPaletteVisual};
+use bevy::prelude::*;
 use bevy::{
     camera::{ClearColorConfig, RenderTarget, visibility::RenderLayers},
     render::render_resource::{TextureDimension, TextureFormat, TextureUsages},

@@ -3,17 +3,17 @@
 //! Kept beside the renderer it observes but out of the lifecycle code: it only reads renderer
 //! ownership, catalog, and retained-asset state and never mutates presentation.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::super::*;
+use super::super::super::{
+    ClientShellSettings, CombatVisualOwner, ImportedWorldFallbackPolicy, Position,
+    V3ProjectileVisual, vfx,
+};
 use super::super::{MAX_ACTIVE_PARTICLE_EMITTERS, RetainedProjectileSmoke3d};
 use super::{
     CombatEffect3d, CombatEffectLayer3d, MAX_EFFECTS, VfxParticleDiagnostics, VfxParticleEmitter3d,
     VfxTransientDiagnostics,
 };
 use crate::vfx::{CombatVisualSignature, VfxRegistry, VfxSignatureCache};
+use bevy::prelude::*;
 use bevy_hanabi::EffectAsset;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -265,6 +265,8 @@ mod tests {
     use super::super::tests::registry;
     use super::*;
     use crate::vfx::VfxPresentationVariant;
+    use brawler::protocol::NetworkEntityId;
+    use std::time::Duration;
 
     #[test]
     fn evidence_snapshot_names_catalog_variant_and_active_lifecycle_owners() {

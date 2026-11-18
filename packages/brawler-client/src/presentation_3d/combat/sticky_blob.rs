@@ -1,10 +1,9 @@
 //! Fuse-driven retained presentation for armed Sticky Blomb and Big Blob payloads.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    AuthoritativeTick, Material3dAssets, NotShadowCaster, NotShadowReceiver, Primitive3dAssets, vfx,
+};
+use bevy::prelude::*;
 use bevy::{
     ecs::{hierarchy::ChildSpawnerCommands, system::SystemParam},
     reflect::TypePath,
@@ -248,6 +247,7 @@ pub(in super::super) fn animate_sticky_blob_style(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::presentation_3d::{WorldPresentationSet, configure_world_presentation_schedule};
 
     #[test]
     fn quality_selection_preserves_the_primitive_fallback() {

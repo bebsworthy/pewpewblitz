@@ -1,10 +1,11 @@
 //! Windowed arena, fighter, camera, HUD, and pause presentation.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    ClientFlow, ClientInputContext, ClientOverlay, ClientPresentation, MatchSettingsRequest,
+    PauseOverlay, PendingLocalActions, ScoreboardOverlay, WindowCloseRequested, assets, audio, hud,
+    presentation_3d, ui,
+};
+use bevy::prelude::*;
 
 #[derive(Resource, Default)]
 pub(super) struct MatchMenuState {
@@ -315,6 +316,10 @@ fn exit_on_close_requested(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        ClientPlayableGate, InputDeviceActivity, PrimaryWindow, apply_pause_request,
+        sample_local_input, touch,
+    };
     use bevy::input::touch::{TouchPhase, touch_screen_input_system};
 
     #[derive(Resource, Default)]

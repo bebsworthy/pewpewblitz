@@ -12,12 +12,13 @@
 //! `assets/catalogs/fighter_outline.ron`; everything here is client presentation outside the
 //! gameplay fingerprint.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    AuthoritativeTick, CombatVisualOwner, Controlled, Fighter, NotShadowCaster, NotShadowReceiver,
+    PrimitiveTopology, RenderAssetUsages, RenderLayers, RimRelation, ToonMaterial, ToonShading,
+    V3FighterVisual,
+};
 use super::fighter_feedback::fighter_is_visually_concealed;
+use bevy::prelude::*;
 use bevy::{
     camera::visibility::NoFrustumCulling,
     mesh::{MeshTag, MeshVertexBufferLayoutRef, VertexAttributeValues, skinning::SkinnedMesh},

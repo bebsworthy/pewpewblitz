@@ -239,8 +239,12 @@ pub fn effective_maximum_health(base: u16, stacks: BoostStacks) -> u16 {
 
 #[cfg(feature = "server")]
 mod authority {
-    #[allow(clippy::wildcard_imports)]
-    use super::*;
+    use super::{
+        BOOST_PICKUP_NETWORK_NAMESPACE, BoostGrantScope, BoostPickup, BoostPickupAvailableAtTick,
+        BoostPickupIdentity, BoostPickupSource, BoostStacks, HOSTILE_NPC_NETWORK_NAMESPACE,
+        HostileNpc, HostileNpcIdentity, IntoScheduleConfigs, MAX_LIVE_BOOST_PICKUPS,
+        ZOMBIE_DEFINITION, ZombieModeState, ZombiePhase, ZombieRules, effective_maximum_health,
+    };
     use crate::{
         combat::{
             ActiveEffects, CombatCue, CombatOutbox, CombatOutcomeFact, CombatOutcomeFacts,
@@ -258,6 +262,7 @@ mod authority {
         timing::SimulationTick,
     };
     use avian2d::prelude::{Collider, CollisionLayers, Position, RigidBody, Rotation};
+    use bevy::prelude::*;
     use lightyear::prelude::{NetworkTarget, Replicate};
     use std::collections::{BTreeMap, BTreeSet};
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::presentation_3d::environment_assets;
 use bevy::mesh::VertexAttributeValues;
 
 fn shared_catalog() -> brawler::map::MapContentCatalog {

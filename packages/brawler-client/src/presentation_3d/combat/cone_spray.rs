@@ -1,9 +1,10 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    AuthoritativeTick, CombatVisualOwner, Indices, Material3dAssets, NotShadowCaster,
+    NotShadowReceiver, Position, PrimitiveTopology, RenderAssetUsages, Rotation, ground_position,
+    vfx,
+};
 use super::common::{CombatVfxContext, GROUND_EFFECT_HEIGHT};
+use bevy::prelude::*;
 use bevy::{reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef};
 use brawler::combat::client::{
     AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker, MAX_CONE_SPRAY_SEGMENTS,
@@ -344,6 +345,10 @@ pub(crate) fn animate_cone_spray_materials(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::presentation_3d::{
+        ToonMaterial, ToonShading, WorldPresentationSet, configure_world_presentation_schedule,
+        setup_3d_foundation,
+    };
 
     #[test]
     fn cone_material_variants_encode_bounded_quality_levels() {

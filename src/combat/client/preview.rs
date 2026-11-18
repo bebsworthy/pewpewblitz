@@ -1,11 +1,11 @@
 //! Weapon preview geometry for the controlled fighter.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    ConeSprayState, DeliveryMethod, FiringPattern, PersistentAreaShape, ProjectileBody,
+    ResolvedWeapon, TargetSelection, delivery, spread_angles,
+};
 use avian2d::{collision::collider::contact_query::time_of_impact, prelude::Collider};
+use bevy::prelude::*;
 use std::collections::HashMap;
 
 /// Rays plus rim segments of one live cone-spray surface.
@@ -998,6 +998,7 @@ fn cone_spray_preview_primitives(
 #[cfg(test)]
 mod geometry_tests {
     use super::*;
+    use crate::combat::{WeaponCatalog, WeaponPresetId};
 
     const FIGHTER_RADIUS: f32 = 14.0;
 

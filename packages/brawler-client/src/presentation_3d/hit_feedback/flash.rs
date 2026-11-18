@@ -6,11 +6,8 @@
 //! material family (`StandardMaterial` and the toon material).
 
 use super::super::combat::FighterGroundMarker3d;
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{FlashTuning, HashMap, HitFeedbackCatalog, ShadedMaterial};
+use bevy::prelude::*;
 
 /// Distinct source materials that may receive a flash variant. Fighters, deployables, NPCs, and
 /// damageable objects use a few dozen; past the ceiling a new material simply does not flash.

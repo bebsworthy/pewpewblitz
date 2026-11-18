@@ -1,11 +1,12 @@
 //! Combat cue ingestion and deduplication.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    BTreeMap, CombatCue, CombatEventId, CombatEvidenceCheckpoint, CombatStateSnapshot,
+    DamageSource, DeduplicatedCombatCue, Fighter, Instant, MAX_COMBAT_EVIDENCE_EVENTS,
+    NetworkEntityId, PathBuf, ShotId, VecDeque, WeaponDefinitionId, env, unix_epoch_micros,
+};
 use bevy::input::gamepad::{Gamepad, GamepadRumbleIntensity, GamepadRumbleRequest};
+use bevy::prelude::*;
 use std::time::Duration;
 #[derive(Resource, Debug)]
 pub struct ClientCombatEvidenceStatus {

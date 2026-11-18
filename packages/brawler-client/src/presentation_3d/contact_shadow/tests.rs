@@ -1,4 +1,8 @@
 use super::*;
+use crate::presentation_3d::{
+    STRAIGHT_PROJECTILE_HEIGHT, ToonMaterial, ToonShading, setup_3d_foundation,
+};
+use avian2d::prelude::Position;
 
 fn tuning() -> ContactShadowTuning {
     ContactShadowTuning::embedded().expect("embedded contact shadow catalog")

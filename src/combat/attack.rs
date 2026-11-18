@@ -1,8 +1,26 @@
 //! Authoritative attack economy and delivery orchestration.
 
-#[allow(clippy::wildcard_imports)]
 #[cfg(feature = "server")]
-use super::*;
+use super::{
+    AbilityWeaponTelemetry, AcceptedAttackFact, AcceptedAttackFacts, ActionState,
+    ActiveAttackTracker, ActiveAttackTrackers, AmmoRecovery, AttackDelivery, AttackSource,
+    Collider, CollisionLayers, CombatCue, CombatEventId, CombatEvidenceMode, CombatLogRecord,
+    CombatOutbox, CombatSourceKind, CombatTelemetry, ComposedProjectileRuntime, ConeSpray,
+    ConeSprayRuntime, ConeSprayState, CurrentHealth, DESTRUCTIBLE_MAP_LAYER, Defeated,
+    DeliveryMethod, FIGHTER_LAYER, Fighter, FighterInput, FiringPattern, HashSet,
+    HealthRecoveryState, InterpolationTarget, LinkOf, LobbedFlight, MAX_COMBAT_EVIDENCE_EVENTS,
+    MeleeAttack, NetworkEntityId, NetworkTarget, NextCombatIds, PROJECTILE_LAYER,
+    PayloadEffectDefinition, PersistentSplashRuntime, PlayerId, Position, Projectile,
+    ProjectileBody, ProjectileDeadline, ProjectileSource, Replicate, ReplicatedAttackSource,
+    ResolvedWeapon, Rotation, STATIC_MAP_LAYER, ShotId, SimulationTick, StickyBlobKind,
+    StickyBlobRuntime, StraightFlight, TargetSelection, TeamId, WeaponCatalogResource,
+    WeaponDefinitionId, WeaponPhase, WeaponPresetId, WeaponRecipe, WeaponState, WeaponTelemetry,
+    WeaponTelemetryOutcome, WeaponTelemetryRecord, WorldPoint, delivery, distance_band, effects,
+    finish_attack_delivery, input_should_neutralize, legacy_compatibility_recipe,
+    map_muzzle_contact, muzzle_position, server, splash, spread_angles, sticky, unix_epoch_micros,
+};
+#[cfg(feature = "server")]
+use bevy::prelude::*;
 
 #[cfg(feature = "server")]
 pub(crate) const MAX_ACTIVE_CONE_SPRAYS: usize = 32;
@@ -776,6 +794,7 @@ fn consume_quick_cycle_state(
 #[cfg(all(test, feature = "server"))]
 mod tests {
     use super::*;
+    use crate::combat::WeaponEconomy;
 
     fn quick_cycle_passive(refill_duration_basis_points: u16) -> crate::builds::ResolvedPassive {
         crate::builds::ResolvedPassive {

@@ -10,11 +10,12 @@
 //! `just riff-asset` rather than editing it.
 
 use super::fighter_weapons::HeldWeapon;
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    ClientShellSettings, Duration, Fighter, Gltf, Imported3dAssets, MatchPhase, MatchRoot,
+    MatchState, NetworkEntityId, ToonScene, V3FallbackVisual, V3FighterVisual, WorldAssetRoot,
+    WorldInstanceReady,
+};
+use bevy::prelude::*;
 use brawler::combat::client::DeduplicatedCombatCue;
 use brawler::combat::{CombatCue, DeliveryMethod};
 

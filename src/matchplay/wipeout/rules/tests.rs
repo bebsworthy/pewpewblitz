@@ -1,4 +1,5 @@
 use super::*;
+use crate::matchplay::{MatchResult, WIPEOUT_RULES_REVISION};
 use crate::{
     combat::{AttackId, CombatEventId, CombatOutcomeFact, CombatSourceKind},
     matchplay::{FighterDisplayName, MatchId, MatchParticipant},

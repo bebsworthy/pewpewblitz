@@ -1,6 +1,11 @@
 use super::super::camera;
 use super::*;
 use crate::local_attack::{LocalAttackKind, LocalShotId};
+use crate::{ClientShellSettings, DEFAULT_GAMEPLAY_VIEWPORT, DEFAULT_GAMEPLAY_WINDOW_ASPECT};
+use crate::{
+    presentation_3d::{camera_offset, follow_3d_camera, ground_point},
+    ui,
+};
 use bevy::time::TimeUpdateStrategy;
 use brawler::combat::{AttackId, CombatCue, CombatEventId, TeamId, WorldPoint};
 use core::time::Duration;

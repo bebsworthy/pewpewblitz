@@ -10,11 +10,12 @@
 //! `assets/catalogs/contact_shadows.ron`; everything here is client presentation outside the
 //! gameplay fingerprint.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    AuthoritativeTick, CombatVisualOwner, Controlled, Fighter, Indices, NotShadowCaster,
+    NotShadowReceiver, PrimitiveTopology, RenderAssetUsages, V3FighterVisual, combat,
+    environment_assets, floor_tiles, ground_position,
+};
+use bevy::prelude::*;
 use serde::Deserialize;
 
 const CONTACT_SHADOW_CATALOG: &str =

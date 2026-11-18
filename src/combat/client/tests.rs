@@ -4,6 +4,7 @@ use crate::combat::client::cues::{
 };
 use crate::combat::client::preview::{AimMark, AimTraceBlockerIndex, aim_lane_marks};
 use crate::combat::{CombatEventId, fighter_color, projectile_color};
+use crate::combat::{DistanceBand, WorldPoint};
 use crate::combat::{WeaponCatalog, WeaponPresetId};
 use crate::map::{MapContentCatalog, MapDynamicState, MapInstanceId, MapPresetId as ArenaPresetId};
 use crate::protocol::PlayerId;

@@ -1,8 +1,5 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{ArenaCamera, DynamicMapVisual, Position, ground_position, hud, ui};
+use bevy::prelude::*;
 
 const OBJECT_HEALTH_BAR_WIDTH: f32 = 76.8;
 const OBJECT_HEALTH_BAR_HEIGHT: f32 = 11.0;

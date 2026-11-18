@@ -26,20 +26,17 @@ mod network;
 mod telemetry;
 
 #[cfg(feature = "server")]
-use bevy::prelude::*;
-
-#[cfg(feature = "server")]
 mod server {
-    #[allow(
-        clippy::wildcard_imports,
-        reason = "the role-owned module composes the shared concealment contract"
-    )]
     use super::{
+        AlliedConcealmentMemberships, ConcealmentFieldState, ConcealmentPresentationState,
+        ConcealmentRevealDeadlines, ConcealmentRulesResource, ConcealmentSources,
+        ForcedRevealSources, NextConcealmentFieldId, ObjectiveCarrier, ObserverRelation,
+        ObserverVisibilityInput, TeamRevealDeadline, TerrainConcealmentMembership, field_contains,
         network::{
             ObserverVisibilityCache, QueuedVisibilityTransitions, apply_queued_observer_visibility,
         },
+        observer_can_see, reveal_lock_active,
         telemetry::{ConcealmentTelemetry, VisibilityTransitionReason, VisibilityTransitionRecord},
-        *,
     };
     use crate::{
         combat::{AcceptedAttackFacts, CombatOutcomeFacts, CombatOutcomeKind, Defeated, TeamId},
@@ -49,6 +46,7 @@ mod server {
         timing::SimulationTick,
     };
     use avian2d::prelude::Position;
+    use bevy::prelude::*;
     use lightyear::prelude::{ControlledBy, Replicate, ReplicationSystems};
     use std::collections::HashSet;
 

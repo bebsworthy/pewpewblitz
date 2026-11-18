@@ -4,11 +4,24 @@
 //! range, plans the whole target/tracker transaction without mutation, commits it once,
 //! and then projects the committed facts. The system below only sequences those stages.
 
-#[allow(clippy::wildcard_imports)]
 #[cfg(feature = "server")]
-use super::*;
+use super::{
+    AbilityWeaponTelemetry, ActiveAttackTrackers, AttackSource, ColdState, CollisionLayers,
+    CombatConditionRules, CombatConditionRulesResource, CombatCue, CombatEffectCue, CombatEventId,
+    CombatLogRecord, CombatOutbox, CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind,
+    CombatSourceKind, CombatTargetKind, CombatTelemetry, CombatWorldEffectFact,
+    CombatWorldEffectFacts, CombatWorldEffectSource, CompletedAttack, ConditionSource,
+    CurrentHealth, DamageFalloff, DamageOverTime, DamageOverTimeKind, DamageSource, Defeated,
+    FIGHTER_LAYER, Fighter, HashMap, HashSet, KnockbackFeedback, LinkOf, NextCombatIds,
+    PULSE_SIDEARM_DEFINITION, PayloadEffectDefinition, PendingDelivery, PendingDeliveryKind,
+    PendingPayload, ProjectileSource, RecipientPolicy, ShotId, SimulationTick, TeamId, TestDummy,
+    TestDummyResetDeadline, WeaponDefinitionId, WeaponPresetId, WeaponRecipeFingerprint,
+    WeaponTelemetry, WeaponTelemetryOutcome, WeaponTelemetryRecord, WorldPoint, distance_band,
+    linear_falloff, server, teams_are_hostile,
+};
 use super::{ActiveEffects, AttackId, ExternalMotion, NetworkEntityId, SlowEffect};
 use bevy::prelude::Vec2;
+use bevy::prelude::*;
 
 #[cfg(feature = "server")]
 mod application;

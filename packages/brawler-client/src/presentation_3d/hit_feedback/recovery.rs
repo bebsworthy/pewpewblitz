@@ -9,11 +9,11 @@
 //! replicated health still claims it. Increases caused by lifecycle resets (respawn, match
 //! restart) are dropped, and decreases never produce a number, so damage is never misattributed.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    CombatCue, CombatEffectCue, DeduplicatedCombatCue, Fighter, FloatingNumberBook, HashMap,
+    HitFeedbackCatalog, HitFeedbackRoots, HitStyle, NetworkEntityId,
+};
+use bevy::prelude::*;
 use brawler::combat::{CurrentHealth, Defeated};
 use brawler::matchplay::{MatchPhase, MatchState, RespawnState, SpawnProtection};
 

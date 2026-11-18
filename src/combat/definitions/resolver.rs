@@ -1,10 +1,11 @@
 //! Deterministic recipe normalization, resolution, fingerprints, spread, and falloff.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    DamageFalloff, DeliveryMethod, EngineWeaponLimits, FINGERPRINT_FORMAT_VERSION, FiringPattern,
+    MAX_RESOLVED_WEAPON_BYTES, PayloadEffectDefinition, PersistentAreaShape, ResolvedWeapon,
+    TargetSelection, WeaponConfiguration, WeaponPresetId, WeaponRecipe, WeaponRecipeFingerprint,
+    WeaponRecipePolicy, WorldEffectDefinition, fnv1a64, limits_within_engine_ceiling,
+};
 
 pub fn resolve_configuration(
     source_preset_id: Option<WeaponPresetId>,

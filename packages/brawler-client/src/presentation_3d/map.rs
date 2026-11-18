@@ -1,10 +1,7 @@
 //! Generation-owned 3D map surface materialization and lifecycle markers.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{NotShadowCaster, border, environment_assets, floor_tiles, ground_position};
+use bevy::prelude::*;
 
 /// Top of the playable floor; effect tiles, water, zones, and rings layer above it.
 pub(super) const PLAYABLE_FLOOR_Y: f32 = 0.25;

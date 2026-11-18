@@ -33,11 +33,15 @@ pub(crate) mod telemetry;
 #[cfg(feature = "server")]
 pub(crate) use telemetry::AbilityWeaponTelemetry;
 
-#[allow(clippy::wildcard_imports)]
-#[cfg(feature = "server")]
-use authority::*;
 #[cfg(feature = "server")]
 pub(crate) use authority::{TestDummy, TestDummyFixture, TestDummyResetDeadline};
+#[cfg(feature = "server")]
+use authority::{
+    area_line_of_sight_clear, area_line_of_sight_clear_excluding, cleanup_disconnected_projectiles,
+    emit_combat_summary, expire_runtime_effects, legacy_compatibility_recipe, lob_launch_point,
+    map_muzzle_contact, payload_can_affect_target, publish_authoritative_tick, queue_area_payloads,
+    record_delivery_termination, reset_due_fighters, send_combat_cues, spawn_test_dummy,
+};
 
 #[cfg(all(test, feature = "server"))]
 use attack::advance_composed_weapon_state;

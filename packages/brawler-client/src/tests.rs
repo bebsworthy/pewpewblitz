@@ -1,6 +1,7 @@
 //! Focused client composition and behavior tests.
 
 use super::*;
+use crate::input::exceeds_activity_threshold;
 
 #[test]
 fn client_network_plugin_does_not_select_gameplay_or_presentation() {

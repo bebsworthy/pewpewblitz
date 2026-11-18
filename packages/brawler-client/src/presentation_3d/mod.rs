@@ -1,10 +1,18 @@
 //! Default V3 world renderer over the unchanged planar simulation.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    ArenaCamera, AuthoritativeTick, ClientAssetHandles, ClientShellSettings, Controlled,
+    DEFAULT_GAMEPLAY_VIEWPORT, DEFAULT_GAMEPLAY_WINDOW_ASPECT, Fighter, InterpolationSystems,
+    MapDraftId, MatchPhase, MatchRoot, MatchState, NetworkEntityId, PendingLocalActions,
+    PhysicsSystems, Position, PrimaryWindow, Rotation, TargetedUltimateInput, env, hud,
+    local_attack, targeted_ultimate_range, ui, vfx,
+};
+#[cfg(feature = "automation")]
+use super::{
+    ClientAutomationConfig, ClientFlow, RenderMeasurementConfig, RenderProfile,
+    RoutedClientLifecycle, RoutedClientPhase, VERSION, assets, dashboard, flow, prediction,
+};
+use bevy::prelude::*;
 use bevy::{
     asset::RenderAssetUsages,
     camera::{CameraUpdateSystems, visibility::RenderLayers},

@@ -1,10 +1,13 @@
 //! Server-authoritative armed Sticky Blomb attachment, fuse, and detonation lifecycle.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    Collider, CollisionLayers, CombatSourceKind, ComposedProjectileRuntime, CurrentHealth,
+    Defeated, DeliveryMethod, Fighter, HashMap, HashSet, LinkOf, NetworkEntityId, PendingDelivery,
+    PendingDeliveryKind, PendingPayload, Position, Projectile, ProjectileBody, ProjectileDeadline,
+    SimulationTick, StickyBlobKind, StickyBlobRuntime, StickyBlobState, StraightFlight,
+    TargetSelection, TeamId, WeaponRecipe, queue_area_payloads,
+};
+use bevy::prelude::*;
 
 pub(crate) const MAX_ACTIVE_STICKY_BLOBS: usize = 96;
 
@@ -389,6 +392,13 @@ pub(crate) fn detonate_sticky_blobs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        combat::{
+            AttackId, AttackSource, CombatEventId, WeaponCatalog, WeaponPresetId,
+            WeaponRecipeFingerprint, WorldPoint,
+        },
+        protocol::PlayerId,
+    };
 
     fn sticky_runtime(
         owner_entity: Entity,

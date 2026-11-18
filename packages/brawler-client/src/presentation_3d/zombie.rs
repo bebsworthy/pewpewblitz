@@ -1,10 +1,12 @@
 //! Durable client presentation for replicated Zombie-mode NPCs and Boost pickups.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    ClientAssetHandles, Duration, FighterPresentationMetrics, Gltf, ImportedWorldFallbackPolicy,
+    KENNEY_CHARACTER_FORWARD_CORRECTION, Material3dAssets, Position, Primitive3dAssets, ToonScene,
+    WorldAsset, WorldAssetRoot, WorldInstanceReady, contact_shadow, gameplay_character_scale,
+    ground_position,
+};
+use bevy::prelude::*;
 
 const ZOMBIE_ANIMATION_NAMES: [&str; 3] = ["idle", "walk", "attack-melee-right"];
 
@@ -424,6 +426,7 @@ fn spawn_primitive_zombie(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use brawler::protocol::NetworkEntityId;
 
     #[test]
     fn mutable_visual_transform_queries_initialize_without_aliasing() {

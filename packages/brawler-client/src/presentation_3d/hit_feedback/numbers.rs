@@ -4,11 +4,11 @@
 //! text slots spawned once mirrors it. Numbers are world-anchored where the hit landed and
 //! projected through the arena camera after it updates each frame.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    ArenaCamera, ClientShellSettings, FIGHTER_VISUAL_HEIGHT_WORLD, GlobalTransform,
+    HitFeedbackCatalog, HitStyle, MAX_FLOATING_NUMBERS, NumberTuning, ui,
+};
+use bevy::prelude::*;
 
 const FIGHTER_BODY_WORLD_HEIGHT: f32 = FIGHTER_VISUAL_HEIGHT_WORLD;
 /// Deterministic lateral pattern, in stack-offset units, for numbers that cannot merge.

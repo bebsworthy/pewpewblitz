@@ -1,10 +1,11 @@
 //! Stationary persistent Splash-area authority.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the server-owned Splash transaction consumes the combat composition surface"
-)]
-use super::*;
+use super::{
+    ActiveAttackTrackers, AttackId, AttackSource, Defeated, Fighter, LinkOf, NetworkEntityId,
+    PayloadBundleDefinition, PayloadEffectDefinition, PendingDelivery, PendingDeliveryKind,
+    PendingPayload, PersistentSplashRuntime, PersistentSplashState, SimulationTick, TeamId,
+    WeaponRecipe, area_line_of_sight_clear, finish_attack_delivery, payload_can_affect_target,
+};
 use avian2d::prelude::Position;
 use bevy::prelude::*;
 use std::collections::HashSet;
@@ -218,6 +219,7 @@ pub(super) fn advance_persistent_splashes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::combat::PersistentAreaShape;
 
     #[test]
     fn splash_timing_includes_landing_and_expiry_pulses() {

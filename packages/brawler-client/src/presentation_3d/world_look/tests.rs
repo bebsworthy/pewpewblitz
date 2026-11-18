@@ -1,4 +1,8 @@
 use super::*;
+use crate::presentation_3d::{
+    GLOW_MUZZLE, GLOW_PICKUP, GLOW_PROJECTILE_BLUE, GLOW_PROJECTILE_RED, ToonMaterial, ToonShading,
+    combat, environment_assets, setup_3d_foundation,
+};
 use bevy::camera::Exposure;
 
 fn catalog() -> WorldLookCatalog {

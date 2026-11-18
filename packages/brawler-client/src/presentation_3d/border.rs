@@ -1,10 +1,6 @@
 //! Pure modular arena-edge and deterministic outer-dressing layout.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use bevy::prelude::*;
 
 pub(super) const EDGE_MODULE: f32 = 64.0;
 pub(super) const OUTER_GROUND_MARGIN: f32 = 1_152.0;

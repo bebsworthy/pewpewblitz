@@ -1,10 +1,11 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    Controlled, Fighter, Indices, Material3dAssets, NetworkEntityId, NotShadowCaster,
+    NotShadowReceiver, PendingLocalActions, Position, PrimitiveTopology, RenderAssetUsages,
+    Rotation, ground_position,
+};
 use super::common::GROUND_EFFECT_HEIGHT;
 use bevy::camera::visibility::NoFrustumCulling;
+use bevy::prelude::*;
 use brawler::combat::client::{
     AimMark, AimTone, AimTraceBlockerClass, AimTraceBlockerIndex, AimTraceDynamicBlocker,
     aim_lane_marks, ultimate_area_marks,

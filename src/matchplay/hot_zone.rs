@@ -238,11 +238,11 @@ fn controlled_by(status: HotZoneStatus, team: usize) -> bool {
 
 #[cfg(feature = "server")]
 mod rules {
-    #[allow(
-        clippy::wildcard_imports,
-        reason = "the child module consumes its parent module's composition surface"
-    )]
-    use super::*;
+    use super::{
+        HOT_ZONE_NEAR_COMBAT_EXPANSION, HotZoneDiagnostics, HotZoneRules, HotZoneState,
+        HotZoneStatus, HotZoneTelemetry, IntoScheduleConfigs, NormalizedArea,
+        ResolvedObjectiveZone, TeamId,
+    };
     use crate::combat::CurrentHealth;
     use crate::map::HOT_ZONE_MODE_DEFINITION;
     use crate::matchplay::{
@@ -254,6 +254,7 @@ mod rules {
     use crate::protocol::{Fighter, NetworkEntityId};
     use crate::timing::SimulationTick;
     use avian2d::prelude::Position;
+    use bevy::prelude::*;
 
     pub struct HotZoneModePlugin;
 

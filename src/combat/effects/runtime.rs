@@ -1,10 +1,14 @@
 //! Damage, defeat, slow, knockback, and passive runtime math.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    ActiveEffects, AttackId, AttackSource, ColdState, CombatCue, CombatEffectCue, CombatEventId,
+    CombatSourceKind, CombatTargetKind, ConditionSource, CurrentHealth, DamageFalloff,
+    DamageOverTime, DamageOverTimeKind, DamageSource, ExternalMotion, NetworkEntityId,
+    PayloadEffectDefinition, PendingPayload, RecipientPolicy, ShotId, SlowEffect, TeamId, Vec2,
+    WeaponDefinitionId, WeaponPresetId, WeaponTelemetryOutcome, WeaponTelemetryRecord, WorldPoint,
+    linear_falloff, teams_are_hostile,
+};
+use bevy::prelude::*;
 pub const MAX_EXTERNAL_MOTION_SPEED: f32 = 900.0;
 
 #[must_use]
@@ -531,6 +535,7 @@ pub(super) fn plan_runtime_effects(
 #[cfg(test)]
 mod elemental_tests {
     use super::*;
+    use crate::protocol::PlayerId;
 
     fn source(action: u64) -> ConditionSource {
         ConditionSource {

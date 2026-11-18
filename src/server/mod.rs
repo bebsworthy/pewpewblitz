@@ -48,9 +48,7 @@ use lightyear::prelude::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env,
-    fmt::Write as _,
-    fs,
+    env, fs,
     path::PathBuf,
     time::Instant,
 };
@@ -83,8 +81,10 @@ pub use routed_worker::{
 pub(crate) use seat_hold::{CompletedSeats, SEAT_HOLD_TICKS, SeatRebindQueue};
 pub(crate) use seat_hold::{RoutedSeat, SeatHold};
 #[cfg(test)]
-#[allow(clippy::wildcard_imports)]
-use verification::*;
+use verification::{
+    checkpoint_reports_converge, combat_prerequisites_met, cues_matching_expected,
+    cues_through_first_reset, fire_to_cue_latency_evidence, report_matches_snapshot,
+};
 use verification::{verify_process_combat, verify_process_match, verify_process_movement};
 pub use worker::{
     LobbyControlInbox, LobbyControlOutbox, WorkerBootstrap, WorkerBootstrapError,

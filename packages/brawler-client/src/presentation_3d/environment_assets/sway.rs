@@ -1,11 +1,8 @@
 //! Gentle sway of concealing foliage (BRL-0153): a pivot at the cell's ground centre tilts the
 //! imported bush a few degrees with a per-cell phase, so the whole bush bends about its base.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{ClientShellSettings, render_quality};
+use bevy::prelude::*;
 
 /// Peak tilt; small enough that the bush never leaves its authoritative cell.
 const SWAY_RADIANS: f32 = 0.045;

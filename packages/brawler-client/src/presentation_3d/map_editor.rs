@@ -1,10 +1,7 @@
 //! Local-only 3D draft preview and editor overlays.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{MapDraftId, NotShadowCaster, Primitive3dAssets, ground_position};
+use bevy::prelude::*;
 
 const EDITOR_INSTANCE_PREFIX: u64 = 0xFFFF_0000_0000_0000;
 

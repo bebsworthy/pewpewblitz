@@ -1,9 +1,12 @@
 use super::super::render_quality::ParticleBackend;
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    AuthoritativeTick, CombatVisualOwner, Controlled, Fighter, FighterPresentationMetrics,
+    LOBBED_PROJECTILE_LAUNCH_HEIGHT, Material3dAssets, NotShadowCaster, NotShadowReceiver,
+    Position, Primitive3dAssets, Rotation, SENTRY_BASE_RADIUS, STRAIGHT_PROJECTILE_HEIGHT,
+    V3FallbackVisual, V3FighterVisual, V3ProjectileVisual, catch_up_projectile_position,
+    contact_shadow, fighter_body_material, fighter_recoil_offset, ground_position, ground_rotation,
+    team_material, vfx,
+};
 use super::common::{
     CombatVfxContext, GROUND_EFFECT_HEIGHT, GroundMarkerRelation, ground_marker_material,
     ground_marker_relation, unique_roots,
@@ -14,6 +17,7 @@ use super::splash_style::spawn_dual_purpose_splash_style;
 use super::{
     MAX_ACTIVE_PARTICLE_EMITTERS, VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
+use bevy::prelude::*;
 use std::collections::{BTreeMap, btree_map::Entry};
 
 const GROUND_MARKER_HEIGHT: f32 = 1.0;
@@ -1557,6 +1561,8 @@ pub(in super::super) fn write_sentry_visual_poses(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::presentation_3d::{ToonMaterial, ToonShading, setup_3d_foundation};
+    use brawler::protocol::{NetworkEntityId, PlayerId};
 
     #[test]
     fn straight_projectile_visual_footprint_matches_replicated_circle() {

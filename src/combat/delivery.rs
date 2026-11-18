@@ -1,9 +1,22 @@
 //! Pure geometry shared by server delivery systems and client previews.
 
-#[allow(clippy::wildcard_imports)]
 #[cfg(feature = "server")]
-use super::*;
+use super::{
+    ActiveAttackTrackers, ArenaWall, AttackSource, Collider, ComposedProjectileRuntime,
+    CurrentHealth, DESTRUCTIBLE_MAP_LAYER, Defeated, DeliveryMethod, FIGHTER_LAYER, Fighter,
+    HashMap, HashSet, LinkOf, LobbedFlight, MeleeAttack, NetworkEntityId, NetworkTarget,
+    NextCombatIds, PayloadEffectDefinition, PendingDelivery, PendingDeliveryKind, PendingPayload,
+    PersistentSplash, PersistentSplashRuntime, PersistentSplashState, Position, ProjectileBody,
+    Replicate, ReplicatedAttackSource, STATIC_MAP_LAYER, SimulationTick, StickyBlobRuntime,
+    StickyBlobState, TargetSelection, TeamId, WeaponRecipe, WeaponTelemetry,
+    WeaponTelemetryOutcome, WorldPoint, area_line_of_sight_clear,
+    area_line_of_sight_clear_excluding, distance_band, effects, finish_attack_delivery,
+    lob_launch_point, payload_can_affect_target, payload_target_visible,
+    record_delivery_termination, splash, sticky,
+};
 use bevy::prelude::Vec2;
+#[cfg(feature = "server")]
+use bevy::prelude::*;
 
 #[cfg(feature = "server")]
 mod projectiles;
@@ -468,6 +481,17 @@ pub(super) fn resolve_melee_attacks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "server")]
+    use crate::{
+        combat::{
+            AttackId, CombatSourceKind, Projectile, StickyBlobKind, WeaponCatalog, WeaponPresetId,
+            WeaponRecipeFingerprint,
+        },
+        movement::PROJECTILE_LAYER,
+        protocol::PlayerId,
+    };
+    #[cfg(feature = "server")]
+    use avian2d::prelude::{CollisionLayers, RigidBody};
 
     #[cfg(feature = "server")]
     fn sticky_sweep_app(tick: u64) -> App {

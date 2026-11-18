@@ -5,14 +5,13 @@
 //! shared, and a relation change is only a tag write. The fighter outline hulls (BRL-0151) carry the
 //! same tag, so their optional relationship tint follows the same relation.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    CombatVisualOwner, Controlled, Fighter, RimRelation, ToonMaterial, V3FighterVisual,
+};
 use super::common::{GroundMarkerRelation, ground_marker_relation};
 use super::fighter_outline::FighterOutlineHull;
 use bevy::mesh::MeshTag;
+use bevy::prelude::*;
 
 const fn rim_relation(relation: GroundMarkerRelation) -> RimRelation {
     match relation {
@@ -63,6 +62,7 @@ pub(in super::super) fn tag_fighter_rim_relation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::presentation_3d::ToonShading;
 
     fn fighter_app() -> (App, Entity, Entity, Entity) {
         let mut app = App::new();

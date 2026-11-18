@@ -14,15 +14,16 @@
 //! [`LOCAL_PROJECTILE_FADE_SECONDS`]. Replicated visuals of the local player's projectiles are
 //! hidden while their cosmetic already finished its flight, or while a local shot is unconfirmed.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    CombatVisualOwner, Controlled, Fighter, Material3dAssets, NetworkEntityId, Position,
+    Primitive3dAssets, Rotation, STRAIGHT_PROJECTILE_HEIGHT, V3ProjectileVisual, ground_position,
+    ground_rotation, vfx,
+};
 use super::common::CombatVfxContext;
 use crate::local_attack::{
     LocalAttackKind, LocalAttackLedger, LocalAttackPresented, LocalShotId, LocalShotStatus,
 };
+use bevy::prelude::*;
 use brawler::combat::client::{AimTraceBlockerIndex, straight_map_travel};
 use brawler::combat::{CombatCue, DeduplicatedCombatCue, DeliveryMethod, FiringPattern};
 use std::collections::VecDeque;
@@ -550,6 +551,8 @@ pub(crate) fn advance_local_projectiles(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use brawler::protocol::PlayerId;
+    use std::time::Duration;
 
     fn lead() -> LocalProjectileLead {
         LocalProjectileLead {

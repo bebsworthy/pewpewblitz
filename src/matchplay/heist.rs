@@ -212,11 +212,14 @@ pub fn timeout_result(health: [u16; 2], maximum: [u16; 2]) -> super::MatchResult
 
 #[cfg(feature = "server")]
 mod authority {
-    #[allow(
-        clippy::wildcard_imports,
-        reason = "the child module consumes its parent module's composition surface"
-    )]
-    use super::*;
+    use super::{
+        HEIST_RULES_REVISION, HEIST_SAFE_COUNT, HeistCompletion, HeistHealthComparison,
+        HeistObjectiveCue, HeistObjectiveCueKind, HeistObjectiveOutbox, HeistRules, HeistSafe,
+        HeistSafeIdentity, HeistState, HeistTelemetry, IntoScheduleConfigs,
+        MAX_HEIST_OBJECTIVE_CUES, MapDynamicGeneration, ModeAnchorId, PendingModeObjectiveDamage,
+        PendingModeObjectiveDamages, TeamId, destroyed_safe_result, objective_cue_kind,
+        remaining_health_comparison, timeout_result,
+    };
     use crate::{
         combat::{CombatDamageSet, CurrentHealth},
         map::{
@@ -231,6 +234,7 @@ mod authority {
         timing::SimulationTick,
     };
     use avian2d::prelude::{Collider, Position, RigidBody, Rotation};
+    use bevy::prelude::*;
     use lightyear::prelude::{NetworkTarget, Replicate};
 
     pub struct HeistModePlugin;

@@ -13,12 +13,9 @@
 use super::camera::{
     GroundView, clamp_3d_camera_center, ground_view, top_hud_fighter_limit, viewport_aspect,
 };
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{ArenaCamera, Controlled, Fighter, NetworkEntityId, Position, local_attack};
 use crate::local_attack::{LocalAttackKind, LocalAttackLedger, LocalAttackPresented};
+use bevy::prelude::*;
 use brawler::builds::ResolvedMatchLoadout;
 use brawler::combat::client::DeduplicatedCombatCue;
 use brawler::combat::{DeliveryMethod, FiringPattern, WeaponRecipe};

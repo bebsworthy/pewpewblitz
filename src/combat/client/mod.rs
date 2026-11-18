@@ -1,10 +1,13 @@
 //! Client-only combat presentation geometry.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    CombatCue, CombatEventId, CombatEvidenceCheckpoint, CombatStateSnapshot, ConeSprayState,
+    DamageSource, DeliveryMethod, Fighter, FiringPattern, MAX_COMBAT_EVIDENCE_EVENTS,
+    NetworkEntityId, PersistentAreaShape, ProjectileBody, ResolvedWeapon, ShotId, TargetSelection,
+    WeaponDefinitionId, capture_client_combat_checkpoints, delivery,
+    receive_combat_evidence_checkpoints, record_headless_combat_observation, spread_angles,
+    unix_epoch_micros,
+};
 use bevy::prelude::*;
 use std::collections::{BTreeMap, VecDeque};
 use std::env;

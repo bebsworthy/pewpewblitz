@@ -43,3 +43,23 @@ forbids inner (`#![...]`) allows, so it needs no change.
 - `rg -n 'clippy::wildcard_imports' src packages` finds nothing (except any explicitly justified, recorded remnant).
 - `just lint` (all `_clippy-*` feature sets: routing, client, automation, server, network, balance-lab), `just test`,
   Android `cargo ndk --target arm64-v8a --platform 31 clippy --locked -p brawler-android -- -D warnings` pass.
+
+# Result (2026-11-18)
+
+All 80 item-level `clippy::wildcard_imports` allows removed (recount at dd7b0869: 40 presentation_3d, 7 other brawler-client, 24 src/combat, 9 other src). `rg -n 'clippy::wildcard_imports' src packages` finds nothing; no exceptions were needed.
+
+Method: removed every allow, collected Clippy's `wildcard_imports` suggestions as JSON across all lint feature sets (client, automation, server, network, balance-lab, network+balance-lab, default), unioned the names per site, and rewrote each glob as an explicit list. Names that came from the parent's `bevy::prelude::*` are now reached through the child's own `use bevy::prelude::*;` (Clippy exempts prelude globs), not through `super::{…}`. Then iterated with the compiler.
+
+Decisions:
+- Five globs Clippy never reported (it skips a glob when the parent has an `as _` import or when only descendants use it) were converted by hand: brawler-client `presentation.rs`, `presentation_3d/mod.rs`, `lib.rs` `#[cfg(test)] use session::*`, `src/combat/client/mod.rs`, and `src/server/verification.rs` together with `server/mod.rs` `#[cfg(test)] use verification::*`.
+- Re-exports to siblings keep their original visibility. `combat/mod.rs` `use authority::*` and `server/mod.rs` `use verification::*` became private explicit lists. Parent modules still import the names that children reach through `super::` (presentation_3d/mod.rs, combat/client/mod.rs, effects/mod.rs).
+- Names a module uses only under some features or only in tests are gated to match: `evidence.rs` client-only/server-only/`any(server, test)` groups, presentation_3d automation group, hud.rs `#[cfg(test)]`, lib.rs `#[cfg(all(test, feature = "automation"))]`. Clippy's lists don't include cfg(test)-only uses, so those surfaced as compile errors.
+- Child `mod tests { use super::*; }` blocks (kept, as the spec requires) that had relied on names arriving through the removed chain now import them explicitly.
+- Removed private imports that became unused: `concealment/mod.rs` top-level `bevy::prelude::*` (it was used only by the inline `server` mod), and the `fmt::Write as _` in `server/mod.rs`, which moved to verification.rs.
+- No changes to public API (`pub use`), behavior, schedules or the wire format; only private `use` items changed.
+
+Verification (logs in target/v34z/):
+- `just lint`: pass (lint.log).
+- `just test`: pass, 24 suites, 2568 passed, 0 failed (test.log).
+- `cargo ndk --target arm64-v8a --platform 31 clippy --locked -p brawler-android -- -D warnings`: pass (android-clippy.log).
+- No APK build or on-device run; none is needed for an import-only change.

@@ -1,10 +1,10 @@
 //! Runtime handles, material preparation/tinting, imported-scene readiness, and fitting admission.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    ImportedWorldFallbackPolicy, MapVisualCatalog, MapVisualProfile, Presented3dMap, ToonMaterial,
+    ToonShading, floor_decals,
+};
+use bevy::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::fitting::{SceneBounds, fit_scene_to_footprint, world_asset_scene_bounds};
@@ -371,6 +371,7 @@ fn validate_scene_against_owned_map_assets(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::REPOSITORY_ROOT;
 
     /// Intrinsic bounds of a single-mesh original kit GLB, read from its POSITION accessor.
     fn glb_bounds(path: &str) -> SceneBounds {

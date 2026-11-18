@@ -1,13 +1,14 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    AuthoritativeTick, CombatVisualOwner, Controlled, Fighter, Material3dAssets, NetworkEntityId,
+    NotShadowCaster, NotShadowReceiver, Position, Primitive3dAssets, Rotation, ShadedMaterial,
+    V3FighterVisual, environment_assets, ground_position, ground_rotation, hit_feedback, vfx,
+};
 use super::{
     common::CombatVfxContext,
     dash_style::{DashTrailMaterial, DashTrailQuality, quality_for_variant},
     entities::FighterGroundMarker3d,
 };
+use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 const CONCEALED_FIGHTER_ALPHA: f32 = 0.52;
@@ -966,6 +967,7 @@ pub(in super::super) fn write_status_visual_poses(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::presentation_3d::{ToonMaterial, ToonShading};
 
     fn terrain_concealed_state(
         revealed_until_tick: u64,

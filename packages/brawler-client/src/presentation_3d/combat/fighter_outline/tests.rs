@@ -1,6 +1,9 @@
 use super::super::entities::reconcile_fighter_visuals;
 use super::super::tag_fighter_rim_relation;
 use super::*;
+use crate::presentation_3d::setup_3d_foundation;
+use avian2d::prelude::Position;
+use bevy::mesh::Indices;
 use bevy::mesh::MeshTag;
 
 fn tuning() -> FighterOutlineTuning {

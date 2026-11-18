@@ -4,12 +4,14 @@ use super::camera_rig::{
     ArenaCameraShake, CameraRig, CameraRigCatalog, CameraRigFrameInput, weapon_reach,
 };
 use super::combat::{OVERHEAD_AMMO_HEIGHT, OVERHEAD_WORLD_HEIGHT};
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    ArenaCamera, ClientShellSettings, Controlled, DEFAULT_GAMEPLAY_VIEWPORT,
+    DEFAULT_GAMEPLAY_WINDOW_ASPECT, Fighter, MapEditorPreview, PendingLocalActions, Position,
+    PrimaryWindow, TargetedUltimateInput, ground_point, ground_position, hud,
+    targeted_ultimate_range,
+};
 use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder};
+use bevy::prelude::*;
 
 /// Vertical field of view at the reference (default native) aspect and every narrower one.
 pub(super) const CAMERA_VERTICAL_FOV_RADIANS: f32 = 30.0_f32.to_radians();
@@ -385,6 +387,7 @@ pub(super) fn ground_view(aspect: f32) -> GroundView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui;
 
     const EPSILON: f32 = 0.02;
 

@@ -1,11 +1,23 @@
 //! Server-authoritative combat lifecycle, spatial targeting, and cue publication.
 
 #[cfg(feature = "server")]
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    ActiveAttackTrackers, ActiveEffects, AngularVelocity, AttackSource, AuthoritativeTick,
+    Collider, CombatCue, CombatLogRecord, CombatOutbox, CombatSummaryLogged, CombatTelemetry,
+    ComposedProjectileRuntime, CurrentHealth, CustomPositionIntegration, DESTRUCTIBLE_MAP_LAYER,
+    DUMMY_NETWORK_ENTITY, DamageFalloff, DamageSource, Defeated, DeliveryMethod, ExternalMotion,
+    FIGHTER_LAYER, Fighter, FiringPattern, HashMap, HashSet, HealthRecoveryState,
+    InterpolationTarget, KnockbackFeedback, LinearVelocity, LinkOf, NEUTRAL_TEAM, NetcodeServer,
+    NetworkEntityId, NetworkTarget, NextCombatIds, PayloadBundleDefinition,
+    PayloadEffectDefinition, PendingPayload, PlayerId, Position, ProjectileBody, RecipientPolicy,
+    Replicate, ResolvedWeapon, RigidBody, Rotation, STATIC_MAP_LAYER, SimulationTick, SpawnState,
+    Stopped, TargetSelection, TeamId, WeaponCatalogResource, WeaponPhase, WeaponPresetId,
+    WeaponRecipe, WeaponState, WeaponTelemetry, WeaponTelemetryOutcome, WeaponTelemetryRecord,
+    WorldPoint, combat_cue_key, delivery, fighter_collision_layers, finish_attack_delivery,
+    muzzle_position, reset_is_due, resolved_fighter_runtime, teams_are_hostile,
+};
+#[cfg(feature = "server")]
+use bevy::prelude::*;
 
 /// M04's legacy cue/log shape is a compatibility adapter for the original single straight
 /// direct-damage recipe. It is selected from the resolved recipe, never from a preset ID, and

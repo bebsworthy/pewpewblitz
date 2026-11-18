@@ -1,7 +1,20 @@
 //! Mutation-free composed-record planning, authoritative commit, and ordered projection.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use super::{
+    AbilityWeaponTelemetry, ActiveAttackTrackers, ActiveEffects, AttackId, BatchView,
+    CollisionLayers, CombatConditionRules, CombatCue, CombatEventId, CombatOutcomeFact,
+    CombatOutcomeKind, CombatSourceKind, CombatTargetKind, CombatTargetState,
+    CombatTransactionState, CurrentHealth, DamageApplicationPlan, DamageFalloff, DamageSource,
+    Defeated, ExternalMotion, FIGHTER_LAYER, HashMap, HashSet, HealingApplicationPlan,
+    KnockbackFeedback, NetworkEntityId, PayloadEffectDefinition, PendingPayload, RecipientPolicy,
+    TargetGate, TeamId, TestDummyResetDeadline, WeaponPresetId, WeaponRecipeFingerprint,
+    WeaponTelemetryRecord, WorldPoint, boost_scaled_immediate_damage, combat_source_allows_target,
+    cue_damage_source, effect_allows_target, effect_recipient_scale, finish_attack_delivery,
+    payload_target_gate, plan_damage_application, plan_healing_application, plan_runtime_effects,
+    project_committed_damage, project_committed_defeat, project_committed_healing,
+    teams_are_hostile,
+};
+use bevy::prelude::*;
 
 #[allow(
     clippy::struct_excessive_bools,

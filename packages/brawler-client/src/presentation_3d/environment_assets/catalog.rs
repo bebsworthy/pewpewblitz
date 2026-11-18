@@ -1,10 +1,7 @@
 //! Embedded client visual/theme definitions, validation, lookup, and coverage tests.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{floor_decals, floor_tiles, world_look};
+use bevy::prelude::*;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 

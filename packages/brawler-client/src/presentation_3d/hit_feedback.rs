@@ -8,11 +8,14 @@
 //! neither a flash nor a number. Defeat feedback stays on the shared VFX/audio request path
 //! (authored `defeat` recipes and the `defeat` audio cue), and camera shake stays with the rig.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    ArenaCamera, CameraUpdateSystems, ClientShellSettings, CombatVisualOwner, Controlled,
+    DynamicMapVisual, FIGHTER_VISUAL_HEIGHT_WORLD, Fighter, HeistSafeVisual, NetworkEntityId,
+    ShadedMaterial, ToonMaterial, UiSystems, V3FighterVisual, WorldPresentationSet, combat,
+    ground_position, ui, update_damageable_map_visuals, update_heist_safe_status_visuals, vfx,
+    zombie,
+};
+use bevy::prelude::*;
 use brawler::combat::client::DeduplicatedCombatCue;
 use brawler::combat::{CombatCue, CombatEffectCue};
 use serde::Deserialize;

@@ -72,11 +72,10 @@ pub fn timeout_result(scores: [u16; 2]) -> MatchResult {
 
 #[cfg(feature = "server")]
 mod rules {
-    #[allow(
-        clippy::wildcard_imports,
-        reason = "the child module consumes its parent module's composition surface"
-    )]
-    use super::*;
+    use super::{
+        IntoScheduleConfigs, TeamId, WipeoutRules, WipeoutState, score_result, statistics,
+        timeout_result,
+    };
     use crate::matchplay::{
         MatchOutcomeDiagnostics, MatchPhase, MatchRestartSet, MatchRoot, MatchSet, MatchState,
         ModeOutcomeCause, ModeRuleOutcome, PendingModeRuleOutcome, offer_mode_rule_outcome,
@@ -89,6 +88,7 @@ mod rules {
         protocol::{Fighter, NetworkEntityId},
         timing::SimulationTick,
     };
+    use bevy::prelude::*;
     use std::collections::{BTreeMap, BTreeSet};
 
     #[derive(Clone, Copy, Debug)]

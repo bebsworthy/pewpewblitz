@@ -11,11 +11,11 @@
 //! every other transparent layer, and never exceed the lit floor's brightness (no bloom). The Low
 //! quality tier hides them. Presentation only: nothing here touches gameplay or the fingerprint.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    GeneratedMapMesh, Indices, NotShadowCaster, PrimitiveTopology, RenderAssetUsages, ToonMaterial,
+    floor_tiles, ground_position, hot_zone_visual_geometry, map, render_quality,
+};
+use bevy::prelude::*;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 

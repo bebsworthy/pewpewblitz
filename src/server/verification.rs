@@ -1,10 +1,14 @@
 //! Process-level movement/combat evidence validation and report parsing.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    BTreeMap, CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot, CombatTelemetry, Fighter,
+    LinkOf, MatchParticipant, MatchPhase, MatchRoot, MatchState, PlayerId, Position,
+    ProcessCombatCheck, ProcessMatchCheck, ProcessMovementCheck, Rotation, ServerSession,
+    ServerSessionPhase, WeaponCatalogResource, WeaponPresetId, WeaponTelemetry, WeaponTelemetryKey,
+    decode_combat_cue, encode_state_snapshot, env, fs, record_server_failure,
+};
+use bevy::prelude::*;
+use std::fmt::Write as _;
 
 /// Every failure path in this module funnels through here: classify the exit as
 /// `verification-failed`, append the bounded failure record when the

@@ -1,10 +1,9 @@
 //! Client-only environment catalog and runtime asset-preparation facade.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    ClientShellSettings, ImportedWorldFallbackPolicy, Presented3dMap, ToonMaterial, ToonShading,
+    floor_decals, floor_tiles, render_quality, world_look,
+};
 
 mod catalog;
 mod fitting;

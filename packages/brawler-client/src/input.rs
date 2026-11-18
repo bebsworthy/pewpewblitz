@@ -1,11 +1,17 @@
 //! Local device sampling, render-to-fixed input bridging, and input diagnostics.
 
 use super::settings::key_code_letter;
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    ACTION_CANCEL, ACTION_INTERACT, ACTION_PAUSE, ACTION_SCOREBOARD, AccumulatedMouseMotion,
+    ActionState, ActiveInputDevice, AngularVelocity, BackInput, Client, ClientInputContext,
+    ClientInputSettings, ClientNetworkConfig, ClientPlayableGate, ConfirmedHistory, Connected,
+    Controlled, Entity, Fighter, FighterInput, InputDeviceActivity, InputMarker,
+    InputSettingsSelection, Interpolated, InterpolationTimeline, Key, LinearVelocity,
+    LiveInputTrace, NetworkTimeline, PendingLocalActions, PingManager, Position, PrimaryWindow,
+    Remote, Rotation, TargetedUltimateInput, apply_pause_request, presentation_3d,
+    select_active_gamepad, select_active_input_device, targeting,
+};
+use bevy::prelude::*;
 
 pub(super) fn logical_key_pressed(keyboard: Option<&ButtonInput<Key>>, expected: &str) -> bool {
     keyboard.is_some_and(|keyboard| {

@@ -4,18 +4,34 @@
 use super::CombatCue;
 #[cfg(feature = "client")]
 use super::client::ClientCombatObservation;
-#[allow(clippy::wildcard_imports)]
-#[cfg(any(feature = "server", feature = "client"))]
-use super::*;
 use super::{
     ActiveEffects, AttackDelivery, AttackId, AuthoritativeTick, Defeated, KnockbackFeedback,
     NetworkEntityId, ProjectileBody, ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon,
     StraightFlight, WeaponRecipeFingerprint, WeaponState, WorldPoint,
 };
+#[cfg(any(feature = "server", feature = "client"))]
+use super::{
+    AuthoritativePose, ConeSpray, ConeSprayState, CurrentHealth, DUMMY_NETWORK_ENTITY, Fighter,
+    LobbedFlight, MAX_COMBAT_EVIDENCE_EVENTS, Position, Projectile, Rotation, WeaponPresetId,
+    unix_epoch_micros,
+};
+#[cfg(feature = "server")]
+use super::{
+    COMBAT_CHECKPOINT_LATCH_TICKS, ExternalMotion, LinkOf, SimulationTick, WeaponCatalogResource,
+    env,
+};
+#[cfg(feature = "client")]
+use super::{
+    ClientCombatEvidenceStatus, FighterDefinitionId, MAX_COMBAT_SNAPSHOT_HISTORY, encode_combat_cue,
+};
+#[cfg(any(feature = "server", test))]
+use super::{FiringPattern, WeaponCatalog};
 #[cfg(feature = "client")]
 use atomic_write_file::AtomicWriteFile;
 #[cfg(feature = "server")]
 use bevy::prelude::Resource;
+#[cfg(any(feature = "server", feature = "client"))]
+use bevy::prelude::*;
 use bevy::prelude::{Message, Vec2};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
@@ -1060,8 +1076,11 @@ fn required_client_checkpoints(preset_id: u16) -> &'static [&'static str] {
 #[cfg(all(test, any(feature = "server", feature = "client")))]
 mod tests {
     use super::*;
+    use crate::combat::{CombatEventId, SlowEffect, WeaponPhase};
     #[cfg(feature = "client")]
     use std::env;
+    #[cfg(feature = "client")]
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fighter(network_entity_id: NetworkEntityId) -> CombatFighterSnapshot {
         CombatFighterSnapshot {

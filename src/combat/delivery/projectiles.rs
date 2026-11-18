@@ -1,10 +1,20 @@
 //! Authoritative post-physics projectile snapshot, planning, and sequential commit.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    ActiveAttackTrackers, AreaFighterCandidate, AreaObjectCandidate, ArenaWall, AttackSource,
+    Collider, ComposedProjectileRuntime, CurrentHealth, DESTRUCTIBLE_MAP_LAYER, Defeated,
+    DeliveryMethod, FIGHTER_LAYER, Fighter, HashMap, HashSet, LinkOf, LobbedFlight,
+    NetworkEntityId, NetworkTarget, NextCombatIds, PayloadEffectDefinition, PendingDelivery,
+    PendingDeliveryKind, PendingPayload, PersistentSplash, PersistentSplashRuntime,
+    PersistentSplashState, PlannedAreaPayloads, Position, ProjectileBody, Replicate,
+    ReplicatedAttackSource, STATIC_MAP_LAYER, SimulationTick, StickyBlobRuntime, StickyBlobState,
+    TargetSelection, TeamId, Vec2, WeaponRecipe, WeaponTelemetry, WeaponTelemetryOutcome,
+    WorldPoint, area_line_of_sight_clear, area_line_of_sight_clear_excluding,
+    collect_area_bundle_candidates, distance_band, effects, finish_attack_delivery,
+    lob_launch_point, payload_can_affect_target, plan_area_payloads, queue_damageable_target,
+    record_delivery_termination, splash, sticky,
+};
+use bevy::prelude::*;
 
 type FighterSweepQuery<'w, 's> = Query<
     'w,
@@ -925,6 +935,13 @@ pub(in crate::combat) fn sweep_composed_projectiles(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        combat::{
+            AttackId, CombatSourceKind, Projectile, WeaponCatalog, WeaponPresetId,
+            WeaponRecipeFingerprint,
+        },
+        protocol::PlayerId,
+    };
 
     fn projectile_sweep_app(tick: u64) -> App {
         let mut app = App::new();

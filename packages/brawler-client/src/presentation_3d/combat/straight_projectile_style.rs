@@ -1,10 +1,9 @@
 //! Retained neutral straight-bolt styling shared by single and spread weapon recipes.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    AuthoritativeTick, Material3dAssets, NotShadowCaster, NotShadowReceiver, Primitive3dAssets, vfx,
+};
+use bevy::prelude::*;
 use bevy::{
     ecs::hierarchy::ChildSpawnerCommands, reflect::TypePath, render::render_resource::AsBindGroup,
     shader::ShaderRef,
@@ -193,6 +192,10 @@ pub(crate) fn animate_straight_projectile_trail_materials(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::presentation_3d::{
+        ToonMaterial, ToonShading, WorldPresentationSet, configure_world_presentation_schedule,
+        setup_3d_foundation,
+    };
 
     fn signature(
         carrier: vfx::VfxCarrier,

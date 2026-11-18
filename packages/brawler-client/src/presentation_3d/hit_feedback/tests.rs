@@ -1,6 +1,7 @@
 use super::flash::flash_material;
 use super::numbers::{FloatingNumberPush, number_animation};
 use super::*;
+use crate::presentation_3d::ToonShading;
 use bevy::time::TimeUpdateStrategy;
 use brawler::combat::{
     AttackId, CombatEventId, DamageSource, DistanceBand, ShotId, WeaponDefinitionId, WorldPoint,

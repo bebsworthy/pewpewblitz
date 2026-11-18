@@ -103,8 +103,11 @@ pub use flow::{
     CancelMatchStartConfirmation, ClientFlow, ClientFlowPlugin, ClientOverlay, FlowError,
     FlowErrorAction, FlowErrorKind, SelectedGameType, SessionPurpose,
 };
-#[allow(clippy::wildcard_imports)]
-use input::*;
+use input::{
+    add_controlled_input_marker, resolve_targeted_ultimate_input, sample_local_input,
+    targeted_ultimate_range, trace_client_interpolation_history, trace_client_interpolation_sync,
+    write_client_input,
+};
 pub use map_maker::{MapDraftDocument, MapDraftId, MapDraftLibrary, MapEditorSession};
 pub use presentation::ClientPresentationPlugin;
 #[cfg(test)]
@@ -117,9 +120,14 @@ pub use queue::{
 pub use routed_udp::{RoutedUdpIo, RoutedUdpPlugin};
 pub use server_select::{LogicalServerAddress, ServerAddressHost, parse_server_address};
 pub use session::ClientNetworkPlugin;
+#[cfg(all(test, feature = "automation"))]
+use session::observe_fresh_lobby_return;
 #[cfg(test)]
-#[allow(clippy::wildcard_imports)]
-use session::*;
+use session::{
+    RoutedTransitionDeadline, drive_routed_transition, enforce_routed_timeout,
+    finish_client_shutdown, forward_app_exit_to_client_disconnect, join_rejection_category,
+    observe_client_lifecycle, observe_completed_match, should_rearm_headless_match_command,
+};
 pub use settings::persistence::ClientShellSettings;
 pub use settings::ui::{InputSettingsField, InputSettingsSelection, compose_input_settings_lines};
 use settings::ui::{adjust_input_settings_from_pause_keys, update_input_settings_overlay};

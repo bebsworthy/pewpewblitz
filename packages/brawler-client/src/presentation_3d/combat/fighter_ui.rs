@@ -1,9 +1,9 @@
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    ArenaCamera, AuthoritativeTick, CombatVisualOwner, Controlled, FIGHTER_VISUAL_HEIGHT_WORLD,
+    Fighter, NetworkEntityId, V3FighterVisual, character_is_visually_defeated, ui,
+};
 use super::common::{GroundMarkerRelation, ground_marker_relation, unique_roots};
+use bevy::prelude::*;
 use bevy::{
     asset::RenderAssetUsages,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
@@ -1072,6 +1072,8 @@ fn reconcile_overhead_ammunition(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use brawler::protocol::PlayerId;
+
     #[test]
     fn overhead_relation_colors_distinguish_names_and_health() {
         assert_ne!(

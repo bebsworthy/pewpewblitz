@@ -1,7 +1,18 @@
 //! Server-only combat identity reservation and lifecycle limits.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use super::{
+    ActiveAttackTrackers, AttackId, CombatDamageSet, CombatEventId, CombatEvidenceMode,
+    CombatEvidenceSnapshots, CombatOutbox, CombatOutcomeFacts, CombatSet, CombatSummaryLogged,
+    CombatTelemetry, CombatWorldEffectFacts, GameplaySet, MeleeAttack, NextCombatIds,
+    PendingDelivery, PendingPayload, TestDummyFixture, WeaponTelemetry,
+    authoritative_composed_fire, capture_server_combat_checkpoints,
+    cleanup_disconnected_projectiles, conditions, emit_combat_summary, env, expire_runtime_effects,
+    fields, flush_completed_attack_telemetry, outcomes, publish_authoritative_tick,
+    reset_due_fighters, resolve_composed_payloads, resolve_melee_attacks,
+    restore_attack_idle_health, send_combat_cues, send_combat_evidence_checkpoints,
+    spawn_test_dummy, splash, spray, sticky, sweep_composed_projectiles,
+};
+use bevy::prelude::*;
 
 pub(super) const MAX_ACTIVE_ATTACK_TRACKERS: usize = 512;
 

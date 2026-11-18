@@ -1,10 +1,7 @@
 //! Retained Dash wake styling shared by production gameplay and `VfxLab`.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::vfx;
+use bevy::prelude::*;
 use bevy::{reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef};
 
 const DASH_TRAIL_SHADER_PATH: &str = "shaders/dash_trail.wgsl";
@@ -87,6 +84,7 @@ pub(super) const fn quality_for_variant(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::presentation_3d::world_look;
 
     #[test]
     fn dash_quality_preserves_reduced_identity_and_primitive_fallback() {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::REPOSITORY_ROOT;
 use std::collections::BTreeSet;
 
 /// Rest rotation of the exported `socket_weapon_r` node in the GLB scene frame (build report).

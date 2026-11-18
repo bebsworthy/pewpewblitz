@@ -1,10 +1,13 @@
 //! Bounded server-owned elemental ultimate fields.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the server-only field transaction consumes the combat composition surface"
-)]
-use super::*;
+use super::{
+    ActiveEffects, CombatConditionRulesResource, CombatCue, CombatEffectCue, CombatOutbox,
+    CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatTargetKind, CombatTelemetry,
+    CurrentHealth, DamageOverTimeKind, Defeated, ElementalFieldId, ElementalFieldKind,
+    ElementalFieldRuntime, ElementalFieldState, Fighter, NetworkEntityId, NextCombatIds,
+    PayloadEffectDefinition, RecipientPolicy, SimulationTick, TeamId, conditions, effects,
+    teams_are_hostile,
+};
 use avian2d::prelude::Position;
 use bevy::prelude::*;
 

@@ -1,11 +1,15 @@
 //! Renderer-neutral client reconstruction of a replicated resolved map snapshot.
 
 use super::catalog::MAP_CATALOG_SCHEMA_VERSION;
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    AxisAlignedMapRect, DamageableTargetIdentity, DamageableWorldObject, MAP_RECIPE_SCHEMA_VERSION,
+    MAX_PICKUP_CUES, MAX_WORLD_OBJECT_CUES, MapCatalogResource, MapContentCatalog,
+    MapDestructionBehavior, MapDurabilityBehavior, MapDynamicGeneration, MapDynamicRecoveryRequest,
+    MapDynamicRecoverySnapshot, MapDynamicResetEvent, MapDynamicState, MapInstanceId,
+    MapMutationEvent, MapPlacementId, MapPlacementOutcome, MapPlacementTransition,
+    MapPresentationThemeId, MapRecipeFingerprint, MapRoot, PickupCue, ReceivedPickupCues,
+    ReceivedWorldObjectCues, ResolvedMapSnapshot, WorldObjectCue,
+};
 use bevy::prelude::*;
 use lightyear::prelude::client::Client;
 use lightyear::prelude::{MessageReceiver, MessageSender};
@@ -438,6 +442,9 @@ pub fn perimeter_visual_shapes(bounds: AxisAlignedMapRect) -> [(Vec2, Vec2); 4] 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map::{
+        BARREL_WOOD_DEBRIS_ASSET, FEATURE_YARD_WIPEOUT_PRESET, MapContentPlugin, MapPresetId,
+    };
 
     fn snapshot(instance: u64) -> ResolvedMapSnapshot {
         MapContentCatalog::embedded()

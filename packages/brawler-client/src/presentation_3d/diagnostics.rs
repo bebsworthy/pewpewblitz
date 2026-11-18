@@ -2,13 +2,15 @@
 
 mod gpu_time;
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::*;
+use super::{
+    ClientFlow, ClientShellSettings, CombatEffect3d, CombatVisualOwner, Controlled,
+    DynamicMapVisual, Fighter, ImportedWorldFallbackPolicy, Position, PrimaryWindow,
+    RenderMeasurementConfig, RenderProfile, RoutedClientLifecycle, RoutedClientPhase, VERSION,
+    assets, dashboard, flow, prediction,
+};
 use atomic_write_file::AtomicWriteFile;
 use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
 use bevy::{
     diagnostic::{
         DiagnosticsStore, FrameTimeDiagnosticsPlugin, SystemInfo,

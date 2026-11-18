@@ -1,15 +1,19 @@
 //! Event reservation and deterministic target/delivery planning.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::runtime::*;
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::runtime::{
+    PlannedTarget, combat_source_allows_target, effect_allows_target, effect_recipient_scale,
+    requested_damage,
+};
+use super::{
+    ActiveAttackTrackers, AttackId, AttackSource, CombatCue, CombatEventId, CombatLogRecord,
+    CombatOutbox, CombatSourceKind, CombatTelemetry, CombatWorldEffectFact, CombatWorldEffectFacts,
+    CombatWorldEffectSource, CompletedAttack, HashMap, HashSet, NetworkEntityId,
+    PULSE_SIDEARM_DEFINITION, PayloadEffectDefinition, PendingDelivery, PendingDeliveryKind,
+    PendingPayload, ProjectileSource, ShotId, TeamId, Vec2, WeaponDefinitionId, WeaponPresetId,
+    WeaponTelemetry, WeaponTelemetryOutcome, WeaponTelemetryRecord, WorldPoint,
+    boost_scaled_immediate_damage, distance_band, teams_are_hostile,
+};
+use bevy::prelude::*;
 
 pub(crate) fn payload_target_visible(
     source: AttackSource,

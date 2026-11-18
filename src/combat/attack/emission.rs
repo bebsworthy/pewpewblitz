@@ -1,7 +1,17 @@
 //! Deterministic delivery-family emission for accepted primary attacks.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use super::{
+    AttackDelivery, AttackSource, BlockedStraightDelivery, CollisionLayers, CombatCue,
+    CombatEventId, CombatLogRecord, CombatOutbox, CombatTelemetry, ComposedProjectileRuntime,
+    ConeSpray, ConeSprayRuntime, ConeSprayState, DESTRUCTIBLE_MAP_LAYER, DeliveryMethod,
+    FIGHTER_LAYER, InterpolationTarget, LobbedFlight, MeleeAttack, NetworkTarget, PROJECTILE_LAYER,
+    PayloadEffectDefinition, Position, Projectile, ProjectileBody, ProjectileDeadline,
+    ProjectileSource, Replicate, ReplicatedAttackSource, ResolvedWeapon, Rotation,
+    STATIC_MAP_LAYER, ShotId, StickyBlobKind, StraightFlight, TargetSelection, WeaponDefinitionId,
+    WeaponRecipe, WorldPoint, cone_spray_timing, delivery, delivery_angles, distance_band, effects,
+    muzzle_position, resolved_lob_flight_ticks, splash, sticky,
+};
+use bevy::prelude::*;
 
 struct DeliveryEmissionRequest<'a> {
     tick: u64,

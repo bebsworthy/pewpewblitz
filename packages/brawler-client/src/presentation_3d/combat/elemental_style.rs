@@ -1,10 +1,9 @@
 //! Retained elemental styling shared by durable projectile and area roots.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    AuthoritativeTick, Material3dAssets, NotShadowCaster, NotShadowReceiver, Primitive3dAssets, vfx,
+};
+use bevy::prelude::*;
 use bevy::{reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef};
 
 const FIRE_AREA_SHADER_PATH: &str = "shaders/fire_area.wgsl";

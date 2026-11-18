@@ -1,10 +1,14 @@
 //! Bounded target-owned Cold, Freeze, Poison, and Fire lifecycle.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the server-only condition transaction consumes the combat composition surface"
-)]
-use super::*;
+use super::{
+    ActiveEffects, ColdState, CombatConditionRules, CombatConditionRulesResource, CombatCue,
+    CombatOutbox, CombatOutcomeFact, CombatOutcomeFacts, CombatOutcomeKind, CombatSourceKind,
+    CombatTargetKind, CombatTelemetry, ConditionSource, CurrentHealth, DamageOverTimeKind,
+    DamageSource, Defeated, DistanceBand, ExternalMotion, FIGHTER_LAYER, Fighter,
+    KnockbackFeedback, NetworkEntityId, NextCombatIds, PayloadEffectDefinition, RecipientPolicy,
+    ShotId, SimulationTick, TeamId, TestDummy, TestDummyResetDeadline, WeaponDefinitionId,
+    WeaponPresetId, WeaponTelemetry, WeaponTelemetryOutcome, WeaponTelemetryRecord, server,
+};
 use avian2d::prelude::{CollisionLayers, Position};
 use bevy::prelude::*;
 
@@ -314,6 +318,10 @@ pub(crate) fn advance_conditions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        combat::{AttackId, DamageOverTime, effects},
+        protocol::PlayerId,
+    };
 
     fn field_source() -> ConditionSource {
         ConditionSource {

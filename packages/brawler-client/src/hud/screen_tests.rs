@@ -7,11 +7,13 @@ use super::plate::{PlateRoot, TeamStripRoot};
 use super::*;
 use crate::touch::TouchControls;
 use crate::ui::layout_harness::{add_layout, apply_viewport_fit, node_rect};
+use crate::{ClientInputContext, ClientInputSettings, PendingLocalActions, ScoreboardOverlay};
 use bevy::math::Rect;
 use brawler::combat::client::DeduplicatedCombatCue;
 use brawler::combat::{
     AttackId, CombatCue, CombatEventId, DamageSource, ShotId, WeaponDefinitionId, WorldPoint,
 };
+use brawler::matchplay::MatchParticipant;
 use brawler::protocol::NetworkEntityId;
 
 /// 16:9 desktop, the Pixel 8a after its cutout strip, the full 2.22:1 phone, and 19.5:9.

@@ -1,10 +1,12 @@
 //! Readiness and match-shell HUD that remains independent from gameplay mutation.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    Client, Controlled, Fighter, MatchPhase, MatchRoot, MatchState, MessageReceiver, PlayerId,
+    default, touch, ui,
+};
+#[cfg(test)]
+use crate::{ClientJoinPhase, assets};
+use bevy::prelude::*;
 use brawler::combat::TeamId;
 use std::collections::BTreeMap;
 

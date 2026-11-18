@@ -6,16 +6,22 @@
 use super::planning::{
     delivery_survives_owner_disconnect, pending_delivery_kind_order, required_payload_event_count,
 };
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::runtime::*;
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::runtime::{
+    PlannedTarget, combat_source_allows_target, cue_damage_source, effect_allows_target,
+    effect_recipient_scale, plan_runtime_effects, requested_damage,
+};
+use super::{
+    AbilityWeaponTelemetry, ActiveAttackTrackers, ActiveEffects, AttackId, CollisionLayers,
+    CombatConditionRules, CombatCue, CombatEffectCue, CombatEventId, CombatLogRecord,
+    CombatOutcomeFact, CombatOutcomeKind, CombatSourceKind, CombatTargetKind, CombatTargetState,
+    CombatTransactionState, CurrentHealth, DamageFalloff, DamageSource, Defeated, ExternalMotion,
+    FIGHTER_LAYER, HashMap, HashSet, KnockbackFeedback, NetworkEntityId, NextCombatIds,
+    PayloadEffectDefinition, PendingDelivery, PendingPayload, RecipientPolicy, TeamId,
+    TestDummyResetDeadline, WeaponPresetId, WeaponRecipeFingerprint, WeaponTelemetry,
+    WeaponTelemetryOutcome, WeaponTelemetryRecord, WorldPoint, boost_scaled_immediate_damage,
+    distance_band, finish_attack_delivery, server, teams_are_hostile,
+};
+use bevy::prelude::*;
 
 mod transaction;
 pub(super) use transaction::{commit_composed_plan, plan_composed_records, project_composed_plan};

@@ -1,13 +1,10 @@
 //! Retained client asset handles, loading state, and manifest validation.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{ClientJoinPhase, ClientJoinStatus, ClientPlayableGate, presentation_3d, ui};
 use bevy::asset::{LoadState, RecursiveDependencyLoadState};
 use bevy::audio::AudioSource;
 use bevy::gltf::Gltf;
+use bevy::prelude::*;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 
@@ -394,6 +391,7 @@ fn valid_import_date(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::REPOSITORY_ROOT;
 
     #[test]
     fn retained_asset_manifest_has_unique_complete_provenance() {

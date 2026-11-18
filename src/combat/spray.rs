@@ -1,10 +1,12 @@
 //! Stationary propagating cone-spray authority.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the server-owned spray transaction consumes the combat composition surface"
-)]
-use super::*;
+use super::{
+    ActiveAttackTrackers, AttackId, AttackSource, ConeSprayRuntime, ConeSprayState, CurrentHealth,
+    Defeated, Fighter, LinkOf, NetworkEntityId, PayloadEffectDefinition, PendingDelivery,
+    PendingDeliveryKind, PendingPayload, SimulationTick, TargetSelection, TeamId, WeaponRecipe,
+    area_line_of_sight_clear, area_line_of_sight_clear_excluding, delivery, effects,
+    finish_attack_delivery, payload_can_affect_target, payload_target_visible,
+};
 use avian2d::prelude::Position;
 use bevy::prelude::*;
 use std::cmp::Ordering;
@@ -423,6 +425,7 @@ pub(super) fn advance_cone_sprays(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::combat::WorldPoint;
 
     #[test]
     fn reached_distance_fills_then_lingers_without_following_an_owner() {

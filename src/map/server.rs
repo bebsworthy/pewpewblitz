@@ -1,10 +1,10 @@
 //! Authoritative map resolution, instantiation, and exact-generation lifecycle.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    AxisAlignedMapRect, FEATURE_YARD_WIPEOUT_PRESET, MapCatalogResource, MapInstanceId,
+    MapInstanceMember, MapPresetId, MapRecipe, MapRoot, PlayableBounds, ResolvedMap,
+    SpawnPointCatalog, install_resolved_map, register_map_runtime,
+};
 use bevy::prelude::*;
 
 pub const ARENA_WALL_THICKNESS: f32 = 48.0;

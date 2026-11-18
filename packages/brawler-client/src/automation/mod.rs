@@ -2,11 +2,12 @@
 //! gameplay-intent synthesis for scripted smoke runs and the scheduled paired-capture plan used
 //! by native visual verification. The player build never contains this module.
 
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the child module consumes its parent module's composition surface"
-)]
-use super::*;
+use super::{
+    ActiveInputDevice, Client, ClientJoinPhase, ClientJoinStatus, Controlled, Fighter,
+    FighterInput, HeadlessAutomation, NetworkEntityId, PendingLocalActions, Position, World,
+    evidence_capture,
+};
+use bevy::prelude::*;
 
 mod config;
 

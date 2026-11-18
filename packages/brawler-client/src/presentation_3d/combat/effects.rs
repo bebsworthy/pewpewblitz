@@ -1,9 +1,10 @@
 use super::super::render_quality::{ActiveRenderQuality, ParticleBackend};
-#[allow(
-    clippy::wildcard_imports,
-    reason = "the world-renderer submodule consumes the presentation_3d composition surface"
-)]
-use super::super::*;
+use super::super::{
+    AuthoritativeTick, ClientShellSettings, CombatVisualOwner, Duration, FIGHTER_RECOIL_SECONDS,
+    Fighter, ImportedWorldFallbackPolicy, Material3dAssets, NetworkEntityId, NotShadowCaster,
+    NotShadowReceiver, Primitive3dAssets, Rotation, V3FighterVisual, ground_position,
+    ground_rotation, local_attack,
+};
 use super::{
     MAX_ACTIVE_PARTICLE_EMITTERS, PendingVfxParticleLayer, RetainedProjectileSmoke3d,
     VfxParticleAssets, VfxParticleDiagnostics, VfxParticleEmitter3d,
@@ -13,6 +14,7 @@ use crate::vfx::{
     VfxMaterialKey, VfxMeshLayer, VfxPresentationVariant, VfxReadabilityClass, VfxRegistry,
     VfxRendererFamily, VfxRequest, VfxTimeline, vfx_counter_sample, vfx_presentation_variant,
 };
+use bevy::prelude::*;
 use brawler::combat::client::DeduplicatedCombatCue;
 use std::collections::{HashMap, VecDeque};
 
@@ -690,6 +692,10 @@ pub(crate) fn cleanup_combat_effects(
 mod tests {
     use super::evidence::component_count;
     use super::*;
+    use crate::presentation_3d::{
+        FIGHTER_RECOIL_DISTANCE, ToonMaterial, ToonShading, fighter_recoil_offset,
+        setup_3d_foundation,
+    };
     use crate::vfx::{
         COMBAT_IMPACT_VFX, COMBAT_MUZZLE_VFX, COMBAT_RESET_VFX, COMBAT_VFX_PRODUCER_RANK,
         CombatVfxProducerPlugin, ELEMENTAL_FIELD_VFX, HEIST_DAMAGED_VFX, HEIST_VFX_PRODUCER_RANK,
