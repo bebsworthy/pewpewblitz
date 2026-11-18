@@ -3,9 +3,9 @@ id: BRL-4jdx
 
 title: Retire unreferenced Sharp-exported shell chrome PNGs
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T20:38:36Z
+status_changed: 2026-11-18T07:02:36Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-1wms]
 
 parent: BRL-q5c4
 
-rank: 17104896
+rank: 11337728
 ---
 
 # Description
