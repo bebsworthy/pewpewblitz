@@ -51,10 +51,13 @@ const THIRD_PARTY: [ThirdPartyCredit; 6] = [
     },
 ];
 
-/// Original project work, each with the repository path that records its provenance: a
-/// `pewpew-blitz-original-*.txt` note, or the `asset_src/` builder directory where no note exists.
+/// Original project work, each with the `assets/licenses/pewpew-blitz-original-*.txt` note that
+/// records its provenance.
 const ORIGINAL: [(&str, &str); 7] = [
-    ("Riff fighter", "asset_src/characters/riff"),
+    (
+        "Riff fighter",
+        "assets/licenses/pewpew-blitz-original-characters.txt",
+    ),
     (
         "fighter weapons",
         "assets/licenses/pewpew-blitz-original-weapons.txt",
@@ -71,7 +74,10 @@ const ORIGINAL: [(&str, &str); 7] = [
         "icons and mode pennants",
         "assets/licenses/pewpew-blitz-original-icons.txt",
     ),
-    ("branding and menu art", "asset_src/player-shell"),
+    (
+        "branding and menu art",
+        "assets/licenses/pewpew-blitz-original-shell-art.txt",
+    ),
     (
         "all other sound effects and music",
         "assets/licenses/pewpew-blitz-original-audio.txt",
@@ -172,7 +178,11 @@ mod tests {
         let original: BTreeSet<&str> = ORIGINAL.iter().map(|(_, path)| *path).collect();
         for (label, path) in &ORIGINAL {
             assert!(
-                root().join(path).exists(),
+                path.starts_with("assets/licenses/pewpew-blitz-original-"),
+                "{label}: provenance {path} is not an original-work license note"
+            );
+            assert!(
+                root().join(path).is_file(),
                 "{label}: missing provenance {path}"
             );
         }

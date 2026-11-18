@@ -1,0 +1,10 @@
+PewPew Blitz original fighter characters
+
+Files: brawler/models/original/characters/*/*.glb
+
+The Riff fighter (brawler/models/original/characters/riff/chr_riff.glb, BRL-0154) is original
+work of the PewPew Blitz project. It is built entirely by the checked-in procedural Blender script
+asset_src/characters/riff/build_riff.py, which loads the frozen earlier passes in
+asset_src/characters/riff/versions/ and writes the source master riff.blend and review renders
+beside it. It contains no third-party, purchased, commissioned or hand-edited model data. The
+README beside the script records the brief, build command, clip contract and budgets.

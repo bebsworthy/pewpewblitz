@@ -1,0 +1,20 @@
+PewPew Blitz original branding and menu artwork
+
+Files: brawler/ui/branding/*.png, brawler/ui/shell/*.png
+
+All of these files are original work of the PewPew Blitz project. They contain no third-party
+artwork. Per-file provenance, recorded in asset_src/player-shell/README.md:
+
+- brawler/ui/branding/pewpew-blitz-lockup.png and pewpew-blitz-wordmark.png: original project
+  branding. Their source files are not in the repository.
+- brawler/ui/shell/logo.png: an AI-assisted refinement (OpenAI image generation) of the original
+  project branding, isolated on a transparent background (BRL-0114). The generated original is
+  retained outside the repository.
+- brawler/ui/shell/panel-*.png, underline.png: code-authored SVG decorations exported by
+  asset_src/player-shell/generate-chrome.cjs (BRL-0114).
+- brawler/ui/shell/game-card*.png, game-selection-background.png: code-authored SVG decorations
+  exported by asset_src/player-shell/generate-game-selection.cjs (BRL-0116, BRL-0156).
+- brawler/ui/shell/practice-card*.png: exported by
+  asset_src/player-shell/generate-practice-cards.cjs.
+- brawler/ui/shell/*-overview.png: schematic Practice map overviews generated from the authored
+  map geometry by asset_src/player-shell/generate-map-overviews.py and render-map-overviews.cjs.

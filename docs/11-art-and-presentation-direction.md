@@ -958,8 +958,11 @@ document the export pipeline needed to reproduce runtime derivatives. Original r
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
 its README (for Riff, `asset_src/characters/riff/README.md`; for the held weapons,
 `asset_src/weapons/README.md`; for environment kits, `asset_src/environment/<kit>/README.md`),
-not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt` and
-`pewpew-blitz-original-weapons.txt` point at the environment kit and weapon sources.
+not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt`,
+`pewpew-blitz-original-weapons.txt` and `pewpew-blitz-original-characters.txt` point at the
+environment kit, weapon and fighter character sources. `pewpew-blitz-original-shell-art.txt`
+records per-file provenance for the branding and shell menu artwork (`assets/brawler/ui/branding/`,
+`assets/brawler/ui/shell/`). Every Credits original-work entry points at one of these notes.
 The shell icon set under `assets/brawler/ui/icons/`, including the hanging mode pennants
 (BRL-1wms), is likewise original generated artwork:
 `asset_src/player-shell/icons/` holds the generator, editable SVG sources and README, and

@@ -16,3 +16,17 @@ Tests: `every_license_file_is_credited` (`credits.rs:164-189`) requires every `a
 - Every shipped original asset family has a note; the `ORIGINAL` table has no `asset_src/` path.
 - `cargo test -p brawler-client --lib shell::credits`, `just lint`.
 - No device check needed (Credits text change only; optional Credits screen glance on Pixel 8a).
+
+
+# Result (2026-11-18)
+
+- New notes in `assets/licenses/`:
+  - `pewpew-blitz-original-characters.txt` covers `brawler/models/original/characters/*/*.glb`, built by `build_riff.py`.
+  - `pewpew-blitz-original-shell-art.txt` covers `brawler/ui/branding/*.png` and `brawler/ui/shell/*.png`, with provenance per file group. It states that the branding PNGs' source files are not in the repository, and that `logo.png` is an AI-assisted refinement whose generated original is kept outside the repository. Every generator script it names exists.
+- `credits.rs`:
+  - The Riff and branding `ORIGINAL` entries now point at the new notes, and no `asset_src/` path remains.
+  - The doc comment is updated.
+  - `every_license_file_is_credited` now also asserts that every `ORIGINAL` path is an `assets/licenses/pewpew-blitz-original-*` file.
+- `docs/11-art-and-presentation-direction.md` names the two new notes.
+- BRL-4jdx has not landed yet. If it removes shell files, update the shell-art note to match.
+- Verification: `cargo test -p brawler-client --lib shell::credits` passes (3 tests), and `just lint` passes. No device check was run.
