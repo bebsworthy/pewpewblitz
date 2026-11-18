@@ -71,13 +71,38 @@ fn capture_scheduled_screenshot(world: &mut World) {
     evidence_capture::request_scheduled_evidence_capture(world, &capture.0, &capture.1);
 }
 
+/// Logs the automation start line once per process.
+///
+/// Render evidence runs without `--simulation-ticks`, so `elapsed_ticks` stays 0 for the whole
+/// match: fire never expires and the ultimate is held every frame. That is the intended "fire
+/// continuously" evidence mode, so the line is gated on a local flag rather than `elapsed_ticks`.
+fn log_automation_start_once(
+    start_logged: &mut bool,
+    automation: &HeadlessAutomation,
+    move_axis: Vec2,
+    aim_axis: Option<Vec2>,
+) {
+    if std::mem::replace(start_logged, true) {
+        return;
+    }
+    info!(
+        move_axis = ?move_axis,
+        aim_axis = ?aim_axis,
+        aim_at_dummy = automation.aim_at_dummy,
+        fire = automation.fire,
+        ultimate = automation.ultimate,
+        "headless movement automation enabled"
+    );
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
     reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
 )]
 pub(super) fn apply_headless_input(
-    automation: Res<HeadlessAutomation>,
+    // Paired with the resource to stay within Clippy's argument limit.
+    (automation, mut start_logged): (Res<HeadlessAutomation>, Local<bool>),
     mut pending: ResMut<PendingLocalActions>,
     statuses: Query<&ClientJoinStatus, With<Client>>,
     controlled: Query<
@@ -182,16 +207,7 @@ pub(super) fn apply_headless_input(
         || automation.fire
         || automation.ultimate
     {
-        if automation.elapsed_ticks == 0 {
-            info!(
-                move_axis = ?move_axis,
-                aim_axis = ?aim_axis,
-                aim_at_dummy = automation.aim_at_dummy,
-                fire = automation.fire,
-                ultimate = automation.ultimate,
-                "headless movement automation enabled"
-            );
-        }
+        log_automation_start_once(&mut start_logged, &automation, move_axis, aim_axis);
         pending.move_axis = move_axis;
         pending.aim_axis = aim_axis;
         pending.aim_distance = if automation.aim_at_dummy {

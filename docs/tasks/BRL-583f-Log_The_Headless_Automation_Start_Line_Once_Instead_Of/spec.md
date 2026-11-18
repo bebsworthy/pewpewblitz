@@ -20,3 +20,15 @@ Automation client logs stay readable: the "headless movement automation enabled"
 - `BRAWLER_RENDER_PRACTICE=1 BRAWLER_RENDER_COMBAT=1 just v3-render-evidence target/583f/r.txt`, then `grep -c "headless movement automation enabled" target/583f/r.txt.client-1.log` prints 1.
 - `just practice-e2e` logs still show the line once per client.
 - `just lint` and `just test` pass.
+
+
+# Result (2026-11-18)
+
+- In `packages/brawler-client/src/automation/mod.rs`, the new `log_automation_start_once` helper writes the "headless movement automation enabled" line once per process. It is gated on a `Local<bool>` paired with `Res<HeadlessAutomation>` in a tuple parameter, which keeps the system within Clippy's 7-argument limit. Extracting the helper also keeps `apply_headless_input` under the 100-line limit.
+- The helper's doc comment records that render evidence keeps `elapsed_ticks` at 0 on purpose: fire never expires and the ultimate is held every frame, which is the evidence's "fire continuously" mode. That behaviour is unchanged.
+- Once per process is enough. The rejoin and network-change smokes don't depend on this line.
+
+Verification:
+- `BRAWLER_RENDER_BIND=127.0.0.1:5033 BRAWLER_RENDER_PRACTICE=1 BRAWLER_RENDER_COMBAT=1 just v3-render-evidence target/583f/r2.txt` passes. `grep -c "headless movement automation enabled" target/583f/r2.txt.client-1.log` prints 1; BRL-1fam's run had 1,773.
+- `just practice-e2e` passes. Its Practice-smoke clients get no scripted move, aim, fire or ultimate input, so the line never prints there, before or after this change. The acceptance's "once per client" item therefore doesn't apply to that smoke.
+- `just lint` and `just test` pass. Logs are in `target/583f/`.
