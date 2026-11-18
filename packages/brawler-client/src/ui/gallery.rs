@@ -7,6 +7,8 @@ use super::{
     theme,
 };
 use bevy::input::mouse::MouseWheel;
+
+mod affordance_board;
 use bevy::{
     prelude::*,
     ui::{InteractionDisabled, ScrollPosition, UiScale, UiSystems},
@@ -26,7 +28,9 @@ pub fn build_ui_gallery_app() -> App {
                 primary_window: Some(Window {
                     title: "PewPew Blitz — UI Gallery".into(),
                     // BRL-0196: the Pixel 8a landscape logical viewport.
-                    resolution: if std::env::var_os("BRAWLER_UI_GALLERY_PHONE").is_some() {
+                    resolution: if let Some(size) = gallery_size_override() {
+                        size.into()
+                    } else if std::env::var_os("BRAWLER_UI_GALLERY_PHONE").is_some() {
                         (914, 411).into()
                     } else if std::env::var_os("BRAWLER_UI_GALLERY_COMPACT").is_some() {
                         (900, 600).into()
@@ -45,10 +49,17 @@ pub fn build_ui_gallery_app() -> App {
         super::surface::SurfacePlugin,
         super::press::ReleaseActivationPlugin,
     ))
-    .add_systems(Startup, setup)
+    .add_systems(
+        Startup,
+        (
+            setup.run_if(not(resource_exists::<GalleryBoard>)),
+            setup_board.run_if(resource_exists::<GalleryBoard>),
+        ),
+    )
     .add_systems(
         Update,
         (
+            affordance_board::cycle_affordance,
             fit_gallery_viewport,
             interact,
             scroll_gallery,
@@ -59,15 +70,32 @@ pub fn build_ui_gallery_app() -> App {
     )
     .add_systems(PreUpdate, hold_press_demo.after(UiSystems::Focus))
     .add_systems(PostUpdate, reveal_focus.after(UiSystems::Layout));
+    let board = std::env::var_os("BRAWLER_UI_GALLERY_AFFORDANCE_BOARD").is_some();
+    if board {
+        app.insert_resource(GalleryBoard);
+    }
     if let Some(path) = std::env::var_os("BRAWLER_UI_GALLERY_CAPTURE") {
         app.insert_resource(GalleryCapture {
             path: path.into(),
             frame: 0,
+            single: board,
         })
         .add_systems(Last, capture_gallery);
     }
     app
 }
+
+/// `BRAWLER_UI_GALLERY_SIZE=WIDTHxHEIGHT` opens the gallery at an exact logical size.
+fn gallery_size_override() -> Option<(u32, u32)> {
+    let value = std::env::var("BRAWLER_UI_GALLERY_SIZE").ok()?;
+    let (width, height) = value.split_once('x')?;
+    Some((width.parse().ok()?, height.parse().ok()?))
+}
+
+/// The gallery shows the BRL-fe7t focus/selection affordance board instead of the component
+/// matrix (`BRAWLER_UI_GALLERY_AFFORDANCE_BOARD=1`).
+#[derive(Resource)]
+struct GalleryBoard;
 
 /// Applies the shell's small-viewport fit, as the player client does (BRL-0196).
 fn fit_gallery_viewport(windows: Query<&Window, With<PrimaryWindow>>, mut scale: ResMut<UiScale>) {
@@ -87,6 +115,8 @@ fn fit_gallery_viewport(windows: Query<&Window, With<PrimaryWindow>>, mut scale:
 struct GalleryCapture {
     path: std::path::PathBuf,
     frame: u32,
+    /// Save only the top (the affordance board fits one screen).
+    single: bool,
 }
 
 const GALLERY_CAPTURE_FRAME: u32 = 120;
@@ -119,8 +149,11 @@ fn capture_gallery(
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(capture.path.clone()));
         }
+        Some(30) if capture.single => {
+            exit.write(AppExit::Success);
+        }
         // The middle shows the held-press and reward-burst references.
-        Some(10) => scroll_to(GALLERY_MIDDLE_SCROLL),
+        Some(10) if !capture.single => scroll_to(GALLERY_MIDDLE_SCROLL),
         Some(40) => {
             commands
                 .spawn(Screenshot::primary_window())
@@ -205,10 +238,10 @@ struct GalleryColumn;
 #[require(super::press::ReleaseActivation)]
 struct GalleryItem(usize);
 
-#[allow(clippy::needless_pass_by_value, reason = "Bevy gallery setup")]
-fn setup(mut commands: Commands, assets: Res<AssetServer>) {
+/// Camera and the fixed backdrop with the shared motif layer (edges layout) behind the scrolling
+/// content; returns the gallery's display font.
+fn spawn_backdrop(commands: &mut Commands, assets: &AssetServer) -> TextFont {
     commands.spawn(Camera2d);
-    // Fixed backdrop with the shared motif layer (edges layout) behind the scrolling content.
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -220,11 +253,33 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
         super::motifs::ShellBackdrop(super::motifs::MotifLayout::Edges),
         GlobalZIndex(-1),
     ));
-    let font = TextFont {
+    TextFont {
         font: assets.load(theme::FONT_PATH).into(),
         font_size: FontSize::Px(24.0),
         ..default()
-    };
+    }
+}
+
+#[allow(clippy::needless_pass_by_value, reason = "Bevy gallery setup")]
+fn setup_board(mut commands: Commands, assets: Res<AssetServer>) {
+    let font = spawn_backdrop(&mut commands, &assets);
+    commands
+        .spawn((
+            GalleryRoot,
+            ScrollPosition::default(),
+            Node {
+                width: percent(100),
+                height: percent(100),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+        ))
+        .with_children(|root| affordance_board::spawn(root, &font));
+}
+
+#[allow(clippy::needless_pass_by_value, reason = "Bevy gallery setup")]
+fn setup(mut commands: Commands, assets: Res<AssetServer>) {
+    let font = spawn_backdrop(&mut commands, &assets);
     commands.spawn((GalleryRoot, ScrollPosition::default(), Node {
         width: percent(100), height: percent(100), padding: UiRect::all(px(32)),
         flex_direction: FlexDirection::Column, row_gap: px(24), overflow: Overflow::scroll_y(), ..default()

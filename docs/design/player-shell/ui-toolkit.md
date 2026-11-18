@@ -163,7 +163,13 @@ application. Run `just ui-gallery` for the wide state matrix and
 `BRAWLER_UI_GALLERY_COMPACT=1 just ui-gallery` for its compact layout. Set
 `BRAWLER_UI_GALLERY_CAPTURE=<path>.png` to save the settled top, a scrolled middle
 (`<path>-middle.png`) and the scrolled bottom (`<path>-bottom.png`) and exit, for native evidence without OS screen capture. Its Reduced motion
-demo switch drives the production surface motion policy. It supplements native
+demo switch drives the production surface motion policy.
+`BRAWLER_UI_GALLERY_AFFORDANCE_BOARD=1` swaps in the BRL-fe7t focus/selection review board (rest,
+focus, selected, focus + selected, pressed and disabled on Primary, Secondary, Card and Row, plus
+reduced-motion and touch rows); `BRAWLER_UI_GALLERY_SIZE=WIDTHxHEIGHT` sets an exact window and
+V cycles the affordance. Automation builds (gallery and `just shell-capture`) select a review
+affordance with `BRAWLER_SURFACE_AFFORDANCE=frame|reticle|spotlight`; the player shell always
+keeps the current one until the owner chooses. It supplements native
 screen review; it does not validate product flow or replace screen-level tests.
 
 ## Extending the toolkit

@@ -25,3 +25,13 @@ Design options first (mockups in the UI gallery), e.g. lift/scale + glow, inner 
 - User-approved affordance applied across shell surfaces; focus visible for keyboard/gamepad; selection distinct from focus; reduced motion respected; gallery evidence (native captures).
 - Existing surface tests (`surface.rs` `selected_focus_keeps_choice_and_inactive_ignores_hover`, reduced-motion tests) updated/passing; `just lint`, `just test`.
 - Pixel 8a device check: touch navigation shows no stray focus frame (if that rule is chosen); gamepad focus visible.
+
+
+# Phase 1 (variants), 2026-11-18
+- Review seam, all in automation builds only; player shell unchanged: `SurfaceAffordance` resource in `ui/surface.rs` (`Current` default; `Frame`, `Reticle`, `Spotlight`) selected by `BRAWLER_SURFACE_AFFORDANCE`, fed to `shell_surface.wgsl` as `flags.w`. The focus pulse is `motion.w`, constant under reduced motion. The Frame lift is `SurfaceMotion::ease_lift`. `ReducedMotionPreview` lets one capture compare reduced and normal motion. Whichever variant is chosen becomes the real implementation in this seam; the others get deleted.
+- Gallery board: `BRAWLER_UI_GALLERY_AFFORDANCE_BOARD=1 just ui-gallery` (`ui/gallery/affordance_board.rs`; V cycles variants; `BRAWLER_UI_GALLERY_SIZE=WxH`). It shows rest/focus/selected/focus+selected/pressed/disabled on Primary, Secondary, Card and Row, plus a reduced-motion row and a touch row (focus hidden).
+- Variants: **Frame**: white outline, face lit in its own hue, narrow inner glow, 3.5% lift, gold inner trim. **Reticle**: breathing white corner brackets, gold bottom bar. **Spotlight**: lit face (cyan, or gold on Play) under a white bevel, gold outline. Iteration: a white-mix glow greyed the navy roles, so Frame now scales the face in hue. Spotlight on Play mixed toward white and looked washed out, so it now uses `play-highlight`. Reticle's underline was thickened for the phone viewport.
+- Evidence: sheets `target/fe7t/fe7t-{frame,reticle,spotlight}-sheet.png` (assets a-000019..21). Each compares current vs variant on the gallery board at 1280x720 and 914x411, plus live `just shell-capture` dashboard, settings and game-select under each variant (scratch supervisor 127.0.0.1:5031, data under target/). Raw captures: `target/fe7t/raw/`, `target/fe7t/shell/`.
+- Questions: q-y21kgwz (variant; Frame recommended), q-4yrvg6g (focus-visible modality rule; hide after touch, show after key/gamepad recommended).
+- Gates: `just lint` pass (target/fe7t/lint.log), `just test` pass, 2565 tests (target/fe7t/test.log). New test: `frame_affordance_lifts_focus_except_under_reduced_motion_or_preview`.
+- Not verified: animated pulse/lift timing only by code and tests (captures are stills); no device check (phase 2).

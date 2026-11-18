@@ -91,7 +91,8 @@ pub(crate) struct SurfaceMaterial {
     fill: Vec4,
     #[uniform(1)]
     ink: Vec4,
-    /// Navigation focus frame and pointer.
+    /// Navigation focus color: frame and pointer, or the review affordance's frame, brackets or
+    /// face highlight.
     #[uniform(2)]
     accent: Vec4,
     #[uniform(3)]
@@ -106,7 +107,8 @@ pub(crate) struct SurfaceMaterial {
     /// Persistent selection rim.
     #[uniform(7)]
     selection: Vec4,
-    /// x: press amount (lip collapse), y: shine sweep position or negative when idle.
+    /// x: press amount (lip collapse), y: shine sweep position or negative when idle, z: burst
+    /// flash, w: focus pulse.
     #[uniform(8)]
     motion: Vec4,
 }
@@ -115,6 +117,86 @@ impl UiMaterial for SurfaceMaterial {
         "brawler/shaders/shell_surface.wgsl".into()
     }
 }
+
+/// Focus/selection affordance under owner review (BRL-fe7t phase 1). The player shell keeps
+/// `Current`; automation builds select another with `BRAWLER_SURFACE_AFFORDANCE` (`frame`,
+/// `reticle` or `spotlight`) so the UI gallery and native shell captures can compare them.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    not(feature = "automation"),
+    allow(
+        dead_code,
+        reason = "review variants are selected only by automation builds"
+    )
+)]
+pub(crate) enum SurfaceAffordance {
+    /// Cyan focus frame with pointer; yellow selection rim.
+    #[default]
+    Current,
+    /// White outline with inner glow and a small lift; gold selection trim.
+    Frame,
+    /// White corner brackets that breathe; gold selection bar along the bottom.
+    Reticle,
+    /// The focused face lights up under a white bevel; gold selection outline.
+    Spotlight,
+}
+
+impl SurfaceAffordance {
+    #[cfg(feature = "automation")]
+    pub(crate) const ALL: [Self; 4] = [Self::Current, Self::Frame, Self::Reticle, Self::Spotlight];
+
+    #[cfg(feature = "automation")]
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Frame => "frame",
+            Self::Reticle => "reticle",
+            Self::Spotlight => "spotlight",
+        }
+    }
+
+    #[cfg(feature = "automation")]
+    fn from_env() -> Self {
+        let value = std::env::var("BRAWLER_SURFACE_AFFORDANCE").unwrap_or_default();
+        Self::ALL
+            .into_iter()
+            .find(|variant| variant.name() == value)
+            .unwrap_or_default()
+    }
+
+    /// Shader selector (`flags.w`).
+    fn index(self) -> f32 {
+        match self {
+            Self::Current => 0.0,
+            Self::Frame => 1.0,
+            Self::Reticle => 2.0,
+            Self::Spotlight => 3.0,
+        }
+    }
+
+    /// Whether a focused surface lifts above its neighbours.
+    fn lifts(self) -> bool {
+        self == Self::Frame
+    }
+
+    /// The focus color the shader receives for `role`.
+    fn focus_color(self, role: Surface) -> Color {
+        match self {
+            Self::Frame | Self::Reticle => TEXT,
+            Self::Spotlight if role == Surface::Primary => PLAY_HIGHLIGHT,
+            Self::Current | Self::Spotlight => ACCENT,
+        }
+    }
+}
+
+/// Gallery review: present this surface as if reduced motion were on, beside surfaces that are
+/// not, so one capture can compare both.
+#[derive(Component, Clone, Copy, Debug, Default)]
+#[cfg_attr(
+    not(feature = "automation"),
+    allow(dead_code, reason = "constructed only by the automation UI gallery")
+)]
+pub(crate) struct ReducedMotionPreview;
 
 /// Opt-in idle motion for the screen's single primary call to action (Dashboard Play).
 #[derive(Component, Clone, Copy, Debug, Default)]
@@ -224,6 +306,10 @@ const BURST_POP: f32 = 0.07;
 const BURST_SHINE_FRACTION: f32 = 0.6;
 const BURST_FLASH: f32 = 0.3;
 const DEFAULT_DETAILS: Vec4 = Vec4::new(8.0, 0.0, 6.0, 0.0);
+/// Review affordances: focus lift scale, its ease time, and the focus pulse period.
+const FOCUS_LIFT: f32 = 0.035;
+const FOCUS_LIFT_SECONDS: f32 = 0.09;
+const FOCUS_PULSE_SECONDS: f32 = 1.2;
 
 /// Per-surface presentation motion. Never read by input, navigation, or networking.
 #[derive(Component, Clone, Copy, Debug, Default)]
@@ -236,6 +322,8 @@ pub(crate) struct SurfaceMotion {
     shine: Option<f32>,
     /// Burst face flash fed to the shader, 0 at rest.
     flash: f32,
+    /// Focus lift, 0 at rest and 1 fully lifted.
+    lift: f32,
 }
 
 fn ease_out_back(t: f32) -> f32 {
@@ -246,6 +334,21 @@ fn ease_out_back(t: f32) -> f32 {
 }
 
 impl SurfaceMotion {
+    /// Eases the focus lift toward `target` and returns its scale factor; immediate and flat
+    /// under reduced motion.
+    fn ease_lift(&mut self, dt: f32, target: bool, reduced: bool) -> f32 {
+        let goal = f32::from(u8::from(target && !reduced));
+        let step = dt / FOCUS_LIFT_SECONDS;
+        self.lift = if reduced {
+            goal
+        } else if self.lift < goal {
+            (self.lift + step).min(goal)
+        } else {
+            (self.lift - step).max(goal)
+        };
+        1.0 + FOCUS_LIFT * ease_out_back(self.lift)
+    }
+
     fn entering() -> Self {
         Self {
             entrance: Some(0.0),
@@ -318,6 +421,7 @@ impl Plugin for SurfacePlugin {
         ))
         .init_resource::<SurfaceMotionPolicy>()
         .init_resource::<SurfaceEntrance>()
+        .init_resource::<SurfaceAffordance>()
         .add_systems(
             PostUpdate,
             (
@@ -331,6 +435,8 @@ impl Plugin for SurfacePlugin {
                 .before(UiSystems::Layout),
         )
         .add_systems(PostUpdate, present.after(UiSystems::Layout));
+        #[cfg(feature = "automation")]
+        app.insert_resource(SurfaceAffordance::from_env());
     }
 }
 fn material() -> SurfaceMaterial {
@@ -474,10 +580,11 @@ fn refresh_entrance_window(
 fn animate(
     time: Res<Time>,
     policy: Res<SurfaceMotionPolicy>,
+    affordance: Option<Res<SurfaceAffordance>>,
     mut surfaces: Query<(
         Option<&SurfaceState>,
         Option<&Interaction>,
-        Has<InteractionDisabled>,
+        (Has<InteractionDisabled>, Has<ReducedMotionPreview>),
         Has<PrimaryIdleMotion>,
         &mut SurfaceMotion,
         &mut UiTransform,
@@ -486,12 +593,19 @@ fn animate(
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
-    for (state, interaction, disabled, idle, mut motion, mut transform, burst) in &mut surfaces {
+    let lifts = affordance.is_some_and(|affordance| affordance.lifts());
+    for (state, interaction, (disabled, preview), idle, mut motion, mut transform, burst) in
+        &mut surfaces
+    {
         let state = state.copied().unwrap_or_default();
+        let reduced = policy.reduced || preview;
         let live = !disabled && !state.disabled && !state.inactive;
         let held = live && interaction == Some(&Interaction::Pressed);
-        let burst = burst.and_then(|mut burst| burst.advance(dt, policy.reduced));
-        let (scale, drop) = motion.step(dt, now, held, idle && live, policy.reduced, burst);
+        let burst = burst.and_then(|mut burst| burst.advance(dt, reduced));
+        let (mut scale, drop) = motion.step(dt, now, held, idle && live, reduced, burst);
+        if lifts {
+            scale *= motion.ease_lift(dt, live && state.focused, reduced);
+        }
         transform.set_if_neq(UiTransform {
             translation: Val2::new(px(0), px(drop)),
             scale: Vec2::splat(scale),
@@ -593,6 +707,9 @@ fn fill_top(role: Surface, state: SurfaceState, bottom: Color) -> Color {
     reason = "Bevy material presentation"
 )]
 fn present(
+    time: Res<Time>,
+    policy: Res<SurfaceMotionPolicy>,
+    affordance: Res<SurfaceAffordance>,
     mut materials: ResMut<Assets<SurfaceMaterial>>,
     surfaces: Query<(
         &Surface,
@@ -603,9 +720,11 @@ fn present(
         Option<&SurfaceStyle>,
         Option<&SurfaceMotion>,
         Has<InteractionDisabled>,
+        Has<ReducedMotionPreview>,
     )>,
 ) {
-    for (role, state, node, handle, interaction, style, motion, disabled) in &surfaces {
+    let phase = time.elapsed_secs() * core::f32::consts::TAU / FOCUS_PULSE_SECONDS;
+    for (role, state, node, handle, interaction, style, motion, disabled, preview) in &surfaces {
         let mut state = state.copied().unwrap_or_default();
         state.disabled |= disabled;
         let Some(mut mat) = materials.get_mut(&handle.0) else {
@@ -637,19 +756,29 @@ fn present(
             style.map_or(default_slope, |style| style.slope),
             style.map_or(BORDER_WIDTH, |style| style.border_width),
         );
-        mat.accent = ACCENT.to_linear().to_vec4();
+        mat.accent = affordance.focus_color(*role).to_linear().to_vec4();
         mat.selection = PLAY_HIGHLIGHT.to_linear().to_vec4();
         mat.flags = Vec4::new(
             f32::from(state.focused && !state.disabled && !state.inactive),
             f32::from(*role == Surface::Quiet),
             f32::from(state.selected && !state.disabled),
-            0.,
+            affordance.index(),
         );
         mat.details = style.map_or(DEFAULT_DETAILS, |style| {
             Vec4::new(style.cut, style.shadow_x, style.shadow_y, 0.0)
         });
         let motion = motion.copied().unwrap_or_default();
-        mat.motion = Vec4::new(motion.lip, motion.shine.unwrap_or(-1.0), motion.flash, 0.0);
+        let pulse = if policy.reduced || preview {
+            1.0
+        } else {
+            0.5 + 0.5 * phase.sin()
+        };
+        mat.motion = Vec4::new(
+            motion.lip,
+            motion.shine.unwrap_or(-1.0),
+            motion.flash,
+            pulse,
+        );
     }
 }
 #[cfg(test)]
@@ -881,6 +1010,30 @@ mod tests {
         assert!((burst_frame(BURST_RISE).scale - (1.0 + BURST_POP)).abs() < 1e-6);
         assert!((burst_frame(1.0).scale - 1.0).abs() < 1e-6);
         assert!(burst_frame(1.0).shine.is_none());
+    }
+
+    #[test]
+    fn frame_affordance_lifts_focus_except_under_reduced_motion_or_preview() {
+        let lifted = |reduced: bool, preview: bool, affordance: SurfaceAffordance| {
+            let (mut app, entity) = motion_app(reduced);
+            app.insert_resource(affordance);
+            let mut surface = app.world_mut().entity_mut(entity);
+            surface.insert(SurfaceState {
+                focused: true,
+                ..default()
+            });
+            if preview {
+                surface.insert(ReducedMotionPreview);
+            }
+            for _ in 0..30 {
+                app.update();
+            }
+            transform(&app, entity).scale.x
+        };
+        assert!((lifted(false, false, SurfaceAffordance::Frame) - (1.0 + FOCUS_LIFT)).abs() < 1e-4);
+        assert!((lifted(true, false, SurfaceAffordance::Frame) - 1.0).abs() < f32::EPSILON);
+        assert!((lifted(false, true, SurfaceAffordance::Frame) - 1.0).abs() < f32::EPSILON);
+        assert!((lifted(false, false, SurfaceAffordance::Current) - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
