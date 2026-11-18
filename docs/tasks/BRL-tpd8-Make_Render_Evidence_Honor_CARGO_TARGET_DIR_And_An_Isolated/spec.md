@@ -24,3 +24,19 @@ The render evidence script is safe to run beside a developer's live server and w
 - `CARGO_TARGET_DIR=$PWD/target/scratch-tpd8 just v3-render-evidence target/scratch-tpd8/report.txt` builds into and runs from `target/scratch-tpd8`. `ps` or the log shows that path.
 - After a `BRAWLER_RENDER_PRACTICE=1 BRAWLER_RENDER_WEAPON=7` run, `git status --porcelain data/server` is empty, and no `brawler-render-evidence.*` dir remains in `$TMPDIR`.
 - The default `just v3-render-evidence` still passes; `bash -n scripts/v3-render-evidence.sh` and `just lint` pass.
+
+
+# Result (2026-11-18)
+
+Implemented in `scripts/v3-render-evidence.sh`:
+- `target_dir=${CARGO_TARGET_DIR:-$project_dir/target}`. The routing-identity probe, the supervisor, the worker executable and every client now run from `$target_dir`. The default report path is unchanged.
+- Server data was already isolated in `${report_path}.server-data` (BRL-qfby). I kept that report-adjacent layout instead of the `mktemp` plan, so the data stays inspectable next to the report and never lands in `$TMPDIR`.
+- Each client gets `BRAWLER_CLIENT_DATA_DIR=${report_path}.client-data/<id>`. The overwrite guard also refuses an existing client-data dir. Automation clients never write `connections.ron`, so the directory normally stays absent; the env var keeps any write out of the developer's config directory.
+- The script refuses `BRAWLER_RENDER_BIND=*:5000` with exit 2, which protects the developer server port.
+
+Verification:
+- `bash -n` passes.
+- `BRAWLER_RENDER_BIND=0.0.0.0:5000 scripts/v3-render-evidence.sh target/x.txt` exits 2 with the refusal message.
+- `CARGO_TARGET_DIR=$PWD/target/scratch-tpd8 BRAWLER_RENDER_PRACTICE=1 BRAWLER_RENDER_WEAPON=7 scripts/v3-render-evidence.sh target/tpd8/scratch.txt` exits 0. It built `release/brawler-client`, `debug/brawler-server` and `debug/brawler-supervisor` fresh into `target/scratch-tpd8`, which was the only place they existed. Profile rows landed in `target/tpd8/scratch.txt.server-data/`, and `data/server/` mtimes are unchanged (Nov 16). The client log has 3 "evidence capture saved" lines. I deleted the scratch target afterwards.
+- `just v3-render-evidence target/tpd8/default.txt` exits 0.
+- `just lint` exits 0.

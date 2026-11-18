@@ -5,9 +5,17 @@ project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 report_path=${1:-target/v3-render-evidence.txt}
 peer_report_path=${report_path}.peer
 capture_dir=${report_path}.captures
-# Supervisor profile/session data for this run stays beside the report, never in data/server/.
+# Supervisor and client data for this run stay beside the report, never in data/server/ or the
+# developer's client data directory. Binaries come from ${CARGO_TARGET_DIR:-target}.
 server_data_dir=${report_path}.server-data
+client_data_dir=${report_path}.client-data
 bind_addr=${BRAWLER_RENDER_BIND:-127.0.0.1:5024}
+case "$bind_addr" in
+    *:5000)
+        printf '%s\n' 'brawler render evidence: refusing to bind port 5000, the developer server port' >&2
+        exit 2
+        ;;
+esac
 game_mode=${BRAWLER_RENDER_MODE:-wipeout}
 players_per_team=${BRAWLER_RENDER_PLAYERS_PER_TEAM:-}
 game_type=${BRAWLER_RENDER_GAME_TYPE:-}
@@ -128,7 +136,8 @@ for duration in "$warmup_seconds" "$measure_seconds"; do
 done
 
 cd "$project_dir"
-if [[ -e "$report_path" || -e "$peer_report_path" || -e "$client_one_log" || -e "$client_two_log" || -e "$capture_dir" || -e "$server_data_dir" ]]; then
+target_dir=${CARGO_TARGET_DIR:-$project_dir/target}
+if [[ -e "$report_path" || -e "$peer_report_path" || -e "$client_one_log" || -e "$client_two_log" || -e "$capture_dir" || -e "$server_data_dir" || -e "$client_data_dir" ]]; then
     printf '%s\n' 'brawler render evidence: refusing to overwrite an existing report, client log, or capture directory' >&2
     exit 2
 fi
@@ -139,7 +148,7 @@ BRAWLER_GIT_COMMIT="$commit" cargo build --locked --release -p brawler-client --
 cargo build --locked --bin brawler-server --no-default-features --features server
 cargo build --locked -p brawler-routing --bin brawler-supervisor
 
-identity=$(target/debug/brawler-server routing-identity)
+identity=$("$target_dir"/debug/brawler-server routing-identity)
 network_protocol=$(awk -F= '$1 == "network_protocol" { print $2 }' <<<"$identity")
 registry_fingerprint=$(awk -F= '$1 == "protocol_registry_fingerprint" { print $2 }' <<<"$identity")
 content_fingerprint=$(awk -F= '$1 == "content_fingerprint" { print $2 }' <<<"$identity")
@@ -180,11 +189,11 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-target/debug/brawler-supervisor \
+"$target_dir"/debug/brawler-supervisor \
     --network-protocol "$network_protocol" \
     --protocol-registry-fingerprint "$registry_fingerprint" \
     --content-fingerprint "$content_fingerprint" \
-    --worker-executable "$project_dir/target/debug/brawler-server" \
+    --worker-executable "$target_dir/debug/brawler-server" \
     --game-types "$project_dir/config/server/game-types.ron" \
     --data-directory "$server_data_dir" \
     --mode "$game_mode" \
@@ -193,7 +202,7 @@ target/debug/brawler-supervisor \
 supervisor_pid=$!
 
 if [[ "$practice_smoke" == 1 ]]; then
-    target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
+    BRAWLER_CLIENT_DATA_DIR="$client_data_dir/1" "$target_dir"/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
         --auto-connect --product-practice-smoke --product-game-type "$game_type" --move-axis 1,0 \
         --window-size "$window_size" \
         --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
@@ -204,7 +213,7 @@ if [[ "$practice_smoke" == 1 ]]; then
         ${measured_weapon_flags:+$measured_weapon_flags} \
         >"$client_one_log" 2>&1 &
 else
-    target/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
+    BRAWLER_CLIENT_DATA_DIR="$client_data_dir/1" "$target_dir"/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
         --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis 1,0 \
         --window-size "$window_size" \
         --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
@@ -220,8 +229,8 @@ measured_pid=$!
 # against the deliberately small unauthenticated lobby ingress budget.
 sleep 2
 if [[ "$practice_smoke" == 0 ]]; then
-    env BRAWLER_RENDER_PROFILE="$peer_render_profile" \
-        target/release/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
+    env BRAWLER_RENDER_PROFILE="$peer_render_profile" BRAWLER_CLIENT_DATA_DIR="$client_data_dir/2" \
+        "$target_dir"/release/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
         --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0' \
         --window-size "$window_size" \
         --render-report "$peer_report_path" --render-warmup-seconds "$warmup_seconds" \
@@ -233,7 +242,7 @@ fi
 
 for ((client_id = 3; client_id <= roster_size; client_id++)); do
     sleep 1
-    target/release/brawler-client --client-id "$client_id" --server "$bind_addr" \
+    BRAWLER_CLIENT_DATA_DIR="$client_data_dir/$client_id" "$target_dir"/release/brawler-client --client-id "$client_id" --server "$bind_addr" \
         --transport routed-udp --headless "$match_flag" \
         --product-game-type "$game_type" \
         >"${report_path}.client-${client_id}.log" 2>&1 &
