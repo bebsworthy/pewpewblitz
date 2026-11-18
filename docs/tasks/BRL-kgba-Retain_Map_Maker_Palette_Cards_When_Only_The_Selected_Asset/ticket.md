@@ -3,9 +3,9 @@ id: BRL-kgba
 
 title: Retain Map Maker palette cards when only the selected asset changes
 
-status: doing
-closed:
-status_changed: 2026-11-18T07:20:52Z
+status: done
+closed: 2026-11-18T07:34:33Z
+status_changed: 2026-11-18T07:34:33Z
 
 theme: quality
 
@@ -19,7 +19,7 @@ related: [BRL-cwm9]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
