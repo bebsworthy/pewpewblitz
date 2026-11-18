@@ -3,9 +3,9 @@ id: BRL-z2hf
 
 title: Render emoji in player names on Android
 
-status: doing
-closed:
-status_changed: 2026-11-18T09:57:10Z
+status: done
+closed: 2026-11-18T17:18:54Z
+status_changed: 2026-11-18T17:18:54Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-5e2s, BRL-cgcf]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
