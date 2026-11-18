@@ -1,6 +1,5 @@
 //! Default V3 world renderer over the unchanged planar simulation.
 
-use super::presentation::spawn_client_hud;
 #[allow(
     clippy::wildcard_imports,
     reason = "the child module consumes its parent module's composition surface"
@@ -1206,7 +1205,6 @@ pub(crate) fn setup_3d_foundation(
     splash_area_materials: Option<ResMut<Assets<combat::SplashAreaMaterial>>>,
     mut toon_materials: ResMut<Assets<ToonMaterial>>,
     toon_shading: Res<ToonShading>,
-    asset_server: Option<Res<AssetServer>>,
 ) {
     let fighter_radius = builds.0.fighter_body.radius;
     let fighter_metrics = FighterPresentationMetrics {
@@ -1625,10 +1623,6 @@ pub(crate) fn setup_3d_foundation(
         Transform::from_xyz(-500.0, 900.0, 650.0).looking_at(Vec3::ZERO, Vec3::Y),
         V3WorldMember,
     ));
-    spawn_client_hud(
-        commands,
-        &ui::theme::display_font_handle(asset_server.as_deref()),
-    );
 }
 
 fn fighter_facing_mesh(fighter_radius: f32) -> Mesh {

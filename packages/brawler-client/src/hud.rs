@@ -12,12 +12,15 @@ mod controls;
 mod kill_feed;
 mod layout;
 mod plate;
+mod scoreboard;
 #[cfg(test)]
 pub(crate) mod screen_tests;
 
 pub(crate) use layout::HudControlLayout;
 pub(crate) use plate::PLATE_BOTTOM as HUD_PLATE_BOTTOM;
 use plate::{PlateState, TeamStripRow};
+pub(crate) use scoreboard::ScoreboardCloseButton;
+use scoreboard::ScoreboardState;
 
 /// HUD colors: observer relations match the overhead plates and ground rings.
 mod palette {
@@ -59,7 +62,6 @@ struct MatchPhaseOverlayText;
 struct CachedRosterEntry {
     team: TeamId,
     display_name: String,
-    weapon_preset: Option<u16>,
     status: CachedRosterStatus,
     connected: bool,
     health: Option<(u16, u16)>,
@@ -142,6 +144,7 @@ impl Plugin for ClientReadinessHudPlugin {
             .init_resource::<SeenHeistObjectiveCueIds>()
             .add_message::<brawler::matchplay::ReceivedHeistObjectiveCue>()
             .init_resource::<PlateState>()
+            .init_resource::<ScoreboardState>()
             .init_resource::<kill_feed::KillFeed>()
             .init_resource::<touch::TouchControls>()
             .add_systems(Startup, spawn_readiness_hud)
@@ -150,7 +153,11 @@ impl Plugin for ClientReadinessHudPlugin {
                 (
                     converge_heist_readiness,
                     receive_heist_objective_cues,
-                    (update_readiness_hud, plate::present_plate)
+                    (
+                        update_readiness_hud,
+                        plate::present_plate,
+                        scoreboard::present_scoreboard,
+                    )
                         .chain()
                         .after(converge_heist_readiness),
                     plate::place_team_strip,
@@ -318,6 +325,7 @@ fn spawn_readiness_hud(mut commands: Commands, asset_server: Option<Res<AssetSer
     controls::spawn_controls(&mut commands, &font, asset_server.as_deref(), root);
     plate::spawn_plate(&mut commands, &font, root);
     kill_feed::spawn_kill_feed(&mut commands, &font, &skull, root);
+    scoreboard::spawn_scoreboard(&mut commands, &font);
     commands.spawn((
         CountdownHudText,
         Text::new(""),
@@ -378,29 +386,14 @@ fn update_readiness_hud(
     mut roster_presentation: ResMut<MatchRosterPresentation>,
     zombie: ZombieHudFacts,
     mut plate_state: ResMut<PlateState>,
+    mut scoreboard: ResMut<ScoreboardState>,
     mut countdown_text: Query<
         (&mut Text, &mut Visibility),
-        (
-            With<CountdownHudText>,
-            Without<MatchPhaseOverlayText>,
-            Without<ScoreboardOverlay>,
-        ),
+        (With<CountdownHudText>, Without<MatchPhaseOverlayText>),
     >,
     mut phase_overlay: Query<
         (&mut Text, &mut Visibility),
-        (
-            With<MatchPhaseOverlayText>,
-            Without<CountdownHudText>,
-            Without<ScoreboardOverlay>,
-        ),
-    >,
-    mut scoreboard_text: Query<
-        &mut Text,
-        (
-            With<ScoreboardOverlay>,
-            Without<CountdownHudText>,
-            Without<MatchPhaseOverlayText>,
-        ),
+        (With<MatchPhaseOverlayText>, Without<CountdownHudText>),
     >,
 ) {
     let fighter = controlled.iter().next();
@@ -468,15 +461,6 @@ fn update_readiness_hud(
         .unwrap_or_default();
         set_retained_text(&mut text, &mut visibility, label, true);
     }
-    let mut roster_rows = roster_presentation.entries.iter().collect::<Vec<_>>();
-    roster_rows.sort_by_key(|(player, entry)| (entry.team.0, **player));
-    let roster_text = roster_rows
-        .into_iter()
-        .map(|(player, entry)| {
-            roster_entry_text(entry, now.unwrap_or(0), local_player == Some(*player))
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     let score_view = match_state.and_then(|(state, _)| {
         if state.mode_definition_id == brawler::map::ZOMBIE_MODE_DEFINITION {
             zombie
@@ -511,6 +495,13 @@ fn update_readiness_hud(
         )
     });
     let local_team = fighter.map(|(_, team)| *team);
+    scoreboard.set_if_neq(scoreboard::scoreboard_state(
+        &roster_presentation,
+        local_player,
+        local_team,
+        now,
+        match_hud_phase,
+    ));
     let team_strip = if matches!(score_view, Some(ModeScoreView::Zombie { .. })) {
         team_strip_rows(&roster_presentation, local_player, local_team, now)
     } else {
@@ -524,9 +515,6 @@ fn update_readiness_hud(
         }),
         team_strip,
     });
-    for mut text in &mut scoreboard_text {
-        text.set_if_neq(Text(format!("SCOREBOARD\n\n{roster_text}")));
-    }
 }
 
 /// The plate timer: start countdown, remaining time, or the Zombie overtime clock.
@@ -811,7 +799,6 @@ fn sync_roster_and_collect_phase_facts<'a>(
             CachedRosterEntry {
                 team,
                 display_name: public.display_name.clone(),
-                weapon_preset: public.weapon_preset_id,
                 status: match public.status {
                     brawler::matchplay::PublicParticipantStatus::Alive => CachedRosterStatus::Alive,
                     brawler::matchplay::PublicParticipantStatus::Ready => CachedRosterStatus::Ready,
@@ -998,41 +985,6 @@ fn countdown_label(state: Option<MatchState>, now: Option<u64>) -> Option<String
     )
 }
 
-fn roster_entry_text(entry: &CachedRosterEntry, now: u64, is_local: bool) -> String {
-    let status = if entry.connected {
-        match entry.status {
-            CachedRosterStatus::Alive => "alive".to_string(),
-            CachedRosterStatus::Ready => "ready".to_string(),
-            CachedRosterStatus::RestartReady => "restart ready".to_string(),
-            CachedRosterStatus::Defeated => "defeated".to_string(),
-            CachedRosterStatus::Respawning(respawn_at_tick) => format!(
-                "respawn {}",
-                respawn_at_tick.saturating_sub(now).div_ceil(60)
-            ),
-            CachedRosterStatus::Protected(expires_at_tick) => format!(
-                "protected {}",
-                expires_at_tick.saturating_sub(now).div_ceil(60)
-            ),
-        }
-    } else {
-        "disconnected".to_string()
-    };
-    let weapon = entry
-        .weapon_preset
-        .map_or_else(|| "W?".to_string(), |preset| format!("W{preset}"));
-    let local = if is_local { "YOU " } else { "" };
-    let health = entry.health.map_or_else(
-        || "HP ?".to_string(),
-        |(current, maximum)| format!("HP {current}/{maximum}"),
-    );
-    format!(
-        "T{}  {local}{}  {weapon}  {health}  B{}  {status}",
-        entry.team.0 + 1,
-        entry.display_name,
-        entry.boost_stacks,
-    )
-}
-
 #[cfg(test)]
 fn readiness_status(
     join: Option<&ClientJoinPhase>,
@@ -1081,13 +1033,12 @@ mod tests {
             .init_resource::<MatchRosterPresentation>()
             .init_resource::<ClientHeistReadiness>()
             .init_resource::<PlateState>()
+            .init_resource::<ScoreboardState>()
             .add_systems(Update, update_readiness_hud);
         app.world_mut()
             .spawn((CountdownHudText, Text::new(""), Visibility::Hidden));
         app.world_mut()
             .spawn((MatchPhaseOverlayText, Text::new(""), Visibility::Hidden));
-        app.world_mut()
-            .spawn((ScoreboardOverlay, Text::new(""), Visibility::Hidden));
 
         app.update();
     }
@@ -1099,6 +1050,7 @@ mod tests {
             .init_resource::<MatchRosterPresentation>()
             .init_resource::<ClientHeistReadiness>()
             .init_resource::<PlateState>()
+            .init_resource::<ScoreboardState>()
             .add_systems(Update, update_readiness_hud);
         let match_id = brawler::matchplay::MatchId(7);
         let root = app
@@ -1122,18 +1074,10 @@ mod tests {
                 },
             ))
             .id();
-        let scoreboard = app
-            .world_mut()
-            .spawn((ScoreboardOverlay, Text::new(""), Visibility::Hidden))
-            .id();
         let changed_ticks = |app: &App| {
             (
                 app.world().resource_ref::<PlateState>().last_changed(),
-                app.world()
-                    .entity(scoreboard)
-                    .get_ref::<Text>()
-                    .expect("scoreboard text")
-                    .last_changed(),
+                app.world().resource_ref::<ScoreboardState>().last_changed(),
             )
         };
 
@@ -1179,6 +1123,10 @@ mod tests {
             (
                 "packages/brawler-client/src/hud/plate.rs",
                 include_str!("hud/plate.rs"),
+            ),
+            (
+                "packages/brawler-client/src/hud/scoreboard.rs",
+                include_str!("hud/scoreboard.rs"),
             ),
             (
                 "packages/brawler-client/src/hud/kill_feed.rs",
@@ -1274,27 +1222,6 @@ mod tests {
                 true,
             ),
             "READY | FALLBACKS ACTIVE: audio.fire"
-        );
-    }
-
-    #[test]
-    fn cached_roster_keeps_weapon_and_disconnected_state() {
-        let entry = CachedRosterEntry {
-            team: TeamId(1),
-            display_name: "Player Seven".to_string(),
-            weapon_preset: Some(3),
-            status: CachedRosterStatus::Ready,
-            connected: false,
-            health: Some((80, 100)),
-            boost_stacks: 2,
-        };
-        assert_eq!(
-            roster_entry_text(&entry, 100, false),
-            "T2  Player Seven  W3  HP 80/100  B2  disconnected"
-        );
-        assert_eq!(
-            roster_entry_text(&entry, 100, true),
-            "T2  YOU Player Seven  W3  HP 80/100  B2  disconnected"
         );
     }
 

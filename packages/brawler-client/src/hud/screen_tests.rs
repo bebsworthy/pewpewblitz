@@ -295,3 +295,134 @@ fn zombie_hud_adds_the_teammate_strip_without_collisions() {
         assert_layout(&mut app, width, height, true);
     }
 }
+
+/// A HUD at `width`x`height` with the scoreboard latched open (panel and close button shown),
+/// the longest status labels, and names measured in the shipped display font.
+fn latched_scoreboard_app(width: u16, height: u16) -> App {
+    use brawler::matchplay::PublicParticipantStatus;
+    static DISPLAY_FONT: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/brawler/ui/fonts/lilita-one-regular.ttf"
+    ));
+    let mut app = hud_app(width, height, brawler::map::WIPEOUT_MODE_DEFINITION);
+    let world = app.world_mut();
+    let statuses = [
+        PublicParticipantStatus::Protected {
+            expires_at_tick: 6000,
+        },
+        PublicParticipantStatus::RestartReady,
+        PublicParticipantStatus::Respawning {
+            respawn_at_tick: 6000,
+        },
+        PublicParticipantStatus::Defeated,
+    ];
+    let mut participants = world.query::<&mut brawler::matchplay::PublicParticipantState>();
+    for (mut participant, status) in participants.iter_mut(world).zip(statuses) {
+        participant.status = status;
+    }
+    app.update();
+    let world = app.world_mut();
+    let mut shown = world.query_filtered::<&mut Visibility, Or<(
+        With<ScoreboardOverlay>,
+        With<ScoreboardCloseButton>,
+    )>>();
+    for mut visibility in shown.iter_mut(world) {
+        *visibility = Visibility::Inherited;
+    }
+    // Headless tests do not load the asset folder.
+    let font = world
+        .resource_mut::<Assets<Font>>()
+        .add(Font::from_bytes(DISPLAY_FONT.to_vec()));
+    let mut fonts = world.query_filtered::<&mut TextFont, With<scoreboard::ScoreboardPart>>();
+    for mut text_font in fonts.iter_mut(world) {
+        text_font.font = font.clone().into();
+    }
+    app.update();
+    app.update();
+    app
+}
+
+/// BRL-ejag: the latched scoreboard shows all six long-named rows and its close button on screen,
+/// without collisions, overlapping labels, or clipped names, at every target viewport.
+#[test]
+fn latched_scoreboard_fits_six_long_names_and_its_close_button() {
+    use super::scoreboard::ScoreboardPart;
+    use bevy::text::TextLayoutInfo;
+    for (width, height) in VIEWPORTS {
+        let mut app = latched_scoreboard_app(width, height);
+        let window = Rect::new(0.0, 0.0, f32::from(width), f32::from(height));
+        let mut elements = visible_rect::<With<ScoreboardCloseButton>>(&mut app, "close button");
+        assert_eq!(elements.len(), 1, "{width}x{height}: close button");
+        let world = app.world_mut();
+        let mut parts = world.query::<(Entity, &ScoreboardPart, &InheritedVisibility)>();
+        let parts: Vec<_> = parts
+            .iter(world)
+            .filter(|(_, _, visible)| visible.get())
+            .map(|(entity, part, _)| (entity, *part))
+            .collect();
+        let (mut names, mut row_rects, mut row_labels) = (Vec::new(), BTreeMap::new(), Vec::new());
+        for (entity, part) in parts {
+            let rect = node_rect(app.world(), entity).expect("laid-out scoreboard part");
+            match part {
+                ScoreboardPart::Row(section, index) => {
+                    elements.push((format!("row {section}.{index}"), rect));
+                    row_rects.insert((section, index), rect);
+                }
+                ScoreboardPart::Health(section, index) | ScoreboardPart::Status(section, index) => {
+                    row_labels.push(((section, index), rect));
+                }
+                ScoreboardPart::SectionHeader(section) => {
+                    elements.push((format!("section {section}"), rect));
+                }
+                ScoreboardPart::Name(..) => names.push((entity, rect)),
+                _ => {}
+            }
+        }
+        assert_eq!(row_rects.len(), 6, "{width}x{height}: scoreboard rows");
+        assert_eq!(names.len(), 6, "{width}x{height}: names");
+        for (label, rect) in &elements {
+            assert!(
+                rect.min.x >= -0.5
+                    && rect.min.y >= -0.5
+                    && rect.max.x <= window.max.x + 0.5
+                    && rect.max.y <= window.max.y + 0.5,
+                "{width}x{height}: {label} {rect:?} leaves the screen"
+            );
+        }
+        for (index, (a_label, a)) in elements.iter().enumerate() {
+            for (b_label, b) in &elements[index + 1..] {
+                assert!(
+                    a.intersect(*b).is_empty(),
+                    "{width}x{height}: {a_label} {a:?} overlaps {b_label} {b:?}"
+                );
+            }
+        }
+        // Health value and status sit inside their row without overlapping each other.
+        assert_eq!(row_labels.len(), 12, "{width}x{height}: row labels");
+        for (key, rect) in &row_labels {
+            let row = row_rects[key];
+            assert!(
+                row.contains(rect.min) && row.contains(rect.max),
+                "{width}x{height}: row {key:?} label {rect:?} leaves {row:?}"
+            );
+            for (other_key, other) in &row_labels {
+                assert!(
+                    other_key != key || other == rect || rect.intersect(*other).is_empty(),
+                    "{width}x{height}: row {key:?} labels {rect:?} and {other:?} overlap"
+                );
+            }
+        }
+        // A name is never clipped by its row: the laid-out text fits its node.
+        for (entity, rect) in names {
+            let text = app
+                .world()
+                .get::<TextLayoutInfo>(entity)
+                .expect("name layout");
+            assert!(
+                text.size.x > 0.0 && text.size.x <= rect.width() + 0.5,
+                "{width}x{height}: name text {} wider than its node {rect:?}",
+                text.size.x
+            );
+        }
+    }
+}

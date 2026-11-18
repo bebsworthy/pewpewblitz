@@ -16,29 +16,6 @@ pub(super) struct MatchMenuState {
 mod match_menu;
 use match_menu::{MatchMenuButton, update_match_menu_chrome};
 
-/// Spawns the on-demand scoreboard panel; the persistent HUD belongs to `hud`.
-pub(super) fn spawn_client_hud(mut commands: Commands, font: &Handle<Font>) {
-    commands.spawn((
-        ScoreboardOverlay,
-        Text::new("SCOREBOARD"),
-        ui::theme::hud_text(font, 20.0),
-        TextColor(Color::WHITE),
-        TextLayout::new(Justify::Left, LineBreak::WordBoundary),
-        BackgroundColor(Color::srgba(0.015, 0.025, 0.04, 0.96)),
-        GlobalZIndex(250),
-        Node {
-            position_type: PositionType::Absolute,
-            left: percent(22.0),
-            right: percent(22.0),
-            top: percent(20.0),
-            padding: UiRect::all(px(18.0)),
-            border_radius: BorderRadius::all(px(9.0)),
-            ..default()
-        },
-        Visibility::Hidden,
-    ));
-}
-
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -113,10 +90,15 @@ fn handle_match_menu_input(
         &ui::press::ReleaseActivation,
         Option<&ui::surface::Surface>,
     )>,
+    close_buttons: Query<&ui::press::ReleaseActivation, With<hud::ScoreboardCloseButton>>,
     mut feedback: MessageWriter<ui::feedback::UiFeedback>,
 ) {
-    // Touch has no cancel key: a tap or click anywhere also leaves the latched scoreboard.
-    if menu.scoreboard_latched && (pending.cancel_pressed || pointer.released()) {
+    // Back, the visible close button, or (touch has no cancel key) a tap or click anywhere
+    // leaves the latched scoreboard.
+    let closed = close_buttons
+        .iter()
+        .any(ui::press::ReleaseActivation::activated);
+    if menu.scoreboard_latched && (pending.cancel_pressed || closed || pointer.released()) {
         menu.scoreboard_latched = false;
         *context = ClientInputContext::Menu;
     }
@@ -225,16 +207,26 @@ pub(super) fn update_client_hud(
     context: Res<ClientInputContext>,
     menu: Option<Res<MatchMenuState>>,
     mut scoreboard: Query<&mut Visibility, With<ScoreboardOverlay>>,
+    mut close_buttons: Query<
+        &mut Visibility,
+        (With<hud::ScoreboardCloseButton>, Without<ScoreboardOverlay>),
+    >,
 ) {
-    for mut visibility in &mut scoreboard {
-        *visibility = if !matches!(*context, ClientInputContext::Shell)
-            && (pending.scoreboard_held
-                || menu.as_deref().is_some_and(|menu| menu.scoreboard_latched))
-        {
+    let in_match = !matches!(*context, ClientInputContext::Shell);
+    let latched = in_match && menu.as_deref().is_some_and(|menu| menu.scoreboard_latched);
+    let shown = |visible: bool| {
+        if visible {
             Visibility::Inherited
         } else {
             Visibility::Hidden
-        };
+        }
+    };
+    for mut visibility in &mut scoreboard {
+        visibility.set_if_neq(shown(latched || (in_match && pending.scoreboard_held)));
+    }
+    // A held scoreboard closes on release; only the latched one needs a visible close control.
+    for mut visibility in &mut close_buttons {
+        visibility.set_if_neq(shown(latched));
     }
 }
 
@@ -397,6 +389,64 @@ mod tests {
         }
         app.update();
         assert!(!app.world().resource::<MatchMenuState>().scoreboard_latched);
+    }
+
+    #[test]
+    fn the_latched_scoreboard_close_button_returns_to_the_menu_and_shows_only_while_latched() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ClientInputContext::Gameplay)
+            .init_resource::<PendingLocalActions>()
+            .init_resource::<MatchMenuState>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_plugins(ui::press::ReleaseActivationPlugin)
+            .add_message::<ui::feedback::UiFeedback>()
+            .add_systems(Update, (handle_match_menu_input, update_client_hud).chain());
+        app.world_mut()
+            .resource_mut::<MatchMenuState>()
+            .scoreboard_latched = true;
+        let panel = app
+            .world_mut()
+            .spawn((ScoreboardOverlay, Visibility::Hidden))
+            .id();
+        let close = app
+            .world_mut()
+            .spawn((
+                hud::ScoreboardCloseButton,
+                Interaction::None,
+                Visibility::Hidden,
+                ChildOf(panel),
+            ))
+            .id();
+        app.update();
+        let visibility = |app: &App, entity| *app.world().get::<Visibility>(entity).unwrap();
+        assert_eq!(visibility(&app, panel), Visibility::Inherited);
+        assert_eq!(visibility(&app, close), Visibility::Inherited);
+
+        *app.world_mut().get_mut::<Interaction>(close).unwrap() = Interaction::Pressed;
+        app.update();
+        assert!(
+            app.world().resource::<MatchMenuState>().scoreboard_latched,
+            "a held press waits for release"
+        );
+        *app.world_mut().get_mut::<Interaction>(close).unwrap() = Interaction::Hovered;
+        app.update();
+        assert!(!app.world().resource::<MatchMenuState>().scoreboard_latched);
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Menu
+        );
+        assert_eq!(visibility(&app, panel), Visibility::Hidden);
+        assert_eq!(visibility(&app, close), Visibility::Hidden);
+
+        // Holding the scoreboard key shows the panel without the latched close control.
+        *app.world_mut().resource_mut::<ClientInputContext>() = ClientInputContext::Gameplay;
+        app.world_mut()
+            .resource_mut::<PendingLocalActions>()
+            .scoreboard_held = true;
+        app.update();
+        assert_eq!(visibility(&app, panel), Visibility::Inherited);
+        assert_eq!(visibility(&app, close), Visibility::Hidden);
     }
 
     /// The production chain around one HUD menu-button tap whose down and up land in the same

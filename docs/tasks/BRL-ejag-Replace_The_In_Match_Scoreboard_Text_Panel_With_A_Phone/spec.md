@@ -29,3 +29,34 @@ Reviewed 2026-11-15 against HEAD 3437c0d8: valid, spec refreshed — the scorebo
 - ECS test: close button dismisses the latched scoreboard; tap-anywhere and Back still do.
 - `just lint`, `just test`.
 - Pixel 8a device check: open SCOREBOARD from the match menu in a 3v3, read it, close it with the button.
+
+
+# Implementation (2026-11-18)
+- New `packages/brawler-client/src/hud/scoreboard.rs` owns the panel: `ScoreboardState` resource (derived in `update_readiness_hud` with `set_if_neq`, like `PlateState`) and `present_scoreboard`, chained after `present_plate`. `spawn_scoreboard` runs from `spawn_readiness_hud`; `presentation::spawn_client_hud` and its `presentation_3d` call are gone (the HUD owns its nodes; `presentation` still owns visibility, latch and dismiss).
+- Layout: full-screen `ScoreboardOverlay` root (GlobalZIndex 250, light dim) centering a `Surface::Panel` (max 1180 authored px). Header: SCOREBOARD title + `ScoreboardCloseButton` (`Surface::Back`, "‹ BACK", 76 authored px tall, about 49 logical px on a 411 px phone). Two observer-relative team sections side by side: section header chip in team color (YOUR TEAM ally blue / OPPONENTS enemy red; a teamless observer sees TEAM 1 / TEAM 2 in neutral PANEL_RAISED), then one row card per player (plate ink background, local row green border plus a YOU tag): line 1 name (clipped, never wrapped) + YOU; line 2 health bar (green, orange under a third, empty when defeated or unknown), "HP a/b" or "HP --", and a status label right-aligned (ALIVE, READY, RESTART READY, DEFEATED, RESPAWN IN Ns, PROTECTED Ns, DISCONNECTED; "BOOST +N" appended when a Zombie boost is held).
+- Retained nodes: two sections are spawned once; each section's rows are spawned on demand (already filled) when the roster grows past the rows it has, then rewritten in place and hidden beyond the current roster, so row count is bounded by the largest participant count seen. No per-frame respawn.
+- Close button: `handle_match_menu_input` dismisses the latch on Back (cancel), the close button's `ReleaseActivation`, or any tap/click (BRL-094c), all returning to `ClientInputContext::Menu`. `update_client_hud` shows the close button only while latched; the held (Tab/Select) panel hides it.
+
+# Decisions
+- Weapon preset dropped from the scoreboard (and from `CachedRosterEntry`): it is an optional numeric source-preset ID, not a player-readable name; naming it would need a catalog lookup outside this ticket's scope (name, YOU, health, status). Team is conveyed by sections, boost only when non-zero.
+- The public status keeps the lobby `ready` flag through the match (`concealment/mod.rs` precedence: respawn > protected > defeated > restart_ready > ready > alive), so every fighter read READY in play. During Countdown/Active the scoreboard shows READY/RESTART READY as ALIVE; outside play it keeps the ready labels. Presentation-only; no server or wire change.
+- "HP --" is shown when the observer has no fighter health (a culled/concealed fighter); the scoreboard reads only `MatchRosterPresentation` (public participant state + replicated fighters), so it stays observer-safe.
+- Kept `Surface::Back` for the close control so it shares the shell's back styling and UI_BACK cue.
+
+# Verification
+- New tests: `hud::screen_tests::latched_scoreboard_fits_six_long_names_and_its_close_button` (four VIEWPORTS, six NAMES, longest statuses, names measured in the shipped Lilita One: 6 rows, close button and section headers on screen without collisions, health/status labels inside their row without overlap, no clipped name); `presentation::tests::the_latched_scoreboard_close_button_returns_to_the_menu_and_shows_only_while_latched` (press then release on the close button clears the latch and returns to Menu; close hidden while only held); `hud::scoreboard::tests::{sections_are_observer_relative_with_the_local_player_first, rows_use_readable_health_and_status_labels}`. Existing `menu_scoreboard_is_latched_and_cancel_returns_to_the_continuing_menu` still covers Back and tap-anywhere. `hud.rs` retained-text tests now track `ScoreboardState` instead of the old Text; `roster_entry_text` and its test were removed; `hud/scoreboard.rs` joined the display-font glyph scan.
+- `just lint`: pass. `just test`: pass (exit 0, every suite ok, including network and performance gates; log target/ejag/just-test.log).
+- Native captures (macOS, Practice wipeout-3v3 with bots, own supervisor on 127.0.0.1:5077 with `--data-directory target/ejag/server`, automation client `--product-practice-smoke --window-size WxH --screenshot-dir ... --render-report ...`). A temporary env-gated hook (removed before handoff) latched or held the scoreboard once Active, applied the product shell's `viewport_fit` UiScale and installed `SurfacePlugin`, which the auto-connect automation client otherwise lacks (it does not compose the product shell):
+  - target/ejag/cap-914x411-latched/brawler-000700.png
+  - target/ejag/cap-914x411-held/brawler-000700.png
+  - target/ejag/cap-1280x720-latched/brawler-000700.png
+  - target/ejag/cap-1280x720-held/brawler-000700.png
+  All six rows readable, no overlap; BACK shown only when latched.
+- Not done here: the Pixel 8a device check (open SCOREBOARD from the match menu in a 3v3, read it, close it with the button).
+
+# Mistakes
+- First capture used the automation client's UiScale 1.0 and no SurfacePlugin, which made the panel overflow 914x411 and hid the Back styling; the product shell applies `viewport_fit` and the surface plugin, so captures must mirror that. First row layout let a long status overlap "HP 1000/1000"; fixed by letting only the bar shrink and adding a label-overlap assertion to the layout test.
+
+
+# Device check (2026-11-18)
+Pixel not connected during closeout; left as playtest: open SCOREBOARD from the match menu in a 3v3, read it, close it with BACK.
