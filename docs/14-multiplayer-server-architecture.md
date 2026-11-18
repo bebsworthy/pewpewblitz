@@ -125,8 +125,31 @@ the token timeout on both ends, so a gap shorter than 10 s keeps the same sessio
 route, and a longer gap (including app suspension) is declared lost by every party at about the
 same time. A lost match session returns the client to a fresh lobby. If its match still runs, the
 client rejoins it automatically (see [Rejoining a running match](#rejoining-a-running-match));
-otherwise it reaches Dashboard with an explanation. A non-UDP fallback transport is not part of
-this contract.
+otherwise it reaches Dashboard with an explanation.
+
+A non-UDP fallback transport is deferred (BRL-ptaq, 2026-11-18). A connection attempt that gets
+no reply says that some networks block the game's UDP traffic and suggests another network. No
+recorded no-reply failure has come from a UDP-blocking network. Each one was on the owner's LAN,
+where UDP worked shortly before or after. A fallback would cost about 3 to 5 weeks:
+
+- a TCP and TLS listener in the supervisor's Mio loop, plus certificates for public servers;
+- a framed stream envelope, with the capability bound to the connection instead of the source
+  address;
+- new rebind, rejoin and `SeatReleased` behavior for stream sessions;
+- client fallback ordering and timeouts that add to every no-reply failure;
+- Android and network-change testing for a second transport.
+
+`lightyear_websocket` 0.29.0 does not reduce that cost. It is a Bevy `Server` link backed by
+aeronet and tokio, and it cannot sit in the Mio supervisor or under the routed envelope.
+`lightyear_webtransport` runs over QUIC, which is UDP, so it does not help on a UDP-blocking
+network. A stream transport also adds head-of-line stalls under loss: each lost segment holds back
+every later snapshot and input for at least one round trip, or for the retransmission timeout
+(200 ms or more) when too few packets follow it to trigger fast retransmit.
+
+Reopen this decision when a player outside a development LAN reports the no-reply hint persisting
+on one network while another network works. Also reopen it before a launch that targets school,
+workplace or hotel networks. The fallback would then be WebSocket over TLS on 443, tried only
+after UDP gets no reply.
 
 Security note (BRL-sqz0). Allowing a return does not widen what a capability holder can do. The
 256-bit capability, not the source address, authorizes a route; any holder could already move a
