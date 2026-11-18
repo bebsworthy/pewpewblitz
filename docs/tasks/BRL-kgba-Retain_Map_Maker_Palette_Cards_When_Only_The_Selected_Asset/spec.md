@@ -27,3 +27,16 @@ Selecting or cycling to another asset on the same palette page updates the selec
 
 # Out of scope
 Map Maker feature work (BRL-6vjz, BRL-tztp).
+
+
+# Result (2026-11-18)
+- Every palette card now spawns its ACCENT border and check badge, tagged `PaletteSelectionMark(palette_index)`, as `Visibility::Hidden` unless selected. `update_map_editor_values` toggles their visibility from `MapMakerRuntime::palette_index`, alongside the BRL-cwm9 retained labels.
+- `PaletteLayout` now keys on the page-window start (`page_start`) instead of the selected index. `MapMakerSelectAsset` and `cycle_palette` compare the layout before and after the change and call `bump_render` only when it differs. Crossing a page edge, changing category or changing the filter still rebuilds; search-driven reselection within the same page no longer does.
+- `palette_item_button` builds its own `FlowButton` index and action from the palette index, which dropped the `too_many_arguments` allow.
+- New shell-capture route `map-editor-palette` (`automation.rs`, `scripts/shell-capture.sh`): the `map-editor` route plus one canonical `MapMakerCycleAsset(1)`.
+
+## Verification
+- ECS test `flow::screens::map_maker::tests::same_page_palette_selection_keeps_the_editor_ui_nodes`, next to `value_only_edits_keep_the_same_editor_ui_nodes`. A card click and a -1 cycle on the same page keep every `Node` entity and the 6 `MapPalettePreviewHost` entities and leave `render_revision` unchanged. Only the newly selected index's border and badge are visible. Cycling +1 from the page's last card rebuilds: the node and preview-host sets are disjoint, and the next page's first card is marked.
+- `just lint`: pass (`target/kgba/lint.log`). `just test`: pass, exit 0, 2557 tests (`target/kgba/test.log`).
+- Native, 1280x720: `target/kgba/capture-default/1280x720/map-editor.png` shows the default Arena Wall card with its border and badge. `target/kgba/capture/1280x720/map-editor-palette.png` shows Ashen Pine with the border and badge, Arena Wall without them, the pointer preview updated, and all six previews rendered.
+- Not verified: hand-driven mouse click and wheel in an interactive client, the 914x411 size, and native evidence that viewports are not recreated (only the ECS test covers that).

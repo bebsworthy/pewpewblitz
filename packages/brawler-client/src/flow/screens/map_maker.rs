@@ -184,6 +184,21 @@ pub(in crate::flow) enum MapMakerValueLabel {
     Status,
 }
 
+/// A palette card's selected border or badge, keyed by palette index; shown only on the card
+/// whose index is `MapMakerRuntime::palette_index` (BRL-kgba).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::flow) struct PaletteSelectionMark(usize);
+
+impl PaletteSelectionMark {
+    fn visibility(self, selected_index: usize) -> Visibility {
+        if self.0 == selected_index {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        }
+    }
+}
+
 /// The always-spawned status line; value-only edits show, hide, or retext it in place.
 #[derive(Component)]
 pub(in crate::flow) struct MapMakerStatusLine;
@@ -571,8 +586,12 @@ pub(in crate::flow) fn resolve_map_maker_action(
                 palette(&catalog.0, session.document.recipe.mode_definition_id).len()
             });
             if index < count {
+                let before = palette_layout(&catalog.0, &runtime);
                 runtime.palette_index = index;
-                runtime.bump_render();
+                // Same-page selection is value-only: the retained selection marks move.
+                if palette_layout(&catalog.0, &runtime) != before {
+                    runtime.bump_render();
+                }
             }
         }
         FlowUiAction::MapMakerCycleSymmetry => {
@@ -1029,6 +1048,7 @@ fn cycle_palette(
     };
     let visible =
         visible_palette_entries(catalog, runtime, session.document.recipe.mode_definition_id);
+    let before = palette_layout(catalog, runtime);
     if !visible.is_empty() {
         let current = visible
             .iter()
@@ -1037,7 +1057,10 @@ fn cycle_palette(
         let next = cycled_palette_index(current, visible.len(), delta);
         runtime.palette_index = visible[next].0;
     }
-    runtime.bump_render();
+    // Only crossing a page edge changes the visible cards; otherwise the marks move in place.
+    if palette_layout(catalog, runtime) != before {
+        runtime.bump_render();
+    }
 }
 
 fn select_first_visible_palette_item(
@@ -1077,11 +1100,12 @@ fn visible_palette_entries(
 }
 
 /// What the palette tray's spawned structure depends on besides tool/drawer state: the visible
-/// cards, the selected card, and whether the clear-search button exists.
+/// cards, the page window the selection falls in, and whether the clear-search button exists.
+/// The selected card within that page is a retained `PaletteSelectionMark`, not structure.
 #[derive(PartialEq, Eq)]
 struct PaletteLayout {
     visible: Vec<usize>,
-    selected: usize,
+    page_start: usize,
     query_empty: bool,
 }
 
@@ -1090,16 +1114,18 @@ fn palette_layout(
     runtime: &MapMakerRuntime,
 ) -> Option<PaletteLayout> {
     let session = runtime.session.as_ref()?;
+    let visible =
+        visible_palette_entries(catalog, runtime, session.document.recipe.mode_definition_id)
+            .into_iter()
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+    let selected_position = visible
+        .iter()
+        .position(|index| *index == runtime.palette_index)
+        .unwrap_or(0);
     Some(PaletteLayout {
-        visible: visible_palette_entries(
-            catalog,
-            runtime,
-            session.document.recipe.mode_definition_id,
-        )
-        .into_iter()
-        .map(|(index, _)| index)
-        .collect(),
-        selected: runtime.palette_index,
+        page_start: palette_window(selected_position, visible.len()).0,
+        visible,
         query_empty: runtime.palette_query.is_empty(),
     })
 }
@@ -2170,6 +2196,7 @@ pub(in crate::flow) fn update_map_editor_values(
     runtime: Res<MapMakerRuntime>,
     mut labels: Query<(&MapMakerValueLabel, &mut Text)>,
     mut status_lines: Query<&mut Node, With<MapMakerStatusLine>>,
+    mut selection_marks: Query<(&PaletteSelectionMark, &mut Visibility)>,
 ) {
     if !runtime.is_changed() {
         return;
@@ -2185,6 +2212,9 @@ pub(in crate::flow) fn update_map_editor_values(
         if node.display != display {
             node.display = display;
         }
+    }
+    for (mark, mut visibility) in &mut selection_marks {
+        visibility.set_if_neq(mark.visibility(runtime.palette_index));
     }
 }
 
@@ -3032,15 +3062,14 @@ fn editor_palette(
                 palette_item_button(
                     items,
                     assets,
-                    100 + index,
-                    FlowUiAction::MapMakerSelectAsset(index),
+                    index,
                     &palette_short_label(item, catalog),
                     MapPalettePreviewHost {
                         slot: slot - start,
                         visual: item.into(),
                         theme,
                     },
-                    runtime.palette_index == index,
+                    runtime.palette_index,
                 );
             }
             if entries.is_empty() {
@@ -3249,23 +3278,21 @@ fn palette_category_button(
         ));
 }
 
-#[allow(clippy::too_many_arguments)]
 fn palette_item_button(
     parent: &mut ChildSpawnerCommands,
     assets: Option<&crate::ClientAssetHandles>,
-    index: usize,
-    action: FlowUiAction,
+    palette_index: usize,
     label: &str,
     preview: MapPalettePreviewHost,
-    selected: bool,
+    selected_index: usize,
 ) {
     parent
         .spawn((
             Button,
             crate::ui::touch_target::TouchTarget::exempt(),
             FlowButton {
-                index,
-                action,
+                index: 100 + palette_index,
+                action: FlowUiAction::MapMakerSelectAsset(palette_index),
                 error_action: false,
             },
             Node {
@@ -3282,26 +3309,30 @@ fn palette_item_button(
             Surface::Dark,
             SurfaceStyle::MAP_ASSET,
             SurfaceState {
-                selected,
+                selected: palette_index == selected_index,
                 ..default()
             },
         ))
         .with_children(|button| {
-            if selected {
-                button.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: px(0),
-                        right: px(0),
-                        top: px(0),
-                        bottom: px(0),
-                        border: UiRect::all(px(3)),
-                        ..default()
-                    },
-                    BorderColor::all(ACCENT),
-                ));
-                palette_selection_badge(button);
-            }
+            // Every card carries a hidden mark so a same-page selection change only toggles
+            // visibility in `update_map_editor_values` instead of respawning the editor UI.
+            let mark = PaletteSelectionMark(palette_index);
+            let visibility = mark.visibility(selected_index);
+            button.spawn((
+                mark,
+                visibility,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(0),
+                    right: px(0),
+                    top: px(0),
+                    bottom: px(0),
+                    border: UiRect::all(px(3)),
+                    ..default()
+                },
+                BorderColor::all(ACCENT),
+            ));
+            palette_selection_badge(button, mark, visibility);
             button.spawn((
                 preview,
                 Node {
@@ -3320,9 +3351,15 @@ fn palette_item_button(
         });
 }
 
-fn palette_selection_badge(button: &mut ChildSpawnerCommands) {
+fn palette_selection_badge(
+    button: &mut ChildSpawnerCommands,
+    mark: PaletteSelectionMark,
+    visibility: Visibility,
+) {
     button
         .spawn((
+            mark,
+            visibility,
             Node {
                 position_type: PositionType::Absolute,
                 right: px(7),
@@ -4029,6 +4066,113 @@ mod tests {
         assert!(
             editor_ui_nodes(&mut app).is_disjoint(&initial),
             "tool switch rebuilds the editor UI"
+        );
+    }
+
+    #[test]
+    fn same_page_palette_selection_keeps_the_editor_ui_nodes() {
+        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+        let document = MapDraftDocument::blank(
+            MapDraftId(1),
+            "Palette",
+            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::MapDimensions {
+                width: 32,
+                height: 24,
+            },
+            brawler::map::MapPresentationThemeId(1),
+            brawler::map::GROUND_ASSET,
+        )
+        .unwrap();
+        let mut runtime = MapMakerRuntime {
+            session: Some(MapEditorSession::open(document)),
+            ..MapMakerRuntime::default()
+        };
+        let visible: Vec<usize> =
+            visible_palette_entries(&catalog, &runtime, brawler::map::WIPEOUT_MODE_DEFINITION)
+                .into_iter()
+                .map(|(index, _)| index)
+                .collect();
+        assert!(
+            visible.len() > VISIBLE_PALETTE_ITEMS,
+            "the default category spans more than one palette page"
+        );
+        select_first_visible_palette_item(&catalog, &mut runtime);
+        runtime.bump_render();
+
+        let mut app = value_edit_test_app(catalog, runtime);
+        app.update();
+        let initial = editor_ui_nodes(&mut app);
+        let preview_hosts = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query_filtered::<Entity, With<MapPalettePreviewHost>>()
+                .iter(world)
+                .collect::<BTreeSet<_>>()
+        };
+        let initial_previews = preview_hosts(&mut app);
+        assert_eq!(initial_previews.len(), VISIBLE_PALETTE_ITEMS);
+        // Each card has a border and a badge mark; only the selected card's are shown.
+        let shown_marks = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query::<(&PaletteSelectionMark, &Visibility)>()
+                .iter(world)
+                .filter(|(_, visibility)| **visibility != Visibility::Hidden)
+                .map(|(mark, _)| mark.0)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shown_marks(&mut app), vec![visible[0], visible[0]]);
+        let revision = app.world().resource::<MapMakerRuntime>().render_revision;
+
+        app.world_mut()
+            .resource_mut::<PendingFlowActions>()
+            .ordinary = Some(FlowUiAction::MapMakerSelectAsset(visible[2]));
+        app.update();
+        assert_eq!(editor_ui_nodes(&mut app), initial, "card click respawned");
+        assert_eq!(preview_hosts(&mut app), initial_previews);
+        assert_eq!(shown_marks(&mut app), vec![visible[2], visible[2]]);
+
+        app.world_mut()
+            .resource_mut::<PendingFlowActions>()
+            .ordinary = Some(FlowUiAction::MapMakerCycleAsset(-1));
+        app.update();
+        assert_eq!(
+            editor_ui_nodes(&mut app),
+            initial,
+            "palette cycle respawned"
+        );
+        assert_eq!(preview_hosts(&mut app), initial_previews);
+        assert_eq!(shown_marks(&mut app), vec![visible[1], visible[1]]);
+        assert_eq!(
+            app.world().resource::<MapMakerRuntime>().render_revision,
+            revision
+        );
+
+        // Cycling past the last card of the page crosses the page edge and rebuilds.
+        app.world_mut()
+            .resource_mut::<PendingFlowActions>()
+            .ordinary = Some(FlowUiAction::MapMakerSelectAsset(
+            visible[VISIBLE_PALETTE_ITEMS - 1],
+        ));
+        app.update();
+        assert_eq!(editor_ui_nodes(&mut app), initial, "card click respawned");
+        app.world_mut()
+            .resource_mut::<PendingFlowActions>()
+            .ordinary = Some(FlowUiAction::MapMakerCycleAsset(1));
+        app.update();
+        assert!(
+            editor_ui_nodes(&mut app).is_disjoint(&initial),
+            "crossing a page edge rebuilds the editor UI"
+        );
+        assert!(preview_hosts(&mut app).is_disjoint(&initial_previews));
+        let next_page = shown_marks(&mut app);
+        assert_eq!(
+            next_page,
+            vec![
+                visible[VISIBLE_PALETTE_ITEMS],
+                visible[VISIBLE_PALETTE_ITEMS]
+            ]
         );
     }
 

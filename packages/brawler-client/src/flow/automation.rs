@@ -45,12 +45,14 @@ pub enum ShellCaptureRoute {
     PracticeMaps,
     MapLibrary,
     MapEditor,
+    /// The new-map editor after cycling the palette selection to the next card on the page.
+    MapEditorPalette,
     Queue,
 }
 
 impl ShellCaptureRoute {
     /// Every route, in the order `scripts/shell-capture.sh` runs them on a fresh profile.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::FirstBrawler,
         Self::Dashboard,
         Self::DashboardMenu,
@@ -69,6 +71,7 @@ impl ShellCaptureRoute {
         Self::PracticeMaps,
         Self::MapLibrary,
         Self::MapEditor,
+        Self::MapEditorPalette,
         Self::Queue,
     ];
 
@@ -94,6 +97,7 @@ impl ShellCaptureRoute {
             Self::PracticeMaps => "practice-maps",
             Self::MapLibrary => "map-library",
             Self::MapEditor => "map-editor",
+            Self::MapEditorPalette => "map-editor-palette",
             Self::Queue => "queue",
         }
     }
@@ -125,6 +129,11 @@ impl ShellCaptureRoute {
             ..wait(ClientFlow::Dashboard, Overlay::WeaponEquipment)
         };
         let library = screen(Action::OpenMapMaker, ClientFlow::MapLibrary);
+        let map_editor = vec![
+            library.clone(),
+            screen(Action::CreateMap, ClientFlow::MapLibrary),
+            screen(Action::ConfirmCreateMap, ClientFlow::MapEditor),
+        ];
         match self {
             Self::FirstBrawler | Self::Dashboard => Vec::new(),
             Self::DashboardMenu => vec![menu],
@@ -171,11 +180,12 @@ impl ShellCaptureRoute {
                 ClientFlow::PracticeMapSelect,
             )],
             Self::MapLibrary => vec![library],
-            Self::MapEditor => vec![
-                library,
-                screen(Action::CreateMap, ClientFlow::MapLibrary),
-                screen(Action::ConfirmCreateMap, ClientFlow::MapEditor),
-            ],
+            Self::MapEditor => map_editor,
+            Self::MapEditorPalette => {
+                let mut steps = map_editor;
+                steps.push(screen(Action::MapMakerCycleAsset(1), ClientFlow::MapEditor));
+                steps
+            }
             Self::Queue => vec![screen(Action::JoinQueue, ClientFlow::Queue)],
         }
     }

@@ -19,7 +19,7 @@ all_routes=(
     first-brawler dashboard dashboard-menu settings credits change-server
     brawler-list brawler-details brawler-create brawler-editor ultimate-picker
     weapon-equipment weapon-parts delete-brawler
-    game-select practice-maps map-library map-editor queue
+    game-select practice-maps map-library map-editor map-editor-palette queue
 )
 all_sizes=(1280x720 914x411)
 
