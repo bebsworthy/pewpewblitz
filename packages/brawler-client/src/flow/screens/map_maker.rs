@@ -1220,6 +1220,13 @@ fn paint_current(
     runtime.bump_render();
 }
 
+/// Which Map Maker name field a keyed Enter confirmed this frame (BRL-yrys).
+#[derive(Clone, Copy, Debug)]
+pub(in crate::flow) enum KeyedMapNameCommit {
+    Create,
+    Rename,
+}
+
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -1247,8 +1254,20 @@ pub(in crate::flow) fn map_maker_input(
     mut runtime: ResMut<MapMakerRuntime>,
     mut actions: ResMut<PendingFlowActions>,
     mut feedback: MessageWriter<crate::ui::feedback::UiFeedback>,
+    mut name_commit: Local<Option<KeyedMapNameCommit>>,
 ) {
-    use crate::ui::feedback::UiFeedback;
+    use crate::ui::{feedback::UiFeedback, surface::Surface};
+    // A keyed create/rename confirm resolves after this system; it sounds on the next frame only
+    // when the name field actually closed, so a failed commit plays nothing (BRL-yrys).
+    if let Some(commit) = name_commit.take() {
+        let committed = match commit {
+            KeyedMapNameCommit::Create => runtime.creating.is_none(),
+            KeyedMapNameCommit::Rename => runtime.renaming.is_none(),
+        };
+        if committed {
+            feedback.write(UiFeedback::Activated(Some(Surface::Primary)));
+        }
+    }
     if !matches!(*flow.get(), ClientFlow::MapLibrary | ClientFlow::MapEditor) {
         return;
     }
@@ -1296,6 +1315,7 @@ pub(in crate::flow) fn map_maker_input(
             }
             if keyboard.just_pressed(KeyCode::Enter) {
                 queue_ui_action(&mut actions, FlowUiAction::ConfirmCreateMap);
+                *name_commit = Some(KeyedMapNameCommit::Create);
             } else if escape {
                 queue_ui_action(&mut actions, FlowUiAction::CancelCreateMap);
                 feedback.write(UiFeedback::Back);
@@ -1321,6 +1341,7 @@ pub(in crate::flow) fn map_maker_input(
             }
             if keyboard.just_pressed(KeyCode::Enter) {
                 queue_ui_action(&mut actions, FlowUiAction::ConfirmRenameMapDraft);
+                *name_commit = Some(KeyedMapNameCommit::Rename);
             } else if escape {
                 queue_ui_action(&mut actions, FlowUiAction::CancelRenameMapDraft);
                 feedback.write(UiFeedback::Back);
@@ -1360,9 +1381,14 @@ pub(in crate::flow) fn map_maker_input(
                 }
             }
         }
-        if keyboard.just_pressed(KeyCode::Enter) || escape {
+        if keyboard.just_pressed(KeyCode::Enter) {
             runtime.palette_search_active = false;
             changed = true;
+            feedback.write(UiFeedback::Activated(Some(Surface::Primary)));
+        } else if escape {
+            runtime.palette_search_active = false;
+            changed = true;
+            feedback.write(UiFeedback::Back);
         }
         if changed {
             let palette_after = catalog.as_deref().map(|catalog| {
@@ -1381,6 +1407,7 @@ pub(in crate::flow) fn map_maker_input(
         activate_editor_tool(&mut runtime, EditorTool::Place);
         runtime.palette_search_active = true;
         runtime.bump_render();
+        feedback.write(UiFeedback::Activated(None));
         return;
     }
     let dimensions = runtime
@@ -1402,6 +1429,8 @@ pub(in crate::flow) fn map_maker_input(
         runtime.cursor = cell;
     }
     let pad = |button| gamepads.iter().any(|gamepad| gamepad.just_pressed(button));
+    // Keyed cursor moves tick only when the cursor really moved: a grid edge is silent.
+    let cursor_before = runtime.cursor;
     if let Some(dimensions) = dimensions {
         if keyboard.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft) {
             runtime.cursor.x = runtime.cursor.x.saturating_sub(1);
@@ -1420,26 +1449,39 @@ pub(in crate::flow) fn map_maker_input(
                 .min(dimensions.height - 1);
         }
     }
+    if runtime.cursor != cursor_before {
+        feedback.write(UiFeedback::Moved);
+    }
+    // Keyboard/gamepad shortcuts click like the toolbar control they stand for; pointer strokes
+    // and wheel cycling stay silent, as before.
+    let mut keyed = false;
     if keyboard.just_pressed(KeyCode::Tab) || pad(GamepadButton::RightTrigger2) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerCycleAsset(1));
+        keyed = true;
     }
     if pad(GamepadButton::LeftTrigger2) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerCycleAsset(-1));
+        keyed = true;
     }
     if keyboard.just_pressed(KeyCode::KeyR) || pad(GamepadButton::West) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerRotate);
+        keyed = true;
     }
     if keyboard.just_pressed(KeyCode::KeyM) || pad(GamepadButton::North) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerCycleSymmetry);
+        keyed = true;
     }
     if keyboard.just_pressed(KeyCode::KeyP) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerUsePlaceTool);
+        keyed = true;
     }
     if keyboard.just_pressed(KeyCode::KeyE) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerUseEraseTool);
+        keyed = true;
     }
     if keyboard.just_pressed(KeyCode::KeyV) {
         queue_ui_action(&mut actions, FlowUiAction::MapMakerUseMoveTool);
+        keyed = true;
     }
     let ui_owns_pointer = ui_activated
         || buttons.iter().any(|(_, interaction, _)| {
@@ -1580,10 +1622,14 @@ pub(in crate::flow) fn map_maker_input(
         || (keyboard.just_pressed(KeyCode::Space) && !mouse_pressed)
         || pad(GamepadButton::South)
     {
-        match runtime.tool {
-            EditorTool::Place => queue_ui_action(&mut actions, FlowUiAction::MapMakerPlace),
-            EditorTool::Erase => queue_ui_action(&mut actions, FlowUiAction::MapMakerErase),
-            EditorTool::Select => {}
+        let action = match runtime.tool {
+            EditorTool::Place => Some(FlowUiAction::MapMakerPlace),
+            EditorTool::Erase => Some(FlowUiAction::MapMakerErase),
+            EditorTool::Select => None,
+        };
+        if let Some(action) = action {
+            queue_ui_action(&mut actions, action);
+            keyed = true;
         }
     }
     if keyboard.just_pressed(KeyCode::Delete)
@@ -1595,37 +1641,37 @@ pub(in crate::flow) fn map_maker_input(
         } else {
             queue_ui_action(&mut actions, FlowUiAction::MapMakerErase);
         }
+        keyed = true;
     }
-    if keyboard.just_pressed(KeyCode::KeyZ) {
-        queue_ui_action(&mut actions, FlowUiAction::MapMakerUndo);
+    for (key, action) in [
+        (KeyCode::KeyZ, FlowUiAction::MapMakerUndo),
+        (KeyCode::KeyY, FlowUiAction::MapMakerRedo),
+        (KeyCode::KeyS, FlowUiAction::SaveMapDraft),
+        (KeyCode::KeyT, FlowUiAction::TestAuthoredMap),
+        (KeyCode::KeyG, FlowUiAction::MapMakerToggleGrid),
+        (KeyCode::KeyC, FlowUiAction::MapMakerClear),
+        (KeyCode::KeyF, FlowUiAction::MapMakerFitView),
+    ] {
+        if keyboard.just_pressed(key) {
+            queue_ui_action(&mut actions, action);
+            keyed = true;
+        }
     }
-    if keyboard.just_pressed(KeyCode::KeyY) {
-        queue_ui_action(&mut actions, FlowUiAction::MapMakerRedo);
-    }
-    if keyboard.just_pressed(KeyCode::KeyS) {
-        queue_ui_action(&mut actions, FlowUiAction::SaveMapDraft);
-    }
-    if keyboard.just_pressed(KeyCode::KeyT) {
-        queue_ui_action(&mut actions, FlowUiAction::TestAuthoredMap);
-    }
-    if keyboard.just_pressed(KeyCode::KeyG) {
-        queue_ui_action(&mut actions, FlowUiAction::MapMakerToggleGrid);
-    }
-    if keyboard.just_pressed(KeyCode::KeyC) {
-        queue_ui_action(&mut actions, FlowUiAction::MapMakerClear);
-    }
-    if keyboard.just_pressed(KeyCode::KeyF) {
-        queue_ui_action(&mut actions, FlowUiAction::MapMakerFitView);
+    // One click per frame however many shortcuts landed together.
+    if keyed {
+        feedback.write(UiFeedback::Activated(None));
     }
     if escape || pad(GamepadButton::East) {
         if runtime.validation_open {
             runtime.validation_open = false;
             runtime.bump_render();
+            feedback.write(UiFeedback::Back);
         } else if runtime.interaction != EditorInteraction::Idle || !runtime.selection.is_empty() {
             runtime.interaction = EditorInteraction::Idle;
             runtime.selection.clear();
             runtime.status = None;
             runtime.bump_render();
+            feedback.write(UiFeedback::Back);
         } else {
             queue_ui_action(&mut actions, FlowUiAction::BackToMapLibrary);
             feedback.write(UiFeedback::Back);
@@ -4152,5 +4198,217 @@ mod tests {
             selected_palette_item(&catalog, &runtime, brawler::map::WIPEOUT_MODE_DEFINITION,)
                 .is_none()
         );
+    }
+
+    #[derive(Resource, Default)]
+    struct RecordedUiFeedback(Vec<crate::ui::feedback::UiFeedback>);
+
+    fn record_ui_feedback(
+        mut feedback: MessageReader<crate::ui::feedback::UiFeedback>,
+        mut recorded: ResMut<RecordedUiFeedback>,
+    ) {
+        recorded.0.extend(feedback.read().copied());
+    }
+
+    fn take_ui_feedback(app: &mut App) -> Vec<crate::ui::feedback::UiFeedback> {
+        std::mem::take(&mut app.world_mut().resource_mut::<RecordedUiFeedback>().0)
+    }
+
+    fn blank_feedback_document() -> MapDraftDocument {
+        MapDraftDocument::blank(
+            MapDraftId(1),
+            "Sounds",
+            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::MapDimensions {
+                width: 32,
+                height: 24,
+            },
+            brawler::map::MapPresentationThemeId(1),
+            brawler::map::GROUND_ASSET,
+        )
+        .unwrap()
+    }
+
+    /// The editor at the grid's top-left corner with the Place tool and an asset selected.
+    fn feedback_editor_app() -> App {
+        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+        let mut runtime = MapMakerRuntime {
+            session: Some(MapEditorSession::open(blank_feedback_document())),
+            ..MapMakerRuntime::default()
+        };
+        select_first_visible_palette_item(&catalog, &mut runtime);
+        runtime.bump_render();
+        let mut app = value_edit_test_app(catalog, runtime);
+        app.init_resource::<RecordedUiFeedback>()
+            .add_systems(Last, record_ui_feedback);
+        app.update();
+        take_ui_feedback(&mut app);
+        app
+    }
+
+    #[test]
+    fn map_editor_keys_sound_once_per_real_action_and_stay_silent_at_the_grid_edge() {
+        use crate::ui::feedback::UiFeedback;
+        let mut app = feedback_editor_app();
+        let key = |app: &mut App, key| {
+            press_editor_key(app, key, None);
+            take_ui_feedback(app)
+        };
+        assert_eq!(
+            app.world().resource::<MapMakerRuntime>().cursor,
+            MapCell::new(0, 0)
+        );
+        assert_eq!(key(&mut app, KeyCode::ArrowLeft), Vec::new(), "left edge");
+        assert_eq!(key(&mut app, KeyCode::ArrowUp), Vec::new(), "top edge");
+        assert_eq!(key(&mut app, KeyCode::ArrowRight), vec![UiFeedback::Moved]);
+        assert_eq!(key(&mut app, KeyCode::ArrowDown), vec![UiFeedback::Moved]);
+        assert_eq!(
+            app.world().resource::<MapMakerRuntime>().cursor,
+            MapCell::new(1, 1)
+        );
+
+        for shortcut in [
+            KeyCode::Tab,
+            KeyCode::KeyR,
+            KeyCode::KeyM,
+            KeyCode::KeyG,
+            KeyCode::KeyF,
+            KeyCode::Enter,
+            KeyCode::KeyZ,
+            KeyCode::Delete,
+            KeyCode::KeyE,
+        ] {
+            assert_eq!(
+                key(&mut app, shortcut),
+                vec![UiFeedback::Activated(None)],
+                "{shortcut:?}"
+            );
+        }
+        // The Move tool has no keyed placement, so Enter does nothing and is silent.
+        assert_eq!(
+            key(&mut app, KeyCode::KeyV),
+            vec![UiFeedback::Activated(None)]
+        );
+        assert_eq!(
+            app.world().resource::<MapMakerRuntime>().tool,
+            EditorTool::Select
+        );
+        assert_eq!(key(&mut app, KeyCode::Enter), Vec::new());
+
+        // Esc first clears an interaction, then closes validation, and only then leaves.
+        app.world_mut()
+            .resource_mut::<MapMakerRuntime>()
+            .interaction = EditorInteraction::Erase { cells: Vec::new() };
+        assert_eq!(key(&mut app, KeyCode::Escape), vec![UiFeedback::Back]);
+        assert_eq!(
+            app.world().resource::<MapMakerRuntime>().interaction,
+            EditorInteraction::Idle
+        );
+        app.world_mut()
+            .resource_mut::<MapMakerRuntime>()
+            .validation_open = true;
+        assert_eq!(key(&mut app, KeyCode::Escape), vec![UiFeedback::Back]);
+        assert!(!app.world().resource::<MapMakerRuntime>().validation_open);
+        // Plain unbound keys are silent.
+        assert_eq!(key(&mut app, KeyCode::KeyQ), Vec::new());
+    }
+
+    #[test]
+    fn map_palette_search_open_commit_and_cancel_sound_and_typing_is_silent() {
+        use crate::ui::{feedback::UiFeedback, surface::Surface};
+        let mut app = feedback_editor_app();
+        press_editor_key(&mut app, KeyCode::Slash, Some("/"));
+        assert!(
+            app.world()
+                .resource::<MapMakerRuntime>()
+                .palette_search_active
+        );
+        assert_eq!(
+            take_ui_feedback(&mut app),
+            vec![UiFeedback::Activated(None)]
+        );
+        press_editor_key(&mut app, KeyCode::KeyE, Some("e"));
+        assert_eq!(app.world().resource::<MapMakerRuntime>().palette_query, "e");
+        assert_eq!(take_ui_feedback(&mut app), Vec::new(), "typing is silent");
+        press_editor_key(&mut app, KeyCode::Enter, None);
+        assert!(
+            !app.world()
+                .resource::<MapMakerRuntime>()
+                .palette_search_active
+        );
+        assert_eq!(
+            take_ui_feedback(&mut app),
+            vec![UiFeedback::Activated(Some(Surface::Primary))]
+        );
+
+        press_editor_key(&mut app, KeyCode::Slash, Some("/"));
+        take_ui_feedback(&mut app);
+        press_editor_key(&mut app, KeyCode::Escape, None);
+        assert!(
+            !app.world()
+                .resource::<MapMakerRuntime>()
+                .palette_search_active
+        );
+        assert_eq!(take_ui_feedback(&mut app), vec![UiFeedback::Back]);
+    }
+
+    #[test]
+    fn map_library_name_confirm_sounds_only_when_the_commit_succeeds() {
+        use crate::ui::{feedback::UiFeedback, surface::Surface};
+        let storage = std::env::temp_dir().join(format!(
+            "brawler-brl-yrys-map-rename-{}",
+            std::process::id()
+        ));
+        let mut library = MapDraftLibrary::default();
+        library.insert(blank_feedback_document()).unwrap();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .add_message::<KeyboardInput>()
+            .add_message::<MouseWheel>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(PendingFlowActions::default())
+            .init_resource::<crate::BackInput>()
+            .add_message::<UiFeedback>()
+            .insert_resource(MapDraftStorage(storage.clone()))
+            .insert_resource(library)
+            .init_resource::<SelectedGameType>()
+            .init_resource::<ClientPracticeModel>()
+            .init_resource::<SessionPurpose>()
+            .init_resource::<FlowCommit>()
+            .insert_resource(MapCatalogResource(
+                brawler::map::MapContentCatalog::embedded().unwrap(),
+            ))
+            .insert_resource(MapMakerRuntime::default())
+            .init_resource::<RecordedUiFeedback>()
+            .insert_state(ClientFlow::MapLibrary)
+            .add_systems(Update, (map_maker_input, resolve_map_maker_action).chain())
+            .add_systems(Last, record_ui_feedback);
+        let confirm = |app: &mut App| {
+            press_editor_key(app, KeyCode::Enter, None);
+            // The keyed confirm resolves after input; its sound waits for the outcome.
+            app.update();
+            take_ui_feedback(app)
+        };
+
+        app.world_mut().resource_mut::<MapMakerRuntime>().renaming =
+            Some((MapDraftId(1), "   ".to_string()));
+        assert_eq!(
+            confirm(&mut app),
+            Vec::new(),
+            "a rejected name plays nothing"
+        );
+        assert!(app.world().resource::<MapMakerRuntime>().renaming.is_some());
+
+        app.world_mut().resource_mut::<MapMakerRuntime>().renaming =
+            Some((MapDraftId(1), "Renamed".to_string()));
+        let renamed = confirm(&mut app);
+        let _ = std::fs::remove_dir_all(&storage);
+        assert_eq!(renamed, vec![UiFeedback::Activated(Some(Surface::Primary))]);
+        assert!(app.world().resource::<MapMakerRuntime>().renaming.is_none());
+
+        // No server membership: the create fails inline and plays nothing.
+        app.world_mut().resource_mut::<MapMakerRuntime>().creating = Some("New".to_string());
+        assert_eq!(confirm(&mut app), Vec::new());
+        assert!(app.world().resource::<MapMakerRuntime>().creating.is_some());
     }
 }

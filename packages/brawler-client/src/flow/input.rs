@@ -256,7 +256,7 @@ pub(super) fn collect_flow_input(
     ) && brawler_edit.editing_name
     {
         let edit = &mut *brawler_edit;
-        edit_name_input(
+        if let Some(outcome) = edit_name_input(
             &mut edit.name,
             Some(&edit.stored_name),
             &mut edit.name_caret,
@@ -266,7 +266,9 @@ pub(super) fn collect_flow_input(
             &mut keyboard_events,
             pad_pressed(GamepadButton::South),
             cancel_pressed,
-        );
+        ) {
+            feedback.write(outcome);
+        }
         if !edit.editing_name && edit.inline_rename {
             if keyboard.just_pressed(KeyCode::Escape) || cancel_pressed {
                 edit.inline_rename = false;
@@ -278,7 +280,7 @@ pub(super) fn collect_flow_input(
     }
     if matches!(*overlay, ClientOverlay::BrawlerCreation) && creation.editing_name {
         let edit = &mut *creation;
-        edit_name_input(
+        if let Some(outcome) = edit_name_input(
             &mut edit.name,
             None,
             &mut edit.name_caret,
@@ -288,7 +290,9 @@ pub(super) fn collect_flow_input(
             &mut keyboard_events,
             pad_pressed(GamepadButton::South),
             cancel_pressed,
-        );
+        ) {
+            feedback.write(outcome);
+        }
         return;
     }
     if let Some(field) = model.editing {
@@ -334,6 +338,9 @@ pub(super) fn collect_flow_input(
             }
         }
         if keyboard.just_pressed(KeyCode::Enter) || pad_pressed(GamepadButton::South) {
+            // The address commits as typed; a rejected name closes the editor with its inline
+            // error and plays nothing (BRL-yrys).
+            let mut committed = true;
             if field == EditingField::Name {
                 match brawler::lobby::normalize_renamed_display_name(
                     &model.name,
@@ -348,15 +355,22 @@ pub(super) fn collect_flow_input(
                         }
                         model.inline_error = None;
                     }
-                    Err(reason) => model.inline_error = Some(format!("{reason}.")),
+                    Err(reason) => {
+                        model.inline_error = Some(format!("{reason}."));
+                        committed = false;
+                    }
                 }
             }
             model.editing = None;
+            if committed {
+                feedback.write(UiFeedback::Activated(Some(Surface::Primary)));
+            }
         } else if keyboard.just_pressed(KeyCode::Escape) || cancel_pressed {
             if field == EditingField::Name {
                 model.name = model.committed_name.clone();
             }
             model.editing = None;
+            feedback.write(UiFeedback::Back);
         }
         return;
     }
@@ -685,6 +699,8 @@ fn equipment_neighbor(
     }
 }
 
+/// Bounded name-field editing; returns the commit or cancel feedback when the edit ended this
+/// frame.
 #[allow(
     clippy::too_many_arguments,
     reason = "Shared bounded name-field input, borrowed by creation and editing"
@@ -699,7 +715,7 @@ fn edit_name_input(
     keyboard_events: &mut MessageReader<KeyboardInput>,
     confirm: bool,
     cancel: bool,
-) {
+) -> Option<UiFeedback> {
     if keyboard.just_pressed(KeyCode::Home) {
         *caret = 0;
     } else if keyboard.just_pressed(KeyCode::End) {
@@ -736,12 +752,16 @@ fn edit_name_input(
                 *name = normalized;
                 *editing = false;
                 *error = None;
+                return Some(UiFeedback::Activated(Some(Surface::Primary)));
             }
+            // A rejected name keeps the field open with its inline error and plays nothing.
             Err(reason) => *error = Some(format!("{reason}.")),
         }
     } else if keyboard.just_pressed(KeyCode::Escape) || cancel {
         *editing = false;
+        return Some(UiFeedback::Back);
     }
+    None
 }
 
 #[cfg(test)]

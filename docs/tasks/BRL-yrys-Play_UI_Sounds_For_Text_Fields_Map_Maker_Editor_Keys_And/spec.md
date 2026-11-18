@@ -26,3 +26,46 @@ Deferred from BRL-ek8p (5cb62cbc). Remaining keyboard/gamepad shell input makes 
 - Focused ECS tests per emitting owner using the `RecordedUiFeedback` pattern (`shell.rs:1428-1439`): server editor, brawler name editor, Map Maker editor keys, Map Maker search, pause open/close.
 - `cargo test -p brawler-client --lib`, `just lint`.
 - Owner playtest (desktop); Pixel 8a device check of Android Back opening/closing the match menu with sound.
+
+# Result (2026-11-18)
+
+## Decisions (mapping)
+- Text commit → `Activated(Some(Surface::Primary))` (ui-confirm); cancel → `Back`. A failed commit (rejected name) plays nothing.
+- Map Maker tool/asset/rotate/symmetry/place/erase and Z/Y/S/T/G/C/F shortcuts → `Activated(None)` (ui-click), at most one per frame. These click on the key, like the toolbar button they stand for, so a no-op result (for example undo with empty history) still clicks, the same as the pointer button does. Enter with the Move tool queues nothing and stays silent. Mouse strokes and wheel asset cycling stay silent, as before.
+- Grid cursor arrows/D-pad → `Moved` only when the cursor cell changes; silent at a grid edge.
+- Palette search: `/` open → `Activated(None)`; Enter close → `Activated(Some(Primary))`; Esc/Back close → `Back`; typing silent.
+- Map Maker create/rename Enter: the confirm resolves after input, so `map_maker_input` keeps a `Local<Option<KeyedMapNameCommit>>` and plays confirm on the next frame only if the name field actually closed. A failed create or rename is silent.
+- Editor Esc that closes validation or clears an interaction/selection → `Back` (back-to-library already sounded).
+- Match menu: the new `publish_match_menu_toggle_feedback` (presentation.rs, chained after `handle_match_menu_input`) watches `ClientInputContext`: Gameplay→Menu → `Activated(None)`, Menu→Gameplay → `Back`. Menu↔Shell (Settings) and match start/end are silent. Rebind capture never toggles the context, so it stays silent too. A Resume row or the HUD menu button already sound themselves; the UI producer's 50 ms press spacing drops the same-gesture duplicate.
+- Scoreboard (BRL-ejag): holding Tab/Select is a peek, not a menu, so it stays silent on purpose. Closing the latched scoreboard with Esc / controller cancel / platform Back was silent; it now writes `Back` (a trivial fix in `handle_match_menu_input`). The pointer close button already sounded.
+- UI gallery keyboard path: skipped (automation only).
+
+## Files
+- packages/brawler-client/src/flow/input.rs — server-select editor commit/cancel; `edit_name_input` returns `Option<UiFeedback>` for the brawler edit and creation name fields.
+- packages/brawler-client/src/flow/screens/map_maker.rs — editor keys, cursor, search, Esc, keyed name confirm + tests.
+- packages/brawler-client/src/presentation.rs — pause toggle watcher, latched-scoreboard cancel Back + test.
+- packages/brawler-client/src/flow/tests.rs — server and brawler editor tests.
+
+## Tests
+- flow::tests::server_select_editor_commit_and_cancel_publish_feedback_and_a_rejected_name_is_silent
+- flow::tests::brawler_name_editor_commit_and_cancel_publish_feedback_and_a_rejected_name_is_silent
+- flow::screens::map_maker::tests::map_editor_keys_sound_once_per_real_action_and_stay_silent_at_the_grid_edge
+- flow::screens::map_maker::tests::map_palette_search_open_commit_and_cancel_sound_and_typing_is_silent
+- flow::screens::map_maker::tests::map_library_name_confirm_sounds_only_when_the_commit_succeeds
+- presentation::tests::pause_requests_sound_the_match_menu_opening_and_closing_once
+
+## Verification
+- `just lint` — pass (target/yrys/lint.log).
+- `just test` — pass, all suites (target/yrys/test.log).
+- Not verified: real audio output, desktop or device playtest.
+
+## Owner playtest (desktop)
+Run `just server`, then `just client`. Listen for confirm (Primary), back, click and move ticks:
+- Server Select: edit address/name, press Enter → confirm; Esc → back; an invalid name (for example a private-use character) + Enter → silence.
+- Brawler details/creation name: Enter → confirm; Esc → back; invalid name → silence.
+- Map Maker library: create/rename + Enter → confirm only when it succeeds.
+- Map Maker editor: arrows → tick, and silence when pressed against an edge; Tab/R/M/P/E/V/Enter/Space/Delete/Z/Y/G/F → click; `/` → click; type → silence; Enter → confirm; `/` then Esc → back; Esc with a selection or with validation open → back.
+- Match: Esc → menu opens (click); Esc → closes (back); Resume row → one sound, not two; menu → Scoreboard, then Esc → back.
+
+## Owner playtest (Pixel 8a)
+`just android-build <host:port>`, `just android-install`. In a match, the Android Back gesture opens the match menu (click) and closes it (back). The HUD menu button makes a single sound.

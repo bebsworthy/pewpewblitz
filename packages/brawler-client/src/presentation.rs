@@ -101,6 +101,11 @@ fn handle_match_menu_input(
     if menu.scoreboard_latched && (pending.cancel_pressed || closed || pointer.released()) {
         menu.scoreboard_latched = false;
         *context = ClientInputContext::Menu;
+        // The pointer close button sounds through the press model; Esc, controller cancel and
+        // platform Back back out audibly too (BRL-yrys).
+        if pending.cancel_pressed && !closed {
+            feedback.write(ui::feedback::UiFeedback::Back);
+        }
     }
     let open = matches!(*context, ClientInputContext::Menu);
     if open && !menu.was_open {
@@ -171,6 +176,32 @@ fn handle_match_menu_input(
             }
             _ => {}
         }
+    }
+}
+
+/// Sounds the match menu opening and closing (BRL-yrys): Gameplay to Menu clicks, Menu to
+/// Gameplay backs out, whichever pause request (keyboard pause binding, controller pause, platform
+/// Back, HUD menu button) toggled it. Shell hand-offs such as Settings or the match ending are not
+/// Gameplay/Menu transitions and stay silent. A menu row or button that resumes already sounded
+/// itself; the UI audio producer's press spacing drops this same-gesture duplicate.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime"
+)]
+fn publish_match_menu_toggle_feedback(
+    context: Res<ClientInputContext>,
+    mut previous: Local<Option<ClientInputContext>>,
+    mut feedback: MessageWriter<ui::feedback::UiFeedback>,
+) {
+    let current = *context;
+    match (previous.replace(current), current) {
+        (Some(ClientInputContext::Gameplay), ClientInputContext::Menu) => {
+            feedback.write(ui::feedback::UiFeedback::Activated(None));
+        }
+        (Some(ClientInputContext::Menu), ClientInputContext::Gameplay) => {
+            feedback.write(ui::feedback::UiFeedback::Back);
+        }
+        _ => {}
     }
 }
 
@@ -249,6 +280,7 @@ impl Plugin for ClientPresentationPlugin {
                     exit_on_close_requested,
                     (
                         handle_match_menu_input,
+                        publish_match_menu_toggle_feedback,
                         update_match_menu_chrome,
                         update_pause_overlay,
                     )
@@ -284,6 +316,111 @@ fn exit_on_close_requested(
 mod tests {
     use super::*;
     use bevy::input::touch::{TouchPhase, touch_screen_input_system};
+
+    #[derive(Resource, Default)]
+    struct RecordedUiFeedback(Vec<ui::feedback::UiFeedback>);
+
+    fn record_ui_feedback(
+        mut feedback: MessageReader<ui::feedback::UiFeedback>,
+        mut recorded: ResMut<RecordedUiFeedback>,
+    ) {
+        recorded.0.extend(feedback.read().copied());
+    }
+
+    fn take_ui_feedback(app: &mut App) -> Vec<ui::feedback::UiFeedback> {
+        std::mem::take(&mut app.world_mut().resource_mut::<RecordedUiFeedback>().0)
+    }
+
+    /// One frame's local pause request, applied the way the keyboard, controller, platform Back
+    /// and HUD-button samplers apply it before `Update`.
+    #[derive(Resource, Default)]
+    struct PauseRequest(bool);
+
+    fn apply_test_pause_request(
+        mut request: ResMut<PauseRequest>,
+        mut context: ResMut<ClientInputContext>,
+        mut pending: ResMut<PendingLocalActions>,
+    ) {
+        let pressed = std::mem::take(&mut request.0);
+        pending.cancel_pressed = pressed;
+        apply_pause_request(&mut context, &mut pending, pressed);
+    }
+
+    #[test]
+    fn pause_requests_sound_the_match_menu_opening_and_closing_once() {
+        use ui::feedback::UiFeedback;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ClientInputContext::Gameplay)
+            .init_resource::<PendingLocalActions>()
+            .init_resource::<MatchMenuState>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<PauseRequest>()
+            .init_resource::<RecordedUiFeedback>()
+            .add_plugins(ui::press::ReleaseActivationPlugin)
+            .add_message::<UiFeedback>()
+            .add_systems(PreUpdate, apply_test_pause_request)
+            .add_systems(
+                Update,
+                (handle_match_menu_input, publish_match_menu_toggle_feedback).chain(),
+            )
+            .add_systems(Last, record_ui_feedback);
+        let pause = |app: &mut App| {
+            app.world_mut().resource_mut::<PauseRequest>().0 = true;
+            app.update();
+            take_ui_feedback(app)
+        };
+        app.update();
+        assert_eq!(take_ui_feedback(&mut app), Vec::new(), "no sound at start");
+
+        assert_eq!(pause(&mut app), vec![UiFeedback::Activated(None)]);
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Menu
+        );
+        app.update();
+        assert_eq!(
+            take_ui_feedback(&mut app),
+            Vec::new(),
+            "an open menu is silent"
+        );
+        assert_eq!(pause(&mut app), vec![UiFeedback::Back]);
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Gameplay
+        );
+
+        // Settings opened from the menu and its return are shell hand-offs, not pause toggles.
+        assert_eq!(pause(&mut app), vec![UiFeedback::Activated(None)]);
+        *app.world_mut().resource_mut::<ClientInputContext>() = ClientInputContext::Shell;
+        app.update();
+        assert_eq!(
+            take_ui_feedback(&mut app),
+            Vec::new(),
+            "Menu to Shell is silent"
+        );
+        *app.world_mut().resource_mut::<ClientInputContext>() = ClientInputContext::Menu;
+        app.update();
+        assert_eq!(
+            take_ui_feedback(&mut app),
+            Vec::new(),
+            "Shell to Menu is silent"
+        );
+        assert_eq!(pause(&mut app), vec![UiFeedback::Back]);
+
+        // The pause binding closing the latched scoreboard returns to the open menu: one Back,
+        // and the menu itself stays open.
+        assert_eq!(pause(&mut app), vec![UiFeedback::Activated(None)]);
+        app.world_mut()
+            .resource_mut::<MatchMenuState>()
+            .scoreboard_latched = true;
+        assert_eq!(pause(&mut app), vec![UiFeedback::Back]);
+        assert!(!app.world().resource::<MatchMenuState>().scoreboard_latched);
+        assert_eq!(
+            *app.world().resource::<ClientInputContext>(),
+            ClientInputContext::Menu
+        );
+    }
 
     #[test]
     fn pointer_menu_actions_are_isolated_from_product_overlays() {

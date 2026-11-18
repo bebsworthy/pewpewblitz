@@ -4355,6 +4355,111 @@ fn dashboard_keyboard_moves_and_activation_publish_feedback_with_the_surface_rol
     );
 }
 
+#[test]
+fn server_select_editor_commit_and_cancel_publish_feedback_and_a_rejected_name_is_silent() {
+    use crate::ui::{feedback::UiFeedback, surface::Surface};
+    let mut app = flow_test_app();
+    record_feedback_in(&mut app);
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    app.update();
+    take_ui_feedback(&mut app);
+    let edit = |app: &mut App, field: EditingField, name: Option<&str>| {
+        let mut model = app.world_mut().resource_mut::<ServerSelectModel>();
+        if let Some(name) = name {
+            model.name = name.to_string();
+            model.caret = model.name.len();
+        }
+        model.editing = Some(field);
+    };
+
+    edit(&mut app, EditingField::Address, None);
+    press_key(&mut app, KeyCode::Enter);
+    assert_eq!(
+        take_ui_feedback(&mut app),
+        vec![UiFeedback::Activated(Some(Surface::Primary))]
+    );
+
+    edit(&mut app, EditingField::Name, Some("Renamed"));
+    press_key(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.world().resource::<ServerSelectModel>().committed_name,
+        "Renamed"
+    );
+    assert_eq!(
+        take_ui_feedback(&mut app),
+        vec![UiFeedback::Activated(Some(Surface::Primary))]
+    );
+
+    edit(&mut app, EditingField::Name, Some("Ab\u{E000}cd"));
+    press_key(&mut app, KeyCode::Enter);
+    assert!(
+        app.world()
+            .resource::<ServerSelectModel>()
+            .inline_error
+            .is_some()
+    );
+    assert_eq!(
+        take_ui_feedback(&mut app),
+        Vec::new(),
+        "a rejected name plays nothing"
+    );
+
+    edit(&mut app, EditingField::Name, None);
+    press_escape(&mut app);
+    assert_eq!(app.world().resource::<ServerSelectModel>().editing, None);
+    assert_eq!(take_ui_feedback(&mut app), vec![UiFeedback::Back]);
+
+    // Ordinary typing inside the field is silent.
+    edit(&mut app, EditingField::Address, None);
+    press_key(&mut app, KeyCode::ArrowLeft);
+    assert_eq!(take_ui_feedback(&mut app), Vec::new());
+}
+
+#[test]
+fn brawler_name_editor_commit_and_cancel_publish_feedback_and_a_rejected_name_is_silent() {
+    use crate::ui::{feedback::UiFeedback, surface::Surface};
+    let mut app = flow_action_test_app();
+    record_feedback_in(&mut app);
+    let snapshot = lobby_membership_with_brawler().profile;
+    let id = snapshot.brawlers[0].id;
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(snapshot);
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BrawlerDetails(id);
+    let begin = |app: &mut App, name: &str| {
+        inject_action(app, FlowUiAction::BeginBrawlerNameEdit);
+        let mut draft = app.world_mut().resource_mut::<BrawlerEditDraft>();
+        assert!(draft.editing_name);
+        draft.name = name.into();
+        draft.name_caret = draft.name.len();
+    };
+
+    begin(&mut app, "Ab\u{E000}cd");
+    take_ui_feedback(&mut app);
+    press_key(&mut app, KeyCode::Enter);
+    assert!(app.world().resource::<BrawlerEditDraft>().editing_name);
+    assert_eq!(
+        take_ui_feedback(&mut app),
+        Vec::new(),
+        "a rejected name plays nothing"
+    );
+
+    press_escape(&mut app);
+    assert!(!app.world().resource::<BrawlerEditDraft>().editing_name);
+    assert_eq!(take_ui_feedback(&mut app), vec![UiFeedback::Back]);
+
+    begin(&mut app, "Renamed build");
+    take_ui_feedback(&mut app);
+    press_key(&mut app, KeyCode::Enter);
+    assert!(!app.world().resource::<BrawlerEditDraft>().editing_name);
+    assert_eq!(
+        take_ui_feedback(&mut app),
+        vec![UiFeedback::Activated(Some(Surface::Primary))]
+    );
+}
+
 /// BRL-nqnm: a lobby app with the real shell, in a match, with Settings opened from the
 /// match menu.
 fn match_settings_app(membership: &ClientLobbyMembership, name: &str) -> App {
