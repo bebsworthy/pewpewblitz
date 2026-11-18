@@ -15,6 +15,7 @@ use bevy::{
     ecs::system::SystemParam,
     input::{ButtonState, keyboard::KeyboardInput},
     prelude::*,
+    ui::UiSystems,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -131,6 +132,7 @@ impl TextEntry {
 #[derive(Resource, Default, Debug)]
 pub struct TextEntryFocus {
     active: Option<TextEntry>,
+    on_screen_keyboard: bool,
 }
 
 impl TextEntryFocus {
@@ -141,6 +143,92 @@ impl TextEntryFocus {
 
     pub(crate) fn set(&mut self, active: Option<TextEntry>) {
         self.active = active;
+    }
+
+    /// A platform shell reports that its on-screen keyboard is up for the active field. The
+    /// keyboard then covers the lower screen, so the shell shows the field in a strip at the top.
+    pub fn set_on_screen_keyboard(&mut self, shown: bool) {
+        self.on_screen_keyboard = shown;
+    }
+}
+
+/// The top-of-screen strip that mirrors the edited field above an on-screen keyboard.
+#[derive(Component)]
+struct TextEntryStrip;
+
+#[derive(Component)]
+struct TextEntryStripText;
+
+/// Strip type size in logical pixels; with its padding the strip fits the top third of a 411 px
+/// tall landscape phone window that the keyboard leaves uncovered.
+const STRIP_FONT_SIZE: f32 = 26.0;
+
+fn strip_label(entry: &TextEntry) -> String {
+    let label = match entry.field {
+        TextEntryField::ServerAddress => "Server address",
+        TextEntryField::PlayerName => "Your name",
+        TextEntryField::BrawlerName => "Brawler name",
+        TextEntryField::MapName => "Map name",
+    };
+    format!(
+        "{label}:  {}|{}",
+        &entry.text[..entry.caret],
+        &entry.text[entry.caret..]
+    )
+}
+
+/// Shows, updates, and removes the strip while an on-screen keyboard edits a field.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+fn present_text_entry_strip(
+    mut commands: Commands,
+    focus: Res<TextEntryFocus>,
+    assets: Option<Res<crate::ClientAssetHandles>>,
+    strips: Query<Entity, With<TextEntryStrip>>,
+    mut texts: Query<&mut Text, With<TextEntryStripText>>,
+) {
+    let wanted = focus
+        .active
+        .as_ref()
+        .filter(|_| focus.on_screen_keyboard)
+        .map(strip_label);
+    let Some(label) = wanted else {
+        for strip in &strips {
+            commands.entity(strip).despawn();
+        }
+        return;
+    };
+    if strips.is_empty() {
+        commands
+            .spawn((
+                TextEntryStrip,
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    padding: UiRect::axes(Val::Px(24.0), Val::Px(12.0)),
+                    border: UiRect::bottom(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(crate::ui::theme::INK),
+                BorderColor::all(crate::ui::theme::ACCENT),
+                GlobalZIndex(700),
+            ))
+            .with_child((
+                TextEntryStripText,
+                Text::new(label),
+                crate::ui::theme::font(assets.as_deref(), STRIP_FONT_SIZE),
+                TextColor(crate::ui::theme::TEXT),
+            ));
+        return;
+    }
+    for mut text in &mut texts {
+        if text.0 != label {
+            text.0.clone_from(&label);
+        }
     }
 }
 
@@ -188,7 +276,11 @@ impl TypedText<'_, '_> {
 pub(crate) fn add_text_entry(app: &mut App) {
     app.add_message::<KeyboardInput>()
         .add_message::<Ime>()
-        .init_resource::<TextEntryFocus>();
+        .init_resource::<TextEntryFocus>()
+        .add_systems(
+            PostUpdate,
+            present_text_entry_strip.before(UiSystems::Prepare),
+        );
 }
 
 #[cfg(test)]
@@ -242,6 +334,51 @@ mod tests {
         assert_eq!(
             TextEntry::new(TextEntryField::PlayerName, "😀a", 5).caret_utf16(),
             3
+        );
+    }
+
+    #[test]
+    fn the_strip_shows_the_field_only_while_an_on_screen_keyboard_edits_it() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        add_text_entry(&mut app);
+        let strip_text = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query_filtered::<&Text, With<TextEntryStripText>>()
+                .iter(world)
+                .map(|text| text.0.clone())
+                .collect::<Vec<_>>()
+        };
+        app.world_mut()
+            .resource_mut::<TextEntryFocus>()
+            .set(Some(TextEntry::new(TextEntryField::PlayerName, "Zoë", 2)));
+        app.update();
+        assert!(
+            strip_text(&mut app).is_empty(),
+            "desktop editing has no strip"
+        );
+
+        app.world_mut()
+            .resource_mut::<TextEntryFocus>()
+            .set_on_screen_keyboard(true);
+        app.update();
+        assert_eq!(strip_text(&mut app), ["Your name:  Zo|ë"]);
+        app.world_mut()
+            .resource_mut::<TextEntryFocus>()
+            .set(Some(TextEntry::new(TextEntryField::MapName, "Arena", 5)));
+        app.update();
+        assert_eq!(strip_text(&mut app), ["Map name:  Arena|"]);
+
+        app.world_mut().resource_mut::<TextEntryFocus>().set(None);
+        app.update();
+        let world = app.world_mut();
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<TextEntryStrip>>()
+                .iter(world)
+                .count(),
+            0
         );
     }
 }

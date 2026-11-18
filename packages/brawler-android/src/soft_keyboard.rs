@@ -148,7 +148,7 @@ impl KeyboardSession {
     reason = "Bevy system parameters are runtime-owned"
 )]
 fn bridge_soft_keyboard(
-    focus: Option<Res<TextEntryFocus>>,
+    mut focus: Option<ResMut<TextEntryFocus>>,
     windows: Query<Entity, With<PrimaryWindow>>,
     mut session: Local<Option<KeyboardSession>>,
     mut keys: MessageWriter<KeyboardInput>,
@@ -158,7 +158,13 @@ fn bridge_soft_keyboard(
     let Some(android) = ANDROID_APP.get() else {
         return;
     };
-    let Some(entry) = focus.as_deref().and_then(TextEntryFocus::active) else {
+    let entry = focus.as_deref().and_then(TextEntryFocus::active).cloned();
+    if let Some(focus) = focus.as_mut() {
+        // The keyboard is requested whenever a field is edited; the client mirrors that field
+        // above it.
+        focus.set_on_screen_keyboard(entry.is_some());
+    }
+    let Some(entry) = entry.as_ref() else {
         if session.take().is_some() {
             android.hide_soft_input(false);
         }
@@ -198,11 +204,12 @@ fn begin_editing(android: &AndroidApp, entry: &TextEntry) {
     PENDING_ACTION.store(false, Ordering::Release);
     KEYBOARD_DISMISSED.store(false, Ordering::Release);
     // GameActivity applies the layout, the text, and the show request on the UI thread in order.
-    android.set_ime_editor_info(
-        input_type(entry.field()),
-        TextInputAction::Done,
-        ImeOptions::empty(),
-    );
+    // GameTextInput leaves the landscape full-screen extract editor blank, so the keyboard stays
+    // below the game and the client mirrors the field in a strip above it. The Enter key's action
+    // lives in the options' action bits.
+    let mut options = ImeOptions::IME_FLAG_NO_FULLSCREEN | ImeOptions::IMG_FLAG_NO_EXTRACT_UI;
+    options.set_action(TextInputAction::Done);
+    android.set_ime_editor_info(input_type(entry.field()), TextInputAction::Done, options);
 }
 
 fn input_type(field: TextEntryField) -> InputType {

@@ -180,7 +180,8 @@ Touch gameplay controls, mobile quality tiers, and background-resilient sessions
 this shell yet.
 
 Text fields (server address, player and brawler names, map names) open the on-screen keyboard
-when tapped; Done confirms the field, and hiding the keyboard with Back cancels it as Back does
+when tapped. While the keyboard is up, a strip at the top of the screen shows the field and its
+text. Done confirms the field, and hiding the keyboard with Back cancels it as Back does
 elsewhere. A hardware keyboard keeps working.
 
 ### Store bundle
