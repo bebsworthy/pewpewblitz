@@ -19,7 +19,9 @@ related: [BRL-tkmh]
 
 parent:
 
-rank: 14811136
+rank: 2210474
 ---
 
 # Description
+
+A second original fighter character, built in Blender like Riff, exports the same clip contract (all clip names, weapon socket and grip points), so BRL-tkmh can offer a per-brawler character choice.

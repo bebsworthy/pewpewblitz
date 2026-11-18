@@ -20,7 +20,7 @@ related: [BRL-hheg, BRL-kfdm, BRL-pzkk]
 
 parent:
 
-rank: 9502720
+rank: 2430288
 ---
 
 # Description

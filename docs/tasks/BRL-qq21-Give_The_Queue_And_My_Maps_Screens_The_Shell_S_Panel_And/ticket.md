@@ -19,7 +19,9 @@ related: [BRL-8q4c, BRL-pw9k]
 
 parent:
 
-rank: 14942208
+rank: 1235816
 ---
 
 # Description
+
+The Queue screen and the Map Maker's My Maps library use the same panels, fonts and buttons as the rest of the player shell, instead of plain centered text on a flat background.

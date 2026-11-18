@@ -20,7 +20,7 @@ related: [BRL-1t80, BRL-4ms7, BRL-5pxn, BRL-k66v]
 
 parent:
 
-rank: 2883584
+rank: 2336082
 ---
 
 # Description
