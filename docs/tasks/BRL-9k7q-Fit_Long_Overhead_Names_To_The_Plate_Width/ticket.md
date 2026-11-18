@@ -4,9 +4,9 @@ was: BRL-0216
 
 title: Fit long overhead names to the plate width
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T05:52:38Z
+status_changed: 2026-11-18T00:30:26Z
 
 theme: quality
 
@@ -20,7 +20,7 @@ related: [BRL-5e2s]
 
 parent: BRL-q5c4
 
-rank: 15663104
+rank: 11337728
 ---
 
 # Description
