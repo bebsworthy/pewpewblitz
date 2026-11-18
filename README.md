@@ -145,6 +145,7 @@ Run `just` to list the supported everyday surface.
 | `just v3-render-evidence [path]` | Record the bounded native release render report; the historical recipe name is retained |
 | `just shell-capture [route] [size]` | Open each player-shell screen through flow actions against a scratch server and save PNG/JSON pairs under `target/shell-capture/<size>/` (default: every route at 1280x720 and 914x411) |
 | `just android-build [HOST:PORT]` / `just android-install [HOST:PORT]` | Build the Android player APK (and install/launch it over adb); see [Android client](#android-client) |
+| `just android-bundle [HOST:PORT]` | Build the upload-key-signed Play bundle (`.aab`); see [Android client](#android-client) |
 | `just ci` | Run lint, deterministic tests, the complete 2/4/6-client E2E matrix, and all nine Practice game types |
 | `just clean` | Remove Cargo build artifacts |
 | `just sweep [dry] [N]` | Prune `target/debug` artifacts and `target/brl*`/`agent-*` scratch dirs older than N days (default 2), keeping the newest artifact per crate, `target/dev`, `release`, Android outputs, and running binaries; `dry` only prints |
@@ -170,12 +171,39 @@ just android-install 192.168.1.20:5000          # build, install, and launch; th
 ```
 
 `just android-build` only builds `packages/brawler-android/android/app/build/outputs/apk/release/app-release.apk`
-(signed with the local debug keystore; not a store build). The baked address is an editable prefill;
+(signed with the Play upload key when one is configured, otherwise with the local debug keystore).
+The baked address is an editable prefill;
 connected servers are remembered. On first launch Android 17 asks for local network access, which a
 server on your Wi-Fi requires; if it is denied, the app explains why and offers Try again / Open settings. Settings and connections live in the app's private storage;
 F12 captures (hardware keyboard) go to `/sdcard/Android/data/com.pewpewblitz.client/files/captures`.
 Touch gameplay controls, mobile quality tiers, and background-resilient sessions are not part of
 this shell yet.
+
+Text fields (server address, player and brawler names, map names) open the on-screen keyboard
+when tapped; Done confirms the field, and hiding the keyboard with Back cancels it as Back does
+elsewhere. A hardware keyboard keeps working.
+
+### Store bundle
+
+`just android-bundle [HOST:PORT]` builds
+`packages/brawler-android/android/app/build/outputs/bundle/release/app-release.aab`, signed with the
+Play upload key. The key never goes in git. Either create the gitignored
+`packages/brawler-android/android/keystore.properties`:
+
+```properties
+storeFile=/absolute/path/to/upload-key.jks
+storePassword=...
+keyAlias=upload
+keyPassword=...
+```
+
+or export `BRAWLER_UPLOAD_STORE_FILE`, `BRAWLER_UPLOAD_STORE_PASSWORD`,
+`BRAWLER_UPLOAD_KEY_ALIAS`, and `BRAWLER_UPLOAD_KEY_PASSWORD` (they override the file). A relative
+`storeFile` resolves against `packages/brawler-android/android/`. Without a complete key the
+recipe stops with a message before building. Create an upload key once with
+`keytool -genkeypair -v -keystore upload-key.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000`,
+keep it and its passwords outside the repository, and enroll it in Play App Signing. Raise
+`versionCode` in `packages/brawler-android/android/app/build.gradle` before each Play upload.
 
 ## Current player flow
 

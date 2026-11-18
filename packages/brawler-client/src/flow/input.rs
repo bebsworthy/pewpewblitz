@@ -15,16 +15,14 @@ use crate::{
                 DASHBOARD_PLAY_INDEX, DASHBOARD_PRACTICE_INDEX, DashboardLayoutClass,
                 DashboardNavigationDirection, DashboardRoot,
             },
+            map_maker::MapMakerRuntime,
             server_select::{EditingField, ServerSelectModel},
             shared::{FlowButton, FlowNavigation},
         },
     },
+    text_entry::{TextEdit, TextEntry, TextEntryField, TextEntryFocus, TypedText},
 };
-use bevy::{
-    input::{ButtonState, keyboard::KeyboardInput},
-    prelude::*,
-    ui::InteractionDisabled,
-};
+use bevy::{prelude::*, ui::InteractionDisabled};
 use unicode_segmentation::UnicodeSegmentation as _;
 
 pub(super) fn repair_dashboard_focus(current: usize, available: &[usize]) -> usize {
@@ -169,6 +167,63 @@ pub(super) fn back_leaves_app(flow: ClientFlow, overlay: &ClientOverlay, editing
         && !editing
 }
 
+/// Publishes the field being edited for a platform on-screen keyboard (BRL-06pz), with the same
+/// precedence `collect_flow_input` and `map_maker_input` give the editors.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+pub(super) fn publish_text_entry(
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    model: Option<Res<ServerSelectModel>>,
+    brawler_edit: Res<BrawlerEditDraft>,
+    creation: Res<BrawlerCreationDraft>,
+    map_maker: Res<MapMakerRuntime>,
+    mut focus: ResMut<TextEntryFocus>,
+) {
+    let map_shell = matches!(
+        *flow.get(),
+        ClientFlow::PracticeMapSelect | ClientFlow::MapLibrary | ClientFlow::MapEditor
+    ) && matches!(*overlay, ClientOverlay::None);
+    let active = if map_shell {
+        (*flow.get() == ClientFlow::MapLibrary)
+            .then(|| map_maker.editing_map_name())
+            .flatten()
+            .map(|name| TextEntry::new(TextEntryField::MapName, name, name.len()))
+    } else if matches!(
+        *overlay,
+        ClientOverlay::BrawlerEditor | ClientOverlay::BrawlerDetails(_)
+    ) && brawler_edit.editing_name
+    {
+        Some(TextEntry::new(
+            TextEntryField::BrawlerName,
+            &brawler_edit.name,
+            brawler_edit.name_caret,
+        ))
+    } else if matches!(*overlay, ClientOverlay::BrawlerCreation) && creation.editing_name {
+        Some(TextEntry::new(
+            TextEntryField::BrawlerName,
+            &creation.name,
+            creation.name_caret,
+        ))
+    } else {
+        let model = model.as_deref();
+        model
+            .and_then(|model| model.editing)
+            .zip(model)
+            .map(|(field, model)| match field {
+                EditingField::Address => {
+                    TextEntry::new(TextEntryField::ServerAddress, &model.address, model.caret)
+                }
+                EditingField::Name => {
+                    TextEntry::new(TextEntryField::PlayerName, &model.name, model.caret)
+                }
+            })
+    };
+    focus.set(active);
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are runtime-owned"
@@ -207,7 +262,7 @@ pub(super) fn collect_flow_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     back: Res<BackInput>,
     gamepads: Query<&Gamepad>,
-    mut keyboard_events: MessageReader<KeyboardInput>,
+    mut typed: TypedText,
     mut model: ResMut<ServerSelectModel>,
     mut persistence: ResMut<ConnectionPersistence>,
     path: Res<ClientConnectionsPath>,
@@ -263,7 +318,7 @@ pub(super) fn collect_flow_input(
             &mut edit.editing_name,
             &mut edit.inline_error,
             &keyboard,
-            &mut keyboard_events,
+            &typed.edits(),
             pad_pressed(GamepadButton::South),
             cancel_pressed,
         ) {
@@ -287,7 +342,7 @@ pub(super) fn collect_flow_input(
             &mut edit.editing_name,
             &mut edit.inline_error,
             &keyboard,
-            &mut keyboard_events,
+            &typed.edits(),
             pad_pressed(GamepadButton::South),
             cancel_pressed,
         ) {
@@ -320,21 +375,20 @@ pub(super) fn collect_flow_input(
                 }
             }
         }
-        for event in keyboard_events.read() {
-            if event.state != ButtonState::Pressed {
-                continue;
-            }
-            if event.key_code == KeyCode::Backspace {
-                let previous = previous_caret(edited_value(&model, field), model.caret, field);
-                let caret = model.caret;
-                edited_value_mut(&mut model, field).replace_range(previous..caret, "");
-                model.caret = previous;
-            } else if event.key_code == KeyCode::Delete {
-                let next = next_caret(edited_value(&model, field), model.caret, field);
-                let caret = model.caret;
-                edited_value_mut(&mut model, field).replace_range(caret..next, "");
-            } else if let Some(text) = event.text.as_deref() {
-                insert_editor_text(&mut model, field, text);
+        for edit in typed.edits() {
+            match edit {
+                TextEdit::Backspace => {
+                    let previous = previous_caret(edited_value(&model, field), model.caret, field);
+                    let caret = model.caret;
+                    edited_value_mut(&mut model, field).replace_range(previous..caret, "");
+                    model.caret = previous;
+                }
+                TextEdit::Delete => {
+                    let next = next_caret(edited_value(&model, field), model.caret, field);
+                    let caret = model.caret;
+                    edited_value_mut(&mut model, field).replace_range(caret..next, "");
+                }
+                TextEdit::Insert(text) => insert_editor_text(&mut model, field, &text),
             }
         }
         if keyboard.just_pressed(KeyCode::Enter) || pad_pressed(GamepadButton::South) {
@@ -712,7 +766,7 @@ fn edit_name_input(
     editing: &mut bool,
     error: &mut Option<String>,
     keyboard: &ButtonInput<KeyCode>,
-    keyboard_events: &mut MessageReader<KeyboardInput>,
+    edits: &[TextEdit],
     confirm: bool,
     cancel: bool,
 ) -> Option<UiFeedback> {
@@ -725,21 +779,20 @@ fn edit_name_input(
     } else if keyboard.just_pressed(KeyCode::ArrowRight) {
         *caret = next_caret(&*name, *caret, EditingField::Name);
     }
-    for event in keyboard_events.read() {
-        if event.state != ButtonState::Pressed {
-            continue;
-        }
-        if event.key_code == KeyCode::Backspace {
-            let previous = previous_caret(&*name, *caret, EditingField::Name);
-            let current_caret = *caret;
-            name.replace_range(previous..current_caret, "");
-            *caret = previous;
-        } else if event.key_code == KeyCode::Delete {
-            let next = next_caret(&*name, *caret, EditingField::Name);
-            let current_caret = *caret;
-            name.replace_range(current_caret..next, "");
-        } else if let Some(text) = event.text.as_deref() {
-            insert_name_text(name, caret, error, text);
+    for edit in edits {
+        match edit {
+            TextEdit::Backspace => {
+                let previous = previous_caret(&*name, *caret, EditingField::Name);
+                let current_caret = *caret;
+                name.replace_range(previous..current_caret, "");
+                *caret = previous;
+            }
+            TextEdit::Delete => {
+                let next = next_caret(&*name, *caret, EditingField::Name);
+                let current_caret = *caret;
+                name.replace_range(current_caret..next, "");
+            }
+            TextEdit::Insert(text) => insert_name_text(name, caret, error, text),
         }
     }
     if keyboard.just_pressed(KeyCode::Enter) || confirm {
