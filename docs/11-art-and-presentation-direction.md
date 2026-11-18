@@ -316,7 +316,14 @@ and a map has at most 160. Every decal fits inside its own cell with its top edg
 wall. All of a map's decals are one mesh drawn with one lit, alpha-blended toon material over the
 generated atlas (`asset_src/environment/floor-decals/`), 0.15 above the floor and sorted before every
 other transparent layer, so fields, shadows, rings, and zones always draw over them and they never
-exceed the lit floor's brightness (no bloom). The `Low` quality tier hides them.
+exceed the lit floor's brightness (no bloom). The `Low` quality tier hides them. The atlas ships as
+a zstd-supercompressed RGBA8 sRGB KTX2 with a pre-filtered mip chain (BRL-dq06), loaded with a
+trilinear sampler (the app default is nearest), so decals stay stable on phones, low resolution
+scales, and zoomed-out framing. The script box-filters each 128 px sprite cell on its own,
+weighting colour by alpha in linear light, and stops at five levels (8 px cells) so no level ever
+averages two sprites. Mips are baked offline rather than generated at load, so the client does no
+per-load work and Android reads the file from the APK like any other asset. Other client textures
+get the same treatment only when they are shown to shimmer.
 
 Fighters and the world share one toon material (`presentation_3d/toon.rs`,
 `assets/shaders/toon.wgsl`, tuned by the client-only `assets/catalogs/toon_shading.ron`). It

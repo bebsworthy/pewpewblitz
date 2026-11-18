@@ -164,11 +164,11 @@ pub(in crate::presentation_3d) fn load_environment_assets(
 ) {
     let map_visuals =
         MapVisualCatalog::embedded(&maps.0).expect("embedded client map catalogs are valid");
-    // The decal atlas is minified at gameplay zoom: sample it linearly (the app default is nearest).
+    // The decal atlas ships its own mip chain; sample it trilinearly (the app default is nearest).
     let decal_atlas = asset_server
         .load_builder()
         .with_settings(|settings: &mut bevy::image::ImageLoaderSettings| {
-            settings.sampler = bevy::image::ImageSampler::linear();
+            settings.sampler = floor_decals::floor_decal_atlas_sampler();
         })
         .load(floor_decals::FLOOR_DECAL_ATLAS_PATH);
     let theme_materials = EnvironmentThemeMaterialCatalog {

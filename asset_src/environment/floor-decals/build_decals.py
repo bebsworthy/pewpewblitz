@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build the PewPew Blitz floor-decal atlas (BRL-0178).
 
-Python 3 standard library only. Every sprite is defined below as code (signed-distance strokes,
-ellipses and seeded value noise), rendered with 4x4 supersampling, and written as one RGBA PNG:
-`assets/brawler/textures/original/environment/floor-decals.png`.
+Python 3.14+ standard library only (`compression.zstd` supercompresses the KTX2 levels). Every
+sprite is defined below as code (signed-distance strokes, ellipses and seeded value noise), rendered
+with 4x4 supersampling, and written as one RGBA8 sRGB KTX2 with a pre-filtered mip chain (BRL-dq06):
+`assets/brawler/textures/original/environment/floor-decals.ktx2`.
 
 Usage, from the repository root:
 
@@ -16,7 +17,9 @@ Atlas contract (mirrored by `floor_decals.rs`): 3 columns x 2 rows of 128 px cel
 the sprite so that edge faces the adjacent wall. Colour is near-white (0.70-1.00) so the theme tint
 in `assets/catalogs/map_presentation_themes.ron` sets the hue; alpha carries the shape. Every sprite
 keeps a transparent border so linear filtering never bleeds between cells, and fully transparent
-texels are white so filtered edges never darken. Rebuilds are byte-identical.
+texels are white so filtered edges never darken. Mip levels are box-filtered inside each cell
+(alpha-weighted, in linear light) down to 8 px cells, i.e. `MIP_LEVELS` = 5, so no level ever mixes
+two sprites. Rebuilds with the same zstd version are byte-identical.
 
 See README.md beside this script for provenance and the inventory.
 """
@@ -30,8 +33,13 @@ import sys
 import zlib
 from pathlib import Path
 
+try:
+    from compression import zstd
+except ImportError:  # pragma: no cover - only hit on Python < 3.14 or a build without libzstd
+    sys.exit("build_decals.py needs Python 3.14+ with compression.zstd (KTX2 supercompression)")
+
 ROOT = Path(__file__).resolve().parents[3]
-ATLAS_PATH = ROOT / "assets" / "brawler" / "textures" / "original" / "environment" / "floor-decals.png"
+ATLAS_PATH = ROOT / "assets" / "brawler" / "textures" / "original" / "environment" / "floor-decals.ktx2"
 SHEET_PATH = Path(__file__).resolve().parent / "previews" / "decal-sheet.png"
 CELL = 128
 COLUMNS = 3
@@ -39,6 +47,9 @@ ROWS = 2
 SUPERSAMPLE = 4
 # Transparent border in sprite units (0..1): keeps every sprite well inside its atlas cell.
 BORDER = 0.06
+# Mip levels in the atlas: 128, 64, 32, 16, and 8 px cells. Stopping at 8 px keeps every level's
+# cells whole (2x2 boxes never straddle a cell edge) and leaves a few texels of each sprite.
+MIP_LEVELS = 5
 
 # ---------------------------------------------------------------------------------------------
 # Deterministic primitives
@@ -331,22 +342,108 @@ def write_png(path: Path, width: int, height: int, rows: list[bytes]) -> None:
                      + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
-def build_atlas() -> list[list[list[tuple[float, float]]]]:
-    sprites = [render_sprite(make()) for _, make in SPRITES]
-    width, height = CELL * COLUMNS, CELL * ROWS
-    rows = []
-    for y in range(height):
-        row = bytearray()
-        for x in range(width):
-            index = (y // CELL) * COLUMNS + x // CELL
-            if index < len(sprites):
-                value, alpha = sprites[index][y % CELL][x % CELL]
+def srgb_to_linear(value: float) -> float:
+    return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+
+def linear_to_srgb(value: float) -> float:
+    return value * 12.92 if value <= 0.0031308 else 1.055 * value ** (1 / 2.4) - 0.055
+
+
+def downsample(texels: list[list[tuple[float, float]]]) -> list[list[tuple[float, float]]]:
+    """One 2x2 box-filtered mip of one sprite cell: colour is weighted by alpha in linear light,
+    so transparent texels never pull edges toward their (white) colour."""
+    size = len(texels) // 2
+    result = []
+    for j in range(size):
+        row = []
+        for i in range(size):
+            block = [texels[2 * j + dj][2 * i + di] for dj in (0, 1) for di in (0, 1)]
+            alpha_sum = sum(alpha for _, alpha in block)
+            premultiplied = sum(srgb_to_linear(value) * alpha for value, alpha in block)
+            value = linear_to_srgb(premultiplied / alpha_sum) if alpha_sum > 0 else 1.0
+            row.append((max(0.0, min(1.0, value)), alpha_sum / 4))
+        result.append(row)
+    return result
+
+
+def atlas_level(cells: list[list[list[tuple[float, float]]]]) -> bytes:
+    """Row-major RGBA8 bytes of one atlas level assembled from its per-sprite cells."""
+    cell = len(cells[0])
+    data = bytearray()
+    for y in range(cell * ROWS):
+        for x in range(cell * COLUMNS):
+            index = (y // cell) * COLUMNS + x // cell
+            if index < len(cells):
+                value, alpha = cells[index][y % cell][x % cell]
             else:
                 value, alpha = 1.0, 0.0
             level = round(value * 255)
-            row += bytes((level, level, level, round(alpha * 255)))
-        rows.append(bytes(row))
-    write_png(ATLAS_PATH, width, height, rows)
+            data += bytes((level, level, level, round(alpha * 255)))
+    return bytes(data)
+
+
+KTX2_IDENTIFIER = b"\xabKTX 20\xbb\r\n\x1a\n"
+VK_FORMAT_R8G8B8A8_SRGB = 43
+KTX2_SUPERCOMPRESSION_ZSTD = 2
+ZSTD_LEVEL = 19
+
+
+def ktx2_basic_dfd() -> bytes:
+    """Khronos Basic data format descriptor for straight-alpha RGBA8 sRGB (KDF 1.3)."""
+    samples = b""
+    for channel, bit_offset in ((0, 0), (1, 8), (2, 16), (15, 24)):
+        # Alpha is always linear; colour follows the sRGB transfer function.
+        qualifiers = 0x1 if channel == 15 else 0
+        samples += struct.pack("<HBB4BII", bit_offset, 7, channel | qualifiers << 4, 0, 0, 0, 0,
+                               0, 255)
+    block_size = 24 + len(samples)
+    block = struct.pack("<IHH", 0, 2, block_size)
+    # colorModel RGBSDA, primaries BT.709, transfer sRGB, straight alpha; 1x1x1x1 texel block;
+    # 4 bytes in plane 0.
+    block += bytes((1, 1, 2, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0)) + samples
+    return struct.pack("<I", 4 + len(block)) + block
+
+
+def write_ktx2(path: Path, width: int, height: int, levels: list[bytes]) -> None:
+    """Zstandard-supercompressed KTX2 (Bevy's loader decodes it with the `zstd_rust` feature the
+    client already enables): header, level index, DFD, then level data smallest-first as the
+    container specification orders it."""
+    raw_lengths = [len(data) for data in levels]
+    levels = [zstd.compress(data, level=ZSTD_LEVEL) for data in levels]
+    header_length = 80
+    index_length = 24 * len(levels)
+    dfd = ktx2_basic_dfd()
+    dfd_offset = header_length + index_length
+    offset = dfd_offset + len(dfd)
+    offset += -offset % 4
+    placements = [None] * len(levels)
+    for level in reversed(range(len(levels))):
+        placements[level] = offset
+        offset += len(levels[level])
+    header = KTX2_IDENTIFIER + struct.pack(
+        "<9I", VK_FORMAT_R8G8B8A8_SRGB, 1, width, height, 0, 0, 1, len(levels),
+        KTX2_SUPERCOMPRESSION_ZSTD)
+    header += struct.pack("<4I2Q", dfd_offset, len(dfd), 0, 0, 0, 0)
+    index = b"".join(struct.pack("<3Q", placements[level], len(data), raw_lengths[level])
+                     for level, data in enumerate(levels))
+    body = bytearray(header + index + dfd)
+    body += bytes(-len(body) % 4)
+    for level in reversed(range(len(levels))):
+        assert len(body) == placements[level]
+        body += levels[level]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(body))
+
+
+def build_atlas() -> list[list[list[tuple[float, float]]]]:
+    sprites = [render_sprite(make()) for _, make in SPRITES]
+    cells = sprites
+    levels = [atlas_level(cells)]
+    for _ in range(1, MIP_LEVELS):
+        cells = [downsample(cell) for cell in cells]
+        levels.append(atlas_level(cells))
+    write_ktx2(ATLAS_PATH, CELL * COLUMNS, CELL * ROWS, levels)
     return sprites
 
 
@@ -392,7 +489,7 @@ def main() -> int:
             print(f"{index}: {name} (column {index % COLUMNS}, row {index // COLUMNS})")
         return 0
     sprites = build_atlas()
-    print(f"wrote {ATLAS_PATH.relative_to(ROOT)} ({CELL * COLUMNS}x{CELL * ROWS})")
+    print(f"wrote {ATLAS_PATH.relative_to(ROOT)} ({CELL * COLUMNS}x{CELL * ROWS}, {MIP_LEVELS} mip levels)")
     if not args.no_sheet:
         build_sheet(sprites)
         print(f"wrote {SHEET_PATH.relative_to(ROOT)}")

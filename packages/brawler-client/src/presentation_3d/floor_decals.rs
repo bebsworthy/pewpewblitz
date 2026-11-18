@@ -19,9 +19,10 @@ use super::*;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 
-/// Generated atlas: `ATLAS_COLUMNS` x `ATLAS_ROWS` sprites in [`FloorDecalSprite`] order.
+/// Generated atlas: `ATLAS_COLUMNS` x `ATLAS_ROWS` sprites in [`FloorDecalSprite`] order, as a
+/// KTX2 carrying its pre-filtered mip chain (BRL-dq06), so minified decals never shimmer.
 pub(super) const FLOOR_DECAL_ATLAS_PATH: &str =
-    "brawler/textures/original/environment/floor-decals.png";
+    "brawler/textures/original/environment/floor-decals.ktx2";
 const ATLAS_COLUMNS: u8 = 3;
 const ATLAS_ROWS: u8 = 2;
 /// Height above the floor surface: under contact shadows (0.6) and effect overlays (1.0).
@@ -467,6 +468,17 @@ pub(super) fn floor_decal_mesh(
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     Some(mesh)
+}
+
+/// Samples the decal atlas trilinearly: it is minified at gameplay zoom, and the app default
+/// sampler is nearest with no mip filtering.
+pub(super) fn floor_decal_atlas_sampler() -> bevy::image::ImageSampler {
+    bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+        mag_filter: bevy::image::ImageFilterMode::Linear,
+        min_filter: bevy::image::ImageFilterMode::Linear,
+        mipmap_filter: bevy::image::ImageFilterMode::Linear,
+        ..default()
+    })
 }
 
 /// The lit, blended material shared by every theme's decals; tint and opacity are vertex colours.

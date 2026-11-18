@@ -8,11 +8,12 @@ hand-edited image data is involved.
 ## Files
 
 - `build_decals.py` — the sprite definitions (signed-distance strokes, ellipses, seeded value
-  noise) and the PNG writer (Python 3 standard library only).
+  noise), the per-cell mip filter, and the KTX2 writer (Python 3.14+ standard library only:
+  `compression.zstd` supercompresses each level).
 - `previews/decal-sheet.png` — generated review sheet: every sprite tinted per theme over that
   theme's floor tone. Its tints are illustrative; the theme catalog owns the shipped values.
 - Runtime derivative (not in this directory):
-  `assets/brawler/textures/original/environment/floor-decals.png`.
+  `assets/brawler/textures/original/environment/floor-decals.ktx2`.
 
 ## Rebuild
 
@@ -24,24 +25,28 @@ python3 asset_src/environment/floor-decals/build_decals.py --no-sheet  # atlas o
 python3 asset_src/environment/floor-decals/build_decals.py --list      # inventory
 ```
 
-Built with Python 3.15. Rendering is deterministic (seeded xorshift, no platform randomness), so
-two builds write byte-identical PNGs. Never hand-edit the PNG: change the script and rebuild.
+Built with Python 3.15 (libzstd 1.5.7). Rendering is deterministic (seeded xorshift, no platform
+randomness), so two builds with the same zstd version write byte-identical files. Never hand-edit
+the atlas: change the script and rebuild.
 
 ## Atlas contract
 
 Mirrored by `packages/brawler-client/src/presentation_3d/floor_decals.rs`:
 
-- 384 x 256 RGBA, 3 columns x 2 rows of 128 px cells, row-major in the order crack, scuff, leaves,
-  sand-drift, stain, pebbles (`FloorDecalSprite`).
+- 384 x 256 RGBA8 sRGB KTX2 (zstd supercompressed, straight alpha), 3 columns x 2 rows of 128 px
+  cells, row-major in the order crack, scuff, leaves, sand-drift, stain, pebbles
+  (`FloorDecalSprite`).
 - The top edge (v = 0) of each sprite is the wall side; the client turns each decal so that edge
   faces the adjacent wall or arena edge.
 - Colour is near-white (0.70–1.00) and alpha carries the shape. Each theme's tint and opacity in
   `assets/catalogs/map_presentation_themes.ron` (`floor_decals`) set the hue, so one atlas serves
   every theme. Fully transparent texels are white and every sprite keeps a transparent border, so
   linear filtering never darkens edges or bleeds between cells.
-- Shapes are soft and low-frequency because the texture has no mipmaps: a cell spans roughly
-  60–140 physical pixels on desktop and phone screens, so a 128 px sprite is never minified
-  far enough to shimmer.
+- Five mip levels (BRL-dq06): each sprite cell is 2x2 box-filtered on its own (colour weighted by
+  alpha in linear light, transparent texels stay white) down to 8 px cells. Stopping there keeps
+  every level's cells whole, so no level averages two sprites; the client samples the chain
+  trilinearly. At the 16 px and 8 px levels a sprite's outermost texels can carry alpha, so a
+  decal covering 16 physical pixels or fewer may pick up a half-texel fringe from its neighbour.
 
 ## Inventory
 

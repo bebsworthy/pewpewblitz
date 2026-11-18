@@ -286,19 +286,43 @@ fn catalog_decals_are_valid_and_validation_rejects_loud_sets() {
     }
 }
 
-/// The atlas the script generates matches the code-owned layout and ships with the client.
+/// The atlas the script generates decodes through Bevy's KTX2 loader path (zstd supercompression,
+/// sRGB RGBA8) with the code-owned layout and its pre-filtered mip chain (BRL-dq06), and the
+/// sampler the client loads it with filters across those mips.
 #[test]
-fn generated_atlas_ships_with_the_expected_layout() {
+fn generated_atlas_ships_mipmapped_with_the_expected_layout() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../assets")
         .join(FLOOR_DECAL_ATLAS_PATH);
     let bytes = std::fs::read(&path).unwrap();
-    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
-    let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
-    let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
-    assert_eq!(width, 128 * u32::from(ATLAS_COLUMNS));
-    assert_eq!(height, 128 * u32::from(ATLAS_ROWS));
-    assert_eq!(bytes[25], 6, "RGBA");
+    let image = Image::from_buffer(
+        &bytes,
+        bevy::image::ImageType::Extension("ktx2"),
+        bevy::image::CompressedImageFormats::NONE,
+        true,
+        floor_decal_atlas_sampler(),
+        RenderAssetUsages::default(),
+    )
+    .unwrap();
+    assert_eq!(image.width(), 128 * u32::from(ATLAS_COLUMNS));
+    assert_eq!(image.height(), 128 * u32::from(ATLAS_ROWS));
+    assert_eq!(
+        image.texture_descriptor.format,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb
+    );
+    // 128 px cells down to 8 px cells: enough to stay stable at any gameplay zoom, few enough
+    // that no level averages two sprites together.
+    assert_eq!(image.texture_descriptor.mip_level_count, 5);
+    let texels: usize = (0..5)
+        .map(|level| (384 >> level) * (256 >> level) * 4)
+        .sum();
+    assert_eq!(image.data.as_ref().map(Vec::len), Some(texels));
+    let bevy::image::ImageSampler::Descriptor(sampler) = &image.sampler else {
+        panic!("the decal atlas needs an explicit sampler");
+    };
+    assert_eq!(sampler.mipmap_filter, bevy::image::ImageFilterMode::Linear);
+    assert_eq!(sampler.min_filter, bevy::image::ImageFilterMode::Linear);
+    assert_eq!(sampler.mag_filter, bevy::image::ImageFilterMode::Linear);
     assert!(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../asset_src/environment/floor-decals/build_decals.py")
