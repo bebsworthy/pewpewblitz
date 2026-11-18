@@ -172,10 +172,13 @@ debug = "line-tables-only"
 opt-level = 3
 debug = false
 
-# Android player library (`just android-build`): optimized, thin-LTO, stripped, abort-on-panic.
+# Android player library (`just android-build`): optimized, stripped, abort-on-panic. Fat LTO
+# with one codegen unit cuts the .so by about a third (BRL-5k0g); cold-crate `opt-level = "s"`
+# and Bevy feature trims measured under 1 % and were not applied.
 # Desktop and server profiles are unaffected.
 [profile.android]
 inherits = "release"
-lto = "thin"
+lto = "fat"
+codegen-units = 1
 strip = true
 panic = "abort"
