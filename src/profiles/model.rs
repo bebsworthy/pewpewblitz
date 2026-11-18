@@ -1,6 +1,8 @@
 use crate::{
     builds::{PassiveDefinitionId, UltimateDefinitionId},
-    lobby::normalize_proposed_display_name,
+    lobby::{
+        normalize_new_display_name, normalize_proposed_display_name, normalize_renamed_display_name,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt, num::NonZeroU64, str::FromStr};
@@ -399,9 +401,10 @@ impl MatchBuildSnapshotV3 {
 }
 
 impl BrawlerDraft {
+    /// A new brawler's name is new input, so it takes the strict name rule.
     pub fn normalized(mut self) -> Result<Self, ProfileModelError> {
-        self.name = normalize_proposed_display_name(&self.name)
-            .map_err(|_| ProfileModelError::InvalidName)?;
+        self.name =
+            normalize_new_display_name(&self.name).map_err(|_| ProfileModelError::InvalidName)?;
         validate_recipe_structure(
             self.fighter_profile_id,
             self.weapon_base_id,
@@ -413,11 +416,21 @@ impl BrawlerDraft {
 }
 
 impl BrawlerEdit {
+    /// Structural normalization; [`Self::normalized_against`] adds the strict rule for renames.
     pub fn normalized(mut self) -> Result<Self, ProfileModelError> {
         self.name = normalize_proposed_display_name(&self.name)
             .map_err(|_| ProfileModelError::InvalidName)?;
         validate_mutable_recipe_structure(self.ultimate_id, self.passive_ids)?;
         Ok(self)
+    }
+
+    /// Normalizes an edit of a brawler currently named `stored`: keeping the stored name keeps the
+    /// rule it was saved under, and any other name is new input under the strict rule.
+    pub fn normalized_against(self, stored: &str) -> Result<Self, ProfileModelError> {
+        let mut edit = self.normalized()?;
+        edit.name = normalize_renamed_display_name(&edit.name, stored)
+            .map_err(|_| ProfileModelError::InvalidName)?;
+        Ok(edit)
     }
 }
 

@@ -479,6 +479,9 @@ impl LobbyState {
         {
             return Err(LobbySessionError::ContentMismatch);
         }
+        // Structural rule only: the hello carries the client's stored preferred name on every
+        // connect and reconnect, so the server cannot tell new input from a name saved before the
+        // strict rule. The client's name editor applies the strict rule at entry (BRL-aj2q).
         normalize_proposed_display_name(&hello.proposed_display_name)
             .map_err(|_| LobbySessionError::InvalidName)
     }

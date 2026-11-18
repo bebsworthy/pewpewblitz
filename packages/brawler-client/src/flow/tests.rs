@@ -2694,6 +2694,31 @@ fn controller_can_enter_and_leave_text_editing_without_becoming_trapped() {
 }
 
 #[test]
+fn committing_an_undrawable_name_explains_the_rejection_inline() {
+    let mut app = flow_test_app();
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    app.update();
+    {
+        let mut model = app.world_mut().resource_mut::<ServerSelectModel>();
+        model.name = "Ab\u{E000}cd".to_string();
+        model.caret = model.name.len();
+        model.editing = Some(EditingField::Name);
+    }
+    press_key(&mut app, KeyCode::Enter);
+    let model = app.world().resource::<ServerSelectModel>();
+    assert_eq!(
+        model.inline_error.as_deref(),
+        Some("Name has a character that can't be shown.")
+    );
+    assert_ne!(
+        model.committed_name, model.name,
+        "the rejected name is not committed"
+    );
+}
+
+#[test]
 fn dashboard_settings_is_menu_owned_and_mode_card_opens_selection() {
     let mut app = flow_test_app();
     app.world_mut().spawn((

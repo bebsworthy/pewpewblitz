@@ -141,6 +141,10 @@ impl ProfileStorage {
         let transaction = self.connection.transaction()?;
         let current = load_profile(&transaction, account_id)?;
         require_revision(&current, expected_profile_revision)?;
+        let edit = match current.brawlers.iter().find(|item| item.id == brawler_id) {
+            Some(stored) => edit.normalized_against(&stored.name)?,
+            None => edit,
+        };
         let changed = transaction.execute(
             "UPDATE brawlers SET name=?1,ultimate_id=?2,passive_1_id=?3,passive_2_id=?4,revision=revision+1 WHERE account_id=?5 AND brawler_id=?6 AND revision=?7",
             params![edit.name, edit.ultimate_id.0, edit.passive_ids[0].0, edit.passive_ids[1].0, account_id.to_bytes().as_slice(), brawler_id.to_bytes().as_slice(), to_i64(expected_brawler_revision.get())?],

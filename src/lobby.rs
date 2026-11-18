@@ -414,14 +414,64 @@ pub fn validate_presentation_name(value: &str) -> Result<String, LobbyModelError
     Ok(normalized)
 }
 
+/// Why a name a player is entering now is rejected; its `Display` is the player-facing sentence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplayNameRejection {
+    Length,
+    UnshowableCharacter,
+}
+
+impl core::fmt::Display for DisplayNameRejection {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str(match self {
+            Self::Length => "Name must be 3 to 24 characters",
+            Self::UnshowableCharacter => "Name has a character that can't be shown",
+        })
+    }
+}
+
+impl std::error::Error for DisplayNameRejection {}
+
+/// The structural player-name rule: NFC, trimmed, 3..=24 graphemes, bounded bytes, no controls.
+///
+/// This is the rule for names that already exist: wire decoding, saved brawlers, persisted client
+/// state, match admission, and lobby hellos (a reconnecting client re-sends its stored name). New
+/// player input goes through [`normalize_new_display_name`] instead (BRL-aj2q).
 pub fn normalize_proposed_display_name(value: &str) -> Result<String, LobbyModelError> {
+    check_display_name(value, false).map_err(|_| LobbyModelError::InvalidPlayerName)
+}
+
+/// The strict rule for a name a player is entering now: the structural rule plus no code point
+/// that no font can draw (private use, noncharacters, and format characters outside an emoji or
+/// script joining sequence).
+pub fn normalize_new_display_name(value: &str) -> Result<String, DisplayNameRejection> {
+    check_display_name(value, true)
+}
+
+/// A rename of a stored name: an unchanged stored name keeps the structural rule, so a name that
+/// predates the strict rule stays editable; any other text is new input.
+pub fn normalize_renamed_display_name(
+    value: &str,
+    stored: &str,
+) -> Result<String, DisplayNameRejection> {
+    match normalize_proposed_display_name(value) {
+        Ok(normalized) if normalized == stored => Ok(normalized),
+        _ => normalize_new_display_name(value),
+    }
+}
+
+fn check_display_name(value: &str, strict: bool) -> Result<String, DisplayNameRejection> {
     let normalized: String = value.trim().nfc().collect();
+    if normalized.chars().any(invalid_text_character)
+        || (strict && normalized.graphemes(true).any(unshowable_grapheme))
+    {
+        return Err(DisplayNameRejection::UnshowableCharacter);
+    }
     let graphemes = normalized.graphemes(true).count();
     if !(3..=MAX_PLAYER_NAME_GRAPHEMES).contains(&graphemes)
         || normalized.len() > MAX_PLAYER_NAME_BYTES
-        || normalized.chars().any(invalid_text_character)
     {
-        return Err(LobbyModelError::InvalidPlayerName);
+        return Err(DisplayNameRejection::Length);
     }
     Ok(normalized)
 }
@@ -459,6 +509,71 @@ pub fn duplicate_display_name(base: &str, suffix: u32) -> Result<String, LobbyMo
 
 fn invalid_text_character(character: char) -> bool {
     character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
+}
+
+/// Private-use (BMP area and planes 15-16) and noncharacter code points: never drawable.
+fn undrawable_character(character: char) -> bool {
+    let code = u32::from(character);
+    matches!(code, 0xE000..=0xF8FF | 0xF_0000..=0x10_FFFF | 0xFDD0..=0xFDEF)
+        || code & 0xFFFE == 0xFFFE
+}
+
+/// `General_Category=Cf` as of Unicode 16. The set is small and changes rarely, so a range table
+/// avoids a Unicode property dependency in the shared crate (BRL-aj2q).
+fn format_character(character: char) -> bool {
+    matches!(
+        u32::from(character),
+        0x00AD
+            | 0x0600..=0x0605
+            | 0x061C
+            | 0x06DD
+            | 0x070F
+            | 0x0890..=0x0891
+            | 0x08E2
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x202A..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x13430..=0x1343F
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0001
+            | 0xE0020..=0xE007F
+    )
+}
+
+const WAVING_BLACK_FLAG: char = '\u{1F3F4}';
+
+/// Joiners and emoji presentation selectors draw nothing alone but are valid after a visible base:
+/// ZWNJ/ZWJ (script joining, emoji ZWJ sequences), VS15/VS16, and tag characters after the black
+/// flag (emoji subdivision flags).
+fn permitted_joiner(character: char, base: char) -> bool {
+    matches!(character, '\u{200C}' | '\u{200D}' | '\u{FE0E}' | '\u{FE0F}')
+        || (base == WAVING_BLACK_FLAG && matches!(u32::from(character), 0xE0020..=0xE007F))
+}
+
+fn unshowable_grapheme(grapheme: &str) -> bool {
+    let mut characters = grapheme.chars();
+    let Some(base) = characters.next() else {
+        return false;
+    };
+    if undrawable_character(base) || format_character(base) || permitted_joiner(base, base) {
+        return true;
+    }
+    let visible_base = !base.is_whitespace();
+    characters.any(|character| {
+        undrawable_character(character)
+            || if permitted_joiner(character, base) {
+                !visible_base
+            } else {
+                format_character(character)
+            }
+    })
 }
 
 pub fn canonical_catalog_bytes(
@@ -641,6 +756,76 @@ mod tests {
         assert!(accepted.graphemes(true).count() <= MAX_PLAYER_NAME_GRAPHEMES);
         assert!(accepted.len() <= MAX_PLAYER_NAME_BYTES);
         assert!(accepted.ends_with(" #12"));
+    }
+
+    #[test]
+    fn new_names_reject_code_points_no_font_can_draw() {
+        for rejected in [
+            "Ab\u{E000}c",   // private use, BMP
+            "Ab\u{F0001}c",  // private use, plane 15
+            "Ab\u{10FFFD}c", // private use, plane 16
+            "Ab\u{FDD0}c",   // noncharacter
+            "Ab\u{FFFE}c",   // noncharacter
+            "Ab\u{1FFFF}c",  // plane noncharacter
+            "\u{200D}Abc",   // lone ZWJ
+            "Ab \u{200D}cd", // ZWJ on a space, no visible base
+            "Ab\u{200B}c",   // zero-width space (Cf)
+            "Ab\u{00AD}c",   // soft hyphen (Cf)
+            "Ab\u{202E}c",   // bidi override (Cf)
+            "\u{FE0F}Abc",   // lone VS16
+            "Abc\u{E0067}",  // tag outside a flag sequence
+        ] {
+            assert_eq!(
+                normalize_new_display_name(rejected),
+                Err(DisplayNameRejection::UnshowableCharacter),
+                "{rejected:?}"
+            );
+            assert!(
+                normalize_proposed_display_name(rejected).is_ok(),
+                "stored names keep the structural rule: {rejected:?}"
+            );
+        }
+        for accepted in [
+            "Café",
+            "Zoë Ångström",
+            "Сергей",
+            "Αλέξης",
+            "李小龍",
+            "김민준",
+            "محمد",
+            "می\u{200C}خواهم", // Persian ZWNJ
+            "Ace 🔥😎",
+            "👩\u{200D}💻 Coder", // emoji ZWJ sequence
+            "Red ❤\u{FE0F}",      // VS16
+            "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F} Eng",
+        ] {
+            assert!(normalize_new_display_name(accepted).is_ok(), "{accepted:?}");
+        }
+        assert_eq!(
+            normalize_new_display_name("ab"),
+            Err(DisplayNameRejection::Length)
+        );
+        assert_eq!(
+            DisplayNameRejection::UnshowableCharacter.to_string(),
+            "Name has a character that can't be shown"
+        );
+    }
+
+    #[test]
+    fn renaming_keeps_an_unchanged_stored_name() {
+        let stored = "Ab\u{E000}c";
+        assert_eq!(
+            normalize_renamed_display_name(" Ab\u{E000}c ", stored).as_deref(),
+            Ok(stored)
+        );
+        assert_eq!(
+            normalize_renamed_display_name("Ab\u{E000}cd", stored),
+            Err(DisplayNameRejection::UnshowableCharacter)
+        );
+        assert_eq!(
+            normalize_renamed_display_name("Abcd", stored).as_deref(),
+            Ok("Abcd")
+        );
     }
 
     #[test]

@@ -286,6 +286,78 @@ fn sqlite_persists_concealment_field_on_create_and_edit() {
 
 #[cfg(feature = "server")]
 #[test]
+fn stored_private_use_names_still_load_while_new_names_take_the_strict_rule() {
+    const STORED: &str = "Old\u{E000}Name";
+    let database = path("stored-pua-name");
+    let account = AccountId::new(103).unwrap();
+    let brawler_id = SavedBrawlerId::new(203).unwrap();
+    let mut store = ProfileStorage::open(&database).unwrap();
+    let empty = store.load_or_create(account).unwrap();
+    assert!(matches!(
+        store.create_brawler(account, empty.revision, brawler_id, draft(STORED, 1, 1)),
+        Err(ProfileStorageError::InvalidData(
+            ProfileModelError::InvalidName
+        ))
+    ));
+    store
+        .create_brawler(
+            account,
+            empty.revision,
+            brawler_id,
+            draft("Plain Name", 1, 1),
+        )
+        .unwrap();
+    drop(store);
+    // A name saved before BRL-aj2q tightened new input.
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute("UPDATE brawlers SET name=?1", [STORED])
+        .unwrap();
+
+    let mut store = ProfileStorage::open(&database).unwrap();
+    let loaded = store.load_or_create(account).unwrap();
+    assert_eq!(
+        loaded.brawlers[0].name, STORED,
+        "the stored name still loads"
+    );
+    loaded.brawlers[0].validate_structure().unwrap();
+    let stored = &loaded.brawlers[0];
+    let edit = |name: &str| BrawlerEdit {
+        name: name.into(),
+        ultimate_id: stored.ultimate_id,
+        passive_ids: stored.passive_ids,
+    };
+    assert!(matches!(
+        store.edit_brawler(
+            account,
+            loaded.revision,
+            brawler_id,
+            stored.revision,
+            edit("New\u{E000}Name"),
+        ),
+        Err(ProfileStorageError::InvalidData(
+            ProfileModelError::InvalidName
+        ))
+    ));
+    let kept = store
+        .edit_brawler(
+            account,
+            loaded.revision,
+            brawler_id,
+            stored.revision,
+            edit(STORED),
+        )
+        .unwrap();
+    assert_eq!(
+        kept.brawlers[0].name, STORED,
+        "keeping the stored name stays editable"
+    );
+    drop(store);
+    std::fs::remove_file(database).unwrap();
+}
+
+#[cfg(feature = "server")]
+#[test]
 fn deleting_selected_brawler_selects_next_creation_ordinal_and_wraps() {
     let database = path("delete-successor");
     let account = AccountId::new(101).unwrap();

@@ -370,6 +370,16 @@ mod tests {
     }
 
     #[test]
+    fn stored_preferred_name_with_private_use_still_loads() {
+        let path = test_path("stored-pua-name").join("connections.ron");
+        let mut state = ConnectionsFileV1::empty();
+        state.preferred_display_name = Some("Old\u{E000}Name".to_string());
+        save_connections(&path, &state).unwrap();
+        assert_eq!(load_connections(&path).unwrap(), Some(state));
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
     fn favorite_identity_is_canonical_and_removal_is_offline() {
         let mut state = ConnectionsFileV1::empty();
         state.add_favorite("First", "LOCALHOST").unwrap();

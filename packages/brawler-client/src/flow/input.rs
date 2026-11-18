@@ -258,6 +258,7 @@ pub(super) fn collect_flow_input(
         let edit = &mut *brawler_edit;
         edit_name_input(
             &mut edit.name,
+            Some(&edit.stored_name),
             &mut edit.name_caret,
             &mut edit.editing_name,
             &mut edit.inline_error,
@@ -279,6 +280,7 @@ pub(super) fn collect_flow_input(
         let edit = &mut *creation;
         edit_name_input(
             &mut edit.name,
+            None,
             &mut edit.name_caret,
             &mut edit.editing_name,
             &mut edit.inline_error,
@@ -333,7 +335,10 @@ pub(super) fn collect_flow_input(
         }
         if keyboard.just_pressed(KeyCode::Enter) || pad_pressed(GamepadButton::South) {
             if field == EditingField::Name {
-                match brawler::lobby::normalize_proposed_display_name(&model.name) {
+                match brawler::lobby::normalize_renamed_display_name(
+                    &model.name,
+                    &model.committed_name,
+                ) {
                     Ok(name) => {
                         model.name.clone_from(&name);
                         model.committed_name.clone_from(&name);
@@ -343,7 +348,7 @@ pub(super) fn collect_flow_input(
                         }
                         model.inline_error = None;
                     }
-                    Err(error) => model.inline_error = Some(format!("Invalid name: {error}")),
+                    Err(reason) => model.inline_error = Some(format!("{reason}.")),
                 }
             }
             model.editing = None;
@@ -686,6 +691,7 @@ fn equipment_neighbor(
 )]
 fn edit_name_input(
     name: &mut String,
+    stored: Option<&str>,
     caret: &mut usize,
     editing: &mut bool,
     error: &mut Option<String>,
@@ -721,13 +727,17 @@ fn edit_name_input(
         }
     }
     if keyboard.just_pressed(KeyCode::Enter) || confirm {
-        match brawler::lobby::normalize_proposed_display_name(&*name) {
+        let normalized = match stored {
+            Some(stored) => brawler::lobby::normalize_renamed_display_name(name, stored),
+            None => brawler::lobby::normalize_new_display_name(name),
+        };
+        match normalized {
             Ok(normalized) => {
                 *name = normalized;
                 *editing = false;
                 *error = None;
             }
-            Err(reason) => *error = Some(format!("Invalid name: {reason}")),
+            Err(reason) => *error = Some(format!("{reason}.")),
         }
     } else if keyboard.just_pressed(KeyCode::Escape) || cancel {
         *editing = false;

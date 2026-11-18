@@ -363,10 +363,10 @@ fn confirm_brawler_creation(
     let Some(snapshot) = profile.snapshot() else {
         return;
     };
-    match brawler::lobby::normalize_proposed_display_name(&draft.name) {
+    match brawler::lobby::normalize_new_display_name(&draft.name) {
         Ok(name) => draft.name = name,
-        Err(error) => {
-            draft.inline_error = Some(format!("Invalid name: {error}"));
+        Err(reason) => {
+            draft.inline_error = Some(format!("{reason}."));
             return;
         }
     }
@@ -443,6 +443,7 @@ fn open_brawler_editor(
         *draft = BrawlerEditDraft {
             brawler_id: Some(brawler.id),
             name_caret: brawler.name.len(),
+            stored_name: brawler.name.clone(),
             name: brawler.name,
             fighter_profile_id: brawler.fighter_profile_id,
             weapon_base_id: brawler.weapon_base_id,
@@ -543,9 +544,13 @@ fn confirm_brawler_edit(
     draft: &mut BrawlerEditDraft,
     pending: &mut PendingEditedBrawler,
 ) {
-    let Ok(name) = brawler::lobby::normalize_proposed_display_name(&draft.name) else {
-        draft.inline_error = Some("Enter a valid brawler name.".to_string());
-        return;
+    let name = match brawler::lobby::normalize_renamed_display_name(&draft.name, &draft.stored_name)
+    {
+        Ok(name) => name,
+        Err(reason) => {
+            draft.inline_error = Some(format!("{reason}."));
+            return;
+        }
     };
     let Some(brawler_id) = draft.brawler_id else {
         return;

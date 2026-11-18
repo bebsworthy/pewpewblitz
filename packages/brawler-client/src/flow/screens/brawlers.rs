@@ -66,6 +66,8 @@ pub(in crate::flow) enum AbilityPicker {
 pub(in crate::flow) struct BrawlerEditDraft {
     pub(in crate::flow) brawler_id: Option<brawler::profiles::SavedBrawlerId>,
     pub(in crate::flow) name: String,
+    /// The saved name when editing began; keeping it skips the strict new-name rule (BRL-aj2q).
+    pub(in crate::flow) stored_name: String,
     pub(in crate::flow) fighter_profile_id: brawler::profiles::FighterProfileId,
     pub(in crate::flow) weapon_base_id: brawler::profiles::WeaponBaseId,
     pub(in crate::flow) ultimate_id: brawler::builds::UltimateDefinitionId,
@@ -82,6 +84,7 @@ impl Default for BrawlerEditDraft {
         Self {
             brawler_id: None,
             name: String::new(),
+            stored_name: String::new(),
             fighter_profile_id: brawler::profiles::FighterProfileId(1),
             weapon_base_id: brawler::profiles::WeaponBaseId(1),
             ultimate_id: brawler::builds::UltimateDefinitionId(1),
