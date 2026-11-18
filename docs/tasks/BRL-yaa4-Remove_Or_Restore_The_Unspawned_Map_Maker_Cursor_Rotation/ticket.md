@@ -3,9 +3,9 @@ id: BRL-yaa4
 
 title: Remove or restore the unspawned Map Maker cursor/rotation readout
 
-status: doing
-closed:
-status_changed: 2026-11-18T07:34:33Z
+status: done
+closed: 2026-11-18T07:37:14Z
+status_changed: 2026-11-18T07:37:14Z
 
 theme: quality
 
@@ -19,7 +19,7 @@ related: [BRL-cwm9]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
