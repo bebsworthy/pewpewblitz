@@ -3,9 +3,9 @@ id: BRL-dwqx
 
 title: Tell other players when a held match seat is bot-controlled
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T20:38:35Z
+status_changed: 2026-11-18T00:58:04Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-yyeg]
 
 parent: BRL-q5c4
 
-rank: 15728640
+rank: 11337728
 ---
 
 # Description
