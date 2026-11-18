@@ -255,6 +255,7 @@ fn spawn_dashboard_preview(
         .spawn((
             DashboardOwned,
             DashboardPreviewCamera,
+            super::presentation_3d::render_quality::PreviewCamera,
             DespawnOnExit(*flow.get()),
             Camera3d::default(),
             Camera {

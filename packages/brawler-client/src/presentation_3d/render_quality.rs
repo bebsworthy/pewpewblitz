@@ -260,6 +260,12 @@ impl ActiveRenderQuality {
 #[derive(Component)]
 pub(super) struct WorldHudCamera;
 
+/// Marks an offscreen shell preview camera (Dashboard, brawler card, weapon family, Map Maker
+/// palette). It follows the tier's MSAA but never gains HDR: preview targets are LDR
+/// `Bgra8UnormSrgb` images (BRL-1gkv).
+#[derive(Component)]
+pub(crate) struct PreviewCamera;
+
 /// Resolves the active tier from the preference and logs every change of selection.
 #[allow(
     clippy::needless_pass_by_value,
@@ -306,7 +312,8 @@ fn select_render_quality(
     commands.insert_resource(next);
 }
 
-/// Keeps MSAA and HDR on the arena and HUD cameras equal to the active tier.
+/// Keeps MSAA and HDR on the arena and HUD cameras, and MSAA alone on preview cameras, equal to
+/// the active tier.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -317,8 +324,12 @@ fn apply_camera_quality(
     quality: Res<ActiveRenderQuality>,
     mut cameras: Query<
         (Entity, &mut Msaa, Has<Hdr>),
-        Or<(With<ArenaCamera>, With<WorldHudCamera>)>,
+        (
+            Or<(With<ArenaCamera>, With<WorldHudCamera>)>,
+            Without<PreviewCamera>,
+        ),
     >,
+    mut previews: Query<&mut Msaa, With<PreviewCamera>>,
 ) {
     let msaa = quality.profile.msaa.msaa();
     for (camera, mut current, has_hdr) in &mut cameras {
@@ -329,6 +340,26 @@ fn apply_camera_quality(
             commands.entity(camera).try_remove::<Hdr>();
         }
     }
+    for mut current in &mut previews {
+        current.set_if_neq(msaa);
+    }
+}
+
+/// Gives a newly spawned preview camera the tier's MSAA before its first render, whichever
+/// schedule point spawned it; absent quality keeps Bevy's default.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are passed by value"
+)]
+fn apply_preview_camera_msaa_on_add(
+    trigger: On<Add, PreviewCamera>,
+    quality: Option<Res<ActiveRenderQuality>>,
+    mut cameras: Query<&mut Msaa>,
+) {
+    let (Some(quality), Ok(mut current)) = (quality, cameras.get_mut(trigger.entity)) else {
+        return;
+    };
+    current.set_if_neq(quality.profile.msaa.msaa());
 }
 
 /// Keeps the arena light's shadow maps equal to the active tier.
@@ -385,7 +416,8 @@ impl Plugin for RenderQualityPlugin {
             )
                 .chain()
                 .in_set(WorldPresentationSet::PrepareAssets),
-        );
+        )
+        .add_observer(apply_preview_camera_msaa_on_add);
     }
 
     fn finish(&self, app: &mut App) {

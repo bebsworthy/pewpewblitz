@@ -137,6 +137,7 @@ fn spawn_target(
         .spawn((
             CardOwned(family),
             BrawlerCardCamera,
+            crate::presentation_3d::render_quality::PreviewCamera,
             Camera3d::default(),
             Camera {
                 order: -3,

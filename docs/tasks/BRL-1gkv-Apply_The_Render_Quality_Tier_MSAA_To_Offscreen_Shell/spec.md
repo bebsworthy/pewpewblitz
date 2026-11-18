@@ -27,3 +27,16 @@ Found during BRL-kp7d: `apply_camera_quality` (`packages/brawler-client/src/pres
 - No visual regression on High (native capture of Dashboard + brawler list).
 - `just lint`, `just test`.
 - Pixel 8a device check: Dashboard and Map Maker palette frame time before/after (logcat or diagnostics overlay), previews still look acceptable without MSAA.
+
+
+# Implementation (2026-11-18)
+- Camera sweep: `Camera3d` is spawned in only five places. Four are the previews named above: `dashboard.rs` (`DashboardPreviewCamera`), `dashboard/card_preview.rs` (`BrawlerCardCamera`, which has moved out of `dashboard.rs`), `dashboard/weapon_preview.rs`, and `presentation_3d/map_palette_preview.rs`. The fifth is the arena camera (`presentation_3d/mod.rs`). `evidence_capture.rs` only queries `Camera3d` and spawns nothing. vfx_lab and ui_gallery spawn no `Camera3d`.
+- `render_quality::PreviewCamera` (`pub(crate)` marker) is added to all four preview spawn bundles.
+- `apply_camera_quality` gets a second query, `Query<&mut Msaa, With<PreviewCamera>>`, and calls `set_if_neq(tier msaa)` on each match. The arena/HUD query adds `Without<PreviewCamera>` so the two `&mut Msaa` queries stay disjoint. HDR sync is unchanged and covers only the arena and HUD cameras, so previews stay LDR.
+- Spawn-time decision: use an `On<Add, PreviewCamera>` observer (`apply_preview_camera_msaa_on_add`, registered in `RenderQualityPlugin`) that sets the tier MSAA when `ActiveRenderQuality` exists. Rejected alternative: pass `Option<Res<ActiveRenderQuality>>` into the four spawn systems. The observer covers every spawn point no matter where it falls relative to `PrepareAssets`, including Map Maker palette rebuilds, so a newly spawned preview never renders a first frame at Sample4 on Low or Medium. If the resource is absent, Bevy's default stays in place until the Update sync runs.
+
+# Verification
+- ECS test `presentation_3d::render_quality::tests::preview_cameras_follow_the_tier_msaa_live_without_gaining_hdr`. A preview camera spawned under Low gets `Msaa::Off` right away from the observer. Live preference changes then give Medium → Off, High → Sample4, Low → Off, and the camera never gains `Hdr`. Passes.
+- `just lint`: pass, after one `cargo fmt` fix to the new test. `just test`: pass (exit 0).
+- Native capture on High: before (HEAD e2c65528) and after (working tree), release client, 1280x720, macOS. Both client logs show tier=HIGH (Auto, desktop GPU). Setup was a scratch-only patched copy using the BRL-kp7d frame-driven flow driver (create brawler → details → weapon equipment → brawler list → Dashboard, screenshot at each step), an isolated supervisor on 127.0.0.1:5291/5292, and data under `target/1gkv/`. I compared the Dashboard, brawler list card, and weapon equipment PNGs by eye and found no visual difference: the same antialiased edges on the brawler and weapon. The only differences are the random profile name and the idle animation phase. This is expected because High is Sample4, the same as the old default.
+- Not done here: the Pixel 8a frame-time and power check on Dashboard and Map Maker palette, and the look of previews without MSAA on device. The owner will do those.

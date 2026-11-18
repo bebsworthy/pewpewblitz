@@ -201,3 +201,32 @@ fn an_incapable_gpu_never_selects_gpu_particles_even_at_high() {
     assert_eq!(active.tier, QualityTier::High);
     assert_eq!(active.particle_backend(), ParticleBackend::Cpu);
 }
+
+#[test]
+fn preview_cameras_follow_the_tier_msaa_live_without_gaining_hdr() {
+    let (mut app, ..) = quality_app(GraphicsQuality::Low, true);
+    app.add_observer(apply_preview_camera_msaa_on_add);
+    // Spawned after the tier exists: the observer applies Low before any frame renders it.
+    let preview = app.world_mut().spawn((PreviewCamera, Msaa::Sample4)).id();
+    assert_eq!(app.world().get::<Msaa>(preview), Some(&Msaa::Off));
+
+    for (preference, expected) in [
+        (GraphicsQuality::Medium, Msaa::Off),
+        (GraphicsQuality::High, Msaa::Sample4),
+        (GraphicsQuality::Low, Msaa::Off),
+    ] {
+        app.world_mut()
+            .resource_mut::<ClientShellSettings>()
+            .graphics_quality = preference;
+        app.update();
+        assert_eq!(
+            app.world().get::<Msaa>(preview),
+            Some(&expected),
+            "{preference:?}"
+        );
+        assert!(
+            app.world().get::<Hdr>(preview).is_none(),
+            "{preference:?} previews stay LDR"
+        );
+    }
+}

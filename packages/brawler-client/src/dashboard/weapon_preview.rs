@@ -135,6 +135,7 @@ fn spawn_preview(
         .spawn((
             WeaponOwned(family),
             Camera3d::default(),
+            crate::presentation_3d::render_quality::PreviewCamera,
             Camera {
                 order: -3,
                 clear_color: ClearColorConfig::Custom(Color::NONE),

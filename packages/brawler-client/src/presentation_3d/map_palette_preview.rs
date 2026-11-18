@@ -83,6 +83,7 @@ fn spawn_previews(
                     image: image.clone(),
                 },
                 Camera3d::default(),
+                render_quality::PreviewCamera,
                 Camera {
                     order: -5,
                     clear_color: ClearColorConfig::Custom(Color::NONE),
