@@ -4,9 +4,9 @@ was: BRL-0215
 
 title: 'Match fallback name glyphs to the display font''s weight and style'
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T05:52:38Z
+status_changed: 2026-11-18T02:51:13Z
 
 theme: quality
 
@@ -20,7 +20,7 @@ related: [BRL-5e2s, BRL-z2hf]
 
 parent: BRL-q5c4
 
-rank: 16121856
+rank: 11337728
 ---
 
 # Description
