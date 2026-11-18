@@ -25,3 +25,40 @@ An opponent proposed the display name `Жора 李雷 مرحبا 🎮` (valid u
 - **Pixel 8a device check:** an emoji in a player name renders on the overhead plate, the kill feed and Results.
 
 Evidence: /private/tmp/claude-501/-Users-boyd-wip-brawler/716520d5-661e-45a6-996e-1f74fe351a54/scratchpad/dc/r04.png (full frame), r04-plate-crop.png, r04-feed-crop.png, r05.jpg (Results).
+
+
+# Result (2026-11-18)
+Owner decision q-vc9wxqv: a colour COLRv0 emoji font, Android only. Implemented as fix option 1.
+
+## Change
+- **Font:** `assets/brawler/ui/fonts/twemoji-mozilla.ttf` is Twemoji Mozilla 0.7.0 (mozilla/twemoji-colr release asset, unmodified, sha256 6d90152e…ee8e, 1,474,284 bytes). It is COLRv0/CPAL, which swash's `ColorOutline(0)` paints.
+- **Registration:** `packages/brawler-client/src/ui/fonts.rs`.
+  - On `target_os = "android"`, a Startup system loads the font as a Bevy `Font` asset through `AssetServer` (APK `assets/`, AndroidAssetReader) and keeps the handle in a resource.
+  - An Update system waits until `bevy_text` has registered the family "Twemoji Mozilla". `prefer_bundled_emoji` then puts it first in fontique's `GenericFamily::Emoji`, with the platform's Noto Color Emoji kept behind it as the fallback for newer emoji. The system marks every `TextFont` changed once, so text shaped earlier is laid out again.
+  - parley 0.9.0 queries `Emoji` for every emoji cluster (`shape/mod.rs` L557-567).
+- **Desktop:** desktop clients ship the file, because Gradle and desktop both read the whole `assets/` dir, but they never register or load it. macOS keeps Apple Color Emoji (sbix).
+- **Provenance:**
+  - Manifest row `font.emoji_android`. `valid_license` now accepts `CC-BY-4.0` with https URLs.
+  - `assets/licenses/twemoji-mozilla-CC-BY-4.0.txt` gives title, authors (Twitter, Inc and other contributors; Mozilla), source, sha256, the licence URI and legal-code URL, the changes notice, and that the Apache-2.0 build code is not shipped.
+  - The repo had no CC BY text, and the full legal code was not downloadable here. The notice links the legal code, as CC BY 4.0 §3(a)(1)(C) allows, and does not copy it.
+  - THIRD_PARTY.md has a pack row, a file row and a re-acquire note. Credits gains "Twemoji Mozilla, Android emoji font … CC BY 4.0" (new label).
+- **Docs:** `docs/11-art-and-presentation-direction.md` now records the emoji exception and that the old "no fallback font bundled, APK unaffected" line no longer holds.
+
+## APK size
+The `.ttf` is deflated in the APK (Lilita One already is). `zip -9` of the file is 733,330 bytes, so the APK grows by about 0.73 MB on 89.0 MB (the release APK of 2026-11-18 10:15). The installed size grows by 1.47 MB. The APK was not rebuilt.
+
+## Verification
+- New host test `ui::fonts::tests::bundled_emoji_font_paints_a_colour_glyph_for_emoji_in_a_display_name`. It runs on any host, with no cfg gate. It registers the shipped font as `bevy_text` does and applies `prefer_bundled_emoji`. It then lays out "Pew 🎮" in the display-font alias through `FontCx` and asserts the 🎮 cluster shapes in Twemoji. Finally it rasterizes that glyph with `bevy::text::get_outlined_glyph_texture`, Bevy's own ColorOutline(0)/ColorBitmap/Outline path. The glyph must be colour (not an alpha mask) and must have painted pixels.
+- Credits and manifest tests pass: `shell::credits::tests::*` and `assets::tests::*`. `ui::theme::tests::names_outside_the_display_font_fall_back_to_heavy_sans_glyphs` still passes on macOS.
+- `cargo ndk --target arm64-v8a --platform 31 clippy --locked -p brawler-android -- -D warnings`: pass. This compiles the Android-only systems; `just lint` does not cover the Android target. Log: target/z2hf/android-clippy.log.
+- `just lint`: pass (target/z2hf/lint.log). `just test`: pass (target/z2hf/test.log).
+- Not verified: the font load and the emoji on a real Android device.
+
+## Owner playtest (Pixel 8a)
+- **Build:** `just android-build 192.168.31.47:5000 && just android-install`, with the routed server on :5000.
+- **Scenario:** an opponent on desktop proposes the display name `Жора 李雷 مرحبا 🎮` and plays a 1v1 against the phone.
+- **Observe on the phone:**
+  - 🎮 renders in colour on the overhead name plate, in the kill feed and on the Results roster.
+  - Cyrillic, CJK and Arabic still render.
+  - Logcat shows `bundled emoji font installed` once at startup.
+- **Known limit:** Twemoji 0.7.0 covers emoji up to roughly Emoji 13/14. Newer emoji fall through to the system COLRv1 Noto font and still render as nothing.

@@ -16,7 +16,7 @@ created: 2026-08-28T09:40:58Z
 
 blocks: [BRL-tztp]
 
-related: [BRL-3c10, BRL-pp2y, BRL-qs1f, BRL-xndc]
+related: [BRL-2xpc, BRL-3c10, BRL-pp2y, BRL-qs1f, BRL-w9z1, BRL-xndc]
 
 parent:
 
