@@ -435,6 +435,30 @@ def ultimate_strike() -> list[float]:
     return out
 
 
+
+def ultimate_strike_cast() -> list[float]:
+    """Radio "call-in" on the press: a static key-up click, then a rising two-note beacon."""
+    out = buffer(0.42)
+    noise(out, 0.0, 0.05, 46, 0.5, decay=0.012, bandpass=2200, q=2.5)
+    tone(out, 0.0, 0.06, sweep(500, 1400, 0.06), "tri", 0.25, decay=0.03)
+    for k, note in enumerate((81, 88)):
+        start = 0.05 + k * 0.11
+        tone(out, start, 0.16, const(midi(note)), "square", 0.3, decay=0.07, duty=0.35)
+        tone(out, start, 0.16, const(midi(note) * 1.004), "sine", 0.25, decay=0.08)
+    lowpass_in_place(out, 4200)
+    return out
+
+
+def ultimate_blob_cast() -> list[float]:
+    """Wet heavy "thwomp": a low body drop, a gloopy wobble and a muffled splat."""
+    out = buffer(0.5)
+    tone(out, 0.0, 0.45, sweep(150, 42, 0.32), "sine", 1.0, attack=0.004, decay=0.14)
+    tone(out, 0.0, 0.3, lambda t: (230 - 300 * t) + 70 * math.sin(TAU * 22 * t), "sine", 0.45,
+         attack=0.006, decay=0.08)
+    noise(out, 0.0, 0.3, 47, 0.6, attack=0.003, decay=0.05, lowpass=sweep(1600, 220, 0.25), q=1.4)
+    drive(out, 1.6)
+    return out
+
 def dash() -> list[float]:
     out = buffer(0.27)
     noise(out, 0.0, 0.25, 51, 1.0, attack=0.03, decay=0.08, bandpass=sweep(450, 3600, 0.22), q=2.2)
@@ -751,6 +775,8 @@ CLIPS = {
     "ultimate-revealed": (ultimate_revealed, -17.0, False),
     "ultimate-field": (ultimate_field, -16.0, False),
     "ultimate-strike": (ultimate_strike, -13.0, False),
+    "ultimate-strike-cast": (ultimate_strike_cast, -18.0, False),
+    "ultimate-blob-cast": (ultimate_blob_cast, -16.0, False),
     "dash": (dash, -18.0, False),
     "charge-ready": (charge_ready, -17.0, False),
     "passive": (passive, -20.0, False),

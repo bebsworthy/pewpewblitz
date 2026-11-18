@@ -263,9 +263,11 @@ authoritative `Dashing` phase. The authoritative activation signal of the same k
 activation cue, the replicated Sentry or Concealment Field, or the controlled fighter's replicated
 `Dashing { ends_at_tick }` at activation tick `ends_at_tick - duration_ticks`, within the same tick
 window) is recorded as an activation echo whose sound the audio producers skip; a rejected dash
-leaves only its short whoosh. Demolition Strike's sound is
-its explosion and Big Blob has none, so both stay authoritative; every area outcome, its effects,
-and cloak state stay cue- or replication-driven. An unanswered cast is rejected after the same
+leaves only its short whoosh. Demolition Strike's activation sound is its explosion and Big Blob
+has none, so neither records an activation echo; instead the local caster hears a dedicated short
+cast sound on the press (`ultimate-strike-cast`, `ultimate-blob-cast`; BRL-evqm) while the
+explosion still plays once from the authoritative cue. Remote casters get no cast sound. Every
+area outcome, its effects, and cloak state stay cue- or replication-driven. An unanswered cast is rejected after the same
 confirmation margin and only frees the charge; its launch flash is a bounded transient. The later authoritative
 `AttackAccepted` from the same fighter is paired with the oldest local shot whose estimated tick
 lies within a small early/late window; paired attack ids are echoes that the animation, VFX, and

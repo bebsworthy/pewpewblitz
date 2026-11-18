@@ -44,7 +44,8 @@ Weapon fire: fire-sticky, fire-lobbed, fire-splash, fire-melee, fire-spray (fire
 the Kenney `fire.ogg`). Impacts: impact-lob, impact-melee, impact-spray (impact-projectile uses
 the Kenney `impact.ogg`). Hits: hit-dealt, hit-taken. Fighters and sentries: respawn, sentry-fire,
 sentry-removed (defeat uses the Kenney `defeat.ogg`). Ultimates: ultimate-cloak,
-ultimate-uncloak, ultimate-scan, ultimate-revealed, ultimate-field, ultimate-strike. Abilities:
+ultimate-uncloak, ultimate-scan, ultimate-revealed, ultimate-field, ultimate-strike,
+ultimate-strike-cast, ultimate-blob-cast (local input-frame cast sounds, BRL-evqm). Abilities:
 dash, charge-ready, passive, sentry-spawn, concealment-field-spawn, reload. Objectives:
 objective-hit, objective-critical, objective-destroyed, zone-captured, zone-lost, zone-progress.
 Match: match-start, match-score, match-victory, match-defeat, match-draw. Pickups:

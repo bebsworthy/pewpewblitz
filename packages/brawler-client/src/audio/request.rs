@@ -103,6 +103,8 @@ pub(crate) mod cue_keys {
     pub(crate) const ULTIMATE_REVEALED: AudioCueKey = AudioCueKey::new("ultimate-revealed");
     pub(crate) const ULTIMATE_FIELD: AudioCueKey = AudioCueKey::new("ultimate-field");
     pub(crate) const ULTIMATE_STRIKE: AudioCueKey = AudioCueKey::new("ultimate-strike");
+    pub(crate) const ULTIMATE_STRIKE_CAST: AudioCueKey = AudioCueKey::new("ultimate-strike-cast");
+    pub(crate) const ULTIMATE_BLOB_CAST: AudioCueKey = AudioCueKey::new("ultimate-blob-cast");
     pub(crate) const OBJECTIVE_HIT: AudioCueKey = AudioCueKey::new("objective-hit");
     pub(crate) const OBJECTIVE_CRITICAL: AudioCueKey = AudioCueKey::new("objective-critical");
     pub(crate) const OBJECTIVE_DESTROYED: AudioCueKey = AudioCueKey::new("objective-destroyed");
@@ -131,7 +133,7 @@ pub(crate) mod cue_keys {
     pub(crate) const UI_MOVE: AudioCueKey = AudioCueKey::new("ui-move");
 
     #[cfg(test)]
-    pub(crate) const BUILTIN: [AudioCueKey; 47] = [
+    pub(crate) const BUILTIN: [AudioCueKey; 49] = [
         FIRE_STRAIGHT,
         FIRE_STICKY,
         FIRE_LOBBED,
@@ -154,6 +156,8 @@ pub(crate) mod cue_keys {
         ULTIMATE_REVEALED,
         ULTIMATE_FIELD,
         ULTIMATE_STRIKE,
+        ULTIMATE_STRIKE_CAST,
+        ULTIMATE_BLOB_CAST,
         OBJECTIVE_HIT,
         OBJECTIVE_CRITICAL,
         OBJECTIVE_DESTROYED,

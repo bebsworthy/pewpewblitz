@@ -372,7 +372,7 @@ mod tests {
             facing: 0.0,
             simulation_tick: 100,
         };
-        // Launch-type casts sound locally; Demolition Strike's sound stays its outcome cue.
+        // Launch-type casts sound locally; Demolition Strike's explosion stays its outcome cue.
         app.world_mut()
             .write_message(local(UltimateKind::SelfCloak, LocalCastId(1)));
         app.world_mut()
@@ -418,6 +418,109 @@ mod tests {
             "local sentry and the teammate's sentry, no replay: {observed:?}"
         );
         assert_eq!(count(cue_keys::ULTIMATE_STRIKE), 0);
+    }
+
+    /// Stand-in for the local attack reconciler: pairs the own Demolition Strike cast with its
+    /// activation cue once. The strike explosion is an area outcome, so the ledger must not turn
+    /// it into an activation echo even when one is offered.
+    fn pair_strike_activation(
+        mut ledger: ResMut<crate::local_attack::LocalAttackLedger>,
+        mut paired: Local<bool>,
+    ) {
+        use crate::local_attack::UltimateActivationEcho;
+        use brawler::builds::UltimateKind;
+        if !std::mem::replace(&mut *paired, true) {
+            ledger.record_cast(
+                UltimateKind::DemolitionStrike,
+                lightyear::prelude::Tick(1),
+                100,
+            );
+            ledger.observe_own_activation(
+                UltimateKind::DemolitionStrike,
+                100,
+                Some(UltimateActivationEcho::Cue(CombatEventId(41))),
+            );
+        }
+    }
+
+    #[test]
+    fn strike_and_blob_casts_sound_on_the_input_frame_and_the_strike_explosion_plays_once() {
+        use crate::local_attack::{
+            LocalAttackKind, LocalAttackLedger, LocalAttackPresented, LocalAttackSet, LocalCastId,
+        };
+        use brawler::builds::UltimateKind;
+        let mut app = App::new();
+        app.add_message::<DeduplicatedCombatCue>()
+            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<AudioRequest>()
+            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientPlayableGate(false))
+            .insert_resource(ClientMapReadiness::Ready)
+            .init_resource::<LocalAttackLedger>()
+            .init_resource::<ObservedRequests>()
+            .add_plugins(AudioRegistryPlugin)
+            .add_plugins(AudioProducersPlugin)
+            .add_systems(
+                Update,
+                pair_strike_activation.in_set(LocalAttackSet::Reconcile),
+            )
+            .add_systems(Update, observe_requests.after(AudioProducerSet));
+        brawler::test_app::finalize(&mut app);
+
+        for (kind, cast) in [
+            (UltimateKind::DemolitionStrike, LocalCastId(5)),
+            (UltimateKind::BigBlob, LocalCastId(6)),
+        ] {
+            app.world_mut().write_message(LocalAttackPresented {
+                fighter: Entity::PLACEHOLDER,
+                owner: NetworkEntityId(12),
+                team: brawler::combat::TeamId(1),
+                kind: LocalAttackKind::Ultimate { kind, cast },
+                origin: Vec2::ZERO,
+                facing: 0.0,
+                simulation_tick: 100,
+            });
+        }
+        app.update();
+        let count = |app: &App, key| {
+            app.world()
+                .resource::<ObservedRequests>()
+                .0
+                .iter()
+                .filter(|request| request.cue_key == key)
+                .count()
+        };
+        assert_eq!(count(&app, cue_keys::ULTIMATE_STRIKE_CAST), 1);
+        assert_eq!(count(&app, cue_keys::ULTIMATE_BLOB_CAST), 1);
+        assert_eq!(
+            count(&app, cue_keys::ULTIMATE_STRIKE),
+            0,
+            "no explosion on the press"
+        );
+
+        // The authoritative strike lands a round trip later.
+        app.world_mut().write_message(DeduplicatedCombatCue(
+            CombatCue::DemolitionStrikeActivated {
+                event_id: CombatEventId(41),
+                tick: 100,
+                source: NetworkEntityId(12),
+                center: WorldPoint::from(Vec2::ZERO),
+                radius_milliunits: 2_000,
+            },
+        ));
+        app.update();
+        let observed = &app.world().resource::<ObservedRequests>().0;
+        assert_eq!(
+            count(&app, cue_keys::ULTIMATE_STRIKE),
+            1,
+            "the explosion plays once from authority: {observed:?}"
+        );
+        assert_eq!(
+            count(&app, cue_keys::ULTIMATE_STRIKE_CAST),
+            1,
+            "the server cue never replays the cast sound: {observed:?}"
+        );
+        assert_eq!(count(&app, cue_keys::ULTIMATE_BLOB_CAST), 1);
     }
 
     /// Stand-in for the local attack reconciler: folds the controlled fighter's replicated dash

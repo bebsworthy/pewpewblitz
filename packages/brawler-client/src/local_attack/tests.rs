@@ -628,10 +628,12 @@ fn only_launch_type_ultimates_present_their_activation_sound_locally() {
         UltimateKind::Dash,
     ] {
         assert!(presents_activation_sound_locally(kind), "{kind:?}");
+        assert!(!plays_cast_sound_locally(kind), "{kind:?}");
     }
     for kind in [UltimateKind::DemolitionStrike, UltimateKind::BigBlob] {
         assert!(!presents_activation_sound_locally(kind), "{kind:?}");
         assert!(presents_cast_motion_locally(kind), "{kind:?}");
+        assert!(plays_cast_sound_locally(kind), "{kind:?}");
     }
     assert!(
         !presents_cast_motion_locally(UltimateKind::Dash),

@@ -18,7 +18,8 @@
 //! Ultimate casts follow the same timeline. A cast is announced on the ULTIMATE rising edge with
 //! full replicated charge; presentation plays the shoot motion and a short launch flash at the
 //! caster ([`presents_cast_motion_locally`]), and, for ultimates whose activation sound is a
-//! launch ([`presents_activation_sound_locally`]), the activation sound. The ledger pairs the cast
+//! launch ([`presents_activation_sound_locally`]), the activation sound; Demolition Strike and
+//! Big Blob instead play a dedicated cast sound ([`plays_cast_sound_locally`]). The ledger pairs the cast
 //! with the authoritative activation signal of the same kind (its activation cue, the spawned
 //! sentry/concealment field, or the replicated `Dashing` phase, within the same tick tolerance)
 //! and records that signal as an activation echo, so the authoritative activation sound does not
@@ -94,6 +95,16 @@ pub const fn presents_activation_sound_locally(kind: UltimateKind) -> bool {
         | UltimateKind::Dash => true,
         UltimateKind::DemolitionStrike | UltimateKind::BigBlob => false,
     }
+}
+
+/// Whether a local cast plays a dedicated cast sound on the input frame that is not its
+/// activation sound. Demolition Strike's activation sound is its authoritative explosion and Big
+/// Blob has none, so both get a short call-in/launch sound on the press while the ledger keeps no
+/// activation echo for them (the explosion still plays once from the server cue). Remote casters
+/// get no cast sound: Big Blob has no activation signal and the explosion announces a Strike.
+#[must_use]
+pub const fn plays_cast_sound_locally(kind: UltimateKind) -> bool {
+    matches!(kind, UltimateKind::DemolitionStrike | UltimateKind::BigBlob)
 }
 
 /// Whether a local cast also starts the shoot motion, recoil, launch flash, and camera shake.

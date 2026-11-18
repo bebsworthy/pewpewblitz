@@ -41,6 +41,8 @@ const COMBAT_KEYS: &[AudioCueKey] = &[
     cue_keys::ULTIMATE_REVEALED,
     cue_keys::ULTIMATE_FIELD,
     cue_keys::ULTIMATE_STRIKE,
+    cue_keys::ULTIMATE_STRIKE_CAST,
+    cue_keys::ULTIMATE_BLOB_CAST,
 ];
 
 /// Minimum authoritative ticks between two hit confirmations of the same kind, so a spray or a
@@ -65,9 +67,18 @@ const LOCAL_ATTACK_AUDIO_OCCURRENCE: u64 = 1 << 63;
 /// ids and local shots.
 pub(super) const LOCAL_ULTIMATE_AUDIO_OCCURRENCE: u64 = 3 << 62;
 
-/// The combat producer's activation sound of a locally cast ultimate, when it is a launch.
-/// Sentry and Concealment Field spawn sounds belong to the ability producer.
+/// The combat producer's input-frame sound of a locally cast ultimate: its activation sound when
+/// that is a launch, or the dedicated cast sound of Demolition Strike and Big Blob (whose
+/// authoritative explosion, if any, still plays from its cue). Dash, Sentry, and Concealment
+/// Field sounds belong to the ability producer.
 const fn local_ultimate_activation_cue(kind: UltimateKind) -> Option<AudioCueKey> {
+    if crate::local_attack::plays_cast_sound_locally(kind) {
+        return match kind {
+            UltimateKind::DemolitionStrike => Some(cue_keys::ULTIMATE_STRIKE_CAST),
+            UltimateKind::BigBlob => Some(cue_keys::ULTIMATE_BLOB_CAST),
+            _ => None,
+        };
+    }
     if !crate::local_attack::presents_activation_sound_locally(kind) {
         return None;
     }
@@ -122,8 +133,8 @@ type CombatAudioFighters<'w, 's> = Query<
     With<Fighter>,
 >;
 
-/// Plays the local player's own fire sound and launch-type ultimate activation sound on its
-/// input frame and every other combat cue as it arrives. The authoritative `AttackAccepted` echo
+/// Plays the local player's own fire sound and launch-type ultimate activation sound (or the
+/// Demolition Strike / Big Blob cast sound) on its input frame and every other combat cue as it arrives. The authoritative `AttackAccepted` echo
 /// of a locally presented shot and the activation cue echo of a locally presented cast are
 /// skipped.
 /// Fire sounds follow the shooter's replicated weapon delivery family; hit confirmations are
