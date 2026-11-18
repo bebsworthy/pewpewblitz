@@ -156,7 +156,7 @@ pub(in crate::flow) fn spawn_dashboard(
             game.display_name
         ));
     }
-    navigation.selected = return_focus.0.take().unwrap_or(DASHBOARD_PLAY_INDEX);
+    navigation.focused = return_focus.0.take().unwrap_or(DASHBOARD_PLAY_INDEX);
     let dashboard_notice = notice
         .0
         .take()
@@ -837,7 +837,7 @@ pub(in crate::flow) fn keep_dashboard_focus_visible(
         *prior = None;
         return;
     };
-    let focus_key = (root_entity, *class, navigation.selected);
+    let focus_key = (root_entity, *class, navigation.focused);
     if prior.as_ref() == Some(&focus_key) {
         return;
     }
@@ -846,7 +846,7 @@ pub(in crate::flow) fn keep_dashboard_focus_visible(
     let mut focused_bottom = f32::MIN;
     let mut found = false;
     for (button, node, transform) in &buttons {
-        if button.index != navigation.selected || node.is_empty() {
+        if button.index != navigation.focused || node.is_empty() {
             continue;
         }
         let (_, _, center) = transform.to_scale_angle_translation();
@@ -1080,7 +1080,7 @@ pub(in crate::flow) fn present_dashboard_menu(
     if roots.iter().next().is_some() || *flow.get() != ClientFlow::Dashboard {
         return;
     }
-    navigation.selected = 0;
+    navigation.focused = 0;
     let favorite_label = memberships.iter().flatten().next().map(|target| {
         if persistence
             .state

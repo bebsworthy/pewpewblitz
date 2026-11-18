@@ -78,7 +78,7 @@ pub(in crate::flow) fn spawn_results(
     // The first presentation of a result celebrates it once; resize/replay rebuilds stay still.
     let celebrate = roots.is_empty();
     if celebrate {
-        navigation.selected = usize::from(replay);
+        navigation.focused = usize::from(replay);
     }
     for (e, _) in &roots {
         commands.entity(e).despawn();
@@ -314,7 +314,7 @@ impl ResultsPainter<'_> {
                 .spawn((
                     Surface::Action,
                     SurfaceState {
-                        selected: ours,
+                        current: ours,
                         ..default()
                     },
                     Node {
@@ -373,7 +373,7 @@ impl ResultsPainter<'_> {
         name: &str,
         kills: &str,
         deaths: &str,
-        selected: bool,
+        current: bool,
         heading: bool,
     ) {
         let mut row = p.spawn(Node {
@@ -393,7 +393,7 @@ impl ResultsPainter<'_> {
             row.insert((
                 Surface::Panel,
                 SurfaceState {
-                    selected,
+                    current,
                     ..default()
                 },
             ));

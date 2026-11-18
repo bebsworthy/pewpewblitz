@@ -915,7 +915,7 @@ pub(super) fn commit_flow(
         };
     }
     if let Some(index) = commit.focus_index {
-        navigation.selected = index;
+        navigation.focused = index;
         if commit.celebrate
             && commit.error.is_none()
             && let Some(mut burst) = burst

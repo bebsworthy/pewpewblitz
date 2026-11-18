@@ -95,10 +95,10 @@ pub(in crate::flow) fn keep_weapon_equipment_focus_visible(
         *prior = None;
         return;
     };
-    let focus_key = (area_entity, navigation.selected);
+    let focus_key = (area_entity, navigation.focused);
     if prior.as_ref().map(|(entity, index, _)| (*entity, *index)) != Some(focus_key) {
         // Let a newly spawned grid settle before caching its geometry.
-        *prior = Some((area_entity, navigation.selected, false));
+        *prior = Some((area_entity, navigation.focused, false));
         return;
     }
     if prior.as_ref().is_some_and(|(_, _, applied)| *applied) {
@@ -110,7 +110,7 @@ pub(in crate::flow) fn keep_weapon_equipment_focus_visible(
                 || parents
                     .get(child_of.parent())
                     .is_ok_and(|p| p.parent() == area_entity))
-                && button.index == navigation.selected
+                && button.index == navigation.focused
         })
     else {
         return;
@@ -118,7 +118,7 @@ pub(in crate::flow) fn keep_weapon_equipment_focus_visible(
     if area_node.is_empty() || button_node.is_empty() {
         return;
     }
-    *prior = Some((area_entity, navigation.selected, true));
+    *prior = Some((area_entity, navigation.focused, true));
     let (_, _, area_center) = area_transform.to_scale_angle_translation();
     let (_, _, button_center) = button_transform.to_scale_angle_translation();
     let visible_top = area_center.y - area_node.size().y * 0.5 + 8.0;
@@ -366,7 +366,7 @@ impl EquipmentView<'_> {
         p: &mut ChildSpawnerCommands,
         index: usize,
         action: FlowUiAction,
-        selected: bool,
+        current: bool,
         mut node: Node,
         content: impl FnOnce(&mut ChildSpawnerCommands),
     ) {
@@ -377,7 +377,7 @@ impl EquipmentView<'_> {
         node.row_gap = px(8.0 * self.factor);
         let mut e = p.spawn((
             crate::ui::surface::SurfaceState {
-                selected,
+                current,
                 ..default()
             },
             Button,
@@ -650,7 +650,7 @@ mod tests {
     fn picker_focus_waits_for_layout_then_reveals_lower_row_without_locking_mouse_scroll() {
         let mut app = App::new();
         app.insert_resource(ClientOverlay::WeaponEquipment)
-            .insert_resource(FlowNavigation { selected: 6 })
+            .insert_resource(FlowNavigation { focused: 6 })
             .add_systems(Update, keep_weapon_equipment_focus_visible);
         let area = app
             .world_mut()

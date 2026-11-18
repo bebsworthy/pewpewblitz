@@ -41,7 +41,7 @@ pub(in crate::flow) fn spawn_connecting(
     assets: Option<Res<ClientAssetHandles>>,
     server: Option<Res<AssetServer>>,
 ) {
-    navigation.selected = 0;
+    navigation.focused = 0;
     let address = pending.as_ref().map_or("server", |pending| {
         pending.target.logical_address.canonical()
     });

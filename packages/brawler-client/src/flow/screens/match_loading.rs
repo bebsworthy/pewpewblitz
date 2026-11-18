@@ -55,7 +55,7 @@ pub(in crate::flow) fn spawn_match_loading(
         return;
     }
     if roots.is_empty() {
-        navigation.selected = 0;
+        navigation.focused = 0;
     }
     for (e, _) in &roots {
         commands.entity(e).despawn();

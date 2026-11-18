@@ -1186,7 +1186,7 @@ fn profile_decisions_preserve_exact_notices_overlays_focus_and_draft_errors() {
         app.world().resource::<DashboardNotice>().0.as_deref(),
         Some("Created Test Brawler.")
     );
-    assert_eq!(app.world().resource::<FlowNavigation>().selected, 0);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 0);
 
     app.world_mut().resource_mut::<PendingEditedBrawler>().0 = Some(created.id);
     app.world_mut()
@@ -1202,7 +1202,7 @@ fn profile_decisions_preserve_exact_notices_overlays_focus_and_draft_errors() {
         app.world().resource::<DashboardNotice>().0.as_deref(),
         Some("Profile saved.")
     );
-    assert_eq!(app.world().resource::<FlowNavigation>().selected, 1);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 1);
 
     app.world_mut().resource_mut::<PendingCreatedBrawler>().0 = Some(created.creation_ordinal);
     app.world_mut()
@@ -2011,7 +2011,7 @@ fn returning_to_game_select_preserves_a_still_advertised_game() {
         .set(ClientFlow::GameTypeSelect);
     app.update();
 
-    assert_eq!(app.world().resource::<FlowNavigation>().selected, 1);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 1);
     assert_eq!(
         app.world()
             .resource::<SelectedGameType>()
@@ -2257,13 +2257,13 @@ fn state_scoped_flow_roots_replace_exactly_and_error_waits_for_destination() {
     app.update();
     assert_eq!(count_flow_roots(&mut app), 1);
 
-    app.world_mut().resource_mut::<FlowNavigation>().selected = 7;
+    app.world_mut().resource_mut::<FlowNavigation>().focused = 7;
     app.world_mut()
         .resource_mut::<NextState<ClientFlow>>()
         .set(ClientFlow::Connecting);
     app.update();
     assert_eq!(count_flow_roots(&mut app), 1);
-    assert_eq!(app.world().resource::<FlowNavigation>().selected, 0);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 0);
 
     *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
         kind: FlowErrorKind::Connection,
@@ -2280,7 +2280,7 @@ fn state_scoped_flow_roots_replace_exactly_and_error_waits_for_destination() {
     app.update();
     assert_eq!(count_flow_roots(&mut app), 1);
     assert_eq!(count_error_roots(&mut app), 1);
-    assert_eq!(app.world().resource::<FlowNavigation>().selected, 1_000);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 1_000);
 
     *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
     app.update();
@@ -2664,13 +2664,13 @@ fn controller_can_enter_and_leave_text_editing_without_becoming_trapped() {
         .resource_mut::<NextState<ClientFlow>>()
         .set(ClientFlow::ServerSelect);
     app.update();
-    assert_eq!(app.world().resource::<FlowNavigation>().selected, 2);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 2);
 
     let mut gamepad = Gamepad::default();
     gamepad.digital_mut().press(GamepadButton::DPadUp);
     let gamepad_entity = app.world_mut().spawn(gamepad).id();
     app.update();
-    assert_eq!(app.world().resource::<FlowNavigation>().selected, 1);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 1);
 
     {
         let mut gamepad = app.world_mut().entity_mut(gamepad_entity);
@@ -2760,7 +2760,7 @@ fn dashboard_settings_is_menu_owned_and_mode_card_opens_selection() {
     press_flow_button(&mut app, &FlowUiAction::CloseDashboardMenu);
     app.update();
     assert_eq!(
-        app.world().resource::<FlowNavigation>().selected,
+        app.world().resource::<FlowNavigation>().focused,
         DASHBOARD_MENU_INDEX
     );
     press_flow_button(&mut app, &FlowUiAction::OpenGameTypeSelect);
@@ -2800,7 +2800,7 @@ fn dashboard_chrome_focus_belongs_only_to_the_active_surface() {
     }
     *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::DashboardMenu;
     for selected in 0..2 {
-        app.world_mut().resource_mut::<FlowNavigation>().selected = selected;
+        app.world_mut().resource_mut::<FlowNavigation>().focused = selected;
         app.update();
         for (index, &entity) in buttons.iter().enumerate() {
             let expected_focus = index == selected + 2;
@@ -3523,7 +3523,7 @@ fn confirmation_navigation_starts_safe_and_supports_both_axes() {
     let mut app = configured_customization_app(&membership);
     inject_action(&mut app, FlowUiAction::DeleteBrawler(id));
     app.update();
-    assert_eq!(app.world().resource::<FlowNavigation>().selected, 0);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 0);
     for (key, expected) in [
         (KeyCode::ArrowRight, 1),
         (KeyCode::ArrowLeft, 0),
@@ -3537,7 +3537,7 @@ fn confirmation_navigation_starts_safe_and_supports_both_axes() {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear();
-        assert_eq!(app.world().resource::<FlowNavigation>().selected, expected);
+        assert_eq!(app.world().resource::<FlowNavigation>().focused, expected);
         assert!(
             !app.world()
                 .resource::<super::super::ClientProfileModel>()
@@ -4432,11 +4432,11 @@ fn dashboard_keyboard_moves_and_activation_publish_feedback_with_the_surface_rol
         .collect::<Vec<_>>();
     assert!(enabled.contains(&DASHBOARD_PLAY_INDEX), "{enabled:?}");
     assert!(enabled.contains(&DASHBOARD_PRACTICE_INDEX), "{enabled:?}");
-    app.world_mut().resource_mut::<FlowNavigation>().selected = DASHBOARD_PLAY_INDEX;
+    app.world_mut().resource_mut::<FlowNavigation>().focused = DASHBOARD_PLAY_INDEX;
 
     press_key(&mut app, KeyCode::ArrowDown);
     assert_eq!(
-        app.world().resource::<FlowNavigation>().selected,
+        app.world().resource::<FlowNavigation>().focused,
         DASHBOARD_PRACTICE_INDEX
     );
     assert_eq!(take_ui_feedback(&mut app), vec![UiFeedback::Moved]);
@@ -4994,7 +4994,7 @@ fn dashboard_error_and_cancel_confirmation_use_the_shell_panel_font_and_surfaces
         back,
         [(1_000, FlowUiAction::DismissError, Surface::Secondary)]
     );
-    assert_eq!(app.world().resource::<FlowNavigation>().selected, 1_000);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 1_000);
 
     *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
         kind: FlowErrorKind::Queue,

@@ -31,11 +31,11 @@ pub(in crate::flow) fn scroll_results(
         return;
     };
     scroll.0.y -= delta;
-    let key = (entity, navigation.selected);
+    let key = (entity, navigation.focused);
     if previous.as_ref() != Some(&key)
         && let Some((_, button, bt)) = buttons
             .iter()
-            .find(|(b, _, _)| b.index == navigation.selected)
+            .find(|(b, _, _)| b.index == navigation.focused)
     {
         let (_, _, center) = transform.to_scale_angle_translation();
         let (_, _, bc) = bt.to_scale_angle_translation();

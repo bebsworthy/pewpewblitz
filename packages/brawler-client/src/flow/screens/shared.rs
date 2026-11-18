@@ -11,7 +11,8 @@ use lightyear::prelude::client::Client;
 
 #[derive(Resource, Default)]
 pub(in crate::flow) struct FlowNavigation {
-    pub(in crate::flow) selected: usize,
+    /// Index of the focused `FlowButton`: where keyboard, gamepad or pointer navigation is.
+    pub(in crate::flow) focused: usize,
 }
 
 #[derive(Component)]
@@ -111,7 +112,7 @@ pub(in crate::flow) fn spawn_heading(parent: &mut ChildSpawnerCommands, text: &s
 )]
 #[allow(
     clippy::too_many_arguments,
-    reason = "Screen-owned selection resources feed shared visual states"
+    reason = "Screen-owned choice resources feed shared visual states"
 )]
 pub(in crate::flow) fn update_flow_button_chrome(
     mut commands: Commands,
@@ -140,7 +141,7 @@ pub(in crate::flow) fn update_flow_button_chrome(
         if matches!(dashboard, Some(DashboardButtonStyle::Preview)) {
             continue;
         }
-        let selected = match button.action {
+        let current = match button.action {
             FlowUiAction::SelectGameTypeDraft(index) => game_draft.selected_index == Some(index),
             FlowUiAction::OpenBrawlerDetails(id) => selected_brawler == Some(id),
             FlowUiAction::SelectEquipmentSlot(slot) => equipment
@@ -178,12 +179,12 @@ pub(in crate::flow) fn update_flow_button_chrome(
             | FlowUiAction::MapMakerToggleGrid
             | FlowUiAction::MapMakerClear => map_maker
                 .as_deref()
-                .is_some_and(|runtime| runtime.action_selected(&button.action)),
+                .is_some_and(|runtime| runtime.action_is_current(&button.action)),
             _ => false,
         };
         let next = SurfaceState {
-            focused: overlay_allows_button(&overlay, button) && navigation.selected == button.index,
-            selected,
+            focused: overlay_allows_button(&overlay, button) && navigation.focused == button.index,
+            current,
             inactive: !overlay_allows_button(&overlay, button),
             disabled,
         };

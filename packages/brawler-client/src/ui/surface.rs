@@ -33,11 +33,13 @@ pub(crate) enum Surface {
 #[derive(Component, Clone, Copy, Debug, Default)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "Independent selection, focus, ownership and availability axes must compose"
+    reason = "Independent current-choice, focus, ownership and availability axes must compose"
 )]
 pub(crate) struct SurfaceState {
     pub focused: bool,
-    pub selected: bool,
+    /// The option the player has chosen in a set (game type, brawler, loadout slot, part, Map
+    /// Maker tool). Independent of focus, which is where navigation currently is.
+    pub current: bool,
     pub inactive: bool,
     pub disabled: bool,
 }
@@ -104,9 +106,9 @@ pub(crate) struct SurfaceMaterial {
     /// Gradient top color.
     #[uniform(6)]
     fill_top: Vec4,
-    /// Persistent selection rim.
+    /// Persistent "current choice" mark color.
     #[uniform(7)]
-    selection: Vec4,
+    current_mark: Vec4,
     /// x: press amount (lip collapse), y: shine sweep position or negative when idle, z: burst
     /// flash, w: focus pulse.
     #[uniform(8)]
@@ -118,8 +120,8 @@ impl UiMaterial for SurfaceMaterial {
     }
 }
 
-/// Focus/selection affordance under owner review (BRL-fe7t phase 1). The player shell keeps
-/// `Current`; automation builds select another with `BRAWLER_SURFACE_AFFORDANCE` (`frame`,
+/// Focus and current-choice affordance under owner review (BRL-fe7t phase 1). The player shell
+/// keeps `Current`; automation builds select another with `BRAWLER_SURFACE_AFFORDANCE` (`frame`,
 /// `reticle` or `spotlight`) so the UI gallery and native shell captures can compare them.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(
@@ -130,14 +132,14 @@ impl UiMaterial for SurfaceMaterial {
     )
 )]
 pub(crate) enum SurfaceAffordance {
-    /// Cyan focus frame with pointer; yellow selection rim.
+    /// Cyan focus frame with pointer; yellow current rim.
     #[default]
     Current,
-    /// White outline with inner glow and a small lift; gold selection trim.
+    /// White outline with inner glow and a small lift; current: gold trim and check badge.
     Frame,
-    /// White corner brackets that breathe; gold selection bar along the bottom.
+    /// White corner brackets that breathe; current: gold bar along the bottom and check badge.
     Reticle,
-    /// The focused face lights up under a white bevel; gold selection outline.
+    /// The focused face lights up under a white bevel; current: gold outline and check badge.
     Spotlight,
 }
 
@@ -172,6 +174,14 @@ impl SurfaceAffordance {
             Self::Reticle => 2.0,
             Self::Spotlight => 3.0,
         }
+    }
+
+    /// Whether `role` may show the current-choice mark. Action buttons (Play, Practice, Back)
+    /// only take focus, so the review candidates never mark them; the `Current` look keeps its
+    /// shipped rim on every role until the chosen candidate replaces it.
+    fn marks_current(self, role: Surface) -> bool {
+        self == Self::Current
+            || !matches!(role, Surface::Primary | Surface::Secondary | Surface::Back)
     }
 
     /// Whether a focused surface lifts above its neighbours.
@@ -448,7 +458,7 @@ fn material() -> SurfaceMaterial {
         flags: Vec4::ZERO,
         details: DEFAULT_DETAILS,
         fill_top: PANEL.to_linear().to_vec4(),
-        selection: PLAY_HIGHLIGHT.to_linear().to_vec4(),
+        current_mark: PLAY_HIGHLIGHT.to_linear().to_vec4(),
         motion: Vec4::new(0.0, -1.0, 0.0, 0.0),
     }
 }
@@ -664,7 +674,7 @@ fn stroke_display_text(
 
 /// The single color/interaction contract for every shell surface: the gradient bottom color.
 pub(crate) fn fill(role: Surface, state: SurfaceState, interaction: Interaction) -> Color {
-    let base = if state.selected && role != Surface::Primary {
+    let base = if state.current && role != Surface::Primary {
         PANEL_RAISED
     } else {
         match role {
@@ -757,11 +767,11 @@ fn present(
             style.map_or(BORDER_WIDTH, |style| style.border_width),
         );
         mat.accent = affordance.focus_color(*role).to_linear().to_vec4();
-        mat.selection = PLAY_HIGHLIGHT.to_linear().to_vec4();
+        mat.current_mark = PLAY_HIGHLIGHT.to_linear().to_vec4();
         mat.flags = Vec4::new(
             f32::from(state.focused && !state.disabled && !state.inactive),
             f32::from(*role == Surface::Quiet),
-            f32::from(state.selected && !state.disabled),
+            f32::from(state.current && !state.disabled && affordance.marks_current(*role)),
             affordance.index(),
         );
         mat.details = style.map_or(DEFAULT_DETAILS, |style| {
@@ -788,9 +798,9 @@ mod tests {
     use core::time::Duration;
 
     #[test]
-    fn selected_focus_keeps_choice_and_inactive_ignores_hover() {
+    fn current_focus_keeps_choice_and_inactive_ignores_hover() {
         let state = SurfaceState {
-            selected: true,
+            current: true,
             focused: true,
             ..default()
         };
@@ -809,7 +819,7 @@ mod tests {
         assert_eq!(
             fill(Surface::Primary, state, Interaction::None),
             PLAY,
-            "the single primary action keeps its play fill when selected"
+            "the single primary action keeps its play fill when current"
         );
         assert_eq!(
             fill(Surface::Back, SurfaceState::default(), Interaction::None),
@@ -1034,6 +1044,21 @@ mod tests {
         assert!((lifted(true, false, SurfaceAffordance::Frame) - 1.0).abs() < f32::EPSILON);
         assert!((lifted(false, true, SurfaceAffordance::Frame) - 1.0).abs() < f32::EPSILON);
         assert!((lifted(false, false, SurfaceAffordance::Current) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn review_candidates_never_mark_action_buttons_as_current() {
+        for candidate in [
+            SurfaceAffordance::Frame,
+            SurfaceAffordance::Reticle,
+            SurfaceAffordance::Spotlight,
+        ] {
+            for role in [Surface::Primary, Surface::Secondary, Surface::Back] {
+                assert!(!candidate.marks_current(role), "{candidate:?} {role:?}");
+            }
+            assert!(candidate.marks_current(Surface::Card));
+        }
+        assert!(SurfaceAffordance::Current.marks_current(Surface::Primary));
     }
 
     #[test]

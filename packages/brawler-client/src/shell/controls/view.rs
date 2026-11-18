@@ -308,11 +308,10 @@ pub(in crate::shell) fn present_values(
         let ShellControlId::Input(id) = button.id else {
             continue;
         };
-        chrome.selected = matches!(
+        chrome.current = matches!(
             (id, state.page),
             (InputControl::KeyboardTab, InputPage::Keyboard)
-        ) || (id == InputControl::GamepadTab
-            && state.page != InputPage::Keyboard);
+        ) || (id == InputControl::GamepadTab && state.page != InputPage::Keyboard);
         if let Some(target) = id.target() {
             *value = ControlValue::Binding(if state.capture.control() == Some(id) {
                 if matches!(state.capture, Capture::Arming(..)) {

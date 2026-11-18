@@ -613,7 +613,7 @@ pub(in crate::flow) fn animate_practice_maps(
         node.left = px(-carousel.offset);
     }
     for (control, mut state) in &mut buttons {
-        let selected = match *control {
+        let current = match *control {
             PracticeControl::Map(slot) => carousel
                 .maps
                 .get(slot % carousel.maps.len().max(1))
@@ -634,7 +634,7 @@ pub(in crate::flow) fn animate_practice_maps(
                 _ => false,
             };
         *state = SurfaceState {
-            selected: selected && matches!(control, PracticeControl::Map(_)),
+            current: current && matches!(control, PracticeControl::Map(_)),
             focused,
             inactive: *overlay != ClientOverlay::None,
             disabled: practice.pending(),

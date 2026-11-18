@@ -81,7 +81,7 @@ pub(in crate::flow) fn present_brawler_details(
         return;
     }
     if roots.is_empty() && !confirmation {
-        screen.navigation.selected = 2;
+        screen.navigation.focused = 2;
     }
     for (entity, _) in &roots {
         commands.entity(entity).despawn();

@@ -135,7 +135,7 @@ pub(in crate::flow) fn spawn_server_select_root(
     assets: Option<&ClientAssetHandles>,
     server: Option<&AssetServer>,
 ) {
-    navigation.selected = requested_selection.unwrap_or(2);
+    navigation.focused = requested_selection.unwrap_or(2);
     commands
         .spawn((
             FlowRoot,

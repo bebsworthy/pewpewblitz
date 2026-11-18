@@ -116,7 +116,7 @@ pub(in crate::flow) fn present_flow_error_overlay(
     for (entity, _) in &roots {
         commands.entity(entity).despawn();
     }
-    navigation.selected = ERROR_BUTTON_BASE;
+    navigation.focused = ERROR_BUTTON_BASE;
     if error.kind == FlowErrorKind::Connection && error.return_flow == ClientFlow::ServerSelect {
         spawn_connection_recovery(&mut commands, error, assets.as_deref(), server.as_deref());
         return;
@@ -388,7 +388,7 @@ pub(in crate::flow) fn present_cancel_confirmation(
     if roots.iter().next().is_some() || *flow.get() != ClientFlow::MatchLoading {
         return;
     }
-    navigation.selected = 0;
+    navigation.focused = 0;
     let assets = assets.as_deref();
     commands
         .spawn((

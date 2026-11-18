@@ -39,7 +39,7 @@ pub(crate) enum ControlValue {
 #[derive(Component, Default)]
 pub(crate) struct ControlState {
     pub(crate) focused: bool,
-    pub(crate) selected: bool,
+    pub(crate) current: bool,
     pub(crate) inactive: bool,
 }
 
@@ -77,7 +77,7 @@ pub(super) struct FocusMarker(Entity);
 #[derive(Component)]
 struct SwitchTrack(Entity);
 
-/// Selected value and navigation focus are deliberately independent.
+/// The current value (the chosen option) and navigation focus are deliberately independent.
 pub(crate) fn colors(
     state: &ControlState,
     interaction: Interaction,
@@ -86,7 +86,7 @@ pub(crate) fn colors(
     if disabled {
         return (PANEL.mix(&INK, 0.35), INK.with_alpha(0.35));
     }
-    let background = if state.selected { PANEL_RAISED } else { PANEL };
+    let background = if state.current { PANEL_RAISED } else { PANEL };
     if state.inactive {
         return (background, INK);
     }
@@ -94,7 +94,7 @@ pub(crate) fn colors(
         (background.mix(&INK, 0.12), ACCENT)
     } else if state.focused {
         (
-            if state.selected {
+            if state.current {
                 PANEL_RAISED
             } else {
                 PANEL.mix(&ACCENT, 0.18)
@@ -378,7 +378,7 @@ fn sync_surface_states(
     for (state, disabled, mut surface) in &mut controls {
         *surface = super::surface::SurfaceState {
             focused: state.focused,
-            selected: state.selected,
+            current: state.current,
             inactive: state.inactive,
             disabled,
         };
@@ -399,7 +399,7 @@ mod tests {
                 Button,
                 ControlState {
                     focused: true,
-                    selected: true,
+                    current: true,
                     inactive: false,
                 },
                 MaterialNode::<super::super::surface::SurfaceMaterial>(Handle::default()),
@@ -462,13 +462,13 @@ mod tests {
     }
 
     #[test]
-    fn focused_category_still_shows_its_selection() {
+    fn focused_category_still_shows_it_is_current() {
         let mut state = ControlState {
             focused: true,
             ..default()
         };
         let before = colors(&state, Interaction::None, false);
-        state.selected = true;
+        state.current = true;
         let after = colors(&state, Interaction::None, false);
         assert_ne!(before.0, after.0);
         assert_eq!(after, (PANEL_RAISED, ACCENT));
@@ -508,9 +508,9 @@ mod tests {
     }
 
     #[test]
-    fn selection_and_focus_have_distinct_treatments() {
-        let selected = ControlState {
-            selected: true,
+    fn current_and_focus_have_distinct_treatments() {
+        let current = ControlState {
+            current: true,
             ..default()
         };
         let focused = ControlState {
@@ -518,11 +518,11 @@ mod tests {
             ..default()
         };
         assert_ne!(
-            colors(&selected, Interaction::None, false),
+            colors(&current, Interaction::None, false),
             colors(&focused, Interaction::None, false)
         );
         let inactive = ControlState {
-            selected: true,
+            current: true,
             focused: true,
             inactive: true,
         };
@@ -531,7 +531,7 @@ mod tests {
             (PANEL_RAISED, INK)
         );
         assert_eq!(
-            colors(&selected, Interaction::None, true),
+            colors(&current, Interaction::None, true),
             colors(&focused, Interaction::Pressed, true)
         );
     }

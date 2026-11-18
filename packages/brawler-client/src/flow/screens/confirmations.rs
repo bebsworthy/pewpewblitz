@@ -102,7 +102,7 @@ pub(in crate::flow) fn present_confirmations(
         return;
     }
     if !roots.iter().any(|(_, old)| old.overlay == *overlay) {
-        navigation.selected = 0;
+        navigation.focused = 0;
     }
     for (e, _) in &roots {
         commands.entity(e).despawn();
@@ -409,11 +409,11 @@ pub(in crate::flow) fn scroll_confirmations(
         return;
     };
     scroll.0.y -= delta;
-    let key = (entity, navigation.selected);
+    let key = (entity, navigation.focused);
     if previous.as_ref() != Some(&key)
         && let Some((_, button, bt)) = buttons
             .iter()
-            .find(|(b, _, _)| b.index == navigation.selected)
+            .find(|(b, _, _)| b.index == navigation.focused)
     {
         let (_, _, center) = transform.to_scale_angle_translation();
         let (_, _, bc) = bt.to_scale_angle_translation();

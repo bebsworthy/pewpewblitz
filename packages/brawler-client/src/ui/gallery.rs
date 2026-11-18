@@ -60,6 +60,7 @@ pub fn build_ui_gallery_app() -> App {
         Update,
         (
             affordance_board::cycle_affordance,
+            affordance_board::switch_page,
             fit_gallery_viewport,
             interact,
             scroll_gallery,
@@ -274,7 +275,7 @@ fn setup_board(mut commands: Commands, assets: Res<AssetServer>) {
                 ..default()
             },
         ))
-        .with_children(|root| affordance_board::spawn(root, &font));
+        .with_children(|root| affordance_board::spawn(root, &font, &assets));
 }
 
 #[allow(clippy::needless_pass_by_value, reason = "Bevy gallery setup")]
@@ -325,20 +326,20 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
             columns.spawn((GalleryColumn, column())).with_children(|right| {
                 heading(right, &font, "STATE REFERENCE");
                 spawn_control(right, &font, "Normal", ControlValue::Action);
-                let selected = spawn_control(right, &font, "Selected category", ControlValue::Tab);
-                right.commands().entity(selected).insert(ControlState { selected: true, ..default() });
+                let current = spawn_control(right, &font, "Current category", ControlValue::Tab);
+                right.commands().entity(current).insert(ControlState { current: true, ..default() });
                 let focused = spawn_control(right, &font, "Navigation focus", ControlValue::Action);
                 right.commands().entity(focused).insert(ControlState { focused: true, ..default() });
                 let disabled = spawn_control(right, &font, "Disabled", ControlValue::Action);
                 right.commands().entity(disabled).insert(InteractionDisabled);
                 let inactive = spawn_control(right, &font, "Inactive surface", ControlValue::Tab);
-                right.commands().entity(inactive).insert(ControlState { selected: true, focused: true, inactive: true });
+                right.commands().entity(inactive).insert(ControlState { current: true, focused: true, inactive: true });
                 heading(right, &font, "SHARED SURFACE STATES");
                 for (label, state, disabled) in [
-                    ("Selected and focused", ControlState{selected:true,focused:true,..default()}, false),
+                    ("Current and focused", ControlState{current:true,focused:true,..default()}, false),
                     ("Focused play action", ControlState{focused:true,..default()}, false),
                     ("Disabled action", ControlState::default(), true),
-                    ("Inactive selected card", ControlState{selected:true,focused:true,inactive:true}, false),
+                    ("Inactive current card", ControlState{current:true,focused:true,inactive:true}, false),
                     ("Held press (squash, lip collapse)", ControlState::default(), false),
                     ("Reward burst at peak (pop, shine, flash)", ControlState::default(), false),
                 ] {
@@ -496,7 +497,7 @@ fn interact(
         if direction != 0 || activate || clicked {
             match &mut *value {
                 ControlValue::Toggle(on) if direction != 0 || activate || clicked => *on = !*on,
-                ControlValue::Tab if activate || clicked => state.selected = !state.selected,
+                ControlValue::Tab if activate || clicked => state.current = !state.current,
                 ControlValue::Slider { fraction, label } if direction != 0 => {
                     *fraction = (*fraction + f32::from(direction) * 0.1).clamp(0.0, 1.0);
                     *label = format!("{:.0}%", 80.0 + *fraction * 40.0);

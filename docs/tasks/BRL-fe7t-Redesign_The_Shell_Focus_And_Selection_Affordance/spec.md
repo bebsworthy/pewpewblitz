@@ -35,3 +35,68 @@ Design options first (mockups in the UI gallery), e.g. lift/scale + glow, inner 
 - Questions: q-y21kgwz (variant; Frame recommended), q-4yrvg6g (focus-visible modality rule; hide after touch, show after key/gamepad recommended).
 - Gates: `just lint` pass (target/fe7t/lint.log), `just test` pass, 2565 tests (target/fe7t/test.log). New test: `frame_affordance_lifts_focus_except_under_reduced_motion_or_preview`.
 - Not verified: animated pulse/lift timing only by code and tests (captures are stills); no device check (phase 2).
+
+
+# Owner feedback 2026-11-18 (phase 1 review): scope change
+- **Focus and "selected" were presented as two states of every button.** That is wrong for action buttons (Play, Connect, Back): they only have focus, which the mouse (hover), keyboard and gamepad all move. The review board must not show a selected/current state on action buttons at all.
+- **"Selected" means the current choice in a set of options.** It is only real where the shell keeps a choice separate from focus: the game type draft on Game Select, the current brawler, the active loadout slot, the equipped part, and the active Map Maker palette tool (see `flow/screens/shared.rs`). The design sample for that state must use those real components, not buttons.
+- **Rename:** the chosen-option state becomes **current** (`ControlState`/`SurfaceState` field and its call sites). The navigation field `navigation.selected`, which is really focus, becomes `focused` (or similar). Code then never uses "selected" for two concepts.
+- **New review board:** (1) action buttons (Primary, Secondary, with icon): rest / focus / pressed / disabled per candidate focus look; (2) choice components as they appear in the real screens (game type card, brawler row, loadout slot, part row, palette tool): rest / current / focus / current + focus / disabled, with the "current" mark designed for each candidate; (3) the touch row, focus hidden after a tap. Re-render the sheets for Frame, Reticle and Spotlight and replace the ticket assets. Then ask the owner again, with the questions rewritten to match.
+
+
+# Phase 1 rework after owner review, 2026-11-18
+Feedback handling: the scope change (rename, new board, new sheets, rewritten questions) is **implemented** below. Nothing is deferred to another ticket yet; the phase 2 notes list what the chosen look must clean up.
+
+## Rename (behaviour unchanged)
+- `SurfaceState::selected` and `ControlState::selected` became `current`: the option the player has chosen in a set. All call sites were renamed with them, including the screen helpers' `selected: bool` parameters, `Choice::current` (game_select), and `MapMakerRuntime::action_selected` → `action_is_current`. The shader's `selection` uniform became `current_mark`, and `flags.z` is now documented as current.
+- `FlowNavigation::selected` (navigation focus) became `focused` everywhere in flow and its tests. The match menu's `MatchMenuState::selected` is also focus, so it became `focused` too (a small local rename).
+- Left as they are: these are domain choices or placement selection, a separate concept: `selected_brawler_id`, `selected_slot`, `selected_index`, `selected_map`, Map Maker placement `selection`, and `PaletteSelectionMark`. No wire or protocol types changed. `docs/design/player-shell/ui-toolkit.md` interaction-state table: "Selected" became "Current", and focus is now defined as navigation (`FlowNavigation::focused`).
+
+## Action buttons never get a current mark
+- Production does set current on action roles: Map Maker's `MapMakerToggleValidation` is `Surface::Primary` and is current while the validation panel is open. `ConfirmGameType` is spawned with current = true, though the chrome system overwrites it every frame.
+- New `SurfaceAffordance::marks_current(role)`: the Frame, Reticle and Spotlight candidates never draw the current mark on `Primary`, `Secondary` or `Back`. The shipped `Current` look keeps its rim on every role, so the player shell is unchanged.
+- Test: `review_candidates_never_mark_action_buttons_as_current`.
+
+## Current mark per candidate (decision)
+- All three candidates add the same "this is your choice" sign: a gold disc with an ink check in the top-right corner of the face (`current_badge` in `shell_surface.wgsl`). It is drawn only on faces at least 56 px tall.
+- **Why 56 px:** at 34 px the badge covered the "2v2" label on the Game Select team-size chips. Small chips, tabs and settings categories now keep only the candidate's trim, bar or outline.
+- Each candidate keeps its own trim beside the badge:
+  - Frame: gold inner trim.
+  - Reticle: gold bottom bar.
+  - Spotlight: gold outline.
+- Focus never uses gold, so "chosen" (gold plus check) stays separate from "where I am" (white or lit) on the same card.
+
+## Review board (rebuilt)
+`ui/gallery/affordance_board.rs` now has two pages. `BRAWLER_UI_GALLERY_AFFORDANCE_BOARD=1 just ui-gallery` opens the actions page; the value `choices` opens the other page. B switches pages and V cycles the looks.
+- **Actions page:** Play (Primary), Practice (Secondary), and the Map Maker FIT icon button (Dark + `MAP_ACTION`), shown at rest / focus / pressed / disabled. It also has a reduced-motion Practice row and a touch row (Play after a tap, focus hidden).
+- **Choices page:** game type card, brawler card, loadout slot, part card and Map Maker PLACE tool, shown at rest / current / focus / current + focus / disabled. Disabled shows "never disabled" for game type cards and tools, which the real screens never disable. The page also has a touch row (brawler card with focus hidden).
+- **Why the board doesn't reuse the screen helpers:** they need `FlowButton`/`FlowUiAction` (private to flow) plus profile, catalog and 3D preview data. Each cell mirrors the real role (`Surface::Card`, as `surface_role` and `tool_button` give), the style (`SurfaceStyle::MAP_TOOL` for the tool), the content order and the real icons (mode pennant, part illustrations, `place`). Sizes are scaled to fit 6 rows on the 914x411 viewport, and the brawler card leaves out its 3D weapon preview.
+
+## Evidence
+- Board captures: `target/fe7t/capture-board.sh` → `target/fe7t/board/{current,frame,reticle,spotlight}-{actions,choices}-{1280x720,914x411}.png`.
+- Live shell captures re-run for all four looks with `target/fe7t/shell.sh` (scratch supervisor 127.0.0.1:5031, data under target/; 12/12 passed): dashboard, settings and game-select in `target/fe7t/shell/`.
+- Sheets were rebuilt with `uv run --with pillow python target/fe7t/sheet.py target/fe7t assets/brawler/ui/fonts/lilita-one-regular.ttf` → `target/fe7t/fe7t-{frame,reticle,spotlight}-sheet.png`. Each sheet shows the shipped look on the left and the candidate on the right: both board pages at 1280x720 and 914x411, then the live screens.
+- Ticket assets a-000019..21 removed; new assets a-000022 (frame), a-000023 (reticle), a-000024 (spotlight).
+- I opened the sheets and checked them:
+  - The labels are legible at both sizes.
+  - The touch rows show no focus.
+  - Action buttons show no current mark in any candidate.
+  - On the live Game Select screen, the chosen game card carries the badge and the 2v2 chip shows only its trim.
+
+## Questions
+- q-y21kgwz superseded: answered as agent bookkeeping (not an owner choice) and resolved.
+- New q-rc8skq9 asks which focus look to use, with each candidate's current mark.
+- q-4yrvg6g (touch hides focus) is kept; its wording now uses focus/current and `navigation.focused`.
+
+## Phase 2 notes (for whichever look is chosen)
+- Map Maker `palette_arrow_button` sets `current: !disabled` to mean "enabled". That is a misuse, and it would put the current mark on the palette arrows. Replace it with plain enabled styling when implementing.
+- Map Maker Clear (`Surface::Danger`) uses current for "armed". Results use current for "your team" banners and for your own row. These are not choices; decide their treatment (likely a distinct armed state, or no mark) when implementing.
+- The validation toggle (Primary) loses its open-state rim under the candidates; the open panel itself shows the state.
+
+## Mistakes
+- The first badge threshold (34 px) collided with short chip labels. I found it only on the live Game Select capture, because the board has no chip-sized choice. Prevention: check the live screens, not just the board, whenever a shader mark is added.
+
+## Gates
+- `just lint`: pass (`target/fe7t/lint.log`).
+- `just test`: pass, 2575 tests, 0 failed (`target/fe7t/test.log`). The new test is `review_candidates_never_mark_action_buttons_as_current`. Renamed tests: `current_focus_keeps_choice_and_inactive_ignores_hover`, `focused_category_still_shows_it_is_current`, and `current_and_focus_have_distinct_treatments`.
+- Not verified: the animated pulse and lift (the captures are stills), and any check on a device (that is phase 2).

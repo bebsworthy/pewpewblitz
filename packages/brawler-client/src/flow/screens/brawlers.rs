@@ -373,7 +373,7 @@ impl BrawlerBrowserArt<'_> {
         parent: &mut ChildSpawnerCommands,
         index: usize,
         action: FlowUiAction,
-        selected: bool,
+        current: bool,
         disabled: bool,
         node: Node,
     ) -> Entity {
@@ -385,7 +385,7 @@ impl BrawlerBrowserArt<'_> {
                 error_action: true,
             },
             crate::ui::surface::SurfaceState {
-                selected,
+                current,
                 ..default()
             },
             node,
@@ -401,7 +401,7 @@ fn spawn_brawler_list_row(
     parent: &mut ChildSpawnerCommands,
     index: usize,
     brawler: &brawler::profiles::SavedBrawler,
-    selected: bool,
+    current: bool,
     catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
     art: &BrawlerBrowserArt,
     disabled: bool,
@@ -411,7 +411,7 @@ fn spawn_brawler_list_row(
         parent,
         index,
         FlowUiAction::OpenBrawlerDetails(brawler.id),
-        selected,
+        current,
         disabled,
         browser_card_node(art.card_height),
     );
@@ -421,7 +421,7 @@ fn spawn_brawler_list_row(
         .insert(AccessibleLabel::new(format!(
             "{}{}: {summary}",
             brawler.name,
-            if selected { ", selected for play" } else { "" }
+            if current { ", selected for play" } else { "" }
         )))
         .with_children(|card| {
             card.spawn(Node {
@@ -552,7 +552,7 @@ pub(in crate::flow) fn present_brawler_list(
     }
     let retained_scroll = scroll_areas.iter().next().cloned().unwrap_or_default();
     if roots.is_empty() {
-        navigation.selected = snapshot
+        navigation.focused = snapshot
             .selected_brawler_id
             .and_then(|selected| snapshot.brawlers.iter().position(|b| b.id == selected))
             .map_or(0, |i| i + 1);
@@ -653,7 +653,7 @@ pub(in crate::flow) fn keep_brawler_list_focus_visible(
         *prior = None;
         return;
     };
-    let focus_key = (area_entity, navigation.selected);
+    let focus_key = (area_entity, navigation.focused);
     if prior.as_ref() == Some(&focus_key) {
         return;
     }
@@ -663,7 +663,7 @@ pub(in crate::flow) fn keep_brawler_list_focus_visible(
                 || parents
                     .get(child_of.parent())
                     .is_ok_and(|p| p.parent() == area_entity))
-                && button.index == navigation.selected
+                && button.index == navigation.focused
         })
     else {
         return;
@@ -740,14 +740,14 @@ pub(in crate::flow) fn keep_brawler_details_focus_visible(
         *prior = None;
         return;
     };
-    let focus_key = (area_entity, navigation.selected);
+    let focus_key = (area_entity, navigation.focused);
     if prior.as_ref() == Some(&focus_key) {
         return;
     }
     *prior = Some(focus_key);
     let Some((_, _, button_node, button_transform)) =
         buttons.iter().find(|(entity, button, _, _)| {
-            button.index == navigation.selected
+            button.index == navigation.focused
                 && parents
                     .iter_ancestors(*entity)
                     .any(|ancestor| ancestor == area_entity)

@@ -952,7 +952,7 @@ impl MapMakerRuntime {
         self.render_revision = self.render_revision.wrapping_add(1).max(1);
     }
 
-    pub(in crate::flow) fn action_selected(&self, action: &FlowUiAction) -> bool {
+    pub(in crate::flow) fn action_is_current(&self, action: &FlowUiAction) -> bool {
         match action {
             FlowUiAction::MapMakerSelectAsset(index) => self.palette_index == *index,
             FlowUiAction::MapMakerUsePlaceTool => self.tool == EditorTool::Place,
@@ -2512,7 +2512,7 @@ fn tool_button(
     action: FlowUiAction,
     label: &str,
     icon: Handle<Image>,
-    selected: bool,
+    current: bool,
 ) {
     parent
         .spawn((
@@ -2535,7 +2535,7 @@ fn tool_button(
             Surface::Card,
             SurfaceStyle::MAP_TOOL,
             SurfaceState {
-                selected,
+                current,
                 ..default()
             },
         ))
@@ -3149,7 +3149,7 @@ fn search_button(
     index: usize,
     action: FlowUiAction,
     label: &str,
-    selected: bool,
+    current: bool,
 ) {
     parent
         .spawn((
@@ -3172,7 +3172,7 @@ fn search_button(
             Surface::Dark,
             SurfaceStyle::MAP_ASSET,
             SurfaceState {
-                selected,
+                current,
                 ..default()
             },
         ))
@@ -3224,7 +3224,7 @@ fn palette_arrow_button(
         Surface::Dark,
         SurfaceStyle::MAP_ACTION,
         SurfaceState {
-            selected: !disabled,
+            current: !disabled,
             disabled,
             ..default()
         },
@@ -3260,7 +3260,7 @@ fn palette_category_button(
     index: usize,
     action: FlowUiAction,
     label: &str,
-    selected: bool,
+    current: bool,
 ) {
     parent
         .spawn((
@@ -3282,7 +3282,7 @@ fn palette_category_button(
             Surface::Dark,
             SurfaceStyle::MAP_TAB,
             SurfaceState {
-                selected,
+                current,
                 ..default()
             },
         ))
@@ -3325,7 +3325,7 @@ fn palette_item_button(
             Surface::Dark,
             SurfaceStyle::MAP_ASSET,
             SurfaceState {
-                selected: palette_index == selected_index,
+                current: palette_index == selected_index,
                 ..default()
             },
         ))
@@ -3432,9 +3432,9 @@ fn compact_action_button(
     action: FlowUiAction,
     label: &str,
     _color: Color,
-    selected: bool,
+    current: bool,
 ) {
-    compact_action_button_disabled(parent, assets, index, action, label, selected, false);
+    compact_action_button_disabled(parent, assets, index, action, label, current, false);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3448,7 +3448,7 @@ fn compact_icon_action_button_disabled(
     label_marker: Option<MapMakerValueLabel>,
     icon_path: String,
     min_width: f32,
-    selected: bool,
+    current: bool,
     disabled: bool,
 ) {
     let role = if matches!(
@@ -3483,7 +3483,7 @@ fn compact_icon_action_button_disabled(
         role,
         SurfaceStyle::MAP_ACTION,
         SurfaceState {
-            selected,
+            current,
             disabled,
             ..default()
         },
@@ -3527,7 +3527,7 @@ fn compact_action_button_disabled(
     index: usize,
     action: FlowUiAction,
     label: &str,
-    selected: bool,
+    current: bool,
     disabled: bool,
 ) {
     let role = surface_role(&action);
@@ -3550,7 +3550,7 @@ fn compact_action_button_disabled(
         role,
         SurfaceStyle::MAP_ACTION,
         SurfaceState {
-            selected,
+            current,
             disabled,
             ..default()
         },
@@ -3668,11 +3668,11 @@ mod tests {
     #[test]
     fn editor_control_selection_is_owned_by_runtime_state() {
         let runtime = MapMakerRuntime::default();
-        assert!(runtime.action_selected(&FlowUiAction::MapMakerUsePlaceTool));
-        assert!(runtime.action_selected(&FlowUiAction::MapMakerSelectAsset(0)));
-        assert!(runtime.action_selected(&FlowUiAction::MapMakerToggleGrid));
-        assert!(!runtime.action_selected(&FlowUiAction::MapMakerUseEraseTool));
-        assert!(!runtime.action_selected(&FlowUiAction::MapMakerCycleSymmetry));
+        assert!(runtime.action_is_current(&FlowUiAction::MapMakerUsePlaceTool));
+        assert!(runtime.action_is_current(&FlowUiAction::MapMakerSelectAsset(0)));
+        assert!(runtime.action_is_current(&FlowUiAction::MapMakerToggleGrid));
+        assert!(!runtime.action_is_current(&FlowUiAction::MapMakerUseEraseTool));
+        assert!(!runtime.action_is_current(&FlowUiAction::MapMakerCycleSymmetry));
         assert_eq!(
             usize::from(PALETTE_PAGE_DELTA.unsigned_abs()),
             VISIBLE_PALETTE_ITEMS

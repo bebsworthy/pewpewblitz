@@ -34,7 +34,7 @@ pub(in crate::flow) fn spawn_queue(
     let Some(membership) = queue.membership() else {
         return;
     };
-    navigation.selected = 0;
+    navigation.focused = 0;
     let lobby = memberships.iter().next();
     commands
         .spawn((

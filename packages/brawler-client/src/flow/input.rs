@@ -295,10 +295,10 @@ pub(super) fn collect_flow_input(
         }
         // Focus follows the press; the action waits for an undragged release.
         if *interaction == Interaction::Pressed {
-            navigation.selected = button.index;
+            navigation.focused = button.index;
         }
         if activation.activated() {
-            navigation.selected = button.index;
+            navigation.focused = button.index;
             queue_ui_action(&mut actions, button.action.clone());
         }
     }
@@ -441,7 +441,7 @@ pub(super) fn collect_flow_input(
     }
     if !available.is_empty() {
         if *flow.get() == ClientFlow::Dashboard && matches!(*overlay, ClientOverlay::None) {
-            navigation.selected = repair_dashboard_focus(navigation.selected, &available);
+            navigation.focused = repair_dashboard_focus(navigation.focused, &available);
             let direction = if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
                 || pad_pressed(GamepadButton::DPadDown)
             {
@@ -464,7 +464,7 @@ pub(super) fn collect_flow_input(
             if let Some(direction) = direction {
                 let class = dashboard_layout.iter().next().copied().unwrap_or_default();
                 let next =
-                    dashboard_focus_neighbor(class, navigation.selected, direction, &available);
+                    dashboard_focus_neighbor(class, navigation.focused, direction, &available);
                 move_focus(&mut navigation, next, &mut feedback);
             }
         } else if (*flow.get() == ClientFlow::GameTypeSelect
@@ -477,8 +477,8 @@ pub(super) fn collect_flow_input(
                     | ClientOverlay::BrawlerEditor
             )
         {
-            if !available.contains(&navigation.selected) {
-                navigation.selected = available[0];
+            if !available.contains(&navigation.focused) {
+                navigation.focused = available[0];
             }
             let direction = if keyboard.any_just_pressed([KeyCode::ArrowLeft, KeyCode::KeyA])
                 || pad_pressed(GamepadButton::DPadLeft)
@@ -508,16 +508,16 @@ pub(super) fn collect_flow_input(
                         | ClientOverlay::BrawlerCreation
                         | ClientOverlay::BrawlerEditor
                 ) {
-                    equipment_neighbor(navigation.selected, direction, &available, columns)
+                    equipment_neighbor(navigation.focused, direction, &available, columns)
                 } else {
-                    game_selection_neighbor(navigation.selected, direction, &available, columns)
+                    game_selection_neighbor(navigation.focused, direction, &available, columns)
                 };
                 move_focus(&mut navigation, next, &mut feedback);
             }
         } else {
             let position = available
                 .iter()
-                .position(|index| *index == navigation.selected)
+                .position(|index| *index == navigation.focused)
                 .unwrap_or(0);
             let confirmation = *flow.get() == ClientFlow::Results
                 || matches!(
@@ -552,7 +552,7 @@ pub(super) fn collect_flow_input(
             .iter()
             .filter(|(button, _, _, disabled, _)| {
                 !*disabled
-                    && button.index == navigation.selected
+                    && button.index == navigation.focused
                     && overlay_allows_button(&overlay, button)
             })
             .min_by_key(|(button, _, _, _, _)| button.index)
@@ -614,8 +614,8 @@ fn move_focus(
     next: usize,
     feedback: &mut MessageWriter<UiFeedback>,
 ) {
-    if navigation.selected != next {
-        navigation.selected = next;
+    if navigation.focused != next {
+        navigation.focused = next;
         feedback.write(UiFeedback::Moved);
     }
 }

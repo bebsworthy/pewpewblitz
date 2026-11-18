@@ -160,7 +160,7 @@ pub(in crate::flow) fn spawn_game_type_select(
         .selected_index
         .and_then(|i| membership.game_types.get(i));
     if entering {
-        navigation.selected = selected.map_or(0, mode_index);
+        navigation.focused = selected.map_or(0, mode_index);
     }
     let factor = (width / 1600.0).min(height / 900.0).clamp(0.6, 1.25);
     commands
@@ -270,7 +270,7 @@ fn spawn_header(
                     &Choice {
                         index: GAME_TYPE_BACK_INDEX,
                         action: FlowUiAction::CancelGameType,
-                        selected: false,
+                        current: false,
                         card: false,
                         label: "Back",
                     },
@@ -303,7 +303,7 @@ fn label(
 struct Choice<'a> {
     index: usize,
     action: FlowUiAction,
-    selected: bool,
+    current: bool,
     card: bool,
     label: &'a str,
 }
@@ -323,7 +323,7 @@ fn choice(
                 super::shared::surface_role(&choice.action)
             },
             crate::ui::surface::SurfaceState {
-                selected: choice.selected,
+                current: choice.current,
                 ..default()
             },
             FlowButton {
@@ -397,7 +397,7 @@ fn spawn_cards(
                     &Choice {
                         index: mode,
                         action: FlowUiAction::SelectGameTypeDraft(index),
-                        selected: active,
+                        current: active,
                         card: true,
                         label: &name,
                     },
@@ -493,7 +493,7 @@ fn spawn_variants(
                 &Choice {
                     index: GAME_TYPE_CONFIRM_INDEX,
                     action: FlowUiAction::ConfirmGameType,
-                    selected: true,
+                    current: true,
                     card: false,
                     label: "SELECT GAME",
                 },
@@ -551,7 +551,7 @@ fn spawn_size_choices(
             &Choice {
                 index: 100 + position,
                 action: FlowUiAction::SelectGameTypeDraft(index),
-                selected: selected == Some(index),
+                current: selected == Some(index),
                 card: false,
                 label: &text,
             },
@@ -615,14 +615,14 @@ pub(in crate::flow) fn keep_game_type_focus_visible(
         *prior = None;
         return;
     };
-    let focus_key = (root_entity, navigation.selected);
+    let focus_key = (root_entity, navigation.focused);
     if prior.as_ref() == Some(&focus_key) {
         return;
     }
     *prior = Some(focus_key);
     let Some((_, focused_node, focused_transform)) = buttons
         .iter()
-        .find(|(button, _, _)| button.index == navigation.selected)
+        .find(|(button, _, _)| button.index == navigation.focused)
     else {
         return;
     };

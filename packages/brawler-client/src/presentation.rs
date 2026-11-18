@@ -9,7 +9,7 @@ use bevy::prelude::*;
 
 #[derive(Resource, Default)]
 pub(super) struct MatchMenuState {
-    selected: usize,
+    focused: usize,
     scoreboard_latched: bool,
     was_open: bool,
 }
@@ -110,7 +110,7 @@ fn handle_match_menu_input(
     }
     let open = matches!(*context, ClientInputContext::Menu);
     if open && !menu.was_open {
-        menu.selected = 0;
+        menu.focused = 0;
     }
     menu.was_open = open;
     if !open
@@ -122,18 +122,18 @@ fn handle_match_menu_input(
         return;
     }
     let pad_pressed = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
-    let focus_before = menu.selected;
+    let focus_before = menu.focused;
     if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
         || pad_pressed(GamepadButton::DPadDown)
     {
-        menu.selected = (menu.selected + 1).min(3);
+        menu.focused = (menu.focused + 1).min(3);
     }
     if keyboard.any_just_pressed([KeyCode::ArrowUp, KeyCode::KeyW])
         || pad_pressed(GamepadButton::DPadUp)
     {
-        menu.selected = menu.selected.saturating_sub(1);
+        menu.focused = menu.focused.saturating_sub(1);
     }
-    if menu.selected != focus_before {
+    if menu.focused != focus_before {
         feedback.write(ui::feedback::UiFeedback::Moved);
     }
     let mut clicked = false;
@@ -141,10 +141,10 @@ fn handle_match_menu_input(
         if interaction.is_changed()
             && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
         {
-            menu.selected = button.0;
+            menu.focused = button.0;
         }
         if release.activated() {
-            menu.selected = button.0;
+            menu.focused = button.0;
             clicked = true;
         }
     }
@@ -155,12 +155,12 @@ fn handle_match_menu_input(
         // Pointer releases already sound through the shared press model.
         let surface = buttons
             .iter()
-            .find(|(button, ..)| button.0 == menu.selected)
+            .find(|(button, ..)| button.0 == menu.focused)
             .and_then(|(.., surface)| surface.copied());
         feedback.write(ui::feedback::UiFeedback::Activated(surface));
     }
     if clicked || keyed {
-        match menu.selected {
+        match menu.focused {
             0 => *context = ClientInputContext::Gameplay,
             1 => {
                 if let Some(mut request) = settings_request {
@@ -685,7 +685,7 @@ mod tests {
                 .unwrap()
                 .get();
             assert!(overlay_visible, "the pause overlay shows");
-            assert_eq!(app.world().resource::<MatchMenuState>().selected, 0);
+            assert_eq!(app.world().resource::<MatchMenuState>().focused, 0);
 
             // A second same-frame tap on the same spot, now under the open overlay, does not
             // reach a menu row or the hidden HUD button: the menu stays open.

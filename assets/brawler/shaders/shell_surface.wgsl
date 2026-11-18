@@ -6,14 +6,14 @@
 @group(1) @binding(2) var<uniform> accent: vec4<f32>;
 // x/y size, z slant, w border width.
 @group(1) @binding(3) var<uniform> geometry: vec4<f32>;
-// x focused, y quiet, z selected, w focus/selection affordance (BRL-fe7t review: 0 current
-// frame, 1 bright frame, 2 reticle, 3 spotlight).
+// x focused, y quiet, z current (the chosen option in a set), w focus/current affordance
+// (BRL-fe7t review: 0 current frame, 1 bright frame, 2 reticle, 3 spotlight).
 @group(1) @binding(4) var<uniform> flags: vec4<f32>;
 // x corner cut, y/z bottom-lip offset.
 @group(1) @binding(5) var<uniform> details: vec4<f32>;
 @group(1) @binding(6) var<uniform> fill_top: vec4<f32>;
-// Persistent selection rim.
-@group(1) @binding(7) var<uniform> selection: vec4<f32>;
+// Persistent "current choice" mark color.
+@group(1) @binding(7) var<uniform> current_mark: vec4<f32>;
 // x press amount (collapses the lip), y shine sweep 0..1 or negative when idle, z burst flash
 // toward white (0..0.3; colors stay at or below 1.0), w focus pulse 0..1 (constant under reduced
 // motion).
@@ -49,6 +49,29 @@ fn corner(p: vec2<f32>, extent: vec2<f32>) -> f32 {
 fn band(d: f32, start: f32, aa: f32) -> f32 {
     return smoothstep(start-aa,start+aa,d);
 }
+fn segment(q: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let qa=q-a;
+    let ba=b-a;
+    return length(qa-ba*clamp(dot(qa,ba)/dot(ba,ba),0.,1.));
+}
+// Review candidates' "this is your choice" badge: a gold disc with an ink check in the top-right
+// corner of the face. Faces too short to hold it beside their label (team-size chips, tabs,
+// settings categories) keep only the candidate's trim, bar or outline.
+fn current_badge(p: vec2<f32>, extent: vec2<f32>, base: vec4<f32>) -> vec4<f32> {
+    if extent.y < 56. { return base; }
+    let w=geometry.w;
+    let r=clamp(0.17*extent.y,7.,11.);
+    let cy=w+5.+r;
+    let q=p-vec2<f32>(extent.x-geometry.z*cy-w-7.-r,cy);
+    let disc=length(q);
+    let disc_aa=max(0.5*fwidth(disc),0.0001);
+    let elbow=vec2<f32>(-0.12*r,0.36*r);
+    let check=min(segment(q,vec2<f32>(-0.46*r,0.02*r),elbow),segment(q,elbow,vec2<f32>(0.5*r,-0.36*r)));
+    let check_aa=max(0.5*fwidth(check),0.0001);
+    var color=mix(base,ink,1.-smoothstep(r+1.5-disc_aa,r+1.5+disc_aa,disc));
+    color=mix(color,current_mark,1.-smoothstep(r-disc_aa,r+disc_aa,disc));
+    return mix(color,ink,1.-smoothstep(0.17*r-check_aa,0.17*r+check_aa,check));
+}
 @fragment fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     let size=max(geometry.xy,vec2<f32>(1.));
     let p=in.uv*size;
@@ -72,7 +95,7 @@ fn band(d: f32, start: f32, aa: f32) -> f32 {
     let w=geometry.w;
     let variant=u32(flags.w+0.5);
     let focused=flags.x>0.5;
-    let selected=flags.z>0.5;
+    let current=flags.z>0.5;
     let pulse=clamp(motion.w,0.,1.);
     // Pressable face: vertical gradient plus a 2.5 px light band under the top border.
     var face=mix(fill_top,fill,clamp(p.y/max(extent.y,1.),0.,1.));
@@ -96,8 +119,8 @@ fn band(d: f32, start: f32, aa: f32) -> f32 {
     var color=vec4<f32>(0.);
     switch variant {
         case 1u: {
-            // Bright frame: the outline turns white with a soft inner glow; selection is a gold
-            // trim inside it. The surface also lifts (surface.rs).
+            // Bright frame: the outline turns white with a soft inner glow; the current choice is a
+            // gold trim inside it plus the check badge. The surface also lifts (surface.rs).
             var inner=face;
             var edge_in=w;
             if focused {
@@ -108,8 +131,9 @@ fn band(d: f32, start: f32, aa: f32) -> f32 {
                 let glow=(1.-smoothstep(edge_in,edge_in+7.,d))*(0.16+0.14*pulse);
                 inner=mix(lit,vec4<f32>(1.),glow);
             }
-            if selected {
-                inner=mix(selection,inner,band(d,edge_in+4.,aa));
+            if current {
+                inner=mix(current_mark,inner,band(d,edge_in+4.,aa));
+                inner=current_badge(p,extent,inner);
             }
             color=mix(ink,inner,band(d,edge_in,aa));
             if focused {
@@ -118,15 +142,16 @@ fn band(d: f32, start: f32, aa: f32) -> f32 {
             }
         }
         case 2u: {
-            // Reticle: white corner brackets lock onto the silhouette; selection is a gold bar
-            // along the bottom of the face.
+            // Reticle: white corner brackets lock onto the silhouette; the current choice is a gold
+            // bar along the bottom of the face plus the check badge.
             var inner=face;
-            if selected {
+            if current {
                 let bottom=extent.y-p.y;
                 let bar=1.-smoothstep(w+6.-aa,w+6.+aa,bottom);
                 let keyline=1.-smoothstep(w+8.-aa,w+8.+aa,bottom);
                 inner=mix(inner,ink,keyline);
-                inner=mix(inner,selection,bar);
+                inner=mix(inner,current_mark,bar);
+                inner=current_badge(p,extent,inner);
             }
             color=mix(ink,inner,band(d,w,aa));
             if focused {
@@ -141,23 +166,24 @@ fn band(d: f32, start: f32, aa: f32) -> f32 {
             }
         }
         case 3u: {
-            // Spotlight: the face lights up (above) under a white inner bevel; selection turns the
-            // outline gold.
+            // Spotlight: the face lights up (above) under a white inner bevel; the current choice
+            // turns the outline gold and carries the check badge.
             var inner=face;
             if focused {
                 inner=mix(vec4<f32>(1.),face,band(d,w+2.5,aa));
             }
             color=mix(ink,inner,band(d,w,aa));
-            if selected {
-                let rim=mix(ink,selection,band(d,1.5,aa));
+            if current {
+                inner=current_badge(p,extent,inner);
+                let rim=mix(ink,current_mark,band(d,1.5,aa));
                 color=mix(rim,inner,band(d,w+1.,aa));
             }
         }
         default: {
             var inner=face;
-            if selected {
+            if current {
                 let rim=select(w+4.,w+9.,focused);
-                inner=mix(selection,face,smoothstep(rim-aa,rim+aa,d));
+                inner=mix(current_mark,face,smoothstep(rim-aa,rim+aa,d));
             }
             color=mix(ink,inner,smoothstep(w-aa,w+aa,d));
             if focused {

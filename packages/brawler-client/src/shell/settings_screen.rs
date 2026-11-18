@@ -665,7 +665,7 @@ pub(super) fn present(
     let mut input_detail = None;
     for (entity, button, mut state, mut current, tab, preference) in &mut controls {
         state.focused = focus.get() == Some(entity);
-        state.selected = tab.is_some_and(|tab| tab.0 == page.category);
+        state.current = tab.is_some_and(|tab| tab.0 == page.category);
         state.inactive = !super::controls::allows(button.id, &input);
         if state.focused
             && let ShellControlId::Input(id) = button.id

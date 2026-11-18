@@ -48,7 +48,7 @@ impl ResultsPainter<'_> {
                     .spawn((
                         Surface::Panel,
                         SurfaceState {
-                            selected: ours,
+                            current: ours,
                             ..default()
                         },
                         Node {

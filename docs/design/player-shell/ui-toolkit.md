@@ -90,8 +90,8 @@ must not bleed into the transparent area outside the border.
 
 | State | Meaning | Required presentation |
 |---|---|---|
-| Focused | Current keyboard/gamepad navigation target | `accent` inner frame with an `ink` keyline and an `accent` pointer; always visible on the active scope |
-| Selected | Persistent product choice or active category | `panel-raised` fill with a `play-highlight` rim; the primary action keeps `play` |
+| Focused | Where keyboard, gamepad or pointer navigation is (`FlowNavigation::focused`); every control can take it | `accent` inner frame with an `ink` keyline and an `accent` pointer; always visible on the active scope |
+| Current | The option the player has chosen in a set (game type draft, brawler, loadout slot, equipped part, Map Maker tool, settings category); only choice components have it, action buttons never do | `panel-raised` fill with a `play-highlight` rim; the primary action keeps `play` |
 | Inactive | Retained surface behind an overlay or outside the active input scope | No focus treatment or pointer |
 | Disabled | Action cannot currently run | Muted treatment, no false focus emphasis, and factual reason where needed |
 
@@ -103,7 +103,7 @@ interaction. Press, idle and entrance motion follow [motion](motion.md) and are 
 celebrates an accepted change by inserting `SurfaceBurst` on the changed element (or, from a flow
 reducer, by setting `FlowCommit::celebrate` with the focus index); it never waits for the burst.
 
-Focus is transient and selected state is persistent. Opening an overlay transfers input and focus
+Focus is transient and the current state is persistent. Opening an overlay transfers input and focus
 to that overlay; the underlying screen cannot react to the same navigation event. Pointer hover or
 press synchronizes navigation focus with the hovered action. Returning restores one valid focus
 owner and repairs focus if the previous action disappeared or became disabled.

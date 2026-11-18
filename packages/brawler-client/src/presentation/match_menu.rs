@@ -112,6 +112,6 @@ pub(super) fn update_match_menu_chrome(
     mut buttons: Query<(&MatchMenuButton, &mut SurfaceState)>,
 ) {
     for (button, mut state) in &mut buttons {
-        state.focused = button.0 == menu.selected;
+        state.focused = button.0 == menu.focused;
     }
 }
