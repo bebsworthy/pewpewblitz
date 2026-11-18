@@ -1,12 +1,38 @@
 use bevy::app::AppExit;
 use brawler_client::{VfxLabAccent, VfxLabConfig, VfxLabRelationship, build_vfx_lab_app};
-use std::{env, process};
+use std::{env, process, str::FromStr};
 
 fn usage() {
     eprintln!(
-        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--sample-ticks N] [--accent neutral|cold|fire|poison|restoration] [--relationship neutral|ally|enemy] [--lobbed-impact] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
+        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--theme N] [--sample-ticks N] [--accent neutral|cold|fire|poison|restoration] [--relationship neutral|ally|enemy] [--lobbed-impact] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
          Controls: Left/Right select · Space restart · Enter pause · . step · N identity · C accent · O relationship · U ultimate · R reduced · P primitive · I guide/details · F12 capture · Esc quit"
     );
+}
+
+/// The next argument parsed as `T`, with the flag's own missing/invalid messages.
+fn parse_next<T: FromStr>(
+    args: &mut impl Iterator<Item = String>,
+    missing: &str,
+    invalid: &str,
+) -> Result<T, String> {
+    args.next()
+        .ok_or_else(|| missing.to_string())?
+        .parse()
+        .map_err(|_| invalid.to_string())
+}
+
+fn parse_window_size(value: &str) -> Result<(u16, u16), String> {
+    let (width, height) = value
+        .split_once(['x', 'X'])
+        .ok_or_else(|| "--window-size requires WIDTHxHEIGHT".to_string())?;
+    Ok((
+        width
+            .parse()
+            .map_err(|_| "invalid VfxLab window width".to_string())?,
+        height
+            .parse()
+            .map_err(|_| "invalid VfxLab window height".to_string())?,
+    ))
 }
 
 fn parse_args() -> Result<VfxLabConfig, String> {
@@ -27,28 +53,32 @@ fn parse_args() -> Result<VfxLabConfig, String> {
             "--lobbed-impact" => config.lobbed_impact = true,
             "--exit-after-capture" => config.exit_after_capture = true,
             "--identity" => {
-                config.presentation_identity = Some(
-                    args.next()
-                        .ok_or_else(|| "--identity requires an integer".to_string())?
-                        .parse()
-                        .map_err(|_| "invalid --identity value".to_string())?,
-                );
+                config.presentation_identity = Some(parse_next(
+                    &mut args,
+                    "--identity requires an integer",
+                    "invalid --identity value",
+                )?);
             }
             "--radius" => {
-                config.radius = Some(
-                    args.next()
-                        .ok_or_else(|| "--radius requires world units".to_string())?
-                        .parse()
-                        .map_err(|_| "invalid --radius value".to_string())?,
-                );
+                config.radius = Some(parse_next(
+                    &mut args,
+                    "--radius requires world units",
+                    "invalid --radius value",
+                )?);
+            }
+            "--theme" => {
+                config.theme = Some(parse_next(
+                    &mut args,
+                    "--theme requires a map theme ID",
+                    "invalid --theme value",
+                )?);
             }
             "--sample-ticks" => {
-                config.sample_ticks = Some(
-                    args.next()
-                        .ok_or_else(|| "--sample-ticks requires an integer".to_string())?
-                        .parse()
-                        .map_err(|_| "invalid --sample-ticks value".to_string())?,
-                );
+                config.sample_ticks = Some(parse_next(
+                    &mut args,
+                    "--sample-ticks requires an integer",
+                    "invalid --sample-ticks value",
+                )?);
             }
             "--accent" => {
                 let value = args.next().ok_or_else(|| {
@@ -78,28 +108,17 @@ fn parse_args() -> Result<VfxLabConfig, String> {
                 );
             }
             "--capture-after" => {
-                config.capture_after_updates = Some(
-                    args.next()
-                        .ok_or_else(|| "--capture-after requires an update count".to_string())?
-                        .parse()
-                        .map_err(|_| "invalid --capture-after update count".to_string())?,
-                );
+                config.capture_after_updates = Some(parse_next(
+                    &mut args,
+                    "--capture-after requires an update count",
+                    "invalid --capture-after update count",
+                )?);
             }
             "--window-size" => {
                 let value = args
                     .next()
                     .ok_or_else(|| "--window-size requires WIDTHxHEIGHT".to_string())?;
-                let (width, height) = value
-                    .split_once(['x', 'X'])
-                    .ok_or_else(|| "--window-size requires WIDTHxHEIGHT".to_string())?;
-                config.window_size = Some((
-                    width
-                        .parse()
-                        .map_err(|_| "invalid VfxLab window width".to_string())?,
-                    height
-                        .parse()
-                        .map_err(|_| "invalid VfxLab window height".to_string())?,
-                ));
+                config.window_size = Some(parse_window_size(&value)?);
             }
             "--help" | "-h" => {
                 usage();

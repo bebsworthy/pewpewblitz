@@ -14,7 +14,8 @@ mod sway;
 #[cfg(test)]
 pub(crate) use catalog::environment_asset_paths;
 pub(in crate::presentation_3d) use catalog::{
-    EffectTileStatusVisual, MapVisualCatalog, MapVisualFitting, MapVisualKind, MapVisualProfile,
+    EffectTileStatusVisual, MapThemeProfile, MapVisualCatalog, MapVisualFitting, MapVisualKind,
+    MapVisualProfile,
 };
 pub(in crate::presentation_3d) use runtime::{
     EnvironmentAssetReadiness, EnvironmentImportedScenes, FittedEnvironmentScene,

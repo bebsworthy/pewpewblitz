@@ -12,8 +12,9 @@ use super::{
         Material3dAssets, PendingCombatEffect, Primitive3dAssets,
         VfxLabLifecyclePresentationPlugin, VfxLabLifecycleSet, VfxParticleAdapterPlugin,
         VfxParticleDiagnostics, VfxParticleEmitter3d, VfxTransientDiagnostics,
-        animate_combat_effect_layers, collect_vfx_evidence_snapshot, install_toon_shading,
-        install_world_look, materialize_combat_effects, resolve_vfx_requests, setup_3d_foundation,
+        animate_combat_effect_layers, apply_map_theme_look, collect_vfx_evidence_snapshot,
+        install_toon_shading, install_world_look, materialize_combat_effects, resolve_vfx_requests,
+        setup_3d_foundation,
     },
     settings::persistence::ClientShellSettings,
     vfx::{
@@ -35,6 +36,8 @@ use serde_json::json;
 use std::path::PathBuf;
 
 const DEFAULT_RADIUS: u16 = 72;
+/// Map presentation theme the arena borrows its lighting and grading from without `--theme`.
+const DEFAULT_THEME: u16 = 1;
 const MAX_INITIAL_SAMPLE_TICKS: u16 = 600;
 const VFX_LAB_DASH_START: Vec2 = Vec2::new(-70.0, 0.0);
 const VFX_LAB_DASH_END: Vec2 = Vec2::new(290.0, 0.0);
@@ -149,6 +152,8 @@ pub struct VfxLabConfig {
     pub presentation_identity: Option<u64>,
     pub radius: Option<u16>,
     pub sample_ticks: Option<u16>,
+    /// Client map presentation theme whose lighting and grading the arena uses (default 1).
+    pub theme: Option<u16>,
     pub accent: VfxLabAccent,
     pub relationship: VfxLabRelationship,
     pub lobbed_impact: bool,
@@ -196,6 +201,16 @@ impl VfxLabConfig {
         }
         if self.capture_after_updates == Some(0) {
             return Err("VfxLab capture update count must be positive".to_string());
+        }
+        if let Some(theme) = self.theme {
+            let catalog = brawler::map::MapContentCatalog::embedded()?;
+            if !catalog
+                .presentation_themes
+                .iter()
+                .any(|known| known.id.0 == theme)
+            {
+                return Err(format!("VfxLab theme {theme} is not an embedded map theme"));
+            }
         }
         if self.presentation_identity == Some(0) {
             return Err("VfxLab presentation identity must be positive".to_string());
@@ -519,6 +534,7 @@ struct VfxLabState {
     scenarios: Vec<VfxLabScenario>,
     selected: usize,
     presentation_identity: u64,
+    theme: u16,
     radius: u16,
     accent: VfxLabAccent,
     relationship: VfxLabRelationship,
@@ -614,15 +630,11 @@ impl Plugin for VfxLabPlugin {
         } else {
             ImportedWorldFallbackPolicy::Auto
         })
-        .insert_resource(GlobalAmbientLight {
-            color: Color::srgb(0.72, 0.78, 0.9),
-            brightness: 160.0,
-            ..default()
-        })
         .add_message::<PendingCombatEffect>()
         .init_resource::<VfxTransientDiagnostics>()
         .add_systems(Startup, setup_3d_foundation)
         .add_systems(Startup, setup_lab_scene.after(setup_3d_foundation))
+        .add_systems(Startup, apply_lab_theme.after(setup_3d_foundation))
         .add_systems(
             Update,
             (
@@ -681,6 +693,7 @@ impl Plugin for VfxLabPlugin {
             scenarios,
             selected,
             presentation_identity: self.config.presentation_identity.unwrap_or(1),
+            theme: self.config.theme.unwrap_or(DEFAULT_THEME),
             radius: self.config.radius.unwrap_or(DEFAULT_RADIUS),
             accent: if fixture_has_fixed_accent(fixture) {
                 VfxLabAccent::Neutral
@@ -769,6 +782,13 @@ fn sync_lab_particle_time(
     } else {
         particle_time.unpause();
     }
+}
+
+/// The arena takes a real map theme's production lighting and grading so captures match a match.
+fn apply_lab_theme(world: &mut World) {
+    let theme = world.resource::<VfxLabState>().theme;
+    apply_map_theme_look(world, brawler::map::MapPresentationThemeId(theme))
+        .expect("VfxLab theme was validated against the embedded map catalog");
 }
 
 #[allow(
@@ -1866,6 +1886,7 @@ fn request_lab_capture(world: &mut World) {
             "request_key": request.as_ref().map(|_| scenario.key.as_str()),
             "producer_rank": request.as_ref().map(|_| scenario.producer_rank),
             "presentation_identity": identity,
+            "theme": world.resource::<VfxLabState>().theme,
             "accent": accent.label(),
             "relationship": relationship.label(),
             "lobbed_impact": lobbed_impact,
@@ -2021,6 +2042,7 @@ fn update_lab_inspector(
          Playback {} - identity {}\n\
          Sample   {} initial ticks\n\
          Radius   {} world units\n\
+         Theme    {} lighting + grading\n\
          Capture  {}\n\
          Catalog  {:016x} - sealed/valid\n\
          Signature {} active - {}\n\
@@ -2038,6 +2060,7 @@ fn update_lab_inspector(
         state.presentation_identity,
         state.initial_sample_ticks,
         state.radius,
+        state.theme,
         state.capture_dir.display(),
         embedded_vfx_catalog_fingerprint(),
         signature_rows.len(),
@@ -2476,6 +2499,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn configuration_accepts_only_embedded_map_themes() {
+        for theme in [1, 2, 3] {
+            VfxLabConfig {
+                theme: Some(theme),
+                ..Default::default()
+            }
+            .validate()
+            .unwrap();
+        }
+        for theme in [0, 4, u16::MAX] {
+            assert!(
+                VfxLabConfig {
+                    theme: Some(theme),
+                    ..Default::default()
+                }
+                .validate()
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn configuration_rejects_undersized_windows_and_oversized_keys() {
         assert!(
             VfxLabConfig {
@@ -2570,6 +2615,7 @@ mod tests {
             scenarios: vec![scenario, scenario],
             selected: 0,
             presentation_identity: 7,
+            theme: DEFAULT_THEME,
             radius: DEFAULT_RADIUS,
             accent: VfxLabAccent::Neutral,
             relationship: VfxLabRelationship::Neutral,

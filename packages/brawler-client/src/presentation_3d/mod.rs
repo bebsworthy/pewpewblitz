@@ -1773,6 +1773,54 @@ fn vitality_spark_mesh() -> Mesh {
     mesh
 }
 
+#[cfg(feature = "automation")]
+type ThemeLookTargets<'w, 's> = (
+    ResMut<'w, GlobalAmbientLight>,
+    Query<'w, 's, &'static mut DirectionalLight, With<V3WorldMember>>,
+    Query<'w, 's, &'static mut ColorGrading, With<ArenaCamera>>,
+);
+
+/// One map theme's production ambient, directional light, and arena camera grading.
+fn apply_theme_look(
+    theme: &environment_assets::MapThemeProfile,
+    ambient: &mut GlobalAmbientLight,
+    directional_lights: &mut Query<&mut DirectionalLight, With<V3WorldMember>>,
+    arena_grading: &mut Query<&mut ColorGrading, With<ArenaCamera>>,
+) {
+    ambient.color = theme.ambient_color();
+    ambient.brightness = theme.ambient_brightness;
+    for mut light in directional_lights.iter_mut() {
+        light.color = theme.directional_color();
+        light.illuminance = theme.directional_illuminance;
+    }
+    world_look::apply_theme_grading(theme.grading, arena_grading);
+}
+
+/// Applies an embedded client map theme's look, exactly as an accepted map of that theme would,
+/// to a scene with no accepted map (the VFX lab). Run it after `setup_3d_foundation`.
+#[cfg(feature = "automation")]
+pub(crate) fn apply_map_theme_look(
+    world: &mut World,
+    theme: brawler::map::MapPresentationThemeId,
+) -> Result<(), String> {
+    let shared = brawler::map::MapContentCatalog::embedded()?;
+    let visuals = environment_assets::MapVisualCatalog::embedded(&shared)?;
+    let profile = visuals
+        .theme(theme)
+        .ok_or_else(|| format!("no client map theme {}", theme.0))?;
+    let mut targets = bevy::ecs::system::SystemState::<ThemeLookTargets>::new(world);
+    let (mut ambient, mut directional_lights, mut arena_grading) = targets
+        .get_mut(world)
+        .map_err(|error| format!("map theme look targets are unavailable: {error}"))?;
+    apply_theme_look(
+        profile,
+        &mut ambient,
+        &mut directional_lights,
+        &mut arena_grading,
+    );
+    Ok(())
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
@@ -1846,13 +1894,12 @@ fn reconcile_3d_map(
             );
             return;
         };
-        ambient.color = grid_theme.ambient_color();
-        ambient.brightness = grid_theme.ambient_brightness;
-        for mut light in &mut directional_lights {
-            light.color = grid_theme.directional_color();
-            light.illuminance = grid_theme.directional_illuminance;
-        }
-        world_look::apply_theme_grading(grid_theme.grading, &mut arena_grading);
+        apply_theme_look(
+            grid_theme,
+            &mut ambient,
+            &mut directional_lights,
+            &mut arena_grading,
+        );
         for (entity, _, generated) in &members {
             if let Some(generated) = generated {
                 meshes.remove(generated.0.id());
@@ -2751,6 +2798,52 @@ mod tests {
 
         assert_eq!(transform.translation, Vec3::Y * 16.0);
         assert_eq!(transform.scale, Vec3::new(0.5, 1.0, 0.5));
+    }
+
+    #[cfg(feature = "automation")]
+    #[test]
+    fn map_theme_look_applies_the_production_theme_grading_and_lights() {
+        let same = |left: f32, right: f32| (left - right).abs() <= f32::EPSILON;
+        let theme_id = brawler::map::MapPresentationThemeId(1);
+        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+        let visuals = environment_assets::MapVisualCatalog::embedded(&catalog).unwrap();
+        let theme = visuals.theme(theme_id).unwrap();
+        let mut world = World::new();
+        world.init_resource::<GlobalAmbientLight>();
+        let camera = world.spawn((ArenaCamera, ColorGrading::default())).id();
+        let light = world
+            .spawn((DirectionalLight::default(), V3WorldMember))
+            .id();
+
+        apply_map_theme_look(&mut world, theme_id).unwrap();
+
+        let grading = world.get::<ColorGrading>(camera).unwrap();
+        let expected = theme.grading.color_grading();
+        assert!(same(grading.global.exposure, expected.global.exposure));
+        assert!(same(
+            grading.global.temperature,
+            expected.global.temperature
+        ));
+        assert!(same(grading.global.tint, expected.global.tint));
+        for (section, expected_section) in [
+            (grading.shadows, expected.shadows),
+            (grading.midtones, expected.midtones),
+            (grading.highlights, expected.highlights),
+        ] {
+            assert!(same(section.saturation, expected_section.saturation));
+            assert!(same(section.contrast, expected_section.contrast));
+        }
+        assert!(!same(grading.midtones.saturation, 1.0));
+        assert!(same(
+            world.get::<DirectionalLight>(light).unwrap().illuminance,
+            theme.directional_illuminance
+        ));
+        let ambient = world.resource::<GlobalAmbientLight>();
+        assert_eq!(ambient.color, theme.ambient_color());
+        assert!(same(ambient.brightness, theme.ambient_brightness));
+        assert!(
+            apply_map_theme_look(&mut world, brawler::map::MapPresentationThemeId(999)).is_err()
+        );
     }
 
     #[test]

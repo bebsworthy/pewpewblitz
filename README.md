@@ -112,7 +112,10 @@ Use `just vfx-lab '--effect combat.impact --lobbed-impact --radius 150'` to prev
 lobbed-landing explosion with its exact payload radius. The `--lobbed-impact` switch changes only
 the Lab's semantic carrier fixture; it does not introduce another renderer path.
 Use `--fixture transient|straight|melee|lobbed|sticky|splash|field|concealment|cone|dash|sentry|status`
-to start at a lifecycle fixture. Native
+to start at a lifecycle fixture. The arena uses a real map theme's production ambient, sun, and
+camera grading so captures match in-match brightness and saturation: `--theme 1|2|3` picks the
+client map presentation theme (default 1; unknown IDs are rejected), and the technical diagnostics
+and JSON evidence record it. Native
 automation may add `--identity N --radius WORLD_UNITS` and
 `--sample-ticks N --accent neutral|cold|fire|poison|restoration --relationship neutral|ally|enemy --ultimate --capture-dir PATH --capture-after UPDATES
 --exit-after-capture`; `--paused` captures a stable sample, with `--sample-ticks` advancing the
