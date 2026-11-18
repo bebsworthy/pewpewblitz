@@ -7,7 +7,7 @@ Run headless from the repository root (see `just riff-asset`):
 The frozen V2 builder supplies the modelled parts, armature, and skin weights (it in turn reuses the
 frozen V1 helpers). This script applies the production deltas owned by BRL-0154:
 
-- chibi head proportions (head block about 45% of the crown height) with modestly enlarged ears;
+- chibi head proportions (head block about 44% of the crown height) with modestly enlarged ears;
 - the gameplay animation set (idle, run, dash, hit_front, ko, victory, ultimate, and per weapon
   family `combat_idle_<family>` / `attack_<family>`), keyed on every deform bone so clips never
   leak channels into each other;
@@ -54,8 +54,8 @@ FPS = 24
 # Head block (chin to crown) is scaled about the neck joint; ears scale less so they stay a
 # readable rabbit silhouette instead of dominating the visual height.
 NECK_PIVOT = Vector((0.0, 0.0, 0.94))
-HEAD_SCALE = 1.45
-EAR_LENGTH_SCALE = 0.80  # applied after HEAD_SCALE, so ears end up about 1.16x V2 length
+HEAD_SCALE = 1.32  # BRL-m7dp: down from 1.45 so the torso and weapon show under the 55-degree camera
+EAR_LENGTH_SCALE = 0.80  # applied after HEAD_SCALE, so ears end up about 1.06x V2 length
 EAR_BASES = {"l": Vector((-0.19, 0.01, 1.46)), "r": Vector((0.19, -0.04, 1.46))}
 
 TRIANGLE_BUDGET = 10_000
@@ -355,12 +355,17 @@ RELAXED = {
 }
 EARS_PERKED = {"ear_l_01": (2, 4, 0), "ear_r_01": (2, -4, 0), "ear_l_02": (0, 0, 0), "ear_r_02": (0, 0, 0)}
 EARS_BACK = {"ear_l_01": (-24, 2, 0), "ear_r_01": (-20, -2, 0), "ear_l_02": (-16, 0, 0), "ear_r_02": (-14, 0, 0)}
+# Ears straightened from their swept-back rest curve (about 30 degrees at the tip) to roughly
+# upright, so they stand above the head from behind under the 55-degree gameplay camera instead of
+# folding over it (BRL-m7dp). Used by run and every family hold.
+EARS_UP = {"ear_l_01": (12, 3, 0), "ear_r_01": (12, -3, 0), "ear_l_02": (10, 0, 0), "ear_r_02": (10, 0, 0)}
 EARS_FLAT = {"ear_l_01": (-46, 10, 0), "ear_r_01": (-42, -10, 0), "ear_l_02": (-24, 0, 0), "ear_r_02": (-22, 0, 0),
              "ear_l_03": (-10, 0, 0), "ear_r_03": (-10, 0, 0)}
 
 FAMILY_HOLD = {
-    # One-handed blaster held forward at chest height; off hand loose and ready.
-    "1h": {"upperarm_r": (-80, 0, 8), "forearm_r": (-14, 0, 0), "aim_r": (0, 0),
+    # One-handed blaster held forward at chest height and out to the side, clear of the head
+    # from behind; off hand loose and ready.
+    "1h": {"upperarm_r": (-80, 0, 20), "forearm_r": (-14, 0, 0), "aim_r": (0, 0),
            "upperarm_l": (-18, 0, 0), "forearm_l": (-30, 0, 0), "chest": (3, 0, 4)},
     # Two-handed families place the weapon (`weapon`: x, y, z in the rest chest frame, then pitch
     # up, yaw toward the weapon side, roll, in degrees) and bake both hands onto it.
@@ -407,18 +412,20 @@ def build_actions(arm, weapons) -> Poser:
     ], loop=True)
 
     # Run: quick light-body stride, 16 frames with footfalls on frames 1 and 9 (phase 0 and 0.5).
-    # The weapon arm carries the blaster forward; the off arm pumps.
-    carry = {"upperarm_r": (-48, 0, 4), "forearm_r": (-42, 0, 0), "aim_r": (0, 0)}
-    contact = merged(carry, EARS_BACK, {
-        "pelvis@": (0, 0, -0.035), "spine_02": (6, 0, 0), "chest": (8, 0, -4), "head": (-6, 0, 0),
+    # The weapon arm carries the blaster forward and out to the side; the off arm pumps. Ears stay
+    # up (EARS_UP) with a light bounce and the head leans into the stride, so from behind the ears
+    # stand above the head and the back of the shirt shows (BRL-m7dp).
+    carry = {"upperarm_r": (-48, -16, 12), "forearm_r": (-42, 0, 0), "aim_r": (0, 0)}
+    contact = merged(carry, EARS_UP, {
+        "pelvis@": (0, 0, -0.035), "spine_02": (6, 0, 0), "chest": (8, 0, -4), "head": (6, 0, 0),
         "thigh_l": (-42, 0, 0), "shin_l": (12, 0, 0), "foot_l": (-12, 0, 0),
         "thigh_r": (34, 0, 0), "shin_r": (46, 0, 0), "foot_r": (10, 0, 0),
         "upperarm_l": (40, 0, 0), "forearm_l": (-40, 0, 0),
         "scarf_01": (28, 0, 0), "scarf_02": (18, 0, 0), "tail_01": (-8, 0, 0),
     })
-    passing = merged(carry, EARS_BACK, {
-        "pelvis@": (0, 0, 0.045), "spine_02": (6, 0, 0), "chest": (8, 0, 0), "head": (-6, 0, 0),
-        "ear_l_02": (-22, 0, 0), "ear_r_02": (-20, 0, 0),
+    passing = merged(carry, EARS_UP, {
+        "pelvis@": (0, 0, 0.045), "spine_02": (6, 0, 0), "chest": (8, 0, 0), "head": (6, 0, 0),
+        "ear_l_02": (2, 0, 0), "ear_r_02": (3, 0, 0),
         "thigh_l": (6, 0, 0), "shin_l": (24, 0, 0), "thigh_r": (-22, 0, 0), "shin_r": (62, 0, 0),
         "upperarm_l": (0, 0, 0), "forearm_l": (-46, 0, 0),
         "scarf_01": (36, 0, 0), "scarf_02": (26, 0, 0), "tail_01": (6, 0, 0),
@@ -498,6 +505,7 @@ def build_actions(arm, weapons) -> Poser:
     # families carry their weapon's support-grip anchor and are sampled every frame.
     holds = {}
     for family, hold in FAMILY_HOLD.items():
+        hold = merged(EARS_UP, hold)
         secondary = weapons[family][1]
         if "weapon" in hold:
             hold = merged(hold, {"grip_secondary": tuple(secondary)})
@@ -505,16 +513,16 @@ def build_actions(arm, weapons) -> Poser:
         breathe = merged(hold, {"pelvis@": (hold.get("pelvis@", (0, 0, 0))[0], 0,
                                             hold.get("pelvis@", (0, 0, 0))[2] - 0.012),
                                 "head": (2, 0, hold.get("head", (0, 0, 0))[2]),
-                                "ear_l_02": (3, 0, 0), "ear_r_02": (-2, 0, 0)})
+                                "ear_l_02": (13, 0, 0), "ear_r_02": (8, 0, 0)})
         keys = [(1, hold), (17, breathe), (33, hold)]
         poser.action(f"combat_idle_{family}", sampled(keys) if "weapon" in hold else keys, loop=True)
     recoil_ears = {"ear_l_01": (-14, 3, 0), "ear_r_01": (-12, -3, 0)}
     poser.action("attack_1h", [
-        (1, FAMILY_HOLD["1h"]),
-        (2, merged(FAMILY_HOLD["1h"], recoil_ears, {"upperarm_r": (-92, 0, 8), "forearm_r": (-24, 0, 0),
-                                                    "aim_r": (14, 0), "chest": (-6, 0, 6), "head": (-4, 0, 0),
-                                                    "pelvis@": (0, 0.025, 0)})),
-        (7, FAMILY_HOLD["1h"]),
+        (1, holds["1h"]),
+        (2, merged(holds["1h"], recoil_ears, {"upperarm_r": (-92, 0, 20), "forearm_r": (-24, 0, 0),
+                                              "aim_r": (14, 0), "chest": (-6, 0, 6), "head": (-4, 0, 0),
+                                              "pelvis@": (0, 0.025, 0)})),
+        (7, holds["1h"]),
     ], loop=False)
     heavy = holds["heavy"]
     poser.action("attack_heavy", sampled([

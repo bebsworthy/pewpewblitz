@@ -23,7 +23,7 @@ pub(crate) const RIFF_ASSET_PATH: &str = "brawler/models/original/characters/rif
 pub(crate) const RIFF_FORWARD_CORRECTION: f32 = core::f32::consts::FRAC_PI_2;
 /// Reviewed export bounds (build report): sole bottom and ear tip in source units.
 const RIFF_SOURCE_GROUND: f32 = 0.04;
-const RIFF_SOURCE_TOP: f32 = 2.506;
+const RIFF_SOURCE_TOP: f32 = 2.3656;
 /// Visual height including the ears: about 1.6 map cells (docs/11). Independent of collision.
 pub(crate) const RIFF_VISUAL_HEIGHT_WORLD: f32 = brawler::map::MAP_CELL_SIZE_WORLD * 1.6;
 const RIFF_GAMEPLAY_SCALE: f32 = RIFF_VISUAL_HEIGHT_WORLD / (RIFF_SOURCE_TOP - RIFF_SOURCE_GROUND);

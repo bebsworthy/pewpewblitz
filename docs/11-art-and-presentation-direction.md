@@ -29,8 +29,10 @@ tickets tune them through native review but do not change the direction.
 - Chunky voxel-toy figures in the style of the roster concept
   (`asset_src/04-character_roaster.png`). Riff (`asset_src/characters/riff/`) is the first
   production character.
-- Exaggerated, readable proportions: the head is about 45% of visual height and the weapon about
-  1.5× oversized. Each character has one strong silhouette and saturated primary colors on
+- Exaggerated, readable proportions: the head is about 44% of the crown height (see below) and
+  the weapon about 1.5× oversized. Proportions and poses are judged from the 55° gameplay camera,
+  not a close-up: torso and weapon must stay visible beside the head from front, side, and back
+  (BRL-m7dp). Each character has one strong silhouette and saturated primary colors on
   clothing.
 - Visual height is about 1.6 map cells. Visual scale stays independent of the canonical 14-unit
   authoritative radius and its ground ring (see [Fighter identity](#fighter-identity)).

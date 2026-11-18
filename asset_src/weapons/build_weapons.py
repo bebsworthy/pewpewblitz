@@ -290,15 +290,16 @@ class WeaponSpec:
     builder: Callable[[], Weapon]
     two_handed: bool
     # Uniform scale about the grip, applied to geometry and anchors: weapons read about 1.5x
-    # oversized for Riff's hand so they stay legible beside his large head from the gameplay camera.
+    # oversized for Riff's hand so they stay legible beside his large head from the gameplay camera
+    # (raised in BRL-m7dp so they clear his head and body from the side and behind).
     scale: float
 
 
 WEAPONS = [
-    WeaponSpec(blaster, two_handed=False, scale=1.15),
-    WeaponSpec(sprayer, two_handed=True, scale=1.3),
-    WeaponSpec(lobber, two_handed=True, scale=1.25),
-    WeaponSpec(blade, two_handed=True, scale=1.15),
+    WeaponSpec(blaster, two_handed=False, scale=1.4),
+    WeaponSpec(sprayer, two_handed=True, scale=1.5),
+    WeaponSpec(lobber, two_handed=True, scale=1.45),
+    WeaponSpec(blade, two_handed=True, scale=1.3),
 ]
 
 

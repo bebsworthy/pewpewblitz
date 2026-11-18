@@ -50,10 +50,13 @@ command above. The review-only weapons are the original family weapons from `ass
 
 ## Runtime contract
 
-- Up axis `+Z`, front `-Y`, soles at `Z = 0.04`; ear tip at `Z = 2.506` (source units).
-- Head block (chin to crown, ears excluded) is about 46% of the crown height; ears are about 1.16x
-  their V2 length. The client scales Riff uniformly to 1.6 map cells including ears; collision is
-  unaffected.
+- Up axis `+Z`, front `-Y`, soles at `Z = 0.04`; ear tip at `Z = 2.3656` (source units).
+- Head block (chin to crown, ears excluded) is about 44% of the crown height (`HEAD_SCALE = 1.32`
+  about the neck, BRL-m7dp); ears are about 1.06x their V2 length. In `run` and every
+  `combat_idle_<family>` the ears tip slightly forward of their swept-back rest so they stand up
+  from behind under the 55-degree gameplay camera, and the 1h weapon arm sits out to the side so
+  the blaster clears the head from behind. The client scales Riff uniformly to 1.6 map cells
+  including ears; collision is unaffected.
 - One skinned mesh, one primitive, one material, flat per-face palette in `COLOR_0`, no normals
   (Bevy rebuilds flat normals), no UVs or textures. 9,688 triangles; about 620 KB.
 - Armature `RIG__riff`: 38 bones including the seven sockets `socket_weapon_r`, `socket_weapon_l`,

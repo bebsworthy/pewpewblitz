@@ -12,9 +12,9 @@
     weapons: [
         // `preview_scale` and `preview_center` (model source units, glTF frame: +Z forward, +Y up)
         // frame each model in the shell weapon preview at about the same on-screen length.
-        (family: OneHanded, model: "brawler/models/original/weapons/wpn_blaster.glb", preview_scale: 1.05, preview_center: (0.0, 0.02, 0.15)),
-        (family: Heavy, model: "brawler/models/original/weapons/wpn_sprayer.glb", preview_scale: 0.72, preview_center: (0.0, 0.1, 0.26)),
-        (family: Throwable, model: "brawler/models/original/weapons/wpn_lobber.glb", preview_scale: 0.88, preview_center: (0.0, 0.1, 0.25)),
-        (family: Melee, model: "brawler/models/original/weapons/wpn_blade.glb", preview_scale: 0.58, preview_center: (0.0, 0.0, 0.39)),
+        (family: OneHanded, model: "brawler/models/original/weapons/wpn_blaster.glb", preview_scale: 0.86, preview_center: (0.0, 0.02, 0.18)),
+        (family: Heavy, model: "brawler/models/original/weapons/wpn_sprayer.glb", preview_scale: 0.62, preview_center: (0.0, 0.12, 0.3)),
+        (family: Throwable, model: "brawler/models/original/weapons/wpn_lobber.glb", preview_scale: 0.76, preview_center: (0.0, 0.12, 0.29)),
+        (family: Melee, model: "brawler/models/original/weapons/wpn_blade.glb", preview_scale: 0.51, preview_center: (0.0, 0.0, 0.44)),
     ],
 )
