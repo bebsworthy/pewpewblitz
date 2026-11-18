@@ -49,7 +49,11 @@ tickets tune them through native review but do not change the direction.
   (`just weapon-assets`) under `assets/brawler/models/original/weapons/`. The authored client
   catalog `assets/catalogs/fighter_weapons.ron` maps family to model and shell-preview framing;
   nothing branches on built-in weapon IDs. Two-handed holds are baked into Riff's family clips with
-  the support hand on each weapon's `grip_secondary` anchor; no IK runs at runtime.
+  the support hand on each weapon's `grip_secondary` anchor; no IK runs at runtime. Two-handed
+  weapons stay in both hands while standing, firing, running, and dashing (per-family run and dash
+  clips, BRL-v8x4) and in the Dashboard, brawler-screen, and brawler-card previews, which play the
+  family's ready loop instead of the calm one-handed `idle`. Hit, defeat, victory, and ultimate
+  clips still hold every weapon by the grip alone.
 
 ### World shading
 
@@ -457,8 +461,8 @@ The imported character's model-space forward direction is corrected once at its 
 primary weapon family's model attaches to the character's `socket_weapon_r` node inside that
 corrected hierarchy at unit scale, and animation-specific transforms remain below it. The model
 follows the replicated loadout, so a loadout that arrives after the scene is ready swaps it; the
-Dashboard brawler holds the selected saved brawler's family, and each shell weapon preview shows
-its own weapon's family. The standard fighter has one canonical 14-unit
+Dashboard brawler holds the selected saved brawler's family (switching to that family's preview
+clip with the model), and each shell weapon preview shows its own weapon's family. The standard fighter has one canonical 14-unit
 authoritative radius: its circular hitbox, exact outer ground-ring edge, and fallback sphere agree.
 Riff is scaled uniformly from his reviewed source height so he stands 1.6 map cells (51.2 units)
 including ears; that scale does not depend on the radius, and a test keeps his bind-pose feet,
@@ -472,7 +476,8 @@ Character motion is chosen per frame by one priority over replicated state and c
 then victory (the fighter's team won the completed match), dash (ability phase Dashing), ultimate
 (a Ready-to-active ability transition), attack (the existing shot trigger, per weapon family),
 hit reaction (`DamageApplied` on that fighter), run (moving), and the weapon family's ready loop.
-The family comes from the replicated primary weapon delivery. A presentation-only,
+The family comes from the replicated primary weapon delivery and also selects the run and dash
+clip, so two-handed weapons keep both hands on them while moving. A presentation-only,
 volume-preserving squash on the imported scene root marks run footfalls, firing, and landing from a
 dash or respawn; reduced motion disables it, and it never moves the gameplay pose or camera.
 

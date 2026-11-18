@@ -15,7 +15,9 @@ frozen V1 helpers). This script applies the production deltas owned by BRL-0154:
   a two-bone IK solve per frame: the weapon hand onto `grip_primary` and the support hand onto the
   weapon's `grip_secondary`, read from the shipped weapon GLBs named by
   `assets/catalogs/fighter_weapons.ron` (build them first with `just weapon-assets`);
-- one joined, flat-shaded, vertex-coloured runtime mesh with a single material.
+- two-handed `run_<family>` / `dash_<family>` clips (BRL-v8x4) on the shared locomotion keys;
+- one joined, flat-shaded, vertex-coloured runtime mesh with a single material, exported without
+  the translation/scale channels that never leave their rest value.
 
 It writes the source master `riff.blend`, review renders under `previews/`, and the runtime
 derivative `assets/brawler/models/original/characters/riff/chr_riff.glb`, then validates the
@@ -61,10 +63,15 @@ EAR_BASES = {"l": Vector((-0.19, 0.01, 1.46)), "r": Vector((0.19, -0.04, 1.46))}
 TRIANGLE_BUDGET = 10_000
 GLB_BYTE_BUDGET = 700_000
 FAMILIES = ("1h", "heavy", "throwable", "melee")
+# Families whose weapon has a `grip_secondary` and is carried with both hands (BRL-v8x4): they get
+# their own run and dash clips; the one-handed family keeps the shared `run` and `dash`.
+TWO_HANDED = ("heavy", "throwable", "melee")
 REQUIRED_CLIPS = (
     "idle", "run", "dash", "hit_front", "ko", "victory", "ultimate",
     *(f"combat_idle_{family}" for family in FAMILIES),
     *(f"attack_{family}" for family in FAMILIES),
+    *(f"run_{family}" for family in TWO_HANDED),
+    *(f"dash_{family}" for family in TWO_HANDED),
 )
 REQUIRED_SOCKETS = (
     "socket_weapon_r", "socket_weapon_l", "socket_head", "socket_chest", "socket_back",
@@ -393,6 +400,36 @@ def placed(pose: dict, dx=0.0, dy=0.0, dz=0.0, pitch=0.0, yaw=0.0, roll=0.0, **j
     return merged(pose, {"weapon": (x + dx, y + dy, z + dz, p + pitch, w + yaw, r + roll)}, joints)
 
 
+# How much of the extra locomotion lean the weapon pitch takes back out (1 keeps the hold's aim).
+# The blade in the dash keeps half, tipping it forward into the lunge: fully levelled, the support
+# hand cannot reach its grip (0.054 miss).
+CARRY_LEVEL = {("dash", "melee"): 0.5}
+ARM_BONES = ("clavicle_", "upperarm_", "forearm_", "hand_", "aim_")
+LEAN_BONES = ("spine_01", "spine_02", "chest")
+
+
+def carried(stride: dict, hold: dict, level: float = 1.0) -> dict:
+    """A shared locomotion key (legs, pelvis, lean, ears, scarf, tail) with its arms replaced by a
+    two-handed family hold (BRL-v8x4).
+
+    The hold's body turn into the weapon side is added to the stride's lean and sway, its
+    clavicles push the support shoulder forward, and its stance legs are dropped. The weapon
+    follows the chest, so `level` of the extra stride lean is taken back out of the weapon pitch to
+    keep the muzzle where the hold aims it; the per-frame IK then bakes both hands onto the grips."""
+    body = {key: value for key, value in stride.items() if not key.startswith(ARM_BONES)}
+    turned = {}
+    for bone in (*LEAN_BONES, "head"):
+        lean = stride.get(bone, (0, 0, 0))
+        turn = hold.get(bone, (0, 0, 0))
+        turned[bone] = (lean[0], lean[1], lean[2] + turn[2])
+    clavicles = {key: hold[key] for key in ("clavicle_l", "clavicle_r") if key in hold}
+    extra_lean = (sum(stride.get(bone, (0, 0, 0))[0] for bone in LEAN_BONES)
+                  - sum(hold.get(bone, (0, 0, 0))[0] for bone in LEAN_BONES))
+    weapon = placed(hold, pitch=extra_lean * level)
+    return merged(body, turned, clavicles,
+                  {"weapon": weapon["weapon"], "grip_secondary": hold["grip_secondary"]})
+
+
 def build_actions(arm, weapons) -> Poser:
     poser = Poser(arm)
     arm.animation_data_create()
@@ -432,8 +469,8 @@ def build_actions(arm, weapons) -> Poser:
     })
     contact_mirror = merged(mirror(contact), carry, {"upperarm_l": (-38, 0, 0), "forearm_l": (-40, 0, 0)})
     passing_mirror = merged(mirror(passing), carry, {"upperarm_l": (-6, 0, 0), "forearm_l": (-46, 0, 0)})
-    poser.action("run", [(1, contact), (5, passing), (9, contact_mirror), (13, passing_mirror),
-                         (17, contact)], loop=True)
+    run_keys = [(1, contact), (5, passing), (9, contact_mirror), (13, passing_mirror), (17, contact)]
+    poser.action("run", run_keys, loop=True)
 
     # Dash: flat-out lunge with ears pinned and scarf streaming.
     dash = merged(EARS_FLAT, {
@@ -445,7 +482,8 @@ def build_actions(arm, weapons) -> Poser:
     })
     dash_flutter = merged(dash, {"pelvis@": (0, 0, -0.055), "scarf_02": (40, 0, 8),
                                  "scarf_03": (8, 0, -8), "ear_l_03": (-22, 0, 0)})
-    poser.action("dash", [(1, dash), (5, dash_flutter), (9, dash)], loop=True)
+    dash_keys = [(1, dash), (5, dash_flutter), (9, dash)]
+    poser.action("dash", dash_keys, loop=True)
 
     # Hit: quick snap backward, ears whip forward, fast recovery.
     hit = merged(RELAXED, {
@@ -516,6 +554,14 @@ def build_actions(arm, weapons) -> Poser:
                                 "ear_l_02": (13, 0, 0), "ear_r_02": (8, 0, 0)})
         keys = [(1, hold), (17, breathe), (33, hold)]
         poser.action(f"combat_idle_{family}", sampled(keys) if "weapon" in hold else keys, loop=True)
+    # Two-handed families run and dash on the shared stride and lunge keys with the weapon held in
+    # both hands (BRL-v8x4), sampled every frame so the support hand stays on `grip_secondary`.
+    for family in TWO_HANDED:
+        for clip, keys in (("run", run_keys), ("dash", dash_keys)):
+            level = CARRY_LEVEL.get((clip, family), 1.0)
+            poser.action(f"{clip}_{family}",
+                         sampled([(frame, carried(pose, holds[family], level)) for frame, pose in keys]),
+                         loop=True)
     recoil_ears = {"ear_l_01": (-14, 3, 0), "ear_r_01": (-12, -3, 0)}
     poser.action("attack_1h", [
         (1, holds["1h"]),
@@ -638,6 +684,108 @@ def export_glb(arm, mesh) -> None:
         export_leaf_bone=False, export_def_bones=False,
         export_draco_mesh_compression_enable=False,
     )
+
+
+# A translation or scale channel that holds its node's rest value in every clip carries nothing, but
+# the exporter keeps all three TRS channels for every bone in every clip, and each channel costs
+# about 170 bytes of glTF JSON per clip. Only these are dropped, from every clip alike, so all clips
+# still key one channel set and nothing leaks between them; rotations are always kept.
+REST_CHANNEL_TOLERANCE = 1e-5
+
+
+def write_glb(path: Path, document: dict, binary: bytes) -> None:
+    text = json.dumps(document, separators=(",", ":")).encode()
+    text += b" " * (-len(text) % 4)
+    binary += b"\0" * (-len(binary) % 4)
+    length = 12 + 8 + len(text) + 8 + len(binary)
+    path.write_bytes(struct.pack("<4sII", b"glTF", 2, length)
+                     + struct.pack("<I4s", len(text), b"JSON") + text
+                     + struct.pack("<I4s", len(binary), b"BIN\0") + binary)
+
+
+def strip_rest_channels(path: Path) -> int:
+    """Drops translation/scale channels that stay at the node's rest value in every clip (BRL-v8x4)
+    and repacks the buffer. Returns the number of channels removed per clip."""
+    document, _ = read_glb(path)
+    data = path.read_bytes()
+    json_length = struct.unpack_from("<I", data, 12)[0]
+    binary = data[20 + json_length + 8:]
+    accessors, views = document["accessors"], document["bufferViews"]
+    sizes = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
+
+    def values(index: int) -> list[tuple[float, ...]]:
+        accessor = accessors[index]
+        view = views[accessor["bufferView"]]
+        width = sizes[accessor["type"]]
+        assert accessor["componentType"] == 5126 and "byteStride" not in view
+        offset = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+        flat = struct.unpack_from(f"<{accessor['count'] * width}f", binary, offset)
+        return [flat[i:i + width] for i in range(0, len(flat), width)]
+
+    animated = {}
+    for animation in document["animations"]:
+        for channel in animation["channels"]:
+            target = (channel["target"]["node"], channel["target"]["path"])
+            if target[1] not in ("translation", "scale"):
+                continue
+            node = document["nodes"][target[0]]
+            rest = node.get(target[1], (0.0, 0.0, 0.0) if target[1] == "translation" else (1.0, 1.0, 1.0))
+            output = values(animation["samplers"][channel["sampler"]]["output"])
+            moves = any(abs(a - b) > REST_CHANNEL_TOLERANCE for row in output for a, b in zip(row, rest))
+            animated[target] = animated.get(target, False) or moves
+    dropped = {target for target, moves in animated.items() if not moves}
+    for animation in document["animations"]:
+        kept = [channel for channel in animation["channels"]
+                if (channel["target"]["node"], channel["target"]["path"]) not in dropped]
+        samplers = []
+        for channel in kept:
+            samplers.append(animation["samplers"][channel["sampler"]])
+            channel["sampler"] = len(samplers) - 1
+        animation["channels"], animation["samplers"] = kept, samplers
+
+    # Repack: keep only accessors still referenced, each with its own tightly packed view.
+    used = set()
+    for mesh in document["meshes"]:
+        for primitive in mesh["primitives"]:
+            used.update(primitive["attributes"].values())
+            if "indices" in primitive:
+                used.add(primitive["indices"])
+    for skin in document.get("skins", []):
+        if "inverseBindMatrices" in skin:
+            used.add(skin["inverseBindMatrices"])
+    for animation in document["animations"]:
+        for sampler in animation["samplers"]:
+            used.update((sampler["input"], sampler["output"]))
+    remap, new_accessors, new_views, packed = {}, [], [], bytearray()
+    for index in sorted(used):
+        accessor = dict(accessors[index])
+        view = dict(views[accessor["bufferView"]])
+        start = view.get("byteOffset", 0)
+        packed += b"\0" * (-len(packed) % 4)
+        chunk = binary[start:start + view["byteLength"]]
+        view["byteOffset"] = len(packed)
+        packed += chunk
+        accessor["bufferView"] = len(new_views)
+        new_views.append(view)
+        remap[index] = len(new_accessors)
+        new_accessors.append(accessor)
+    for mesh in document["meshes"]:
+        for primitive in mesh["primitives"]:
+            primitive["attributes"] = {key: remap[value] for key, value in primitive["attributes"].items()}
+            if "indices" in primitive:
+                primitive["indices"] = remap[primitive["indices"]]
+    for skin in document.get("skins", []):
+        if "inverseBindMatrices" in skin:
+            skin["inverseBindMatrices"] = remap[skin["inverseBindMatrices"]]
+    for animation in document["animations"]:
+        for sampler in animation["samplers"]:
+            sampler["input"], sampler["output"] = remap[sampler["input"]], remap[sampler["output"]]
+    assert all(view.get("buffer", 0) == 0 for view in views) and len(document["buffers"]) == 1
+    document["accessors"], document["bufferViews"] = new_accessors, new_views
+    packed += b"\0" * (-len(packed) % 4)
+    document["buffers"][0]["byteLength"] = len(packed)
+    write_glb(path, document, bytes(packed))
+    return len(dropped)
 
 
 def read_glb(path: Path):
@@ -840,6 +988,14 @@ def review_renders(arm, mats, weapons) -> None:
                   view=((2.6, -4.6, 5.4), (0, -0.15, 0.75), 45))
     contact_sheet(arm, camera, weapon_cells, PREVIEW_DIR / "riff-weapons-front.png", roots,
                   view=((1.2, -5.2, 1.6), (0, -0.15, 0.9), 50))
+    # Two-handed run and dash (BRL-v8x4): one row per family, run passing/contact keys then dash.
+    locomotion_cells = [(f"{clip}_{family}", frame) for family in TWO_HANDED
+                        for clip, frame in (("run", 1), ("run", 5), ("run", 9), ("run", 13),
+                                            ("dash", 1), ("dash", 5))]
+    contact_sheet(arm, camera, locomotion_cells, PREVIEW_DIR / "riff-two-handed-gameplay.png", roots,
+                  view=((2.6, -4.6, 5.4), (0, -0.15, 0.75), 45))
+    contact_sheet(arm, camera, locomotion_cells, PREVIEW_DIR / "riff-two-handed-side.png", roots,
+                  view=((5.2, -1.2, 1.6), (0, -0.15, 0.9), 50))
     show_weapon(roots, "1h")
     review.hide_render = True
 
@@ -894,7 +1050,9 @@ def main() -> None:
     geo.hide_render = True
     geo.hide_viewport = True
     export_glb(arm, runtime_mesh)
+    stripped = strip_rest_channels(GLB_PATH)
     report = validate_export()
+    report["rest_channels_stripped_per_clip"] = stripped
 
     heights = [(runtime_mesh.matrix_world @ vertex.co).z for vertex in runtime_mesh.data.vertices]
     head_parts = [obj for obj, bone in parts if bone == "head"]

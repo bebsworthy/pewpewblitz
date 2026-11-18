@@ -272,7 +272,11 @@ fn ready(
     if let Ok(mut animation_player) = players.get_mut(player) {
         let mut transitions = AnimationTransitions::new();
         transitions
-            .play(&mut animation_player, imported.clips.idle, Duration::ZERO)
+            .play(
+                &mut animation_player,
+                imported.clips.preview(family),
+                Duration::ZERO,
+            )
             .repeat();
         commands
             .entity(player)

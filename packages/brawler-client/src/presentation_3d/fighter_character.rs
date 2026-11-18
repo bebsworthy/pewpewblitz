@@ -50,8 +50,9 @@ const LANDING_SQUASH: f32 = 0.14;
 const LANDING_SQUASH_SECONDS: f32 = 0.22;
 const MOTION_BLEND: Duration = Duration::from_millis(100);
 
-/// Clip names exported by the builder, in graph order.
-const CLIP_NAMES: [&str; 15] = [
+/// Clip names exported by the builder, in graph order. Two-handed families run and dash with their
+/// own clips (BRL-v8x4); the one-handed family uses the shared `run` and `dash`.
+const CLIP_NAMES: [&str; 21] = [
     "idle",
     "run",
     "dash",
@@ -67,6 +68,12 @@ const CLIP_NAMES: [&str; 15] = [
     "attack_heavy",
     "attack_throwable",
     "attack_melee",
+    "run_heavy",
+    "run_throwable",
+    "run_melee",
+    "dash_heavy",
+    "dash_throwable",
+    "dash_melee",
 ];
 
 /// Animation family of the primary weapon, from its replicated delivery method. It selects both the
@@ -117,8 +124,8 @@ impl WeaponFamily {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FighterClips {
     pub(crate) idle: AnimationNodeIndex,
-    run: AnimationNodeIndex,
-    dash: AnimationNodeIndex,
+    run: [AnimationNodeIndex; 4],
+    dash: [AnimationNodeIndex; 4],
     hit: AnimationNodeIndex,
     defeat: AnimationNodeIndex,
     victory: AnimationNodeIndex,
@@ -127,7 +134,7 @@ pub(crate) struct FighterClips {
     attack: [AnimationNodeIndex; 4],
     hit_seconds: f32,
     ultimate_seconds: f32,
-    run_seconds: f32,
+    run_seconds: [f32; 4],
     attack_seconds: [f32; 4],
 }
 
@@ -147,38 +154,52 @@ impl FighterClips {
             .map(|handle| clips.get(handle).map(AnimationClip::duration))
             .collect::<Option<Vec<_>>>()?;
         let (graph, nodes) = AnimationGraph::from_clips(handles);
+        Some((graph, Self::from_nodes(&nodes, &durations)))
+    }
+
+    /// Maps graph nodes and clip durations, both in `CLIP_NAMES` order, onto the clip roles.
+    fn from_nodes(nodes: &[AnimationNodeIndex], durations: &[f32]) -> Self {
         let node = |index: usize| nodes[index];
-        Some((
-            graph,
-            Self {
-                idle: node(0),
-                run: node(1),
-                dash: node(2),
-                hit: node(3),
-                defeat: node(4),
-                victory: node(5),
-                ultimate: node(6),
-                hold: [node(7), node(8), node(9), node(10)],
-                attack: [node(11), node(12), node(13), node(14)],
-                hit_seconds: durations[3],
-                ultimate_seconds: durations[6],
-                run_seconds: durations[1],
-                attack_seconds: [durations[11], durations[12], durations[13], durations[14]],
-            },
-        ))
+        Self {
+            idle: node(0),
+            run: [node(1), node(15), node(16), node(17)],
+            dash: [node(2), node(18), node(19), node(20)],
+            hit: node(3),
+            defeat: node(4),
+            victory: node(5),
+            ultimate: node(6),
+            hold: [node(7), node(8), node(9), node(10)],
+            attack: [node(11), node(12), node(13), node(14)],
+            hit_seconds: durations[3],
+            ultimate_seconds: durations[6],
+            run_seconds: [durations[1], durations[15], durations[16], durations[17]],
+            attack_seconds: [durations[11], durations[12], durations[13], durations[14]],
+        }
     }
 
     fn node(&self, motion: CharacterMotion) -> AnimationNodeIndex {
         match motion {
             CharacterMotion::Idle => self.idle,
             CharacterMotion::Hold(family) => self.hold[family.index()],
-            CharacterMotion::Run => self.run,
+            CharacterMotion::Run(family) => self.run[family.index()],
             CharacterMotion::Attack(family) => self.attack[family.index()],
             CharacterMotion::Hit => self.hit,
-            CharacterMotion::Dash => self.dash,
+            CharacterMotion::Dash(family) => self.dash[family.index()],
             CharacterMotion::Ultimate => self.ultimate,
             CharacterMotion::Victory => self.victory,
             CharacterMotion::Defeated => self.defeat,
+        }
+    }
+
+    /// The looping clip of a standing shell preview (Dashboard, brawler cards): the calm `idle`
+    /// for a one-handed weapon, the family's ready hold for a two-handed one, so both hands stay on
+    /// it (BRL-v8x4).
+    pub(crate) const fn preview(&self, family: WeaponFamily) -> AnimationNodeIndex {
+        match family {
+            WeaponFamily::OneHanded => self.idle,
+            WeaponFamily::Heavy | WeaponFamily::Throwable | WeaponFamily::Melee => {
+                self.hold[family.index()]
+            }
         }
     }
 }
@@ -227,10 +248,10 @@ pub(crate) fn find_socket_and_player(
 pub(super) enum CharacterMotion {
     Idle,
     Hold(WeaponFamily),
-    Run,
+    Run(WeaponFamily),
     Attack(WeaponFamily),
     Hit,
-    Dash,
+    Dash(WeaponFamily),
     Ultimate,
     Victory,
     Defeated,
@@ -270,7 +291,7 @@ const fn select_motion(inputs: MotionInputs) -> CharacterMotion {
     } else if inputs.victorious {
         CharacterMotion::Victory
     } else if inputs.dashing {
-        CharacterMotion::Dash
+        CharacterMotion::Dash(inputs.family)
     } else if inputs.ultimate {
         CharacterMotion::Ultimate
     } else if inputs.attacking {
@@ -278,7 +299,7 @@ const fn select_motion(inputs: MotionInputs) -> CharacterMotion {
     } else if inputs.hit {
         CharacterMotion::Hit
     } else if inputs.moving {
-        CharacterMotion::Run
+        CharacterMotion::Run(inputs.family)
     } else {
         CharacterMotion::Hold(inputs.family)
     }
@@ -683,14 +704,17 @@ pub(super) fn update_character_animation(
             runtime.current = next;
         }
 
-        let run_phase = (runtime.current == CharacterMotion::Run)
-            .then(|| players.get(runtime.player).ok())
-            .flatten()
-            .and_then(|(player, _)| player.animation(clips.run))
-            .and_then(|animation| {
-                (clips.run_seconds > 0.0)
-                    .then(|| (animation.seek_time() / clips.run_seconds).rem_euclid(1.0))
-            });
+        let run_phase = match runtime.current {
+            CharacterMotion::Run(family) => players
+                .get(runtime.player)
+                .ok()
+                .and_then(|(player, _)| player.animation(clips.run[family.index()]))
+                .and_then(|animation| {
+                    let seconds = clips.run_seconds[family.index()];
+                    (seconds > 0.0).then(|| (animation.seek_time() / seconds).rem_euclid(1.0))
+                }),
+            _ => None,
+        };
         root_transform.scale = runtime.squashed_scale(reduced_motion, run_phase);
     }
 }

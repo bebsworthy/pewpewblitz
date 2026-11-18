@@ -128,7 +128,10 @@ fn motion_priority_keeps_defeat_victory_dash_and_fire_legible() {
         victorious: false,
         ..all
     };
-    assert_eq!(select_motion(all), CharacterMotion::Dash);
+    assert_eq!(
+        select_motion(all),
+        CharacterMotion::Dash(WeaponFamily::Heavy)
+    );
     let all = MotionInputs {
         dashing: false,
         ..all
@@ -148,7 +151,10 @@ fn motion_priority_keeps_defeat_victory_dash_and_fire_legible() {
     };
     assert_eq!(select_motion(all), CharacterMotion::Hit);
     let all = MotionInputs { hit: false, ..all };
-    assert_eq!(select_motion(all), CharacterMotion::Run);
+    assert_eq!(
+        select_motion(all),
+        CharacterMotion::Run(WeaponFamily::Heavy)
+    );
     assert_eq!(
         select_motion(MotionInputs {
             family: WeaponFamily::Throwable,
@@ -156,6 +162,44 @@ fn motion_priority_keeps_defeat_victory_dash_and_fire_legible() {
         }),
         CharacterMotion::Hold(WeaponFamily::Throwable)
     );
+}
+
+/// Clips whose graph node index equals their `CLIP_NAMES` position.
+fn indexed_clips() -> FighterClips {
+    let nodes = (0..CLIP_NAMES.len())
+        .map(AnimationNodeIndex::new)
+        .collect::<Vec<_>>();
+    FighterClips::from_nodes(&nodes, &[1.0; CLIP_NAMES.len()])
+}
+
+#[test]
+fn two_handed_families_run_dash_and_preview_with_both_hands_on_the_weapon() {
+    let clips = indexed_clips();
+    let name = |node: AnimationNodeIndex| CLIP_NAMES[node.index()];
+    assert_eq!(
+        name(clips.node(CharacterMotion::Run(WeaponFamily::OneHanded))),
+        "run"
+    );
+    assert_eq!(
+        name(clips.node(CharacterMotion::Dash(WeaponFamily::OneHanded))),
+        "dash"
+    );
+    assert_eq!(name(clips.preview(WeaponFamily::OneHanded)), "idle");
+    for (family, suffix) in [
+        (WeaponFamily::Heavy, "heavy"),
+        (WeaponFamily::Throwable, "throwable"),
+        (WeaponFamily::Melee, "melee"),
+    ] {
+        assert_eq!(
+            name(clips.node(CharacterMotion::Run(family))),
+            format!("run_{suffix}")
+        );
+        assert_eq!(
+            name(clips.node(CharacterMotion::Dash(family))),
+            format!("dash_{suffix}")
+        );
+        assert_eq!(name(clips.preview(family)), format!("combat_idle_{suffix}"));
+    }
 }
 
 #[test]
@@ -218,7 +262,8 @@ fn one_shot_motions_do_not_loop() {
     assert!(!CharacterMotion::Hit.loops());
     assert!(!CharacterMotion::Ultimate.loops());
     assert!(!CharacterMotion::Defeated.loops());
-    assert!(CharacterMotion::Run.loops());
+    assert!(CharacterMotion::Run(WeaponFamily::Heavy).loops());
+    assert!(CharacterMotion::Dash(WeaponFamily::OneHanded).loops());
     assert!(CharacterMotion::Hold(WeaponFamily::OneHanded).loops());
     assert!(CharacterMotion::Victory.loops());
 }

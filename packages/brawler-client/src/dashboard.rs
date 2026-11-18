@@ -67,6 +67,11 @@ struct DashboardPreviewFallback;
 #[derive(Component)]
 struct DashboardImportedSpawned;
 
+/// The animation player inside the Dashboard's imported brawler, so a weapon-family swap also
+/// switches its preview clip (BRL-v8x4).
+#[derive(Component, Clone, Copy)]
+struct DashboardPreviewPlayer(Entity);
+
 #[derive(Component, Clone, Copy)]
 enum DashboardImportedScene {
     Character,
@@ -451,10 +456,12 @@ fn setup_dashboard_imported_scene(
     else {
         return;
     };
-    // `sync_dashboard_preview_weapon` attaches the selected brawler's weapon family.
-    commands
-        .entity(ready.entity)
-        .insert(super::presentation_3d::HeldWeapon::new(socket));
+    // `sync_dashboard_preview_weapon` attaches the selected brawler's weapon family and plays its
+    // preview clip.
+    commands.entity(ready.entity).insert((
+        super::presentation_3d::HeldWeapon::new(socket),
+        DashboardPreviewPlayer(player),
+    ));
     if let Ok(mut animation_player) = players.get_mut(player) {
         let mut transitions = AnimationTransitions::new();
         transitions
@@ -470,7 +477,8 @@ fn setup_dashboard_imported_scene(
     }
 }
 
-/// Keeps the preview brawler holding the selected saved brawler's primary weapon family model.
+/// Keeps the preview brawler holding the selected saved brawler's primary weapon family model, in
+/// that family's preview clip (two-handed weapons in both hands).
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Bevy system parameters are passed by value"
@@ -479,7 +487,14 @@ fn sync_dashboard_preview_weapon(
     mut commands: Commands,
     imported: Option<Res<super::presentation_3d::Imported3dAssets>>,
     memberships: Query<&super::ClientLobbyMembership>,
-    mut held_weapons: Query<&mut super::presentation_3d::HeldWeapon, With<DashboardImportedScene>>,
+    mut held_weapons: Query<
+        (
+            &mut super::presentation_3d::HeldWeapon,
+            &DashboardPreviewPlayer,
+        ),
+        With<DashboardImportedScene>,
+    >,
+    mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
 ) {
     let Some(imported) = imported else {
         return;
@@ -488,8 +503,13 @@ fn sync_dashboard_preview_weapon(
         super::presentation_3d::WeaponFamily::OneHanded,
         super::presentation_3d::selected_weapon_family,
     );
-    for mut held in &mut held_weapons {
+    for (mut held, preview_player) in &mut held_weapons {
         if let Some(socket) = held.begin_swap(&mut commands, family) {
+            if let Ok((mut player, mut transitions)) = players.get_mut(preview_player.0) {
+                transitions
+                    .play(&mut player, imported.clips.preview(family), Duration::ZERO)
+                    .repeat();
+            }
             let weapon = commands
                 .spawn((
                     DashboardImportedScene::Weapon,

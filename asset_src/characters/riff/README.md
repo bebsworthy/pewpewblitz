@@ -15,7 +15,9 @@ entirely by checked-in procedural Blender scripts from the brief in `spec.md` an
 - `previews/` — generated review renders: `riff-front.png` and `riff-side.png` (orthographic),
   `riff-three-quarter.png`, `riff-gameplay.png` (55-degree gameplay elevation, 1h hold), and
   `riff-animation-sheet.png` (key poses of every clip, each family clip with its weapon), and
-  `riff-weapons-gameplay.png` / `riff-weapons-front.png` (every family's hold and attack peak).
+  `riff-weapons-gameplay.png` / `riff-weapons-front.png` (every family's hold and attack peak),
+  and `riff-two-handed-gameplay.png` / `riff-two-handed-side.png` (one row per two-handed family:
+  four run keys, then two dash frames).
 - `versions/v1/`, `versions/v2/` — frozen earlier passes; never edited.
 - Runtime derivative (not in this directory):
   `assets/brawler/models/original/characters/riff/chr_riff.glb`.
@@ -58,7 +60,8 @@ command above. The review-only weapons are the original family weapons from `ass
   the blaster clears the head from behind. The client scales Riff uniformly to 1.6 map cells
   including ears; collision is unaffected.
 - One skinned mesh, one primitive, one material, flat per-face palette in `COLOR_0`, no normals
-  (Bevy rebuilds flat normals), no UVs or textures. 9,688 triangles; about 620 KB.
+  (Bevy rebuilds flat normals), no UVs or textures. 9,688 triangles; about 510 KB (budget
+  700,000 bytes).
 - Armature `RIG__riff`: 38 bones including the seven sockets `socket_weapon_r`, `socket_weapon_l`,
   `socket_head`, `socket_chest`, `socket_back`, `socket_fx_center`, `socket_fx_ground`.
 - No weapon, camera, light, or review geometry in the export. The game attaches the primary weapon
@@ -69,19 +72,32 @@ command above. The review-only weapons are the original family weapons from `ass
   onto `grip_primary` and the left hand onto the weapon's `grip_secondary`, read from the GLB the
   catalog names. The build fails if a hand misses its anchor by more than 0.02 units and reports
   the worst miss per clip as `two_handed_grip_error`.
-- Clips (24 fps, in place). Every clip keys every deform bone, so no clip leaks a channel into the
-  next:
+- Two-handed families also run and dash with both hands on the weapon (BRL-v8x4): `run_<family>`
+  and `dash_<family>` reuse the shared `run` / `dash` keys (legs, pelvis, lean, ears, scarf, tail;
+  `EARS_UP` and the forward head lean in the run) with their arms replaced by the family hold: the
+  hold's body turn and clavicles are added, its stance legs dropped, and the extra locomotion lean
+  is taken back out of the weapon pitch (half of it for the blade's dash, which otherwise leaves
+  the support hand 0.054 short). They are sampled every frame like the holds. `1h` keeps `run` and
+  `dash`.
+- Clips (24 fps, in place). Every clip keys every deform bone's rotation, so no clip leaks a
+  channel into the next. After export the builder drops the translation and scale channels that
+  hold their node's rest value in every clip (all but the pelvis translation), from every clip
+  alike, and repacks the buffer; the exporter otherwise keeps all three per bone per clip, about
+  170 bytes of glTF JSON each, which is most of the file. The report counts them as
+  `rest_channels_stripped_per_clip`.
 
 | Clip | Use | Loop |
 |---|---|---|
-| `idle` | Dashboard and brawler-screen preview | yes |
-| `run` | moving; footfalls at phase 0 and 0.5 | yes |
-| `dash` | ability phase Dashing | yes |
+| `idle` | Dashboard and brawler-screen preview with a `1h` weapon | yes |
+| `run` | moving with a `1h` weapon; footfalls at phase 0 and 0.5 | yes |
+| `dash` | ability phase Dashing with a `1h` weapon | yes |
+| `run_<family>` | moving with a two-handed weapon; same 16-frame stride | yes |
+| `dash_<family>` | ability phase Dashing with a two-handed weapon | yes |
 | `hit_front` | `DamageApplied` on this fighter | no |
 | `ko` | defeated (holds the last frame) | no |
 | `victory` | own team won the completed match | yes |
 | `ultimate` | Ready-to-active ultimate transition | no |
-| `combat_idle_<family>` | standing with the weapon ready | yes |
+| `combat_idle_<family>` | standing with the weapon ready; the shell preview for two-handed families | yes |
 | `attack_<family>` | each accepted shot, with recoil | no |
 
 Weapon families come from the primary weapon's delivery: `1h` (Straight, StickyStraight),
@@ -89,8 +105,8 @@ Weapon families come from the primary weapon's delivery: `1h` (Straight, StickyS
 
 ## Known limits
 
-Run, dash, idle, and the other non-family clips carry every weapon one-handed by the grip. The
-support hand is baked into the clips rather than solved at runtime, so a weapon whose
+`hit_front`, `ko`, `victory`, and `ultimate` carry every weapon one-handed by the grip; there is
+no two-handed `idle` (the shell previews use `combat_idle_<family>` instead). The support hand is baked into the clips rather than solved at runtime, so a weapon whose
 `grip_secondary` moves needs a Riff rebuild. There is no reload clip, and only Riff exists.
 Per-brawler model selection and the remaining weapon compatibility checks in `spec.md` (rifle,
 rocket launcher, bow, magic wand) are follow-up work.
