@@ -36,6 +36,8 @@ mod equipment;
 mod match_flow;
 mod profile;
 
+#[cfg(test)]
+pub(in crate::flow) use match_flow::MATCH_CONNECT_FAILED;
 pub(in crate::flow) use match_flow::MatchFailureNotice;
 #[allow(
     unused_imports,

@@ -92,6 +92,7 @@ flowchart TD
     Queue -- reservation --> MatchLoading
     Queue -- "cancel acknowledged" --> Dashboard
     MatchLoading -- "cancel / start returned" --> Dashboard
+    MatchLoading -- "match session lost + fresh lobby" --> Dashboard
     MatchLoading -- countdown --> Match
 
     Match -- "authoritative completion" --> MatchComplete[Match Complete transient]
@@ -595,6 +596,11 @@ Errors map structured causes to the nearest honest action:
 - match disconnect → explain that the match cannot currently resume, then attempt a fresh lobby or
   offer Server Select; if that fresh lobby attempt also fails while the match is still presented,
   show the recoverable connection error (Retry / Change Server) rather than staying on the match;
+- match session lost or never connected during Match Loading (for example its connect request times
+  out after 10 s because the match worker is gone) → the same fresh-lobby recovery as a match
+  disconnect: Dashboard with "Could not connect to the match" (Back), the recoverable connection
+  error if that lobby also fails, or the automatic rejoin when the lobby announces one. The lobby
+  session before the handoff never counts as that return (BRL-hjmq);
 - server shutdown or lost lobby → clear connected state and return to Server Select without treating
   the event as an application crash.
 

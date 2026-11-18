@@ -11,6 +11,7 @@ use crate::{
             attempt_deadline_expiry, observation_for_expiry,
         },
         model::ClientFlow,
+        reducer::MatchFailureNotice,
     },
 };
 use bevy::{
@@ -69,22 +70,32 @@ fn observe_match_scope(
     match_failed: bool,
     countdown_observed: bool,
     rejoin: RejoinView,
+    match_loss_pending: bool,
 ) -> ObservationScope {
-    if flow == ClientFlow::Match && rejoin.rejoined {
+    // BRL-hjmq: Match Loading presents the match session too (from the handoff until the
+    // countdown), so a lost or never-established match session must reach the same
+    // fresh-lobby recovery as a lost match. While loading, the lobby session before the
+    // handoff is not a return: only a lobby opened after an observed match loss is.
+    let presents_match = match flow {
+        ClientFlow::Match => true,
+        ClientFlow::MatchLoading => match_loss_pending,
+        _ => false,
+    };
+    if matches!(flow, ClientFlow::Match | ClientFlow::MatchLoading) && rejoin.rejoined {
         ObservationScope::Complete(Some(SessionObservation::MatchRejoined))
-    } else if flow == ClientFlow::Match
-        && lobby_return == LobbyReturn::Accepted
-        && rejoin.in_progress
-    {
+    } else if presents_match && lobby_return == LobbyReturn::Accepted && rejoin.in_progress {
         // BRL-yyeg: this lobby session is fetching a rejoin grant; keep the match presented.
         ObservationScope::Complete(None)
     } else if rejoin.in_progress && LOBBY_FLOWS.contains(&flow) {
         ObservationScope::Complete(Some(SessionObservation::RejoinStarted))
-    } else if flow == ClientFlow::Match && lobby_return == LobbyReturn::Accepted {
+    } else if presents_match && lobby_return == LobbyReturn::Accepted {
         ObservationScope::Complete(Some(SessionObservation::FreshLobbyReturn))
-    } else if flow == ClientFlow::Match && lobby_return == LobbyReturn::Failed {
+    } else if presents_match && lobby_return == LobbyReturn::Failed {
         ObservationScope::Complete(Some(SessionObservation::LobbyReturnFailed))
-    } else if flow == ClientFlow::Match && match_failed {
+    } else if flow == ClientFlow::MatchLoading && lobby_return == LobbyReturn::Failed {
+        // The lobby session was lost before the match handoff.
+        ObservationScope::Complete(Some(SessionObservation::UnexpectedLoss))
+    } else if matches!(flow, ClientFlow::Match | ClientFlow::MatchLoading) && match_failed {
         ObservationScope::Complete(Some(SessionObservation::MatchFailed))
     } else if flow == ClientFlow::MatchLoading {
         ObservationScope::Complete(
@@ -184,6 +195,7 @@ pub(super) fn observe_session(
     mut practice: ResMut<ClientPracticeModel>,
     result_state: Res<ClientMatchResultState>,
     routed: Res<RoutedClientLifecycle>,
+    match_failure: Res<MatchFailureNotice>,
 ) {
     let resolver_observation = poll_resolver_observation(&mut resolver, pending.as_deref());
 
@@ -233,6 +245,7 @@ pub(super) fn observe_session(
             in_progress: routed.rejoin_in_progress(),
             rejoined: routed.rejoined,
         },
+        match_failure.0,
     ) {
         ObservationScope::Continue => {}
         ObservationScope::Complete(observation) => {
@@ -297,7 +310,8 @@ mod tests {
                 LobbyReturn::Accepted,
                 true,
                 false,
-                RejoinView::default()
+                RejoinView::default(),
+                false
             ),
             ObservationScope::Complete(Some(SessionObservation::FreshLobbyReturn))
         ));
@@ -307,7 +321,8 @@ mod tests {
                 LobbyReturn::NotObserved,
                 false,
                 false,
-                RejoinView::default()
+                RejoinView::default(),
+                false
             ),
             ObservationScope::Complete(None)
         ));
@@ -321,7 +336,8 @@ mod tests {
                 LobbyReturn::Failed,
                 true,
                 false,
-                RejoinView::default()
+                RejoinView::default(),
+                false
             ),
             ObservationScope::Complete(Some(SessionObservation::LobbyReturnFailed))
         ));
@@ -331,7 +347,8 @@ mod tests {
                 LobbyReturn::Failed,
                 false,
                 false,
-                RejoinView::default()
+                RejoinView::default(),
+                false
             ),
             ObservationScope::Continue
         ));
@@ -349,7 +366,8 @@ mod tests {
                 LobbyReturn::Accepted,
                 false,
                 false,
-                rejoining
+                rejoining,
+                false
             ),
             ObservationScope::Complete(None)
         ));
@@ -359,7 +377,8 @@ mod tests {
                 LobbyReturn::Accepted,
                 false,
                 false,
-                rejoining
+                rejoining,
+                false
             ),
             ObservationScope::Complete(Some(SessionObservation::RejoinStarted))
         ));
@@ -370,7 +389,8 @@ mod tests {
                 LobbyReturn::Failed,
                 false,
                 false,
-                rejoining
+                rejoining,
+                false
             ),
             ObservationScope::Complete(Some(SessionObservation::LobbyReturnFailed))
         ));
@@ -383,7 +403,8 @@ mod tests {
                 RejoinView {
                     in_progress: false,
                     rejoined: true,
-                }
+                },
+                false
             ),
             ObservationScope::Complete(Some(SessionObservation::MatchRejoined))
         ));
@@ -403,9 +424,54 @@ mod tests {
                 RejoinView {
                     in_progress: false,
                     rejoined: true,
-                }
+                },
+                false
             ),
             ObservationScope::Complete(Some(SessionObservation::MatchRejoined))
+        ));
+    }
+
+    /// BRL-hjmq: Match Loading observes a failed match session and the fresh lobby after it,
+    /// but never mistakes the lobby session before the handoff for a return.
+    #[test]
+    fn match_loading_observes_a_lost_match_session_and_the_lobby_after_it() {
+        let loading = |lobby_return, match_failed, rejoin, pending| {
+            observe_match_scope(
+                ClientFlow::MatchLoading,
+                lobby_return,
+                match_failed,
+                false,
+                rejoin,
+                pending,
+            )
+        };
+        let rejoining = RejoinView {
+            in_progress: true,
+            rejoined: false,
+        };
+        assert!(matches!(
+            loading(LobbyReturn::NotObserved, true, RejoinView::default(), false),
+            ObservationScope::Complete(Some(SessionObservation::MatchFailed))
+        ));
+        assert!(matches!(
+            loading(LobbyReturn::Accepted, false, RejoinView::default(), false),
+            ObservationScope::Complete(None)
+        ));
+        assert!(matches!(
+            loading(LobbyReturn::Accepted, false, RejoinView::default(), true),
+            ObservationScope::Complete(Some(SessionObservation::FreshLobbyReturn))
+        ));
+        assert!(matches!(
+            loading(LobbyReturn::Accepted, false, rejoining, true),
+            ObservationScope::Complete(None)
+        ));
+        assert!(matches!(
+            loading(LobbyReturn::Failed, false, RejoinView::default(), true),
+            ObservationScope::Complete(Some(SessionObservation::LobbyReturnFailed))
+        ));
+        assert!(matches!(
+            loading(LobbyReturn::Failed, false, RejoinView::default(), false),
+            ObservationScope::Complete(Some(SessionObservation::UnexpectedLoss))
         ));
     }
 

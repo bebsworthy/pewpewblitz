@@ -20,6 +20,11 @@ use crate::{
 };
 use bevy::prelude::Resource;
 
+/// Dashboard explanation after the match session failed during Match Loading (BRL-hjmq).
+pub(in crate::flow) const MATCH_CONNECT_FAILED: &str =
+    "Could not connect to the match, so it did not start. You are back in the lobby.";
+
+/// A match session was lost and the fresh lobby that follows has not been observed yet.
 #[derive(Resource, Default)]
 pub(in crate::flow) struct MatchFailureNotice(pub(in crate::flow) bool);
 
@@ -92,11 +97,15 @@ pub(super) fn resolve_observation(
             };
             commit.next_flow = Some(destination);
             if core::mem::take(&mut match_failure.0) {
+                // BRL-hjmq: a match session lost while loading never reached the match.
+                let message = if flow == ClientFlow::MatchLoading {
+                    MATCH_CONNECT_FAILED
+                } else {
+                    "The connection to the match was lost, and the match could not be resumed."
+                };
                 commit.error = Some(FlowError {
                     kind: FlowErrorKind::Connection,
-                    message:
-                        "The connection to the match was lost, and the match could not be resumed."
-                            .to_string(),
+                    message: message.to_string(),
                     return_flow: ClientFlow::Dashboard,
                     actions: [Some(FlowErrorAction::Back), None],
                 });

@@ -3935,6 +3935,115 @@ fn failed_lobby_return_during_match_presentation_shows_recoverable_connection_er
     }
 }
 
+/// BRL-hjmq: the match session's connect request times out during Match Loading (the match
+/// worker is gone). The real observation path must leave "Match loading / Connecting" for a fresh
+/// lobby and show the connection error over the Dashboard, while the lobby session before the
+/// handoff is never mistaken for that return.
+#[test]
+fn match_loading_connect_timeout_shows_the_error_and_returns_to_the_dashboard() {
+    let mut app = flow_test_app_with(|app| {
+        app.init_resource::<crate::ClientInputContext>();
+    });
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::MatchLoading);
+    app.update();
+    assert_eq!(current_flow(&app), ClientFlow::MatchLoading);
+
+    // Before the handoff the accepted lobby session is not a return to the Dashboard.
+    let lobby_generation = {
+        let mut routed = app.world_mut().resource_mut::<RoutedClientLifecycle>();
+        routed.start_lobby();
+        routed.generation
+    };
+    let lobby = spawn_active_lobby_session(&mut app, lobby_generation);
+    app.update();
+    app.update();
+    assert_eq!(current_flow(&app), ClientFlow::MatchLoading);
+
+    // The handoff replaced the lobby with a match session whose connect request then timed out.
+    app.world_mut().despawn(lobby);
+    let match_generation = {
+        let mut routed = app.world_mut().resource_mut::<RoutedClientLifecycle>();
+        routed.generation += 1;
+        routed.phase = RoutedClientPhase::Match;
+        routed.generation
+    };
+    let match_session = app
+        .world_mut()
+        .spawn((
+            Client,
+            RoutedClientSession {
+                generation: match_generation,
+                kind: super::super::RoutedClientSessionKind::Match,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::Disconnected,
+                started_at: Duration::ZERO,
+                disconnect_requested: false,
+            },
+        ))
+        .id();
+    app.update();
+    assert_eq!(
+        app.world().resource::<RoutedClientLifecycle>().phase,
+        RoutedClientPhase::AwaitingMatchUnlink,
+        "the lost match session starts the fresh lobby return"
+    );
+    assert!(app.world().resource::<MatchFailureNotice>().0);
+    assert_eq!(current_flow(&app), ClientFlow::MatchLoading);
+
+    // The session transition unlinks the match session and opens a fresh lobby.
+    app.world_mut().despawn(match_session);
+    let fresh_generation = {
+        let mut routed = app.world_mut().resource_mut::<RoutedClientLifecycle>();
+        routed.start_lobby();
+        routed.generation
+    };
+    spawn_active_lobby_session(&mut app, fresh_generation);
+    app.update();
+    app.update();
+
+    assert_eq!(current_flow(&app), ClientFlow::Dashboard);
+    let ClientOverlay::Error(error) = app.world().resource::<ClientOverlay>().clone() else {
+        panic!("a match connect timeout must show the connection error");
+    };
+    assert_eq!(error.kind, FlowErrorKind::Connection);
+    assert_eq!(error.message, reducer::MATCH_CONNECT_FAILED);
+    assert_eq!(error.return_flow, ClientFlow::Dashboard);
+    assert_eq!(error.actions, [Some(FlowErrorAction::Back), None]);
+    assert!(!app.world().resource::<MatchFailureNotice>().0);
+    assert_eq!(count_error_roots(&mut app), 1);
+
+    press_flow_button(&mut app, &FlowUiAction::DismissError);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::None
+    );
+    assert_eq!(current_flow(&app), ClientFlow::Dashboard);
+}
+
+fn spawn_active_lobby_session(app: &mut App, generation: u64) -> Entity {
+    app.world_mut()
+        .spawn((
+            Client,
+            lobby_membership(),
+            RoutedClientSession {
+                generation,
+                kind: super::super::RoutedClientSessionKind::Lobby,
+            },
+            ClientJoinStatus {
+                phase: ClientJoinPhase::LobbyActive {
+                    player_id: brawler::protocol::PlayerId(1),
+                },
+                started_at: Duration::ZERO,
+                disconnect_requested: false,
+            },
+        ))
+        .id()
+}
+
 /// BRL-0198: one shell screen reached from a fresh connected Dashboard.
 struct BackCase {
     screen: &'static str,
