@@ -3,9 +3,9 @@ id: BRL-1gkv
 
 title: Apply the render quality tier MSAA to offscreen shell preview cameras
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T20:38:35Z
+status_changed: 2026-11-18T02:07:57Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-kp7d]
 
 parent: BRL-q5c4
 
-rank: 15859712
+rank: 11337728
 ---
 
 # Description

@@ -4,9 +4,9 @@ was: BRL-0211
 
 title: Make every shell control at least 48 dp tall on phones
 
-status: doing
-closed:
-status_changed: 2026-11-18T01:38:59Z
+status: done
+closed: 2026-11-18T02:07:57Z
+status_changed: 2026-11-18T02:07:57Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-8q4c, BRL-rs10]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
