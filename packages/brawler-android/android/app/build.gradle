@@ -2,6 +2,42 @@ plugins {
     id 'com.android.application'
 }
 
+// Store signing (BRL-06pz). The Play upload key never lives in git: it comes from
+// `keystore.properties` beside settings.gradle (gitignored) or, overriding it, from the
+// BRAWLER_UPLOAD_STORE_FILE / _STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD environment variables.
+// Without it, release APKs fall back to the local debug key and store bundles refuse to build.
+def uploadKey = [:]
+def uploadKeyProperties = rootProject.file('keystore.properties')
+if (uploadKeyProperties.exists()) {
+    def properties = new Properties()
+    uploadKeyProperties.withInputStream { properties.load(it) }
+    ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].each { name ->
+        uploadKey[name] = properties.getProperty(name)
+    }
+}
+[
+    storeFile: 'BRAWLER_UPLOAD_STORE_FILE',
+    storePassword: 'BRAWLER_UPLOAD_STORE_PASSWORD',
+    keyAlias: 'BRAWLER_UPLOAD_KEY_ALIAS',
+    keyPassword: 'BRAWLER_UPLOAD_KEY_PASSWORD',
+].each { name, variable ->
+    def value = System.getenv(variable)
+    if (value) {
+        uploadKey[name] = value
+    }
+}
+def hasUploadKey = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].every { uploadKey[it] }
+
+gradle.taskGraph.whenReady { graph ->
+    if (!hasUploadKey && graph.allTasks.any { it.name == 'bundleRelease' }) {
+        throw new GradleException(
+            'bundleRelease needs the Play upload key: create packages/brawler-android/android/' +
+            'keystore.properties (storeFile, storePassword, keyAlias, keyPassword) or set ' +
+            'BRAWLER_UPLOAD_STORE_FILE, BRAWLER_UPLOAD_STORE_PASSWORD, BRAWLER_UPLOAD_KEY_ALIAS ' +
+            'and BRAWLER_UPLOAD_KEY_PASSWORD. See the Android section of README.md.')
+    }
+}
+
 android {
     namespace 'com.pewpewblitz.client'
     compileSdk 37
@@ -21,12 +57,23 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasUploadKey) {
+            upload {
+                storeFile = rootProject.file(uploadKey.storeFile)
+                storePassword = uploadKey.storePassword
+                keyAlias = uploadKey.keyAlias
+                keyPassword = uploadKey.keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
-            // Development installs only: signed with the local debug keystore. Store signing is
-            // separate deferred work.
-            signingConfig signingConfigs.debug
+            // The upload key when it is configured; otherwise the local debug key, which only
+            // suits development installs.
+            signingConfig = hasUploadKey ? signingConfigs.upload : signingConfigs.debug
         }
     }
 

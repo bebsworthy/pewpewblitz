@@ -36,6 +36,10 @@ android-build server="":
 android-install server="":
     ./scripts/android.sh install {{server}}
 
+# Build the upload-key-signed Play bundle (.aab); fails early without the upload key (README).
+android-bundle server="":
+    ./scripts/android.sh bundle {{server}}
+
 # Format all Rust sources.
 fmt:
     cargo fmt --all

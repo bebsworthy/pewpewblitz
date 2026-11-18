@@ -3,3 +3,7 @@ build/
 app/build/
 app/src/main/jniLibs/
 local.properties
+# Play upload key configuration and keystores (BRL-06pz); never committed.
+keystore.properties
+*.jks
+*.keystore
