@@ -3,9 +3,9 @@ id: BRL-ztpa
 
 title: Add original-work license notes for Riff and the shell artwork
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T20:38:36Z
+status_changed: 2026-11-18T07:00:42Z
 
 theme: core
 
@@ -19,7 +19,7 @@ related: [BRL-wpr8]
 
 parent: BRL-q5c4
 
-rank: 17039360
+rank: 11337728
 ---
 
 # Description
