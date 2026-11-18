@@ -4,8 +4,8 @@
 //! brawler's family on its own layer (`DASHBOARD_RENDER_LAYER`).
 use crate::flow::BrawlerCardPreview;
 use crate::presentation_3d::{
-    DASHBOARD_RIFF_SCALE, Imported3dAssets, WeaponFamily, WorldLookCatalog, find_socket_and_player,
-    player_preview_toon_scene, riff_scene_transform, weapon_attachment,
+    DASHBOARD_RIFF_SCALE, Imported3dAssets, PreviewOutline, WeaponFamily, WorldLookCatalog,
+    find_socket_and_player, player_preview_toon_scene, riff_scene_transform, weapon_attachment,
 };
 use bevy::{
     asset::RenderAssetUsages,
@@ -106,6 +106,7 @@ pub(super) fn ensure(
         commands.entity(root).insert(CardRiffSpawned).with_child((
             CardScene(scene.0),
             player_preview_toon_scene(),
+            PreviewOutline,
             WorldAssetRoot(imported.character_scene.clone()),
             riff_scene_transform(-0.12, DASHBOARD_RIFF_SCALE),
             layer(scene.0),

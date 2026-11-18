@@ -3,11 +3,14 @@
 // `packages/brawler-client/src/presentation_3d/combat/fighter_outline.rs`; the shader is
 // `assets/shaders/fighter_outline.wgsl`.
 (
-    schema_version: 1,
+    schema_version: 2,
     // Outline width in world units at the fighter (a fighter is about 43 units tall), so the
     // outline scales with the fighter under every map framing and display resolution. The shell is
     // extruded in screen space, so the width is even all around the silhouette.
     width_world: 1.1,
+    // Shell preview outline width (Dashboard and brawler-card Riff, BRL-y3hb), in world units at
+    // the preview Riff, which is scaled about 1.8x an arena fighter and framed much closer.
+    preview_width_world: 0.8,
     // Dark navy `#0E1638` (sRGB, docs/11 visual direction): darker than every floor, never black.
     color: (0.055, 0.086, 0.22),
     // Optional relationship tint: 0 keeps every outline navy; up to 1 mixes it toward the

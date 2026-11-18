@@ -58,7 +58,10 @@ pub(super) use fighter_feedback::{
     ConcealedMaterialVariants, fighter_is_visually_concealed, reconcile_dash_trails,
     reconcile_status_visuals, update_fighter_concealment_visuals, write_status_visual_poses,
 };
-pub(super) use fighter_outline::{attach_fighter_outlines, install as install_fighter_outlines};
+pub(crate) use fighter_outline::PreviewOutline;
+pub(super) use fighter_outline::{
+    attach_fighter_outlines, attach_preview_outlines, install as install_fighter_outlines,
+};
 pub(super) use fighter_rim::tag_fighter_rim_relation;
 pub(super) use fighter_ui::{
     OVERHEAD_AMMO_HEIGHT, OVERHEAD_WORLD_HEIGHT, fit_overhead_player_names,

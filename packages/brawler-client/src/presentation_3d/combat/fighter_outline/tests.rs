@@ -8,8 +8,13 @@ fn tuning() -> FighterOutlineTuning {
 }
 
 fn catalog(width: f32, color: (f32, f32, f32), tint: f32) -> String {
+    catalog_with_preview(width, 0.8, color, tint)
+}
+
+fn catalog_with_preview(width: f32, preview: f32, color: (f32, f32, f32), tint: f32) -> String {
     format!(
-        "(schema_version: 1, width_world: {width}, color: ({}, {}, {}), relationship_tint: {tint})",
+        "(schema_version: 2, width_world: {width}, preview_width_world: {preview}, \
+         color: ({}, {}, {}), relationship_tint: {tint})",
         color.0, color.1, color.2
     )
 }
@@ -18,6 +23,7 @@ fn catalog(width: f32, color: (f32, f32, f32), tint: f32) -> String {
 fn embedded_catalog_is_a_thin_dark_navy_outline() {
     let tuning = tuning();
     assert!((0.6..=2.0).contains(&tuning.width_world));
+    assert!((0.3..=2.0).contains(&tuning.preview_width_world));
     let color = tuning.color;
     assert!(
         color.blue > color.red && color.blue > color.green,
@@ -43,7 +49,13 @@ fn catalog_rejects_out_of_bounds_tuning() {
             "width {width} color {color:?} tint {tint} must be rejected"
         );
     }
-    let wrong_schema = catalog(2.5, navy, 0.0).replace("schema_version: 1", "schema_version: 2");
+    for preview in [0.0, MAX_OUTLINE_WIDTH_WORLD + 1.0, f32::NAN] {
+        assert!(
+            FighterOutlineTuning::from_ron(&catalog_with_preview(1.1, preview, navy, 0.0)).is_err(),
+            "preview width {preview} must be rejected"
+        );
+    }
+    let wrong_schema = catalog(2.5, navy, 0.0).replace("schema_version: 2", "schema_version: 1");
     assert!(FighterOutlineTuning::from_ron(&wrong_schema).is_err());
 }
 
@@ -268,4 +280,76 @@ fn outline_exists_only_while_the_observer_may_see_the_fighter() {
             .iter()
             .all(|(_, _, visibility)| *visibility == Visibility::Inherited)
     );
+}
+
+#[test]
+fn a_preview_root_outlines_its_toon_meshes_once_on_the_preview_layer() {
+    let mut app = App::new();
+    app.init_resource::<Assets<Mesh>>()
+        .init_resource::<Assets<ToonMaterial>>()
+        .insert_resource(ToonShading::embedded().unwrap())
+        .init_resource::<Assets<FighterOutlineMaterial>>()
+        .insert_resource(tuning())
+        .init_resource::<FighterOutlineAssets>()
+        .add_systems(Startup, prepare_fighter_outline_material)
+        .add_systems(Update, attach_preview_outlines);
+    let mesh = app
+        .world_mut()
+        .resource_mut::<Assets<Mesh>>()
+        .add(Cuboid::from_length(2.0));
+    let toon = app.world_mut().resource_mut::<Assets<ToonMaterial>>().add(
+        ToonShading::embedded()
+            .unwrap()
+            .material(StandardMaterial::default()),
+    );
+    let layer = RenderLayers::layer(29);
+    let root = app.world_mut().spawn((PreviewOutline, layer.clone())).id();
+    let scene = app.world_mut().spawn(ChildOf(root)).id();
+    let body = app
+        .world_mut()
+        .spawn((
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(toon.clone()),
+            layer.clone(),
+            ChildOf(scene),
+        ))
+        .id();
+    // A weapon close-up scene has toon meshes but no preview outline marker.
+    let close_up = app.world_mut().spawn(RenderLayers::layer(28)).id();
+    app.world_mut().spawn((
+        Mesh3d(mesh),
+        MeshMaterial3d(toon),
+        RenderLayers::layer(28),
+        ChildOf(close_up),
+    ));
+
+    for _ in 0..3 {
+        app.update();
+        let world = app.world_mut();
+        let hulls = world
+            .query_filtered::<(
+                &ChildOf,
+                &RenderLayers,
+                &MeshMaterial3d<FighterOutlineMaterial>,
+            ), With<FighterOutlineHull>>()
+            .iter(world)
+            .map(|(parent, layers, material)| (parent.parent(), layers.clone(), material.0.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hulls.len(),
+            1,
+            "exactly one hull, never duplicated, none on the close-up"
+        );
+        let (parent, layers, material) = &hulls[0];
+        assert_eq!(*parent, body);
+        assert_eq!(
+            *layers, layer,
+            "the hull carries the preview layer explicitly"
+        );
+        assert_eq!(
+            *material,
+            world.resource::<FighterOutlineAssets>().preview_material,
+            "previews use the preview-width material"
+        );
+    }
 }

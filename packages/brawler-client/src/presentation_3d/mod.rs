@@ -56,7 +56,7 @@ pub(crate) use combat::{
     VfxLabLifecycleSet, VfxParticleDiagnostics, VfxParticleEmitter3d,
 };
 pub(crate) use combat::{
-    PendingCombatEffect, VfxParticleAdapterPlugin, VfxTransientDiagnostics,
+    PendingCombatEffect, PreviewOutline, VfxParticleAdapterPlugin, VfxTransientDiagnostics,
     animate_combat_effect_layers, cleanup_combat_effects, materialize_combat_effects,
     resolve_vfx_requests,
 };
@@ -497,6 +497,8 @@ impl Plugin for WorldPresentationPlugin {
                         combat::tag_fighter_rim_relation,
                     )
                         .chain(),
+                    // Shell previews (Dashboard, brawler cards) outside matches too (BRL-y3hb).
+                    combat::attach_preview_outlines,
                     (
                         contact_shadow::attach_contact_shadows,
                         contact_shadow::update_fighter_contact_shadows,

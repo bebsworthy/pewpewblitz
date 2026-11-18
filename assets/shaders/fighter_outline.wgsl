@@ -17,15 +17,13 @@
 struct FighterOutlineSettings {
     // Linear RGB outline colour per mesh tag; alpha unused.
     colors: array<vec4<f32>, 4>,
-    // x: width in world units at the fighter's depth.
+    // x: width in world units at the fighter's depth; y: world units the hull is pushed away from
+    // the camera, so where body parts meet (neck, hands on the blaster) the shell stays behind
+    // the touching surfaces instead of poking dark specks through.
     width: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> outline: FighterOutlineSettings;
-
-// World units the hull is pushed away from the camera, so where body parts meet (neck, hands on
-// the blaster) the shell stays behind the touching surfaces instead of poking dark specks through.
-const HULL_DEPTH_PUSH: f32 = 2.0;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -57,7 +55,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let world_position =
         mesh_functions::mesh_position_local_to_world(world_from_local, vec4<f32>(vertex.position, 1.0));
     let away_from_camera = normalize(world_position.xyz - view.world_position);
-    var clip = position_world_to_clip(world_position.xyz + away_from_camera * HULL_DEPTH_PUSH);
+    var clip = position_world_to_clip(world_position.xyz + away_from_camera * outline.width.y);
 
     // Screen-space direction, world-scale width: the projected normal in pixels gives the
     // direction; `width × clip_from_view[1][1]` is the width in NDC height units times clip.w, so

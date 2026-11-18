@@ -59,7 +59,8 @@ tickets tune them through native review but do not change the direction.
   inverted hull on each fighter mesh (smoothed normals, extruded in screen space by a world-unit
   width, flat colour, no shadows), so world geometry in front of a fighter still hides it and it
   never shows through walls. A locally concealed ally shows no outline over its translucent body.
-  Width, colour, and an optional relationship tint live in `assets/catalogs/fighter_outline.ron`.
+  Width (arena and shell preview), colour, and an optional relationship tint live in
+  `assets/catalogs/fighter_outline.ron`.
 - **Post-processing.** HDR with a filmic tonemapper and restrained bloom. Only emissive projectiles,
   muzzle flashes, and pickups bloom.
 - **Color grading.** Saturation about ×1.15–1.25, applied per theme.
@@ -394,7 +395,13 @@ applies. The toon material bands only directional light plus ambient, so the pre
 shadowless key light plus a per-camera ambient, both from `preview_light` in
 `assets/catalogs/world_look.ron`. The per-camera ambient keeps the preview independent of the last
 presented map theme. There are no point lights or preview shadow maps; the toon rim takes the place
-of the former coloured rim light. Fighter outlines (BRL-0151) are not drawn in the previews yet.
+of the former coloured rim light. The Dashboard brawler and the brawler-card Riff (card list,
+details portrait, creation choice card) draw the fighter outline too, held weapon included, on the
+preview's own render layer (BRL-y3hb). The preview Riff is scaled about 1.8x an arena fighter and
+framed close, so it uses `preview_width_world` from `assets/catalogs/fighter_outline.ron` and a
+deeper hull depth push in code, which keeps face details and pockets from picking up their own dark
+rings. The standalone weapon close-ups (weapon equipment, creation weapon card) stay unoutlined:
+they are UI illustrations of a part, not a fighter silhouette.
 
 ### Bevy UI
 

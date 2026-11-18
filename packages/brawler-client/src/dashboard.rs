@@ -379,6 +379,7 @@ fn spawn_imported_character(
         parent.spawn((
             DashboardImportedScene::Character,
             super::presentation_3d::player_preview_toon_scene(),
+            super::presentation_3d::PreviewOutline,
             WorldAssetRoot(imported.character_scene.clone()),
             super::presentation_3d::riff_scene_transform(
                 -0.12,
