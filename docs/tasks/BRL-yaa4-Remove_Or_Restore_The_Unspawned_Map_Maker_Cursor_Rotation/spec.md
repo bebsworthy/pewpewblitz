@@ -21,3 +21,16 @@ Should the editor show a rotation/cell readout? (owner) — ask via `ticket task
 
 # Decision (2026-11-15)
 Go with the default: **remove** the dead readout system and `rotation_degrees` (the approved mockups dropped it, and symmetry is already shown). The owner can reopen the ticket to restore it instead.
+
+
+# Result (2026-11-18)
+
+I removed the readout, following the recorded default decision:
+- Deleted `MapMakerCursorCopy`, `update_map_editor_cursor_copy`, `rotation_degrees` and its overflow test from `flow/screens/map_maker.rs`.
+- Removed the system's import, its scheduling and its `.after` edge from `flow.rs`.
+- `symmetry_label` stays because the retained Symmetry label still uses it.
+- No spawn site existed, so nothing visible changes.
+
+Verification: `just lint` passes, and `cargo test -p brawler-client --lib` passes (828). Logs are in `target/yaa4/`.
+
+If the owner wants the readout back, reopen this ticket and use the "Restore" plan above.

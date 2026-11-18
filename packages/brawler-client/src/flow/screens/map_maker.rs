@@ -172,9 +172,6 @@ impl Default for MapMakerRuntime {
 #[derive(Component)]
 pub(in crate::flow) struct MapMakerRoot(u64);
 
-#[derive(Component)]
-pub(in crate::flow) struct MapMakerCursorCopy;
-
 /// Retained editor labels whose text changes on value-only edits (BRL-0175).
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::flow) enum MapMakerValueLabel {
@@ -360,29 +357,6 @@ fn preview_place_item(
         PaletteItem::Spawn(team) => session.place_spawn(catalog, cell, team, quarter_turns),
         PaletteItem::HotZone => session.place_hot_zone(cell),
         PaletteItem::HeistSafe(team) => session.place_heist_safe(cell, team),
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::flow) fn update_map_editor_cursor_copy(
-    runtime: Res<MapMakerRuntime>,
-    mut copies: Query<&mut Text, With<MapMakerCursorCopy>>,
-) {
-    if !runtime.is_changed() {
-        return;
-    }
-    let symmetry = runtime
-        .session
-        .as_ref()
-        .map_or(MapSymmetry::None, |session| session.symmetry);
-    for mut copy in &mut copies {
-        **copy = format!(
-            "{}°  ·  {}  ·  CELL {},{}",
-            rotation_degrees(runtime.quarter_turns),
-            symmetry_label(symmetry),
-            runtime.cursor.x,
-            runtime.cursor.y
-        );
     }
 }
 
@@ -3576,10 +3550,6 @@ fn palette_label(item: Option<PaletteItem>, catalog: &brawler::map::MapContentCa
     }
 }
 
-fn rotation_degrees(quarter_turns: u8) -> u16 {
-    u16::from(quarter_turns % 4) * 90
-}
-
 fn root_node() -> Node {
     Node {
         width: percent(100),
@@ -3651,12 +3621,6 @@ pub(in crate::flow) fn return_to_editor_after_practice(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn valid_three_quarter_turn_rotation_displays_without_u8_overflow() {
-        assert_eq!(rotation_degrees(3), 270);
-        assert_eq!(rotation_degrees(u8::MAX), 270);
-    }
 
     #[test]
     fn editor_control_selection_is_owned_by_runtime_state() {
