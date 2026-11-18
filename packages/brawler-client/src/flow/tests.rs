@@ -3658,6 +3658,180 @@ fn player_path_screens_keep_every_control_reachable_on_a_landscape_phone() {
     assert_phone_reachable(&mut app, "Practice maps");
 }
 
+/// Settles the layout, then asserts every control stays reachable and is a 48 dp touch target.
+fn assert_phone_touch_targets(app: &mut App, screen: &str) {
+    assert_phone_reachable(app, screen);
+    let short = crate::ui::layout_harness::short_buttons(
+        app.world_mut(),
+        crate::ui::touch_target::MIN_TOUCH_TARGET_DP,
+    );
+    assert!(
+        short.is_empty(),
+        "{screen}: controls under 48 dp at the phone viewport: {short:?}"
+    );
+    // The Dashboard brawler preview is a backdrop hit area the action column sits on.
+    let previews: Vec<_> = app
+        .world_mut()
+        .query_filtered::<Entity, With<DashboardPreviewHost>>()
+        .iter(app.world())
+        .collect();
+    let overlapping = crate::ui::layout_harness::overlapping_buttons(app.world_mut(), &previews);
+    assert!(
+        overlapping.is_empty(),
+        "{screen}: raised controls overlap: {overlapping:?}"
+    );
+}
+
+/// BRL-q148: with the touch policy on, every shell control on the player path is at least 48 dp
+/// tall at the default and the smallest UI scale, and stays reachable.
+#[test]
+fn shell_controls_are_48_dp_touch_targets_on_a_landscape_phone() {
+    use crate::settings::persistence::MIN_UI_SCALE;
+    let touch_phone_app = |membership: &ClientLobbyMembership, ui_scale: f32| {
+        let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
+            crate::ui::layout_harness::add_layout(app, PHONE_VIEWPORT.0, PHONE_VIEWPORT.1);
+            app.insert_resource(crate::ui::touch_target::TouchTargetPolicy { enabled: true })
+                .insert_resource(super::super::ClientInputContext::Shell);
+        });
+        crate::ui::layout_harness::apply_viewport_fit(&mut app);
+        app.world_mut().resource_mut::<UiScale>().0 *= ui_scale;
+        app.world_mut()
+            .resource_mut::<super::super::ClientProfileModel>()
+            .set_snapshot_for_test(membership.profile.clone());
+        app
+    };
+    for ui_scale in [1.0, MIN_UI_SCALE] {
+        let membership = lobby_membership_with_brawler();
+        let at = |screen: &str| format!("{screen} at {:.0}%", ui_scale * 100.0);
+
+        let mut app = touch_phone_app(&membership, ui_scale);
+        app.world_mut()
+            .resource_mut::<RoutedClientLifecycle>()
+            .start_lobby();
+        app.world_mut()
+            .resource_mut::<super::super::ClientQueueModel>()
+            .set_membership_for_test(queue_membership(&membership));
+        inject_session_observation(
+            &mut app,
+            SessionObservation::QueueOutcome(brawler::lobby::QueueCommandOutcome {
+                request_id: brawler::lobby::QueueRequestId::new(1).unwrap(),
+                decision: brawler::lobby::QueueDecision::Joined(queue_membership(&membership)),
+            }),
+        );
+        app.update();
+        assert_eq!(current_flow(&app), ClientFlow::Queue);
+        assert_phone_touch_targets(&mut app, &at("Queue"));
+
+        let mut app = touch_phone_app(&membership, ui_scale);
+
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::ServerSelect);
+        assert_phone_touch_targets(&mut app, &at("Server Select"));
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Error(FlowError {
+            kind: FlowErrorKind::Connection,
+            message: "The lobby connection was lost unexpectedly".to_string(),
+            return_flow: ClientFlow::ServerSelect,
+            actions: [
+                Some(FlowErrorAction::RetryConnection),
+                Some(FlowErrorAction::Back),
+            ],
+        });
+        assert_phone_touch_targets(&mut app, &at("Connection error"));
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
+
+        enter_dashboard(&mut app);
+        assert_phone_touch_targets(&mut app, &at("Dashboard"));
+        inject_action(&mut app, FlowUiAction::OpenDashboardMenu);
+        assert_phone_touch_targets(&mut app, &at("Dashboard menu"));
+        inject_action(&mut app, FlowUiAction::RequestChangeServer);
+        assert_phone_touch_targets(&mut app, &at("Change server confirmation"));
+        *app.world_mut().resource_mut::<ClientOverlay>() = lost_match_dashboard_error();
+        assert_phone_touch_targets(&mut app, &at("Dashboard error"));
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
+        app.update();
+
+        inject_action(&mut app, FlowUiAction::OpenGameTypeSelect);
+        assert_phone_touch_targets(&mut app, &at("Choose Game"));
+        inject_action(&mut app, FlowUiAction::CancelGameType);
+        inject_action(&mut app, FlowUiAction::OpenPracticeMaps);
+        assert_phone_touch_targets(&mut app, &at("Practice maps"));
+        inject_action(&mut app, FlowUiAction::CancelPracticeMaps);
+        let brawler = membership.profile.brawlers[0].id;
+        inject_action(&mut app, FlowUiAction::OpenBrawlerList);
+        assert_phone_touch_targets(&mut app, &at("Brawlers"));
+        inject_action(&mut app, FlowUiAction::OpenBrawlerDetails(brawler));
+        assert_phone_touch_targets(&mut app, &at("Brawler details"));
+        inject_action(&mut app, FlowUiAction::BackToBrawlerList);
+        inject_action(&mut app, FlowUiAction::CreateBrawler);
+        assert_phone_touch_targets(&mut app, &at("Create Brawler"));
+        inject_action(&mut app, FlowUiAction::CancelCreateBrawler);
+        inject_action(&mut app, FlowUiAction::CloseBrawlerList);
+
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::MatchLoading);
+        *app.world_mut().resource_mut::<ClientOverlay>() = cancel_match_start_overlay();
+        assert_phone_touch_targets(&mut app, &at("Cancel confirmation"));
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::None;
+
+        app.world_mut()
+            .resource_mut::<super::super::ClientMatchResultState>()
+            .context = Some(match_result_context(membership.game_types[0].id.clone()));
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::Results);
+        assert_phone_touch_targets(&mut app, &at("Results"));
+    }
+}
+
+/// BRL-q148: desktop keeps the authored control heights; the touch floor is off by default.
+#[test]
+fn desktop_policy_keeps_authored_control_heights() {
+    let mut app = flow_test_app_with(|app| {
+        crate::ui::layout_harness::add_layout(app, 1280, 720);
+    });
+    assert!(
+        !app.world()
+            .resource::<crate::ui::touch_target::TouchTargetPolicy>()
+            .enabled
+    );
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    settle_layout(&mut app);
+    let heights = |app: &mut App| {
+        let mut nodes = app
+            .world_mut()
+            .query_filtered::<(Entity, &Node), With<FlowButton>>();
+        let mut heights: Vec<_> = nodes
+            .iter(app.world())
+            .map(|(entity, node)| (entity, node.min_height))
+            .collect();
+        heights.sort_by_key(|(entity, _)| *entity);
+        heights
+    };
+    let authored = heights(&mut app);
+    assert!(!authored.is_empty());
+    // Enabled at a small scale the floor raises every control; disabling restores them.
+    app.world_mut()
+        .resource_mut::<crate::ui::touch_target::TouchTargetPolicy>()
+        .enabled = true;
+    app.world_mut().resource_mut::<UiScale>().0 = 0.5;
+    settle_layout(&mut app);
+    assert!(
+        heights(&mut app)
+            .iter()
+            .all(|(_, height)| *height == px(96))
+    );
+    app.world_mut()
+        .resource_mut::<crate::ui::touch_target::TouchTargetPolicy>()
+        .enabled = false;
+    app.world_mut().resource_mut::<UiScale>().0 = 1.0;
+    settle_layout(&mut app);
+    assert_eq!(heights(&mut app), authored);
+}
+
 /// BRL-0199 / BRL-0162: after a completed or lost match the client opens a fresh lobby session
 /// while the match screen is still presented. If that lobby attempt fails, the real observation
 /// path must leave MATCH COMPLETE for the recoverable connection error (Retry / Change Server).

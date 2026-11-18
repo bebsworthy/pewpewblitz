@@ -70,7 +70,10 @@ pub(in crate::flow) fn apply_flow_burst(
 }
 
 #[derive(Component, Clone, Debug)]
-#[require(crate::ui::press::ReleaseActivation)]
+#[require(
+    crate::ui::press::ReleaseActivation,
+    crate::ui::touch_target::TouchTarget
+)]
 pub(in crate::flow) struct FlowButton {
     pub(in crate::flow) index: usize,
     pub(in crate::flow) action: FlowUiAction,

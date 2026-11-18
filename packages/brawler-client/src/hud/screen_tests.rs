@@ -299,13 +299,14 @@ fn zombie_hud_adds_the_teammate_strip_without_collisions() {
 
 /// A HUD at `width`x`height` with the scoreboard latched open (panel and close button shown),
 /// the longest status labels, and names measured in the shipped display font.
-fn latched_scoreboard_app(width: u16, height: u16) -> App {
+fn latched_scoreboard_app(width: u16, height: u16, touch: bool) -> App {
     use brawler::matchplay::PublicParticipantStatus;
     static DISPLAY_FONT: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../assets/brawler/ui/fonts/lilita-one-regular.ttf"
     ));
     let mut app = hud_app(width, height, brawler::map::WIPEOUT_MODE_DEFINITION);
+    app.insert_resource(ui::touch_target::TouchTargetPolicy { enabled: touch });
     let world = app.world_mut();
     let statuses = [
         PublicParticipantStatus::Protected {
@@ -349,11 +350,22 @@ fn latched_scoreboard_app(width: u16, height: u16) -> App {
 fn latched_scoreboard_fits_six_long_names_and_its_close_button() {
     use super::scoreboard::ScoreboardPart;
     use bevy::text::TextLayoutInfo;
-    for (width, height) in VIEWPORTS {
-        let mut app = latched_scoreboard_app(width, height);
+    // BRL-q148: the touch-target floor (Android) keeps the same layout guarantees.
+    for ((width, height), touch) in VIEWPORTS
+        .into_iter()
+        .flat_map(|viewport| [(viewport, false), (viewport, true)])
+    {
+        let mut app = latched_scoreboard_app(width, height, touch);
         let window = Rect::new(0.0, 0.0, f32::from(width), f32::from(height));
         let mut elements = visible_rect::<With<ScoreboardCloseButton>>(&mut app, "close button");
         assert_eq!(elements.len(), 1, "{width}x{height}: close button");
+        if touch {
+            let close = elements[0].1.height();
+            assert!(
+                close >= 47.5,
+                "{width}x{height}: close button {close} px tall"
+            );
+        }
         let world = app.world_mut();
         let mut parts = world.query::<(Entity, &ScoreboardPart, &InheritedVisibility)>();
         let parts: Vec<_> = parts

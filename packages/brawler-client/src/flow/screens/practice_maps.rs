@@ -460,6 +460,7 @@ fn control(
             control,
             control_surface(control),
             SurfaceState::default(),
+            crate::ui::touch_target::TouchTarget::default(),
             node,
         ))
         .id()

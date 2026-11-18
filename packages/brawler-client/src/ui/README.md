@@ -24,6 +24,10 @@ Bevy entities, not a separate widget runtime.
   samples plus the touch gesture (sideways drag follows the finger, vertical drag is left to
   scrolling, an undragged tap sets the tapped position on release). Owners keep range, step,
   units and save deferral.
+- `touch_target`: the BRL-q148 touch-target floor. `TouchTarget` (required by flow, shell, match
+  menu and scoreboard-close buttons) raises `Node::min_height` to `48 / UiScale` UI pixels while
+  `TouchTargetPolicy` is enabled (default: the Android build), remembering the owner's authored
+  height so responsive owners can keep rewriting it; `TouchTarget::exempt()` opts a screen out.
 - `viewport`: the small-window fit. Below 640 logical pixels of height the effective `UiScale` is
   the player's setting times `height / 640` (floor 0.5), so landscape phones get the authored
   wide layouts on a 640-pixel-tall virtual canvas; taller windows are unchanged.

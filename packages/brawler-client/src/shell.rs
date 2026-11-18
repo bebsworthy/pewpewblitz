@@ -138,7 +138,10 @@ enum SettingsReturnTarget {
 }
 
 #[derive(Component)]
-#[require(super::ui::press::ReleaseActivation)]
+#[require(
+    super::ui::press::ReleaseActivation,
+    super::ui::touch_target::TouchTarget
+)]
 struct ShellButton {
     id: ShellControlId,
     action: Option<ShellAction>,
@@ -152,6 +155,7 @@ pub struct ClientShellPlugin;
 impl Plugin for ClientShellPlugin {
     fn build(&self, app: &mut App) {
         super::ui::press::add_release_activation(app);
+        super::ui::touch_target::add_touch_targets(app);
         super::back::add_back_input(app);
         super::ui::feedback::add_ui_feedback(app);
         app.add_plugins((
@@ -1253,6 +1257,73 @@ mod tests {
         app.update();
         let scroll = app.world().get::<ScrollPosition>(area).unwrap().0.y;
         assert!((scroll - 400.0).abs() < f32::EPSILON, "{scroll}");
+    }
+
+    /// BRL-q148: with the touch policy on, every Settings row, tab and binding is at least 48 dp
+    /// tall on a landscape phone at the default and the smallest UI scale, and stays reachable.
+    #[test]
+    fn settings_controls_are_48_dp_touch_targets_on_a_landscape_phone() {
+        use crate::ui::{layout_harness, touch_target};
+        for ui_scale in [1.0, MIN_UI_SCALE] {
+            let path = std::env::temp_dir().join(format!(
+                "brawler-brlq148-touch-{}-{}-settings.ron",
+                (ui_scale * 100.0).round(),
+                std::process::id()
+            ));
+            let mut app = shell_test_app(path);
+            layout_harness::add_layout(&mut app, 868, 411);
+            app.insert_resource(touch_target::TouchTargetPolicy { enabled: true });
+            app.update();
+            app.world_mut()
+                .resource_mut::<ClientShellSettings>()
+                .ui_scale = ui_scale;
+            request_settings(&mut app);
+            for category in [
+                None,
+                Some(ShellAction::AudioCategory),
+                Some(ShellAction::AccessibilityCategory),
+                Some(ShellAction::ControlsCategory),
+            ] {
+                if let Some(category) = category {
+                    app.world_mut()
+                        .resource_mut::<PendingActions>()
+                        .0
+                        .push(category);
+                }
+                for _ in 0..3 {
+                    app.update();
+                }
+                let scale = app.world().resource::<UiScale>().0;
+                assert!((scale - ui_scale * 411.0 / 640.0).abs() < 1e-3, "{scale}");
+                let screen = format!("{category:?} at {:.0}%", ui_scale * 100.0);
+                let unreachable = layout_harness::unreachable_buttons(app.world_mut());
+                assert!(
+                    unreachable.is_empty(),
+                    "{screen}: unreachable controls: {unreachable:?}"
+                );
+                let short = layout_harness::short_buttons(
+                    app.world_mut(),
+                    touch_target::MIN_TOUCH_TARGET_DP,
+                );
+                assert!(
+                    short.is_empty(),
+                    "{screen}: controls under 48 dp: {short:?}"
+                );
+                let overlapping = layout_harness::overlapping_buttons(app.world_mut(), &[]);
+                assert!(
+                    overlapping.is_empty(),
+                    "{screen}: raised controls overlap: {overlapping:?}"
+                );
+            }
+            *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Credits;
+            for _ in 0..4 {
+                app.update();
+            }
+            assert!(layout_harness::unreachable_buttons(app.world_mut()).is_empty());
+            let short =
+                layout_harness::short_buttons(app.world_mut(), touch_target::MIN_TOUCH_TARGET_DP);
+            assert!(short.is_empty(), "Credits: controls under 48 dp: {short:?}");
+        }
     }
 
     /// BRL-wpr8: the longer Credits text keeps BACK reachable on a landscape phone and desktop.

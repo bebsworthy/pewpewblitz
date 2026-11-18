@@ -142,6 +142,80 @@ pub(crate) fn unreachable_buttons(world: &mut World) -> Vec<String> {
     failures
 }
 
+/// Visible, enabled, laid-out buttons shorter than `min_height` logical pixels (dp on Android).
+/// The harness window has a scale factor of 1, so physical and logical pixels coincide.
+pub(crate) fn short_buttons(world: &mut World, min_height: f32) -> Vec<String> {
+    let mut buttons = world.query_filtered::<(Entity, &InheritedVisibility), (
+        With<Button>,
+        Without<bevy::ui::InteractionDisabled>,
+    )>();
+    let candidates: Vec<_> = buttons
+        .iter(world)
+        .filter(|(_, visible)| visible.get())
+        .map(|(entity, _)| entity)
+        .collect();
+    assert!(!candidates.is_empty(), "no visible controls to check");
+    candidates
+        .into_iter()
+        .filter_map(|entity| {
+            let rect = node_rect(world, entity)?;
+            (rect.width() > 0.0 && rect.height() > 0.0 && rect.height() < min_height - 0.5).then(
+                || {
+                    let label = world
+                        .get::<AccessibleLabel>(entity)
+                        .map_or_else(|| format!("{entity:?}"), |label| label.0.clone());
+                    format!("{label}: {:.1} px tall", rect.height())
+                },
+            )
+        })
+        .collect()
+}
+
+/// Pairs of visible, laid-out buttons under the same UI root (one screen or overlay layer) whose
+/// rectangles overlap by more than a pixel, so a raised control never covers its neighbour.
+/// `exempt` lists deliberate backdrop hit areas that other controls sit on.
+pub(crate) fn overlapping_buttons(world: &mut World, exempt: &[Entity]) -> Vec<String> {
+    let mut buttons = world.query_filtered::<(Entity, &InheritedVisibility), With<Button>>();
+    let rects: Vec<_> = buttons
+        .iter(world)
+        .filter(|(entity, visible)| visible.get() && !exempt.contains(entity))
+        .filter_map(|(entity, _)| Some((entity, node_rect(world, entity)?)))
+        .filter(|(_, rect)| rect.width() > 0.0 && rect.height() > 0.0)
+        .collect();
+    let label = |entity: Entity| {
+        world
+            .get::<AccessibleLabel>(entity)
+            .map_or_else(|| format!("{entity:?}"), |label| label.0.clone())
+    };
+    let nested = |inner: Entity, outer: Entity| {
+        std::iter::successors(world.get::<ChildOf>(inner), |child_of| {
+            world.get::<ChildOf>(child_of.parent())
+        })
+        .any(|child_of| child_of.parent() == outer)
+    };
+    let root = |entity: Entity| {
+        std::iter::successors(Some(entity), |entity| {
+            world.get::<ChildOf>(*entity).map(ChildOf::parent)
+        })
+        .last()
+    };
+    let mut failures = Vec::new();
+    for (index, (a, rect_a)) in rects.iter().enumerate() {
+        for (b, rect_b) in &rects[index + 1..] {
+            let overlap = rect_a.intersect(*rect_b);
+            if overlap.width() > 1.0
+                && overlap.height() > 1.0
+                && root(*a) == root(*b)
+                && !nested(*a, *b)
+                && !nested(*b, *a)
+            {
+                failures.push(format!("{} overlaps {}", label(*a), label(*b)));
+            }
+        }
+    }
+    failures
+}
+
 /// True when the laid-out node lies entirely inside the primary window as presented now (without
 /// scrolling).
 pub(crate) fn on_screen(world: &mut World, entity: Entity) -> bool {

@@ -192,7 +192,7 @@ fn scoreboard_row(
 /// The latched panel's visible close control; `presentation` shows it only while latched and
 /// dismisses the scoreboard when it activates.
 #[derive(Component)]
-#[require(ui::press::ReleaseActivation)]
+#[require(ui::press::ReleaseActivation, ui::touch_target::TouchTarget)]
 pub(crate) struct ScoreboardCloseButton;
 
 /// The rows container of one section; rows are spawned here on demand.

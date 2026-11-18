@@ -2471,6 +2471,7 @@ fn tool_button(
     parent
         .spawn((
             Button,
+            crate::ui::touch_target::TouchTarget::exempt(),
             FlowButton {
                 index,
                 action,
@@ -2697,6 +2698,7 @@ fn icon_image_button(
     parent
         .spawn((
             Button,
+            crate::ui::touch_target::TouchTarget::exempt(),
             AccessibleLabel::new(label),
             FlowButton {
                 index,
@@ -2838,6 +2840,7 @@ fn editor_palette(
     if runtime.tool != EditorTool::Place || !runtime.assets_open {
         root.spawn((
             Button,
+            crate::ui::touch_target::TouchTarget::exempt(),
             FlowButton {
                 index: 60,
                 action: FlowUiAction::MapMakerToggleAssets,
@@ -2935,6 +2938,7 @@ fn editor_palette(
             header
                 .spawn((
                     Button,
+                    crate::ui::touch_target::TouchTarget::exempt(),
                     FlowButton {
                         index: 60,
                         action: FlowUiAction::MapMakerToggleAssets,
@@ -3105,6 +3109,7 @@ fn search_button(
     parent
         .spawn((
             Button,
+            crate::ui::touch_target::TouchTarget::exempt(),
             FlowButton {
                 index,
                 action,
@@ -3158,6 +3163,7 @@ fn palette_arrow_button(
 ) {
     let mut button = parent.spawn((
         Button,
+        crate::ui::touch_target::TouchTarget::exempt(),
         FlowButton {
             index,
             action,
@@ -3214,6 +3220,7 @@ fn palette_category_button(
     parent
         .spawn((
             Button,
+            crate::ui::touch_target::TouchTarget::exempt(),
             FlowButton {
                 index,
                 action,
@@ -3255,6 +3262,7 @@ fn palette_item_button(
     parent
         .spawn((
             Button,
+            crate::ui::touch_target::TouchTarget::exempt(),
             FlowButton {
                 index,
                 action,
@@ -3403,6 +3411,7 @@ fn compact_icon_action_button_disabled(
     let content_color = TEXT;
     let mut button = parent.spawn((
         Button,
+        crate::ui::touch_target::TouchTarget::exempt(),
         FlowButton {
             index,
             action,
@@ -3471,6 +3480,7 @@ fn compact_action_button_disabled(
     let role = surface_role(&action);
     let mut button = parent.spawn((
         Button,
+        crate::ui::touch_target::TouchTarget::exempt(),
         FlowButton {
             index,
             action,
@@ -3566,6 +3576,7 @@ fn action_button(
     parent
         .spawn((
             Button,
+            crate::ui::touch_target::TouchTarget::exempt(),
             FlowButton {
                 index,
                 action,

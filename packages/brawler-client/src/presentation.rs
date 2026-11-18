@@ -236,6 +236,7 @@ pub struct ClientPresentationPlugin;
 impl Plugin for ClientPresentationPlugin {
     fn build(&self, app: &mut App) {
         ui::press::add_release_activation(app);
+        ui::touch_target::add_touch_targets(app);
         ui::feedback::add_ui_feedback(app);
         app.init_resource::<ClientPresentation>()
             .init_resource::<MatchMenuState>()

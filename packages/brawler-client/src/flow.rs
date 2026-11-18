@@ -95,6 +95,7 @@ impl Plugin for ClientFlowPlugin {
     )]
     fn build(&self, app: &mut App) {
         super::ui::press::add_release_activation(app);
+        super::ui::touch_target::add_touch_targets(app);
         super::back::add_back_input(app);
         super::ui::feedback::add_ui_feedback(app);
         app.init_state::<ClientFlow>()

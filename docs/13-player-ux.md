@@ -300,7 +300,12 @@ above, are unchanged. World-anchored UI (overheads, floating numbers, object hea
 selection toolbar) converts camera viewport positions into the scaled UI space. Every vertical shell
 scroll area also scrolls by touch drag: once a finger travels past the press drag-cancel distance,
 the innermost overflowing area under it follows the finger, the press under it is cancelled, and a
-mostly sideways drag never scrolls. Focus reveal runs on focus changes only, so a drag may move the
+mostly sideways drag never scrolls. On a touch platform (BRL-q148: the Android build; a touch on
+a desktop window does not reflow the shell) every shell control (product-flow and Settings buttons,
+rows, tabs, bindings, overlays, the match menu and the scoreboard BACK) is at least 48 dp tall at
+every UI scale, including 80 %: a shared floor raises each control's minimum height to
+`48 / effective UI scale` UI pixels on top of its authored height. Desktop layouts keep their
+authored heights. Map Maker is exempt until its phone layout exists (BRL-8q4c). Focus reveal runs on focus changes only, so a drag may move the
 focused row out of view. Server Select shows the address and name values beside their labels, and
 each recent server has FORGET, which removes the recent entry, any favorite, and the address's
 binding to a logical server so a fresh server at the same address can be joined.
@@ -461,7 +466,8 @@ down on a slider track waits for the press drag-cancel distance: a mostly sidewa
 the finger (even if it drifts off the row), a vertical drag scrolls the page without changing the
 value, and an undragged tap sets the value at the tapped position when the finger lifts. The track
 geometry is captured at touch-down, so a live UI-scale change cannot feed back into the drag.
-Slider rows are at least 48 dp tall at the landscape-phone fit. Fullscreen changes preview for 15
+Slider rows are at least 48 dp tall at the landscape-phone fit, and on touch platforms every row
+meets the shared 48 dp floor. Fullscreen changes preview for 15
 seconds and require Keep display; timeout, Revert, or leaving Settings restores the previous mode.
 Each page has scoped Reset and Undo reset, preserving unrelated preferences.
 

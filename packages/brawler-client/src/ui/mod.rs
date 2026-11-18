@@ -21,4 +21,6 @@ pub(crate) mod slider;
 
 pub(crate) mod surface;
 
+pub(crate) mod touch_target;
+
 pub(crate) mod viewport;

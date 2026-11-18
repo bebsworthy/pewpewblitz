@@ -45,6 +45,12 @@ impl ClientQueueModel {
         }
     }
 
+    /// Presents an accepted membership without the lobby command round trip.
+    #[cfg(test)]
+    pub(crate) fn set_membership_for_test(&mut self, membership: brawler::lobby::QueueMembership) {
+        self.membership = Some(membership);
+    }
+
     pub(crate) fn start_requeue_join(
         &mut self,
         generation: u64,

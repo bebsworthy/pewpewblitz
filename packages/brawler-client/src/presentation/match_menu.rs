@@ -11,7 +11,10 @@ use crate::{
 };
 
 #[derive(Component)]
-#[require(crate::ui::press::ReleaseActivation)]
+#[require(
+    crate::ui::press::ReleaseActivation,
+    crate::ui::touch_target::TouchTarget
+)]
 pub(super) struct MatchMenuButton(pub(super) usize);
 
 #[allow(

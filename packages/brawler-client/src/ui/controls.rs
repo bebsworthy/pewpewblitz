@@ -53,7 +53,8 @@ pub(crate) struct SliderTrack(pub(crate) Entity);
 pub(crate) const SLIDER_KNOB_RADIUS: f32 = 12.0;
 
 /// Slider rows are touch targets: 76 UI px is at least 48 dp at the landscape-phone fit
-/// (411 / 640 of the default 100% UI scale, BRL-0201). Other rows keep the 56 px desktop height.
+/// (411 / 640 of the default 100% UI scale, BRL-0201). Other rows keep the 56 px desktop height;
+/// on touch platforms `touch_target` floors every row at 48 dp for any UI scale (BRL-q148).
 pub(crate) const SLIDER_ROW_MIN_HEIGHT: f32 = 76.0;
 
 /// Bevy reports the track center as zero, with edges at -0.5 and +0.5.

@@ -141,6 +141,7 @@ pub struct ClientReadinessHudPlugin;
 
 impl Plugin for ClientReadinessHudPlugin {
     fn build(&self, app: &mut App) {
+        ui::touch_target::add_touch_targets(app);
         app.init_resource::<MatchRosterPresentation>()
             .init_resource::<ClientHeistReadiness>()
             .init_resource::<SeenHeistObjectiveCueIds>()
