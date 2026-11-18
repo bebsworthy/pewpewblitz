@@ -3,9 +3,9 @@ id: BRL-89kq
 
 title: Report GPU frame time in native render evidence
 
-status: doing
-closed:
-status_changed: 2026-11-18T06:19:54Z
+status: done
+closed: 2026-11-18T06:32:22Z
+status_changed: 2026-11-18T06:32:22Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-hkj4]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
