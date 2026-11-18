@@ -3,9 +3,9 @@ id: BRL-dq06
 
 title: Generate mipmaps for the floor decal atlas and other minified client textures
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T20:38:37Z
+status_changed: 2026-11-18T08:08:40Z
 
 theme: core
 
@@ -19,7 +19,7 @@ related: [BRL-23q3]
 
 parent: BRL-q5c4
 
-rank: 17432576
+rank: 11337728
 ---
 
 # Description
