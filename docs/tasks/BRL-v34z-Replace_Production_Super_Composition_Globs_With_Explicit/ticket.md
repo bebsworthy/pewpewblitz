@@ -4,9 +4,9 @@ was: BRL-0213
 
 title: 'Replace production super::* composition globs with explicit imports'
 
-status: doing
-closed:
-status_changed: 2026-11-18T17:21:06Z
+status: done
+closed: 2026-11-18T17:53:29Z
+status_changed: 2026-11-18T17:53:29Z
 
 theme: quality
 
@@ -20,7 +20,7 @@ related: [BRL-gjz8]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
