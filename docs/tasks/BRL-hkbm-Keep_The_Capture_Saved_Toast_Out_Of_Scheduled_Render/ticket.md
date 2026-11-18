@@ -3,9 +3,9 @@ id: BRL-hkbm
 
 title: Keep the capture-saved toast out of scheduled render-evidence frames
 
-status: doing
-closed:
-status_changed: 2026-11-18T05:22:09Z
+status: done
+closed: 2026-11-18T05:32:47Z
+status_changed: 2026-11-18T05:32:47Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-1fam]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
