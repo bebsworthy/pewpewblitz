@@ -4,9 +4,9 @@ was: BRL-0202
 
 title: Shrink the Android APK and native library
 
-status: doing
-closed:
-status_changed: 2026-11-18T08:24:28Z
+status: done
+closed: 2026-11-18T09:19:08Z
+status_changed: 2026-11-18T09:19:08Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-ynt5]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
