@@ -26,3 +26,22 @@ Paired render-evidence PNGs after the first are not overlaid by the previous cap
 - A unit test in `evidence_capture.rs` tests: `LogOnly` yields no toast for success or failure, and `Toast` yields the existing messages.
 - `BRAWLER_RENDER_PRACTICE=1 just v3-render-evidence target/hkbm/r.txt`: `brawler-000480.png` and `brawler-000660.png` show no capture toast, and the client log still has three "client evidence capture saved" lines.
 - In an interactive client, F12 still shows "Capture saved: …". `just lint` and `just test` pass.
+
+
+# Result (2026-11-18)
+
+## Changes
+- `packages/brawler-client/src/evidence_capture.rs`: new `pub(crate) enum CaptureFeedback { Toast, LogOnly }`. It is a parameter of `request_evidence_capture_pair` and `request_custom_evidence_capture`, and the result channel now carries `(CaptureFeedback, Result<PathBuf, String>)`. The player F12/gamepad path passes `Toast`. `request_scheduled_evidence_capture` (automation) passes `LogOnly`. `LogOnly` skips the "Capturing frame + state…" request toast, the serialize-failure toast and the result toast. The `info!`/`error!` lines are unchanged for both kinds. New pure helpers `capture_toast_message(feedback, &result)` and `capture_failed_toast`. `LogOnly` has a narrow `cfg_attr(not(any(feature = "automation", test)), expect(dead_code, reason))`, because only automation builds construct it.
+- `packages/brawler-client/src/vfx_lab.rs`: the VfxLab capture passes `CaptureFeedback::Toast`.
+- New unit test `evidence_capture::tests::only_toast_feedback_shows_capture_results`: `Toast` gives the existing saved and failed messages, and `LogOnly` gives `None` for both.
+
+## Verification
+- `BRAWLER_RENDER_BIND=127.0.0.1:5031 BRAWLER_RENDER_PRACTICE=1 just v3-render-evidence target/hkbm/r.txt`: passed (exit 0). I inspected `target/hkbm/r.txt.captures/brawler-000480.png` and `brawler-000660.png`: neither has a capture toast, and the bottom HUD (E / LMB controls) is clear. `target/hkbm/r.txt.client-1.log` has 3 "client evidence capture saved" lines (300, 480, 660). Log: `target/hkbm/render.log`.
+- `just lint`: pass (`target/hkbm/lint.log`).
+- `just test`: pass, 2546 passed and 0 failed (`target/hkbm/test.log`).
+
+## Known limits
+- Interactive F12 toast not checked in a live client. The unit test covers the `Toast` messages, and by code reading `request_evidence_capture` passes `CaptureFeedback::Toast` through the unchanged `toast.show` path.
+
+## Learning
+- The first `just lint` failed on dead code: `LogOnly` is built only under the `automation` feature, and the `_clippy-client` role builds without it. Prevention: when a new enum variant is produced only by feature-gated code, run the role-specific clippy (or `just lint`) before the render run.

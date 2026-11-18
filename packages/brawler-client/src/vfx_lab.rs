@@ -3,7 +3,8 @@
 use super::{
     ArenaCamera,
     evidence_capture::{
-        ClientEvidenceCapturePlugin, current_unix_millis, request_custom_evidence_capture,
+        CaptureFeedback, ClientEvidenceCapturePlugin, current_unix_millis,
+        request_custom_evidence_capture,
     },
     hud::ClientHeistReadiness,
     presentation_3d::{
@@ -1885,7 +1886,7 @@ fn request_lab_capture(world: &mut World) {
         },
         "vfx": collect_vfx_evidence_snapshot(world),
     });
-    request_custom_evidence_capture(world, &directory, &stem, &snapshot);
+    request_custom_evidence_capture(world, &directory, &stem, &snapshot, CaptureFeedback::Toast);
 }
 
 #[allow(

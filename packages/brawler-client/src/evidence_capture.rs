@@ -97,10 +97,24 @@ impl EvidenceCaptureToastState {
 #[derive(Component)]
 struct EvidenceCaptureToast;
 
+/// Whether a capture tells the player about itself with the on-screen toast or only in the log.
+/// Scheduled automation captures are `LogOnly` so a toast never lands in a later evidence frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CaptureFeedback {
+    Toast,
+    #[cfg_attr(
+        not(any(feature = "automation", test)),
+        expect(dead_code, reason = "only scheduled automation captures are log-only")
+    )]
+    LogOnly,
+}
+
+type CaptureResult = (CaptureFeedback, Result<PathBuf, String>);
+
 #[derive(Resource)]
 struct EvidenceCaptureResults {
-    sender: Sender<Result<PathBuf, String>>,
-    receiver: Mutex<Receiver<Result<PathBuf, String>>>,
+    sender: Sender<CaptureResult>,
+    receiver: Mutex<Receiver<CaptureResult>>,
 }
 
 impl Default for EvidenceCaptureResults {
@@ -146,12 +160,24 @@ fn request_evidence_capture(world: &mut World, mut sequence: Local<u32>) {
     *sequence = sequence.saturating_add(1);
     let directory = world.resource::<EvidenceCaptureDirectory>().0.clone();
     let stem = format!("brawler-{unix_millis}-{suffix:03}");
-    request_evidence_capture_pair(world, &directory, &stem, unix_millis);
+    request_evidence_capture_pair(
+        world,
+        &directory,
+        &stem,
+        unix_millis,
+        CaptureFeedback::Toast,
+    );
 }
 
 #[cfg(feature = "automation")]
 pub(super) fn request_scheduled_evidence_capture(world: &mut World, directory: &Path, stem: &str) {
-    request_evidence_capture_pair(world, directory, stem, current_unix_millis());
+    request_evidence_capture_pair(
+        world,
+        directory,
+        stem,
+        current_unix_millis(),
+        CaptureFeedback::LogOnly,
+    );
 }
 
 pub(crate) fn current_unix_millis() -> u64 {
@@ -167,9 +193,10 @@ fn request_evidence_capture_pair(
     directory: &Path,
     stem: &str,
     unix_millis: u64,
+    feedback: CaptureFeedback,
 ) {
     let snapshot = collect_client_snapshot(world, unix_millis);
-    request_custom_evidence_capture(world, directory, stem, &snapshot);
+    request_custom_evidence_capture(world, directory, stem, &snapshot, feedback);
 }
 
 pub(crate) fn request_custom_evidence_capture(
@@ -177,23 +204,28 @@ pub(crate) fn request_custom_evidence_capture(
     directory: &Path,
     stem: &str,
     snapshot: &Value,
+    feedback: CaptureFeedback,
 ) {
     let png_path = directory.join(format!("{stem}.png"));
     let json_path = directory.join(format!("{stem}.json"));
     let snapshot_json = match serde_json::to_vec_pretty(&snapshot) {
         Ok(json) => json,
         Err(error) => {
-            world
-                .resource_mut::<EvidenceCaptureToastState>()
-                .show(format!("Capture failed: {error}"));
             error!(%error, "could not serialize client evidence capture");
+            if let Some(message) = capture_failed_toast(feedback, &error.to_string()) {
+                world
+                    .resource_mut::<EvidenceCaptureToastState>()
+                    .show(message);
+            }
             return;
         }
     };
 
-    world
-        .resource_mut::<EvidenceCaptureToastState>()
-        .show("Capturing frame + state…".to_string());
+    if feedback == CaptureFeedback::Toast {
+        world
+            .resource_mut::<EvidenceCaptureToastState>()
+            .show("Capturing frame + state…".to_string());
+    }
     info!(png = %png_path.display(), state = %json_path.display(), "client evidence capture requested");
     world
         .commands()
@@ -210,7 +242,7 @@ pub(crate) fn request_custom_evidence_capture(
                         let result =
                             save_capture_pair(&image, &png_path, &json_path, &snapshot_json)
                                 .map(|()| png_path);
-                        let _ = sender.send(result);
+                        let _ = sender.send((feedback, result));
                     })
                     .detach();
             },
@@ -692,18 +724,31 @@ fn receive_capture_results(
         toast.show("Capture failed: result channel unavailable".to_string());
         return;
     };
-    while let Ok(result) = receiver.try_recv() {
-        match result {
-            Ok(path) => {
-                info!(png = %path.display(), "client evidence capture saved");
-                toast.show(format!("Capture saved: {}", path.display()));
-            }
-            Err(error) => {
-                error!(%error, "could not save client evidence capture");
-                toast.show(format!("Capture failed: {error}"));
-            }
+    while let Ok((feedback, result)) = receiver.try_recv() {
+        match &result {
+            Ok(path) => info!(png = %path.display(), "client evidence capture saved"),
+            Err(error) => error!(%error, "could not save client evidence capture"),
+        }
+        if let Some(message) = capture_toast_message(feedback, &result) {
+            toast.show(message);
         }
     }
+}
+
+/// The toast for a finished capture, or `None` when the capture reports only to the log.
+fn capture_toast_message(
+    feedback: CaptureFeedback,
+    result: &Result<PathBuf, String>,
+) -> Option<String> {
+    match result {
+        Ok(path) => (feedback == CaptureFeedback::Toast)
+            .then(|| format!("Capture saved: {}", path.display())),
+        Err(error) => capture_failed_toast(feedback, error),
+    }
+}
+
+fn capture_failed_toast(feedback: CaptureFeedback, error: &str) -> Option<String> {
+    (feedback == CaptureFeedback::Toast).then(|| format!("Capture failed: {error}"))
 }
 
 fn present_capture_toast(
@@ -749,6 +794,34 @@ fn present_capture_toast(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_toast_feedback_shows_capture_results() {
+        let saved = Ok(PathBuf::from("captures/brawler-000300.png"));
+        let failed = Err("save PNG: disk full".to_string());
+        assert_eq!(
+            capture_toast_message(CaptureFeedback::Toast, &saved).as_deref(),
+            Some(
+                format!(
+                    "Capture saved: {}",
+                    Path::new("captures/brawler-000300.png").display()
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(
+            capture_toast_message(CaptureFeedback::Toast, &failed).as_deref(),
+            Some("Capture failed: save PNG: disk full")
+        );
+        assert_eq!(
+            capture_toast_message(CaptureFeedback::LogOnly, &saved),
+            None
+        );
+        assert_eq!(
+            capture_toast_message(CaptureFeedback::LogOnly, &failed),
+            None
+        );
+    }
 
     #[test]
     fn wide_match_ids_are_captured_as_json_strings() {
