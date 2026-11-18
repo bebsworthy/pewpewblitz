@@ -4,9 +4,9 @@ was: BRL-0206
 
 title: Evaluate a non-UDP fallback transport for UDP-blocked networks
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T01:07:43Z
+status_changed: 2026-11-18T17:19:17Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-g57a]
 
 parent: BRL-q5c4
 
-rank: 17825792
+rank: 11337728
 ---
 
 # Description
