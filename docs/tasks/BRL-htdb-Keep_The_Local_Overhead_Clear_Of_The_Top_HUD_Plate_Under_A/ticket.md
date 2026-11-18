@@ -3,9 +3,9 @@ id: BRL-htdb
 
 title: Keep the local overhead clear of the top HUD plate under a strong south look-ahead lean
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-15T20:38:35Z
+status_changed: 2026-11-18T02:41:07Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-fwtg]
 
 parent: BRL-q5c4
 
-rank: 15990784
+rank: 11337728
 ---
 
 # Description
