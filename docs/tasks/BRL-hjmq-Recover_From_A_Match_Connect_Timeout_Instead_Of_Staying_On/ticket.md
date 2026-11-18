@@ -3,9 +3,9 @@ id: BRL-hjmq
 
 title: Recover from a match connect timeout instead of staying on Match loading
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-16T20:29:10Z
+status_changed: 2026-11-18T09:45:13Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-2nsg]
 
 parent:
 
-rank: 17956864
+rank: 11337728
 ---
 
 # Description
