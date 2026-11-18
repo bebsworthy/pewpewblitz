@@ -1022,6 +1022,15 @@ from `content/catalogs/builds.ron`) gives the measured client that primary weapo
 canonical saved-brawler create/select path, so each weapon family's aim lane, projectiles, and
 effects can be captured; unset, the measured client keeps its existing selected brawler.
 
+The frame interval in the native render report is vsync-bound on fast desktops, so the report
+(schema 9) also records an informational GPU-time distribution: `gpu_time_source`,
+`gpu_sample_count`, and `gpu_p50_ms` / `gpu_p95_ms` / `gpu_p99_ms`. The automation-only probe
+registers a `Queue::on_submitted_work_done` callback after each frame's render submission and polls
+the device from a thread that runs only during the measurement window. The value is submit-to-
+completion time, which approximates the frame's GPU time only when the GPU is idle at submit (as in
+vsync-bound runs); a GPU-bound run also counts queueing behind earlier frames. Without samples the
+source is `unavailable` and the percentiles read `unavailable`. GPU time never affects `result`.
+
 Imported map-object scale is validated from intrinsic asset bounds after the complete parent/child
 transform chain, not from a profile number in isolation. A nearby authored tile provides a native
 size reference when footprint readability matters. Static materialization and dynamic replacement

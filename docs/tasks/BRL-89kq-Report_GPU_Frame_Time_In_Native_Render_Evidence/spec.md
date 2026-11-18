@@ -26,3 +26,21 @@ On the Apple M6 MacBook Pro the frame interval is vsync-bound at 120 Hz (8.33 ms
 - Unit tests: `compose_report` emits the GPU fields with given samples and the unavailable form with none, and `validate_report` accepts both.
 - `cargo build -p brawler-client` (without `automation`) and `just lint` (`_client-features`) show no GPU probe in the player build; `just test` passes.
 - One desktop run, `BRAWLER_RENDER_PRACTICE=1 just v3-render-evidence target/89kq/report.txt`, shows `gpu_time_source=submitted-work-done` and a plausible p50 (around 4-5 ms on the M6), noted on the ticket.
+
+
+# Result (2026-11-18)
+
+- `packages/brawler-client/src/presentation_3d/diagnostics/gpu_time.rs` (new, automation-only): `GpuTimeProbe` installs a `Render` system after `RenderSystems::Render` / before `Cleanup` that stamps `Instant::now()` and registers `RenderQueue::on_submitted_work_done`. The callback pushes elapsed ms into a shared `Arc` bounded by `SAMPLE_CAPACITY`, and only while `active`. A `render-evidence-gpu-poll` thread runs `RenderDevice::poll(PollType::Poll)` every 50 µs. It starts at the first post-warmup frame, and finalize (or the probe's `Drop`) stops and joins it. APIs were checked against vendored wgpu 29.0.4 (`Queue::on_submitted_work_done`, `Device::poll`, `PollType::Poll`) and bevy_render 0.19.1 (`RenderQueue` deref, `RenderDevice::poll`, `render_resource::PollType`, `render_system` submit and present inside `RenderSystems::Render`).
+- `diagnostics.rs`: the report is now schema 9 and adds `gpu_time_source` (`submitted-work-done|unavailable`), `gpu_sample_count`, and `gpu_p50_ms`/`gpu_p95_ms`/`gpu_p99_ms` (`unavailable` with no samples). GPU time is informational and never part of `result`. Timestamp queries were not implemented because they returned zeros on this Metal device (BRL-hkj4).
+- Caveat: completion time approximates GPU time only when the GPU is idle at submit, as in vsync-bound runs. It is recorded in the module docs and in `docs/11-art-and-presentation-direction.md`.
+- Tests: the new `report_carries_informational_gpu_time` checks the measured and unavailable forms, that both validate, and that `result` stays pass. The gpu_time unit tests cover bounded, active-only recording and the unavailable source when there is no render app.
+
+Verification:
+- `just lint`: pass (`target/89kq/lint.log`).
+- `just test`: pass (`target/89kq/test.log`).
+- `cargo build -p brawler-client` (player): the debug player binary has 0 occurrences of `render-evidence-gpu-poll`. The automation release binary has 1.
+- `BRAWLER_RENDER_BIND=127.0.0.1:5035 BRAWLER_RENDER_PRACTICE=1 just v3-render-evidence target/89kq/report.txt`: Apple M6/Metal, `result=pass`, frame p50 8.329 ms, `gpu_time_source=submitted-work-done`, n=3600, gpu p50/p95/p99 = 4.707/6.632/6.822 ms.
+- Default `just v3-render-evidence target/89kq/default.txt` (bind 5035): both reports pass.
+  - Measured client: frame p50 16.663, gpu n=1800, 4.414/4.995/5.348.
+  - Peer: frame p50 8.330, gpu n=3599, 4.341/6.025/6.303.
+- Not verified: Android, and GPU-bound (non-vsync-limited) runs, where queueing inflates the value.

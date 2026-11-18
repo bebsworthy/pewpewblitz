@@ -1,5 +1,7 @@
 //! Opt-in, bounded native render evidence for V3 closeout.
 
+mod gpu_time;
+
 #[allow(
     clippy::wildcard_imports,
     reason = "the world-renderer submodule consumes the presentation_3d composition surface"
@@ -13,8 +15,9 @@ use bevy::{
         SystemInformationDiagnosticsPlugin,
     },
     platform::time::Instant,
-    render::renderer::RenderAdapterInfo,
+    render::renderer::{RenderAdapterInfo, RenderDevice},
 };
+use gpu_time::{GpuTimeProbe, GpuTimeSamples};
 #[cfg(test)]
 use std::env;
 use std::{collections::HashSet, io::Write, time::Duration};
@@ -46,6 +49,11 @@ const REPORT_FIELDS: &[&str] = &[
     "frames_over_25_ms",
     "frames_over_50_ms",
     "frames_over_100_ms",
+    "gpu_time_source",
+    "gpu_sample_count",
+    "gpu_p50_ms",
+    "gpu_p95_ms",
+    "gpu_p99_ms",
     "entity_high_water",
     "entity_terminal",
     "mesh_entity_high_water",
@@ -157,6 +165,10 @@ struct RenderMeasurementState {
     context: Option<RenderMeasurementContext>,
     match_window: MatchWindow,
     owner_motion: OwnerMotionSamples,
+    /// Render-world GPU completion probe; `None` only in report-composition tests.
+    gpu: Option<GpuTimeProbe>,
+    /// GPU completion samples, taken from the probe when the window closes.
+    gpu_samples: GpuTimeSamples,
     written: bool,
 }
 
@@ -362,6 +374,7 @@ pub(super) struct RenderMeasurementPlugin(pub(crate) RenderMeasurementConfig);
 
 impl Plugin for RenderMeasurementPlugin {
     fn build(&self, app: &mut App) {
+        let gpu = GpuTimeProbe::install(app, SAMPLE_CAPACITY);
         app.add_plugins((
             FrameTimeDiagnosticsPlugin::new(SAMPLE_CAPACITY),
             SystemInformationDiagnosticsPlugin,
@@ -377,6 +390,8 @@ impl Plugin for RenderMeasurementPlugin {
             context: None,
             match_window: MatchWindow::default(),
             owner_motion: OwnerMotionSamples::default(),
+            gpu: Some(gpu),
+            gpu_samples: GpuTimeSamples::unavailable(),
             written: false,
         })
         .add_systems(
@@ -407,6 +422,7 @@ fn sample_and_finalize_render_measurement(
     settings: Option<Res<ClientShellSettings>>,
     maps: Query<&brawler::map::ResolvedMapSnapshot, With<brawler::map::MapRoot>>,
     routed: Option<Res<RoutedClientLifecycle>>,
+    device: Option<Res<RenderDevice>>,
     mut exits: MessageWriter<AppExit>,
 ) {
     if state.written {
@@ -464,6 +480,9 @@ fn sample_and_finalize_render_measurement(
     };
     let current = state.current;
     update_high_water(&mut state.high, current);
+    if let Some(gpu) = state.gpu.as_mut() {
+        gpu.start(device.as_deref());
+    }
     if let Some(measurement) = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
         .and_then(|value| value.measurement())
@@ -480,6 +499,9 @@ fn sample_and_finalize_render_measurement(
 
     let window = windows.iter().next();
     let map = maps.iter().max_by_key(|map| map.identity.instance_id);
+    if let Some(gpu) = state.gpu.as_mut() {
+        state.gpu_samples = gpu.finish();
+    }
     let report = compose_report(
         &state,
         window,
@@ -616,6 +638,9 @@ fn compose_report(
     let over_25 = samples.iter().filter(|value| **value > 25.0).count();
     let over_50 = samples.iter().filter(|value| **value > 50.0).count();
     let over_100 = samples.iter().filter(|value| **value > 100.0).count();
+    let gpu = &state.gpu_samples;
+    let mut gpu_samples = gpu.samples.clone();
+    gpu_samples.sort_by(f64::total_cmp);
     let left_match = state.match_window.left;
     let failed = render_measurement_failure(left_match, samples.len(), p95, p99, over_25, over_100);
     let (width, height) = window.map_or((0, 0), |window| {
@@ -636,7 +661,7 @@ fn compose_report(
     let theme_id = measured_map.map_or(0, |value| value.3.0);
     let context = state.context.unwrap_or_default().name();
     format!(
-        "schema=8\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nleft_match_during_measurement={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\n{}result={}\nfirst_failure={}\n",
+        "schema=9\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nleft_match_during_measurement={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\ngpu_time_source={}\ngpu_sample_count={}\ngpu_p50_ms={}\ngpu_p95_ms={}\ngpu_p99_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\n{}result={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -665,6 +690,11 @@ fn compose_report(
         over_25,
         over_50,
         over_100,
+        gpu.source,
+        gpu_samples.len(),
+        gpu_percentile_field(&gpu_samples, 50),
+        gpu_percentile_field(&gpu_samples, 95),
+        gpu_percentile_field(&gpu_samples, 99),
         state.high.entities,
         state.current.entities,
         state.high.mesh_entities,
@@ -699,6 +729,15 @@ fn compose_report(
         if failed.is_none() { "pass" } else { "fail" },
         failed.unwrap_or("none"),
     )
+}
+
+/// GPU percentiles are informational and never part of `result`; `unavailable` without samples.
+fn gpu_percentile_field(sorted: &[f64], percentage: usize) -> String {
+    if sorted.is_empty() {
+        "unavailable".to_string()
+    } else {
+        format!("{:.3}", percentile(sorted, percentage))
+    }
 }
 
 fn validate_report(report: &str) -> Result<(), String> {
@@ -879,6 +918,8 @@ mod tests {
             context: Some(RenderMeasurementContext::Gameplay),
             match_window: MatchWindow::default(),
             owner_motion: OwnerMotionSamples::default(),
+            gpu: None,
+            gpu_samples: GpuTimeSamples::unavailable(),
             written: false,
         }
     }
@@ -931,7 +972,7 @@ mod tests {
         };
         let stayed = compose(&state);
         validate_report(&stayed).unwrap();
-        assert_eq!(report_value(&stayed, "schema"), Some("8"));
+        assert_eq!(report_value(&stayed, "schema"), Some("9"));
         assert_eq!(
             report_value(&stayed, "left_match_during_measurement"),
             Some("false")
@@ -949,6 +990,50 @@ mod tests {
             report_value(&left, "first_failure"),
             Some("left_match_during_measurement")
         );
+    }
+
+    #[test]
+    fn report_carries_informational_gpu_time() {
+        let mut state = measured_gameplay_state();
+        let mut compose = |gpu: GpuTimeSamples| {
+            state.gpu_samples = gpu;
+            compose_report(
+                &state,
+                None,
+                None,
+                None,
+                ImportedWorldFallbackPolicy::Auto,
+                false,
+                None,
+            )
+        };
+        let measured = GpuTimeSamples {
+            source: "submitted-work-done",
+            samples: (1..=100).rev().map(f64::from).collect(),
+        };
+        let report = compose(measured);
+        validate_report(&report).unwrap();
+        assert_eq!(
+            report_value(&report, "gpu_time_source"),
+            Some("submitted-work-done")
+        );
+        assert_eq!(report_value(&report, "gpu_sample_count"), Some("100"));
+        assert_eq!(report_value(&report, "gpu_p50_ms"), Some("51.000"));
+        assert_eq!(report_value(&report, "gpu_p95_ms"), Some("96.000"));
+        assert_eq!(report_value(&report, "gpu_p99_ms"), Some("100.000"));
+        // GPU time never decides the result, even when it exceeds every frame budget.
+        assert_eq!(report_value(&report, "result"), Some("pass"));
+
+        let unavailable = compose(GpuTimeSamples::unavailable());
+        validate_report(&unavailable).unwrap();
+        assert_eq!(
+            report_value(&unavailable, "gpu_time_source"),
+            Some("unavailable")
+        );
+        assert_eq!(report_value(&unavailable, "gpu_sample_count"), Some("0"));
+        for field in ["gpu_p50_ms", "gpu_p95_ms", "gpu_p99_ms"] {
+            assert_eq!(report_value(&unavailable, field), Some("unavailable"));
+        }
     }
 
     #[test]
