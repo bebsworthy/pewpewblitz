@@ -55,3 +55,13 @@ Lower power use outside matches on Android without making menus feel sluggish.
 4. Match: the BRL-ynt5 scenario must still show a 60 FPS median (timestats).
 5. Feel (owner judgement): taps on menu buttons respond without visible delay; slider and scroll drags track the finger smoothly; motifs, entrance/burst animations and the Dashboard preview look smooth enough at 30 Hz. Watch for a stall when entering MatchLoading/Match: the switch to continuous should be immediate.
 6. Optional: if timestats show the display still refreshing at 60/120 Hz in menus, consider the 30 Hz surface vote from Decisions.
+
+
+# Device check 2026-11-18 (Pixel 8a, Android 17, merged main f2c0c44e, release APK)
+- **Dashboard frame rate:** SurfaceFlinger timestats over 30 s gave 899 frames, so 30 FPS. Present-to-present: 588 frames at 33 ms, 162 at 16 ms, 145 at 50 ms, 0 dropped. Before this change the Dashboard ran at 52-60 FPS (BRL-ynt5).
+- **Power, as CPU time:** app CPU over 120 s idle on the Dashboard was 209.6 s with the pre-m4eh HEAD APK and 170.0 s with this build, a 19% cut. GPU work is halved along with the frame count. I used CPU time instead of a batterystats estimate because the phone was charging over USB. Most of the remaining CPU does not depend on the frame rate: two `Compute Task Pool` threads run at about 35% each. Filed as follow-up BRL-fs5k.
+- **Match:** Practice Wipeout 3v3 on Verdant Crossfire with bots, scripted move and fire, 45 s, Auto = Medium. Median frame 16 ms, p95 33 ms, average 52.9 FPS, GPU post→acquire median 12 ms. This matches the BRL-ynt5 baseline (16/33 ms, 48-52 average), even though the phone started at thermal status 3. The end screenshot shows a live match.
+- **Feel:** taps on Server Select and the Dashboard responded at once, and keyboard edits showed up in the field straight away. The owner still needs to judge whether Dashboard preview motion looks smooth enough at 30 Hz.
+- **30 Hz surface vote:** not done. The panel already gets a frame only every 33 ms, and any further power saving is blocked by the CPU cost tracked in BRL-fs5k.
+- Evidence: `target/brl-06pz/m4eh-dash-ts.txt`, `m4eh-cpu-{before,after}.txt`; the match run is under the session scratchpad `xb54/` as `*-m4eh*`.
+- Merged main: `just lint` and `just test` pass.
