@@ -33,6 +33,7 @@ const REPORT_FIELDS: &[&str] = &[
     "window_height",
     "render_profile",
     "measurement_context",
+    "left_match_during_measurement",
     "fallback",
     "reduced_effects",
     "warmup_seconds",
@@ -154,8 +155,35 @@ struct RenderMeasurementState {
     current: HighWater,
     measured_map: Option<MeasuredMap>,
     context: Option<RenderMeasurementContext>,
+    match_window: MatchWindow,
     owner_motion: OwnerMotionSamples,
     written: bool,
+}
+
+/// Whether a gameplay measurement stayed inside one routed match (BRL-rr1x).
+///
+/// The window is anchored at map readiness and never restarts, so a match that completes during
+/// warmup or measurement would otherwise be reported as gameplay while the client samples the
+/// match-end return to the lobby. The first routed match generation seen in the window is kept;
+/// leaving `RoutedClientPhase::Match` or entering a different match generation marks the window.
+/// Clients without a routed match (in-process transport, dashboard context) never mark it.
+#[derive(Default)]
+struct MatchWindow {
+    generation: Option<u64>,
+    left: bool,
+}
+
+impl MatchWindow {
+    fn observe(&mut self, lifecycle: &RoutedClientLifecycle) {
+        let in_match = lifecycle.phase == RoutedClientPhase::Match;
+        match self.generation {
+            None if in_match => self.generation = Some(lifecycle.generation),
+            Some(generation) if !in_match || generation != lifecycle.generation => {
+                self.left = true;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Per-frame presented owner motion during the measurement window (BRL-0169).
@@ -347,6 +375,7 @@ impl Plugin for RenderMeasurementPlugin {
             current: HighWater::default(),
             measured_map: None,
             context: None,
+            match_window: MatchWindow::default(),
             owner_motion: OwnerMotionSamples::default(),
             written: false,
         })
@@ -377,6 +406,7 @@ fn sample_and_finalize_render_measurement(
     fallback: Res<ImportedWorldFallbackPolicy>,
     settings: Option<Res<ClientShellSettings>>,
     maps: Query<&brawler::map::ResolvedMapSnapshot, With<brawler::map::MapRoot>>,
+    routed: Option<Res<RoutedClientLifecycle>>,
     mut exits: MessageWriter<AppExit>,
 ) {
     if state.written {
@@ -390,9 +420,9 @@ fn sample_and_finalize_render_measurement(
     let gameplay_ready = map_readiness
         .is_some_and(|value| matches!(*value, brawler::map::ClientMapReadiness::Ready));
     let ready = assets_ready && (dashboard_ready || gameplay_ready);
-    // Readiness starts the bounded window; later match teardown must not restart it. Keeping the
-    // original anchor makes the report cover the product match and its routed return-to-lobby
-    // lifecycle instead of waiting forever once the measured match completes.
+    // Readiness starts the bounded window; later match teardown must not restart it. A gameplay
+    // window that leaves the measured match still completes on the original anchor, but records
+    // `left_match_during_measurement` and fails instead of passing on lobby frames.
     if state.ready_at.is_none() && !ready {
         return;
     }
@@ -405,6 +435,11 @@ fn sample_and_finalize_render_measurement(
         });
     }
     let ready_at = *state.ready_at.get_or_insert(now);
+    if state.context == Some(RenderMeasurementContext::Gameplay)
+        && let Some(routed) = routed.as_deref()
+    {
+        state.match_window.observe(routed);
+    }
     if let Some(map) = maps.iter().max_by_key(|map| map.identity.instance_id) {
         state.measured_map = Some(measured_map(map));
     }
@@ -539,13 +574,16 @@ fn percentile(sorted: &[f64], percentage: usize) -> f64 {
 }
 
 fn render_measurement_failure(
+    left_match: bool,
     sample_count: usize,
     p95: f64,
     p99: f64,
     over_25: usize,
     over_100: usize,
 ) -> Option<&'static str> {
-    if sample_count < 1_200 {
+    if left_match {
+        Some("left_match_during_measurement")
+    } else if sample_count < 1_200 {
         Some("sample_count")
     } else if p95 > 18.5 {
         Some("frame_p95_ms")
@@ -578,7 +616,8 @@ fn compose_report(
     let over_25 = samples.iter().filter(|value| **value > 25.0).count();
     let over_50 = samples.iter().filter(|value| **value > 50.0).count();
     let over_100 = samples.iter().filter(|value| **value > 100.0).count();
-    let failed = render_measurement_failure(samples.len(), p95, p99, over_25, over_100);
+    let left_match = state.match_window.left;
+    let failed = render_measurement_failure(left_match, samples.len(), p95, p99, over_25, over_100);
     let (width, height) = window.map_or((0, 0), |window| {
         (window.physical_width(), window.physical_height())
     });
@@ -597,7 +636,7 @@ fn compose_report(
     let theme_id = measured_map.map_or(0, |value| value.3.0);
     let context = state.context.unwrap_or_default().name();
     format!(
-        "schema=7\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\n{}result={}\nfirst_failure={}\n",
+        "schema=8\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nleft_match_during_measurement={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\n{}result={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -609,6 +648,7 @@ fn compose_report(
         height,
         RenderProfile::from_env().name(),
         context,
+        left_match,
         if fallback == ImportedWorldFallbackPolicy::ForcePrimitive {
             "primitive"
         } else {
@@ -820,6 +860,95 @@ mod tests {
         assert!(write_report(&path, b"second").is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"first");
         std::fs::remove_file(path).unwrap();
+    }
+
+    fn measured_gameplay_state() -> RenderMeasurementState {
+        RenderMeasurementState {
+            config: RenderMeasurementConfig {
+                report_path: std::path::PathBuf::new(),
+                warmup: Duration::from_secs(10),
+                measurement: Duration::from_secs(30),
+                reduced_effects: false,
+            },
+            ready_at: Some(Duration::ZERO),
+            last_measurement: None,
+            samples: vec![8.3; 1_200],
+            high: HighWater::default(),
+            current: HighWater::default(),
+            measured_map: None,
+            context: Some(RenderMeasurementContext::Gameplay),
+            match_window: MatchWindow::default(),
+            owner_motion: OwnerMotionSamples::default(),
+            written: false,
+        }
+    }
+
+    fn report_value<'a>(report: &'a str, field: &str) -> Option<&'a str> {
+        report
+            .lines()
+            .find_map(|line| line.strip_prefix(field)?.strip_prefix('='))
+    }
+
+    #[test]
+    fn match_window_marks_leaving_the_first_routed_match() {
+        let mut lifecycle = RoutedClientLifecycle {
+            generation: 4,
+            ..default()
+        };
+        let mut window = MatchWindow::default();
+        // Not yet in a routed match (or never routed): nothing to leave.
+        window.observe(&lifecycle);
+        assert!(!window.left && window.generation.is_none());
+        lifecycle.phase = RoutedClientPhase::Match;
+        window.observe(&lifecycle);
+        window.observe(&lifecycle);
+        assert_eq!((window.generation, window.left), (Some(4), false));
+        lifecycle.phase = RoutedClientPhase::AwaitingMatchUnlink;
+        window.observe(&lifecycle);
+        assert!(window.left);
+        // A later, different match generation is also a different measured match.
+        let mut window = MatchWindow::default();
+        lifecycle.phase = RoutedClientPhase::Match;
+        window.observe(&lifecycle);
+        lifecycle.generation = 6;
+        window.observe(&lifecycle);
+        assert!(window.left);
+    }
+
+    #[test]
+    fn report_fails_a_window_that_left_the_match() {
+        let mut state = measured_gameplay_state();
+        let compose = |state: &RenderMeasurementState| {
+            compose_report(
+                state,
+                None,
+                None,
+                None,
+                ImportedWorldFallbackPolicy::Auto,
+                false,
+                None,
+            )
+        };
+        let stayed = compose(&state);
+        validate_report(&stayed).unwrap();
+        assert_eq!(report_value(&stayed, "schema"), Some("8"));
+        assert_eq!(
+            report_value(&stayed, "left_match_during_measurement"),
+            Some("false")
+        );
+        assert_eq!(report_value(&stayed, "result"), Some("pass"));
+        state.match_window.left = true;
+        let left = compose(&state);
+        validate_report(&left).unwrap();
+        assert_eq!(
+            report_value(&left, "left_match_during_measurement"),
+            Some("true")
+        );
+        assert_eq!(report_value(&left, "result"), Some("fail"));
+        assert_eq!(
+            report_value(&left, "first_failure"),
+            Some("left_match_during_measurement")
+        );
     }
 
     #[test]

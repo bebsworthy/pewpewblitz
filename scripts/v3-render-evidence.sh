@@ -20,8 +20,8 @@ game_mode=${BRAWLER_RENDER_MODE:-wipeout}
 players_per_team=${BRAWLER_RENDER_PLAYERS_PER_TEAM:-}
 game_type=${BRAWLER_RENDER_GAME_TYPE:-}
 timeout_seconds=${BRAWLER_RENDER_TIMEOUT_SECONDS:-75}
-warmup_seconds=${BRAWLER_RENDER_WARMUP_SECONDS:-10}
-measure_seconds=${BRAWLER_RENDER_MEASURE_SECONDS:-30}
+warmup_seconds=${BRAWLER_RENDER_WARMUP_SECONDS:-}
+measure_seconds=${BRAWLER_RENDER_MEASURE_SECONDS:-}
 window_size=${BRAWLER_RENDER_WINDOW_SIZE:-1280x720}
 peer_render_profile=${BRAWLER_RENDER_PEER_PROFILE:-native}
 validate_peer=${BRAWLER_RENDER_VALIDATE_PEER:-1}
@@ -96,6 +96,20 @@ if [[ "$practice_smoke" == 1 ]]; then
 fi
 if [[ -z "$players_per_team" ]]; then
     if [[ "$game_mode" == hot-zone ]]; then players_per_team=2; else players_per_team=1; fi
+fi
+# The report fails a window that leaves the measured match (left_match_during_measurement,
+# BRL-rr1x), so every default window must end inside a live match. Heist Practice bots break a
+# safe and end the 180 s match as early as 18 s after match-ready (observed 18-23 s with the
+# measured client walking and firing right, and with it aiming elsewhere; some runs last past
+# 40 s). The window is anchored at match readiness and includes the 3 s countdown, so Heist
+# Practice defaults to 4 s warmup + 11 s measurement (15 s; 1,320 samples at 120 Hz against the
+# 1,200-sample gate). Other modes keep 10 s + 30 s. Explicit durations override both.
+if [[ "$practice_smoke" == 1 && "$game_mode" == heist ]]; then
+    warmup_seconds=${warmup_seconds:-4}
+    measure_seconds=${measure_seconds:-11}
+else
+    warmup_seconds=${warmup_seconds:-10}
+    measure_seconds=${measure_seconds:-30}
 fi
 if [[ -z "$game_type" ]]; then
     if [[ "$game_mode" == hot-zone ]]; then
