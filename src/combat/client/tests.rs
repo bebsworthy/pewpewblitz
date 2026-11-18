@@ -1,6 +1,6 @@
 use super::*;
 use crate::combat::client::cues::{
-    ClientCombatEvidenceStatus, RecentCombatEvents, remember_combat_event,
+    ClientCombatEvidenceStatus, RecentCombatEvents, is_superseded_legacy_cue, remember_combat_event,
 };
 use crate::combat::client::preview::{AimMark, AimTraceBlockerIndex, aim_lane_marks};
 use crate::combat::{CombatEventId, fighter_color, projectile_color};
@@ -183,4 +183,38 @@ fn named_client_combat_sets_preserve_the_locked_update_order() {
         vec!["ingest", "ensure", "sync", "hud", "effects", "evidence"],
         "named sets must execute in the documented phase order"
     );
+}
+
+#[test]
+fn only_environment_legacy_damage_reaches_presentation() {
+    let damage = |source| CombatCue::Damage {
+        event_id: CombatEventId(1),
+        tick: 10,
+        source,
+        target: NetworkEntityId(7),
+        amount: 12,
+        health_after: 88,
+        distance_band: DistanceBand::Close,
+    };
+    let environment = damage(DamageSource::Environment {
+        map_instance_id: 1,
+        generation: 1,
+        placement_id: 3,
+        initiating_player: Some(PlayerId(2)),
+        initiating_fighter: Some(NetworkEntityId(8)),
+    });
+    let weapon = damage(DamageSource::PlayerWeapon {
+        player_id: PlayerId(2),
+        fighter_id: NetworkEntityId(8),
+        weapon_definition_id: WeaponDefinitionId(1),
+        shot_id: ShotId(4),
+    });
+    assert!(!is_superseded_legacy_cue(&environment));
+    assert!(is_superseded_legacy_cue(&weapon));
+    assert!(is_superseded_legacy_cue(&CombatCue::Reset {
+        event_id: CombatEventId(2),
+        tick: 10,
+        target: NetworkEntityId(7),
+        position: WorldPoint::from(Vec2::ZERO),
+    }));
 }

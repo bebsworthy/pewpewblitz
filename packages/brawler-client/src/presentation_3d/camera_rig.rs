@@ -48,6 +48,9 @@ const MAX_SMOOTH_SECONDS: f32 = 1.0;
 /// A long hitch is integrated as one bounded step instead of a large spring jump.
 const MAX_RIG_STEP_SECONDS: f32 = 0.1;
 const MAX_SEEN_WORLD_OBJECT_CUES: usize = 32;
+/// Environment damage (barrel blasts, damaging effect tiles) shakes the camera at most once per
+/// this many authoritative ticks, so tile damage over time reads as distinct jolts, not a buzz.
+const ENVIRONMENT_DAMAGE_SHAKE_SPACING_TICKS: u64 = brawler::timing::SIMULATION_TICK_HZ / 5;
 /// A spread weapon's fire trauma may at most quadruple its delivery family's value.
 const MAX_SPREAD_FIRE_SCALE: f32 = 4.0;
 /// Noise phase wraps on a whole multiple of every component period (eighths of a cycle).
@@ -436,6 +439,7 @@ pub(super) struct CameraRig {
     trauma: f32,
     noise_phase: f32,
     seen_world_object_cues: VecDeque<brawler::combat::CombatEventId>,
+    last_environment_damage_tick: Option<u64>,
 }
 
 impl CameraRig {
@@ -456,6 +460,19 @@ impl CameraRig {
         self.look_ahead = Spring::default();
         self.bounds = None;
         self.trauma = 0.0;
+        self.last_environment_damage_tick = None;
+    }
+
+    /// Whether an environment damage cue at `tick` may shake now; records it when it may. A tick
+    /// before the last one (a new server timeline) is never held back.
+    fn admit_environment_damage(&mut self, tick: u64) -> bool {
+        if self.last_environment_damage_tick.is_some_and(|last| {
+            tick >= last && tick < last.saturating_add(ENVIRONMENT_DAMAGE_SHAKE_SPACING_TICKS)
+        }) {
+            return false;
+        }
+        self.last_environment_damage_tick = Some(tick);
+        true
     }
 
     pub(super) fn step(
@@ -687,6 +704,17 @@ pub(super) fn accumulate_camera_trauma(
             brawler::combat::CombatCue::DamageApplied { target, amount, .. }
                 if is_local(target) =>
             {
+                triggers.local_damage.for_hit(*amount, maximum_health)
+            }
+            // Environment damage arrives only as the legacy damage cue (BRL-75dh). A barrel blast
+            // also adds the distance-scaled explosion term below; `add_trauma` clamps the sum.
+            brawler::combat::CombatCue::Damage {
+                target,
+                amount,
+                tick,
+                source: brawler::combat::DamageSource::Environment { .. },
+                ..
+            } if is_local(target) && rig.admit_environment_damage(*tick) => {
                 triggers.local_damage.for_hit(*amount, maximum_health)
             }
             brawler::combat::CombatCue::FighterDefeated { target, .. } if is_local(target) => {

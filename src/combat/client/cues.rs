@@ -168,18 +168,26 @@ pub(crate) fn receive_combat_cues(
             if let Some(observation) = observation.as_mut() {
                 record_cue_evidence(observation, &cue);
             }
-            if matches!(
-                &cue,
-                CombatCue::Muzzle { .. }
-                    | CombatCue::Impact { .. }
-                    | CombatCue::Damage { .. }
-                    | CombatCue::Defeat { .. }
-                    | CombatCue::Reset { .. }
-            ) {
+            if is_superseded_legacy_cue(&cue) {
                 continue;
             }
             presented_cues.write(DeduplicatedCombatCue(cue.clone()));
         }
+    }
+}
+
+/// Legacy cues that the typed cues replace for presentation. Environment damage (barrels, effect
+/// tiles) has no typed `DamageApplied` counterpart, so its legacy `Damage` cue is presented
+/// (BRL-75dh); consumers that only read typed cues ignore it.
+#[cfg(feature = "client")]
+pub(super) fn is_superseded_legacy_cue(cue: &CombatCue) -> bool {
+    match cue {
+        CombatCue::Damage { source, .. } => !matches!(source, DamageSource::Environment { .. }),
+        CombatCue::Muzzle { .. }
+        | CombatCue::Impact { .. }
+        | CombatCue::Defeat { .. }
+        | CombatCue::Reset { .. } => true,
+        _ => false,
     }
 }
 

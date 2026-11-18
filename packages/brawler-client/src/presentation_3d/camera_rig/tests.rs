@@ -1151,3 +1151,84 @@ fn ecs_camera_shake_setting_scales_the_applied_offset() {
     assert!((peaks[1] - peaks[0] * 0.5).abs() < 1e-3, "{peaks:?}");
     assert!(peaks[2].abs() < f32::EPSILON, "{peaks:?}");
 }
+
+#[test]
+fn ecs_environment_damage_shakes_the_local_fighter_once_per_spacing() {
+    let mut app = rig_app();
+    let loadout = preset_loadout(3);
+    let maximum_health = loadout.fighter_stats.maximum_health;
+    app.world_mut().spawn((
+        Fighter,
+        Controlled,
+        NetworkEntityId(7),
+        Position(Vec2::ZERO),
+        loadout,
+    ));
+    app.update();
+    app.update();
+    let catalog = catalog();
+    let decay = catalog.shake.decay_per_second * FRAME;
+    let mut next_event = 30;
+    let mut trauma_after = |app: &mut App, cues: &[(NetworkEntityId, u64, u16)]| {
+        // Settle any earlier shake without touching the rig's spacing memory.
+        for _ in 0..600 {
+            if app.world().resource::<CameraRig>().trauma() <= 0.0 {
+                break;
+            }
+            app.update();
+        }
+        for &(target, tick, amount) in cues {
+            next_event += 1;
+            app.world_mut()
+                .write_message(DeduplicatedCombatCue(CombatCue::Damage {
+                    event_id: CombatEventId(next_event),
+                    tick,
+                    source: brawler::combat::DamageSource::Environment {
+                        map_instance_id: 1,
+                        generation: 1,
+                        placement_id: 3,
+                        initiating_player: None,
+                        initiating_fighter: None,
+                    },
+                    target,
+                    amount,
+                    health_after: maximum_health.saturating_sub(amount),
+                    distance_band: brawler::combat::DistanceBand::Close,
+                }));
+        }
+        app.update();
+        app.world().resource::<CameraRig>().trauma()
+    };
+    let expected = |amount: u16| {
+        catalog
+            .shake
+            .triggers
+            .local_damage
+            .for_hit(amount, Some(maximum_health))
+            - decay
+    };
+    let local = NetworkEntityId(7);
+
+    let remote = trauma_after(&mut app, &[(NetworkEntityId(8), 100, 40)]);
+    assert!(
+        remote.abs() < f32::EPSILON,
+        "a remote target adds none: {remote}"
+    );
+    let blast = trauma_after(&mut app, &[(local, 100, 40)]);
+    assert!((blast - expected(40)).abs() < 1e-4, "{blast}");
+    // Two cues inside one spacing window (one barrel, or a tile tick right after it) shake once.
+    let held = trauma_after(&mut app, &[(local, 104, 40)]);
+    assert!(
+        held.abs() < f32::EPSILON,
+        "a tile tick inside the spacing is held back: {held}"
+    );
+    let spacing = ENVIRONMENT_DAMAGE_SHAKE_SPACING_TICKS;
+    let spaced = trauma_after(
+        &mut app,
+        &[(local, 100 + spacing, 8), (local, 101 + spacing, 8)],
+    );
+    assert!((spaced - expected(8)).abs() < 1e-4, "{spaced}");
+    // A new server timeline (lower tick) is never held back.
+    let restarted = trauma_after(&mut app, &[(local, 5, 8)]);
+    assert!((restarted - expected(8)).abs() < 1e-4, "{restarted}");
+}
