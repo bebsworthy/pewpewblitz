@@ -29,3 +29,78 @@ The Android client can be published and fully used without a hardware keyboard.
 - `just android-bundle` (or an equivalent recipe) produces a signed `.aab` when the upload-key secrets are present, and fails with a clear message when they are absent. No secret is committed.
 - **Pixel 8a device check:** tapping the Server Select address and name fields opens the on-screen keyboard. Typed text appears, Backspace and Done work, and the keyboard hides on commit or Back. A server can be joined by typing an address on a build made without the prefill.
 - **Pixel 8a device check:** the launcher icon fills the launcher mask and reads clearly, including in themed (monochrome) icon mode.
+
+# Implementation (2026-11-18, branch `worktree-agent-acc252c392493bc86`)
+
+## Soft keyboard: research and chosen path
+- winit 0.30.13 `platform_impl/android/mod.rs`: `set_ime_allowed(true)` calls `AndroidApp::show_soft_input(true)` (an *implicit* show), and `set_ime_cursor_area` / `set_ime_purpose` do nothing. Its input loop handles only `MotionEvent` and `KeyEvent`. `InputEvent::TextEvent` (GameTextInput state) and `InputEvent::TextAction` (IME Done) go to the `warn!("Unknown android_activity input event")` arm and are dropped. So winit never emits `Ime::Commit` on Android.
+- games-activity 4.4.0 (`javap` of `gametextinput.InputConnection`): while the soft keyboard is active, `onKey` turns key presses, Backspace included, into edits of the GameTextInput editable, and single-line Enter into `sendEditorAction`. They never become native key events. Relying on winit `KeyboardInput` for soft Backspace or Enter would therefore be unreliable.
+- **Chosen:** the Android shell drives GameTextInput directly through `android-activity` 0.6.1 (`bevy::android::ANDROID_APP`), plus two primitive-only JNI hooks in `MainActivity` in the `nativeOnBackPressed` style. The JNI approach (InputMethodManager from Java) was not needed for show/hide. `GameActivity_showSoftInput`, `hideSoftInput`, `setTextInputState` and `setImeEditorInfo` post to the UI thread in order (GameActivity.cpp `write_work`), so they are safe from the game thread. The show uses the explicit flag (0), not winit's implicit one.
+- Client (`packages/brawler-client/src/text_entry.rs`, new):
+  - `TypedText` SystemParam merges `KeyboardInput` presses and `Ime::Commit` into `TextEdit::{Backspace, Delete, Insert}`. The Server Select address/name editors, the brawler create/rename name editor, the Map Maker new/rename map-name editor and palette search all consume it. Committed text therefore goes through the existing `insert_editor_text` / `insert_name_text` / map-name bound paths.
+  - `TextEntryFocus` (pub) is published in `Last` by `flow::input::publish_text_entry`. It carries the edited field (ServerAddress / PlayerName / BrawlerName / MapName), its text and its caret.
+  - `TextEntry::edit_toward(ime_text)` is a pure, unit-tested diff. It turns the IME's text into Backspace presses (in each field's own deletion unit: bytes, graphemes or chars), an insertion, and a submit flag when a line break arrives.
+- Android shell (`packages/brawler-android/src/soft_keyboard.rs`, new; system in `First`):
+  - Focus starts: `set_ime_editor_info` (URI layout for the address; person-name + cap-words for names; cap-words for map names; suggestions off; action Done), then mirror the field text and UTF-16 caret into GameTextInput, then `show_soft_input(false)`.
+  - Each frame: read `text_input_state()`, diff it against the mirrored text, then write the Backspace `KeyboardInput`s and one `Ime::Commit`. If the editor kept something different (a rejected character, a bound, a normalized name), its text is written back to the keyboard.
+  - A mirror write is applied asynchronously on the UI thread. Diffs are suppressed until the keyboard reports the mirrored text, which avoids replaying stale text as deletions. After 30 frames the write is retried.
+  - Focus ends: `hide_soft_input(false)`.
+- `MainActivity.java` overrides:
+  - `onEditorAction` → `nativeOnImeAction` → a synthetic Enter, so Done commits.
+  - `onSoftwareKeyboardVisibilityChanged` → `nativeOnSoftKeyboardVisibilityChanged`. A hide after the keyboard was shown for the current field becomes `BackInput::request()`. **Decision:** Back with the keyboard open (consumed by the IME) or the keyboard's own hide control cancels the field exactly like Back/Escape: the address text is kept, the name reverts. This matches Back semantics everywhere else in the shell.
+- Desktop is unchanged. Window IME is never enabled, so desktop gets no `Ime` messages and editing stays key-press driven.
+- Scope note: the brawler name editors were included (same mechanism, needed for "keyboard-complete"). Palette search is keyboard-only (opened by `/`) and has no touch entry, so it gets no on-screen keyboard.
+- Landscape: no `IME_FLAG_NO_EXTRACT_UI`. Gboard's landscape full-screen extract editor therefore shows the typed text even where the keyboard covers the field. If the owner prefers the inline keyboard, pass `ImeOptions::IME_FLAG_NO_FULLSCREEN | IMG_FLAG_NO_EXTRACT_UI` in `begin_editing`.
+
+## Store signing / AAB
+- `app/build.gradle`: the upload key comes from the gitignored `packages/brawler-android/android/keystore.properties` (storeFile/storePassword/keyAlias/keyPassword) or the `BRAWLER_UPLOAD_STORE_FILE` / `_STORE_PASSWORD` / `_KEY_ALIAS` / `_KEY_PASSWORD` env vars (env overrides the file).
+  - Release signs with it when it is complete, otherwise with the debug key.
+  - A `taskGraph.whenReady` guard fails `bundleRelease` with a clear message when the key is incomplete.
+- `.gitignore` adds `keystore.properties`, `*.jks`, `*.keystore`.
+- `scripts/android.sh bundle` runs `gradle bundleRelease`. It fails before the native build when neither the properties file nor `BRAWLER_UPLOAD_STORE_FILE` exists. `just android-bundle [HOST:PORT]` wraps it.
+- README Android section documents the key setup, keytool command, Play App Signing and the versionCode bump.
+- Follow-up not done: versionCode is still hand-edited (1). Bump it before the second Play upload.
+
+## Adaptive icon
+- `res/mipmap-anydpi-v26/ic_launcher.xml` has these layers:
+  - background: `drawable/ic_launcher_background.xml`, a navy radial vector matching the legacy icon.
+  - foreground: `mipmap-*dpi/ic_launcher_foreground.png`, the original `assets/brawler/ui/branding/pewpew-blitz-lockup.png` at 64 dp wide centred in 108 dp, with letters, blaster and spark inside the 66 dp safe circle.
+  - monochrome: `mipmap-*dpi/ic_launcher_monochrome.png`, the lockup's white/yellow artwork as an alpha mask.
+- Generated by `swift asset_src/android/build_launcher_icons.swift` (run from repo root). Legacy `ic_launcher.png` files are kept.
+- The manifest has no `roundIcon`, so the adaptive icon covers round launchers.
+
+## Verification
+- `cargo test -p brawler-client --lib -- text_entry ime_commits`: 4 passed. Coverage:
+  - `ime_commits_edit_the_server_address_and_name_within_their_bounds`: address append, ASCII rejection, name insertion, 64-byte bound, focus publish/clear.
+  - `ime_commits_type_a_new_map_name_within_its_bound`: Backspace + commit, control filtering, byte bound.
+  - `edit_toward` unit tests: caret, autocorrect replacement, after-caret guard, grapheme deletion, line-break submit, UTF-16 caret.
+- `cargo ndk --target arm64-v8a --platform 31 clippy --locked -p brawler-android -- -D warnings`: clean.
+- `just lint`: pass. `just test`: pass (24 suites, 2503 tests, 0 failed, including network and performance gates). Commits: `53407970` (soft keyboard), `1407d107` (signing/AAB/icon).
+- `just android-bundle 192.168.31.47:5000` with a throwaway keystore under `target/brl-06pz/` (env vars, not committed) produced `app-release.aab` (42 MB). It contains `base/lib/arm64-v8a/libbrawler_android.so`, `keytool -printcert -jarfile` shows the throwaway signer, and the icon resources are present.
+- `just android-bundle` without a key fails immediately with the missing-key message. `gradle bundleRelease` without a key fails with the Gradle message.
+- `just android-build 192.168.31.47:5000` (no key) succeeds. `apksigner verify --print-certs` shows `CN=Android Debug`, which confirms the fallback.
+- Not run: anything on the device. adb and the phone were reserved for another agent.
+
+## Device-check plan (Pixel 8a)
+Build an APK **without** the prefill (`just android-install`, no address) so the address must be typed. Start `BRAWLER_ROUTED_BIND=0.0.0.0:5000 just server` on the Mac.
+1. Server Select: tap the address field.
+   - Expect: the keyboard opens with a URL layout, possibly as Gboard's landscape full-screen editor.
+   - Type `192.168.31.47:5000`. Expect: the field shows the text.
+   - Backspace twice and retype. Expect: the field follows.
+   - Press Done. Expect: the keyboard hides and editing ends.
+   - Connect. Expect: the join succeeds.
+2. Tap the name field and type a name with an accent (e.g. `Zoë`).
+   - Done: the name commits and persists.
+   - Re-open, type, then press Back. Expect: the keyboard hides, the name reverts, and the app stays on Server Select.
+   - A second Back then backgrounds the app.
+3. Address field: type a non-ASCII character (e.g. `é` from a long-press). Expect: the field rejects it with the inline error, and the keyboard text snaps back to the field's value.
+4. Brawlers → Create Brawler / rename in Details. The keyboard opens for the name field, Done confirms, Back cancels.
+5. Map Maker library → New Map / Rename. The keyboard opens with the name prefilled, Done confirms the map, Back cancels.
+6. Switching directly between the address and name fields keeps the keyboard up and edits the right field.
+7. Launcher: the adaptive icon fills the mask on the home screen. With Wallpaper & style → Themed icons on, the monochrome "PewPew Blitz" artwork reads clearly.
+8. Logcat if something fails: `adb logcat -s gti.InputConnection GameActivity RustStdoutStderr`. GameTextInput logs every key and state change.
+
+Known limits: the 30-frame mirror-settle window means a keystroke landing in the same frame as a rejected-character resync can be dropped. Composition-heavy IMEs (CJK) are untested; suggestions are off.
+
+## Rebase onto main (2026-11-18)
+Rebased onto `main` 40fc1563. The only conflict was in `flow/screens/map_maker.rs`: BRL-yrys `KeyedMapNameCommit` sat next to the new `edit_map_name` helper. Kept both, and added `Ime` to the new BRL-yrys map-library test app. The new commits are `34f42cd1` (soft keyboard) and `2da726b3` (signing/AAB/icon). After the rebase: `just lint` passes, `just test` passes (24 suites, 2572 tests, 0 failed), and Android clippy (`-D warnings`) is clean. The AAB was not rebuilt.

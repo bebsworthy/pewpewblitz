@@ -4,9 +4,9 @@ was: BRL-0195
 
 title: Make the Android client store-ready and keyboard-complete
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-13T15:54:23Z
+status_changed: 2026-11-18T19:17:30Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-zj53]
 
 parent: BRL-q5c4
 
-rank: 17694720
+rank: 11468800
 ---
 
 # Description

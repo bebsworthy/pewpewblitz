@@ -3,9 +3,9 @@ id: BRL-xb54
 
 title: Measure the High-tier arena cast-shadow cost on the Pixel 8a
 
-status: todo
-closed:
-status_changed: 2026-11-15T20:38:37Z
+status: done
+closed: 2026-11-18T20:48:08Z
+status_changed: 2026-11-18T20:48:08Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-hkj4, BRL-ynt5]
 
 parent: BRL-q5c4
 
-rank: 17498112
+rank:
 ---
 
 # Description

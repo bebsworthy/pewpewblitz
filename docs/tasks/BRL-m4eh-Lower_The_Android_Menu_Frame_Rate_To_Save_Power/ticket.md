@@ -4,9 +4,9 @@ was: BRL-0203
 
 title: Lower the Android menu frame rate to save power
 
-status: todo
+status: doing
 closed:
-status_changed: 2026-11-14T00:30:09Z
+status_changed: 2026-11-18T19:17:30Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-ynt5]
 
 parent: BRL-q5c4
 
-rank: 17629184
+rank: 11403264
 ---
 
 # Description
