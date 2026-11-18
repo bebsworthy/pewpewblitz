@@ -911,7 +911,14 @@ pub(in super::super) fn fit_overhead_player_names(
             PLAYER_NAME_MAX_WIDTH
         };
         let shown = fit_overhead_name(&label.full, budget, |candidate| {
-            measure_text_width(&mut font_cx, &mut layout_cx, &family, font_size, candidate)
+            measure_text_width(
+                &mut font_cx,
+                &mut layout_cx,
+                &family,
+                font_size,
+                text_font.weight,
+                candidate,
+            )
         });
         if text.0 != shown {
             text.0 = shown;
@@ -938,6 +945,7 @@ fn measure_text_width(
     layout_cx: &mut bevy::text::LayoutCx,
     family: &str,
     font_size: f32,
+    weight: FontWeight,
     text: &str,
 ) -> f32 {
     use parley::{FontFamily, StyleProperty, TextWrapMode};
@@ -946,6 +954,7 @@ fn measure_text_width(
         .ranged_builder(&mut font_cx.context, text, 1.0, true);
     builder.push_default(StyleProperty::FontFamily(FontFamily::named(family)));
     builder.push_default(StyleProperty::FontSize(font_size));
+    builder.push_default(StyleProperty::FontWeight(weight.into()));
     builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::NoWrap));
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
@@ -1419,10 +1428,9 @@ mod tests {
         );
     }
 
-    /// Fits names through the real display font and system fallbacks, then checks that two
-    /// plates exactly one plate width apart keep their names inside their own plate.
-    #[test]
-    fn adjacent_plates_with_maximum_names_do_not_overlap() {
+    /// A world whose parley collection holds the shipped display font, as `bevy_text` registers
+    /// it, plus the client's display fallback configuration.
+    fn world_with_display_font() -> (World, Handle<Font>) {
         let mut world = World::new();
         let mut fonts = Assets::<Font>::default();
         let font = fonts.add(Font::from_bytes(
@@ -1435,9 +1443,20 @@ mod tests {
         world.insert_resource(fonts);
         world.init_resource::<bevy::text::FontCx>();
         world.init_resource::<bevy::text::LayoutCx>();
+        ui::fonts::apply_script_fallbacks(
+            &mut world.resource_mut::<bevy::text::FontCx>().collection,
+        );
         world
             .run_system_cached(bevy::text::load_font_assets_into_font_collection)
             .unwrap();
+        (world, font)
+    }
+
+    /// Fits names through the real display font and system fallbacks, then checks that two
+    /// plates exactly one plate width apart keep their names inside their own plate.
+    #[test]
+    fn adjacent_plates_with_maximum_names_do_not_overlap() {
+        let (mut world, font) = world_with_display_font();
         let label = |world: &mut World, name: &str| {
             world
                 .spawn((
@@ -1472,25 +1491,25 @@ mod tests {
                 });
                 world.resource_scope(|world, mut font_cx: Mut<bevy::text::FontCx>| {
                     let mut layout_cx = world.resource_mut::<bevy::text::LayoutCx>();
-                    let full_width = measure_text_width(
-                        &mut font_cx,
-                        &mut layout_cx,
-                        &family,
-                        PLAYER_NAME_FONT_SIZE,
-                        full,
+                    let mut measure = |text: &str| {
+                        measure_text_width(
+                            &mut font_cx,
+                            &mut layout_cx,
+                            &family,
+                            PLAYER_NAME_FONT_SIZE,
+                            ui::fonts::DISPLAY_WEIGHT,
+                            text,
+                        )
+                    };
+                    assert!(
+                        measure(full) > OVERHEAD_WIDTH,
+                        "{full} is wider than a plate"
                     );
-                    assert!(full_width > OVERHEAD_WIDTH, "{full} is wider than a plate");
                     assert!(
                         shown.ends_with(PLAYER_NAME_ELLIPSIS),
                         "{shown} is truncated"
                     );
-                    measure_text_width(
-                        &mut font_cx,
-                        &mut layout_cx,
-                        &family,
-                        PLAYER_NAME_FONT_SIZE,
-                        &shown,
-                    )
+                    measure(&shown)
                 })
             };
             let left_width = width(&mut world, left, left_name);

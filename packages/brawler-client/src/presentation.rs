@@ -238,6 +238,7 @@ impl Plugin for ClientPresentationPlugin {
         ui::press::add_release_activation(app);
         ui::touch_target::add_touch_targets(app);
         ui::feedback::add_ui_feedback(app);
+        ui::fonts::add_fallback_fonts(app);
         app.init_resource::<ClientPresentation>()
             .init_resource::<MatchMenuState>()
             .add_systems(Startup, match_menu::spawn_pause_overlay)
