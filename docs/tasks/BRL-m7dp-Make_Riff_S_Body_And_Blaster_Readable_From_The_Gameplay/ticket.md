@@ -4,9 +4,9 @@ was: BRL-0186
 
 title: 'Make Riff''s body and blaster readable from the gameplay camera'
 
-status: doing
-closed:
-status_changed: 2026-11-18T04:10:21Z
+status: done
+closed: 2026-11-18T04:43:36Z
+status_changed: 2026-11-18T04:43:36Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-57hs]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
