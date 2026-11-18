@@ -4,9 +4,9 @@ was: BRL-0037
 
 title: Add a bounded player-facing map builder
 
-status: backlog
-closed:
-status_changed: 2026-11-12T20:15:05Z
+status: done
+closed: 2026-11-18T17:11:22Z
+status_changed: 2026-11-18T17:11:22Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-3c10, BRL-pp2y, BRL-qs1f, BRL-xndc]
 
 parent:
 
-rank: 9633792
+rank:
 ---
 
 # Description

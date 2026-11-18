@@ -4,9 +4,9 @@ was: BRL-0115
 
 title: Investigate black scheduled PNG captures on native player shell
 
-status: backlog
-closed:
-status_changed: 2026-09-07T17:16:05Z
+status: done
+closed: 2026-11-18T17:11:22Z
+status_changed: 2026-11-18T17:11:22Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-a83q]
 
 parent:
 
-rank: 9764864
+rank:
 ---
 
 # Description

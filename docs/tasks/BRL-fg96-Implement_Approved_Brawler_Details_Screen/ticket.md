@@ -4,9 +4,9 @@ was: BRL-0126
 
 title: Implement approved brawler details screen
 
-status: backlog
-closed:
-status_changed: 2026-11-12T20:15:05Z
+status: done
+closed: 2026-11-18T17:11:22Z
+status_changed: 2026-11-18T17:11:22Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: []
 
 parent:
 
-rank: 9699328
+rank:
 ---
 
 # Description
