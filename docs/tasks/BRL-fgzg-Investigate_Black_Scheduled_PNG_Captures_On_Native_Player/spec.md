@@ -5,3 +5,8 @@
 
 ## Scope and acceptance
 Investigate capture target/camera ordering, confirm cause, and correct the existing evidence path without a second screenshot framework. Require a nonblack Dashboard PNG matching the native screen and its companion state; preserve gameplay captures. Keep read-only evidence separate from gameplay authority.
+
+
+# Closed (2026-11-18)
+
+Closed at the owner's request. Scheduled native shell captures now render correctly: BRL-pw9k's just shell-capture produced non-black PNG/JSON pairs for every shell screen, and so did BRL-v8x4's and BRL-fe7t's shell captures.

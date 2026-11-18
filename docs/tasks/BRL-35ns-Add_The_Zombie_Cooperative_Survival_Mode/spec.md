@@ -377,3 +377,8 @@ Verification:
 - Exact staged snapshot, excluding unrelated local VFX work: `cargo test --lib --all-features` passed 993 tests.
 - `git diff --cached --check` passed.
 - The staged-only build exposed and removed an accidental dependency on the separate VFX branch's `effect_enemy` material; Zombie presentation now uses the existing `marker_enemy` material.
+
+
+# Closed (2026-11-18)
+
+Closed at the owner's request. Zombie mode was implemented and verified on 2026-09-03 and ships on game select.

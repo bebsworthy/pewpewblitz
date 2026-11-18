@@ -36,3 +36,8 @@ Learn-from-errors correction: previous handoff tested containment rather than fi
 
 
 User rejects remaining button inconsistency: new details Back is orange but chamfered rather than slanted, unlike weapon Back and rounded browser Back. Feedback is accepted and owned by reopened BRL-gaec whole-shell consolidation. Do not patch another details-only renderer. Details remains awaiting visual acceptance and must adopt shared Back/action/panel components from BRL-gaec.
+
+
+# Closed (2026-11-18)
+
+Closed at the owner's request. The details screen is implemented; the remaining button-consistency feedback is owned by BRL-gaec.

@@ -737,3 +737,8 @@ The toolbar comparison is representative of the entire Map Maker shell. The deli
 ### Review cadence
 
 Each slice ends with a reference crop, delivered crop, discrepancy checklist, affected automated checks, and an explicit pass/fail decision. A failed component is corrected before work moves to the next numbered component.
+
+
+# Closed (2026-11-18)
+
+Closed at the owner's request. The bounded Map Maker slice has shipped; follow-ups are BRL-tztp (advanced tools), BRL-8q4c (phone layout) and BRL-qq21 (My Maps style).
