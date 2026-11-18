@@ -17,3 +17,37 @@ BRL-fwtg's band (`top_hud_fighter_limit`, `presentation_3d/camera.rs:338-360`: `
 
 # Decision (2026-11-15)
 Default **(a) cap**: after measuring, clamp the south lean so the overhead stays clear of the top HUD plate, and record the measured overlap in the ticket. The owner can reopen the ticket to accept the overlap instead.
+
+
+# Measurement (2026-11-18, HEAD fd07cd62, pure rig test)
+Settled `CameraRig` (180 frames), fighter at origin, open 60x60 arena, aim `(0,-1)`, reach `STICKY_REACH` (674), before the cap. Cell = 32 world units.
+
+| viewport | ui_scale | fighter.y - center.y | top_hud_fighter_limit | overlap |
+|---|---|---|---|---|
+| 1280x720 | 1.0 (= fit) | 5.00 cells | 2.05 cells | 2.95 cells |
+| 914x411 | 0.642 (fit) | 5.00 cells | 1.72 cells | 3.28 cells |
+| 914x411 | 1.0 (unfitted) | 5.00 cells | 0.27 cells | 4.73 cells |
+
+The south lean hits `max_distance_cells` (5) for Pulse reach too, not only Sticky Blomb, so every long-reach south aim put the overhead under the plate.
+
+# Decision applied: (a) cap
+`CameraRig::step` (`camera_rig.rs`) computes `top_limit` once (same safe-frame clamp as the BRL-fwtg band) and:
+1. caps the look-ahead spring **target** `look_target.y >= -top_limit`, so the spring settles at rest at the cap;
+2. caps `lead.y >= -top_limit` after the safe-frame clamp (also bounds a northward follow lag).
+The BRL-fwtg north-edge band (`top_hud_band_center`) is unchanged. BRL-crdt shake gating untouched.
+
+Smoothness: an aim swing south→north→south→east at both viewports measured a max per-frame camera step of about 7.2 world units and a max per-frame change in that step of about 1.7. A variant that clamped only the spring output (target uncapped) measured 10.9 and 6.8: the camera stalls while the excess unwinds, then pops. That is why the target is capped too.
+
+Effect: the south lean shortens from 5 cells to about 2.05 cells at 1280x720 and 1.72 cells at 914x411, so the bottom of the screen shows less of a long south reach (BRL-vptw tradeoff). Owner can reopen to accept the overlap instead.
+
+# Tests
+- Replaced `top_hud_band_never_moves_open_field_or_south_edge_framing` with `top_hud_band_caps_only_the_south_lean_away_from_the_north_edge`: framing still a fixed point of the clamp; open-field framing equals the look-ahead target with only its south component capped; pure band rule asserts kept.
+- `sustained_south_sticky_aim_keeps_the_local_overhead_below_the_top_hud_band` (1280x720, 914x411, fitted UI scale): uncapped lean exceeds the limit by more than a cell; every frame over 600 frames `fighter.y - center.y <= top_limit + EPS`, fighter on screen; settles exactly at the limit.
+- `south_lean_cap_eases_in_and_out_of_aim_swings_without_a_pop`: per-frame step < 0.3 cell, jerk < 0.08 cell (the output-only clamp fails this), bound held every frame, settles back at the cap.
+- Docs: `docs/11-art-and-presentation-direction.md` camera paragraph updated (cap rule, shortened south lean).
+
+# Verification (2026-11-18)
+- `cargo test -p brawler-client --lib presentation_3d::camera_rig`: 28 passed.
+- `just lint`: pass.
+- `just test`: pass (all suites, including network and performance gates; 0 failures).
+- Not done: native capture / Pixel 8a check of a south Sticky Blomb aim (optional; needs BRL-wegn fixed aim). Playtest: `just server` + `just client` (or the Android build), equip Sticky Blomb, hold the aim stick straight down in open ground; the name/health/ammo overhead should stay below the top-centre score plate, and swinging the aim up and back down should ease without a jump.

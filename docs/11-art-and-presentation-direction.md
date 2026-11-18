@@ -190,9 +190,9 @@ ground is a trapezoid, so the same reach leans more toward the shallow bottom an
 than to the wide sides, and because the view's shape follows the window aspect, the lean is
 computed per viewport: it only reveals up to the commanded reach, never more for a wider window.
 At the reference aspect the standard Pulse reach (354 units) stays on screen to the sides with the
-minimum lean, shows to within a tenth of a cell toward the top, and shows about 9.9 of its 11 cells
-toward the bottom; longer reaches stop at the maximum. Direction-only stick aim leans fully;
-mouse and placement aim scale the lean by aim distance, with full strength authored at least 1.5
+minimum lean, shows to within a tenth of a cell toward the top, and would show about 9.9 of its
+11 cells toward the bottom, which the top HUD cap (below) shortens; longer reaches stop at the
+maximum. Direction-only stick aim leans fully; mouse and placement aim scale the lean by aim distance, with full strength authored at least 1.5
 times the maximum lean so a mouse cursor, which is measured through the leaning view, cannot drag
 the view after it. The combined follow lag and look-ahead keeps the fighter at least an authored
 safe margin (1 cell, code minimum 1) inside every screen edge, and the result then passes through
@@ -202,9 +202,12 @@ clamp holds the camera south of the rig's framing at the map's north edge, the c
 edge, over the outer dressing, by just enough to keep the local fighter's overhead (name, health,
 and ammunition) below the top-center score plate. The band is the plate's bottom edge plus the
 overhead height in UI units times the effective UI scale (phone viewport fit and the player's
-setting), so it follows both. It never moves the camera further north than the unclamped framing,
-so open-field framing and the look-ahead lean are unchanged; a strong south lean can still carry
-the overhead under the plate.
+setting), so it follows both. The same limit also caps the open-field lean (BRL-htdb): a south
+lean or northward follow lag never puts the fighter further ahead of the look target than the band
+allows, so the overhead stays below the plate everywhere. The cap applies to the look-ahead
+spring's target as well as its output, so the lean settles at the cap and aim swings ease out of it
+without a pop. It shortens the south lean: at 1280x720 and on the Pixel 8a landscape viewport the
+5-cell south lean stops at about 2.0 and 1.7 cells, so the bottom shows less of a long south reach.
 A trauma-based shake fed by local fire, local damage and defeat, and distance-scaled nearby lob
 landings, barrel explosions, and defeats adds a ground-plane translation of at most a quarter cell
 after framing. Local fire trauma is authored per primary-weapon delivery family with a spread-pattern

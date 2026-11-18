@@ -491,21 +491,35 @@ impl CameraRig {
         };
         let view = ground_view(viewport_aspect(input.viewport));
         let safe_margin = catalog.look_ahead.fighter_safe_margin_cells * MAP_CELL_SIZE_WORLD;
-        let look_target = if input.reduced_motion || input.fighter.is_none() {
+        // How far ahead of the look target the local fighter may sit before its overhead reaches
+        // the top HUD plate (BRL-fwtg band, BRL-htdb cap).
+        let top_limit = input.fighter.map(|_| {
+            top_hud_fighter_limit(input.viewport, input.ui_scale)
+                .clamp(view.near_y + safe_margin, view.far_y - safe_margin)
+        });
+        let mut look_target = if input.reduced_motion || input.fighter.is_none() {
             Vec2::ZERO
         } else {
             look_ahead_target(&catalog.look_ahead, input.aim, input.reach, view)
         };
+        if let Some(top_limit) = top_limit {
+            // Cap the south lean at its target too, so the spring settles at the cap and an aim
+            // swing starts from rest instead of first unwinding the excess.
+            look_target.y = look_target.y.max(-top_limit);
+        }
         let look_ahead = self
             .look_ahead
             .step(look_target, catalog.look_ahead.smooth_seconds, dt);
-        // The fighter sits at `-lead` from the look target; keep it inside the safe frame.
-        let lead = -view.clamp(anchor - (follow + look_ahead), safe_margin);
+        // The fighter sits at `-lead` from the look target; keep it inside the safe frame and at
+        // most `top_limit` ahead of it, so a south lean or northward follow lag never puts its
+        // overhead under the top HUD plate. This shortens the BRL-vptw south lean by the excess.
+        let mut lead = -view.clamp(anchor - (follow + look_ahead), safe_margin);
+        if let Some(top_limit) = top_limit {
+            lead.y = lead.y.max(-top_limit);
+        }
         let framed = anchor + lead;
         let mut center = clamp_3d_camera_center(framed, input.bounds, input.viewport);
-        if input.fighter.is_some() {
-            let top_limit = top_hud_fighter_limit(input.viewport, input.ui_scale)
-                .clamp(view.near_y + safe_margin, view.far_y - safe_margin);
+        if let Some(top_limit) = top_limit {
             center.y = top_hud_band_center(center.y, framed.y, anchor.y, top_limit);
         }
 
@@ -534,8 +548,7 @@ impl CameraRig {
 /// Top HUD safe band (BRL-fwtg): where the map clamp holds the camera south of the rig's framing
 /// (the map's north edge), the camera may still pass that edge by just enough to keep the local
 /// fighter at most `top_limit` ahead of the look target, so its overhead clears the top-center
-/// score plate. It never goes further north than the unclamped framing, so open-field framing
-/// and the look-ahead lean are unchanged.
+/// score plate. It never goes further north than the (already capped) framing.
 pub(super) fn top_hud_band_center(clamped: f32, framed: f32, fighter: f32, top_limit: f32) -> f32 {
     clamped.max((fighter - top_limit).min(framed))
 }

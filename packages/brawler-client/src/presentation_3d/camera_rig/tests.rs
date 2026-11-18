@@ -359,23 +359,160 @@ fn north_edge_keeps_the_local_overhead_below_the_top_hud_band() {
 }
 
 #[test]
-fn top_hud_band_never_moves_open_field_or_south_edge_framing() {
+fn top_hud_band_caps_only_the_south_lean_away_from_the_north_edge() {
     let bounds = centered_map(25.0, 37.0);
     let viewport = Vec2::new(914.0, 411.0);
     let ui_scale = ui::viewport::viewport_fit(viewport.y);
     let top_limit = top_hud_fighter_limit(viewport, ui_scale);
+    let view = ground_view(viewport_aspect(viewport));
+    let tuning = catalog().look_ahead;
     for fighter in [Vec2::ZERO, Vec2::new(0.0, bounds.min.y + 16.0)] {
         for direction in aim_directions() {
-            let framed = settled_center(fighter, bounds, viewport, (direction, None), None);
+            let catalog = catalog();
+            let mut rig = CameraRig::default();
+            let mut framed = Vec2::ZERO;
+            for _ in 0..180 {
+                framed = rig
+                    .step(
+                        &catalog,
+                        CameraRigFrameInput {
+                            aim: Some((direction, None)),
+                            viewport,
+                            ui_scale,
+                            ..input(fighter, bounds)
+                        },
+                    )
+                    .center;
+            }
+            // The band never passes the framing clamp here: the cap only shortens the lean.
             let clamped = clamp_3d_camera_center(framed, bounds, viewport);
             assert_eq!(framed, clamped, "{fighter} {direction}");
+            assert!(
+                fighter.y - framed.y <= top_limit + EPSILON,
+                "{fighter} {direction}"
+            );
+            if fighter == Vec2::ZERO {
+                // In the open field only the southward component of the lean changes.
+                let mut expected = look_ahead_target(&tuning, Some((direction, None)), None, view);
+                expected.y = expected.y.max(-top_limit);
+                assert!(framed.distance(expected) < EPSILON, "{direction}: {framed}");
+            }
         }
     }
     // The pure rule: no band when the clamp did not hold the camera south of the fighter's need,
-    // and never further north than the unclamped framing.
+    // and never further north than the (capped) framing.
     assert!((top_hud_band_center(10.0, 50.0, 0.0, top_limit) - 10.0).abs() < 1e-3);
     assert!((top_hud_band_center(-500.0, -490.0, 0.0, top_limit) + 490.0).abs() < 1e-3);
     assert!((top_hud_band_center(-500.0, 900.0, 0.0, top_limit) + top_limit).abs() < 1e-3);
+}
+
+/// Desktop reference and Pixel 8a landscape viewports at their fitted UI scale.
+const SOUTH_LEAN_VIEWPORTS: [Vec2; 2] = [Vec2::new(1280.0, 720.0), Vec2::new(914.0, 411.0)];
+
+#[test]
+fn sustained_south_sticky_aim_keeps_the_local_overhead_below_the_top_hud_band() {
+    let catalog = catalog();
+    let open_arena = centered_map(60.0, 60.0);
+    for viewport in SOUTH_LEAN_VIEWPORTS {
+        let ui_scale = ui::viewport::viewport_fit(viewport.y);
+        let top_limit = top_hud_fighter_limit(viewport, ui_scale);
+        let view = ground_view(viewport_aspect(viewport));
+        let wanted = look_ahead_target(
+            &catalog.look_ahead,
+            Some((Vec2::NEG_Y, None)),
+            Some(STICKY_REACH),
+            view,
+        );
+        // Uncapped, the reach-aware lean would put the fighter well above the band.
+        assert!(-wanted.y > top_limit + MAP_CELL_SIZE_WORLD, "{viewport}");
+        let mut rig = CameraRig::default();
+        let mut offset = Vec2::ZERO;
+        for _ in 0..600 {
+            let center = rig
+                .step(
+                    &catalog,
+                    CameraRigFrameInput {
+                        aim: Some((Vec2::NEG_Y, None)),
+                        reach: Some(STICKY_REACH),
+                        viewport,
+                        ui_scale,
+                        ..input(Vec2::ZERO, open_arena)
+                    },
+                )
+                .center;
+            offset = -center;
+            assert!(
+                offset.y <= top_limit + EPSILON,
+                "{viewport}: fighter {offset} above {top_limit}"
+            );
+            assert!(view.contains(offset, -EPSILON), "{viewport}: {offset}");
+        }
+        // Settled, the lean stops exactly at the band.
+        assert!(
+            (offset.y - top_limit).abs() < EPSILON,
+            "{viewport}: {offset}"
+        );
+    }
+}
+
+#[test]
+fn south_lean_cap_eases_in_and_out_of_aim_swings_without_a_pop() {
+    let catalog = catalog();
+    let open_arena = centered_map(60.0, 60.0);
+    for viewport in SOUTH_LEAN_VIEWPORTS {
+        let ui_scale = ui::viewport::viewport_fit(viewport.y);
+        let top_limit = top_hud_fighter_limit(viewport, ui_scale);
+        let mut rig = CameraRig::default();
+        let mut centers = Vec::new();
+        // Settle south, swing north, swing back south, then swing to the east.
+        for (frames, direction) in [
+            (180, Vec2::NEG_Y),
+            (150, Vec2::Y),
+            (150, Vec2::NEG_Y),
+            (150, Vec2::X),
+        ] {
+            for _ in 0..frames {
+                let center = rig
+                    .step(
+                        &catalog,
+                        CameraRigFrameInput {
+                            aim: Some((direction, None)),
+                            reach: Some(STICKY_REACH),
+                            viewport,
+                            ui_scale,
+                            ..input(Vec2::ZERO, open_arena)
+                        },
+                    )
+                    .center;
+                assert!(-center.y <= top_limit + EPSILON, "{viewport}: {center}");
+                centers.push(center);
+            }
+        }
+        // The spring settles at the cap, so each swing starts from rest and the camera's
+        // per-frame motion changes gradually: no stall while an excess unwinds, then a pop.
+        let speed: Vec<Vec2> = centers.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        let max_step = speed.iter().map(|step| step.length()).fold(0.0, f32::max);
+        let max_jerk = speed
+            .windows(2)
+            .map(|pair| pair[1].distance(pair[0]))
+            .fold(0.0, f32::max);
+        // Measured about 7.2 and 1.7 world units; clamping only the spring output (leaving its
+        // target uncapped) measured about 10.9 and 6.8, the pop this guards against.
+        assert!(
+            max_step < 0.3 * MAP_CELL_SIZE_WORLD,
+            "{viewport}: step {max_step}"
+        );
+        assert!(
+            max_jerk < 0.08 * MAP_CELL_SIZE_WORLD,
+            "{viewport}: jerk {max_jerk}"
+        );
+        // Swinging back south settles at the cap again rather than past it.
+        let settled_south = centers[180 + 150 + 149];
+        assert!(
+            (-settled_south.y - top_limit).abs() < EPSILON,
+            "{viewport}: {settled_south}"
+        );
+    }
 }
 
 #[test]
