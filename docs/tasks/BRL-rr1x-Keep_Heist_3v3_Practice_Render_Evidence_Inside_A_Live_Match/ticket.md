@@ -4,9 +4,9 @@ was: BRL-0177
 
 title: Keep Heist 3v3 Practice render evidence inside a live match during measurement
 
-status: doing
-closed:
-status_changed: 2026-11-18T05:32:47Z
+status: done
+closed: 2026-11-18T05:55:07Z
+status_changed: 2026-11-18T05:55:07Z
 
 theme: core
 
@@ -20,7 +20,7 @@ related: [BRL-m10f]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
