@@ -6,8 +6,17 @@
 //! * The frame's threads join an Android Dynamic Performance Framework hint session with a
 //!   16.7 ms target and report each main-loop frame's work duration, so the CPU governor ramps
 //!   the cores that run the frame instead of leaving them at idle clocks.
+//! * Menus update reactively at 30 Hz to save power; Match and its loading screen keep
+//!   continuous 60 FPS updates (BRL-m4eh, [`battery_flow_winit_settings`]).
 
-use bevy::{android::ANDROID_APP, prelude::*, render::RenderApp};
+use bevy::{
+    android::ANDROID_APP,
+    prelude::*,
+    render::RenderApp,
+    window::{PrimaryWindow, RawHandleWrapper},
+    winit::WinitSettings,
+};
+use brawler_client::{ClientFlow, battery_flow_winit_settings};
 use ndk::native_window::{FrameRateCompatibility, NativeWindow};
 use std::{
     ffi::{CStr, c_void},
@@ -51,7 +60,7 @@ pub(super) fn configure_task_pools() {
 
 pub(super) fn install(app: &mut App) {
     register_current_thread();
-    app.add_systems(Last, request_game_frame_rate);
+    app.add_systems(Last, (request_game_frame_rate, apply_flow_update_mode));
     app.insert_non_send(HintSession::default())
         .add_systems(First, begin_frame)
         .add_systems(Last, report_frame);
@@ -84,6 +93,20 @@ fn request_game_frame_rate(mut requested_for: Local<Option<NativeWindow>>) {
         Err(error) => warn!("could not request the game surface frame rate: {error}"),
     }
     *requested_for = Some(window);
+}
+
+/// Applies the battery update policy whenever the product flow changes. Winit re-reads
+/// [`WinitSettings`] after each update, so the new mode starts with the next frame.
+fn apply_flow_update_mode(
+    flow: Option<Res<State<ClientFlow>>>,
+    mut settings: ResMut<WinitSettings>,
+) {
+    let Some(flow) = flow else {
+        return;
+    };
+    if flow.is_changed() {
+        *settings = battery_flow_winit_settings(*flow.get());
+    }
 }
 
 type GetManager = unsafe extern "C" fn() -> *mut c_void;
@@ -198,14 +221,25 @@ impl HintSession {
     }
 }
 
+/// Work is measured from `First` to `Last` of one update, so the idle wait between reactive menu
+/// updates is never reported. An update without a window surface (Bevy removes the primary
+/// window's `RawHandleWrapper` for the last update before Android suspends) presents nothing and
+/// is not reported either. The 16.7 ms target stays:
+/// Match frames need it, and short menu frames only tell the governor it has headroom.
 fn begin_frame(mut hint: NonSendMut<HintSession>) {
     hint.frame_start = Some(Instant::now());
 }
 
-fn report_frame(mut hint: NonSendMut<HintSession>) {
+fn report_frame(
+    mut hint: NonSendMut<HintSession>,
+    surfaces: Query<(), (With<PrimaryWindow>, With<RawHandleWrapper>)>,
+) {
     let Some(start) = hint.frame_start.take() else {
         return;
     };
+    if surfaces.is_empty() {
+        return;
+    }
     hint.ensure_session();
     let (Some(api), Some(session)) = (hint.api.as_ref(), hint.session) else {
         return;
