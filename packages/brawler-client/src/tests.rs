@@ -125,6 +125,49 @@ fn render_profiles_keep_fixed_simulation_and_select_expected_window_path() {
 }
 
 #[test]
+fn battery_flow_settings_keep_matches_continuous_and_menus_reactive_at_30_hz() {
+    for flow in [ClientFlow::MatchLoading, ClientFlow::Match] {
+        let settings = battery_flow_winit_settings(flow);
+        assert_eq!(settings.focused_mode, UpdateMode::Continuous, "{flow:?}");
+        assert_eq!(
+            settings.unfocused_mode,
+            WinitSettings::game().unfocused_mode,
+            "{flow:?}"
+        );
+    }
+    for flow in [
+        ClientFlow::Connecting,
+        ClientFlow::ServerSelect,
+        ClientFlow::Dashboard,
+        ClientFlow::GameTypeSelect,
+        ClientFlow::PracticeMapSelect,
+        ClientFlow::MapLibrary,
+        ClientFlow::MapEditor,
+        ClientFlow::Queue,
+        ClientFlow::Results,
+    ] {
+        let settings = battery_flow_winit_settings(flow);
+        assert_eq!(
+            settings.focused_mode,
+            UpdateMode::reactive(RENDER_30_INTERVAL),
+            "{flow:?}"
+        );
+        assert_eq!(
+            settings.unfocused_mode,
+            UpdateMode::reactive_low_power(RENDER_30_INTERVAL),
+            "{flow:?}"
+        );
+    }
+    // Desktop's startup choice is untouched.
+    assert_eq!(
+        render_profile_settings(RenderProfile::Native)
+            .1
+            .focused_mode,
+        UpdateMode::Continuous
+    );
+}
+
+#[test]
 fn app_exit_is_forwarded_after_update_producers_run() {
     fn request_exit(mut app_exit: MessageWriter<AppExit>) {
         app_exit.write(AppExit::Success);

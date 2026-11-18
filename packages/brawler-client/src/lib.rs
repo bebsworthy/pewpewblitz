@@ -781,6 +781,31 @@ fn render_profile_settings(profile: RenderProfile) -> (PresentMode, WinitSetting
     }
 }
 
+/// Battery-device update policy for each product flow (BRL-m4eh); the Android shell applies it
+/// on every flow change, desktop keeps its startup [`render_profile_settings`].
+///
+/// Match and its loading screen update continuously like [`WinitSettings::game`]. Menus update
+/// reactively: at least every 1/30 s so time-driven motion keeps animating, and at once on any
+/// window event, so touches and drags run at the input rate.
+#[must_use]
+pub fn battery_flow_winit_settings(flow: ClientFlow) -> WinitSettings {
+    match flow {
+        ClientFlow::MatchLoading | ClientFlow::Match => WinitSettings::game(),
+        ClientFlow::Connecting
+        | ClientFlow::ServerSelect
+        | ClientFlow::Dashboard
+        | ClientFlow::GameTypeSelect
+        | ClientFlow::PracticeMapSelect
+        | ClientFlow::MapLibrary
+        | ClientFlow::MapEditor
+        | ClientFlow::Queue
+        | ClientFlow::Results => WinitSettings {
+            focused_mode: UpdateMode::reactive(RENDER_30_INTERVAL),
+            unfocused_mode: UpdateMode::reactive_low_power(RENDER_30_INTERVAL),
+        },
+    }
+}
+
 /// Build the default client application.
 pub fn build_app() -> App {
     build_app_with_config(ClientNetworkConfig::new(1))
