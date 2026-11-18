@@ -18,6 +18,13 @@ pub(in super::super) const OVERHEAD_WORLD_HEIGHT: f32 = FIGHTER_BODY_WORLD_HEIGH
 // the 720 px reference height: a bold 22 px bar with the health number inside it.
 const OVERHEAD_WIDTH: f32 = 140.0;
 const PLAYER_NAME_FONT_SIZE: f32 = 15.0;
+/// Clear space kept between the name and each plate edge, covering the drop-shadow offset and
+/// sub-pixel differences between this measurement and the scaled render layout.
+const PLAYER_NAME_SIDE_PADDING: f32 = 4.0;
+/// Widest laid-out player name that stays inside its own fixed-width plate (BRL-9k7q).
+const PLAYER_NAME_MAX_WIDTH: f32 = OVERHEAD_WIDTH - 2.0 * PLAYER_NAME_SIDE_PADDING;
+/// Lilita One maps U+2026, so truncation uses the single-glyph ellipsis.
+const PLAYER_NAME_ELLIPSIS: &str = "\u{2026}";
 const PLAYER_NAME_HEIGHT: f32 = 19.0;
 const HEALTH_BAR_WIDTH: f32 = 96.0;
 const HEALTH_BAR_HEIGHT: f32 = 22.0;
@@ -63,6 +70,14 @@ pub(in super::super) struct FighterColdPieUi {
 
 #[derive(Component)]
 pub(in super::super) struct FighterOverheadTextUi;
+
+/// The full replicated display name behind an overhead name label. The label shows it fitted to
+/// the plate; fitting reruns only when the name changes (or until the display font is loaded).
+#[derive(Component, Default)]
+pub(in super::super) struct FighterOverheadNameUi {
+    full: String,
+    fitted: bool,
+}
 
 #[derive(Component)]
 pub(in super::super) struct FighterAmmoRowUi;
@@ -254,6 +269,9 @@ fn spawn_fighter_overhead(
         PLAYER_NAME_FONT_SIZE,
         "V3 fighter overhead player name",
     );
+    commands
+        .entity(player_name)
+        .insert(FighterOverheadNameUi::default());
     // The number sits centered inside the bar, above the fill.
     let (health_amount_container, health_amount) = spawn_overhead_text(
         commands,
@@ -374,6 +392,9 @@ fn spawn_overhead_text(
                 height: px(height),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
+                // Backstop for text the fitter has not measured yet: nothing paints past the
+                // fixed plate width that overlap resolution assumes.
+                overflow: Overflow::clip_x(),
                 ..default()
             },
             GlobalZIndex(122),
@@ -624,6 +645,7 @@ pub(in super::super) fn update_fighter_overhead_state(
     >,
     mut fill_nodes: AmmoFillQuery,
     mut overhead_texts: Query<(&mut Text, &mut TextColor), With<FighterOverheadTextUi>>,
+    mut overhead_names: Query<&mut FighterOverheadNameUi>,
     mut overhead_colors: Query<
         &mut BackgroundColor,
         Or<(With<FighterHealthFillUi>, With<FighterAmmoSegmentUi>)>,
@@ -690,12 +712,15 @@ pub(in super::super) fn update_fighter_overhead_state(
         if let Ok(mut color) = overhead_colors.get_mut(overhead.fill) {
             color.0 = overhead_health_color(relation);
         }
-        if let Ok((mut text, mut color)) = overhead_texts.get_mut(overhead.player_name) {
-            if text.0 != name {
-                text.0.clear();
-                text.0.push_str(name);
-            }
+        if let Ok((_, mut color)) = overhead_texts.get_mut(overhead.player_name) {
             color.set_if_neq(TextColor(overhead_name_color(relation)));
+        }
+        if let Ok(mut label) = overhead_names.get_mut(overhead.player_name)
+            && label.full != name
+        {
+            label.full.clear();
+            label.full.push_str(name);
+            label.fitted = false;
         }
         if overhead.last_health != Some(current) {
             if let Ok((mut text, _)) = overhead_texts.get_mut(overhead.health_amount) {
@@ -736,6 +761,99 @@ pub(in super::super) fn update_fighter_overhead_state(
             },
         );
     }
+}
+
+/// Shows each changed overhead name fitted to its plate, measuring candidates with the same parley
+/// font collection (display font plus system fallbacks) that lays the label out.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are passed by value"
+)]
+pub(in super::super) fn fit_overhead_player_names(
+    fonts: Res<Assets<Font>>,
+    mut font_cx: ResMut<bevy::text::FontCx>,
+    mut layout_cx: ResMut<bevy::text::LayoutCx>,
+    mut names: Query<(&mut FighterOverheadNameUi, &mut Text, &TextFont)>,
+) {
+    for (mut label, mut text, text_font) in &mut names {
+        if label.fitted {
+            continue;
+        }
+        // Until the display font is registered, parley would measure a fallback face instead.
+        let Some(family) = registered_font_family(&fonts, &mut font_cx, text_font) else {
+            continue;
+        };
+        let font_size = text_font.font_size.eval(Vec2::ZERO, PLAYER_NAME_FONT_SIZE);
+        let shown = fit_overhead_name(&label.full, PLAYER_NAME_MAX_WIDTH, |candidate| {
+            measure_text_width(&mut font_cx, &mut layout_cx, &family, font_size, candidate)
+        });
+        if text.0 != shown {
+            text.0 = shown;
+        }
+        label.fitted = true;
+    }
+}
+
+fn registered_font_family(
+    fonts: &Assets<Font>,
+    font_cx: &mut bevy::text::FontCx,
+    text_font: &TextFont,
+) -> Option<String> {
+    let FontSource::Handle(handle) = &text_font.font else {
+        return None;
+    };
+    let alias = &fonts.get(handle.id())?.alias;
+    (!alias.is_empty() && font_cx.collection.family_id(alias).is_some()).then(|| alias.clone())
+}
+
+/// Logical-pixel advance width of `text` on one unwrapped line, as `bevy_text` would shape it.
+fn measure_text_width(
+    font_cx: &mut bevy::text::FontCx,
+    layout_cx: &mut bevy::text::LayoutCx,
+    family: &str,
+    font_size: f32,
+    text: &str,
+) -> f32 {
+    use parley::{FontFamily, StyleProperty, TextWrapMode};
+    let mut builder = layout_cx
+        .0
+        .ranged_builder(&mut font_cx.context, text, 1.0, true);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named(family)));
+    builder.push_default(StyleProperty::FontSize(font_size));
+    builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::NoWrap));
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    layout.full_width()
+}
+
+/// Returns `name` unchanged when `measure` says it fits in `max_width`; otherwise the longest
+/// grapheme prefix that fits with a trailing ellipsis. `measure` returns a laid-out width, so
+/// emoji and fallback-font glyphs count at their real size.
+fn fit_overhead_name(name: &str, max_width: f32, mut measure: impl FnMut(&str) -> f32) -> String {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    if measure(name) <= max_width {
+        return name.to_owned();
+    }
+    let boundaries = name
+        .grapheme_indices(true)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let candidate = |graphemes: usize| {
+        let mut shown = name[..boundaries[graphemes]].trim_end().to_owned();
+        shown.push_str(PLAYER_NAME_ELLIPSIS);
+        shown
+    };
+    // Widths grow with the prefix, so binary-search the longest fitting grapheme count.
+    let (mut fits, mut too_wide) = (0, boundaries.len());
+    while too_wide - fits > 1 {
+        let middle = usize::midpoint(fits, too_wide);
+        if measure(&candidate(middle)) <= max_width {
+            fits = middle;
+        } else {
+            too_wide = middle;
+        }
+    }
+    candidate(fits)
 }
 
 fn reconcile_overhead_ammunition(
@@ -988,6 +1106,209 @@ mod tests {
         app.world_mut().despawn(fighter);
         app.update();
         assert_eq!(plates(&mut app), 0);
+    }
+
+    /// Longest names the lobby accepts: 24 graphemes, or 21 three-byte CJK characters under the
+    /// 64-byte cap, plus a mixed-script name that needs several fallback fonts.
+    const MAX_LATIN_NAME: &str = "WWWWWWWWWWWWWWWWWWWWWWWW";
+    // 李小雷さくら김민준李小雷さくら김민준李小雷
+    const MAX_CJK_NAME: &str = "\u{674E}\u{5C0F}\u{96F7}\u{3055}\u{304F}\u{3089}\u{AE40}\u{BBFC}\u{C900}\u{674E}\u{5C0F}\u{96F7}\u{3055}\u{304F}\u{3089}\u{AE40}\u{BBFC}\u{C900}\u{674E}\u{5C0F}\u{96F7}";
+    // Łukasz Жора Αλέξης 李
+    const MIXED_SCRIPT_NAME: &str = "\u{141}ukasz \u{416}\u{43E}\u{440}\u{430} \u{391}\u{3BB}\u{3AD}\u{3BE}\u{3B7}\u{3C2} \u{674E}";
+
+    /// Stand-in measure: wide Latin, wider CJK, everything else narrower, all per grapheme.
+    fn fake_width(text: &str) -> f32 {
+        text.chars()
+            .map(|character| match character {
+                'W' => 13.0,
+                '\u{2E80}'.. => 15.0,
+                _ => 8.0,
+            })
+            .sum()
+    }
+
+    #[test]
+    fn maximum_names_are_valid_lobby_names() {
+        for name in [MAX_LATIN_NAME, MAX_CJK_NAME, MIXED_SCRIPT_NAME] {
+            assert!(
+                brawler::lobby::normalize_proposed_display_name(name).is_ok(),
+                "{name} is a valid display name"
+            );
+        }
+        assert!(
+            brawler::lobby::normalize_proposed_display_name(&format!("{MAX_CJK_NAME}\u{674E}"))
+                .is_err(),
+            "a 22nd CJK character exceeds the byte cap"
+        );
+    }
+
+    #[test]
+    fn display_font_draws_the_truncation_ellipsis() {
+        assert!(
+            PLAYER_NAME_ELLIPSIS
+                .chars()
+                .all(ui::theme::display_font_has_glyph)
+        );
+    }
+
+    #[test]
+    fn short_names_are_shown_unchanged() {
+        for name in ["Ace", "Bot Kestrel", "\u{674E}\u{5C0F}\u{96F7}"] {
+            assert_eq!(
+                fit_overhead_name(name, PLAYER_NAME_MAX_WIDTH, fake_width),
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn wide_names_truncate_by_grapheme_to_the_longest_fitting_prefix() {
+        for name in [MAX_LATIN_NAME, MAX_CJK_NAME, MIXED_SCRIPT_NAME] {
+            assert!(
+                fake_width(name) > PLAYER_NAME_MAX_WIDTH,
+                "{name} needs fitting"
+            );
+            let shown = fit_overhead_name(name, PLAYER_NAME_MAX_WIDTH, fake_width);
+            assert!(fake_width(&shown) <= PLAYER_NAME_MAX_WIDTH, "{shown} fits");
+            let prefix = shown
+                .strip_suffix(PLAYER_NAME_ELLIPSIS)
+                .expect("a truncated name ends with the ellipsis");
+            assert!(name.starts_with(prefix) && !prefix.ends_with(' '));
+            // One more grapheme would not fit.
+            let next = name[prefix.len()..]
+                .trim_start()
+                .chars()
+                .next()
+                .expect("truncation dropped graphemes");
+            assert!(
+                fake_width(&format!("{prefix}{next}{PLAYER_NAME_ELLIPSIS}"))
+                    > PLAYER_NAME_MAX_WIDTH
+            );
+        }
+    }
+
+    #[test]
+    fn truncation_never_splits_a_grapheme_cluster() {
+        use unicode_segmentation::UnicodeSegmentation as _;
+        // One grapheme of seven code points (man, woman, girl, boy joined by ZWJ).
+        const FAMILY: &str = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+        // One grapheme of two regional indicators.
+        const FLAG: &str = "\u{1F1EF}\u{1F1F5}";
+        let name = format!("Pew{FAMILY}{FLAG}{FAMILY}{FLAG}{FAMILY}");
+        let per_grapheme = |text: &str| text.graphemes(true).map(|_| 14.0).sum::<f32>();
+        assert_eq!(fit_overhead_name(&name, 60.0, per_grapheme), "Pew\u{2026}");
+        assert_eq!(
+            fit_overhead_name(&name, 74.0, per_grapheme),
+            format!("Pew{FAMILY}{PLAYER_NAME_ELLIPSIS}")
+        );
+    }
+
+    /// Fits names through the real display font and system fallbacks, then checks that two
+    /// plates exactly one plate width apart keep their names inside their own plate.
+    #[test]
+    fn adjacent_plates_with_maximum_names_do_not_overlap() {
+        let mut world = World::new();
+        let mut fonts = Assets::<Font>::default();
+        let font = fonts.add(Font::from_bytes(
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../assets/brawler/ui/fonts/lilita-one-regular.ttf"
+            ))
+            .to_vec(),
+        ));
+        world.insert_resource(fonts);
+        world.init_resource::<bevy::text::FontCx>();
+        world.init_resource::<bevy::text::LayoutCx>();
+        world
+            .run_system_cached(bevy::text::load_font_assets_into_font_collection)
+            .unwrap();
+        let label = |world: &mut World, name: &str| {
+            world
+                .spawn((
+                    FighterOverheadNameUi {
+                        full: name.to_owned(),
+                        fitted: false,
+                    },
+                    Text::new(""),
+                    ui::theme::hud_text(&font, PLAYER_NAME_FONT_SIZE),
+                ))
+                .id()
+        };
+        let pairs = [
+            (MAX_LATIN_NAME, MAX_CJK_NAME),
+            (MAX_CJK_NAME, MAX_CJK_NAME),
+            (MAX_LATIN_NAME, MIXED_SCRIPT_NAME),
+        ];
+        for (left_name, right_name) in pairs {
+            let left = label(&mut world, left_name);
+            let right = label(&mut world, right_name);
+            world.run_system_cached(fit_overhead_player_names).unwrap();
+            let width = |world: &mut World, entity: Entity, full: &str| {
+                let shown = world.get::<Text>(entity).unwrap().0.clone();
+                let family = world.resource_scope(|world, mut font_cx: Mut<bevy::text::FontCx>| {
+                    registered_font_family(
+                        world.resource::<Assets<Font>>(),
+                        &mut font_cx,
+                        world.get::<TextFont>(entity).unwrap(),
+                    )
+                    .expect("display font is registered")
+                });
+                world.resource_scope(|world, mut font_cx: Mut<bevy::text::FontCx>| {
+                    let mut layout_cx = world.resource_mut::<bevy::text::LayoutCx>();
+                    let full_width = measure_text_width(
+                        &mut font_cx,
+                        &mut layout_cx,
+                        &family,
+                        PLAYER_NAME_FONT_SIZE,
+                        full,
+                    );
+                    assert!(full_width > OVERHEAD_WIDTH, "{full} is wider than a plate");
+                    assert!(
+                        shown.ends_with(PLAYER_NAME_ELLIPSIS),
+                        "{shown} is truncated"
+                    );
+                    measure_text_width(
+                        &mut font_cx,
+                        &mut layout_cx,
+                        &family,
+                        PLAYER_NAME_FONT_SIZE,
+                        &shown,
+                    )
+                })
+            };
+            let left_width = width(&mut world, left, left_name);
+            let right_width = width(&mut world, right, right_name);
+            assert!(left_width <= PLAYER_NAME_MAX_WIDTH && right_width <= PLAYER_NAME_MAX_WIDTH);
+            // Centered names on plates whose centers are exactly OVERHEAD_WIDTH apart.
+            let left_plate = OverheadPlacement {
+                root: left,
+                top_left: Vec2::ZERO,
+                height: OVERHEAD_HEALTH_HEIGHT,
+                is_local: false,
+            };
+            let right_plate = OverheadPlacement {
+                root: right,
+                top_left: Vec2::new(OVERHEAD_WIDTH, 0.0),
+                height: OVERHEAD_HEALTH_HEIGHT,
+                is_local: false,
+            };
+            assert!(!overhead_plates_overlap(&left_plate, &right_plate));
+            let left_name_right_edge = OVERHEAD_WIDTH * 0.5 + left_width * 0.5;
+            let right_name_left_edge = OVERHEAD_WIDTH * 1.5 - right_width * 0.5;
+            assert!(left_name_right_edge <= right_name_left_edge);
+        }
+
+        // A fitted label is not re-measured until its name changes.
+        let entity = label(&mut world, MAX_LATIN_NAME);
+        world.run_system_cached(fit_overhead_player_names).unwrap();
+        world.get_mut::<Text>(entity).unwrap().0 = "sentinel".to_owned();
+        world.run_system_cached(fit_overhead_player_names).unwrap();
+        assert_eq!(world.get::<Text>(entity).unwrap().0, "sentinel");
+        let mut name = world.get_mut::<FighterOverheadNameUi>(entity).unwrap();
+        name.full = "Ace".to_owned();
+        name.fitted = false;
+        world.run_system_cached(fit_overhead_player_names).unwrap();
+        assert_eq!(world.get::<Text>(entity).unwrap().0, "Ace");
     }
 
     #[test]

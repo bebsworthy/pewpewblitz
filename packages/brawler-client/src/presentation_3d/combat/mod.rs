@@ -61,8 +61,9 @@ pub(super) use fighter_feedback::{
 pub(super) use fighter_outline::{attach_fighter_outlines, install as install_fighter_outlines};
 pub(super) use fighter_rim::tag_fighter_rim_relation;
 pub(super) use fighter_ui::{
-    OVERHEAD_AMMO_HEIGHT, OVERHEAD_WORLD_HEIGHT, prepare_cold_pie_assets,
-    project_fighter_overhead_ui, reconcile_fighter_overheads, update_fighter_overhead_state,
+    OVERHEAD_AMMO_HEIGHT, OVERHEAD_WORLD_HEIGHT, fit_overhead_player_names,
+    prepare_cold_pie_assets, project_fighter_overhead_ui, reconcile_fighter_overheads,
+    update_fighter_overhead_state,
 };
 pub(super) use local_projectile::{
     LocalProjectileHandoffs, LocalProjectileLead, advance_local_projectiles,

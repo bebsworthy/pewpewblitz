@@ -502,7 +502,11 @@ impl Plugin for WorldPresentationPlugin {
                         contact_shadow::update_fighter_contact_shadows,
                     )
                         .chain(),
-                    combat::update_fighter_overhead_state,
+                    (
+                        combat::update_fighter_overhead_state,
+                        combat::fit_overhead_player_names,
+                    )
+                        .chain(),
                     combat::reconcile_status_visuals,
                     combat::reconcile_dash_trails,
                     combat::update_sticky_blob_fuse_progress,
