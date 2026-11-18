@@ -3,9 +3,9 @@ id: BRL-v8x4
 
 title: 'Carry two-handed weapons two-handed in run, dash, and idle'
 
-status: doing
-closed:
-status_changed: 2026-11-18T04:43:36Z
+status: done
+closed: 2026-11-18T05:13:16Z
+status_changed: 2026-11-18T05:13:16Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-q29d]
 
 parent: BRL-q5c4
 
-rank: 11337728
+rank:
 ---
 
 # Description
