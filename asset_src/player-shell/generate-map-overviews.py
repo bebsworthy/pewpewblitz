@@ -1,8 +1,14 @@
-"""Generate schematic Practice overviews from current authored map geometry."""
+"""Generate schematic Practice overviews from current authored map geometry.
+
+Python 3 standard library only. Writes the SVG source to map-overviews/ and rasterizes the runtime
+PNG (assets/brawler/ui/shell/<key>-overview.png, fit inside 1200x800) with the shell-art Canvas.
+"""
 from pathlib import Path
 import re
+from build_shell_art import Canvas
 root=Path(__file__).resolve().parents[2]
 out=Path(__file__).resolve().parent / "map-overviews"
+png_dir=root/'assets/brawler/ui/shell'
 out.mkdir(exist_ok=True)
 catalog=(root/'content/catalogs/map_assets.ron').read_text()
 assets={}
@@ -37,26 +43,34 @@ def overview(key):
         ident,x,y,rw,rh,a,q=map(int,m.groups())
         cells.extend((ident+dy*rw+dx,x+dx,y+dy,a,q,'') for dy in range(rh) for dx in range(rw))
     shapes=[f'<rect width="{w}" height="{h}" fill="{color(assets[default][0])}"/>']
+    scale=min(1200/w,800/h);pw,ph=round(w*scale),round(h*scale);canvas=Canvas(pw,ph,pw/w,ph/h)
+    canvas.fill_rect(0,0,w,h,color(assets[default][0]))
     for ident,x,y,a,q,params in sorted(cells,key=lambda c:({'Surface':0,'Feature':1,'Decoration':2,'Marker':3}.get(assets[c[3]][1],3),c[0])):
         name,slot,aw,ah=assets[a]
         if q%2:aw,ah=ah,aw
         if 'PlayerSpawn' in params:
             team=int(re.search(r'team_slot: (\d+)',params)[1]);c='#38a9dd' if team==0 else '#e16a62'
-            shapes.append(f'<circle cx="{x+.5}" cy="{h-y-.5}" r=".6" fill="{c}" stroke="#fff4dd" stroke-width=".18"/>');continue
+            shapes.append(f'<circle cx="{x+.5}" cy="{h-y-.5}" r=".6" fill="{c}" stroke="#fff4dd" stroke-width=".18"/>')
+            canvas.circle(x+.5,h-y-.5,.6,c,stroke='#fff4dd',stroke_width=.18);continue
         if slot=='Marker':continue
         stroke='' if slot=='Surface' else ' stroke="#29444b" stroke-opacity=".25" stroke-width=".06"'
         shapes.append(f'<rect x="{x}" y="{h-y-ah}" width="{aw}" height="{ah}" fill="{color(name)}"{stroke}/>')
+        canvas.fill_rect(x,h-y-ah,aw,ah,color(name))
+        if stroke:canvas.stroke_rect(x,h-y-ah,aw,ah,.06,'#29444b',.25)
     for m in re.finditer(r'HotZoneCircle\(center_half_cell: \(x: (\d+), y: (\d+)\), radius_half_cells: (\d+)\)', src):
         x,y,r=map(int,m.groups())
         shapes.append(f'<circle cx="{x/2}" cy="{h-y/2}" r="{r/2}" fill="#ff9a31" fill-opacity=".3" stroke="#fff4dd" stroke-width=".2"/>')
+        canvas.circle(x/2,h-y/2,r/2,'#ff9a31',.3,'#fff4dd',.2)
     for m in re.finditer(r'HeistSafe\(team_slot: (\d+), origin_cell: \(x: (\d+), y: (\d+)\), width_cells: (\d+), height_cells: (\d+), quarter_turns: (\d+)', src):
         team,x,y,sw,sh,q=map(int,m.groups())
         if q%2: sw,sh=sh,sw
         c='#38a9dd' if team==0 else '#e16a62'
         shapes.append(f'<rect x="{x}" y="{h-y-sh}" width="{sw}" height="{sh}" fill="{c}" stroke="#fff4dd" stroke-width=".2"/>')
+        canvas.fill_rect(x,h-y-sh,sw,sh,c);canvas.stroke_rect(x,h-y-sh,sw,sh,.2,'#fff4dd')
     body=''.join(shapes)
     svg=f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}">{body}</svg>'
     (out/f'{key}-overview.svg').write_text(svg)
+    canvas.write_png(png_dir/f'{key}-overview.png')
     print(key, w,h,'expanded placements:',len(cells))
     return w,h,body
 

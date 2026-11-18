@@ -191,4 +191,56 @@ mod tests {
                 .is_file()
         );
     }
+
+    fn client_sources(dir: &Path, text: &mut String) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                client_sources(&path, text);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                text.push_str(&std::fs::read_to_string(&path).unwrap());
+            }
+        }
+    }
+
+    /// BRL-4jdx: the shell directory ships only artwork a screen loads, either by a literal path
+    /// in client source or as the overview of a map a game type offers in Practice.
+    #[test]
+    fn shell_directory_holds_only_loaded_artwork() {
+        let root = Path::new(crate::REPOSITORY_ROOT);
+        let mut source = String::new();
+        client_sources(&root.join("packages/brawler-client/src"), &mut source);
+        let game_types = std::fs::read_to_string(root.join("config/server/game-types.ron"))
+            .expect("game types config");
+        let practice_maps: BTreeSet<&str> = game_types
+            .split("maps: [")
+            .skip(1)
+            .filter_map(|rest| rest.split(']').next())
+            .flat_map(|list| list.split(',').map(|key| key.trim().trim_matches('"')))
+            .filter(|key| !key.is_empty())
+            .collect();
+        assert!(!practice_maps.is_empty());
+        assert!(source.contains("format!(\"brawler/ui/shell/{}-overview.png\", p.key)"));
+
+        let shipped: BTreeSet<String> = std::fs::read_dir(root.join("assets/brawler/ui/shell"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        for file in &shipped {
+            let literal = source.contains(&format!("\"brawler/ui/shell/{file}\""));
+            let overview = file
+                .strip_suffix("-overview.png")
+                .is_some_and(|key| practice_maps.contains(key));
+            assert!(
+                literal || overview,
+                "no screen loads brawler/ui/shell/{file}"
+            );
+        }
+        for key in practice_maps {
+            assert!(
+                shipped.contains(&format!("{key}-overview.png")),
+                "Practice map {key} has no overview"
+            );
+        }
+    }
 }
