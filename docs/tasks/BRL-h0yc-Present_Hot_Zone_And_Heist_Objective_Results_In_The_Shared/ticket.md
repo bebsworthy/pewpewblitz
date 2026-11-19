@@ -4,9 +4,9 @@ was: BRL-0135
 
 title: Present Hot Zone and Heist objective results in the shared shell
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-12T20:15:05Z
+status_changed: 2026-11-19T14:23:59Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: []
 
 parent:
 
-rank: 2273278
+rank: 11599872
 ---
 
 # Description

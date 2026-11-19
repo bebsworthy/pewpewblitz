@@ -3,9 +3,9 @@ id: BRL-wqst
 
 title: 'Extend shell capture to live-match routes (Results, match menu, leave confirmation)'
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-18T06:48:36Z
+status_changed: 2026-11-19T14:23:59Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-pw9k]
 
 parent: BRL-q5c4
 
-rank: 2304680
+rank: 11534336
 ---
 
 # Description
