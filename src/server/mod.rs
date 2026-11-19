@@ -1455,14 +1455,6 @@ fn build_authoritative_app(
     app
 }
 
-/// The required scenario checkpoints for one asserted weapon preset. Public for the
-/// `validate-closeout` terminal gate, which re-derives the declared checkpoint count
-/// from the asserted preset so a launcher-side declaration cannot drift silently.
-#[must_use]
-pub fn required_process_checkpoints(preset_id: WeaponPresetId) -> &'static [&'static str] {
-    verification::required_process_checkpoints(preset_id)
-}
-
 /// Common lifecycle rules for one rules profile; deadlines shorten without changing semantics.
 #[must_use]
 pub fn match_lifecycle_rules_for_profile(profile: MatchRulesProfile) -> MatchLifecycleRules {

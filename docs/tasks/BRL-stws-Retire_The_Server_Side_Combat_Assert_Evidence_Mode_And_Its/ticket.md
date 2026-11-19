@@ -3,9 +3,9 @@ id: BRL-stws
 
 title: Retire the server-side combat-assert evidence mode and its CombatEvidenceCheckpoint wire message
 
-status: doing
-closed:
-status_changed: 2026-11-19T16:48:44Z
+status: done
+closed: 2026-11-19T18:11:16Z
+status_changed: 2026-11-19T18:11:16Z
 
 theme: quality
 
@@ -19,7 +19,7 @@ related: [BRL-rhw3]
 
 parent: BRL-q5c4
 
-rank: 11403264
+rank:
 ---
 
 # Description

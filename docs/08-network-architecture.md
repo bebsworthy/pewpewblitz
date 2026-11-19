@@ -669,3 +669,13 @@ it with the authoring validator and fingerprint exactly as for authored Practice
 rebuild it from the replicated `ResolvedMapSnapshot`. The two new registrations change the
 protocol-registry fingerprint; match-manifest v5, control IPC v7, and the route envelope are
 unchanged. There are no per-message versions or compatibility decoders.
+
+Protocol 52 unregisters the server-to-client `CombatEvidenceCheckpoint` message (BRL-stws). It
+carried snapshots from the retired direct-UDP combat-assert verification mode
+(`BRAWLER_NETWORK_ASSERT_COMBAT`), which no client read after BRL-rhw3; the server-side capture,
+the evidence mode and its test-dummy insertion are removed with it. `CombatChannel` and every
+other registration are unchanged. Removing the registration changes the protocol-registry
+fingerprint, so the global handshake rejects a protocol 51 peer; every role must be rebuilt. The
+process closeout report moves to schema revision 5 without the checkpoint declaration, digest and
+observed count, and `brawler-server validate-closeout` takes only `<DIRECTORY> <CLIENT-COUNT>`.
+Match-manifest v5, control IPC v7, and the route envelope are unchanged.

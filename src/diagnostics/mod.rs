@@ -21,17 +21,11 @@ pub use process::{
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// The only closeout schema revision produced or accepted by this build. Revision 2 adds
-/// the gameplay-aggregate block (match/mode, build, ability, weapon, and map dynamics
-/// summaries) to revision 1's manifest, process, transport, and evidence fields, so the
-/// consolidated report ties the gameplay subsystems to the run identity instead of
-/// carrying process/network measurements alone.
-/// The only closeout schema revision produced or accepted by this build. Revision 3 adds
-/// the mode-aggregate fields (mode identity plus the typed Wipeout/Hot Zone summaries),
-/// the observed-checkpoint count distinct from the declared scenario contract, the
-/// map-destruction no-op brush counter, and includes the declared scenario counts in the shared
-/// run identity.
-pub const CLOSEOUT_SCHEMA_VERSION: u16 = 4;
+/// The only closeout schema revision produced or accepted by this build. Revision 5 drops the
+/// retired combat-evidence checkpoint fields (the declared `checkpoints` count, the
+/// `checkpoint_digest`, and `checkpoints_observed`) along with the server checkpoint capture
+/// that produced them (BRL-stws).
+pub const CLOSEOUT_SCHEMA_VERSION: u16 = 5;
 
 /// Upper bound on manifest identity strings; rejects oversized or runaway scripted fields.
 pub const MAX_IDENTITY_BYTES: usize = 96;
@@ -110,8 +104,7 @@ pub struct ManifestParticipant {
 /// Versioned identity of one deterministic scenario run.
 ///
 /// The manifest names what was run; the closeout report records what was observed. Neither
-/// embeds unbounded event history: scripted actions and checkpoints are referenced by count,
-/// with their digests carried in the report.
+/// embeds unbounded event history: scripted actions are referenced by count.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunManifestV1 {
     pub schema_version: u16,
@@ -131,7 +124,6 @@ pub struct RunManifestV1 {
     pub seed: u64,
     pub participants: Vec<ManifestParticipant>,
     pub scripted_action_count: u32,
-    pub checkpoint_count: u32,
 }
 
 impl RunManifestV1 {
@@ -222,7 +214,6 @@ impl RunManifestV1 {
             ));
         }
         lines.push(format!("scripted_actions={}", self.scripted_action_count));
-        lines.push(format!("checkpoints={}", self.checkpoint_count));
         lines
     }
 }
@@ -601,11 +592,6 @@ pub struct CloseoutReportV1 {
     pub packets_received: u64,
     pub channel_messages_sent: u64,
     pub channel_messages_received: u64,
-    pub checkpoint_digest: u64,
-    /// Checkpoint evidence this process actually observed. Distinct from the manifest's
-    /// declared `checkpoint_count`, which preserves the scenario's expectation so the
-    /// terminal gate can compare declaration against observation.
-    pub checkpoints_observed: u32,
     pub first_divergence: Option<String>,
     pub dropped_messages: u64,
     pub rejected_connections: u64,
@@ -694,8 +680,6 @@ impl CloseoutReportV1 {
                 "channel_messages_received={}",
                 self.channel_messages_received
             ),
-            format!("checkpoint_digest={}", self.checkpoint_digest),
-            format!("checkpoints_observed={}", self.checkpoints_observed),
             format!(
                 "first_divergence={}",
                 self.first_divergence.as_deref().unwrap_or("none")
@@ -749,7 +733,7 @@ pub fn split_report_lines(contents: &str) -> Result<Vec<(&str, &str)>, String> {
 /// Every non-participant field a schema-3 closeout report carries exactly once. The reader
 /// rejects reports that drop, duplicate, or oversize any of these fields, mirroring
 /// `CloseoutReportV1::to_report_lines`.
-const REPORT_REQUIRED_KEYS: [&str; 80] = [
+const REPORT_REQUIRED_KEYS: [&str; 77] = [
     "schema_version",
     "scenario_id",
     "scenario_revision",
@@ -767,7 +751,6 @@ const REPORT_REQUIRED_KEYS: [&str; 80] = [
     "seed",
     "participants",
     "scripted_actions",
-    "checkpoints",
     "end_reason",
     "exit_category",
     "started_at_unix_micros",
@@ -793,8 +776,6 @@ const REPORT_REQUIRED_KEYS: [&str; 80] = [
     "packets_received",
     "channel_messages_sent",
     "channel_messages_received",
-    "checkpoint_digest",
-    "checkpoints_observed",
     "first_divergence",
     "dropped_messages",
     "rejected_connections",
@@ -970,8 +951,6 @@ pub fn parse_closeout_report(lines: &[(&str, &str)]) -> Result<CloseoutReportV1,
         packets_received: parse_typed_field(lines, "packets_received", "u64")?,
         channel_messages_sent: parse_typed_field(lines, "channel_messages_sent", "u64")?,
         channel_messages_received: parse_typed_field(lines, "channel_messages_received", "u64")?,
-        checkpoint_digest: parse_typed_field(lines, "checkpoint_digest", "u64")?,
-        checkpoints_observed: parse_typed_field(lines, "checkpoints_observed", "u32")?,
         first_divergence: match parse_report_field(lines, "first_divergence")
             .expect("presence was checked")
         {
@@ -1018,7 +997,6 @@ fn parse_run_manifest(lines: &[(&str, &str)], schema: u16) -> Result<RunManifest
         seed: parse_typed_field(lines, "seed", "u64")?,
         participants,
         scripted_action_count: parse_typed_field(lines, "scripted_actions", "u32")?,
-        checkpoint_count: parse_typed_field(lines, "checkpoints", "u32")?,
     })
 }
 
@@ -1063,12 +1041,12 @@ fn validate_report_participant_block(lines: &[(&str, &str)]) -> Result<(), Strin
 
 /// The manifest identity fields one launcher run shares across every endpoint. Source
 /// identity, the canonical participant/build assignment, and the declared scenario
-/// contract (scripted actions and expected checkpoints) are part of the shared identity,
+/// contract (scripted actions) are part of the shared identity,
 /// so a report from another source tree, a different roster, or a diverging scenario
 /// declaration cannot satisfy this run's gate when version and fingerprints happen to
 /// match. Network and render profiles stay per-endpoint (a run may mix native and
 /// headless clients), so they are deliberately excluded from the agreement check.
-const RUN_IDENTITY_FIELDS: [&str; 15] = [
+const RUN_IDENTITY_FIELDS: [&str; 14] = [
     "scenario_id",
     "scenario_revision",
     "run_id",
@@ -1083,7 +1061,6 @@ const RUN_IDENTITY_FIELDS: [&str; 15] = [
     "seed",
     "participants",
     "scripted_actions",
-    "checkpoints",
 ];
 
 /// Render one manifest's shared run identity as `(field, value)` pairs for comparison.
@@ -1113,7 +1090,6 @@ fn run_identity_pairs(manifest: &RunManifestV1) -> Vec<(&'static str, String)> {
                     .collect::<Vec<_>>()
                     .join(";"),
                 "scripted_actions" => manifest.scripted_action_count.to_string(),
-                "checkpoints" => manifest.checkpoint_count.to_string(),
                 _ => unreachable!("the field list is closed"),
             };
             (*field, value)
@@ -1161,22 +1137,14 @@ fn enforce_closeout_terminal_gate(
 /// reconstructing and validating as the current schema, one shared run identity (source
 /// revision, seed, the canonical participant/build assignment, and the declared scenario
 /// contract included) across endpoints with at least one observed participant row per
-/// endpoint, every endpoint exiting clean with zero dropped messages, rejections, errors,
-/// and divergence, and one checkpoint digest across endpoints that carries real evidence
-/// exactly when `expect_checkpoint_evidence` says the run profile records checkpoints
-/// (combat-assert runs do; movement, map, and match profiles do not). When
-/// `declared_checkpoint_requirement` carries the asserted preset's required checkpoint
-/// count, every report's declared `checkpoint_count` must equal it and its observed
-/// checkpoints must cover it, so a launcher declaration that drifted from the preset
-/// fails the gate instead of being overwritten by observation. Verification launchers
+/// endpoint, and every endpoint exiting clean with zero dropped messages, rejections, errors,
+/// and divergence. Verification launchers
 /// reach this through `brawler-server validate-closeout` so the terminal gate and the
 /// report writer share a single schema definition instead of a launcher-side subset.
 /// Returns the number of validated reports.
 pub fn validate_closeout_directory(
     directory: &std::path::Path,
     client_count: u32,
-    expect_checkpoint_evidence: bool,
-    declared_checkpoint_requirement: Option<u32>,
 ) -> Result<usize, String> {
     if client_count == 0 || client_count > 8 {
         return Err(format!(
@@ -1208,7 +1176,6 @@ pub fn validate_closeout_directory(
             }
         ));
     }
-    let mut digests: Vec<u64> = Vec::new();
     let mut reference_identity: Option<(String, Vec<(&'static str, String)>)> = None;
     for name in &expected {
         let path = directory.join(name);
@@ -1233,77 +1200,8 @@ pub fn validate_closeout_directory(
             }
         }
         reference_identity = Some((name.clone(), identity));
-        if expect_checkpoint_evidence && report.checkpoint_digest == 0 {
-            return Err(format!(
-                "{}: checkpoint digest is zero; this run profile must carry checkpoint evidence",
-                path.display()
-            ));
-        }
-        if !expect_checkpoint_evidence && report.checkpoint_digest != 0 {
-            return Err(format!(
-                "{}: checkpoint digest is nonzero; this run profile records no checkpoint evidence",
-                path.display()
-            ));
-        }
-        if let Some(required) = declared_checkpoint_requirement {
-            enforce_declared_checkpoint_requirement(&report, &path, required)?;
-        }
-        digests.push(report.checkpoint_digest);
-    }
-    if digests.iter().any(|digest| digest != &digests[0]) {
-        return Err(format!(
-            "checkpoint digests diverged across endpoints: {}",
-            digests
-                .iter()
-                .map(u64::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
     }
     Ok(expected.len())
-}
-
-/// Enforce one report's declared scenario contract against the asserted preset's
-/// requirement: the declaration must equal the requirement, and observed evidence must
-/// cover it. Observed may exceed the requirement when the roster fights mixed presets;
-/// it must never fall short of the scenario's declared contract.
-fn enforce_declared_checkpoint_requirement(
-    report: &CloseoutReportV1,
-    path: &std::path::Path,
-    required: u32,
-) -> Result<(), String> {
-    if report.manifest.checkpoint_count != required {
-        return Err(format!(
-            "{}: declared checkpoints {} diverge from the asserted preset's required {}",
-            path.display(),
-            report.manifest.checkpoint_count,
-            required
-        ));
-    }
-    if report.checkpoints_observed < required {
-        return Err(format!(
-            "{}: observed {} of the {} checkpoints the scenario declares",
-            path.display(),
-            report.checkpoints_observed,
-            required
-        ));
-    }
-    Ok(())
-}
-
-/// FNV-1a digest over ordered checkpoint values; stable across runs and platforms.
-#[must_use]
-pub fn stable_digest(values: &[&str]) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for value in values {
-        for byte in value.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x1000_0000_01b3);
-        }
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(0x1000_0000_01b3);
-    }
-    hash
 }
 
 /// Bounded ring of microsecond samples used for fixed-tick and RTT percentiles.

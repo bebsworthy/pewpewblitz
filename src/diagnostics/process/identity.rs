@@ -36,10 +36,6 @@ impl RunManifestV1 {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(0),
-            checkpoint_count: std::env::var("BRAWLER_DIAGNOSTICS_CHECKPOINTS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0),
         }
     }
 }

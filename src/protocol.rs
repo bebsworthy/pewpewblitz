@@ -20,11 +20,11 @@ use brawler_routing::{AllocationId, MatchId, PeerId, RequestId, RouteId};
 
 use crate::builds::{AbilityState, PassiveRuntimeState, ResolvedMatchLoadout};
 use crate::combat::{
-    ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue,
-    CombatEvidenceCheckpoint, ConeSpray, ConeSprayState, CurrentHealth, Defeated,
-    FighterDefinitionId, KnockbackFeedback, LobbedFlight, PersistentSplash, PersistentSplashState,
-    Projectile, ProjectileBody, ProjectileDeadline, ProjectileSource, ReplicatedAttackSource,
-    StickyBlobState, StraightFlight, TeamId, WeaponDefinitionId, WeaponState,
+    ActiveEffects, AttackDelivery, AuthoritativePose, AuthoritativeTick, CombatCue, ConeSpray,
+    ConeSprayState, CurrentHealth, Defeated, FighterDefinitionId, KnockbackFeedback, LobbedFlight,
+    PersistentSplash, PersistentSplashState, Projectile, ProjectileBody, ProjectileDeadline,
+    ProjectileSource, ReplicatedAttackSource, StickyBlobState, StraightFlight, TeamId,
+    WeaponDefinitionId, WeaponState,
 };
 use crate::content::GameplayContentFingerprint;
 use crate::map::{
@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 51;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 52;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -773,8 +773,6 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<crate::matchplay::HeistObjectiveCue>()
             .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<CombatEvidenceCheckpoint>()
-            .add_direction(NetworkDirection::ServerToClient);
         app.add_channel::<CombatChannel>(ChannelSettings {
             mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
             ..default()
@@ -1010,11 +1008,18 @@ mod tests {
         assert_eq!(decoded, message);
     }
 
+    /// Protocol 52 (BRL-stws) unregisters the retired server-to-client combat-evidence
+    /// checkpoint message. The registry fingerprint changes, and only the global handshake
+    /// version guards the removal; no per-message version remains.
+    #[test]
+    fn combat_evidence_checkpoint_retirement_is_protocol_52() {
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 52);
+    }
+
     /// Protocol 51 (BRL-w9z1) registers the map publish request and outcome and adds the
     /// community-map fields to the catalog and reservation; the global handshake guards them.
     #[test]
     fn map_publishing_is_part_of_protocol_51() {
-        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 51);
         let outcome = crate::lobby::MapPublishOutcome {
             request_id: crate::lobby::MapPublishRequestId::new(2).unwrap(),
             decision: crate::lobby::MapPublishDecision::Accepted {

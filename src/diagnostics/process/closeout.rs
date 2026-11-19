@@ -9,63 +9,29 @@ use bevy::app::AppExit;
 use bevy::prelude::*;
 use std::{path::Path, time::SystemTime};
 
-/// Convergence evidence derived from the process's own checkpoint and drop telemetry. The
-/// defaults are what a run with no recorded scenario checkpoints reports.
+/// Convergence evidence derived from the process's own drop telemetry. The defaults are what a
+/// process without authoritative combat telemetry reports.
 #[derive(Default)]
 struct CloseoutEvidence {
-    checkpoint_digest: u64,
-    observed_checkpoints: usize,
     first_divergence: Option<String>,
     dropped_messages: u64,
 }
 
-/// The server is authoritative: it digests the checkpoints it recorded and sums its own
-/// bounded-evidence drop counters. It reports no divergence of its own.
+/// The server is authoritative: it sums its own bounded-evidence drop counters. It reports no
+/// divergence of its own.
 #[cfg(feature = "server")]
-fn server_closeout_evidence(
-    evidence: &crate::combat::CombatEvidenceSnapshots,
-    telemetry: Option<&crate::combat::CombatTelemetry>,
-) -> CloseoutEvidence {
-    let (checkpoint_digest, observed_checkpoints) =
-        checkpoint_evidence_digest(&evidence.checkpoints);
-    let dropped_messages = telemetry.map_or(0, |telemetry| {
-        telemetry
-            .dropped_cues
-            .saturating_add(telemetry.dropped_records)
-            .saturating_add(telemetry.dropped_accepted_shot_timestamps)
-    });
+fn server_closeout_evidence(telemetry: &crate::combat::CombatTelemetry) -> CloseoutEvidence {
     CloseoutEvidence {
-        checkpoint_digest,
-        observed_checkpoints,
         first_divergence: None,
-        dropped_messages,
+        dropped_messages: telemetry
+            .dropped_cues
+            .saturating_add(telemetry.dropped_records),
     }
-}
-
-/// Digest over a process's recorded checkpoint evidence: ordered `name:encoded-snapshot`
-/// pairs, so equal digests across endpoints prove both checkpoint sets and payloads agree.
-#[cfg(any(feature = "server", test))]
-pub(in crate::diagnostics) fn checkpoint_evidence_digest(
-    checkpoints: &std::collections::BTreeMap<String, crate::combat::CombatStateSnapshot>,
-) -> (u64, usize) {
-    if checkpoints.is_empty() {
-        // Zero is reserved for "no checkpoint evidence observed", so idle runs never carry
-        // the digest of an empty set.
-        return (0, 0);
-    }
-    let mut values = Vec::with_capacity(checkpoints.len());
-    for (name, snapshot) in checkpoints {
-        let encoded = crate::combat::encode_state_snapshot(snapshot).unwrap_or_default();
-        values.push(format!("{name}:{encoded}"));
-    }
-    let count = values.len();
-    let refs: Vec<&str> = values.iter().map(String::as_str).collect();
-    (crate::diagnostics::stable_digest(&refs), count)
 }
 
 // Bevy system parameters are owned by the scheduling runtime; `Res` cannot be borrowed here.
-// The server-gated evidence parameters let one finalizer serve both role lanes; clients report
-// the default (no checkpoint) evidence.
+// The server-gated telemetry parameter lets one finalizer serve both role lanes; clients report
+// the default evidence.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -79,7 +45,6 @@ pub(super) fn finalize_closeout_report(
     classification: Res<ProcessExitClassification>,
     protocol: Option<Res<crate::protocol::ProtocolFingerprint>>,
     content: Option<Res<crate::content::GameplayContentFingerprint>>,
-    #[cfg(feature = "server")] server_evidence: Option<Res<crate::combat::CombatEvidenceSnapshots>>,
     #[cfg(feature = "server")] combat_telemetry: Option<Res<crate::combat::CombatTelemetry>>,
 ) {
     if !state.enabled || state.report_written {
@@ -94,8 +59,6 @@ pub(super) fn finalize_closeout_report(
     let exit_category = classification.classified_category(exit);
     let manifest = completed_manifest(&settings, &state, protocol.as_deref(), content.as_deref());
     let evidence = resolve_closeout_evidence(
-        #[cfg(feature = "server")]
-        server_evidence.as_deref(),
         #[cfg(feature = "server")]
         combat_telemetry.as_deref(),
     );
@@ -133,12 +96,11 @@ fn completed_manifest(
 }
 
 fn resolve_closeout_evidence(
-    #[cfg(feature = "server")] server_evidence: Option<&crate::combat::CombatEvidenceSnapshots>,
     #[cfg(feature = "server")] combat_telemetry: Option<&crate::combat::CombatTelemetry>,
 ) -> CloseoutEvidence {
     #[cfg(feature = "server")]
-    if let Some(server) = server_evidence {
-        return server_closeout_evidence(server, combat_telemetry);
+    if let Some(telemetry) = combat_telemetry {
+        return server_closeout_evidence(telemetry);
     }
     CloseoutEvidence::default()
 }
@@ -205,8 +167,6 @@ fn assemble_closeout_report(
         packets_received: state.transport.packets_received,
         channel_messages_sent: state.transport.channel_messages_sent,
         channel_messages_received: state.transport.channel_messages_received,
-        checkpoint_digest: evidence.checkpoint_digest,
-        checkpoints_observed: u32::try_from(evidence.observed_checkpoints).unwrap_or(u32::MAX),
         first_divergence: evidence.first_divergence,
         dropped_messages: evidence.dropped_messages,
         rejected_connections: state.rejected_connections,

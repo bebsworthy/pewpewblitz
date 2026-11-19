@@ -134,9 +134,9 @@ pub struct TestDummyFixture {
     pub reset_delay_ticks: u64,
 }
 
-#[cfg(feature = "server")]
+#[cfg(all(feature = "server", feature = "network-test"))]
 impl TestDummyFixture {
-    /// Standard deterministic policy for the opt-in combat verification target.
+    /// Standard deterministic policy for the network-test harness's combat target.
     #[must_use]
     pub const fn standard(position: Vec2) -> Self {
         Self {
@@ -706,7 +706,6 @@ pub(super) fn emit_combat_summary(
         long_hits = telemetry.long_hits,
         dropped_cues = telemetry.dropped_cues,
         dropped_records = telemetry.dropped_records,
-        dropped_accepted_shot_timestamps = telemetry.dropped_accepted_shot_timestamps,
         weapon_dropped_records = weapon_telemetry.dropped_records,
         weapon_dropped_aggregate_entries = weapon_telemetry.dropped_aggregate_entries,
         "combat telemetry summary"

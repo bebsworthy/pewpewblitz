@@ -13,7 +13,6 @@ pub mod delivery;
 pub(crate) mod effects;
 #[cfg(feature = "server")]
 pub(crate) mod environment;
-pub(crate) mod evidence;
 #[cfg(feature = "server")]
 pub(crate) mod fields;
 pub(crate) mod model;
@@ -55,8 +54,6 @@ use effects::{
     resolve_composed_payloads,
 };
 #[cfg(feature = "server")]
-use evidence::{capture_server_combat_checkpoints, send_combat_evidence_checkpoints};
-#[cfg(feature = "server")]
 use recovery::restore_attack_idle_health;
 
 pub use crate::content::GameplayContentFingerprint;
@@ -77,12 +74,6 @@ pub use definitions::{
     WeaponRecipePolicy, WorldEffectDefinition, WorldEffectKind, linear_falloff,
     resolve_configuration, resolve_configuration_with_policy, spread_angles,
 };
-pub use evidence::{
-    CombatCheckpoint, CombatConeSpraySnapshot, CombatEvidenceCheckpoint, CombatFighterSnapshot,
-    CombatProjectileSnapshot, CombatStateSnapshot, encode_state_snapshot,
-};
-#[cfg(feature = "server")]
-pub use evidence::{CombatEvidenceSnapshots, CombatOutbox};
 #[cfg(feature = "server")]
 pub(crate) use model::ElementalFieldRuntime;
 #[cfg(feature = "server")]
@@ -112,6 +103,7 @@ pub use rules::{
 };
 #[cfg(feature = "server")]
 pub use server::ServerCombatPlugin;
+#[cfg(feature = "client")]
 use telemetry::MAX_COMBAT_EVIDENCE_EVENTS;
 #[cfg(test)]
 use telemetry::MAX_COMBAT_RECORDS;
@@ -172,9 +164,6 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
 use std::collections::HashMap;
-#[cfg(feature = "server")]
-use std::env;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "server")]
 use avian2d::prelude::{Position, Rotation};
@@ -273,31 +262,16 @@ pub struct WeaponDefinitionId(pub u16);
 #[derive(Resource, Default, Debug)]
 struct CombatSummaryLogged(bool);
 
+/// Authoritative cues committed this tick, drained by the cue sender.
 #[cfg(feature = "server")]
-#[derive(Resource, Clone, Copy, Debug, Default)]
-struct CombatEvidenceMode {
-    enabled: bool,
-}
-
-#[cfg(feature = "server")]
-const COMBAT_CHECKPOINT_LATCH_TICKS: u16 = 600;
+#[derive(Resource, Default, Debug)]
+pub struct CombatOutbox(pub Vec<CombatCue>);
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NextCombatIds {
     pub next_attack_id: u64,
     pub next_shot_id: u64,
     pub next_event_id: u64,
-}
-
-/// Return a process-comparable timestamp for the impairment evidence harness.
-///
-/// This value is deliberately outside the simulation contract: it is used only to compare
-/// server acceptance and client cue receipt in local multi-process runs.
-#[must_use]
-pub fn unix_epoch_micros() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_micros())
 }
 
 impl Default for NextCombatIds {

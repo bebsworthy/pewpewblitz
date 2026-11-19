@@ -462,18 +462,3 @@ pub(super) fn verify_process_movement(
         check.completed = true;
     }
 }
-
-pub(crate) fn required_process_checkpoints(preset_id: WeaponPresetId) -> &'static [&'static str] {
-    match preset_id.0 {
-        2 => &["active_scatter_flight", "defeat", "reset"],
-        3 => &[
-            "active_lob_flight",
-            "active_slow",
-            "active_knockback",
-            "defeat",
-            "reset",
-        ],
-        4 => &["active_knockback", "defeat", "reset"],
-        _ => &["defeat", "reset"],
-    }
-}

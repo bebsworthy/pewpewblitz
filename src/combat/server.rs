@@ -1,16 +1,14 @@
 //! Server-only combat identity reservation and lifecycle limits.
 
 use super::{
-    ActiveAttackTrackers, AttackId, CombatDamageSet, CombatEventId, CombatEvidenceMode,
-    CombatEvidenceSnapshots, CombatOutbox, CombatOutcomeFacts, CombatSet, CombatSummaryLogged,
-    CombatTelemetry, CombatWorldEffectFacts, GameplaySet, MeleeAttack, NextCombatIds,
-    PendingDelivery, PendingPayload, TestDummyFixture, WeaponTelemetry,
-    authoritative_composed_fire, capture_server_combat_checkpoints,
-    cleanup_disconnected_projectiles, conditions, emit_combat_summary, env, expire_runtime_effects,
-    fields, flush_completed_attack_telemetry, outcomes, publish_authoritative_tick,
-    reset_due_fighters, resolve_composed_payloads, resolve_melee_attacks,
-    restore_attack_idle_health, send_combat_cues, send_combat_evidence_checkpoints,
-    spawn_test_dummy, splash, spray, sticky, sweep_composed_projectiles,
+    ActiveAttackTrackers, AttackId, CombatDamageSet, CombatEventId, CombatOutbox,
+    CombatOutcomeFacts, CombatSet, CombatSummaryLogged, CombatTelemetry, CombatWorldEffectFacts,
+    GameplaySet, MeleeAttack, NextCombatIds, PendingDelivery, PendingPayload, TestDummyFixture,
+    WeaponTelemetry, authoritative_composed_fire, cleanup_disconnected_projectiles, conditions,
+    emit_combat_summary, expire_runtime_effects, fields, flush_completed_attack_telemetry,
+    outcomes, publish_authoritative_tick, reset_due_fighters, resolve_composed_payloads,
+    resolve_melee_attacks, restore_attack_idle_health, send_combat_cues, spawn_test_dummy, splash,
+    spray, sticky, sweep_composed_projectiles,
 };
 use bevy::prelude::*;
 
@@ -55,9 +53,6 @@ impl Plugin for ServerCombatPlugin {
     )]
     fn build(&self, app: &mut App) {
         outcomes::register_accepted_attack_fact_lifecycle(app);
-        if env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1") {
-            app.insert_resource(TestDummyFixture::standard(Vec2::new(0.0, -320.0)));
-        }
         app.init_resource::<NextCombatIds>()
             .init_resource::<CombatTelemetry>()
             .init_resource::<WeaponTelemetry>()
@@ -65,13 +60,9 @@ impl Plugin for ServerCombatPlugin {
             .init_resource::<CombatOutbox>()
             .init_resource::<CombatOutcomeFacts>()
             .init_resource::<CombatWorldEffectFacts>()
-            .init_resource::<CombatEvidenceSnapshots>()
             .init_resource::<crate::matchplay::PendingModeObjectiveDamages>()
             .init_resource::<CombatSummaryLogged>()
             .init_resource::<fields::NextElementalFieldId>()
-            .insert_resource(CombatEvidenceMode {
-                enabled: env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1"),
-            })
             .add_message::<MeleeAttack>()
             .add_message::<PendingPayload>()
             .add_message::<PendingDelivery>()
@@ -144,12 +135,6 @@ impl Plugin for ServerCombatPlugin {
                     publish_authoritative_tick
                         .in_set(CombatSet::Finalize)
                         .before(crate::gameplay::advance_simulation_tick),
-                    capture_server_combat_checkpoints
-                        .in_set(CombatSet::Finalize)
-                        .after(publish_authoritative_tick),
-                    send_combat_evidence_checkpoints
-                        .in_set(CombatSet::Finalize)
-                        .after(capture_server_combat_checkpoints),
                 ),
             )
             .add_systems(

@@ -4,20 +4,20 @@
 use super::{
     AbilityWeaponTelemetry, AcceptedAttackFact, AcceptedAttackFacts, ActionState,
     ActiveAttackTracker, ActiveAttackTrackers, AmmoRecovery, AttackDelivery, AttackSource,
-    Collider, CollisionLayers, CombatCue, CombatEventId, CombatEvidenceMode, CombatLogRecord,
-    CombatOutbox, CombatSourceKind, CombatTelemetry, ComposedProjectileRuntime, ConeSpray,
-    ConeSprayRuntime, ConeSprayState, CurrentHealth, DESTRUCTIBLE_MAP_LAYER, Defeated,
-    DeliveryMethod, FIGHTER_LAYER, Fighter, FighterInput, FiringPattern, HashSet,
-    HealthRecoveryState, InterpolationTarget, LinkOf, LobbedFlight, MAX_COMBAT_EVIDENCE_EVENTS,
-    MeleeAttack, NetworkEntityId, NetworkTarget, NextCombatIds, PROJECTILE_LAYER,
-    PayloadEffectDefinition, PersistentSplashRuntime, PlayerId, Position, Projectile,
-    ProjectileBody, ProjectileDeadline, ProjectileSource, Replicate, ReplicatedAttackSource,
-    ResolvedWeapon, Rotation, STATIC_MAP_LAYER, ShotId, SimulationTick, StickyBlobKind,
-    StickyBlobRuntime, StraightFlight, TargetSelection, TeamId, WeaponCatalogResource,
-    WeaponDefinitionId, WeaponPhase, WeaponPresetId, WeaponRecipe, WeaponState, WeaponTelemetry,
-    WeaponTelemetryOutcome, WeaponTelemetryRecord, WorldPoint, delivery, distance_band, effects,
-    finish_attack_delivery, input_should_neutralize, legacy_compatibility_recipe,
-    map_muzzle_contact, muzzle_position, server, splash, spread_angles, sticky, unix_epoch_micros,
+    Collider, CollisionLayers, CombatCue, CombatEventId, CombatLogRecord, CombatOutbox,
+    CombatSourceKind, CombatTelemetry, ComposedProjectileRuntime, ConeSpray, ConeSprayRuntime,
+    ConeSprayState, CurrentHealth, DESTRUCTIBLE_MAP_LAYER, Defeated, DeliveryMethod, FIGHTER_LAYER,
+    Fighter, FighterInput, FiringPattern, HashSet, HealthRecoveryState, InterpolationTarget,
+    LinkOf, LobbedFlight, MeleeAttack, NetworkEntityId, NetworkTarget, NextCombatIds,
+    PROJECTILE_LAYER, PayloadEffectDefinition, PersistentSplashRuntime, PlayerId, Position,
+    Projectile, ProjectileBody, ProjectileDeadline, ProjectileSource, Replicate,
+    ReplicatedAttackSource, ResolvedWeapon, Rotation, STATIC_MAP_LAYER, ShotId, SimulationTick,
+    StickyBlobKind, StickyBlobRuntime, StraightFlight, TargetSelection, TeamId,
+    WeaponCatalogResource, WeaponDefinitionId, WeaponPhase, WeaponPresetId, WeaponRecipe,
+    WeaponState, WeaponTelemetry, WeaponTelemetryOutcome, WeaponTelemetryRecord, WorldPoint,
+    delivery, distance_band, effects, finish_attack_delivery, input_should_neutralize,
+    legacy_compatibility_recipe, map_muzzle_contact, muzzle_position, server, splash,
+    spread_angles, sticky,
 };
 #[cfg(feature = "server")]
 use bevy::prelude::*;
@@ -280,7 +280,6 @@ struct AcceptedAttackRecord<'a> {
 #[allow(clippy::too_many_lines)]
 fn record_accepted_attack(
     record: AcceptedAttackRecord<'_>,
-    evidence_enabled: bool,
     trackers: &mut ActiveAttackTrackers,
     telemetry: &mut WeaponTelemetry,
     legacy_telemetry: &mut CombatTelemetry,
@@ -342,17 +341,6 @@ fn record_accepted_attack(
     };
     legacy_telemetry.record_cue(accepted_cue.clone());
     outbox.0.push(accepted_cue);
-    if evidence_enabled {
-        if legacy_telemetry.accepted_shot_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS {
-            legacy_telemetry
-                .accepted_shot_timestamps
-                .push((ShotId(attack_id.0), unix_epoch_micros()));
-        } else {
-            legacy_telemetry.dropped_accepted_shot_timestamps = legacy_telemetry
-                .dropped_accepted_shot_timestamps
-                .saturating_add(1);
-        }
-    }
     if let Some(muzzle_event) = legacy_muzzle_event {
         let muzzle = muzzle_position(
             origin,
@@ -428,7 +416,6 @@ pub(super) fn authoritative_composed_fire(
     mut ids: ResMut<NextCombatIds>,
     mut gameplay_telemetry: AbilityWeaponTelemetry,
     mut legacy_telemetry: ResMut<CombatTelemetry>,
-    evidence: Res<CombatEvidenceMode>,
     mut trackers: ResMut<ActiveAttackTrackers>,
     mut commit_buffers: AttackCommitBuffers,
     mut melee: MessageWriter<MeleeAttack>,
@@ -701,7 +688,6 @@ pub(super) fn authoritative_composed_fire(
                 emitted_deliveries,
                 recipe,
             },
-            evidence.enabled,
             &mut trackers,
             &mut gameplay_telemetry.weapon,
             &mut legacy_telemetry,

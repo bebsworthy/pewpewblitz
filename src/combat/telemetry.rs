@@ -31,13 +31,9 @@ pub struct CombatTelemetry {
     pub defeats: u64,
     pub dropped_cues: u64,
     pub dropped_records: u64,
-    pub dropped_accepted_shot_timestamps: u64,
     pub close_hits: u64,
     pub mid_hits: u64,
     pub long_hits: u64,
-    /// Wall-clock samples used only by the local impairment evidence harness. They are never
-    /// used by gameplay or attribution.
-    pub accepted_shot_timestamps: Vec<(ShotId, u128)>,
     /// Bounded authoritative cue payloads retained for deterministic/process evidence.
     pub cues: Vec<CombatCue>,
     /// Bounded diagnostic history; authoritative counters and cues are retained separately.

@@ -163,10 +163,9 @@ validate_closeout_reports() {
     # full schema contract (every required field with typed values, bounded identities,
     # participant rows, the gameplay-aggregate consistency rules, one shared run identity
     # including source revision and the canonical participant/build assignment, clean
-    # exits, zero drops/rejections/errors, and cross-endpoint digest agreement) instead
-    # of a launcher-side subset that can drift from the writer. Movement and match profiles
-    # record no combat checkpoints, so their digests must be zero.
-    "$server_binary" validate-closeout "$diagnostics_dir" "$client_count" 0
+    # exits, and zero drops/rejections/errors) instead of a launcher-side subset that can
+    # drift from the writer.
+    "$server_binary" validate-closeout "$diagnostics_dir" "$client_count"
     printf 'brawler network: closeout reports validated in %s\n' "$diagnostics_dir"
     if command -v shasum >/dev/null 2>&1; then
         printf 'brawler network: terminal digest '
@@ -202,10 +201,9 @@ if [[ -n "$diagnostics_dir" ]]; then
     # recipes have no ambient randomness, so the declared seed is the scenario label all
     # endpoints must agree on); the scripted-action count is one per scripted input
     # channel the launcher applies to the two scripted headless clients (move axis and
-    # aim source). No profile declares combat checkpoints.
+    # aim source).
     diagnostics_seed="${BRAWLER_DIAGNOSTICS_SEED:-1}"
     scripted_actions=0
-    declared_checkpoints=0
     if [[ "$headless" == "1" ]]; then
         scripted_actions=4
     fi
@@ -224,7 +222,6 @@ if [[ -n "$diagnostics_dir" ]]; then
         "BRAWLER_DIAGNOSTICS_MODE=$game_mode"
         "BRAWLER_DIAGNOSTICS_SEED=$diagnostics_seed"
         "BRAWLER_DIAGNOSTICS_SCRIPTED_ACTIONS=$scripted_actions"
-        "BRAWLER_DIAGNOSTICS_CHECKPOINTS=$declared_checkpoints"
         "BRAWLER_SERVER_EXIT_AFTER_VERIFICATION=1"
     )
     server_env+=(

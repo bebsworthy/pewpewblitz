@@ -24,7 +24,6 @@ fn valid_manifest() -> RunManifestV1 {
             build_identity: "runner".to_string(),
         }],
         scripted_action_count: 600,
-        checkpoint_count: 4,
     }
 }
 
@@ -126,9 +125,9 @@ fn report_line_validation_rejects_duplicates_missing_and_unknown_schemas() {
         parse_closeout_report(&pairs).is_err_and(|error| error.contains("duplicate report field"))
     );
 
-    let missing = contents.replace("checkpoint_digest=0\n", "");
+    let missing = contents.replace("dropped_messages=0\n", "");
     let pairs = split_report_lines(&missing).expect("lines split");
-    assert!(parse_closeout_report(&pairs).is_err_and(|error| error.contains("checkpoint_digest")));
+    assert!(parse_closeout_report(&pairs).is_err_and(|error| error.contains("dropped_messages")));
 
     let unknown_schema = contents.replace(
         &format!("schema_version={CLOSEOUT_SCHEMA_VERSION}"),
@@ -523,16 +522,6 @@ fn configuration_failures_carry_their_own_category() {
 }
 
 #[test]
-fn stable_digest_is_order_sensitive_and_repeatable() {
-    let a = stable_digest(&["one", "two"]);
-    let b = stable_digest(&["one", "two"]);
-    let c = stable_digest(&["two", "one"]);
-    assert_eq!(a, b);
-    assert_ne!(a, c);
-    assert_ne!(a, stable_digest(&["one", "two", ""]));
-}
-
-#[test]
 fn exit_categories_round_trip_through_names() {
     for category in [
         ProcessExitCategory::CleanExit,
@@ -683,50 +672,6 @@ fn failure_messages_encode_report_separators() {
     );
     let control = ProcessFailureRecordV1::new(FailureCategory::Panic, "a\tb");
     assert_eq!(control.message, "a b");
-}
-
-#[test]
-fn checkpoint_digest_requires_identical_names_and_snapshots() {
-    use crate::combat::CombatStateSnapshot;
-    use std::collections::BTreeMap;
-
-    let snapshot = |tick: u64| CombatStateSnapshot {
-        authoritative_tick: tick,
-        fighters: Vec::new(),
-        projectiles: Vec::new(),
-        cone_sprays: Vec::new(),
-    };
-    let mut left: BTreeMap<String, CombatStateSnapshot> = BTreeMap::new();
-    left.insert("defeat".to_string(), snapshot(42));
-    left.insert("reset".to_string(), snapshot(90));
-    let mut right = left.clone();
-    let (left_digest, count) = process::closeout::checkpoint_evidence_digest(&left);
-    assert_eq!(count, 2);
-    assert_eq!(
-        process::closeout::checkpoint_evidence_digest(&right),
-        (left_digest, 2)
-    );
-
-    right.insert("active_slow".to_string(), snapshot(7));
-    assert_ne!(
-        process::closeout::checkpoint_evidence_digest(&right).0,
-        left_digest,
-        "an extra unmatched checkpoint must change the digest"
-    );
-
-    right.remove("active_slow");
-    right.insert("reset".to_string(), snapshot(91));
-    assert_ne!(
-        process::closeout::checkpoint_evidence_digest(&right).0,
-        left_digest,
-        "a divergent snapshot payload must change the digest"
-    );
-
-    let empty: BTreeMap<String, CombatStateSnapshot> = BTreeMap::new();
-    assert_eq!(
-        process::closeout::checkpoint_evidence_digest(&empty),
-        (0, 0)
-    );
 }
 
 #[test]
@@ -1237,11 +1182,10 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
         std::env::temp_dir().join(format!("brawler-closeout-gate-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&directory);
     std::fs::create_dir_all(&directory).expect("test gate directory");
-    let write_report = |name: &str, digest: u64| {
+    let write_report = |name: &str| {
         let report = CloseoutReportV1 {
             manifest: valid_manifest(),
             end_reason: "completed".to_string(),
-            checkpoint_digest: digest,
             ..Default::default()
         };
         assert!(report.validate().is_ok());
@@ -1252,16 +1196,13 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
         .expect("report written");
     };
 
-    write_report("server.closeout", 42);
-    write_report("client-1.closeout", 42);
-    write_report("client-2.closeout", 42);
-    assert_eq!(
-        validate_closeout_directory(&directory, 2, true, None),
-        Ok(3)
-    );
+    write_report("server.closeout");
+    write_report("client-1.closeout");
+    write_report("client-2.closeout");
+    assert_eq!(validate_closeout_directory(&directory, 2), Ok(3));
 
-    // A truncated report still parses line-by-line; only the full 48-field schema reader
-    // catches it, which is exactly the drift the launcher gate must not allow.
+    // A truncated report still parses line-by-line; only the full schema reader catches it,
+    // which is exactly the drift the launcher gate must not allow.
     let full = std::fs::read_to_string(directory.join("client-2.closeout")).unwrap();
     let truncated: String = full
         .lines()
@@ -1275,7 +1216,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
         + "\n";
     std::fs::write(directory.join("client-2.closeout"), truncated).unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true, None)
+        validate_closeout_directory(&directory, 2)
             .is_err_and(|error| error.contains("missing or duplicated required field"))
     );
 
@@ -1283,28 +1224,15 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     let non_numeric = full.replace("fixed_ticks=0", "fixed_ticks=not-a-number");
     std::fs::write(directory.join("client-2.closeout"), non_numeric).unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true, None)
+        validate_closeout_directory(&directory, 2)
             .is_err_and(|error| error.contains("fixed_ticks") && error.contains("is not a u64"))
     );
 
-    write_report("client-2.closeout", 43);
-    assert!(
-        validate_closeout_directory(&directory, 2, true, None)
-            .is_err_and(|error| error.contains("digests diverged"))
-    );
-
-    write_report("client-2.closeout", 0);
-    assert!(
-        validate_closeout_directory(&directory, 2, true, None)
-            .is_err_and(|error| error.contains("checkpoint digest is zero"))
-    );
-
-    // An unrelated report from a different run must not satisfy this run's gate even
-    // when its digest matches: the shared run identity has to agree across endpoints.
+    // An unrelated report from a different run must not satisfy this run's gate: the
+    // shared run identity has to agree across endpoints.
     let mut other_run = CloseoutReportV1 {
         manifest: valid_manifest(),
         end_reason: "completed".to_string(),
-        checkpoint_digest: 42,
         ..Default::default()
     };
     other_run.manifest.run_id = "different-run".to_string();
@@ -1314,18 +1242,16 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true, None)
+        validate_closeout_directory(&directory, 2)
             .is_err_and(|error| error.contains("run identity run_id diverged")
                 && error.contains("different-run"))
     );
 
     // A report from a different source tree must not satisfy this run's gate even when
     // version and fingerprints happen to match: source identity is part of the agreement.
-    write_report("client-2.closeout", 42);
     let mut other_source = CloseoutReportV1 {
         manifest: valid_manifest(),
         end_reason: "completed".to_string(),
-        checkpoint_digest: 42,
         ..Default::default()
     };
     other_source.manifest.source_revision = "deadbee".to_string();
@@ -1335,17 +1261,15 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true, None).is_err_and(|error| error
+        validate_closeout_directory(&directory, 2).is_err_and(|error| error
             .contains("run identity source_revision diverged")
             && error.contains("deadbee"))
     );
 
     // A different participant/build assignment is a different run, not a matching report.
-    write_report("client-2.closeout", 42);
     let mut other_roster = CloseoutReportV1 {
         manifest: valid_manifest(),
         end_reason: "completed".to_string(),
-        checkpoint_digest: 42,
         ..Default::default()
     };
     other_roster.manifest.participants[0].build_identity =
@@ -1356,7 +1280,7 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true, None)
+        validate_closeout_directory(&directory, 2)
             .is_err_and(|error| error.contains("run identity participants diverged"))
     );
 
@@ -1370,15 +1294,49 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 2, true, None)
+        validate_closeout_directory(&directory, 2)
             .is_err_and(|error| error.contains("no participant rows"))
     );
 
-    write_report("client-2.closeout", 42);
+    // One endpoint declaring a different scenario contract breaks shared run identity.
+    let mut drifted_actions = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        ..Default::default()
+    };
+    drifted_actions.manifest.scripted_action_count += 1;
+    std::fs::write(
+        directory.join("client-2.closeout"),
+        drifted_actions.to_report_lines().join("\n") + "\n",
+    )
+    .unwrap();
+    assert!(
+        validate_closeout_directory(&directory, 2)
+            .is_err_and(|error| error.contains("run identity scripted_actions diverged"))
+    );
+
+    // Server drop counters stay part of the terminal gate.
+    let mut dropping = CloseoutReportV1 {
+        manifest: valid_manifest(),
+        end_reason: "completed".to_string(),
+        ..Default::default()
+    };
+    dropping.dropped_messages = 2;
+    std::fs::write(
+        directory.join("server.closeout"),
+        dropping.to_report_lines().join("\n") + "\n",
+    )
+    .unwrap();
+    write_report("client-2.closeout");
+    assert!(
+        validate_closeout_directory(&directory, 2)
+            .is_err_and(|error| error.contains("dropped_messages=2"))
+    );
+    write_report("server.closeout");
+
     let mut failing = CloseoutReportV1 {
         manifest: valid_manifest(),
         end_reason: "completed".to_string(),
-        checkpoint_digest: 42,
         ..Default::default()
     };
     failing.error_count = 1;
@@ -1388,106 +1346,21 @@ fn closeout_directory_gate_requires_one_full_report_per_endpoint() {
     )
     .unwrap();
     assert!(
-        validate_closeout_directory(&directory, 3, true, None)
+        validate_closeout_directory(&directory, 3)
             .is_err_and(|error| error.contains("error_count=1"))
     );
 
     // Exactly one report per configured endpoint: an unconfigured client-3 is rejected
     // once the roster drops back to two.
-    write_report("client-3.closeout", 42);
+    write_report("client-3.closeout");
+    assert_eq!(validate_closeout_directory(&directory, 3), Ok(4));
     assert!(
-        validate_closeout_directory(&directory, 2, true, None)
+        validate_closeout_directory(&directory, 2)
             .is_err_and(|error| error
                 .contains("expected exactly one closeout report per configured endpoint"))
     );
-    assert!(validate_closeout_directory(&directory, 0, true, None).is_err());
-    assert!(validate_closeout_directory(&directory, 9, true, None).is_err());
-
-    // Movement, terrain, and match profiles record no combat checkpoints: their zero
-    // digests are the expected evidence, and a nonzero digest is a stale combat report.
-    write_report("server.closeout", 0);
-    write_report("client-1.closeout", 0);
-    write_report("client-2.closeout", 0);
-    write_report("client-3.closeout", 0);
-    assert_eq!(
-        validate_closeout_directory(&directory, 3, false, None),
-        Ok(4)
-    );
-    write_report("client-3.closeout", 42);
-    assert!(
-        validate_closeout_directory(&directory, 3, false, None)
-            .is_err_and(|error| error.contains("checkpoint digest is nonzero"))
-    );
-
-    // Combat-assert gate: the declared scenario contract is checked against the asserted
-    // preset's required checkpoints, and observed evidence must cover the declaration.
-    // Extra observed checkpoints stay legal because mixed-preset rosters can record
-    // checkpoint names beyond one preset's required set.
-    let declared_gate = |checkpoint_count: u32, observed: u32| {
-        for name in [
-            "server.closeout",
-            "client-1.closeout",
-            "client-2.closeout",
-            "client-3.closeout",
-        ] {
-            let mut report = CloseoutReportV1 {
-                manifest: valid_manifest(),
-                end_reason: "completed".to_string(),
-                checkpoint_digest: 42,
-                checkpoints_observed: observed,
-                ..Default::default()
-            };
-            report.manifest.checkpoint_count = checkpoint_count;
-            assert!(report.validate().is_ok());
-            std::fs::write(
-                directory.join(name),
-                report.to_report_lines().join("\n") + "\n",
-            )
-            .expect("report written");
-        }
-    };
-
-    declared_gate(6, 6);
-    assert!(
-        validate_closeout_directory(&directory, 3, true, Some(5))
-            .is_err_and(|error| error.contains("declared checkpoints 6 diverge"))
-    );
-    declared_gate(5, 4);
-    assert!(
-        validate_closeout_directory(&directory, 3, true, Some(5))
-            .is_err_and(|error| error.contains("observed 4 of the 5 checkpoints"))
-    );
-    declared_gate(5, 7);
-    assert_eq!(
-        validate_closeout_directory(&directory, 3, true, Some(5)),
-        Ok(4)
-    );
-    declared_gate(5, 5);
-    assert_eq!(
-        validate_closeout_directory(&directory, 3, true, Some(5)),
-        Ok(4)
-    );
-
-    // One endpoint declaring a different scenario contract breaks shared run identity
-    // before the preset requirement is even consulted.
-    let mut drifted_actions = CloseoutReportV1 {
-        manifest: valid_manifest(),
-        end_reason: "completed".to_string(),
-        checkpoint_digest: 42,
-        checkpoints_observed: 5,
-        ..Default::default()
-    };
-    drifted_actions.manifest.checkpoint_count = 5;
-    drifted_actions.manifest.scripted_action_count += 1;
-    std::fs::write(
-        directory.join("client-3.closeout"),
-        drifted_actions.to_report_lines().join("\n") + "\n",
-    )
-    .unwrap();
-    assert!(
-        validate_closeout_directory(&directory, 3, true, Some(5))
-            .is_err_and(|error| error.contains("run identity scripted_actions diverged"))
-    );
+    assert!(validate_closeout_directory(&directory, 0).is_err());
+    assert!(validate_closeout_directory(&directory, 9).is_err());
 
     let _ = std::fs::remove_dir_all(&directory);
 }
