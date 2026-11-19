@@ -7,8 +7,6 @@ use brawler::map::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use unicode_normalization::UnicodeNormalization as _;
-use unicode_segmentation::UnicodeSegmentation as _;
 
 pub const MAP_DRAFT_SCHEMA_VERSION: u16 = 1;
 
@@ -89,18 +87,7 @@ impl MapDraftDocument {
     }
 }
 
-pub fn normalize_map_name(value: &str) -> Result<String, String> {
-    let normalized: String = value.trim().nfc().collect();
-    let graphemes = normalized.graphemes(true).count();
-    if graphemes == 0
-        || graphemes > brawler::map::authoring::MAX_AUTHORED_MAP_NAME_GRAPHEMES
-        || normalized.len() > brawler::map::authoring::MAX_AUTHORED_MAP_NAME_BYTES
-        || normalized.chars().any(char::is_control)
-    {
-        return Err("map name must be 1..=48 readable characters".to_string());
-    }
-    Ok(normalized)
-}
+pub use brawler::map::authoring::normalize_map_name;
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct MapDraftLibrary {

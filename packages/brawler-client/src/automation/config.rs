@@ -49,6 +49,12 @@ pub struct ClientAutomationConfig {
     /// Headless BRL-xndc evidence: once the match session can check in, send Cancel Match Start
     /// instead of Ready, so the routed worker's formation fails through an accepted cancellation.
     pub cancel_match_start: bool,
+    /// Headless BRL-w9z1 evidence: publish one copy of the game type's first built-in map to the
+    /// server's community rotation and exit after the server accepts it.
+    pub product_publish_map_smoke: bool,
+    /// Headless BRL-w9z1 evidence: the player-versus-player match this client reaches Active in must be an
+    /// approved published map, credited on Match Loading.
+    pub expect_published_map: bool,
     pub product_match_players_per_team: u8,
     pub product_match_game_type: Option<brawler::lobby::GameTypeId>,
     pub headless_move: Option<(i8, i8)>,
@@ -86,6 +92,8 @@ impl Default for ClientAutomationConfig {
             product_completed_rejoin_cue: None,
             leave_match_cue: None,
             cancel_match_start: false,
+            product_publish_map_smoke: false,
+            expect_published_map: false,
             product_match_players_per_team: 2,
             product_match_game_type: None,
             headless_move: None,
@@ -334,6 +342,20 @@ impl ClientAutomationConfig {
                 "--product-completed-rejoin-smoke requires PvP match automation without --leave-match-cue"
                     .to_string(),
             );
+        }
+        if self.product_publish_map_smoke
+            && (!self.product_match_smoke
+                || self.product_practice_smoke
+                || self.product_requeue_smoke
+                || self.product_match_game_type.is_none())
+        {
+            return Err(
+                "--product-publish-map-smoke requires --product-game-type without other match smokes"
+                    .to_string(),
+            );
+        }
+        if self.expect_published_map && (!pvp_match || self.product_publish_map_smoke) {
+            return Err("--expect-published-map requires PvP match automation".to_string());
         }
         if self.leave_match_cue.is_some() && !pvp_match {
             return Err("--leave-match-cue requires PvP match automation".to_string());

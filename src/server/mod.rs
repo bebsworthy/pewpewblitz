@@ -61,9 +61,9 @@ pub use admission::{
 };
 use fighter_spawn::spawn_authoritative_fighter;
 pub use lobby::{
-    LobbyBuildIdentity, LobbyClient, LobbyControlFrame, LobbyPlugin, LobbySessionIdSource,
-    LobbyState, QueueCommandResult, QueueState, QueueTelemetry, QueueTicket, QueueTicketIdSource,
-    SnapshotPublication, default_build_identity,
+    CommunityMap, CommunityMapRotation, LobbyBuildIdentity, LobbyClient, LobbyControlFrame,
+    LobbyPlugin, LobbySessionIdSource, LobbyState, QueueCommandResult, QueueState, QueueTelemetry,
+    QueueTicket, QueueTicketIdSource, SnapshotPublication, default_build_identity,
 };
 pub use routed_worker::{
     RoutedPeer, RoutedPeerClose, RoutedWorker, RoutedWorkerFailure, RoutedWorkerPlugin,

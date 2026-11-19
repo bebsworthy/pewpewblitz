@@ -33,6 +33,76 @@ pub(crate) struct ResolvedLobbyCatalog {
     policy_revision: CatalogRevision,
     game_rules: BTreeMap<GameTypeId, ResolvedGameRules>,
     map_admission_revisions: BTreeMap<MapPresetId, u16>,
+    map_publishing: MapPublishingPolicy,
+}
+
+/// How a valid published-map submission enters rotation (BRL-w9z1).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum MapModeration {
+    /// Every submission waits for `brawler-profile-admin maps approve`.
+    #[default]
+    Approve,
+    /// A valid submission enters rotation at once; the operator removes it later if needed.
+    Automatic,
+}
+
+/// Validated per-server publishing policy. Server-wide capacity ceilings stay in code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MapPublishingPolicy {
+    pub moderation: MapModeration,
+    pub pending_per_account: u8,
+    pub submit_cooldown: Duration,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct OperatorMapPublishing {
+    #[serde(default)]
+    moderation: MapModeration,
+    #[serde(default = "default_pending_per_account")]
+    pending_per_account: u8,
+    #[serde(default = "default_submit_cooldown_seconds")]
+    submit_cooldown_seconds: u16,
+}
+
+const fn default_pending_per_account() -> u8 {
+    3
+}
+
+const fn default_submit_cooldown_seconds() -> u16 {
+    120
+}
+
+impl Default for OperatorMapPublishing {
+    fn default() -> Self {
+        Self {
+            moderation: MapModeration::default(),
+            pending_per_account: default_pending_per_account(),
+            submit_cooldown_seconds: default_submit_cooldown_seconds(),
+        }
+    }
+}
+
+impl OperatorMapPublishing {
+    fn resolve(self) -> Result<MapPublishingPolicy, String> {
+        let pending_limit = crate::profiles::MAX_PENDING_PUBLISHED_MAPS;
+        if self.pending_per_account == 0 || u32::from(self.pending_per_account) > pending_limit {
+            return Err(format!(
+                "map publishing pending_per_account must be 1..={pending_limit}"
+            ));
+        }
+        if self.submit_cooldown_seconds > crate::lobby::MAX_PUBLISH_COOLDOWN_SECONDS {
+            return Err(format!(
+                "map publishing submit_cooldown_seconds must be at most {}",
+                crate::lobby::MAX_PUBLISH_COOLDOWN_SECONDS
+            ));
+        }
+        Ok(MapPublishingPolicy {
+            moderation: self.moderation,
+            pending_per_account: self.pending_per_account,
+            submit_cooldown: Duration::from_secs(u64::from(self.submit_cooldown_seconds)),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +169,10 @@ impl ResolvedLobbyCatalog {
         self.formation_timing
     }
 
+    pub(crate) const fn map_publishing(&self) -> MapPublishingPolicy {
+        self.map_publishing
+    }
+
     pub(crate) fn first_rules_for_mode(
         &self,
         mode_definition_id: crate::map::ModeDefinitionId,
@@ -119,6 +193,8 @@ struct OperatorCatalog {
     common_lifecycle: OperatorCommonLifecyclePolicy,
     mode_policies: OperatorModePolicies,
     map_dimension_limits: MapDimensionLimits,
+    #[serde(default)]
+    map_publishing: OperatorMapPublishing,
     game_types: Vec<OperatorGameType>,
 }
 
@@ -173,6 +249,8 @@ struct OperatorGameType {
     safe_health: u16,
     #[serde(default)]
     pressure_stages: u8,
+    #[serde(default)]
+    community_maps: bool,
     match_duration_seconds: u16,
     countdown_seconds: u16,
     respawn_seconds: u16,
@@ -198,6 +276,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     let formation_timing_policy = operator.formation_timing;
     let formation_timing = MatchFormationTiming::resolve(formation_timing_policy)?;
     operator.map_dimension_limits.validate()?;
+    let map_publishing = operator.map_publishing.resolve()?;
     if operator.game_types.is_empty() || operator.game_types.len() > MAX_GAME_TYPES {
         return Err(format!(
             "game-type catalog must contain 1..={MAX_GAME_TYPES} entries"
@@ -313,6 +392,18 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                     format!("game type {} has invalid objective: {error}", id.as_str())
                 }
             })?;
+        let supports_authoring = matches!(
+            mode.definition_id,
+            crate::map::WIPEOUT_MODE_DEFINITION
+                | crate::map::HOT_ZONE_MODE_DEFINITION
+                | crate::map::HEIST_MODE_DEFINITION
+        );
+        if entry.community_maps && !supports_authoring {
+            return Err(format!(
+                "game type {} cannot take community maps: its mode is unavailable in Map Maker",
+                id.as_str()
+            ));
+        }
         let objective_target = resolved_mode.objective_target;
         let rules_summary = resolved_mode.rules_summary;
         let mode_definition_id = mode.definition_id;
@@ -395,13 +486,8 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             display_name,
             mode_definition_id,
             practice_map_preset_ids: map_ids.clone(),
-            map_authoring_limits: matches!(
-                mode.definition_id,
-                crate::map::WIPEOUT_MODE_DEFINITION
-                    | crate::map::HOT_ZONE_MODE_DEFINITION
-                    | crate::map::HEIST_MODE_DEFINITION
-            )
-            .then_some(crate::map::AUTHORING_LIMITS),
+            map_authoring_limits: supports_authoring.then_some(crate::map::AUTHORING_LIMITS),
+            community_maps: entry.community_maps,
             map_preset_ids: map_ids,
             team_count: entry.teams,
             players_per_team: entry.players_per_team,
@@ -453,6 +539,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         policy_revision,
         game_rules,
         map_admission_revisions,
+        map_publishing,
     })
 }
 
@@ -618,9 +705,9 @@ mod tests {
         assert_eq!(
             catalog.revision.0,
             [
-                0xae, 0x35, 0x4e, 0xab, 0x93, 0x55, 0x4b, 0x05, 0x01, 0x12, 0x8f, 0x9b, 0xf1, 0x2b,
-                0x70, 0x76, 0x68, 0x39, 0xaa, 0x91, 0x19, 0x35, 0x03, 0x87, 0xdd, 0xf5, 0x92, 0xa3,
-                0x39, 0x98, 0xdd, 0x0b,
+                0x25, 0x1f, 0x92, 0xb8, 0xae, 0x2e, 0x2b, 0x1f, 0xb4, 0xc3, 0x70, 0x5a, 0x08, 0x15,
+                0x09, 0xba, 0xdf, 0xbd, 0x77, 0x9e, 0x48, 0x3c, 0x0c, 0x44, 0xd7, 0x09, 0xa6, 0xcc,
+                0x99, 0x27, 0x17, 0x62,
             ]
         );
     }
@@ -650,6 +737,63 @@ mod tests {
         assert_eq!(changed.revision, baseline.revision);
         assert_ne!(changed.policy_revision, baseline.policy_revision);
         assert_eq!(changed.formation_timing().loading_deadline_millis(), 31_000);
+    }
+
+    #[test]
+    fn map_publishing_defaults_to_pre_approval_and_opts_in_per_game_type() {
+        let checked_in = resolve_operator_catalog(VALID.as_bytes()).unwrap();
+        assert_eq!(
+            checked_in.map_publishing(),
+            MapPublishingPolicy {
+                moderation: MapModeration::Approve,
+                pending_per_account: 3,
+                submit_cooldown: Duration::from_mins(2),
+            }
+        );
+        assert_eq!(
+            checked_in
+                .game_types
+                .iter()
+                .filter(|game| game.community_maps)
+                .map(|game| game.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["wipeout-1v1"]
+        );
+
+        let start = VALID.find("  map_publishing:").unwrap();
+        let end = start + VALID[start..].find("  ),\n").unwrap() + "  ),\n".len();
+        let omitted = format!("{}{}", &VALID[..start], &VALID[end..]);
+        assert_eq!(
+            resolve_operator_catalog(omitted.as_bytes())
+                .unwrap()
+                .map_publishing(),
+            checked_in.map_publishing(),
+            "an operator catalog without the section keeps pre-approval"
+        );
+
+        let automatic = VALID.replace("moderation: Approve", "moderation: Automatic");
+        assert_eq!(
+            resolve_operator_catalog(automatic.as_bytes())
+                .unwrap()
+                .map_publishing()
+                .moderation,
+            MapModeration::Automatic
+        );
+        for invalid in [
+            VALID.replace("pending_per_account: 3", "pending_per_account: 0"),
+            VALID.replace("pending_per_account: 3", "pending_per_account: 65"),
+            VALID.replace(
+                "submit_cooldown_seconds: 120",
+                "submit_cooldown_seconds: 3601",
+            ),
+            VALID.replace(
+                "maps: [\"zombie-yard\"], teams: 1, players_per_team: 2,",
+                "maps: [\"zombie-yard\"], community_maps: true, teams: 1, players_per_team: 2,",
+            ),
+        ] {
+            assert_ne!(invalid, VALID);
+            assert!(resolve_operator_catalog(invalid.as_bytes()).is_err());
+        }
     }
 
     #[test]

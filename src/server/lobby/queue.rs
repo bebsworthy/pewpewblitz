@@ -65,11 +65,18 @@ pub struct ReservedParticipant {
     pub team: u8,
 }
 
+/// The map a queue reservation plays: a built-in preset or an approved published map.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum QueueMapSource {
+    Preset(crate::map::MapPresetId),
+    Published(std::sync::Arc<super::CommunityMap>),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueueReservation {
     pub reservation_id: crate::lobby::MatchReservationId,
     pub game_type_id: GameTypeId,
-    pub map_preset_id: crate::map::MapPresetId,
+    pub map: QueueMapSource,
     pub team_count: u8,
     pub players_per_team: u8,
     pub participants: Vec<ReservedParticipant>,
@@ -958,6 +965,7 @@ impl QueueState {
     pub(crate) fn reserve_oldest_exact(
         &mut self,
         catalog: &ResolvedLobbyCatalog,
+        community: &super::CommunityMapRotation,
         reservation_id: crate::lobby::MatchReservationId,
         live_sessions: &BTreeSet<LobbySessionId>,
     ) -> Option<QueueReservation> {
@@ -993,8 +1001,19 @@ impl QueueState {
         }
         let (_, game, selected) = candidate?;
         let next_revision = self.state_revision.checked_add(1)?;
+        // Round-robin over the built-in maps, then the approved community maps.
+        let community_maps = community.maps_for(&game.id);
         let ordinal = *self.map_ordinals.get(&game.id).unwrap_or(&0);
-        let map_index = usize::try_from(ordinal).unwrap_or(0) % game.map_preset_ids.len();
+        let map_index = usize::try_from(ordinal).unwrap_or(0)
+            % (game.map_preset_ids.len() + community_maps.len());
+        let map = game.map_preset_ids.get(map_index).map_or_else(
+            || {
+                QueueMapSource::Published(std::sync::Arc::clone(
+                    &community_maps[map_index - game.map_preset_ids.len()],
+                ))
+            },
+            |preset_id| QueueMapSource::Preset(*preset_id),
+        );
         let selected_set: BTreeSet<_> = selected.iter().copied().collect();
         self.pools
             .get_mut(&game.id)
@@ -1011,7 +1030,7 @@ impl QueueState {
         let reservation = QueueReservation {
             reservation_id,
             game_type_id: game.id.clone(),
-            map_preset_id: game.map_preset_ids[map_index],
+            map,
             team_count: game.team_count,
             players_per_team: game.players_per_team,
             participants,
@@ -1606,7 +1625,12 @@ mod tests {
             .map(|value| LobbySessionId::new(value).unwrap())
             .collect();
         let reservation = queue
-            .reserve_oldest_exact(&catalog, reservation_id, &live_sessions)
+            .reserve_oldest_exact(
+                &catalog,
+                &super::super::CommunityMapRotation::default(),
+                reservation_id,
+                &live_sessions,
+            )
             .expect("four acknowledged 2v2 tickets form");
         assert_eq!(reservation.participants.len(), 4);
         assert_eq!(
@@ -1646,7 +1670,12 @@ mod tests {
             .collect();
         let first_id = crate::lobby::MatchReservationId::new(30).unwrap();
         let first = queue
-            .reserve_oldest_exact(&catalog, first_id, &live_sessions)
+            .reserve_oldest_exact(
+                &catalog,
+                &super::super::CommunityMapRotation::default(),
+                first_id,
+                &live_sessions,
+            )
             .unwrap();
         assert_eq!(first.game_type_id, catalog.game_types[1].id);
         assert_eq!(queue.complete_reservation(first_id).len(), 4);
@@ -1654,6 +1683,7 @@ mod tests {
         let second = queue
             .reserve_oldest_exact(
                 &catalog,
+                &super::super::CommunityMapRotation::default(),
                 crate::lobby::MatchReservationId::new(31).unwrap(),
                 &live_sessions,
             )
@@ -1680,6 +1710,7 @@ mod tests {
             queue
                 .reserve_oldest_exact(
                     &catalog,
+                    &super::super::CommunityMapRotation::default(),
                     crate::lobby::MatchReservationId::new(9).unwrap(),
                     &live_sessions,
                 )
@@ -1689,6 +1720,105 @@ mod tests {
         assert_eq!(queue.reservation_count(), 0);
         assert_eq!(queue.snapshot().pools[0].queued, 4);
         assert!(queue.indexes_are_valid());
+    }
+
+    fn published_record(
+        catalog: &ResolvedLobbyCatalog,
+        game_type: &str,
+        id: u64,
+    ) -> crate::profiles::PublishedMapRecord {
+        let game = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id.as_str() == game_type)
+            .unwrap();
+        let published_map_id = crate::lobby::PublishedMapId::new(id).unwrap();
+        let mut recipe = crate::map::MapContentCatalog::embedded()
+            .unwrap()
+            .preset(game.map_preset_ids[0])
+            .unwrap()
+            .recipe
+            .clone();
+        recipe.recipe_id = published_map_id.recipe_id().unwrap();
+        recipe.revision = crate::lobby::PUBLISHED_MAP_RECIPE_REVISION;
+        crate::profiles::PublishedMapRecord {
+            published_map_id,
+            account_id: crate::profiles::AccountId::new(5).unwrap(),
+            author_display_name: "Author".into(),
+            name: format!("Community {id}"),
+            game_type_id: game.id.clone(),
+            game_type_revision: game.configuration_revision,
+            status: crate::profiles::PublishedMapStatus::Approved,
+            recipe: postcard::to_allocvec(&recipe).unwrap(),
+            submitted_at_unix_ms: 0,
+            decided_at_unix_ms: Some(0),
+            reason: None,
+        }
+    }
+
+    #[test]
+    fn queue_rotation_plays_built_in_maps_then_approved_community_maps() {
+        let catalog = catalog();
+        let maps = crate::map::MapContentCatalog::embedded().unwrap();
+        let mut rotation = super::super::CommunityMapRotation::default();
+        let mut stale = published_record(&catalog, "wipeout-1v1", 9);
+        stale.game_type_revision += 1;
+        rotation.replace_from_records(
+            vec![
+                published_record(&catalog, "wipeout-1v1", 4),
+                // Game types without the operator flag never take community maps.
+                published_record(&catalog, "wipeout-2v2", 5),
+                // A configuration change suspends the map from rotation without deleting it.
+                stale,
+            ],
+            &catalog,
+            &maps,
+        );
+        let pool = catalog
+            .game_types
+            .iter()
+            .position(|game| game.id.as_str() == "wipeout-1v1")
+            .unwrap();
+        let game_id = catalog.game_types[pool].id.clone();
+        assert_eq!(rotation.maps_for(&game_id).len(), 1);
+        assert!(rotation.maps_for(&catalog.game_types[0].id).is_empty());
+
+        let mut queue = QueueState::with_id_source(&catalog, SequentialTicketIds(1));
+        let mut sources = Vec::new();
+        for round in 0..3_u64 {
+            let players = [round * 2 + 1, round * 2 + 2];
+            for value in players {
+                let player = session(value);
+                submit(&mut queue, player, 1, join_pool(&catalog, pool, 1), 0);
+                queue.acknowledge(player.lobby_session_id, QueueRequestId::new(1).unwrap());
+            }
+            let reservation_id =
+                crate::lobby::MatchReservationId::new(u128::from(round) + 40).unwrap();
+            let reservation = queue
+                .reserve_oldest_exact(
+                    &catalog,
+                    &rotation,
+                    reservation_id,
+                    &players
+                        .map(|value| LobbySessionId::new(u128::from(value)).unwrap())
+                        .into_iter()
+                        .collect(),
+                )
+                .unwrap();
+            sources.push(match reservation.map {
+                QueueMapSource::Preset(preset) => format!("preset {}", preset.0),
+                QueueMapSource::Published(map) => {
+                    format!("published {}", map.published_map_id.get())
+                }
+            });
+            assert!(queue.mark_reservation_handoff_ready(reservation_id));
+            queue.complete_reservation(reservation_id);
+        }
+        let built_in = format!("preset {}", catalog.game_types[pool].map_preset_ids[0].0);
+        assert_eq!(
+            sources,
+            vec![built_in.clone(), "published 4".to_string(), built_in]
+        );
     }
 
     #[test]
@@ -1708,6 +1838,7 @@ mod tests {
         let reservation = queue
             .reserve_oldest_exact(
                 &catalog,
+                &super::super::CommunityMapRotation::default(),
                 crate::lobby::MatchReservationId::new(20).unwrap(),
                 &(1..=6)
                     .map(|value| LobbySessionId::new(value).unwrap())

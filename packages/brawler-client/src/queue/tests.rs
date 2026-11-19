@@ -13,6 +13,7 @@ fn game() -> brawler::lobby::AdvertisedGameType {
         map_preset_ids: vec![brawler::map::MapPresetId(1)],
         practice_map_preset_ids: vec![brawler::map::MapPresetId(1)],
         map_authoring_limits: Some(brawler::map::AUTHORING_LIMITS),
+        community_maps: false,
         team_count: 2,
         players_per_team: 2,
         rules_summary: brawler::lobby::AdvertisedRulesSummary::Wipeout {
@@ -163,6 +164,7 @@ fn cancelled_match_start_clears_loading_and_returns_to_game_select_observation()
             players_per_team: 2,
             accepted_build: joined.accepted_build,
             loading_deadline_millis: 30_000,
+            published_map: None,
         }),
         ..default()
     };
@@ -209,6 +211,7 @@ fn fresh_lobby_generation_discards_completed_match_loading_state() {
             players_per_team: 2,
             accepted_build: joined.accepted_build,
             loading_deadline_millis: 30_000,
+            published_map: None,
         }),
         phase: Some(brawler::lobby::MatchLoadingPhase::WaitingForPlayers),
         protocol_failure: true,
@@ -478,4 +481,56 @@ fn practice_selection_survives_replay_but_cannot_leak_to_another_game() {
         brawler::profiles::ProfileRevision::INITIAL
     ));
     assert_eq!(model.pending.as_ref().unwrap().map_preset_id, None);
+}
+
+#[test]
+fn map_publish_allows_one_request_per_lobby_generation_and_reports_its_outcome_once() {
+    let mut model = ClientMapPublishModel::default();
+    let mut game = game();
+    game.community_maps = true;
+    let revision = brawler::lobby::CatalogRevision([1; 32]);
+    let candidate = || brawler::map::AuthoredMapCandidate {
+        draft_id: 3,
+        recipe: brawler::map::MapContentCatalog::embedded()
+            .unwrap()
+            .preset(brawler::map::FEATURE_YARD_WIPEOUT_PRESET)
+            .unwrap()
+            .recipe
+            .clone(),
+    };
+    assert!(
+        !model.start(revision, &game, "Yard".into(), candidate()),
+        "no lobby session yet"
+    );
+    model.bind_generation(1);
+    assert!(model.start(revision, &game, "Yard".into(), candidate()));
+    assert!(model.pending());
+    assert!(!model.start(revision, &game, "Yard".into(), candidate()));
+    let request_id = brawler::lobby::MapPublishRequestId::new(1).unwrap();
+    let accepted = brawler::lobby::MapPublishDecision::Accepted {
+        published_map_id: brawler::lobby::PublishedMapId::new(4).unwrap(),
+        state: brawler::lobby::PublishedMapState::Pending,
+    };
+    // An outcome for another request is ignored.
+    model.accept_outcome(brawler::lobby::MapPublishOutcome {
+        request_id: brawler::lobby::MapPublishRequestId::new(9).unwrap(),
+        decision: accepted,
+    });
+    assert!(model.pending());
+    model.accept_outcome(brawler::lobby::MapPublishOutcome {
+        request_id,
+        decision: accepted,
+    });
+    assert!(!model.pending());
+    assert_eq!(model.take_outcome(), Some(accepted));
+    assert_eq!(model.take_outcome(), None);
+    assert!(map_publish_decision_text(accepted).contains("review"));
+    assert_eq!(
+        map_publish_decision_text(brawler::lobby::MapPublishDecision::Rejected(
+            brawler::lobby::MapPublishRejection::CoolingDown {
+                retry_after_seconds: 42
+            }
+        )),
+        "Publish again in 42 s."
+    );
 }

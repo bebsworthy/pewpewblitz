@@ -1,7 +1,8 @@
 use super::{
     AccountId, AdvertisedBrawlerCatalog, MatchBuildSnapshotV3, ProfileCommand, ProfileDecision,
     ProfileOutcome, ProfileSnapshot, ProfileStorageCommand, ProfileStorageError,
-    ProfileStorageExecutor, SavedBrawlerId,
+    ProfileStorageExecutor, ProfileStorageReply, PublishedMapLimits, PublishedMapRecord,
+    PublishedMapSubmission, PublishedMapSubmissionOutcome, SavedBrawlerId,
 };
 use bevy::prelude::Resource;
 use std::{collections::BTreeMap, path::PathBuf};
@@ -26,6 +27,21 @@ enum PendingOperation {
         request_id: u64,
         command: ProfileCommand,
     },
+    PublishedMap,
+}
+
+/// A published-map storage completion, keyed by the storage request ID its submission returned.
+/// The lobby's publishing owner interprets it; profile sessions never observe it.
+#[derive(Debug)]
+pub enum PublishedMapStorageCompletion {
+    Submission {
+        storage_request_id: u64,
+        result: Result<PublishedMapSubmissionOutcome, ProfileStorageError>,
+    },
+    Rotation {
+        storage_request_id: u64,
+        result: Result<Vec<PublishedMapRecord>, ProfileStorageError>,
+    },
 }
 
 #[derive(Resource)]
@@ -37,6 +53,7 @@ pub struct ProfileAuthority {
     active_accounts: BTreeMap<AccountId, u64>,
     pending_accounts: BTreeMap<AccountId, u64>,
     pending: BTreeMap<u64, PendingOperation>,
+    published_map_completions: Vec<PublishedMapStorageCompletion>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,6 +108,7 @@ impl ProfileAuthority {
             active_accounts: BTreeMap::new(),
             pending_accounts: BTreeMap::new(),
             pending: BTreeMap::new(),
+            published_map_completions: Vec::new(),
         })
     }
 
@@ -141,14 +159,19 @@ impl ProfileAuthority {
             let Some(pending) = self.pending.remove(&completion.request_id) else {
                 continue;
             };
+            let Some(completion_result) =
+                self.take_profile_reply(completion.request_id, completion.result)
+            else {
+                continue;
+            };
             match pending {
+                PendingOperation::PublishedMap => {}
                 PendingOperation::Load {
                     client_key,
                     account_id,
                 } => {
                     self.pending_accounts.remove(&account_id);
-                    let result = completion
-                        .result
+                    let result = completion_result
                         .map_err(|error| storage_decision(&error))
                         .and_then(|snapshot| {
                             if snapshot_catalog_is_valid(&snapshot, &self.catalog) {
@@ -181,7 +204,7 @@ impl ProfileAuthority {
                     request_id,
                     command,
                 } => {
-                    let result = completion.result.and_then(|snapshot| {
+                    let result = completion_result.and_then(|snapshot| {
                         if snapshot_catalog_is_valid(&snapshot, &self.catalog) {
                             Ok(snapshot)
                         } else {
@@ -297,6 +320,69 @@ impl ProfileAuthority {
         Ok(ProfileMutationSubmission::Pending)
     }
 
+    /// A profile reply for profile sessions; a published-map reply is set aside for the lobby.
+    fn take_profile_reply(
+        &mut self,
+        storage_request_id: u64,
+        reply: ProfileStorageReply,
+    ) -> Option<Result<ProfileSnapshot, ProfileStorageError>> {
+        let completion = match reply {
+            ProfileStorageReply::Profile(result) => return Some(result),
+            ProfileStorageReply::PublishedMapSubmission(result) => {
+                PublishedMapStorageCompletion::Submission {
+                    storage_request_id,
+                    result,
+                }
+            }
+            ProfileStorageReply::PublishedRotation(result) => {
+                PublishedMapStorageCompletion::Rotation {
+                    storage_request_id,
+                    result,
+                }
+            }
+        };
+        self.published_map_completions.push(completion);
+        None
+    }
+
+    /// Queue one validated published-map submission on the storage owner (BRL-w9z1). Returns
+    /// the storage request ID its `PublishedMapStorageCompletion` will carry.
+    pub fn submit_published_map(
+        &mut self,
+        submission: PublishedMapSubmission,
+        limits: PublishedMapLimits,
+    ) -> Result<u64, ProfileAuthorityError> {
+        let storage_request_id = self.next_storage_request_id()?;
+        self.storage
+            .try_submit(ProfileStorageCommand::SubmitPublishedMap {
+                request_id: storage_request_id,
+                submission: Box::new(submission),
+                limits,
+            })
+            .map_err(|error| map_submission_error(&error))?;
+        self.pending
+            .insert(storage_request_id, PendingOperation::PublishedMap);
+        Ok(storage_request_id)
+    }
+
+    /// Queue a read of the approved published maps in rotation order.
+    pub fn request_published_rotation(&mut self) -> Result<u64, ProfileAuthorityError> {
+        let storage_request_id = self.next_storage_request_id()?;
+        self.storage
+            .try_submit(ProfileStorageCommand::LoadPublishedRotation {
+                request_id: storage_request_id,
+            })
+            .map_err(|error| map_submission_error(&error))?;
+        self.pending
+            .insert(storage_request_id, PendingOperation::PublishedMap);
+        Ok(storage_request_id)
+    }
+
+    /// Published-map completions collected by the last `poll_loads`.
+    pub fn take_published_map_completions(&mut self) -> Vec<PublishedMapStorageCompletion> {
+        std::mem::take(&mut self.published_map_completions)
+    }
+
     /// The client key whose accepted or loading profile session currently holds `account_id`.
     #[must_use]
     pub fn account_holder(&self, account_id: AccountId) -> Option<u64> {
@@ -372,6 +458,7 @@ impl ProfileAuthority {
                 client_key: pending_client,
                 ..
             } => *pending_client != client_key,
+            PendingOperation::PublishedMap => true,
         });
     }
 

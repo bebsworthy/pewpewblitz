@@ -78,6 +78,8 @@ pub struct ReservationStarted {
     pub players_per_team: u8,
     pub accepted_build: AcceptedBuildSummary,
     pub loading_deadline_millis: u32,
+    /// Author credit when the reserved map is an approved published map (BRL-w9z1).
+    pub published_map: Option<crate::lobby::PublishedMapCredit>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

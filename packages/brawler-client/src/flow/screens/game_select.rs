@@ -673,6 +673,7 @@ mod tests {
             map_preset_ids: vec![],
             practice_map_preset_ids: vec![],
             map_authoring_limits: (mode == 0).then_some(brawler::map::AUTHORING_LIMITS),
+            community_maps: false,
             team_count: if mode == 0 { 2 } else { 1 },
             players_per_team: size,
             rules_summary: if mode == 0 {

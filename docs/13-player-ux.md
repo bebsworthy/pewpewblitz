@@ -353,7 +353,16 @@ bounded undo/redo, Clear confirmation and explicit local Save. Safe incomplete d
 saveable; Test in Practice is enabled by resolving the exact current recipe against the connected
 server's advertised mode and roster, then submitting that saved revision for authoritative
 admission. Results and deliberate Practice exit retain a return path to the same document. Player
-drafts stay in app-owned local storage and are not published or added to server map pools.
+drafts stay in app-owned local storage.
+
+Each My Maps card also has **Publish** (BRL-w9z1). It sends the saved draft to the connected server
+for that server's community rotation, targeting the draft's intended game type when the server
+opens it to community maps, otherwise the first opted-in game type of the draft's mode. The library
+status line reports the outcome: held for operator review, already in rotation, or the reason it
+was refused (invalid map, too few spawns, a pending-map limit, or "Publish again in N s"). A
+community map's Match Loading screen credits it under the topology line as "Map — by Author". A
+"your submissions" status screen, a Results credit, and other players' Practice picker are not
+part of this slice.
 
 Zombie is co-op only. Ordinary Play requires an exact two- or three-human roster; Practice starts
 with one human and fills the selected two- or three-fighter roster with friendly server-hosted

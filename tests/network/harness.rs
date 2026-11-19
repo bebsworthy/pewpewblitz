@@ -402,13 +402,24 @@ impl Harness {
     pub(super) fn new_routed_match(
         participants: &[brawler::testing::TestRoutedParticipant],
     ) -> Self {
+        Self::new_routed_match_with(participants, |_| {})
+    }
+
+    /// `new_routed_match` with one edit applied to the manifest before its digest is sealed,
+    /// for example the published map a lobby allocation carried (BRL-w9z1).
+    pub(super) fn new_routed_match_with(
+        participants: &[brawler::testing::TestRoutedParticipant],
+        edit: impl FnOnce(&mut brawler_routing::MatchManifestV1),
+    ) -> Self {
         brawler::testing::install_network_test_logger();
         let server_config = ServerNetworkConfig {
             transport: NetworkTransport::Crossbeam,
             handshake_timeout: std::time::Duration::from_millis(250),
             ..Default::default()
         };
-        let manifest = brawler::testing::routed_wipeout_manifest(&server_config, participants);
+        let mut manifest = brawler::testing::routed_wipeout_manifest(&server_config, participants);
+        edit(&mut manifest);
+        let manifest = manifest.with_digest().expect("edited manifest digest");
         let mut server = brawler::server::build_match_worker_app(server_config.clone(), manifest)
             .expect("routed match worker builds");
         server.add_systems(PreUpdate, link_latency_pin());

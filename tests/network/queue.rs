@@ -360,7 +360,11 @@ fn product_lobby_cross_pool_snapshots_are_shared_but_membership_is_private() {
 }
 
 /// Feed one supervisor control body to the product lobby, as its control stream would.
-fn apply_lobby_control(harness: &mut Harness, sequence: u64, body: brawler_routing::ControlBody) {
+pub(super) fn apply_lobby_control(
+    harness: &mut Harness,
+    sequence: u64,
+    body: brawler_routing::ControlBody,
+) {
     let frame = brawler_routing::ControlFrame::from_raw_sequence(
         sequence,
         brawler_routing::ProcessId::new(2).unwrap(),
@@ -378,7 +382,7 @@ fn apply_lobby_control(harness: &mut Harness, sequence: u64, body: brawler_routi
 
 /// Wait for the lobby's allocation request and grant every participant a route, as the
 /// supervisor would after starting the match worker.
-fn grant_pending_allocation(harness: &mut Harness, sequence: u64) {
+pub(super) fn grant_pending_allocation(harness: &mut Harness, sequence: u64) {
     let mut request = None;
     for _ in 0..600 {
         harness.step();

@@ -7,6 +7,7 @@
 
 mod account_takeover;
 mod catalog;
+mod map_publishing;
 mod profile_transactions;
 mod queue;
 mod rejoin;
@@ -17,6 +18,7 @@ pub use queue::{
 };
 
 pub(crate) use catalog::resolve_operator_catalog;
+pub use map_publishing::{CommunityMap, CommunityMapRotation};
 
 use profile_transactions::{
     PendingLobbyAdmissions, collect_profile_commands, lobby_receive_hellos,
@@ -264,38 +266,21 @@ fn resolve_practice_map(
         if command.map_preset_id.is_some() || candidate.draft_id == 0 {
             return Err(Rejection::InvalidMapRecipe);
         }
-        let resolved = crate::map::validate_authored_recipe(
-            &candidate.recipe,
-            game.mode_definition_id,
-            maps,
-            crate::map::MapInstanceId(1),
-        )
-        .map_err(|_| Rejection::InvalidMapRecipe)?;
-        let capacity = crate::matchplay::ResolvedMatchCapacity {
-            team_slots: (0..game.team_count)
-                .map(|team_slot| crate::matchplay::TeamSlotCapacity {
-                    team_slot,
-                    minimum_participants: game.players_per_team,
-                    maximum_participants: game.players_per_team,
-                })
-                .collect(),
-            maximum_active_fighters: game.team_count * game.players_per_team,
-        };
-        capacity
-            .validate_against_spawn_catalog(&crate::map::SpawnPointCatalog(
-                resolved.spawn_points_by_team.clone(),
-            ))
-            .map_err(|_| Rejection::RosterMismatch)?;
+        let accepted = map_publishing::accept_authored_map(&candidate.recipe, game, maps).map_err(
+            |reason| match reason {
+                map_publishing::AuthoredMapRejection::InvalidRecipe => Rejection::InvalidMapRecipe,
+                map_publishing::AuthoredMapRejection::RosterMismatch => Rejection::RosterMismatch,
+            },
+        )?;
         return Ok(AcceptedPracticeMap {
             routing_preset: 0,
             routing_revision: candidate.recipe.revision,
-            routing_fingerprint: resolved.snapshot.identity.recipe_fingerprint.0,
-            routing_recipe: postcard::to_allocvec(&candidate.recipe)
-                .map_err(|_| Rejection::InvalidMapRecipe)?,
+            routing_fingerprint: accepted.identity.recipe_fingerprint.0,
+            routing_recipe: accepted.recipe_bytes,
             preset_id: None,
-            recipe_id: resolved.snapshot.identity.recipe_id,
-            recipe_revision: resolved.snapshot.identity.recipe_revision,
-            recipe_fingerprint: resolved.snapshot.identity.recipe_fingerprint,
+            recipe_id: accepted.identity.recipe_id,
+            recipe_revision: accepted.identity.recipe_revision,
+            recipe_fingerprint: accepted.identity.recipe_fingerprint,
         });
     }
     let map = command.map_preset_id.unwrap_or(game.map_preset_ids[0]);
@@ -752,24 +737,44 @@ impl LobbyState {
         let rules = catalog
             .rules(&reservation.game_type_id)
             .ok_or(CodecError::InvalidValue)?;
-        let maps =
-            crate::map::MapContentCatalog::embedded().map_err(|_| CodecError::InvalidValue)?;
-        let resolved_map = maps
-            .resolve_preset(reservation.map_preset_id, crate::map::MapInstanceId(1))
-            .map_err(|_| CodecError::InvalidValue)?;
+        let (map_preset, map_revision, map_recipe_fingerprint, map_recipe) = match &reservation.map
+        {
+            queue::QueueMapSource::Preset(preset_id) => {
+                let maps = crate::map::MapContentCatalog::embedded()
+                    .map_err(|_| CodecError::InvalidValue)?;
+                let resolved_map = maps
+                    .resolve_preset(*preset_id, crate::map::MapInstanceId(1))
+                    .map_err(|_| CodecError::InvalidValue)?;
+                (
+                    preset_id.0,
+                    u32::from(
+                        catalog
+                            .map_admission_revision(*preset_id)
+                            .ok_or(CodecError::InvalidValue)?,
+                    ),
+                    resolved_map.snapshot.identity.recipe_fingerprint.0,
+                    Vec::new(),
+                )
+            }
+            // The rotation already re-validated this recipe; the match worker validates the
+            // manifest copy again before it installs the map.
+            queue::QueueMapSource::Published(published) => (
+                0,
+                published.recipe_revision,
+                published.recipe_fingerprint.0,
+                published.recipe_bytes.clone(),
+            ),
+        };
         self.pending = Some(PendingAllocation {
             body: AllocateRequestBody {
                 request_id,
                 lobby_session_id,
                 mode: routing_mode_for_definition(game.mode_definition_id)
                     .ok_or(CodecError::InvalidValue)?,
-                map_preset: reservation.map_preset_id.0,
-                map_revision: catalog
-                    .map_admission_revision(reservation.map_preset_id)
-                    .ok_or(CodecError::InvalidValue)?
-                    .into(),
-                map_recipe_fingerprint: resolved_map.snapshot.identity.recipe_fingerprint.0,
-                map_recipe: Vec::new(),
+                map_preset,
+                map_revision,
+                map_recipe_fingerprint,
+                map_recipe,
                 rules_profile: crate::config::MatchRulesProfile::Production.routing_id(),
                 objective_target: rules.objective_target,
                 match_duration_ticks: rules.match_duration_ticks,
@@ -897,6 +902,7 @@ impl LobbyState {
             players_per_team: game.players_per_team,
             accepted_build,
             loading_deadline_millis: catalog.formation_timing().loading_deadline_millis(),
+            published_map: None,
         })
     }
 
@@ -1257,6 +1263,8 @@ impl Plugin for LobbyPlugin {
             .init_resource::<QueueEvidenceSettings>()
             .init_resource::<ProductFormationState>()
             .init_resource::<rejoin::MatchSeatTable>()
+            .init_resource::<CommunityMapRotation>()
+            .init_resource::<map_publishing::PendingMapPublications>()
             .add_systems(Startup, initialize_lobby_state)
             .configure_sets(
                 Update,
@@ -1284,7 +1292,10 @@ impl Plugin for LobbyPlugin {
                         .in_set(LobbyScheduleSet::AuthenticateLobbyHellos),
                     (
                         process_profile_storage_results,
+                        map_publishing::apply_published_map_completions,
                         collect_profile_commands,
+                        map_publishing::apply_map_publish_requests,
+                        map_publishing::refresh_community_rotation,
                         ApplyDeferred,
                     )
                         .chain()
@@ -2050,6 +2061,7 @@ fn form_product_reservation(
     mut state: ResMut<LobbyState>,
     mut queue: ResMut<QueueState>,
     catalog: Res<catalog::ResolvedLobbyCatalog>,
+    rotation: Res<CommunityMapRotation>,
     mut formation: ResMut<ProductFormationState>,
     mut frame: ResMut<LobbyQueueFrame>,
     mut clients: Query<(
@@ -2077,7 +2089,8 @@ fn form_product_reservation(
             (connected && !disconnected).then_some(client.lobby_session_id)
         })
         .collect();
-    let Some(reservation) = queue.reserve_oldest_exact(&catalog, reservation_id, &live_sessions)
+    let Some(reservation) =
+        queue.reserve_oldest_exact(&catalog, &rotation, reservation_id, &live_sessions)
     else {
         return;
     };
@@ -2095,13 +2108,7 @@ fn form_product_reservation(
     formation.loading_deadline = Some(loading_deadline);
     formation.grant_deadline = Some(grant_deadline);
     frame.snapshot_changed = true;
-    let accepted_map = crate::map::MapContentCatalog::embedded()
-        .ok()
-        .and_then(|maps| {
-            maps.resolve_preset(reservation.map_preset_id, crate::map::MapInstanceId(1))
-                .ok()
-        });
-    let Some(accepted_map) = accepted_map else {
+    let Some(reserved_map) = reserved_map_presentation(&reservation, &catalog) else {
         queue.complete_reservation(reservation_id);
         return;
     };
@@ -2122,18 +2129,63 @@ fn form_product_reservation(
                     reservation_id,
                     ticket_id: Some(ticket.ticket_id),
                     game_type_id: reservation.game_type_id.clone(),
-                    mode_definition_id: accepted_map.snapshot.mode_definition_id,
-                    map_preset_id: Some(reservation.map_preset_id),
-                    map_recipe_id: accepted_map.snapshot.identity.recipe_id,
-                    map_recipe_revision: accepted_map.snapshot.identity.recipe_revision,
-                    map_recipe_fingerprint: accepted_map.snapshot.identity.recipe_fingerprint,
+                    mode_definition_id: reserved_map.mode_definition_id,
+                    map_preset_id: reserved_map.preset_id,
+                    map_recipe_id: reserved_map.recipe_id,
+                    map_recipe_revision: reserved_map.recipe_revision,
+                    map_recipe_fingerprint: reserved_map.recipe_fingerprint,
                     team_count: reservation.team_count,
                     players_per_team: reservation.players_per_team,
                     accepted_build: ticket.accepted_build,
                     loading_deadline_millis: catalog.formation_timing().loading_deadline_millis(),
+                    published_map: reserved_map.credit.clone(),
                 },
             ),
         });
+    }
+}
+
+/// The map identity a queue reservation presents on Match Loading.
+struct ReservedMapPresentation {
+    mode_definition_id: crate::map::ModeDefinitionId,
+    preset_id: Option<crate::map::MapPresetId>,
+    recipe_id: crate::map::MapRecipeId,
+    recipe_revision: u32,
+    recipe_fingerprint: crate::map::MapRecipeFingerprint,
+    credit: Option<crate::lobby::PublishedMapCredit>,
+}
+
+fn reserved_map_presentation(
+    reservation: &queue::QueueReservation,
+    catalog: &catalog::ResolvedLobbyCatalog,
+) -> Option<ReservedMapPresentation> {
+    match &reservation.map {
+        queue::QueueMapSource::Preset(preset_id) => {
+            let maps = crate::map::MapContentCatalog::embedded().ok()?;
+            let resolved = maps
+                .resolve_preset(*preset_id, crate::map::MapInstanceId(1))
+                .ok()?;
+            Some(ReservedMapPresentation {
+                mode_definition_id: resolved.snapshot.mode_definition_id,
+                preset_id: Some(*preset_id),
+                recipe_id: resolved.snapshot.identity.recipe_id,
+                recipe_revision: resolved.snapshot.identity.recipe_revision,
+                recipe_fingerprint: resolved.snapshot.identity.recipe_fingerprint,
+                credit: None,
+            })
+        }
+        queue::QueueMapSource::Published(published) => Some(ReservedMapPresentation {
+            mode_definition_id: catalog
+                .game_types
+                .iter()
+                .find(|game| game.id == reservation.game_type_id)?
+                .mode_definition_id,
+            preset_id: None,
+            recipe_id: published.recipe_id,
+            recipe_revision: published.recipe_revision,
+            recipe_fingerprint: published.recipe_fingerprint,
+            credit: Some(published.credit()),
+        }),
     }
 }
 

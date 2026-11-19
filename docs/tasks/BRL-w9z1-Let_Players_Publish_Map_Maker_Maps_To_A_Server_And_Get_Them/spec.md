@@ -148,3 +148,59 @@ Because accounts are free, the per-server pending cap, not the per-account quota
    - A routed e2e covers publishing on client A, approving with the CLI, then a queued 1v1 that clients A and B both load.
 
 Deferred to backlog tickets once the design is approved: the "Your submissions" status screen with withdraw (slice 4 in the original list), Results credit, choosing published maps in other players' Practice picker, an in-client operator preview, voting or ratings, replacing an approved revision with an update, purge, and real account authentication.
+
+
+# First slice: implementation decisions and deviations (2026-11-19)
+
+Owner answers (questions list) override the recommended design: per-server `map_publishing.moderation: Approve | Automatic` (default Approve), per-game-type `community_maps: true`, 3 pending per account, 120 s cooldown, no approved cap. Research claims in the recommended design were checked against the code and hold (validator, manifest v5 path, worker revalidation at `src/server/admission.rs` `validate_manifest_map_against_catalog`, queue round-robin, profile SQLite executor).
+
+Deviations from the recommended design, recorded before they shipped:
+
+1. **Operator config.** `map_publishing: (moderation, pending_per_account, submit_cooldown_seconds)` and per-game-type `community_maps` are optional fields with defaults (Approve, 3, 120 s, false). The operator catalog schema stays 6 because older catalogs still parse with the same meaning. `enabled` and `published_per_account` are not added: opt-in is per game type and the owner removed the approved cap. `wipeout-1v1` opts in and its configuration revision moves 2 -> 3.
+2. **`AdvertisedGameType.community_maps`** is advertised (in the canonical catalog bytes) so Map Maker can pick an opted-in target. It changes the catalog revision only when operator config changes, never on approval.
+3. **Storage.** One `published_maps` table in the profile database (schema 3, forward migration from 0/1/2). The storage executor's reply becomes `ProfileStorageReply { Profile | PublishedMapSubmission | PublishedRotation }`; `ProfileAuthority` routes map completions to the lobby's publishing systems. Quota, cooldown (from the last accepted submission), and capacity are checked inside the insert transaction. Code ceilings: 256 stored pending+approved, 64 pending, 64 rotation per game type, 256-byte reason.
+4. **No persisted `Suspended` state.** An approved row that stops validating, or whose game type changes revision or drops the opt-in, is left out of the in-memory rotation and logged; the row stays `approved` and recoverable. Simpler and equally fail-closed.
+5. **No withdraw, no "my submissions" request, no resubmit-replaces-pending.** Each accepted publish is a new row. These belong with the deferred submissions screen.
+6. **Rejection reasons:** `InvalidName, InvalidMapRecipe, RosterMismatch, StaleCatalog, UnknownGameType, StaleGameConfiguration, CommunityMapsDisabled, PendingLimitReached, CoolingDown { retry_after_seconds }, StoreFull, Busy, Internal`.
+7. **CLI:** `maps list [--state]`, `approve`, `reject --reason`, and `remove [--reason]` ship; `export` is deferred.
+8. **Client:** one PUBLISH button per My Maps card (current style), status line shows the outcome; Match Loading adds one "Map — by Author" line. No restyle (BRL-2xpc owns the redesign).
+9. **Protocol 51** (global handshake): `MapPublishRequest`, `MapPublishOutcome`, `AdvertisedGameType.community_maps`, `ReservationStarted.published_map`. Manifest v5, control IPC v7, route envelope unchanged.
+
+
+# First slice: implementation, verification, and learning (2026-11-19)
+
+Implemented on branch `worktree-agent-ad51b6905ae27cf81`, commit 49616ef6 (on main ad565170). Protocol 51.
+
+## Built
+
+- Shared: `brawler::map::authoring::normalize_map_name` (moved from the client); wire types in `src/lobby/publishing.rs`; `AdvertisedGameType.community_maps`; `ReservationStarted.published_map`.
+- Storage: `src/profiles/storage/published_maps.rs` (schema 3 table, quota/cooldown/capacity in one transaction, operator decisions, rotation order = decision time then ID). Executor reply enum; `ProfileAuthority` routes map completions.
+- Lobby: `src/server/lobby/map_publishing.rs` (shared `accept_authored_map` now also used by Practice, publish request handling, 5 s rotation reload with re-validation, `CommunityMapRotation`); `QueueMapSource { Preset | Published }` round-robins built-in maps then community maps; product allocation sends recipe bytes with `map_preset = 0`; Match Loading credit.
+- Operator: `map_publishing` section and per-game-type `community_maps` in `config/server/game-types.ron` (wipeout-1v1 opted in, revision 3); `brawler-profile-admin maps list | approve | reject | remove`.
+- Client: PUBLISH on each My Maps card (current style), outcome text on the library status line, "Map — by Author" on Match Loading. Headless automation `--product-publish-map-smoke` and `--expect-published-map`.
+- Docs 04, 08, 13, 14, 16 and README updated. New `just published-map-e2e` (`scripts/e2e-published-map.sh`).
+
+## Finding beyond the spec
+
+The research section claimed clients already rebuild an authored map from the replicated snapshot. They did not: `src/map/client.rs` rejected every snapshot without `source_preset_id` ("replicated map has no preset identity"), so an authored Practice or published map never became `ClientMapReadiness::Ready` on a real client. The e2e exposed it. The client now rebuilds the canonical recipe from the snapshot, re-resolves it with the same resolver, and requires the identical snapshot (fingerprint included). The network test now also requires `ClientMapReadiness::Ready`.
+
+## Verification
+
+- `just lint` (ripgrep on PATH): pass.
+- `just test`: routing, client (910), server (561 + 611 lib), balance-lab, and network (134, including the 2 new `map_publishing` tests) suites pass. `_test-performance` fails on wall-clock budgets only while run in parallel on a machine at load average ~26 from other agents' builds (p95 up to 38 ms); run serially (`cargo test -p brawler-client --features network-test --test performance -- --test-threads=1`) all 12 pass with p95 <= 10.1 ms against 16.7 ms. No changed code runs in those per-tick systems. Rerun `just test` on a quiet machine.
+- New tests: storage quota/cooldown/decisions/rotation order, Automatic moderation, v2 -> v3 migration (`src/profiles/tests.rs`); catalog policy defaults/opt-in/invalid values; queue rotation built-in -> community -> built-in with stale/closed rows dropped; wire bounds (`src/lobby/publishing.rs`); protocol 51; client snapshot re-resolution; client publish model and credit text; network: validation rejections (wrong mode, oversized, closed game type), pending storage with server-assigned identity, cooldown, and an approved map reaching the second 1v1 reservation, the allocation request, Match Loading credit for both clients, and a production match worker that both clients load to `Ready`.
+- E2E: `BRAWLER_ROUTED_BIND=127.0.0.1:5082 BRAWLER_SERVER_DATA_DIR=$PWD/target/w9z1/server ./scripts/e2e-published-map.sh` passed: client A published map 1 (pending), `maps list` showed it, `maps approve 1`, the first 1v1 played the built-in map (recipe_id 7), the second showed `credit="E2E Published Yard — by Brawler-1BBD" published_map_id=1` on both clients and both reached Active on recipe_id 281474976710657 (2^48 + 1).
+
+## Not verified
+
+- No windowed check of the PUBLISH button or the Match Loading credit line (no windowed clients were launched). Playtest: `just server`, `just client`, open Map Maker, save a valid Wipeout draft, press PUBLISH on its card (expect "Published. The server operator reviews it…"), run `cargo run --no-default-features --features server --bin brawler-profile-admin -- maps approve 1 --database target/dev/server/profiles.sqlite3`, then play two 1v1 queue matches with two clients: the second shows "<map> — by <name>" on Match Loading.
+
+## Deferred (linked backlog)
+
+BRL-s3dh (submissions status + withdraw), BRL-1sgj (Results credit), BRL-r0ky (Practice picker), BRL-76a9 (voting/rating), BRL-4gqt (update an approved map).
+
+## Mistakes and prevention
+
+- Trusted the spec's claim that clients rebuild authored snapshots; only the real-process e2e caught it, because the network test checked replicated identity rather than client readiness. Prevention: map-distribution tests assert `ClientMapReadiness::Ready`, not just the replicated component.
+- The e2e cleanup referenced an empty bash array under `set -u` (macOS bash 3.2) and leaked a supervisor on failure; fixed with `${arr[@]+...}` and killed the leaked process by PID.
+- Adding a flow system changed entity order and exposed a tie in `flow_button_sizes` (two Dashboard buttons share `OpenBrawlerList`); the sort now has a total order.

@@ -506,12 +506,20 @@ fingerprinting. There is one parser and canonical representation; a convenience 
 create another runtime path.
 
 Player authoring is a deliberately smaller envelope than the engine's structural ceiling: 64 local
-documents; normalized names up to 48 graphemes and 96 UTF-8 bytes; 20..=128 cells per axis and
+documents; normalized names up to 48 graphemes and 96 UTF-8 bytes (one shared rule,
+`brawler::map::authoring::normalize_map_name`, used by the draft envelope and the lobby's publish
+request); 20..=128 cells per axis and
 16,384 total cells; 4,096 expanded placements; 256 KiB canonical source recipes; 512 KiB saved
 document envelopes; and undo history bounded to 128 entries and 4 MiB. Map Maker excludes runtime
 debris/replacement assets and exposes only the sealed catalog's explicit authorable initial states.
 These limits are advertised for supported modes and are checked before rectangle expansion or large
 allocation as well as by authoritative resolution.
+
+A published map (BRL-w9z1) is the same canonical recipe, stored by the server under a
+server-assigned identity: `recipe_id = 2^48 + published_map_id` and revision 1, so its recipe
+fingerprint is unique on that server and never collides with a built-in preset or local draft ID.
+The map name stays outside `MapRecipe`; the server stores it beside the recipe and only uses it for
+the Match Loading credit.
 
 Ordinary surface, feature, decoration, spawn, and damageable-object placements remain aligned to
 integer cells. Geometric mode anchors may use integer half-cell units: `(2x + 1, 2y + 1)` names the

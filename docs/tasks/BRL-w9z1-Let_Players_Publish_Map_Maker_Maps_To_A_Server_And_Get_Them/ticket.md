@@ -3,9 +3,9 @@ id: BRL-w9z1
 
 title: Let players publish Map Maker maps to a server and get them into rotation
 
-status: doing
-closed:
-status_changed: 2026-11-19T12:23:21Z
+status: done
+closed: 2026-11-19T14:56:42Z
+status_changed: 2026-11-19T14:56:42Z
 
 theme:
 
@@ -15,11 +15,11 @@ created: 2026-11-18T17:18:30Z
 
 blocks: []
 
-related: [BRL-2xpc, BRL-6vjz]
+related: [BRL-1sgj, BRL-2xpc, BRL-4gqt, BRL-6vjz, BRL-76a9, BRL-r0ky, BRL-s3dh]
 
 parent:
 
-rank: 11468800
+rank:
 ---
 
 # Description

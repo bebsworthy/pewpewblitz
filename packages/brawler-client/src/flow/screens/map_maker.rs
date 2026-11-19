@@ -381,6 +381,7 @@ pub(in crate::flow) fn resolve_map_maker_action(
     mut runtime: ResMut<MapMakerRuntime>,
     mut selection: ResMut<SelectedGameType>,
     mut practice: ResMut<ClientPracticeModel>,
+    mut publish: ResMut<crate::ClientMapPublishModel>,
     mut purpose: ResMut<SessionPurpose>,
     mut commit: ResMut<FlowCommit>,
 ) {
@@ -505,6 +506,17 @@ pub(in crate::flow) fn resolve_map_maker_action(
                 runtime.status =
                     Some("Press DELETE again to confirm. This cannot be undone.".to_string());
             }
+            runtime.bump_render();
+        }
+        FlowUiAction::PublishMapDraft(id) if *flow.get() == ClientFlow::MapLibrary => {
+            runtime.pending_delete = None;
+            runtime.status = Some(publish_draft(
+                &memberships,
+                &catalog.0,
+                &library,
+                id,
+                &mut publish,
+            ));
             runtime.bump_render();
         }
         FlowUiAction::BackToMapLibrary if *flow.get() == ClientFlow::MapEditor => {
@@ -733,6 +745,7 @@ fn is_map_maker_action(action: &FlowUiAction) -> bool {
             | FlowUiAction::CancelRenameMapDraft
             | FlowUiAction::DuplicateMapDraft(_)
             | FlowUiAction::DeleteMapDraft(_)
+            | FlowUiAction::PublishMapDraft(_)
             | FlowUiAction::CloseMapMaker
             | FlowUiAction::BackToMapLibrary
             | FlowUiAction::SaveMapDraft
@@ -833,6 +846,71 @@ fn create_default_document(
             commit.next_flow = Some(ClientFlow::MapEditor);
         }
         Err(error) => runtime.status = Some(error),
+    }
+}
+
+/// Submit one saved draft to the connected server's community rotation (BRL-w9z1). The target is
+/// the draft's intended game type when it takes community maps, otherwise the first advertised
+/// game type of the draft's mode that does. Returns the status line to show.
+fn publish_draft(
+    memberships: &Query<&ClientLobbyMembership, With<Client>>,
+    catalog: &brawler::map::MapContentCatalog,
+    library: &MapDraftLibrary,
+    id: MapDraftId,
+    publish: &mut crate::ClientMapPublishModel,
+) -> String {
+    let Some(document) = library.drafts.get(&id) else {
+        return "map draft disappeared".to_string();
+    };
+    let Some(membership) = memberships.iter().next() else {
+        return "Connect to a server to publish.".to_string();
+    };
+    let mode = document.recipe.mode_definition_id;
+    let game = membership
+        .game_types
+        .iter()
+        .filter(|game| game.community_maps && game.mode_definition_id == mode)
+        .find(|game| Some(&game.id) == document.intended_game_type_id.as_ref())
+        .or_else(|| {
+            membership
+                .game_types
+                .iter()
+                .find(|game| game.community_maps && game.mode_definition_id == mode)
+        });
+    let Some(game) = game else {
+        return "This server does not take community maps for this mode.".to_string();
+    };
+    if let Err(error) = brawler::map::validate_authored_recipe(
+        &document.recipe,
+        mode,
+        catalog,
+        brawler::map::MapInstanceId(1),
+    ) {
+        return error.to_string();
+    }
+    if publish.start(
+        membership.catalog_revision,
+        game,
+        document.name.clone(),
+        AuthoredMapCandidate {
+            draft_id: document.id.0,
+            recipe: document.recipe.clone(),
+        },
+    ) {
+        format!("Publishing to {}…", game.display_name)
+    } else {
+        "A publish request is already in progress.".to_string()
+    }
+}
+
+/// Show the server's publish decision on the library status line.
+pub(in crate::flow) fn observe_map_publish_outcome(
+    mut publish: ResMut<crate::ClientMapPublishModel>,
+    mut runtime: ResMut<MapMakerRuntime>,
+) {
+    if let Some(decision) = publish.take_outcome() {
+        runtime.status = Some(crate::map_publish_decision_text(decision));
+        runtime.bump_render();
     }
 }
 
@@ -2035,6 +2113,14 @@ fn map_card(
                 button_base.saturating_add(2),
                 FlowUiAction::DuplicateMapDraft(document.id),
                 "DUPLICATE",
+                ACCENT,
+            );
+            action_button(
+                card,
+                assets,
+                button_base.saturating_add(4),
+                FlowUiAction::PublishMapDraft(document.id),
+                "PUBLISH",
                 ACCENT,
             );
             action_button(
@@ -4004,6 +4090,7 @@ mod tests {
         .init_resource::<MapDraftLibrary>()
         .init_resource::<SelectedGameType>()
         .init_resource::<ClientPracticeModel>()
+        .init_resource::<crate::ClientMapPublishModel>()
         .init_resource::<SessionPurpose>()
         .init_resource::<FlowCommit>()
         .insert_resource(MapCatalogResource(catalog))
@@ -4432,6 +4519,7 @@ mod tests {
             .insert_resource(library)
             .init_resource::<SelectedGameType>()
             .init_resource::<ClientPracticeModel>()
+            .init_resource::<crate::ClientMapPublishModel>()
             .init_resource::<SessionPurpose>()
             .init_resource::<FlowCommit>()
             .insert_resource(MapCatalogResource(

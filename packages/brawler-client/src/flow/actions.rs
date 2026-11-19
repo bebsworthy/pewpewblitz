@@ -79,6 +79,7 @@ pub(super) enum FlowUiAction {
     CancelRenameMapDraft,
     DuplicateMapDraft(crate::MapDraftId),
     DeleteMapDraft(crate::MapDraftId),
+    PublishMapDraft(crate::MapDraftId),
     CloseMapMaker,
     BackToMapLibrary,
     SaveMapDraft,

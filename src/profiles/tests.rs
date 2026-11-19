@@ -548,7 +548,7 @@ fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
             .pragma_update(None, "application_id", 0x4252_574c_i32)
             .unwrap();
         connection
-            .pragma_update(None, "user_version", 3_i32)
+            .pragma_update(None, "user_version", 4_i32)
             .unwrap();
     }
     assert!(ProfileStorage::open(&newer).is_err());
@@ -556,7 +556,7 @@ fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
     let version: i32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     drop(connection);
 
     let corrupt = path("corrupt");
@@ -746,5 +746,216 @@ fn persisted_incompatible_resistances_load_for_repair_but_fail_admission_explici
         Err(ProfileAuthorityError::IncompatibleBuild)
     );
     drop(authority);
+    std::fs::remove_file(database).unwrap();
+}
+
+#[cfg(feature = "server")]
+fn published_submission(
+    account: AccountId,
+    name: &str,
+    now_unix_ms: u64,
+) -> PublishedMapSubmission {
+    let mut recipe = crate::map::MapContentCatalog::embedded()
+        .unwrap()
+        .preset(crate::map::FEATURE_YARD_WIPEOUT_PRESET)
+        .unwrap()
+        .recipe
+        .clone();
+    recipe.recipe_id = crate::map::MapRecipeId(42);
+    recipe.revision = 9;
+    PublishedMapSubmission {
+        account_id: account,
+        author_display_name: "Author".into(),
+        name: name.into(),
+        game_type_id: crate::lobby::GameTypeId::new("wipeout-1v1").unwrap(),
+        game_type_revision: 3,
+        recipe,
+        now_unix_ms,
+    }
+}
+
+#[cfg(feature = "server")]
+const PRE_APPROVAL: PublishedMapLimits = PublishedMapLimits {
+    pending_per_account: 3,
+    submit_cooldown_millis: 120_000,
+    approve_immediately: false,
+};
+
+#[cfg(feature = "server")]
+#[test]
+fn published_maps_apply_quota_cooldown_and_operator_decisions() {
+    use crate::lobby::{MapPublishRejection, PublishedMapState};
+    let database = path("published-maps");
+    let account = AccountId::new(90).unwrap();
+    let mut storage = ProfileStorage::open(&database).unwrap();
+    storage.load_or_create(account).unwrap();
+    let mut accepted = Vec::new();
+    for (index, now) in [0_u64, 120_000, 240_000].into_iter().enumerate() {
+        let outcome = storage
+            .submit_published_map(
+                published_submission(account, &format!("Map {index}"), now),
+                PRE_APPROVAL,
+            )
+            .unwrap();
+        let PublishedMapSubmissionOutcome::Accepted {
+            published_map_id,
+            state: PublishedMapState::Pending,
+        } = outcome
+        else {
+            panic!("submission {index} is stored as pending: {outcome:?}");
+        };
+        accepted.push(published_map_id);
+    }
+    assert_eq!(
+        storage
+            .submit_published_map(
+                published_submission(account, "Early", 300_000),
+                PRE_APPROVAL
+            )
+            .unwrap(),
+        PublishedMapSubmissionOutcome::Rejected(MapPublishRejection::CoolingDown {
+            retry_after_seconds: 60
+        })
+    );
+    assert_eq!(
+        storage
+            .submit_published_map(
+                published_submission(account, "Fourth", 360_000),
+                PRE_APPROVAL
+            )
+            .unwrap(),
+        PublishedMapSubmissionOutcome::Rejected(MapPublishRejection::PendingLimitReached)
+    );
+
+    let stored = storage
+        .list_published_maps(Some(PublishedMapStatus::Pending))
+        .unwrap();
+    assert_eq!(stored.len(), 3);
+    let recipe: crate::map::MapRecipe = postcard::from_bytes(&stored[0].recipe).unwrap();
+    assert_eq!(Some(recipe.recipe_id), accepted[0].recipe_id());
+    assert_eq!(recipe.revision, crate::lobby::PUBLISHED_MAP_RECIPE_REVISION);
+
+    decide_and_resubmit(&mut storage, account, &accepted);
+    drop(storage);
+    std::fs::remove_file(database).unwrap();
+}
+
+/// Approvals are unlimited per account; rotation order is decision order; decided rows free
+/// pending slots.
+#[cfg(feature = "server")]
+fn decide_and_resubmit(
+    storage: &mut ProfileStorage,
+    account: AccountId,
+    accepted: &[crate::lobby::PublishedMapId],
+) {
+    storage
+        .decide_published_map(accepted[2], &PublishedMapAction::Approve, 10)
+        .unwrap();
+    storage
+        .decide_published_map(accepted[0], &PublishedMapAction::Approve, 20)
+        .unwrap();
+    storage
+        .decide_published_map(
+            accepted[1],
+            &PublishedMapAction::Reject {
+                reason: "Offensive name".into(),
+            },
+            30,
+        )
+        .unwrap();
+    assert!(
+        storage
+            .decide_published_map(accepted[1], &PublishedMapAction::Approve, 40)
+            .is_err(),
+        "a rejected map cannot be approved"
+    );
+    let rotation = storage.load_published_rotation().unwrap();
+    assert_eq!(
+        rotation
+            .iter()
+            .map(|record| record.published_map_id)
+            .collect::<Vec<_>>(),
+        vec![accepted[2], accepted[0]]
+    );
+    storage
+        .decide_published_map(
+            accepted[2],
+            &PublishedMapAction::Remove { reason: None },
+            50,
+        )
+        .unwrap();
+    assert_eq!(
+        storage
+            .load_published_rotation()
+            .unwrap()
+            .iter()
+            .map(|record| record.published_map_id)
+            .collect::<Vec<_>>(),
+        vec![accepted[0]]
+    );
+    // Decided rows free pending slots for new work after the cooldown.
+    assert!(matches!(
+        storage
+            .submit_published_map(
+                published_submission(account, "Fifth", 400_000),
+                PRE_APPROVAL
+            )
+            .unwrap(),
+        PublishedMapSubmissionOutcome::Accepted { .. }
+    ));
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn automatic_moderation_stores_a_valid_submission_as_approved() {
+    let database = path("published-maps-automatic");
+    let account = AccountId::new(91).unwrap();
+    let mut storage = ProfileStorage::open(&database).unwrap();
+    storage.load_or_create(account).unwrap();
+    let automatic = PublishedMapLimits {
+        approve_immediately: true,
+        ..PRE_APPROVAL
+    };
+    let outcome = storage
+        .submit_published_map(published_submission(account, "Live", 0), automatic)
+        .unwrap();
+    let PublishedMapSubmissionOutcome::Accepted {
+        published_map_id,
+        state: crate::lobby::PublishedMapState::Approved,
+    } = outcome
+    else {
+        panic!("automatic moderation approves at once: {outcome:?}");
+    };
+    let rotation = storage.load_published_rotation().unwrap();
+    assert_eq!(rotation.len(), 1);
+    assert_eq!(rotation[0].published_map_id, published_map_id);
+    drop(storage);
+    std::fs::remove_file(database).unwrap();
+}
+
+#[cfg(feature = "server")]
+#[test]
+fn sqlite_v2_profiles_migrate_to_the_published_map_schema() {
+    let database = path("v2-migration");
+    let account = AccountId::new(92).unwrap();
+    {
+        let mut storage = ProfileStorage::open(&database).unwrap();
+        storage.load_or_create(account).unwrap();
+    }
+    {
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute_batch("DROP TABLE published_maps; PRAGMA user_version=2;")
+            .unwrap();
+    }
+    let mut storage = ProfileStorage::open(&database).unwrap();
+    assert!(storage.list_published_maps(None).unwrap().is_empty());
+    assert!(matches!(
+        storage
+            .submit_published_map(published_submission(account, "Migrated", 0), PRE_APPROVAL)
+            .unwrap(),
+        PublishedMapSubmissionOutcome::Accepted { .. }
+    ));
+    drop(storage);
     std::fs::remove_file(database).unwrap();
 }

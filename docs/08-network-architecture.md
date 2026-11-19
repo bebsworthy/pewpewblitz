@@ -381,9 +381,9 @@ spawn, placement, anchor, or map-state changes directly to a running match.
 The selected `ModeDefinitionId` resolves only to a server-installed mode plugin. A map recipe may
 place that mode's required anchors and choose explicitly exposed parameters, but cannot define or
 replace scoring, victory, respawn, objective, or other executable rules. The server replicates the
-accepted map identity/revision and resolved data needed for client reconstruction. Distribution,
-asset upload, persistence, publishing, discovery, moderation, and migration of user maps are later
-network/service concerns.
+accepted map identity/revision and resolved data needed for client reconstruction. Publishing a
+player map to a routed server's queue rotation is a lobby request (protocol 51, below); asset
+upload, discovery, voting, and migration of user maps remain later network/service concerns.
 
 User-map identity/revision is authoritative match data, not a substitute for the shared catalog and
 mode-schema fingerprint. The shared fingerprint proves that both roles understand the referenced
@@ -647,3 +647,25 @@ always-public roster projection so other players can see that a server bot drive
 new field changes the canonical encoding but not the registered types, so the protocol-registry
 fingerprint is unchanged (15212284317352318216) and only `SUPPORTED_PROTOCOL_VERSION` guards it.
 Control IPC version 7 and the match manifest are unchanged. Every role must be rebuilt.
+
+Protocol 51 adds map publishing (BRL-w9z1). The client sends `MapPublishRequest { request_id,
+catalog_revision, game_type_id, game_type_configuration_revision, name, candidate }` on
+`SessionChannel` over its lobby session; the lobby answers `MapPublishOutcome { request_id,
+Accepted { published_map_id, state: Pending | Approved } | Rejected(reason) }`. The name is the
+shared normalized Map Maker name (48 graphemes, 96 bytes) and decodes only in that form; the
+candidate is the same bounded `AuthoredMapCandidate` Practice already carries. The client claims
+no author, identity, or state. The lobby runs the shared authored-map acceptance path (authoring
+preflight, the authoritative resolver, and the game type's exact roster), then the profile storage
+owner assigns a server-unique `PublishedMapId` and rewrites the stored recipe to
+`recipe_id = 2^48 + id`, revision 1, so its fingerprint is unique on that server.
+`AdvertisedGameType` gains `community_maps: bool` (in the canonical catalog bytes) so Map Maker can
+offer opted-in game types, and `ReservationStarted` gains `published_map:
+Option<PublishedMapCredit { published_map_id, name, author_display_name }>` for the Match Loading
+credit. Published recipes are server data: they never enter `GameplayContentFingerprint`, the
+advertised map pools, or `CatalogRevision`, so approving a map never splits compatible clients or
+stales queue tickets. A queue reservation of a published map carries the stored recipe in the
+existing match-manifest v5 `map_recipe` field with `map_preset = 0`; the match worker revalidates
+it with the authoring validator and fingerprint exactly as for authored Practice, and clients
+rebuild it from the replicated `ResolvedMapSnapshot`. The two new registrations change the
+protocol-registry fingerprint; match-manifest v5, control IPC v7, and the route envelope are
+unchanged. There are no per-message versions or compatibility decoders.

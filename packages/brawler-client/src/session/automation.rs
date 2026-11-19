@@ -63,10 +63,13 @@ pub(super) fn update_controller_demo_gamepad(
 }
 
 /// Headless M05 evidence: exit successfully once the joined product match reaches Active.
+/// With `--expect-published-map` the replicated map must also be a published recipe
+/// (BRL-w9z1), so the run proves the community map reached this client.
 #[allow(clippy::needless_pass_by_value)]
 pub(super) fn finish_product_match_smoke(
     config: Res<crate::ClientAutomationConfig>,
     roots: Query<&MatchState, With<MatchRoot>>,
+    maps: Query<&brawler::map::ResolvedMapIdentity, With<brawler::map::MapRoot>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if config.product_match_smoke
@@ -80,6 +83,23 @@ pub(super) fn finish_product_match_smoke(
             .iter()
             .any(|state| matches!(state.phase, MatchPhase::Active { .. }))
     {
+        let identity = maps.iter().next();
+        if let Some(identity) = identity {
+            let marker = format!(
+                "brawler-client match-map recipe_id={} recipe_fingerprint={}\n",
+                identity.recipe_id.0, identity.recipe_fingerprint.0
+            );
+            let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), marker.as_bytes());
+        }
+        if config.expect_published_map
+            && identity.is_none_or(|identity| {
+                identity.recipe_id.0 <= brawler::lobby::PUBLISHED_MAP_RECIPE_ID_BASE
+            })
+        {
+            bevy::log::error!("brawler product match smoke expected a published community map");
+            exit.write(AppExit::error());
+            return;
+        }
         exit.write(AppExit::Success);
     }
 }

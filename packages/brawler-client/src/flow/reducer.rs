@@ -719,6 +719,7 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::CancelRenameMapDraft
         | FlowUiAction::DuplicateMapDraft(_)
         | FlowUiAction::DeleteMapDraft(_)
+        | FlowUiAction::PublishMapDraft(_)
         | FlowUiAction::CloseMapMaker
         | FlowUiAction::BackToMapLibrary
         | FlowUiAction::SaveMapDraft

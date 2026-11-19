@@ -34,9 +34,10 @@ use screens::{
         spawn_game_type_select,
     },
     map_maker::{
-        MapMakerRuntime, load_map_library, map_maker_input, position_map_editor_selection_toolbar,
-        present_map_editor, present_map_library, resolve_map_maker_action,
-        return_to_editor_after_practice, sync_map_editor_preview, update_map_editor_values,
+        MapMakerRuntime, load_map_library, map_maker_input, observe_map_publish_outcome,
+        position_map_editor_selection_toolbar, present_map_editor, present_map_library,
+        resolve_map_maker_action, return_to_editor_after_practice, sync_map_editor_preview,
+        update_map_editor_values,
     },
     match_loading::{spawn_match_loading, update_match_loading},
     overlays::{
@@ -117,6 +118,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<ClientLocalLoadFailures>()
             .init_resource::<super::ClientQueueModel>()
             .init_resource::<super::ClientPracticeModel>()
+            .init_resource::<super::ClientMapPublishModel>()
             .init_resource::<super::ClientMatchLoadingModel>()
             .init_resource::<brawler::builds::BuildCatalogResource>()
             .init_resource::<brawler::combat::WeaponCatalogResource>()
@@ -214,6 +216,7 @@ impl Plugin for ClientFlowPlugin {
                     update_queue_cancel_button,
                     update_queue_status,
                     spawn_game_type_select.before(update_flow_button_chrome),
+                    observe_map_publish_outcome.before(present_map_library),
                     present_map_library.run_if(in_state(ClientFlow::MapLibrary)),
                     (
                         present_map_editor.run_if(in_state(ClientFlow::MapEditor)),

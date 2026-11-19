@@ -142,6 +142,7 @@ Run `just` to list the supported everyday surface.
 | `just test` | Run deterministic routing, client, server, Balance Lab, network, and performance suites |
 | `just e2e [2, 4, or 6]` | Run the real-process 1v1, 2v2, or 3v3 product path; default is 2 |
 | `BRAWLER_PRODUCT_PLAYERS_PER_TEAM=1 BRAWLER_PRODUCT_REQUEUE_SMOKE=1 ./scripts/network-product-match.sh` | Play one real `wipeout-1v1` (or `BRAWLER_PRODUCT_GAME_TYPE`) match to its authoritative end, return both clients to a fresh lobby, and queue again; the watchdog defaults to the game type's authored formation, countdown, and duration plus 60 s, and a failure names the lifecycle phase each client reached (BRL-cb3x) |
+| `just published-map-e2e` | Publish a map from one headless client, approve it with `brawler-profile-admin`, and load it in a routed 1v1 queue match for two clients |
 | `just practice-e2e [game type]` | Run one exact real-process Practice match with one human and server-filled bots; default is `wipeout-1v1` |
 | `just network-change-e2e [game type]` | Keep one routed Practice match session alive across two 4 s outages: to a new client source port, then back to the original (BRL-g57a, BRL-sqz0) |
 | `just slow-link-e2e [delay ms]` | Reach the lobby welcome on the first connect attempt through a UDP proxy that delays every supervisor-to-client datagram; default is 1500 (BRL-jx6p) |
@@ -404,6 +405,21 @@ cargo run --locked --no-default-features --features server \
 The command refuses to overwrite its output and validates the completed copy. To restore, stop the
 server, preserve the current database together with any `-wal` and `-shm` siblings, copy the
 validated backup into a fresh data directory as `profiles.sqlite3`, and restart the supervisor.
+
+Published Map Maker maps live in the same database. With the default `moderation: Approve` in
+`config/server/game-types.ron`, review and decide them while the server runs; the lobby picks up a
+decision within 5 s:
+
+```sh
+cargo run --locked --no-default-features --features server --bin brawler-profile-admin -- \
+  maps list --database target/dev/server/profiles.sqlite3            # pending; --state approved|rejected|removed|all
+cargo run --locked --no-default-features --features server --bin brawler-profile-admin -- \
+  maps approve 3 --database target/dev/server/profiles.sqlite3
+cargo run --locked --no-default-features --features server --bin brawler-profile-admin -- \
+  maps reject 4 --reason "Offensive name" --database target/dev/server/profiles.sqlite3
+cargo run --locked --no-default-features --features server --bin brawler-profile-admin -- \
+  maps remove 3 --database target/dev/server/profiles.sqlite3        # takes an approved map out of rotation
+```
 
 Do not use `--all-features` as a supported application build. The player client is the
 `packages/brawler-client` package (`-p brawler-client`) built on the shared `brawler` crate's

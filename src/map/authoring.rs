@@ -10,9 +10,7 @@ use super::{
 
 #[cfg(feature = "client")]
 pub const MAX_AUTHORED_MAP_DRAFTS: usize = 64;
-#[cfg(feature = "client")]
 pub const MAX_AUTHORED_MAP_NAME_GRAPHEMES: usize = 48;
-#[cfg(feature = "client")]
 pub const MAX_AUTHORED_MAP_NAME_BYTES: usize = 96;
 #[cfg(feature = "client")]
 pub const MAX_AUTHORED_DOCUMENT_BYTES: usize = 512 * 1024;
@@ -92,6 +90,23 @@ impl core::fmt::Display for AuthoringRecipeError {
 }
 
 impl std::error::Error for AuthoringRecipeError {}
+
+/// The one name rule for player-authored maps: the local draft envelope, the lobby's publish
+/// request, and the published-map credit all accept exactly this normalized form.
+pub fn normalize_map_name(value: &str) -> Result<String, String> {
+    use unicode_normalization::UnicodeNormalization as _;
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let normalized: String = value.trim().nfc().collect();
+    let graphemes = normalized.graphemes(true).count();
+    if graphemes == 0
+        || graphemes > MAX_AUTHORED_MAP_NAME_GRAPHEMES
+        || normalized.len() > MAX_AUTHORED_MAP_NAME_BYTES
+        || normalized.chars().any(char::is_control)
+    {
+        return Err("map name must be 1..=48 readable characters".to_string());
+    }
+    Ok(normalized)
+}
 
 impl MapAuthoringLimits {
     pub fn validate_dimensions(

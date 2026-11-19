@@ -71,6 +71,7 @@ pub(super) fn drive_headless_queue_smoke(
     mut exit: MessageWriter<AppExit>,
 ) {
     if (!config.product_queue_smoke && !config.product_match_smoke)
+        || config.product_publish_map_smoke
         || *stage == HeadlessQueueSmokeStage::Complete
     {
         return;
@@ -193,6 +194,105 @@ fn start_headless_product_request(
         Some(HeadlessQueueSmokeStage::Joining)
     } else {
         None
+    }
+}
+
+/// Headless BRL-w9z1 evidence: publish one copy of the selected game type's first built-in map
+/// and exit once the server decides. Acceptance prints a parseable marker for the e2e script.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+pub(super) fn drive_headless_publish_smoke(
+    config: Res<crate::ClientAutomationConfig>,
+    memberships: Query<&ClientLobbyMembership, With<Client>>,
+    mut publish: ResMut<crate::ClientMapPublishModel>,
+    mut started: Local<bool>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if !config.product_publish_map_smoke {
+        return;
+    }
+    if *started {
+        match publish.take_outcome() {
+            Some(brawler::lobby::MapPublishDecision::Accepted {
+                published_map_id,
+                state,
+            }) => {
+                let marker = format!(
+                    "brawler-client published-map id={} state={state:?}\n",
+                    published_map_id.get()
+                );
+                let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), marker.as_bytes());
+                exit.write(AppExit::Success);
+            }
+            Some(brawler::lobby::MapPublishDecision::Rejected(reason)) => {
+                error!(?reason, "brawler product publish smoke was rejected");
+                exit.write(AppExit::error());
+            }
+            None => {}
+        }
+        return;
+    }
+    let Some(lobby) = memberships.iter().next() else {
+        return;
+    };
+    let Some(game) = automation_game_type(
+        &lobby.game_types,
+        config.product_match_players_per_team,
+        config.product_match_game_type.as_ref(),
+    ) else {
+        return;
+    };
+    let Some(recipe) = brawler::map::MapContentCatalog::embedded()
+        .ok()
+        .and_then(|maps| {
+            game.map_preset_ids
+                .first()
+                .and_then(|id| maps.preset(*id))
+                .map(|preset| preset.recipe.clone())
+        })
+    else {
+        error!("brawler product publish smoke found no built-in map to copy");
+        exit.write(AppExit::error());
+        return;
+    };
+    *started = publish.start(
+        lobby.catalog_revision,
+        game,
+        "E2E Published Yard".to_string(),
+        brawler::map::AuthoredMapCandidate {
+            draft_id: 1,
+            recipe,
+        },
+    );
+}
+
+/// Headless BRL-w9z1 evidence: print the Match Loading credit of a published map once.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+pub(super) fn report_published_map_credit(
+    config: Res<crate::ClientAutomationConfig>,
+    loading: Res<crate::ClientMatchLoadingModel>,
+    mut reported: Local<bool>,
+) {
+    if !config.expect_published_map || *reported {
+        return;
+    }
+    if let Some(credit) = loading
+        .active()
+        .and_then(|active| active.published_map.as_ref())
+    {
+        *reported = true;
+        let marker = format!(
+            "brawler-client match-loading credit=\"{} — by {}\" published_map_id={}\n",
+            credit.name,
+            credit.author_display_name,
+            credit.published_map_id.get()
+        );
+        let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), marker.as_bytes());
     }
 }
 

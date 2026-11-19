@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 50;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 51;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -586,6 +586,10 @@ fn register_queue_protocol(app: &mut App) {
         .add_direction(NetworkDirection::ServerToClient);
     app.register_message::<crate::lobby::PracticeStartRequest>()
         .add_direction(NetworkDirection::ClientToServer);
+    app.register_message::<crate::lobby::MapPublishRequest>()
+        .add_direction(NetworkDirection::ClientToServer);
+    app.register_message::<crate::lobby::MapPublishOutcome>()
+        .add_direction(NetworkDirection::ServerToClient);
     app.register_message::<crate::lobby::MatchRejoinStatus>()
         .add_direction(NetworkDirection::ServerToClient);
     app.add_channel::<QueueSnapshotChannel>(ChannelSettings {
@@ -881,6 +885,8 @@ mod tests {
         assert!(app.is_message_registered::<crate::lobby::MatchmakingClientMessage>());
         assert!(app.is_message_registered::<crate::lobby::MatchmakingServerMessage>());
         assert!(app.is_message_registered::<crate::lobby::PracticeStartRequest>());
+        assert!(app.is_message_registered::<crate::lobby::MapPublishRequest>());
+        assert!(app.is_message_registered::<crate::lobby::MapPublishOutcome>());
         assert!(app.is_message_registered::<MatchRouteGrant>());
         assert!(app.is_message_registered::<MatchCommandRequest>());
         assert!(app.is_message_registered::<MatchCommandOutcome>());
@@ -1004,6 +1010,22 @@ mod tests {
         assert_eq!(decoded, message);
     }
 
+    /// Protocol 51 (BRL-w9z1) registers the map publish request and outcome and adds the
+    /// community-map fields to the catalog and reservation; the global handshake guards them.
+    #[test]
+    fn map_publishing_is_part_of_protocol_51() {
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 51);
+        let outcome = crate::lobby::MapPublishOutcome {
+            request_id: crate::lobby::MapPublishRequestId::new(2).unwrap(),
+            decision: crate::lobby::MapPublishDecision::Accepted {
+                published_map_id: crate::lobby::PublishedMapId::new(3).unwrap(),
+                state: crate::lobby::PublishedMapState::Pending,
+            },
+        };
+        let bytes = postcard::to_allocvec(&outcome).expect("outcome serializes");
+        assert_eq!(postcard::from_bytes(&bytes), Ok(outcome));
+    }
+
     /// Protocol 50 (BRL-dwqx) adds `PublicParticipantState::control`; the field changes the
     /// canonical encoding, so the global handshake version guards it.
     #[test]
@@ -1011,7 +1033,6 @@ mod tests {
         use crate::matchplay::{
             MatchId, MatchParticipant, ParticipantControl, PublicParticipantStatus,
         };
-        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 50);
         let state = PublicParticipantState {
             player_id: PlayerId(7),
             fighter_network_id: NetworkEntityId(11),
@@ -1048,6 +1069,7 @@ mod tests {
             map_preset_ids: vec![crate::map::MapPresetId(1)],
             practice_map_preset_ids: vec![crate::map::MapPresetId(1)],
             map_authoring_limits: Some(crate::map::AUTHORING_LIMITS),
+            community_maps: false,
             team_count: 2,
             players_per_team: 2,
             rules_summary: crate::lobby::AdvertisedRulesSummary::Wipeout {

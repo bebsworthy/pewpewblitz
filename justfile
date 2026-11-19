@@ -65,6 +65,10 @@ zombie-e2e players="2":
 practice-e2e game_type="wipeout-1v1":
     ./scripts/e2e-practice.sh {{game_type}}
 
+# Publish a map from one client, approve it with the operator CLI, and play it in a routed 1v1 queue match.
+published-map-e2e:
+    ./scripts/e2e-published-map.sh
+
 # Keep one routed Practice match session alive across two 4 s outages: to a new client source port, then back to the original.
 network-change-e2e game_type="wipeout-1v1":
     ./scripts/e2e-network-change.sh {{game_type}}

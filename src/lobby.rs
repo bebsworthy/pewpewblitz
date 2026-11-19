@@ -10,7 +10,14 @@ use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization as _;
 use unicode_segmentation::UnicodeSegmentation as _;
 
+mod publishing;
 mod queue;
+
+pub use publishing::{
+    MAX_PUBLISH_COOLDOWN_SECONDS, MapPublishDecision, MapPublishOutcome, MapPublishRejection,
+    MapPublishRequest, MapPublishRequestId, PUBLISHED_MAP_RECIPE_ID_BASE,
+    PUBLISHED_MAP_RECIPE_REVISION, PublishedMapCredit, PublishedMapId, PublishedMapState,
+};
 
 pub use queue::{
     BeginMatchConnect, FormationAvailability, MAX_QUEUE_FORMATION_SIZE, MAX_QUEUE_OUTCOME_BYTES,
@@ -157,6 +164,9 @@ pub struct AdvertisedGameType {
     #[serde(deserialize_with = "deserialize_practice_map_ids")]
     pub practice_map_preset_ids: Vec<MapPresetId>,
     pub map_authoring_limits: Option<crate::map::MapAuthoringLimits>,
+    /// The operator mixes approved published maps into this game type's queue rotation, so
+    /// Map Maker offers it as a Publish target (BRL-w9z1).
+    pub community_maps: bool,
     pub team_count: u8,
     pub players_per_team: u8,
     pub rules_summary: AdvertisedRulesSummary,
@@ -347,7 +357,9 @@ impl AdvertisedGameType {
                 | crate::map::HOT_ZONE_MODE_DEFINITION
                 | crate::map::HEIST_MODE_DEFINITION
         );
-        if self.map_authoring_limits != supports_authoring.then_some(crate::map::AUTHORING_LIMITS) {
+        if self.map_authoring_limits != supports_authoring.then_some(crate::map::AUTHORING_LIMITS)
+            || (self.community_maps && !supports_authoring)
+        {
             return Err(LobbyModelError::InvalidMapCount);
         }
         let topology_valid = match self.rules_summary {
@@ -613,6 +625,7 @@ pub fn canonical_catalog_bytes(
         } else {
             bytes.push(0);
         }
+        bytes.push(u8::from(game_type.community_maps));
         bytes.push(game_type.team_count);
         bytes.push(game_type.players_per_team);
         match game_type.rules_summary {
@@ -680,6 +693,7 @@ mod tests {
                 map_preset_ids: vec![MapPresetId(1)],
                 practice_map_preset_ids: vec![MapPresetId(1)],
                 map_authoring_limits: Some(crate::map::AUTHORING_LIMITS),
+                community_maps: false,
                 team_count: 2,
                 players_per_team: 2,
                 rules_summary: AdvertisedRulesSummary::Wipeout {
@@ -695,6 +709,7 @@ mod tests {
                 map_preset_ids: vec![MapPresetId(2)],
                 practice_map_preset_ids: vec![MapPresetId(2)],
                 map_authoring_limits: Some(crate::map::AUTHORING_LIMITS),
+                community_maps: false,
                 team_count: 2,
                 players_per_team: 2,
                 rules_summary: AdvertisedRulesSummary::HotZone {
@@ -709,13 +724,13 @@ mod tests {
     fn canonical_catalog_matches_committed_golden_vector() {
         let catalog = golden_catalog();
         let bytes = canonical_catalog_bytes(&catalog).unwrap();
-        assert_eq!(bytes.len(), 161);
+        assert_eq!(bytes.len(), 163);
         assert_eq!(
             catalog_revision(&catalog).unwrap().0,
             [
-                0x0f, 0xb6, 0x65, 0x1d, 0xa3, 0x92, 0x54, 0x1b, 0x96, 0x0f, 0x58, 0xd7, 0x99, 0xcc,
-                0x99, 0xec, 0xbd, 0x0e, 0xfe, 0x93, 0x57, 0x4a, 0xa5, 0x36, 0x05, 0x4d, 0x27, 0x36,
-                0x63, 0x01, 0x28, 0xc3,
+                0xf4, 0xd8, 0x99, 0x3b, 0xfd, 0xb2, 0xf8, 0x27, 0xdf, 0x6f, 0x6e, 0x92, 0x0c, 0x72,
+                0xde, 0x56, 0x94, 0xcd, 0x5c, 0x0a, 0x40, 0x26, 0xc8, 0xa6, 0x05, 0xa1, 0xc9, 0x27,
+                0xd3, 0xd1, 0xd9, 0x8d,
             ]
         );
     }

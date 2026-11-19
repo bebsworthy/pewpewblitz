@@ -359,6 +359,8 @@ client.
 | Route capability creation, validation, expiry, revocation | Supervisor from validated lobby allocation input |
 | Game-type and advertised brawler catalogs, profile content validation, queue tickets, formation, reservation | Lobby authority |
 | Saved-profile structural persistence and atomic load/store | Lobby-owned storage executor |
+| Published-map validation, quota, cooldown, and community rotation | Lobby authority, stored by the same executor |
+| Published-map moderation decisions | Operator, through `brawler-profile-admin maps` |
 | Host worker count and resource admission | Supervisor |
 | Match manifest validation | Worker |
 | Match ECS, physics, map, terrain, modes, combat, results | Worker authoritative world |
@@ -380,6 +382,20 @@ requires exactly one map source—a built-in preset or authored recipe—and the
 decode, fingerprint and resolver validation before inserting the resulting server map selection.
 Worker failure and cancellation use the same reservation, route-revocation and capacity cleanup as
 built-in Practice; local draft persistence remains client-owned.
+
+Published community maps (BRL-w9z1) reuse that path for queue matches. A lobby `MapPublishRequest`
+runs the shared authored-map acceptance, then the lobby's single profile-storage executor applies
+the operator's per-account quota and cooldown and the code capacity ceilings and stores the row in
+the `published_maps` table of the profile database (schema 3), so profile backups include it. The
+executor stays the only in-process writer; `brawler-profile-admin maps list | approve | reject |
+remove --database <data-dir>/profiles.sqlite3` is the offline operator path against the same WAL
+database while the lobby runs. The lobby re-reads approved rows every 5 s (and at once after an
+`Automatic` approval), re-validates each against the current content and game-type revision, and
+keeps an in-memory `CommunityMapRotation` per opted-in game type. Queue formation picks the next
+map round-robin over the built-in maps and then that rotation; a community map's reservation sends
+its stored recipe bytes, revision and fingerprint in the allocation request with `map_preset = 0`,
+and the worker validates it exactly as for authored Practice. Already formed reservations keep
+their immutable manifest. The supervisor, control IPC and manifest schema are unchanged.
 
 ## Failure and security requirements
 

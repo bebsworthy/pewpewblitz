@@ -14,8 +14,16 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+mod published_maps;
+
+pub use published_maps::{
+    MAX_PENDING_PUBLISHED_MAPS, MAX_PUBLISHED_MAP_REASON_BYTES, MAX_ROTATION_MAPS_PER_GAME_TYPE,
+    MAX_STORED_PUBLISHED_MAPS, PublishedMapAction, PublishedMapLimits, PublishedMapRecord,
+    PublishedMapStatus, PublishedMapSubmission, PublishedMapSubmissionOutcome,
+};
+
 const APPLICATION_ID: i32 = 0x4252_574c;
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 const EXECUTOR_BOUND: usize = 64;
 
 #[derive(Debug)]
@@ -352,8 +360,11 @@ fn migrate(connection: &mut Connection) -> Result<(), ProfileStorageError> {
              PRAGMA application_id=1112692556;
              PRAGMA user_version=2;",
         )?;
+        published_maps::create_schema_v3(&transaction)?;
         transaction.commit()?;
-    } else if version == 1 {
+        return Ok(());
+    }
+    if version == 1 {
         let transaction = connection.transaction()?;
         transaction.execute_batch(
             "ALTER TABLE profiles ADD COLUMN starter_part_set INTEGER NOT NULL DEFAULT 0 CHECK(starter_part_set>=0);
@@ -361,6 +372,13 @@ fn migrate(connection: &mut Connection) -> Result<(), ProfileStorageError> {
              CREATE TABLE brawler_part_slots(account_id BLOB NOT NULL CHECK(length(account_id)=16),brawler_id BLOB NOT NULL CHECK(length(brawler_id)=16),slot_index INTEGER NOT NULL CHECK(slot_index BETWEEN 0 AND 3),part_instance_id BLOB NOT NULL CHECK(length(part_instance_id)=16),PRIMARY KEY(account_id,brawler_id,slot_index),UNIQUE(account_id,part_instance_id),FOREIGN KEY(account_id,brawler_id) REFERENCES brawlers(account_id,brawler_id) ON DELETE CASCADE,FOREIGN KEY(account_id,part_instance_id) REFERENCES weapon_part_instances(account_id,part_instance_id) ON DELETE RESTRICT);
              PRAGMA user_version=2;",
         )?;
+        published_maps::create_schema_v3(&transaction)?;
+        transaction.commit()?;
+        return Ok(());
+    }
+    if version == 2 {
+        let transaction = connection.transaction()?;
+        published_maps::create_schema_v3(&transaction)?;
         transaction.commit()?;
     }
     Ok(())
@@ -691,12 +709,27 @@ pub enum ProfileStorageCommand {
         equipped_part_ids: [Option<crate::weapon_parts::WeaponPartInstanceId>;
             crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
     },
+    SubmitPublishedMap {
+        request_id: u64,
+        submission: Box<PublishedMapSubmission>,
+        limits: PublishedMapLimits,
+    },
+    LoadPublishedRotation {
+        request_id: u64,
+    },
     Shutdown,
+}
+
+/// One storage-owner completion; the variant matches the command family that produced it.
+pub enum ProfileStorageReply {
+    Profile(Result<ProfileSnapshot, ProfileStorageError>),
+    PublishedMapSubmission(Result<PublishedMapSubmissionOutcome, ProfileStorageError>),
+    PublishedRotation(Result<Vec<PublishedMapRecord>, ProfileStorageError>),
 }
 
 pub struct ProfileStorageResult {
     pub request_id: u64,
-    pub result: Result<ProfileSnapshot, ProfileStorageError>,
+    pub result: ProfileStorageReply,
 }
 
 pub struct ProfileStorageExecutor {
@@ -732,7 +765,10 @@ impl ProfileStorageExecutor {
                         ProfileStorageCommand::LoadOrCreate {
                             request_id,
                             account_id,
-                        } => (request_id, storage.load_or_create(account_id)),
+                        } => (
+                            request_id,
+                            ProfileStorageReply::Profile(storage.load_or_create(account_id)),
+                        ),
                         ProfileStorageCommand::Create {
                             request_id,
                             account_id,
@@ -741,12 +777,12 @@ impl ProfileStorageExecutor {
                             draft,
                         } => (
                             request_id,
-                            storage.create_brawler(
+                            ProfileStorageReply::Profile(storage.create_brawler(
                                 account_id,
                                 expected_profile_revision,
                                 brawler_id,
                                 draft,
-                            ),
+                            )),
                         ),
                         ProfileStorageCommand::Edit {
                             request_id,
@@ -757,13 +793,13 @@ impl ProfileStorageExecutor {
                             edit,
                         } => (
                             request_id,
-                            storage.edit_brawler(
+                            ProfileStorageReply::Profile(storage.edit_brawler(
                                 account_id,
                                 expected_profile_revision,
                                 brawler_id,
                                 expected_brawler_revision,
                                 edit,
-                            ),
+                            )),
                         ),
                         ProfileStorageCommand::Select {
                             request_id,
@@ -772,11 +808,11 @@ impl ProfileStorageExecutor {
                             brawler_id,
                         } => (
                             request_id,
-                            storage.select_brawler(
+                            ProfileStorageReply::Profile(storage.select_brawler(
                                 account_id,
                                 expected_profile_revision,
                                 brawler_id,
-                            ),
+                            )),
                         ),
                         ProfileStorageCommand::Delete {
                             request_id,
@@ -786,12 +822,12 @@ impl ProfileStorageExecutor {
                             expected_brawler_revision,
                         } => (
                             request_id,
-                            storage.delete_brawler(
+                            ProfileStorageReply::Profile(storage.delete_brawler(
                                 account_id,
                                 expected_profile_revision,
                                 brawler_id,
                                 expected_brawler_revision,
-                            ),
+                            )),
                         ),
                         ProfileStorageCommand::Equip {
                             request_id,
@@ -802,12 +838,28 @@ impl ProfileStorageExecutor {
                             equipped_part_ids,
                         } => (
                             request_id,
-                            storage.equip_weapon_parts(
+                            ProfileStorageReply::Profile(storage.equip_weapon_parts(
                                 account_id,
                                 expected_profile_revision,
                                 brawler_id,
                                 expected_brawler_revision,
                                 equipped_part_ids,
+                            )),
+                        ),
+                        ProfileStorageCommand::SubmitPublishedMap {
+                            request_id,
+                            submission,
+                            limits,
+                        } => (
+                            request_id,
+                            ProfileStorageReply::PublishedMapSubmission(
+                                storage.submit_published_map(*submission, limits),
+                            ),
+                        ),
+                        ProfileStorageCommand::LoadPublishedRotation { request_id } => (
+                            request_id,
+                            ProfileStorageReply::PublishedRotation(
+                                storage.load_published_rotation(),
                             ),
                         ),
                         ProfileStorageCommand::Shutdown => break,

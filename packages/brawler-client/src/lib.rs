@@ -113,8 +113,8 @@ pub use presentation::ClientPresentationPlugin;
 use presentation::{clamp_camera_center, update_client_hud};
 pub use profile::{ClientProfileModel, ClientProfilePlugin};
 pub use queue::{
-    ClientMatchLoadingModel, ClientPracticeModel, ClientQueueModel, ClientQueuePlugin,
-    PendingQueueCommand,
+    ClientMapPublishModel, ClientMatchLoadingModel, ClientPracticeModel, ClientQueueModel,
+    ClientQueuePlugin, PendingQueueCommand, map_publish_decision_text,
 };
 pub use routed_udp::{RoutedUdpIo, RoutedUdpPlugin};
 pub use server_select::{LogicalServerAddress, ServerAddressHost, parse_server_address};

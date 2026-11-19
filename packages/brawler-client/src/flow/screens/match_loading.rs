@@ -203,6 +203,9 @@ impl LoadingView<'_> {
                 format!("{}v{}", active.players_per_team, active.players_per_team)
             };
             self.label(group, &topology, 38.0, TEXT);
+            if let Some(credit) = active.published_map.as_ref() {
+                self.label(group, &published_map_credit_text(credit), 28.0, TEXT);
+            }
             group.spawn((
                 Node {
                     width: percent(96),
@@ -277,6 +280,13 @@ impl LoadingView<'_> {
     }
 }
 
+/// The Match Loading credit for a community map: "Map — by Author" (BRL-w9z1).
+pub(in crate::flow) fn published_map_credit_text(
+    credit: &brawler::lobby::PublishedMapCredit,
+) -> String {
+    format!("{} — by {}", credit.name, credit.author_display_name)
+}
+
 pub(in crate::flow) fn match_loading_text(
     _active: &brawler::lobby::ReservationStarted,
     phase: Option<brawler::lobby::MatchLoadingPhase>,
@@ -333,5 +343,21 @@ pub(in crate::flow) fn update_match_loading(
         } else {
             commands.entity(e).remove::<InteractionDisabled>();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn community_map_credit_names_the_map_and_its_author() {
+        let credit = brawler::lobby::PublishedMapCredit {
+            published_map_id: brawler::lobby::PublishedMapId::new(3).unwrap(),
+            name: "Yard Remix".to_string(),
+            author_display_name: "Brawler-1A2B".to_string(),
+        };
+        assert_eq!(
+            super::published_map_credit_text(&credit),
+            "Yard Remix — by Brawler-1A2B"
+        );
     }
 }

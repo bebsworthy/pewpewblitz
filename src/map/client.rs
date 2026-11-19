@@ -7,8 +7,8 @@ use super::{
     MapDestructionBehavior, MapDurabilityBehavior, MapDynamicGeneration, MapDynamicRecoveryRequest,
     MapDynamicRecoverySnapshot, MapDynamicResetEvent, MapDynamicState, MapInstanceId,
     MapMutationEvent, MapPlacementId, MapPlacementOutcome, MapPlacementTransition,
-    MapPresentationThemeId, MapRecipeFingerprint, MapRoot, PickupCue, ReceivedPickupCues,
-    ReceivedWorldObjectCues, ResolvedMapSnapshot, WorldObjectCue,
+    MapPresentationThemeId, MapRecipe, MapRecipeFingerprint, MapRoot, PickupCue,
+    ReceivedPickupCues, ReceivedWorldObjectCues, ResolvedMapSnapshot, WorldObjectCue,
 };
 use bevy::prelude::*;
 use lightyear::prelude::client::Client;
@@ -402,11 +402,28 @@ fn validate_client_grid_snapshot(
     {
         return Err("replicated map snapshot violates identity or schema".to_string());
     }
-    let preset_id = snapshot
-        .identity
-        .source_preset_id
-        .ok_or_else(|| "replicated map has no preset identity".to_string())?;
-    let expected = catalog.resolve_preset(preset_id, snapshot.identity.instance_id)?;
+    let expected = match snapshot.identity.source_preset_id {
+        Some(preset_id) => catalog.resolve_preset(preset_id, snapshot.identity.instance_id)?,
+        // A player-authored recipe (authored Practice or a published community map, BRL-w9z1)
+        // has no embedded preset. Its snapshot is the canonical expanded recipe, so the client
+        // re-resolves it with the same resolver and requires the identical snapshot, including
+        // the server's recipe fingerprint.
+        None => catalog.resolve_recipe(
+            &MapRecipe {
+                recipe_id: snapshot.identity.recipe_id,
+                revision: snapshot.identity.recipe_revision,
+                recipe_version: snapshot.recipe_schema_version,
+                mode_definition_id: snapshot.mode_definition_id,
+                presentation_theme_id: snapshot.presentation_theme_id,
+                dimensions: snapshot.dimensions,
+                default_surface_asset_id: snapshot.default_surface_asset_id,
+                placements: snapshot.placements.clone(),
+                filled_rects: Vec::new(),
+                mode_anchors: snapshot.mode_anchors.clone(),
+            },
+            snapshot.identity.instance_id,
+        )?,
+    };
     if expected.snapshot != *snapshot {
         return Err("replicated map differs from embedded canonical content".to_string());
     }
@@ -452,6 +469,27 @@ mod tests {
             .resolve_preset(MapPresetId(1), MapInstanceId(instance))
             .unwrap()
             .snapshot
+    }
+
+    #[test]
+    fn an_authored_snapshot_without_preset_provenance_is_re_resolved_exactly() {
+        let catalog = MapContentCatalog::embedded().unwrap();
+        let mut recipe = catalog
+            .preset(FEATURE_YARD_WIPEOUT_PRESET)
+            .unwrap()
+            .recipe
+            .clone();
+        recipe.recipe_id = crate::map::MapRecipeId(1 << 48 | 7);
+        recipe.revision = 1;
+        let authored = catalog
+            .resolve_recipe(&recipe, MapInstanceId(3))
+            .unwrap()
+            .snapshot;
+        assert_eq!(authored.identity.source_preset_id, None);
+        assert_eq!(validate_client_grid_snapshot(&authored, &catalog), Ok(()));
+        let mut forged = authored.clone();
+        forged.identity.recipe_fingerprint.0 ^= 1;
+        assert!(validate_client_grid_snapshot(&forged, &catalog).is_err());
     }
 
     fn app_with_snapshot(snapshot: ResolvedMapSnapshot) -> App {

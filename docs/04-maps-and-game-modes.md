@@ -54,6 +54,40 @@ and fingerprint before worker allocation. Runtime destruction, pickups, scoring,
 state never write back to the local draft. Built-in recipes continue to carry their preset
 provenance and use their existing pools.
 
+### Community maps in queue rotation
+
+A player can publish a saved Map Maker draft to the routed server they are connected to (BRL-w9z1).
+The server operator opts a game type in with `community_maps: true` in
+`config/server/game-types.ron`; `wipeout-1v1` is opted in on the checked-in server. Publish targets
+the draft's intended game type when it takes community maps, otherwise the first opted-in game type
+of the draft's mode.
+
+- **Validation.** The lobby runs the same authored-map acceptance as Practice: authoring
+  preflight, the authoritative resolver, and the game type's exact roster spawn capacity. The
+  approved rotation is re-validated against the current content and game-type revision every time
+  the lobby reloads it, and the match worker validates the manifest copy again. A map that stops
+  validating, or whose game type changes revision or leaves the opt-in, drops out of rotation and
+  stays stored.
+- **Moderation.** `map_publishing.moderation` is a per-server setting: `Approve` (the default)
+  stores a valid submission as pending until the operator runs
+  `brawler-profile-admin maps approve <id>`; `Automatic` puts a valid submission straight into
+  rotation and the operator removes it later with `maps remove <id>`. A pending map's name is
+  never shown to other players. `maps reject <id> --reason <text>` refuses one.
+- **Limits.** Per account: `pending_per_account` (3) maps awaiting review and a
+  `submit_cooldown_seconds` (120) wait between accepted submissions; there is no cap on one
+  account's approved maps. Code keeps the server ceilings: the 256 KiB authoring source limit,
+  256 stored pending-or-approved maps, 64 pending maps, and 64 rotation maps per game type.
+- **Rotation.** Queue formation round-robins over the game type's built-in maps first, then its
+  approved community maps in approval order. An approval takes effect within the lobby's 5 s
+  reload interval and only for reservations formed afterwards.
+- **Credit.** Match Loading shows "Map — by Author" for a community map. The author is the lobby
+  display name accepted when the map was published; the account that published it is a device's
+  unauthenticated account ID, so the credit is not a protected creator identity.
+
+Published maps are server data stored beside the profiles. They never change the gameplay content
+fingerprint, the advertised map pools, or the catalog revision (see
+[the network architecture](./08-network-architecture.md#practice-map-selection-wire-contract)).
+
 ## Map recipe contract
 
 The supported recipe model expresses:

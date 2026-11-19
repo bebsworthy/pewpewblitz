@@ -315,6 +315,7 @@ fn lobby_membership() -> ClientLobbyMembership {
             map_preset_ids: vec![brawler::map::MapPresetId(1)],
             practice_map_preset_ids: vec![brawler::map::MapPresetId(1)],
             map_authoring_limits: Some(brawler::map::AUTHORING_LIMITS),
+            community_maps: false,
             team_count: 2,
             players_per_team: 2,
             rules_summary: brawler::lobby::AdvertisedRulesSummary::Wipeout {
@@ -568,6 +569,7 @@ fn a_queue_handoff_reaches_the_match_even_after_a_late_reservation_removal() {
                 players_per_team: 1,
                 accepted_build: joined.accepted_build,
                 loading_deadline_millis: 30_000,
+                published_map: None,
             },
         ),
     );
@@ -2244,6 +2246,7 @@ fn queue_copy_uses_advertised_game_and_saved_brawler_recipe() {
             players_per_team: 2,
             accepted_build: membership.accepted_build,
             loading_deadline_millis: 30_000,
+            published_map: None,
         },
         Some(brawler::lobby::MatchLoadingPhase::Synchronizing),
     );
@@ -3780,7 +3783,13 @@ fn flow_button_sizes(app: &mut App) -> Vec<(String, Vec2)> {
             (format!("{:?}", button.action), size)
         })
         .collect();
-    sizes.sort_by(|a, b| a.0.cmp(&b.0));
+    // Two buttons can share an action (Dashboard's brawler tile and card); order them by size
+    // too, so the comparison never depends on entity iteration order.
+    sizes.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.x.total_cmp(&b.1.x))
+            .then(a.1.y.total_cmp(&b.1.y))
+    });
     sizes
 }
 
