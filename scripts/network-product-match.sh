@@ -6,10 +6,11 @@ set -eu
 # Active. M06 may override the client count to exercise several serial handoffs from one queue pool.
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$project_dir/scripts/e2e-config.sh"
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
 # Keep automated runs out of the supervisor's default data/server/ profile store.
 server_data_dir=${BRAWLER_SERVER_DATA_DIR:-$project_dir/target/e2e/server}
-timeout_seconds=${BRAWLER_ROUTED_TIMEOUT_SECONDS:-60}
+timeout_seconds=${BRAWLER_ROUTED_TIMEOUT_SECONDS:-}
 players_per_team=${BRAWLER_PRODUCT_PLAYERS_PER_TEAM:-2}
 game_type=${BRAWLER_PRODUCT_GAME_TYPE:-}
 headless=${BRAWLER_NETWORK_HEADLESS:-1}
@@ -137,11 +138,58 @@ if [ "$rejoin_smoke" = completed ] && [ "$client_count" -ne 2 ]; then
     echo "brawler product match: the completed rejoin smoke requires exactly one 1v1 roster" >&2
     exit 2
 fi
+# The requeue smoke plays a real match to its authoritative end, so its default watchdog follows
+# the game type's authored timing instead of the fast Active-only bound (BRL-cb3x).
+if [ "$requeue_smoke" = 1 ]; then
+    game_type=${game_type:-wipeout-1v1}
+    if [ -z "$timeout_seconds" ]; then
+        timeout_seconds=$(e2e_requeue_timeout_seconds "$project_dir" "$game_type") || {
+            echo "brawler product match: config/server/game-types.ron has no complete timing for $game_type" >&2
+            exit 2
+        }
+        echo "brawler product match: requeue watchdog ${timeout_seconds}s covers $game_type formation, countdown, and match duration plus ${e2e_requeue_margin_seconds}s routing margin"
+    fi
+fi
+timeout_seconds=${timeout_seconds:-60}
+# Weapons come from the authored diagnostic rotation, never from a literal range (BRL-xbq8).
+first_preset=$(e2e_diagnostic_weapon_for_client "$project_dir" 1) || {
+    echo "brawler product match: content/catalogs/builds.ron has no direct_diagnostic weapons" >&2
+    exit 2
+}
 
 supervisor_pid=
 watchdog_pid=
 client_1= client_2= client_3= client_4= client_5= client_6=
 cue_dir=
+requeue_log_dir=
+
+# Name the furthest requeue lifecycle phase each client and the supervisor reached, so a failure
+# reads as "never completed", "never returned to lobby", or "no new Joined".
+report_requeue_phases() {
+    [ -n "$requeue_log_dir" ] || return 0
+    phase_index=1
+    while [ "$phase_index" -le "$client_count" ]; do
+        phase_log="$requeue_log_dir/client-$phase_index.log"
+        phase=$(awk '
+            /brawler client accepted/ { granted = 1 }
+            /observed authoritative match completion/ { completed = 1 }
+            completed && /brawler lobby client accepted/ { lobby = 1 }
+            /requeue smoke accepted a fresh queue Join/ { joined = 1 }
+            END {
+                if (joined) print "received a new queue Joined"
+                else if (lobby) print "returned to a fresh lobby but got no new queue Joined"
+                else if (completed) print "saw the match complete but never returned to a fresh lobby"
+                else if (granted) print "entered the match but never saw it complete"
+                else print "never entered a match"
+            }
+        ' "$phase_log" 2>/dev/null || echo "left no log")
+        echo "brawler product match: requeue phase: client $phase_index $phase ($phase_log)" >&2
+        phase_index=$((phase_index + 1))
+    done
+    results=$(grep -c "worker result-received" "$requeue_log_dir/supervisor.log" 2>/dev/null || true)
+    reaped=$(grep -c "worker reaped" "$requeue_log_dir/supervisor.log" 2>/dev/null || true)
+    echo "brawler product match: requeue phase: supervisor received ${results:-0} match result(s) and reaped ${reaped:-0} worker(s)" >&2
+}
 
 cleanup() {
     trap - INT TERM EXIT
@@ -181,6 +229,15 @@ network_protocol=$(printf '%s\n' "$identity" | awk -F= '$1 == "network_protocol"
 registry_fingerprint=$(printf '%s\n' "$identity" | awk -F= '$1 == "protocol_registry_fingerprint" { print $2 }')
 content_fingerprint=$(printf '%s\n' "$identity" | awk -F= '$1 == "content_fingerprint" { print $2 }')
 
+# The requeue smoke keeps each process's log as its phase evidence; other paths stream to stderr.
+if [ "$requeue_smoke" = 1 ]; then
+    mkdir -p "$project_dir/target/e2e"
+    requeue_log_dir=$(mktemp -d "$project_dir/target/e2e/requeue.XXXXXX")
+    echo "brawler product match: requeue logs in $requeue_log_dir"
+    exec 3>"$requeue_log_dir/supervisor.log"
+else
+    exec 3>&2
+fi
 target/debug/brawler-supervisor \
     --network-protocol "$network_protocol" \
     --protocol-registry-fingerprint "$registry_fingerprint" \
@@ -188,12 +245,13 @@ target/debug/brawler-supervisor \
     --worker-executable "$project_dir/target/debug/brawler-server" \
     --game-types "$project_dir/config/server/game-types.ron" \
     --data-directory "$server_data_dir" \
-    --bind "$bind_addr" &
+    --bind "$bind_addr" 2>&3 &
 supervisor_pid=$!
+exec 3>&-
 
 index=1
 while [ "$index" -le "$client_count" ]; do
-    preset=$((1 + (index - 1) % 7))
+    preset=$(e2e_diagnostic_weapon_for_client "$project_dir" "$index")
     if [ "$headless" = 1 ]; then
         if [ "$practice_smoke" = 1 ]; then
             target/debug/brawler-client \
@@ -204,7 +262,7 @@ while [ "$index" -le "$client_count" ]; do
                 --headless \
                 "$practice_flag" \
                 --product-game-type "$game_type" \
-                --weapon-preset 1 &
+                --weapon-preset "$first_preset" &
         elif [ "$rejoin_smoke" = completed ]; then
             if [ "$index" -eq 1 ]; then
                 role_flag=--product-completed-rejoin-smoke
@@ -225,7 +283,7 @@ while [ "$index" -le "$client_count" ]; do
                     "$match_flag" \
                     --product-game-type "${game_type:-wipeout-1v1}" \
                     "$role_flag" "$cue_dir/leave" \
-                    --weapon-preset 1 &
+                    --weapon-preset "$first_preset" &
             else
                 target/debug/brawler-client \
                     --client-id $((5000 + index)) \
@@ -237,7 +295,7 @@ while [ "$index" -le "$client_count" ]; do
                     --product-game-type "${game_type:-wipeout-1v1}" \
                     "$role_flag" "$cue_dir/leave" \
                     --exit-after-lobby-return \
-                    --weapon-preset 1 &
+                    --weapon-preset "$first_preset" &
             fi
         elif [ "$requeue_smoke" = 1 ]; then
             if [ "$index" -eq 1 ]; then aim_axis=1,0; else aim_axis=-1,0; fi
@@ -248,10 +306,11 @@ while [ "$index" -le "$client_count" ]; do
                 --auto-connect \
                 --headless \
                 --product-requeue-smoke \
+                --product-game-type "$game_type" \
                 --aim-axis "$aim_axis" \
                 --fire \
                 --simulation-ticks 4000 \
-                --weapon-preset 1 &
+                --weapon-preset "$first_preset" >"$requeue_log_dir/client-$index.log" 2>&1 &
         else
             if [ -n "$game_type" ]; then
                 target/debug/brawler-client \
@@ -296,6 +355,7 @@ if [ "$headless" = 1 ]; then
     (
         sleep "$timeout_seconds"
         echo "brawler product match: timed out after ${timeout_seconds}s" >&2
+        report_requeue_phases
         index=1
         while [ "$index" -le "$client_count" ]; do
             eval "pid=\$client_${index}"
@@ -321,9 +381,15 @@ wait "$watchdog_pid" 2>/dev/null || true
 watchdog_pid=
 if [ "$status" -ne 0 ]; then
     echo "brawler product match: a client failed with status $status" >&2
+    report_requeue_phases
     exit "$status"
 fi
 
+report_requeue_phases
+if [ -n "$requeue_log_dir" ] && ! grep -q "worker result-received" "$requeue_log_dir/supervisor.log"; then
+    echo "brawler product match: the supervisor never received the completed match result" >&2
+    exit 1
+fi
 kill -INT "$supervisor_pid"
 wait "$supervisor_pid"
 supervisor_pid=

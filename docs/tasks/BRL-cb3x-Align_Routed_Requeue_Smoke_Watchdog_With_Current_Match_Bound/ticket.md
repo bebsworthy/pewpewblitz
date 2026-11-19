@@ -4,9 +4,9 @@ was: BRL-0042
 
 title: Align routed requeue smoke watchdog with current match bound
 
-status: doing
-closed:
-status_changed: 2026-11-19T13:09:26Z
+status: done
+closed: 2026-11-19T13:42:02Z
+status_changed: 2026-11-19T13:42:02Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-aejx]
 
 parent:
 
-rank: 11599872
+rank:
 ---
 
 # Description

@@ -48,7 +48,7 @@ fmt:
 check: _check-routing _check-client _check-automation _check-server _check-network _check-balance-lab
 
 # Run formatting, Clippy, dedicated-server isolation, and player-client automation-exclusion checks.
-lint: _fmt-check _balance-lab-web _clippy-routing _clippy-client _clippy-automation _clippy-server _clippy-network _clippy-balance-lab _clippy-network-balance-lab _server-features _client-features _v3-world-presentation _map-cleanup _lint-exceptions
+lint: _fmt-check _balance-lab-web _clippy-routing _clippy-client _clippy-automation _clippy-server _clippy-network _clippy-balance-lab _clippy-network-balance-lab _server-features _client-features _v3-world-presentation _map-cleanup _lint-exceptions _e2e-config
 
 # Run all deterministic Rust test suites, including the performance gates.
 test: _test-routing _test-client _test-server _test-balance-lab _test-network _test-performance
@@ -183,6 +183,9 @@ _map-cleanup:
 
 _lint-exceptions:
     ./scripts/check-lint-exceptions.sh
+
+_e2e-config:
+    ./scripts/check-e2e-config.sh
 
 # Client unit tests run with automation so the scripted-driver tests run beside player tests.
 _test-client:

@@ -138,9 +138,10 @@ Run `just` to list the supported everyday surface.
 | `just run <N>` | Build once, start the routed server, and open exactly 1–16 interactive clients |
 | `just fmt` | Format all Rust sources |
 | `just check` | Check every independently buildable role |
-| `just lint` | Run formatting, Clippy, role isolation (including the player-client automation exclusion), renderer/map-boundary checks, and Balance Lab web checks |
+| `just lint` | Run formatting, Clippy, role isolation (including the player-client automation exclusion), renderer/map-boundary checks, the authored e2e weapon and requeue-timing check, and Balance Lab web checks |
 | `just test` | Run deterministic routing, client, server, Balance Lab, network, and performance suites |
 | `just e2e [2, 4, or 6]` | Run the real-process 1v1, 2v2, or 3v3 product path; default is 2 |
+| `BRAWLER_PRODUCT_PLAYERS_PER_TEAM=1 BRAWLER_PRODUCT_REQUEUE_SMOKE=1 ./scripts/network-product-match.sh` | Play one real `wipeout-1v1` (or `BRAWLER_PRODUCT_GAME_TYPE`) match to its authoritative end, return both clients to a fresh lobby, and queue again; the watchdog defaults to the game type's authored formation, countdown, and duration plus 60 s, and a failure names the lifecycle phase each client reached (BRL-cb3x) |
 | `just practice-e2e [game type]` | Run one exact real-process Practice match with one human and server-filled bots; default is `wipeout-1v1` |
 | `just network-change-e2e [game type]` | Keep one routed Practice match session alive across two 4 s outages: to a new client source port, then back to the original (BRL-g57a, BRL-sqz0) |
 | `just slow-link-e2e [delay ms]` | Reach the lobby welcome on the first connect attempt through a UDP proxy that delays every supervisor-to-client datagram; default is 1500 (BRL-jx6p) |
