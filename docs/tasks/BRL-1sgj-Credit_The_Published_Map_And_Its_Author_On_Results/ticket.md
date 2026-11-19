@@ -3,9 +3,9 @@ id: BRL-1sgj
 
 title: Credit the published map and its author on Results
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-19T13:47:37Z
+status_changed: 2026-11-19T18:11:25Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-w9z1]
 
 parent:
 
-rank: 9830400
+rank: 11665408
 ---
 
 # Description

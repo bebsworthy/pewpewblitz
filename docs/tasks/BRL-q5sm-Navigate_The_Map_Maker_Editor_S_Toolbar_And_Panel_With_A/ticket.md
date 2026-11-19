@@ -3,9 +3,9 @@ id: BRL-q5sm
 
 title: 'Navigate the Map Maker editor''s toolbar and panel with a controller'
 
-status: doing
-closed:
-status_changed: 2026-11-19T16:48:44Z
+status: done
+closed: 2026-11-19T18:19:06Z
+status_changed: 2026-11-19T18:19:06Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-2xpc, BRL-tztp]
 
 parent:
 
-rank: 11468800
+rank:
 ---
 
 # Description

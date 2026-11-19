@@ -3,9 +3,9 @@ id: BRL-s3dh
 
 title: Show players the status of their published maps and let them withdraw one
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-19T13:47:37Z
+status_changed: 2026-11-19T18:11:25Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-w9z1]
 
 parent:
 
-rank: 9764864
+rank: 11599872
 ---
 
 # Description

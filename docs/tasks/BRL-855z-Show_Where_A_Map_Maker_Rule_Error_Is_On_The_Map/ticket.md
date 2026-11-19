@@ -3,9 +3,9 @@ id: BRL-855z
 
 title: Show where a Map Maker rule error is on the map
 
-status: doing
-closed:
-status_changed: 2026-11-19T16:48:44Z
+status: done
+closed: 2026-11-19T18:19:06Z
+status_changed: 2026-11-19T18:19:06Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-2xpc]
 
 parent:
 
-rank: 11534336
+rank:
 ---
 
 # Description
