@@ -13,6 +13,7 @@ use crate::{
     ui::{
         surface::{Surface, SurfaceBurst, SurfaceState},
         theme::{INK, TEXT, font, shell_background},
+        viewport::FIT_REFERENCE_HEIGHT,
     },
 };
 use bevy::{prelude::*, ui::InteractionDisabled, window::PrimaryWindow};
@@ -27,6 +28,14 @@ pub(in crate::flow) struct ResultsView {
     context: ClientMatchResultContext,
     size: Vec2,
     replay: bool,
+}
+/// Results parts the landscape-phone layout keeps on screen without scrolling (BRL-bnxx).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::flow) enum ResultsLayoutRole {
+    Header,
+    Trophy,
+    Headline,
+    TeamCard,
 }
 #[derive(bevy::ecs::system::SystemParam)]
 pub(in crate::flow) struct ResultsAssets<'w, 's> {
@@ -61,12 +70,12 @@ pub(in crate::flow) fn spawn_results(
                 && member.game_types.iter().any(|game| &game.id == id)
         })
     });
-    let size = assets
+    let window = assets
         .windows
         .iter()
         .next()
-        .map_or(Vec2::new(1440., 900.), |w| Vec2::new(w.width(), w.height()))
-        / assets.scale.as_deref().map_or(1., |s| s.0);
+        .map_or(Vec2::new(1440., 900.), |w| Vec2::new(w.width(), w.height()));
+    let size = window / assets.scale.as_deref().map_or(1., |s| s.0);
     let key = ResultsView {
         context: context.clone(),
         size,
@@ -86,18 +95,35 @@ pub(in crate::flow) fn spawn_results(
     let painter = ResultsPainter {
         context,
         assets: assets.handles.as_deref(),
-        compact: size.x < 1000.,
-        stacked: size.x < 700.,
+        layout: ResultsLayout {
+            compact: size.x < 1000.,
+            stacked: size.x < 700.,
+            // BRL-bnxx: a window shorter than the viewport-fit reference is a landscape phone.
+            // Its UI space is the reference height or taller at every UI scale, but too short for
+            // the desktop layout plus 48 dp touch targets, so it gets the short layout. Desktop
+            // windows at least that tall keep the desktop layout at every scale.
+            short: window.y < FIT_REFERENCE_HEIGHT,
+        },
         celebrate,
     };
     painter.draw(&mut commands, key, assets.server.as_deref(), *purpose);
 }
 
+/// Layout class chosen from the window and UI space when Results is drawn.
+#[derive(Clone, Copy)]
+struct ResultsLayout {
+    /// Narrow UI space: smaller type and padding.
+    compact: bool,
+    /// Very narrow UI space: team cards and actions stack.
+    stacked: bool,
+    /// Landscape-phone layout: header beside the trophy, shorter cards and rows (BRL-bnxx).
+    short: bool,
+}
+
 struct ResultsPainter<'a> {
     context: &'a ClientMatchResultContext,
     assets: Option<&'a ClientAssetHandles>,
-    compact: bool,
-    stacked: bool,
+    layout: ResultsLayout,
     /// Play the one results burst on the outcome and the local team (BRL-51zd).
     celebrate: bool,
 }
@@ -128,7 +154,11 @@ impl ResultsPainter<'_> {
                     width: percent(100),
                     height: percent(100),
                     flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(px(if self.compact { 24. } else { 40. })),
+                    padding: if self.layout.short {
+                        UiRect::axes(px(if self.layout.compact { 24. } else { 40. }), px(16))
+                    } else {
+                        UiRect::all(px(if self.layout.compact { 24. } else { 40. }))
+                    },
                     overflow: Overflow::scroll_y(),
                     ..default()
                 },
@@ -189,11 +219,11 @@ impl ResultsPainter<'_> {
         body.spawn(Node {
             width: percent(100),
             max_width: px(840),
-            margin: UiRect::top(px(24)),
+            margin: UiRect::top(px(if self.layout.short { 8. } else { 24. })),
             flex_shrink: 0.,
             column_gap: px(24),
             row_gap: px(12),
-            flex_direction: if self.stacked {
+            flex_direction: if self.layout.stacked {
                 FlexDirection::Column
             } else {
                 FlexDirection::Row
@@ -241,13 +271,42 @@ impl ResultsPainter<'_> {
         .id()
     }
     fn header(&self, p: &mut ChildSpawnerCommands) {
-        let cup = trophy(p, if self.compact { 0.6 } else { 0.85 });
+        if self.layout.short {
+            // One row keeps the trophy and outcome on a landscape phone without scrolling.
+            p.spawn((
+                ResultsLayoutRole::Header,
+                Node {
+                    max_width: percent(100),
+                    flex_shrink: 0.,
+                    flex_wrap: FlexWrap::Wrap,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    column_gap: px(28),
+                    ..default()
+                },
+            ))
+            .with_children(|row| self.header_parts(row, 0.75, 60., 28.));
+        } else {
+            let (cup, headline, title) = if self.layout.compact {
+                (0.6, 44., 24.)
+            } else {
+                (0.85, 72., 30.)
+            };
+            self.header_parts(p, cup, headline, title);
+        }
+    }
+    fn header_parts(&self, p: &mut ChildSpawnerCommands, cup: f32, headline: f32, title_size: f32) {
+        let cup = trophy(p, cup);
+        p.commands().entity(cup).insert(ResultsLayoutRole::Trophy);
         self.burst(p, cup);
         let headline = self.text(
             p,
             &outcome(self.context.result, self.context.local_team),
-            if self.compact { 44. } else { 72. },
+            headline,
         );
+        p.commands()
+            .entity(headline)
+            .insert(ResultsLayoutRole::Headline);
         self.burst(p, headline);
         let title = self.context.wipeout.as_ref().map_or_else(
             || {
@@ -274,7 +333,7 @@ impl ResultsPainter<'_> {
             },
         );
         if !title.is_empty() {
-            self.text(p, &title, if self.compact { 24. } else { 30. });
+            self.text(p, &title, title_size);
         }
     }
     fn teams(&self, p: &mut ChildSpawnerCommands, scores: &WipeoutState) {
@@ -284,12 +343,12 @@ impl ResultsPainter<'_> {
             flex_shrink: 0.,
             column_gap: px(28),
             row_gap: px(22),
-            flex_direction: if self.stacked {
+            flex_direction: if self.layout.stacked {
                 FlexDirection::Column
             } else {
                 FlexDirection::Row
             },
-            margin: UiRect::top(px(8)),
+            margin: UiRect::top(px(if self.layout.short { 0. } else { 8. })),
             ..default()
         })
         .with_children(|teams| {
@@ -300,14 +359,21 @@ impl ResultsPainter<'_> {
         });
     }
     fn team(&self, p: &mut ChildSpawnerCommands, scores: &WipeoutState, team: TeamId) {
-        p.spawn(Node {
-            width: if self.stacked { percent(100) } else { px(0) },
-            min_width: px(0),
-            flex_grow: 1.,
-            flex_direction: FlexDirection::Column,
-            row_gap: px(8),
-            ..default()
-        })
+        p.spawn((
+            ResultsLayoutRole::TeamCard,
+            Node {
+                width: if self.layout.stacked {
+                    percent(100)
+                } else {
+                    px(0)
+                },
+                min_width: px(0),
+                flex_grow: 1.,
+                flex_direction: FlexDirection::Column,
+                row_gap: px(8),
+                ..default()
+            },
+        ))
         .with_children(|column| {
             let ours = self.context.local_team == Some(team);
             column
@@ -319,8 +385,14 @@ impl ResultsPainter<'_> {
                     },
                     Node {
                         width: percent(100),
-                        min_height: px(if self.compact { 78. } else { 112. }),
-                        padding: UiRect::axes(px(28), px(12)),
+                        min_height: px(if self.layout.compact {
+                            78.
+                        } else if self.layout.short {
+                            84.
+                        } else {
+                            112.
+                        }),
+                        padding: UiRect::axes(px(28), px(if self.layout.short { 8. } else { 12. })),
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::SpaceBetween,
                         ..default()
@@ -339,12 +411,18 @@ impl ResultsPainter<'_> {
                         } else {
                             "TEAM 2"
                         },
-                        if self.compact { 22. } else { 32. },
+                        if self.layout.compact { 22. } else { 32. },
                     );
                     self.text(
                         banner,
                         &scores.team_scores[usize::from(team.0)].to_string(),
-                        if self.compact { 48. } else { 76. },
+                        if self.layout.compact {
+                            48.
+                        } else if self.layout.short {
+                            56.
+                        } else {
+                            76.
+                        },
                     );
                 });
             self.row(column, "", "KILLS", "DEATHS", false, true);
@@ -379,13 +457,13 @@ impl ResultsPainter<'_> {
         let mut row = p.spawn(Node {
             width: percent(100),
             min_height: px(if heading {
-                28.
-            } else if self.compact {
+                if self.layout.short { 24. } else { 28. }
+            } else if self.layout.compact || self.layout.short {
                 50.
             } else {
                 62.
             }),
-            padding: UiRect::axes(px(if self.compact { 18. } else { 28. }), px(9)),
+            padding: UiRect::axes(px(if self.layout.compact { 18. } else { 28. }), px(9)),
             align_items: AlignItems::Center,
             ..default()
         });
@@ -417,9 +495,11 @@ impl ResultsPainter<'_> {
                             cell,
                             value,
                             if heading {
-                                if self.compact { 15. } else { 18. }
-                            } else if self.compact {
+                                if self.layout.compact { 15. } else { 18. }
+                            } else if self.layout.compact {
                                 21.
+                            } else if self.layout.short {
+                                26.
                             } else {
                                 28.
                             },
@@ -448,7 +528,11 @@ impl ResultsPainter<'_> {
             role,
             SurfaceState::default(),
             Node {
-                width: if self.stacked { percent(100) } else { px(0) },
+                width: if self.layout.stacked {
+                    percent(100)
+                } else {
+                    px(0)
+                },
                 flex_grow: 1.,
                 min_height: px(76),
                 padding: UiRect::axes(px(30), px(14)),
@@ -461,7 +545,7 @@ impl ResultsPainter<'_> {
             e.insert(InteractionDisabled);
         }
         e.with_children(|button| {
-            self.text(button, title, if self.compact { 23. } else { 30. });
+            self.text(button, title, if self.layout.compact { 23. } else { 30. });
         });
     }
 }

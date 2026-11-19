@@ -3985,6 +3985,175 @@ fn shell_controls_are_48_dp_touch_targets_on_a_landscape_phone() {
     }
 }
 
+/// Wipeout 3v3, Hot Zone and Heist victories for the local team 1, as Results presents them.
+fn results_layout_contexts(
+    game_type_id: &brawler::lobby::GameTypeId,
+) -> [(&'static str, super::super::ClientMatchResultContext); 3] {
+    use brawler::matchplay::{MatchId, MatchResult, ObjectiveResult, ObjectiveTotals};
+    let result = MatchResult::TeamVictory {
+        team: brawler::combat::TeamId(0),
+    };
+    let mut wipeout = brawler::matchplay::WipeoutState {
+        team_scores: [10, 7],
+        target_score: 10,
+        ..Default::default()
+    };
+    for (index, slot) in wipeout.players.iter_mut().take(6).enumerate() {
+        let id = u64::try_from(index).unwrap() + 1;
+        *slot = Some(brawler::matchplay::WipeoutPlayerStats {
+            player_id: brawler::protocol::PlayerId(id),
+            network_id: brawler::protocol::NetworkEntityId(id),
+            team: brawler::combat::TeamId(u8::try_from(index % 2).unwrap()),
+            display_name: format!("Brawler {id}"),
+            kills: 4,
+            deaths: 2,
+        });
+    }
+    let base = super::super::ClientMatchResultContext {
+        result,
+        local_team: Some(brawler::combat::TeamId(0)),
+        local_player: Some(brawler::protocol::PlayerId(1)),
+        ..match_result_context(game_type_id.clone())
+    };
+    let objective = |totals| {
+        Some(ObjectiveResult {
+            match_id: MatchId(1),
+            result,
+            totals,
+        })
+    };
+    [
+        (
+            "Wipeout",
+            super::super::ClientMatchResultContext {
+                wipeout: Some(wipeout),
+                ..base.clone()
+            },
+        ),
+        (
+            "Hot Zone",
+            super::super::ClientMatchResultContext {
+                objective: objective(ObjectiveTotals::HotZone {
+                    progress: [1800, 927],
+                    target: 1800,
+                }),
+                ..base.clone()
+            },
+        ),
+        (
+            "Heist",
+            super::super::ClientMatchResultContext {
+                objective: objective(ObjectiveTotals::Heist {
+                    health: [1800, 0],
+                    maximum: [2000, 2000],
+                }),
+                ..base
+            },
+        ),
+    ]
+}
+
+/// BRL-bnxx: on a landscape phone at the default and the smallest UI scale, every mode's Results
+/// shows the trophy, outcome header, both team cards and both 48 dp actions without scrolling
+/// and without overlap. Desktop 1280x720 keeps its stacked header.
+#[test]
+fn results_fit_a_landscape_phone_without_scrolling() {
+    use crate::settings::persistence::MIN_UI_SCALE;
+    use crate::ui::layout_harness::{node_rect, on_screen, overlapping_buttons, short_buttons};
+    use screens::results::{ResultsLayoutRole, ResultsView};
+    for (width, height, ui_scale) in [
+        (868, 411, 1.0),
+        (868, 411, MIN_UI_SCALE),
+        (914, 411, 1.0),
+        (914, 411, MIN_UI_SCALE),
+        (1280, 720, 1.0),
+    ] {
+        let membership = lobby_membership_with_brawler();
+        let game_type_id = membership.game_types[0].id.clone();
+        for (mode, context) in results_layout_contexts(&game_type_id) {
+            let screen = format!(
+                "{mode} Results at {width}x{height}, {:.0}%",
+                ui_scale * 100.0
+            );
+            let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
+                crate::ui::layout_harness::add_layout(app, width, height);
+                app.insert_resource(crate::ui::touch_target::TouchTargetPolicy { enabled: true });
+            });
+            crate::ui::layout_harness::apply_viewport_fit(&mut app);
+            app.world_mut().resource_mut::<UiScale>().0 *= ui_scale;
+            app.world_mut()
+                .resource_mut::<super::super::ClientMatchResultState>()
+                .context = Some(context);
+            app.world_mut()
+                .resource_mut::<NextState<ClientFlow>>()
+                .set(ClientFlow::Results);
+            settle_layout(&mut app);
+
+            let mut roles = app.world_mut().query::<(Entity, &ResultsLayoutRole)>();
+            let roles: Vec<_> = roles
+                .iter(app.world())
+                .map(|(entity, role)| (entity, *role))
+                .collect();
+            let count = |wanted| roles.iter().filter(|(_, role)| *role == wanted).count();
+            assert_eq!(count(ResultsLayoutRole::Trophy), 1, "{screen}");
+            assert_eq!(count(ResultsLayoutRole::Headline), 1, "{screen}");
+            assert_eq!(count(ResultsLayoutRole::TeamCard), 2, "{screen}");
+            if height >= 640 {
+                // Desktop keeps the stacked header: the phone row never applies there.
+                assert_eq!(count(ResultsLayoutRole::Header), 0, "{screen}");
+                continue;
+            }
+            assert_eq!(count(ResultsLayoutRole::Header), 1, "{screen}");
+
+            let (content, size) = app
+                .world_mut()
+                .query_filtered::<&ComputedNode, With<ResultsView>>()
+                .single(app.world())
+                .map(|node| (node.content_size().y, node.size().y))
+                .expect("one Results root");
+            assert!(
+                content <= size + 0.5,
+                "{screen}: content {content} > {size}, so Results would scroll"
+            );
+            let mut buttons = app.world_mut().query_filtered::<Entity, With<FlowButton>>();
+            let buttons: Vec<_> = buttons.iter(app.world()).collect();
+            assert_eq!(buttons.len(), 2, "{screen}");
+            let parts: Vec<_> = roles
+                .iter()
+                .filter(|(_, role)| *role != ResultsLayoutRole::Header)
+                .map(|(entity, _)| *entity)
+                .chain(buttons)
+                .collect();
+            for &part in &parts {
+                assert!(
+                    on_screen(app.world_mut(), part),
+                    "{screen}: {:?} {part:?} is off screen at {:?}",
+                    app.world().get::<ResultsLayoutRole>(part),
+                    node_rect(app.world(), part)
+                );
+            }
+            for (index, &a) in parts.iter().enumerate() {
+                for &b in &parts[index + 1..] {
+                    let overlap = node_rect(app.world(), a)
+                        .unwrap()
+                        .intersect(node_rect(app.world(), b).unwrap());
+                    assert!(
+                        overlap.width() <= 1.0 || overlap.height() <= 1.0,
+                        "{screen}: {a:?} overlaps {b:?}"
+                    );
+                }
+            }
+            let short = short_buttons(
+                app.world_mut(),
+                crate::ui::touch_target::MIN_TOUCH_TARGET_DP,
+            );
+            assert!(short.is_empty(), "{screen}: actions under 48 dp: {short:?}");
+            let overlapping = overlapping_buttons(app.world_mut(), &[]);
+            assert!(overlapping.is_empty(), "{screen}: {overlapping:?}");
+        }
+    }
+}
+
 /// BRL-q148: desktop keeps the authored control heights; the touch floor is off by default.
 #[test]
 fn desktop_policy_keeps_authored_control_heights() {

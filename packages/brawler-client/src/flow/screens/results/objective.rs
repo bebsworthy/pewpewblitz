@@ -29,14 +29,14 @@ impl ResultsPainter<'_> {
             width: percent(100),
             max_width: px(1200),
             flex_shrink: 0.,
-            flex_direction: if self.stacked {
+            flex_direction: if self.layout.stacked {
                 FlexDirection::Column
             } else {
                 FlexDirection::Row
             },
             column_gap: px(28),
             row_gap: px(22),
-            margin: UiRect::vertical(px(16)),
+            margin: UiRect::vertical(px(if self.layout.short { 0. } else { 16. })),
             ..default()
         })
         .with_children(|teams| {
@@ -46,20 +46,29 @@ impl ResultsPainter<'_> {
                 let (label, detail, amount) = values(totals, usize::from(team.0));
                 teams
                     .spawn((
+                        super::ResultsLayoutRole::TeamCard,
                         Surface::Panel,
                         SurfaceState {
                             current: ours,
                             ..default()
                         },
                         Node {
-                            width: if self.stacked { percent(100) } else { px(0) },
+                            width: if self.layout.stacked {
+                                percent(100)
+                            } else {
+                                px(0)
+                            },
                             min_width: px(0),
                             flex_grow: 1.,
                             flex_shrink: 0.,
-                            padding: UiRect::all(px(if self.compact { 26. } else { 40. })),
+                            padding: if self.layout.short {
+                                UiRect::axes(px(40), px(18))
+                            } else {
+                                UiRect::all(px(if self.layout.compact { 26. } else { 40. }))
+                            },
                             flex_direction: FlexDirection::Column,
                             align_items: AlignItems::Center,
-                            row_gap: px(20),
+                            row_gap: px(if self.layout.short { 8. } else { 20. }),
                             ..default()
                         },
                     ))
@@ -78,10 +87,20 @@ impl ResultsPainter<'_> {
                             } else {
                                 "TEAM 2"
                             },
-                            if self.compact { 26. } else { 36. },
+                            if self.layout.compact { 26. } else { 36. },
                         );
-                        self.text(card, label, if self.compact { 19. } else { 24. });
-                        self.text(card, &detail, if self.compact { 42. } else { 64. });
+                        self.text(card, label, if self.layout.compact { 19. } else { 24. });
+                        self.text(
+                            card,
+                            &detail,
+                            if self.layout.compact {
+                                42.
+                            } else if self.layout.short {
+                                52.
+                            } else {
+                                64.
+                            },
+                        );
                         card.spawn((
                             BackgroundColor(INK.mix(&PANEL, 0.4)),
                             Node {

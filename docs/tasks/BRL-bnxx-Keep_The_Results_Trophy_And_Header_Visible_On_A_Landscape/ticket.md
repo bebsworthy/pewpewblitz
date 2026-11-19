@@ -3,9 +3,9 @@ id: BRL-bnxx
 
 title: Keep the Results trophy and header visible on a landscape phone
 
-status: doing
-closed:
-status_changed: 2026-11-19T15:26:33Z
+status: done
+closed: 2026-11-19T16:28:10Z
+status_changed: 2026-11-19T16:28:10Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-h0yc]
 
 parent:
 
-rank: 11796480
+rank:
 ---
 
 # Description

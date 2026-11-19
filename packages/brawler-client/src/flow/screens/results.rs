@@ -4,6 +4,8 @@ mod scroll;
 mod view;
 pub(in crate::flow) use scroll::scroll_results;
 pub(in crate::flow) use view::spawn_results;
+#[cfg(test)]
+pub(in crate::flow) use view::{ResultsLayoutRole, ResultsView};
 
 use crate::{
     ClientMatchResultState,
