@@ -18,7 +18,9 @@ use crate::{
 use bevy::{prelude::*, ui::InteractionDisabled};
 use std::path::PathBuf;
 
-/// One of the three layout directions on the board.
+mod compact;
+
+/// One of the layout directions on the board.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Direction {
     /// A: card shelf library; floating canvas chrome (top bar, tool rail, bottom asset tray).
@@ -27,16 +29,33 @@ enum Direction {
     Workbench,
     /// C: Practice-style spotlight carousel; editor driven from a bottom mode bar.
     QuickBuild,
+    /// D: lighter shell library; flat, compact application-style editor (`compact`).
+    CompactTool,
 }
 
 impl Direction {
-    const ALL: [Self; 3] = [Self::Shelf, Self::Workbench, Self::QuickBuild];
+    const ALL: [Self; 4] = [
+        Self::Shelf,
+        Self::Workbench,
+        Self::QuickBuild,
+        Self::CompactTool,
+    ];
+
+    /// The scenes this direction shows: the shared five, plus D's tool-style library variant
+    /// and its open Assets panel.
+    const fn scenes(self) -> &'static [Scene] {
+        match self {
+            Self::CompactTool => &Scene::COMPACT,
+            _ => &Scene::ALL,
+        }
+    }
 
     const fn key(self) -> &'static str {
         match self {
             Self::Shelf => "a-shelf",
             Self::Workbench => "b-workbench",
             Self::QuickBuild => "c-quick-build",
+            Self::CompactTool => "d-compact-tool",
         }
     }
 }
@@ -49,6 +68,10 @@ enum Scene {
     Create,
     Editor,
     Check,
+    /// D only: the library drawn in the same flat tool style as the editor.
+    ToolLibrary,
+    /// D only: the editor with its side panel open on Assets.
+    Assets,
 }
 
 impl Scene {
@@ -59,6 +82,15 @@ impl Scene {
         Self::Editor,
         Self::Check,
     ];
+    const COMPACT: [Self; 7] = [
+        Self::Library,
+        Self::ToolLibrary,
+        Self::Empty,
+        Self::Create,
+        Self::Editor,
+        Self::Assets,
+        Self::Check,
+    ];
 
     const fn key(self) -> &'static str {
         match self {
@@ -67,6 +99,8 @@ impl Scene {
             Self::Create => "create",
             Self::Editor => "editor",
             Self::Check => "check",
+            Self::ToolLibrary => "library-tool",
+            Self::Assets => "assets",
         }
     }
 }
@@ -75,6 +109,14 @@ impl Scene {
 const SETTLE_FRAMES: u32 = 45;
 /// Frames between the capture request and the next mockup, for the asynchronous save.
 const SAVE_FRAMES: u32 = 30;
+
+/// Editor controls drawn over the arena; the board reports their share of the screen.
+#[derive(Component)]
+struct ChromeRegion;
+
+/// The mockup root, whose laid-out size is the screen the chrome share is measured against.
+#[derive(Component)]
+struct MockupRoot;
 
 #[derive(Resource)]
 struct MockupBoard {
@@ -90,7 +132,12 @@ pub(crate) fn add_map_maker_mockups(app: &mut App, dir: PathBuf) {
     std::fs::create_dir_all(&dir).expect("mockup directory is creatable");
     let queue = Direction::ALL
         .into_iter()
-        .flat_map(|direction| Scene::ALL.map(|scene| (direction, scene)))
+        .flat_map(|direction| {
+            direction
+                .scenes()
+                .iter()
+                .map(move |scene| (direction, *scene))
+        })
         .collect();
     crate::ui::touch_target::add_touch_targets(app);
     app.insert_resource(MockupBoard {
@@ -124,6 +171,8 @@ fn drive_board(
     server: Res<AssetServer>,
     windows: Query<&Window>,
     target: Res<crate::automation::OffscreenRenderTarget>,
+    chrome: Query<&ComputedNode, With<ChromeRegion>>,
+    roots: Query<&ComputedNode, With<MockupRoot>>,
     mut policy: ResMut<crate::ui::touch_target::TouchTargetPolicy>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -158,6 +207,31 @@ fn drive_board(
         commands
             .spawn(target.screenshot())
             .observe(save_to_disk(path));
+        if let Some(screen) = roots
+            .iter()
+            .next()
+            .map(|root| root.size().x * root.size().y)
+            && !chrome.is_empty()
+            && screen > 0.0
+        {
+            let covered: f32 = chrome
+                .iter()
+                .map(|node| node.size().x * node.size().y)
+                .sum();
+            let line = format!(
+                "{}-{}: controls {:.1}% of the screen, arena {:.1}%\n",
+                direction.key(),
+                scene.key(),
+                100.0 * covered / screen,
+                100.0 * (1.0 - covered / screen)
+            );
+            info!("{}", line.trim_end());
+            let path = board.dir.join("arena-share.txt");
+            let previous = std::fs::read_to_string(&path).unwrap_or_default();
+            if let Err(error) = std::fs::write(&path, previous + &line) {
+                warn!("arena share not written: {error}");
+            }
+        }
     } else if board.frame >= SETTLE_FRAMES + SAVE_FRAMES {
         if let Some(root) = board.root.take() {
             commands.entity(root).despawn();
@@ -176,9 +250,12 @@ fn spawn_mockup(commands: &mut Commands, kit: &Kit, direction: Direction, scene:
             ..default()
         },
         shell_background(),
+        MockupRoot,
     ));
     root.with_children(|root| {
-        if matches!(scene, Scene::Library | Scene::Empty | Scene::Create) {
+        if matches!(scene, Scene::Library | Scene::Empty | Scene::Create)
+            && !(direction == Direction::CompactTool && scene == Scene::ToolLibrary)
+        {
             root.spawn((
                 crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
                 ImageNode {
@@ -210,6 +287,8 @@ fn spawn_mockup(commands: &mut Commands, kit: &Kit, direction: Direction, scene:
             (Direction::QuickBuild, Scene::Create) => spotlight_create(root, kit),
             (Direction::QuickBuild, Scene::Editor) => quick_editor(root, kit, false),
             (Direction::QuickBuild, Scene::Check) => quick_editor(root, kit, true),
+            (Direction::CompactTool, scene) => compact::spawn(root, kit, scene),
+            (_, Scene::ToolLibrary | Scene::Assets) => {}
         }
     });
     root.id()
@@ -920,6 +999,7 @@ fn shelf_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         top: px(10),
         ..default()
     })
+    .insert(ChromeRegion)
     .with_children(|top| {
         kit.surface(
             top,
@@ -980,6 +1060,7 @@ fn shelf_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         top: px(rail_top),
         ..column(10.0)
     })
+    .insert(ChromeRegion)
     .with_children(|rail| {
         for (icon, label, state) in [
             ("place", "PLACE", current()),
@@ -997,6 +1078,7 @@ fn shelf_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         top: px(rail_top),
         ..column(10.0)
     })
+    .insert(ChromeRegion)
     .with_children(|view| view_controls(view, kit, true));
     shelf_tray(root, kit);
     if check {
@@ -1007,6 +1089,7 @@ fn shelf_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
             width: px(kit.pick(470.0, 640.0)),
             ..default()
         })
+        .insert(ChromeRegion)
         .with_children(|anchor| issues_panel(anchor, kit));
     }
 }
@@ -1020,6 +1103,7 @@ fn shelf_tray(root: &mut ChildSpawnerCommands, kit: &Kit) {
         bottom: px(10),
         ..default()
     })
+    .insert(ChromeRegion)
     .with_children(|anchor| {
         kit.surface(
             anchor,
@@ -1294,6 +1378,8 @@ fn issue_rows(panel: &mut ChildSpawnerCommands, kit: &Kit, include_passed: bool)
 #[derive(Clone, Copy, Default)]
 struct CanvasInsets {
     right_percent: f32,
+    /// UI pixels a top bar takes above the arena.
+    top: f32,
 }
 
 fn canvas(root: &mut ChildSpawnerCommands, kit: &Kit, insets: CanvasInsets) {
@@ -1301,7 +1387,7 @@ fn canvas(root: &mut ChildSpawnerCommands, kit: &Kit, insets: CanvasInsets) {
         Node {
             position_type: PositionType::Absolute,
             left: px(0),
-            top: px(0),
+            top: px(insets.top),
             bottom: px(0),
             right: percent(insets.right_percent),
             justify_content: JustifyContent::Center,
@@ -1314,7 +1400,7 @@ fn canvas(root: &mut ChildSpawnerCommands, kit: &Kit, insets: CanvasInsets) {
     .with_children(|stage| {
         // Overview art sized like a fitted 48×32 arena (the image is 1.6:1).
         let width = (kit.pick(1280.0, 1423.0) * (1.0 - insets.right_percent / 100.0) - 40.0)
-            .min(kit.pick(720.0, 640.0) * 1.6 - 40.0);
+            .min((kit.pick(720.0, 640.0) - insets.top) * 1.6 - 40.0);
         stage
             .spawn((
                 ImageNode::new(
@@ -1608,6 +1694,7 @@ fn workbench_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         kit,
         CanvasInsets {
             right_percent: dock_percent,
+            ..default()
         },
     );
     // Slim top bar over the canvas only.
@@ -1619,6 +1706,7 @@ fn workbench_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         padding: UiRect::right(px(12)),
         ..default()
     })
+    .insert(ChromeRegion)
     .with_children(|top| {
         kit.surface(
             top,
@@ -1649,6 +1737,7 @@ fn workbench_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         bottom: px(12),
         ..row(10.0)
     })
+    .insert(ChromeRegion)
     .with_children(|view| view_controls(view, kit, false));
     // Dock.
     root.spawn(Node {
@@ -1660,6 +1749,7 @@ fn workbench_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         padding: UiRect::all(px(10)),
         ..default()
     })
+    .insert(ChromeRegion)
     .with_children(|anchor| {
         kit.surface(
             anchor,
@@ -2192,6 +2282,7 @@ fn quick_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         top: px(10),
         ..row(10.0)
     })
+    .insert(ChromeRegion)
     .with_children(|lead| {
         kit.action(
             lead,
@@ -2217,6 +2308,7 @@ fn quick_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         top: px(10),
         ..row(10.0)
     })
+    .insert(ChromeRegion)
     .with_children(|trail| {
         kit.action(
             trail,
@@ -2242,6 +2334,7 @@ fn quick_editor(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         top: px(kit.pick(90.0, 104.0)),
         ..column(10.0)
     })
+    .insert(ChromeRegion)
     .with_children(|view| view_controls(view, kit, false));
     quick_bottom(root, kit, check);
 }
@@ -2256,6 +2349,7 @@ fn quick_bottom(root: &mut ChildSpawnerCommands, kit: &Kit, check: bool) {
         align_items: AlignItems::Center,
         ..column(8.0)
     })
+    .insert(ChromeRegion)
     .with_children(|bottom| {
         kit.surface(
             bottom,
