@@ -91,3 +91,61 @@ All three directions:
 ![Direction B - Workbench](assets/direction-b-workbench.png)
 
 ![Direction C - Quick Build](assets/direction-c-quick-build.png)
+
+### D — Compact tool UI (`target/2xpc/sheets/direction-d-compact-tool.png`), added 2026-11-19
+
+Owner feedback, 2026-11-19: the wide slanted buttons suit the game shell, but Map Maker is fundamentally an application. Large, decorative controls waste space, especially on a phone. D explores standard GUI components that keep the shell's colours.
+
+- **Kept from the shell:**
+  - the palette: navy panels, cyan focus and selection, orange primary;
+  - the Lilita title font;
+  - 48 dp phone targets (76 UI px at 914x411).
+- **Editor:**
+  - **No shell surfaces:** no slants, lips, drop shadows or full-width text bars.
+  - **Thin top bar** (`ctl` + 8 px tall), all square icon buttons:
+    - Back;
+    - document name and status;
+    - Place, Select and Erase as one segmented control (icon only on the phone, icon plus a short label on desktop);
+    - Undo and Redo;
+    - Grid, Mirror and Fit;
+    - Save and Test (orange; disabled while checks fail).
+  - **Side panel for Assets and Check:**
+    - open, it is 400 px wide on the phone (330 px on desktop), with segmented tabs and a collapse button;
+    - collapsed, it shrinks to two tab buttons, and Check carries an orange count badge;
+    - collapsed, a chip in the corner shows the current asset ("Arena Wall · Cover · R rotates");
+    - Assets: a category picker, search, and compact rows (swatch, name, footprint) with the selection shown as a cyan fill and outline;
+    - Check: issue rows, each with Show, then what passed.
+  - **Body text** uses the platform sans (`FontSource::SansSerif`, weight 600). Titles stay in Lilita.
+- **Library:**
+  - **The lighter-shell look (main frames):** the shell background, shell Back, title, orange CREATE MAP and EDIT MAP, and flat map tiles inside a translucent `ink` panel. Rename, Duplicate and Delete are flat buttons acting on the selected tile. Create is a flat dialog.
+  - **The tool-style variant (`library-tool`):** a thin top bar and a table of maps (thumbnail, name, mode, size, status, saved time, and inline rename, duplicate and delete icons).
+- **Measured control coverage** on the phone (914x411):
+
+  | Direction | Controls cover | Arena keeps |
+  |---|---|---|
+  | D, panel collapsed | 20.0 % | 80 % |
+  | D, panel open | 37.6 % | 62 % |
+  | A | 44.3 % (61 % with the check open) | 56 % |
+  | B | 51.5 % | 48.5 % |
+  | C | 43.2 % | 57 % |
+
+  The board writes these numbers to `target/2xpc/board/<size>/arena-share.txt`. They are the summed layout areas of the editor's control containers (`ChromeRegion`) over the screen. The desktop figures are D 10.9 % / 30.7 %, B 41.7 %, A 44.4 %, C 32.5 %.
+- **Comparison sheet:** `target/2xpc/sheets/compare-b-vs-d-phone.png` shows B and D side by side on the phone: the editor, the check, and D's open Assets panel, with A for reference.
+- **Trade-offs:**
+  - **For:**
+    - the arena gets about 80 % of the phone screen, and every control is still 48 dp;
+    - flat controls are simpler to build and test, because they skip the slant, lip and focus-geometry reserves;
+    - long asset lists scroll naturally;
+    - the panel has room for BRL-tztp's extra tools.
+  - **Against:**
+    - the editor deliberately stops looking like the shell (a "game" vs "tool" split);
+    - controller focus needs a local flat focus ring, because the shell surface's focus frame doesn't apply;
+    - the system sans differs between macOS (Helvetica Neue) and Android (Roboto);
+    - D's widgets stay local to Map Maker and are not added to the shell toolkit, per the brief.
+- **Implementation note if D is chosen:** the flat widgets live in Map Maker's own module, next to its screen, and are not a `Surface` variant. Map Maker's buttons still get the touch-target floor through `FlowButton`/`TouchTarget`.
+
+**Updated recommendation: D, with the lighter-shell library.** The owner's critique holds up when measured. Shell-styled controls at 48 dp cost B about half the phone screen; D's flat controls cost 20 % collapsed and 38 % open. My Maps keeps the shell look, so Map Maker's entry still feels like part of the game. The tool-style library is the alternative if one consistent tool look throughout Map Maker matters more. The question `q-ad0c83c` was edited in place to offer A, B, C, D, and D with the tool-style library.
+
+![Direction D - Compact tool UI](assets/direction-d-compact-tool.png)
+
+![Phone editor: B vs D](assets/compare-b-vs-d-phone.png)

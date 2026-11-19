@@ -2,48 +2,72 @@
 
 # Questions · BRL-2xpc
 
-## q-ad0c83c · open · blocking · by Boyd
+## q-ad0c83c · open · blocking · edited 2026-11-19 13:23 · by Boyd
 
 Which Map Maker layout direction should the overhaul implement?
 
-I audited the current library and editor at 1280x720 and 914x411 (sheets `audit-1280x720.png` and `audit-914x411.png`). The worst problems:
+**Updated 2026-11-19:** added direction D, "Compact tool UI", at your request. The default is now D.
+
+I audited the current library and editor at 1280x720 and 914x411 (sheets `2xpc-audit-*.png`). The worst problems:
 
 - The library is unstyled text with 19–25 dp buttons.
 - With 4 drafts at desktop size, CREATE MAP and BACK go below the window.
 - Each card is a stack of 4 identical buttons, with no overview or status.
 - The create preview shows the wrong size.
 - On the phone the ERASE tool is hidden under the asset tray.
-- Validation shows one raw string ("grid map lacks spawn capacity").
+- Validation shows one raw string.
 
-The spec's "Design phase" section has the full list.
+Every direction fixes these. Each keeps phone controls at 48 dp or more, puts Back top-left, makes Test the primary action, and shows the check as requirements plus fixes. None changes the recipe, validation or undo model. The sheets are `direction-*.png` and `compare-b-vs-d-phone.png`.
 
-Each direction below is built from the shell toolkit and shows library, empty, create, editor and check at both sizes; see the attached `direction-*.png` sheets. All three:
+**How much of the phone screen the editor controls cover** (measured from the laid-out control panels at 914x411; lower leaves more room for the arena):
 
-- Give My Maps a titled panel and an empty state.
-- Keep every phone control at least 48 dp.
-- Put Back top-left and make Test the primary action.
-- Show the check as requirements plus fixes.
-
-None of them changes the recipe, validation or undo model. Each adds a recipe-derived overview thumbnail (a presentation cache) and fixes the create preview.
+| Direction | Editor | With assets or check open |
+|---|---|---|
+| A Shelf | 44 % | 61 % (check popover) |
+| B Workbench | 52 % | 52 % |
+| C Quick Build | 43 % | 41 % |
+| **D Compact tool** | **20 %** (side panel collapsed) | **38 %** (side panel open) |
 
 - [ ] A — Shelf
 
-  A titled panel with a horizontal shelf of map cards and one action bar for the focused card. The editor keeps today's floating chrome, cleaned up: top bar, left tool rail, right view rail and a bottom asset tray.
-  - **For:** smallest change to the shipped editor, so the least rework and retesting. Cards look good with a few maps.
-  - **Against:** on the phone the top bar and tray leave about 55 % of the height for the arena. The sideways shelf gets slow past about 8 maps.
+  A card shelf library; the editor keeps today's floating chrome, cleaned up, with a bottom asset tray.
+  - **For:** smallest editor change.
+  - **Against:** about 44 % of the phone screen is chrome, rising to 61 % with the check open.
 
-- [ ] B — Workbench *(recommended · default if unanswered)*
+- [ ] B — Workbench
 
-  Library: a scrolling list of maps on the left and a detail panel on the right (large overview, facts, status, Rename, Duplicate, Delete, Edit). Empty and create states appear in the detail panel. Editor: the arena keeps the full height on the left. A right-hand dock holds Save and Test, the tools, and Assets / Check tabs; Check lists what blocks Test, then what passed.
-  - **For:** suits a landscape phone, which has width to spare but little height. All controls sit in one thumb-side column. The list scales to many maps and works naturally with a controller. The check has room for requirement counts, and the dock has room for BRL-tztp's extra tools.
-  - **Against:** the arena is narrower (about 60–67 % of the width). It is the biggest editor restructure, and the palette becomes a vertical grid.
+  A list + detail library; the editor has a full-height arena with a right-hand dock.
+  - **For:** a strong library, and a check panel with room for requirement counts.
+  - **Against:** the shell-styled dock uses half the phone screen, because slanted, lipped 48 dp shell buttons are large.
 
 - [ ] C — Quick Build
 
-  Library: a spotlight carousel like the Practice map picker, with a big EDIT MAP and a full-screen create step. Editor: a full-screen arena driven by a bottom mode bar (Build, Select, Erase, Check, Undo, Redo) with a contextual tray above it.
-  - **For:** the most game-like option, consistent with the approved Practice picker. All frequent actions are in the bottom thumb zone.
-  - **Against:** shows one map at a time, so it is slow to scan or manage many drafts. Two bottom rows cover the lower third of the arena on the phone, and the check tray fits about two issues.
+  A Practice-style carousel library; a full-screen editor driven by a bottom mode bar.
+  - **For:** the most game-like option.
+  - **Against:** slow to scan many maps, and the two bottom rows cover the lower part of the arena.
 
-- [ ] Mix: A's card shelf library with B's dock editor
+- [ ] D — Compact tool UI, with the lighter-shell library *(recommended · default if unanswered)*
 
-  For cards in the library but the dock editor's phone layout.
+  The editor keeps the shell palette (navy, cyan selection, orange primary) and the title font, but uses flat application controls:
+  - a thin top bar with square icon buttons (Back, the Place/Select/Erase segmented tools, Undo, Redo, Grid, Mirror, Fit, Save, Test);
+  - a side panel for Assets and Check that collapses to two tabs;
+  - compact list rows, with the selection shown as a cyan outline and fill;
+  - body text in the platform sans.
+
+  Collapsed, a chip in the corner keeps the current asset visible. My Maps keeps the shell's Back, title and orange actions, with flat map tiles, so it still reads as part of the game's menus, and EDIT MAP opens the tool UI.
+  - **For:**
+    - the arena gets about 80 % of the phone screen, against about 48 % for B and about 56 % for A, the direction closest to today's layout;
+    - every control is still 48 dp;
+    - the controls are simpler to build and test, because they skip the slant, lip and focus-geometry rules;
+    - long asset lists scroll naturally;
+    - the dock has room for BRL-tztp's extra tools.
+  - **Against:**
+    - the editor no longer looks like the rest of the shell, which is a deliberate split between "game" and "tool";
+    - controller focus needs its own flat focus ring, because D cannot use the shell surface's focus treatment;
+    - the platform sans renders differently on macOS and Android.
+
+- [ ] D, with the tool-style library
+
+  The same D editor. My Maps is also flat: a thin top bar and a table of maps (thumbnail, name, mode, size, status, saved time, and inline rename, duplicate and delete). This is the `library-tool` frames on the D sheet.
+  - **For:** fastest to manage many maps, and one consistent tool look throughout Map Maker.
+  - **Against:** My Maps stops feeling like part of the game's menus.
