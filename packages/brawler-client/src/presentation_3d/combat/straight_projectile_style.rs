@@ -1,4 +1,5 @@
-//! Retained neutral straight-bolt styling shared by single and spread weapon recipes.
+//! Retained neutral straight-bolt styling shared by single and spread weapon recipes. The
+//! nucleus and wake carry the observer-relative weapon team tint (BRL-h270).
 
 use super::super::{
     AuthoritativeTick, Material3dAssets, NotShadowCaster, NotShadowReceiver, Primitive3dAssets, vfx,
@@ -20,17 +21,11 @@ pub(crate) struct StraightProjectileTrailMaterial {
 }
 
 impl StraightProjectileTrailMaterial {
-    pub(crate) const fn blue(quality: TrailQuality) -> Self {
+    /// A wake in one linear HDR relation colour (ally blue or enemy red).
+    pub(crate) fn new(color: LinearRgba, quality: TrailQuality) -> Self {
         Self {
             params: Vec4::new(0.0, quality.shader_index(), 0.0, 0.0),
-            color: Vec4::new(0.055, 1.35, 2.45, 1.0),
-        }
-    }
-
-    pub(crate) const fn red(quality: TrailQuality) -> Self {
-        Self {
-            params: Vec4::new(0.0, quality.shader_index(), 0.0, 0.0),
-            color: Vec4::new(2.8, 0.34, 0.025, 1.0),
+            color: Vec4::new(color.red, color.green, color.blue, 1.0),
         }
     }
 }
@@ -108,7 +103,7 @@ pub(super) fn spawn_neutral_straight_projectile_style(
     materials: &Material3dAssets,
     signature: vfx::CombatVisualSignature,
     core_transform: Transform,
-    team: brawler::combat::TeamId,
+    tint: vfx::WeaponTeamTint,
     visual_radius: f32,
 ) -> bool {
     let Some(quality) = neutral_straight_trail_quality(signature) else {
@@ -119,10 +114,9 @@ pub(super) fn spawn_neutral_straight_projectile_style(
         .with_scale(Vec3::new(visual_radius, visual_radius, visual_radius));
     parent.spawn((
         Mesh3d(primitives.effect_sphere.clone()),
-        MeshMaterial3d(if team.0 == 1 {
-            materials.projectile_hot_red.clone()
-        } else {
-            materials.projectile_hot_blue.clone()
+        MeshMaterial3d(match tint {
+            vfx::WeaponTeamTint::Ally => materials.projectile_hot_ally.clone(),
+            vfx::WeaponTeamTint::Enemy => materials.projectile_hot_enemy.clone(),
         }),
         NotShadowCaster,
         NotShadowReceiver,
@@ -134,7 +128,7 @@ pub(super) fn spawn_neutral_straight_projectile_style(
     let trail_width = visual_radius.mul_add(2.8, 5.0).clamp(18.0, 28.0);
     parent.spawn((
         Mesh3d(primitives.projectile_trail.clone()),
-        MeshMaterial3d(projectile_trail_material(team, quality, materials)),
+        MeshMaterial3d(projectile_trail_material(tint, quality, materials)),
         NotShadowCaster,
         NotShadowReceiver,
         Transform::from_xyz(0.0, core_transform.scale.y * 0.56, 0.0).with_scale(Vec3::new(
@@ -148,15 +142,16 @@ pub(super) fn spawn_neutral_straight_projectile_style(
 }
 
 fn projectile_trail_material(
-    team: brawler::combat::TeamId,
+    tint: vfx::WeaponTeamTint,
     quality: TrailQuality,
     materials: &Material3dAssets,
 ) -> Handle<StraightProjectileTrailMaterial> {
-    match (team.0 == 1, quality) {
-        (false, TrailQuality::Normal) => materials.projectile_trail_blue.clone(),
-        (true, TrailQuality::Normal) => materials.projectile_trail_red.clone(),
-        (false, TrailQuality::Reduced) => materials.projectile_trail_blue_reduced.clone(),
-        (true, TrailQuality::Reduced) => materials.projectile_trail_red_reduced.clone(),
+    use vfx::WeaponTeamTint::{Ally, Enemy};
+    match (tint, quality) {
+        (Ally, TrailQuality::Normal) => materials.projectile_trail_ally.clone(),
+        (Enemy, TrailQuality::Normal) => materials.projectile_trail_enemy.clone(),
+        (Ally, TrailQuality::Reduced) => materials.projectile_trail_ally_reduced.clone(),
+        (Enemy, TrailQuality::Reduced) => materials.projectile_trail_enemy_reduced.clone(),
     }
 }
 
@@ -178,10 +173,10 @@ pub(crate) fn animate_straight_projectile_trail_materials(
         .expect("the simulation tick rate fits u16");
     let time = f32::from(visual_tick) / f32::from(tick_hz);
     for handle in [
-        &handles.projectile_trail_blue,
-        &handles.projectile_trail_red,
-        &handles.projectile_trail_blue_reduced,
-        &handles.projectile_trail_red_reduced,
+        &handles.projectile_trail_ally,
+        &handles.projectile_trail_enemy,
+        &handles.projectile_trail_ally_reduced,
+        &handles.projectile_trail_enemy_reduced,
     ] {
         if let Some(mut material) = materials.get_mut(handle) {
             material.params.x = time;
@@ -262,13 +257,123 @@ mod tests {
     }
 
     #[test]
-    fn authored_trail_materials_encode_quality_and_team_color() {
-        let blue = StraightProjectileTrailMaterial::blue(TrailQuality::Normal);
-        let red = StraightProjectileTrailMaterial::red(TrailQuality::Reduced);
+    fn trail_materials_encode_quality_and_relation_color() {
+        let blue = StraightProjectileTrailMaterial::new(
+            LinearRgba::new(0.04, 1.4, 2.6, 1.0),
+            TrailQuality::Normal,
+        );
+        let red = StraightProjectileTrailMaterial::new(
+            LinearRgba::new(2.6, 0.07, 0.05, 1.0),
+            TrailQuality::Reduced,
+        );
         assert!(blue.params.y.abs() < f32::EPSILON);
         assert!((red.params.y - 1.0).abs() < f32::EPSILON);
         assert!(blue.color.z > blue.color.x);
         assert!(red.color.x > red.color.z);
+    }
+
+    fn foundation_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<super::super::elemental_style::FireAreaMaterial>>()
+            .init_resource::<Assets<super::super::elemental_style::ElementalSupportAreaMaterial>>()
+            .init_resource::<Assets<super::super::cone_spray::ConeSprayMaterial>>()
+            .init_resource::<Assets<StraightProjectileTrailMaterial>>()
+            .init_resource::<brawler::builds::BuildCatalogResource>()
+            .init_resource::<Assets<ToonMaterial>>()
+            .insert_resource(ToonShading::embedded().unwrap())
+            .add_systems(Startup, setup_3d_foundation);
+        app.update();
+        app
+    }
+
+    #[test]
+    fn bolt_nucleus_and_wake_use_the_viewer_relative_tint_in_rim_colors() {
+        let mut app = foundation_app();
+        let signature = signature(
+            vfx::VfxCarrier::StraightProjectile,
+            vfx::VfxAccent::Neutral,
+            vfx::VfxPresentationVariant::Normal,
+        );
+        let mut roots = Vec::new();
+        for tint in [vfx::WeaponTeamTint::Ally, vfx::WeaponTeamTint::Enemy] {
+            let world = app.world_mut();
+            let materials = world.resource::<Material3dAssets>();
+            let (hot, trail) = match tint {
+                vfx::WeaponTeamTint::Ally => (
+                    materials.projectile_hot_ally.clone(),
+                    materials.projectile_trail_ally.clone(),
+                ),
+                vfx::WeaponTeamTint::Enemy => (
+                    materials.projectile_hot_enemy.clone(),
+                    materials.projectile_trail_enemy.clone(),
+                ),
+            };
+            let root = world.spawn_empty().id();
+            world.resource_scope(|world, materials: Mut<Material3dAssets>| {
+                world.resource_scope(|world, primitives: Mut<Primitive3dAssets>| {
+                    world.commands().entity(root).with_children(|parent| {
+                        assert!(spawn_neutral_straight_projectile_style(
+                            parent,
+                            &primitives,
+                            &materials,
+                            signature,
+                            Transform::default(),
+                            tint,
+                            4.0,
+                        ));
+                    });
+                    world.flush();
+                });
+            });
+            roots.push((root, hot, trail));
+        }
+        let world = app.world_mut();
+        for (root, hot, trail) in roots {
+            let children = world.get::<Children>(root).unwrap().to_vec();
+            assert!(children.iter().any(|child| {
+                world
+                    .get::<MeshMaterial3d<StandardMaterial>>(*child)
+                    .is_some_and(|material| material.0 == hot)
+            }));
+            assert!(children.iter().any(|child| {
+                world
+                    .get::<MeshMaterial3d<StraightProjectileTrailMaterial>>(*child)
+                    .is_some_and(|material| material.0 == trail)
+            }));
+        }
+
+        // The hues are the toon rim relation colours shared with rings, nameplates, and rims.
+        let shading = ToonShading::embedded().unwrap();
+        let materials = app.world().resource::<Material3dAssets>();
+        let standard = app.world().resource::<Assets<StandardMaterial>>();
+        for (handle, relation) in [
+            (
+                &materials.weapon_body_ally,
+                crate::presentation_3d::RimRelation::Ally,
+            ),
+            (
+                &materials.weapon_body_enemy,
+                crate::presentation_3d::RimRelation::Enemy,
+            ),
+        ] {
+            let color = standard.get(handle).unwrap().base_color.to_srgba();
+            let [red, green, blue] = shading.rim_rgb(relation);
+            assert!((color.red - red).abs() < 1e-4);
+            assert!((color.green - green).abs() < 1e-4);
+            assert!((color.blue - blue).abs() < 1e-4);
+        }
+        let ally = standard
+            .get(&materials.projectile_hot_ally)
+            .unwrap()
+            .emissive;
+        let enemy = standard
+            .get(&materials.projectile_hot_enemy)
+            .unwrap()
+            .emissive;
+        assert!(ally.blue > ally.green && ally.green > ally.red);
+        assert!(enemy.red > 10.0 * enemy.green && enemy.red > 10.0 * enemy.blue);
     }
 
     #[test]
@@ -297,7 +402,7 @@ mod tests {
         let handle = app
             .world()
             .resource::<Material3dAssets>()
-            .projectile_trail_blue
+            .projectile_trail_ally
             .clone();
         let material = app
             .world()

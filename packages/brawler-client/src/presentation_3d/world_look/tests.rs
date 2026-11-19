@@ -1,7 +1,7 @@
 use super::*;
 use crate::presentation_3d::{
-    GLOW_MUZZLE, GLOW_PICKUP, GLOW_PROJECTILE_BLUE, GLOW_PROJECTILE_RED, ToonMaterial, ToonShading,
-    combat, environment_assets, setup_3d_foundation,
+    GLOW_MUZZLE, GLOW_PICKUP, GLOW_PROJECTILE_PEAK, RimRelation, ToonMaterial, ToonShading, combat,
+    environment_assets, relation_glow, setup_3d_foundation,
 };
 use bevy::camera::Exposure;
 
@@ -150,9 +150,11 @@ fn theme_lighting_stays_below_the_bloom_knee() {
 #[test]
 fn glow_materials_exceed_the_bloom_threshold() {
     let threshold = catalog().bloom.threshold;
+    let shading = ToonShading::embedded().expect("embedded toon shading");
+    let relation = |relation| relation_glow(shading.rim_rgb(relation), GLOW_PROJECTILE_PEAK);
     for glow in [
-        GLOW_PROJECTILE_BLUE,
-        GLOW_PROJECTILE_RED,
+        relation(RimRelation::Ally),
+        relation(RimRelation::Enemy),
         GLOW_MUZZLE,
         GLOW_PICKUP,
     ] {

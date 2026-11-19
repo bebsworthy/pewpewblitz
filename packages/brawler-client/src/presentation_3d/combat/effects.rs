@@ -198,7 +198,7 @@ fn resolved_effect(
                     meshes.as_deref_mut(),
                     melee_meshes,
                 ),
-                material: vfx_material(layer.material, materials),
+                material: vfx_material(layer.material, request.signature.relationship, materials),
                 transform: effect_layer_transform(
                     layer,
                     request.position,
@@ -371,8 +371,18 @@ pub(crate) fn animate_combat_effect_layers(
     }
 }
 
-fn vfx_material(key: VfxMaterialKey, materials: &Material3dAssets) -> Handle<StandardMaterial> {
+fn vfx_material(
+    key: VfxMaterialKey,
+    relationship: crate::vfx::VfxRelationship,
+    materials: &Material3dAssets,
+) -> Handle<StandardMaterial> {
+    use crate::vfx::VfxRelationship as R;
     match key {
+        VfxMaterialKey::RelationshipSoft => match relationship {
+            R::SelfOwned | R::Ally => materials.effect_ally_soft.clone(),
+            R::Enemy => materials.effect_enemy_soft.clone(),
+            R::Neutral => materials.neutral_energy_soft.clone(),
+        },
         VfxMaterialKey::EffectMuzzle => materials.effect_muzzle.clone(),
         VfxMaterialKey::EffectImpact => materials.effect_impact.clone(),
         VfxMaterialKey::EffectDamage => materials.effect_damage.clone(),
@@ -1026,6 +1036,60 @@ mod tests {
         assert_eq!(mesh.0, sphere);
         assert_eq!(transform.translation, Vec3::new(10.0, 6.3, -20.0));
         assert_eq!(transform.scale, Vec3::splat(14.0));
+    }
+
+    #[test]
+    fn neutral_straight_muzzle_shell_follows_the_viewer_relative_weapon_tint() {
+        use crate::vfx::VfxRelationship as R;
+
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<super::super::elemental_style::FireAreaMaterial>>()
+            .init_resource::<Assets<super::super::elemental_style::ElementalSupportAreaMaterial>>()
+            .init_resource::<Assets<super::super::cone_spray::ConeSprayMaterial>>()
+            .init_resource::<
+                Assets<super::super::straight_projectile_style::StraightProjectileTrailMaterial>,
+            >()
+            .init_resource::<brawler::builds::BuildCatalogResource>()
+            .init_resource::<Assets<ToonMaterial>>()
+            .insert_resource(ToonShading::embedded().unwrap())
+            .add_systems(Startup, setup_3d_foundation);
+        app.update();
+        let materials = app.world().resource::<Material3dAssets>();
+        for (relationship, expected) in [
+            (R::SelfOwned, &materials.effect_ally_soft),
+            (R::Ally, &materials.effect_ally_soft),
+            (R::Enemy, &materials.effect_enemy_soft),
+            (R::Neutral, &materials.neutral_energy_soft),
+        ] {
+            assert_eq!(
+                &vfx_material(VfxMaterialKey::RelationshipSoft, relationship, materials),
+                expected
+            );
+        }
+
+        // The production neutral straight muzzle tints its shell and echo, never the hot core.
+        let registry = registry();
+        let mut request = VfxRequest::try_new(
+            COMBAT_MUZZLE_VFX,
+            VfxRequestOrder::new(COMBAT_VFX_PRODUCER_RANK, 1),
+            Vec2::ZERO,
+            None,
+            None,
+            "muzzle tint test",
+        )
+        .unwrap();
+        request.signature.carrier = crate::vfx::VfxCarrier::StraightProjectile;
+        let recipe = registry.resolve(&request, false).unwrap();
+        assert_eq!(recipe.id, "neutral_straight_muzzle");
+        let tinted = recipe
+            .layers
+            .iter()
+            .filter(|layer| layer.material == VfxMaterialKey::RelationshipSoft)
+            .map(|layer| layer.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(tinted, ["neutral_muzzle_shell", "neutral_muzzle_echo"]);
     }
 
     #[test]

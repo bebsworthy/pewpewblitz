@@ -1499,9 +1499,11 @@ const fn lab_relationship_facts(
     relationship: VfxLabRelationship,
 ) -> (brawler::protocol::NetworkEntityId, brawler::combat::TeamId) {
     match relationship {
+        // The reserved neutral team: the Lab's default shows weapon fire in the blue viewer-side
+        // tint (BRL-h270); O cycles to ally blue and enemy red.
         VfxLabRelationship::Neutral => (
             brawler::protocol::NetworkEntityId(1),
-            brawler::combat::TeamId(0),
+            brawler::combat::NEUTRAL_TEAM,
         ),
         VfxLabRelationship::Ally => (
             brawler::protocol::NetworkEntityId(2),
@@ -2593,7 +2595,7 @@ mod tests {
             (
                 VfxLabRelationship::Neutral,
                 brawler::protocol::NetworkEntityId(1),
-                brawler::combat::TeamId(0),
+                brawler::combat::NEUTRAL_TEAM,
                 crate::vfx::VfxRelationship::Neutral,
             ),
             (

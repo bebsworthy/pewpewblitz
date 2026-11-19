@@ -76,6 +76,30 @@ pub(crate) enum VfxRelationship {
     Neutral,
 }
 
+/// Observer-relative team hue of weapon fire (BRL-h270): the viewer's side is ally blue and the
+/// other side enemy red, in the relation colours of the fighter rings, nameplates, and rims.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WeaponTeamTint {
+    Ally,
+    Enemy,
+}
+
+impl VfxRelationship {
+    /// The team hue of weapon fire from `team` under this observer relationship.
+    ///
+    /// `SelfOwned` uses the ally hue like every other team cue. `Neutral` means there is no
+    /// viewer team (no controlled fighter yet, the VFX Lab default) or the source is the reserved
+    /// neutral team; it keeps the absolute side convention (team 1 red, every other team blue) so
+    /// both sides stay distinguishable without a viewer.
+    pub(crate) fn weapon_team_tint(self, team: brawler::combat::TeamId) -> WeaponTeamTint {
+        match self {
+            Self::Enemy => WeaponTeamTint::Enemy,
+            Self::Neutral if team == brawler::combat::TeamId(1) => WeaponTeamTint::Enemy,
+            Self::SelfOwned | Self::Ally | Self::Neutral => WeaponTeamTint::Ally,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub(crate) enum VfxContextOverride {
     Ultimate(UltimateDefinitionId),
@@ -346,12 +370,19 @@ impl VfxObserver {
     ) -> VfxRelationship {
         if self.network_id == Some(owner) {
             VfxRelationship::SelfOwned
-        } else if team.0 == 0 || self.team_id.is_none() {
-            VfxRelationship::Neutral
-        } else if self.team_id == Some(team) {
-            VfxRelationship::Ally
         } else {
-            VfxRelationship::Enemy
+            self.team_relationship(team)
+        }
+    }
+
+    /// Relationship to a team without an owning fighter. `TeamId(0)` is a playing team; only the
+    /// reserved [`brawler::combat::NEUTRAL_TEAM`] and a missing observer are neutral.
+    pub(crate) fn team_relationship(self, team: brawler::combat::TeamId) -> VfxRelationship {
+        match self.team_id {
+            _ if team == brawler::combat::NEUTRAL_TEAM => VfxRelationship::Neutral,
+            None => VfxRelationship::Neutral,
+            Some(observer) if observer == team => VfxRelationship::Ally,
+            Some(_) => VfxRelationship::Enemy,
         }
     }
 }
@@ -985,6 +1016,70 @@ mod tests {
                 Some(VfxAccent::Cold),
             ]),
             [Some(VfxAccent::Restoration), Some(VfxAccent::Cold)]
+        );
+    }
+
+    #[test]
+    fn weapon_team_tint_is_blue_for_the_viewer_side_and_red_for_the_other_on_every_team() {
+        use WeaponTeamTint::{Ally, Enemy};
+        use brawler::combat::{NEUTRAL_TEAM, TeamId};
+
+        let shooter = NetworkEntityId(20);
+        // (viewer team, projectile team, tint): a pure function of local and projectile team.
+        for (local, team, expected) in [
+            (Some(TeamId(0)), TeamId(0), Ally),
+            (Some(TeamId(0)), TeamId(1), Enemy),
+            (Some(TeamId(1)), TeamId(1), Ally),
+            (Some(TeamId(1)), TeamId(0), Enemy),
+            // No viewer team (before the controlled fighter replicates, VFX Lab default):
+            // the absolute side convention keeps both sides distinct.
+            (None, TeamId(0), Ally),
+            (None, TeamId(1), Enemy),
+            (Some(TeamId(1)), NEUTRAL_TEAM, Ally),
+        ] {
+            let observer = VfxObserver {
+                network_id: Some(NetworkEntityId(9)),
+                team_id: local,
+            };
+            assert_eq!(
+                observer.relationship(shooter, team).weapon_team_tint(team),
+                expected,
+                "viewer {local:?} projectile {team:?}"
+            );
+        }
+        // The viewer's own shots use the ally hue on either team.
+        for team in [TeamId(0), TeamId(1)] {
+            let observer = VfxObserver {
+                network_id: Some(shooter),
+                team_id: Some(team),
+            };
+            assert_eq!(
+                observer.relationship(shooter, team).weapon_team_tint(team),
+                Ally
+            );
+        }
+    }
+
+    #[test]
+    fn team_zero_is_a_playing_team_and_only_the_reserved_team_is_neutral() {
+        use brawler::combat::{NEUTRAL_TEAM, TeamId};
+
+        let observer = VfxObserver {
+            network_id: Some(NetworkEntityId(9)),
+            team_id: Some(TeamId(0)),
+        };
+        assert_eq!(observer.team_relationship(TeamId(0)), VfxRelationship::Ally);
+        assert_eq!(
+            observer.team_relationship(TeamId(1)),
+            VfxRelationship::Enemy
+        );
+        assert_eq!(
+            observer.team_relationship(NEUTRAL_TEAM),
+            VfxRelationship::Neutral
+        );
+        assert_eq!(
+            VfxObserver::NONE.team_relationship(TeamId(0)),
+            VfxRelationship::Neutral
         );
     }
 

@@ -647,14 +647,7 @@ fn relationship_for_team(
     cache: &VfxSignatureCache,
     team: brawler::combat::TeamId,
 ) -> VfxRelationship {
-    let observer = cache.observer();
-    if team.0 == 0 || observer.team_id.is_none() {
-        VfxRelationship::Neutral
-    } else if observer.team_id == Some(team) {
-        VfxRelationship::Ally
-    } else {
-        VfxRelationship::Enemy
-    }
+    cache.observer().team_relationship(team)
 }
 
 #[allow(

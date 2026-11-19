@@ -65,6 +65,9 @@ pub(crate) enum VfxMaterialKey {
     EffectDamage,
     NeutralBright,
     NeutralSoft,
+    /// Translucent observer-relative weapon tint: ally blue for the viewer's side, enemy red for
+    /// the other side, and `NeutralSoft` when the request has no viewer relationship (BRL-h270).
+    RelationshipSoft,
     ScanArea,
     ConcealmentBright,
     ConcealmentSoft,

@@ -5,7 +5,7 @@ use super::super::{
     Position, Primitive3dAssets, Rotation, SENTRY_BASE_RADIUS, STRAIGHT_PROJECTILE_HEIGHT,
     V3FallbackVisual, V3FighterVisual, V3ProjectileVisual, catch_up_projectile_position,
     contact_shadow, fighter_body_material, fighter_recoil_offset, ground_position, ground_rotation,
-    team_material, vfx,
+    vfx, weapon_body_material,
 };
 use super::common::{
     CombatVfxContext, GROUND_EFFECT_HEIGHT, GroundMarkerRelation, ground_marker_material,
@@ -1055,14 +1055,7 @@ fn relationship_for_team(
     cache: &vfx::VfxSignatureCache,
     team: brawler::combat::TeamId,
 ) -> vfx::VfxRelationship {
-    let observer = cache.observer();
-    if team.0 == 0 || observer.team_id.is_none() {
-        vfx::VfxRelationship::Neutral
-    } else if observer.team_id == Some(team) {
-        vfx::VfxRelationship::Ally
-    } else {
-        vfx::VfxRelationship::Enemy
-    }
+    cache.observer().team_relationship(team)
 }
 
 fn update_ground_markers(
@@ -1193,7 +1186,8 @@ pub(super) fn spawn_projectile(
         } else {
             primitives.projectile.clone()
         };
-        let relationship_material = team_material(team, materials);
+        let tint = signature.relationship.weapon_team_tint(team);
+        let relationship_material = weapon_body_material(tint, materials);
         if lobbed.is_some() {
             parent
                 .spawn((
@@ -1211,7 +1205,7 @@ pub(super) fn spawn_projectile(
                         mesh,
                         transform,
                         relationship_material,
-                        team,
+                        tint,
                         visual_radius,
                     );
                 });
@@ -1224,7 +1218,7 @@ pub(super) fn spawn_projectile(
                 mesh,
                 transform,
                 relationship_material,
-                team,
+                tint,
                 visual_radius,
             );
         }
@@ -1292,7 +1286,7 @@ fn spawn_projectile_geometry(
     mesh: Handle<Mesh>,
     transform: Transform,
     relationship_material: Handle<StandardMaterial>,
-    team: brawler::combat::TeamId,
+    tint: vfx::WeaponTeamTint,
     visual_radius: f32,
 ) {
     if !spawn_elemental_projectile_style(
@@ -1310,7 +1304,7 @@ fn spawn_projectile_geometry(
         materials,
         signature,
         transform,
-        team,
+        tint,
         visual_radius,
     ) {
         parent.spawn((
@@ -1352,7 +1346,8 @@ fn spawn_sentry(
         ))
         .id();
     commands.entity(root).with_children(|parent| {
-        let team_material = team_material(team, materials);
+        let team_material =
+            weapon_body_material(signature.relationship.weapon_team_tint(team), materials);
         if spawn_sentry_style(
             parent,
             primitives,

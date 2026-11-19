@@ -586,7 +586,7 @@ it does not replace these ownership and cleanup paths:
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
 | Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with up to eight combined children: ordered mesh layers plus zero to two optional decorative GPU-particle layers; every particle layer has an authored bounded profile and a shaped retained mesh | Root lifetime is the maximum mesh or particle lifetime, or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
-| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Neutral straight shots wrap a dimensional nucleus in one animated comet wake, Cold adds slow crystal fins, Fire adds fast trailing lobes, Poison leaves a bubbly wake, and Restoration carries a rotating vitality spark; lobbed flight also has a projected shadow and fixed landing marker, while Fire may emit lingering world-space smoke; the nucleus carries a restrained ally/enemy relationship channel | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
+| Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Neutral straight shots wrap a dimensional nucleus in one animated comet wake, Cold adds slow crystal fins, Fire adds fast trailing lobes, Poison leaves a bubbly wake, and Restoration carries a rotating vitality spark; lobbed flight also has a projected shadow and fixed landing marker, while Fire may emit lingering world-space smoke; the nucleus, wake, and plain/lobbed body carry the observer-relative weapon team tint (ally blue / enemy red) | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
 | Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained ember ground underlay plus a procedural material for a coherent turbulent circumference and layered heat bands. Normal Poison uses animated cellular contamination with perimeter bubbles; Normal Restoration uses curved, offset vitality ripples with petal markers and no cardinal-spoke icon. Pattern and motion identify type; selected native filaments, crystals, bubbles, petals, or ripple arcs carry a restrained ally-blue or enemy-red accent. Neutral leaves the pattern untinted. Reduced/primitive variants preserve the same type-pattern/team-accent separation with bounded mesh cues | Recreated after late join from public state; owner removal is cleanup truth |
 | Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary; circular Cold/Fire areas reuse the elemental area style | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
 | Sticky payload | Replicated position, fuse ticks, radius, role, and attack source | Volatile dimensional body, animated veins and droplets, exact warning ring, and authoritative fuse-progress fill | Recreated at the observed tick and removed with the owner |
@@ -641,7 +641,20 @@ ally blue or enemy red, but relationship may not add a freestanding icon, overla
 gameplay radius. `SelfOwned` uses the ally effect treatment because the controlled fighter's
 selection ring already identifies self; neutral leaves the type pattern untinted. Normal shader
 variants and degraded mesh variants preserve the same type pattern and cadence for ally and enemy;
-only the selected accent color changes. Contextual overrides are a closed owned enum and may replace
+only the selected accent color changes.
+
+Weapon fire carries an observer-relative team tint (BRL-h270): shots from the viewer and their
+teammates are ally blue and shots from the other team are enemy red, whichever team the viewer is
+on. The hues are the toon rim relation colours (`assets/catalogs/toon_shading.ron` `ally` /
+`enemy`), the same blue and red as the ground rings, nameplates, and outlines; the glowing nucleus
+and wake scale them to the projectile glow peaks. The tint covers the straight bolt nucleus and
+wake, plain/primitive/lobbed projectile bodies, the elemental projectile relationship core, sentry
+bodies, and the neutral straight muzzle shell and echo (`VfxMaterialKey::RelationshipSoft`). Body
+shape, size, trail length, and elemental pattern keep each weapon's identity; elemental muzzles and
+impacts keep their element colour. `TeamId(0)` is a playing team; only `NEUTRAL_TEAM` and a missing
+viewer are `Neutral`. With no viewer team (before the controlled fighter replicates, the VfxLab
+default `neutral` relationship) weapon fire uses the absolute side convention, team 1 red and every
+other team blue, and the muzzle shell stays `NeutralSoft`. Contextual overrides are a closed owned enum and may replace
 only the documented recipe selection step; they do not create a general priority/tag engine.
 
 The client does not initially need a protocol change for exact weapon identity. Delivery entities
@@ -1049,6 +1062,20 @@ source is `unavailable` and the percentiles read `unavailable`. GPU time never a
 (BRL-g7ny): no OS window, frames rendered into an image and paced by the client's schedule runner
 (120 Hz for the native profile) instead of display presentation, so the frame interval measures CPU
 and GPU work at that pace without swapchain acquire/present or compositor effects.
+
+A passing report needs at least 1,200 frame samples. The automation client therefore rejects a
+`--render-measure-seconds` window that cannot collect them, plus 20% headroom, at the cadence the
+run plans for (BRL-vh61): the off-screen pace above, the 30/60 Hz cap for those windowed profiles,
+and 60 Hz for an uncapped or display-paced run (windowed native or high-refresh, off-screen
+high-refresh). That is 12 s for native off-screen, 24 s at 60 Hz, and 48 s at 30 Hz, and the error
+names the required duration. The headroom covers the schedule runner's sleep overshoot: off-screen
+native runs paced at 120 Hz sample at about 110-114 Hz. `scripts/v3-render-evidence.sh` runs each
+planned client command line with `--check-config` (validate, then exit) after building and before
+starting the routed topology, so a short `BRAWLER_RENDER_MEASURE_SECONDS`, including one too short
+for a 30 Hz `BRAWLER_RENDER_PEER_PROFILE`, fails in seconds. Its defaults pass the gate: 10 s
+warm-up + 30 s measurement, and 4 s + 12 s for Heist Practice, whose bots can end the match about
+18 s after match readiness. The check changes no report field, so schema 10 and earlier reports
+read as before.
 
 Imported map-object scale is validated from intrinsic asset bounds after the complete parent/child
 transform chain, not from a profile number in isolation. A nearby authored tile provides a native

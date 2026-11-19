@@ -117,8 +117,11 @@ const HEIST_IDOL_FOOTPRINT_WIDTH: f32 = 96.0;
 const HEIST_IDOL_FOOTPRINT_DEPTH: f32 = 64.0;
 // HDR glow colors (linear, max channel above the bloom threshold). Unlit materials ignore
 // `emissive`, so unlit glows carry their HDR value in `base_color`.
-const GLOW_PROJECTILE_BLUE: LinearRgba = LinearRgba::new(0.18, 2.6, 6.0, 1.0);
-const GLOW_PROJECTILE_RED: LinearRgba = LinearRgba::new(6.0, 0.9, 0.03, 1.0);
+/// Max-channel HDR value of a projectile nucleus glow. The hue is the observer-relative rim colour
+/// (`toon_shading.ron` ally/enemy), so weapon fire matches the fighter rings and nameplates.
+const GLOW_PROJECTILE_PEAK: f32 = 6.0;
+/// Max-channel HDR value of the straight projectile wake's relation colour.
+const PROJECTILE_TRAIL_PEAK: f32 = 2.6;
 const GLOW_MUZZLE: LinearRgba = LinearRgba::new(6.0, 3.6, 0.45, 1.0);
 const GLOW_PICKUP: LinearRgba = LinearRgba::new(0.45, 6.0, 1.05, 0.58);
 
@@ -203,12 +206,19 @@ pub(crate) struct Material3dAssets {
     pub(crate) spray_gas: Handle<combat::ConeSprayMaterial>,
     pub(crate) spray_gas_reduced: Handle<combat::ConeSprayMaterial>,
     pub(crate) spray_gas_primitive: Handle<combat::ConeSprayMaterial>,
-    pub(crate) projectile_trail_blue: Handle<combat::StraightProjectileTrailMaterial>,
-    pub(crate) projectile_trail_red: Handle<combat::StraightProjectileTrailMaterial>,
-    pub(crate) projectile_trail_blue_reduced: Handle<combat::StraightProjectileTrailMaterial>,
-    pub(crate) projectile_trail_red_reduced: Handle<combat::StraightProjectileTrailMaterial>,
-    pub(crate) projectile_hot_blue: Handle<StandardMaterial>,
-    pub(crate) projectile_hot_red: Handle<StandardMaterial>,
+    /// Weapon fire in observer-relative ally blue / enemy red ([`vfx::WeaponTeamTint`]).
+    pub(crate) projectile_trail_ally: Handle<combat::StraightProjectileTrailMaterial>,
+    pub(crate) projectile_trail_enemy: Handle<combat::StraightProjectileTrailMaterial>,
+    pub(crate) projectile_trail_ally_reduced: Handle<combat::StraightProjectileTrailMaterial>,
+    pub(crate) projectile_trail_enemy_reduced: Handle<combat::StraightProjectileTrailMaterial>,
+    pub(crate) projectile_hot_ally: Handle<StandardMaterial>,
+    pub(crate) projectile_hot_enemy: Handle<StandardMaterial>,
+    /// Matte plain, primitive, and lobbed projectile bodies and sentry bodies.
+    pub(crate) weapon_body_ally: Handle<StandardMaterial>,
+    pub(crate) weapon_body_enemy: Handle<StandardMaterial>,
+    /// Translucent muzzle shells (`VfxMaterialKey::RelationshipSoft`).
+    pub(crate) effect_ally_soft: Handle<StandardMaterial>,
+    pub(crate) effect_enemy_soft: Handle<StandardMaterial>,
     pub(crate) status_slow: Handle<StandardMaterial>,
     pub(crate) status_knockback: Handle<StandardMaterial>,
     pub(crate) status_reveal: Handle<StandardMaterial>,
@@ -1266,6 +1276,10 @@ pub(crate) fn setup_3d_foundation(
             )
         },
     );
+    let ally_rgb = toon_shading.rim_rgb(RimRelation::Ally);
+    let enemy_rgb = toon_shading.rim_rgb(RimRelation::Enemy);
+    let trail_ally = relation_glow(ally_rgb, PROJECTILE_TRAIL_PEAK);
+    let trail_enemy = relation_glow(enemy_rgb, PROJECTILE_TRAIL_PEAK);
     let material_assets = Material3dAssets {
         team_blue: materials.add(matte(Color::srgb(0.12, 0.72, 0.96))),
         team_red: materials.add(matte(Color::srgb(1.0, 0.42, 0.12))),
@@ -1324,32 +1338,49 @@ pub(crate) fn setup_3d_foundation(
         spray_gas: cone_spray_materials.add(combat::ConeSprayMaterial::normal()),
         spray_gas_reduced: cone_spray_materials.add(combat::ConeSprayMaterial::reduced()),
         spray_gas_primitive: cone_spray_materials.add(combat::ConeSprayMaterial::primitive()),
-        projectile_trail_blue: straight_projectile_trail_materials.add(
-            combat::StraightProjectileTrailMaterial::blue(combat::TrailQuality::Normal),
+        projectile_trail_ally: straight_projectile_trail_materials.add(
+            combat::StraightProjectileTrailMaterial::new(trail_ally, combat::TrailQuality::Normal),
         ),
-        projectile_trail_red: straight_projectile_trail_materials.add(
-            combat::StraightProjectileTrailMaterial::red(combat::TrailQuality::Normal),
+        projectile_trail_enemy: straight_projectile_trail_materials.add(
+            combat::StraightProjectileTrailMaterial::new(trail_enemy, combat::TrailQuality::Normal),
         ),
-        projectile_trail_blue_reduced: straight_projectile_trail_materials.add(
-            combat::StraightProjectileTrailMaterial::blue(combat::TrailQuality::Reduced),
+        projectile_trail_ally_reduced: straight_projectile_trail_materials.add(
+            combat::StraightProjectileTrailMaterial::new(trail_ally, combat::TrailQuality::Reduced),
         ),
-        projectile_trail_red_reduced: straight_projectile_trail_materials.add(
-            combat::StraightProjectileTrailMaterial::red(combat::TrailQuality::Reduced),
+        projectile_trail_enemy_reduced: straight_projectile_trail_materials.add(
+            combat::StraightProjectileTrailMaterial::new(
+                trail_enemy,
+                combat::TrailQuality::Reduced,
+            ),
         ),
         // BRL-0146: projectile cores, muzzle/explosion flashes, and pickups are the only
         // world materials authored above the bloom threshold (`world_look.ron`).
-        projectile_hot_blue: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.1, 0.55, 0.82),
-            emissive: GLOW_PROJECTILE_BLUE,
+        projectile_hot_ally: materials.add(StandardMaterial {
+            base_color: relation_color(ally_rgb, 0.85),
+            emissive: relation_glow(ally_rgb, GLOW_PROJECTILE_PEAK),
             perceptual_roughness: 0.2,
             metallic: 0.22,
             ..default()
         }),
-        projectile_hot_red: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.82, 0.25, 0.04),
-            emissive: GLOW_PROJECTILE_RED,
+        projectile_hot_enemy: materials.add(StandardMaterial {
+            base_color: relation_color(enemy_rgb, 0.85),
+            emissive: relation_glow(enemy_rgb, GLOW_PROJECTILE_PEAK),
             perceptual_roughness: 0.2,
             metallic: 0.18,
+            ..default()
+        }),
+        weapon_body_ally: materials.add(matte(relation_color(ally_rgb, 1.0))),
+        weapon_body_enemy: materials.add(matte(relation_color(enemy_rgb, 1.0))),
+        effect_ally_soft: materials.add(StandardMaterial {
+            base_color: relation_color(ally_rgb, 1.0).with_alpha(0.28),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        effect_enemy_soft: materials.add(StandardMaterial {
+            base_color: relation_color(enemy_rgb, 1.0).with_alpha(0.28),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
             ..default()
         }),
         status_slow: materials.add(StandardMaterial {
@@ -2409,14 +2440,35 @@ fn spawn_map_grass(
     ));
 }
 
-fn team_material(
-    team: brawler::combat::TeamId,
+/// An observer-relative rim colour (sRGB as authored) scaled by `brightness`.
+fn relation_color([red, green, blue]: [f32; 3], brightness: f32) -> Color {
+    Color::srgb(red * brightness, green * brightness, blue * brightness)
+}
+
+/// The linear HDR glow of a relation colour, normalized so its max channel is `peak`.
+fn relation_glow(rgb: [f32; 3], peak: f32) -> LinearRgba {
+    let linear = relation_color(rgb, 1.0).to_linear();
+    let max = linear
+        .red
+        .max(linear.green)
+        .max(linear.blue)
+        .max(f32::EPSILON);
+    LinearRgba::new(
+        linear.red / max * peak,
+        linear.green / max * peak,
+        linear.blue / max * peak,
+        1.0,
+    )
+}
+
+/// Weapon-fire body material (projectile body, sentry) for one observer-relative tint.
+fn weapon_body_material(
+    tint: vfx::WeaponTeamTint,
     materials: &Material3dAssets,
 ) -> Handle<StandardMaterial> {
-    if team.0 == 1 {
-        materials.team_red.clone()
-    } else {
-        materials.team_blue.clone()
+    match tint {
+        vfx::WeaponTeamTint::Ally => materials.weapon_body_ally.clone(),
+        vfx::WeaponTeamTint::Enemy => materials.weapon_body_enemy.clone(),
     }
 }
 
