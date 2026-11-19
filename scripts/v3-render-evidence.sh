@@ -149,11 +149,14 @@ fi
 # safe and end the 180 s match as early as 18 s after match-ready (observed 18-23 s with the
 # measured client walking and firing right, and with it aiming elsewhere; some runs last past
 # 40 s). The window is anchored at match readiness and includes the 3 s countdown, so Heist
-# Practice defaults to 4 s warmup + 11 s measurement (15 s; 1,320 samples at 120 Hz against the
-# 1,200-sample gate). Other modes keep 10 s + 30 s. Explicit durations override both.
+# Practice defaults to 4 s warmup + 12 s measurement (16 s). Other modes keep 10 s + 30 s.
+# Explicit durations override both. The client configuration check below rejects a measurement
+# too short for the 1,200-sample gate at the run's cadence with 20% headroom (BRL-vh61): 12 s for
+# the native profile off-screen (paced at 120 Hz, measured 110-114 Hz), 24 s at 60 Hz, 48 s at
+# 30 Hz.
 if [[ "$practice_smoke" == 1 && "$game_mode" == heist ]]; then
     warmup_seconds=${warmup_seconds:-4}
-    measure_seconds=${measure_seconds:-11}
+    measure_seconds=${measure_seconds:-12}
 else
     warmup_seconds=${warmup_seconds:-10}
     measure_seconds=${measure_seconds:-30}
@@ -218,6 +221,45 @@ if [[ -z "$network_protocol" || -z "$registry_fingerprint" || -z "$content_finge
     exit 1
 fi
 
+# The measured and peer client command lines, shared by the configuration check below and the
+# launch. The optional flag strings split into words on purpose.
+if [[ "$practice_smoke" == 1 ]]; then
+    measured_match_flag=--product-practice-smoke
+else
+    measured_match_flag=$match_flag
+fi
+measured_args=(--client-id 1 --server "$bind_addr" --transport routed-udp
+    --auto-connect "$measured_match_flag" --product-game-type "$game_type"
+    --move-axis "$measured_move_axis" --window-size "$window_size" --offscreen
+    --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180
+    --screenshot-count "$capture_count"
+    --render-report "$report_path" --render-warmup-seconds "$warmup_seconds"
+    --render-measure-seconds "$measure_seconds")
+measured_args+=($render_effect_flag $measured_combat_flags $measured_weapon_flags)
+peer_args=(--client-id 2 --server "$bind_addr" --transport routed-udp
+    --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0'
+    --window-size "$window_size" --offscreen
+    --render-report "$peer_report_path" --render-warmup-seconds "$warmup_seconds"
+    --render-measure-seconds "$measure_seconds")
+peer_args+=($render_effect_flag $peer_combat_flags)
+
+# Reject a configuration the clients would refuse, notably a measurement window too short for the
+# report's 1,200-sample gate at the run's cadence (BRL-vh61), before the routed topology starts.
+check_client_config() {
+    local role=$1
+    shift
+    if ! "$@" --check-config >/dev/null; then
+        printf 'brawler render evidence: the %s client rejected its configuration (above); set BRAWLER_RENDER_MEASURE_SECONDS to at least the duration it names\n' \
+            "$role" >&2
+        exit 2
+    fi
+}
+check_client_config measured "$target_dir"/release/brawler-client "${measured_args[@]}"
+if [[ "$practice_smoke" == 0 ]]; then
+    check_client_config peer env BRAWLER_RENDER_PROFILE="$peer_render_profile" \
+        "$target_dir"/release/brawler-client "${peer_args[@]}"
+fi
+
 supervisor_pid=
 measured_pid=
 peer_pid=
@@ -265,42 +307,15 @@ supervisor_pid=$!
 # Both clients render off-screen (`--offscreen`, BRL-g7ny): no window, no focus change. Their
 # frame interval follows the client's schedule runner (120 Hz for the native profile), not
 # display presentation; the report records `render_target=offscreen`.
-if [[ "$practice_smoke" == 1 ]]; then
-    BRAWLER_CLIENT_DATA_DIR="$client_data_dir/1" "$target_dir"/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
-        --auto-connect --product-practice-smoke --product-game-type "$game_type" --move-axis "$measured_move_axis" \
-        --window-size "$window_size" --offscreen \
-        --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
-        --screenshot-count "$capture_count" \
-        --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
-        --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
-        ${measured_combat_flags:+$measured_combat_flags} \
-        ${measured_weapon_flags:+$measured_weapon_flags} \
-        >"$client_one_log" 2>&1 &
-else
-    BRAWLER_CLIENT_DATA_DIR="$client_data_dir/1" "$target_dir"/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
-        --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis "$measured_move_axis" \
-        --window-size "$window_size" --offscreen \
-        --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
-        --screenshot-count "$capture_count" \
-        --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
-        --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
-        ${measured_combat_flags:+$measured_combat_flags} \
-        ${measured_weapon_flags:+$measured_weapon_flags} \
-        >"$client_one_log" 2>&1 &
-fi
+BRAWLER_CLIENT_DATA_DIR="$client_data_dir/1" "$target_dir"/release/brawler-client "${measured_args[@]}" \
+    >"$client_one_log" 2>&1 &
 measured_pid=$!
 # Match the canonical routed-product smoke: do not turn a two-client evidence run into a burst
 # against the deliberately small unauthenticated lobby ingress budget.
 sleep 2
 if [[ "$practice_smoke" == 0 ]]; then
     env BRAWLER_RENDER_PROFILE="$peer_render_profile" BRAWLER_CLIENT_DATA_DIR="$client_data_dir/2" \
-        "$target_dir"/release/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
-        --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0' \
-        --window-size "$window_size" --offscreen \
-        --render-report "$peer_report_path" --render-warmup-seconds "$warmup_seconds" \
-        --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
-        ${peer_combat_flags:+$peer_combat_flags} \
-        >"$client_two_log" 2>&1 &
+        "$target_dir"/release/brawler-client "${peer_args[@]}" >"$client_two_log" 2>&1 &
     peer_pid=$!
 fi
 

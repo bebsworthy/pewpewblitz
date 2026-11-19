@@ -620,7 +620,7 @@ fn render_measurement_failure(
 ) -> Option<&'static str> {
     if left_match {
         Some("left_match_during_measurement")
-    } else if sample_count < 1_200 {
+    } else if sample_count < crate::automation::RENDER_REPORT_MINIMUM_SAMPLES as usize {
         Some("sample_count")
     } else if p95 > 18.5 {
         Some("frame_p95_ms")

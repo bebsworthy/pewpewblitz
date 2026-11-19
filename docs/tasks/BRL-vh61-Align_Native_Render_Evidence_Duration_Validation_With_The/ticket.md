@@ -4,9 +4,9 @@ was: BRL-0106
 
 title: Align native render evidence duration validation with the sample gate
 
-status: backlog
-closed:
-status_changed: 2026-08-31T11:44:10Z
+status: done
+closed: 2026-11-19T11:18:19Z
+status_changed: 2026-11-19T11:18:19Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-a83q]
 
 parent:
 
-rank: 308954
+rank:
 ---
 
 # Description

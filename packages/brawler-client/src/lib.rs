@@ -789,6 +789,33 @@ const fn offscreen_frame_interval(profile: RenderProfile) -> Duration {
     }
 }
 
+/// The frame interval a render report plans its sample count for (BRL-vh61). Off-screen runs use
+/// their [`offscreen_frame_interval`]; windowed runs the profile's update cap. A run that is
+/// uncapped (off-screen `high-refresh`) or display-paced (windowed `native` and `high-refresh`)
+/// plans for 60 Hz: the slowest display refresh the development targets have, and close to the
+/// slowest cadence the report's 18.5 ms p95 frame gate can pass anyway.
+#[cfg(feature = "automation")]
+pub(crate) const fn planned_render_frame_interval(
+    profile: RenderProfile,
+    offscreen: bool,
+) -> Duration {
+    let paced = if offscreen {
+        offscreen_frame_interval(profile)
+    } else {
+        match profile {
+            RenderProfile::ThirtyFps => RENDER_30_INTERVAL,
+            RenderProfile::SixtyFps | RenderProfile::Native | RenderProfile::HighRefresh => {
+                Duration::ZERO
+            }
+        }
+    };
+    if paced.is_zero() {
+        RENDER_60_INTERVAL
+    } else {
+        paced
+    }
+}
+
 fn render_profile_settings(profile: RenderProfile) -> (PresentMode, WinitSettings) {
     match profile {
         RenderProfile::Native => (PresentMode::Fifo, WinitSettings::game()),

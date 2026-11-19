@@ -240,7 +240,7 @@ impl ClientAutomationConfig {
             return Err("--offscreen requires a windowed client".to_string());
         }
         self.validate_screenshot_schedule(headless)?;
-        self.validate_render_measurement(headless)?;
+        self.validate_render_measurement(headless, network)?;
         self.validate_shell_capture(network)?;
         Ok(())
     }
@@ -338,7 +338,11 @@ impl ClientAutomationConfig {
         Ok(())
     }
 
-    fn validate_render_measurement(&self, headless: bool) -> Result<(), String> {
+    fn validate_render_measurement(
+        &self,
+        headless: bool,
+        network: &ClientNetworkConfig,
+    ) -> Result<(), String> {
         let Some(measurement) = &self.render_measurement else {
             return Ok(());
         };
@@ -358,8 +362,48 @@ impl ClientAutomationConfig {
                 "render warm-up and measurement must be between 1 and 120 seconds".to_string(),
             );
         }
+        let interval = crate::planned_render_frame_interval(network.render_profile, self.offscreen);
+        let required = minimum_render_measurement(interval);
+        if measurement.measurement < required {
+            let target = if self.offscreen {
+                "off-screen"
+            } else {
+                "windowed"
+            };
+            return Err(format!(
+                "--render-measure-seconds {} cannot reach the report's {RENDER_REPORT_MINIMUM_SAMPLES}-sample gate at the {} Hz {target} {} cadence; use at least {} seconds",
+                measurement.measurement.as_secs(),
+                frames_per_second(interval),
+                network.render_profile.name(),
+                required.as_secs(),
+            ));
+        }
         Ok(())
     }
+}
+
+/// The locked minimum frame-sample count of a passing native render report.
+pub(crate) const RENDER_REPORT_MINIMUM_SAMPLES: u32 = 1_200;
+
+/// Extra measurement time over `RENDER_REPORT_MINIMUM_SAMPLES` frames. A schedule runner or vsync
+/// loop never runs faster than its nominal rate: off-screen native runs paced at 120 Hz measured
+/// 110-114 Hz (sleep overshoot), so 10% headroom left under 20 samples to spare; 20% still passes
+/// at an effective 100 Hz.
+const RENDER_SAMPLE_HEADROOM_PERCENT: u32 = 20;
+
+/// The shortest whole-second measurement window that collects the minimum sample count, plus
+/// headroom, at `interval`: 12 s at 120 Hz, 24 s at 60 Hz, 48 s at 30 Hz.
+fn minimum_render_measurement(interval: Duration) -> Duration {
+    let nanos = interval.as_nanos()
+        * u128::from(RENDER_REPORT_MINIMUM_SAMPLES)
+        * u128::from(100 + RENDER_SAMPLE_HEADROOM_PERCENT)
+        / 100;
+    let seconds = nanos.div_ceil(1_000_000_000);
+    Duration::from_secs(u64::try_from(seconds).unwrap_or(u64::MAX))
+}
+
+fn frames_per_second(interval: Duration) -> u128 {
+    1_000_000_000 / interval.as_nanos().max(1)
 }
 
 /// Accepts only a weapon ID a saved brawler can select: the costed weapons in the embedded
@@ -400,9 +444,13 @@ pub(crate) fn automatic_match_command_enabled(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use brawler::config::RenderProfile;
 
+    /// A windowed client at the default render profile, whatever `BRAWLER_RENDER_PROFILE` says.
     fn windowed() -> ClientNetworkConfig {
-        ClientNetworkConfig::new(1)
+        let mut network = ClientNetworkConfig::new(1);
+        network.render_profile = RenderProfile::Native;
+        network
     }
 
     fn headless() -> ClientNetworkConfig {
@@ -467,6 +515,79 @@ mod tests {
             config
                 .validate(&windowed())
                 .is_err_and(|error| error.contains("120"))
+        );
+    }
+
+    fn render_report_lasting(seconds: u64, offscreen: bool) -> ClientAutomationConfig {
+        ClientAutomationConfig {
+            render_measurement: Some(RenderMeasurementConfig {
+                report_path: "render.txt".into(),
+                warmup: Duration::from_secs(4),
+                measurement: Duration::from_secs(seconds),
+                reduced_effects: false,
+            }),
+            offscreen,
+            ..ClientAutomationConfig::default()
+        }
+    }
+
+    fn profiled(profile: RenderProfile) -> ClientNetworkConfig {
+        let mut network = windowed();
+        network.render_profile = profile;
+        network
+    }
+
+    /// BRL-vh61: the shortest accepted window reaches the report's sample gate, with headroom, at
+    /// the cadence the run will use, and a shorter one names the duration it needs.
+    #[test]
+    fn render_measurement_must_reach_the_sample_gate_at_the_planned_cadence() {
+        let cases = [
+            (RenderProfile::Native, true, 12),
+            (RenderProfile::SixtyFps, true, 24),
+            (RenderProfile::ThirtyFps, true, 48),
+            (RenderProfile::HighRefresh, true, 24),
+            (RenderProfile::Native, false, 24),
+            (RenderProfile::SixtyFps, false, 24),
+            (RenderProfile::ThirtyFps, false, 48),
+            (RenderProfile::HighRefresh, false, 24),
+        ];
+        for (profile, offscreen, required) in cases {
+            let network = profiled(profile);
+            let interval = crate::planned_render_frame_interval(profile, offscreen);
+            let planned_samples = Duration::from_secs(required).as_nanos() / interval.as_nanos();
+            assert!(
+                planned_samples >= u128::from(RENDER_REPORT_MINIMUM_SAMPLES),
+                "{profile:?} offscreen={offscreen}"
+            );
+            assert!(
+                render_report_lasting(required, offscreen)
+                    .validate(&network)
+                    .is_ok(),
+                "{profile:?} offscreen={offscreen}"
+            );
+            let error = render_report_lasting(required - 1, offscreen)
+                .validate(&network)
+                .expect_err("one second short is rejected");
+            assert!(
+                error.contains(&format!("use at least {required} seconds"))
+                    && error.contains("1200-sample gate"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_render_evidence_launcher_defaults_reach_the_sample_gate_off_screen() {
+        let native = profiled(RenderProfile::Native);
+        // scripts/v3-render-evidence.sh: 10 s + 30 s, and Heist Practice 4 s + 12 s.
+        assert!(render_report_lasting(30, true).validate(&native).is_ok());
+        assert!(render_report_lasting(12, true).validate(&native).is_ok());
+        assert_eq!(
+            minimum_render_measurement(crate::planned_render_frame_interval(
+                RenderProfile::Native,
+                true
+            )),
+            Duration::from_secs(12)
         );
     }
 

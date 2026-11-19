@@ -11,7 +11,7 @@ use brawler_client::{
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
 
-pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen]";
+pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen] [--check-config]";
 
 fn parse_value<T: core::str::FromStr>(flag: &str, value: Option<String>) -> Result<T, String> {
     value
@@ -84,6 +84,7 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
     let mut render_measure_seconds: u64 = 30;
     let mut render_reduced_effects = false;
     let mut offscreen = false;
+    let mut check_config = false;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--client-id" => client_id = Some(parse_value(&flag, args.next())?),
@@ -190,6 +191,7 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
             }
             "--render-reduced-effects" => render_reduced_effects = true,
             "--offscreen" => offscreen = true,
+            "--check-config" => check_config = true,
             "--help" | "-h" => {
                 super::usage();
                 process::exit(0);
@@ -317,5 +319,11 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
         .validate()
         .and_then(|()| automation.validate(&config))
         .map_err(|error| format!("invalid client configuration: {error}"))?;
+    // Scripts validate a planned client command line before they start a routed topology
+    // (BRL-vh61): the configuration is fully checked, then the process exits without an app.
+    if check_config {
+        println!("brawler-client: configuration accepted");
+        process::exit(0);
+    }
     Ok((config, automation))
 }
