@@ -25,3 +25,7 @@ Reviewed 2026-11-15 against HEAD 3437c0d8: valid but not implementable yet: stil
 - Two characters selectable and rendered consistently in gameplay, Dashboard and brawler previews; remote fighters render the owner's choice.
 - No process-local or asset paths on the wire; unknown ID falls back to Riff.
 - Profile migration test; `just lint`, `just test`; owner visual check; Pixel 8a check of asset memory with two characters loaded.
+
+# Parked (2026-11-19)
+
+Owner answer to q-m6n2sj1: the current per-brawler customization (weapon parts, passives, ultimate, stat profile) is probably overkill to expose to players; a roster of characters, each with its own weapon style and stats, may fit better. Park this ticket for deeper reflection and design. The second character it needed now exists (BRL-qfaj, Bumper). The product question is tracked in BRL-7sqn.
