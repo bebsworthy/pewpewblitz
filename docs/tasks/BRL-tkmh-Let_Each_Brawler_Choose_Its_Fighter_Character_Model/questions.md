@@ -2,7 +2,15 @@
 
 # Questions · BRL-tkmh
 
-## q-m6n2sj1 · open · blocking · edited 2026-11-19 13:26 · by Boyd
+## q-wr6gc13 · answered · by Boyd
+
+Per-brawler character models need a second production character, and there is only Riff. Where should it come from? Choose one, and I'll file a ticket to make or import it before BRL-tkmh.
+
+- [x] Make an original character like Riff (Blender, same clip contract)
+- [ ] Import a CC0 pack character (e.g. Kenney/Quaternius) and retarget clips
+- [ ] Defer: keep BRL-tkmh in backlog for now
+
+## q-m6n2sj1 · answered · blocking · edited 2026-11-19 13:26 · by Boyd
 
 How should a player pick which 3D character model their brawler uses?
 
@@ -18,10 +26,9 @@ How should a player pick which 3D character model their brawler uses?
 
   No picker. The model is chosen from the brawler's weapon family or build (for example heavy weapons use the bigger character). Simpler to build and no stored data, but players can't choose, two brawlers with the same weapon always look the same, and changing a weapon silently changes how your brawler looks.
 
-## q-wr6gc13 · answered · by Boyd
-
-Per-brawler character models need a second production character, and there is only Riff. Where should it come from? Choose one, and I'll file a ticket to make or import it before BRL-tkmh.
-
-- [x] Make an original character like Riff (Blender, same clip contract)
-- [ ] Import a CC0 pack character (e.g. Kenney/Quaternius) and retarget clips
-- [ ] Defer: keep BRL-tkmh in backlog for now
+> **Answer** (2026-11-19 16:31 · by Boyd): I think this is worth a review. Currently there are a lot of option for the player to customize a character.
+> It's nice because it allows customization but i think it's overkill to expose it to the user.
+> 
+> I think it would make more sense for the user to have a roaster of characters to choose from, each with their own weapon style and character stats.
+> 
+> park that ticket for deeper reflexion and design

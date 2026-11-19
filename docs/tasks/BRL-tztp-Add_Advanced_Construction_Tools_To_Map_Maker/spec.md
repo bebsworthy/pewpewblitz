@@ -48,3 +48,21 @@ After the foundational BRL-6vjz editor is accepted, creators can build and revis
 ## Dependencies and exclusions
 
 Blocked by acceptance of BRL-6vjz. This ticket does not add new gameplay asset families, executable map rules, publishing, collaboration, procedural generation, AI generation, or a professional-engine outliner.
+
+# Re-scope against Map Maker direction D (BRL-2xpc, 2026-11-19)
+
+The editor now uses the compact tool UI. The "contextual viewport toolbar" this spec names maps onto D like this:
+
+- **Operations:**
+  - Line, rectangle and fill go in as more segments of the top bar's segmented tool control (`map_maker/editor.rs` `tool_segments`).
+  - On a phone the top bar has little spare width at 48 dp. Prefer a single "Shape" segment that opens a small flat menu over adding three segments.
+- **Picker, copy/cut/paste:**
+  - These belong on the floating selection toolbar (flat squares, `selection_toolbar`) and on keyboard shortcuts.
+- **Stamps:**
+  - Saved stamps get a **Stamps** category in the Assets panel's category picker.
+  - Rows use the compact asset-row style; the chip shows the stamp's preview.
+- **Constraints:**
+  - All controls are flat `widgets::Kit` buttons local to Map Maker, 48 dp on phones.
+  - Add each new control to `assert_map_maker_phone_touch_targets` in `flow/tests.rs`.
+  - Re-measure the collapsed phone chrome with `map_editor_controls_leave_the_arena_most_of_a_landscape_phone`. It is 19.6 % now; keep it at 22 % or less.
+- **Out of scope:** controller access to the new controls follows BRL-q5sm.

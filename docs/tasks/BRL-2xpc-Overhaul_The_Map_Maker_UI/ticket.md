@@ -3,9 +3,9 @@ id: BRL-2xpc
 
 title: Overhaul the Map Maker UI
 
-status: doing
-closed:
-status_changed: 2026-11-19T12:23:21Z
+status: done
+closed: 2026-11-19T16:43:28Z
+status_changed: 2026-11-19T16:43:28Z
 
 theme:
 
@@ -15,11 +15,11 @@ created: 2026-11-18T17:18:30Z
 
 blocks: []
 
-related: [BRL-6vjz, BRL-8q4c, BRL-qq21, BRL-tztp, BRL-w9z1]
+related: [BRL-6vjz, BRL-855z, BRL-8q4c, BRL-q5sm, BRL-qq21, BRL-tztp, BRL-w9z1]
 
 parent:
 
-rank: 11337728
+rank:
 ---
 
 # Description

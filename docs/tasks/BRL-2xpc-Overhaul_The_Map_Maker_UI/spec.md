@@ -149,3 +149,165 @@ Owner feedback, 2026-11-19: the wide slanted buttons suit the game shell, but Ma
 ![Direction D - Compact tool UI](assets/direction-d-compact-tool.png)
 
 ![Phone editor: B vs D](assets/compare-b-vs-d-phone.png)
+
+# Implementation: direction D (2026-11-19)
+
+The owner chose D, "Compact tool UI, with the lighter-shell library" (q-ad0c83c). This also delivers BRL-8q4c. Presentation and interaction only: the map recipe, `validate_authored_recipe` and the undo model are unchanged.
+
+## What was built
+
+- **Module layout:** `flow/screens/map_maker.rs` keeps state, action resolution and input. The views are new submodules:
+  - `map_maker/library.rs`: My Maps.
+  - `map_maker/editor.rs`: the editor.
+  - `map_maker/widgets.rs`: the flat D controls. They stay local to Map Maker; no shell-toolkit variant was added.
+  - `map_maker/check.rs`: the map check.
+  - `map_maker/scroll.rs`: the Map Maker scroll areas.
+- **My Maps (lighter shell):**
+  - Shell background, shell Back, MY MAPS title with a saved-count subtitle, and an orange + CREATE MAP. Flat map tiles sit in a translucent `ink` panel.
+  - Each tile shows a recipe-derived overview, the name, the mode pennant, mode and size, and its check status ("Ready to test" or "N issues"). The overview is a disposable flat drawing: placements, filled rects, spawns and objectives in palette colours. It is not cached.
+  - Tapping a tile selects it, and tapping the selected tile opens it. The selected map's bar holds Rename, Duplicate, Publish (BRL-w9z1, kept and restyled), Delete and the orange EDIT MAP.
+  - Rename happens in place in that bar: a real text field with a caret, typing updates it without a rebuild, plus Cancel and Save name.
+  - Delete opens a proper confirmation dialog ("“Name” will be removed from this device. This cannot be undone.") with Cancel and Delete map.
+  - Empty state: NO MAPS YET, three steps and + CREATE YOUR FIRST MAP.
+  - The tiles scroll (wheel, touch drag, focus reveal). The scroll position survives rebuilds.
+  - Publish outcomes and errors show on a status line at the top of the panel.
+- **Create dialog:** a flat dialog on its own UI layer. It has the name field, then Mode (with pennant), Size and Theme, and "Mode and size follow your selected game, <game>." When the server offers no defaults, the reason shows and Create is disabled.
+  - **Audit bug fixed:** the dialog and `create_default_document` now share `create_defaults()`, the selected game's first Practice preset. The preview no longer reads `catalog.presets.first()`.
+- **Editor:**
+  - **Thin top bar:** Back, the map name and status ("Hot Zone · 64 × 40 · unsaved", plus " · mirror left / right" when mirroring is on), Place/Select/Erase as one segmented control (labels on desktop, icons only on the phone), Undo, Redo, Grid, Mirror, Fit, Save, and an orange Test.
+  - **Test while the check fails:** Test is muted but still pressable. Pressing it opens Check and says "Test needs N fixes first. See Check."
+  - **Side panel:** a collapsible Assets/Check panel, 330 px wide on desktop and 400 UI px on the phone, with segmented tabs and a collapse button.
+    - Collapsed, it is two tabs; Check carries an orange count badge.
+    - Assets has a category picker (a dropdown list), search with a real field and Clear, and compact rows (footprint swatch, name, footprint). The selection is a cyan fill and outline.
+  - **Corner chip:** shows the current asset as a live 3D preview, its name, and "Cover · R rotates" (phone: "tap to change"). It updates in place when the asset cycles. With Select or Erase active, a tool hint replaces it.
+  - **Check:** a summary, then issue rows with requirement counts ("Team B spawns: 0 of 3") and advice. Each row has an **Add** action that opens Assets on the entry that fixes it: right category, search cleared, Place tool. A validator refusal not explained by the counts shows as its own row. Below that, what passed.
+  - **Arena framing:** the arena camera draws only below the top bar and left of the side panel. Its viewport follows the laid-out chrome (`MapEditorArenaInsets`), so the map fits the free area.
+  - **Status messages:** a compact toast under the top bar's left edge, no longer in the middle of the canvas.
+  - **Selection toolbar:** flat squares for Rotate, Duplicate, Delete and Clear, kept below the top bar.
+  - **Erase on phones:** reachable in the top bar's segmented control.
+- **Panel defaults:** a draft opens with Assets on desktop and collapsed on a phone-sized window.
+  - Switching to Select or Erase collapses Assets; Check stays open.
+  - Picking a category opens Assets.
+  - Esc closes the category menu or Check before it leaves.
+- **Font:**
+  - Titles: the shell's Lilita One.
+  - Body text: **Fira Sans Bold**, bundled as `assets/brawler/ui/fonts/fira-sans-bold.ttf`. It is OFL-1.1, Mozilla/Telefonica, taken from Bevy's `bevy_feathers` assets, and recorded in the manifest, `THIRD_PARTY.md`, the license text `FiraSans-OFL-1.1.txt` and Credits.
+  - Why: the design board used `FontSource::SansSerif` at weight 600, the platform sans. That is Helvetica Neue on macOS and Roboto on Android, so it renders differently. A bundled face renders the same on both.
+  - Bold was picked as the nearest bundled weight to the board's 600.
+- **Focus:**
+  - The flat controls draw a 3 px `accent` focus ring, offset 2 px. It is the flat counterpart of BRL-fe7t's inset accent frame, and it follows the same `FocusVisibility` rule: a touch press hides it, and keys, the D-pad or the mouse show it again.
+  - My Maps has keyboard and controller navigation: arrows and the D-pad move to the nearest control in that direction, and Enter, Space or South activates it. While a dialog is open, only its buttons take focus.
+  - The shell-surface actions (Back, Create, Edit) keep the shell focus frame.
+  - The editor keeps its existing keyboard and controller shortcuts, and its controls take no focus. Controller navigation of the editor toolbar is deferred.
+- **Touch targets:**
+  - `TouchTarget::exempt()` is removed from Map Maker, and from the code entirely, since it had no other user. The unused `SurfaceStyle::MAP_*` shell geometry is also retired.
+  - Compact controls are authored at 48 dp: `ctl = max(76, ceil(48 / UiScale))` UI px whenever the window is under 640 logical px tall or touch is on, so the Android floor never resizes the layout.
+  - The flat controls are `FlowButton`s, so they still get the floor and release activation.
+- **Android keyboard:** a new `TextEntryField::AssetSearch` lets the Android on-screen keyboard type into asset search.
+- **Board cleanup:** the design board (`map_maker_mockups/`) and the gallery's `BRAWLER_UI_GALLERY_MOCKUPS` mode are deleted. The sheets stay attached.
+  - The audit capture routes stay and show the new screens.
+  - `map-editor-palette` now opens Assets on Cover and cycles to the next asset.
+  - `map-editor-issues` opens the Check panel.
+
+## Arena share (measured like the board)
+
+The measure is the summed laid-out areas of the editor's control containers (top bar, side panel, corner chip) over the screen, with the panel collapsed. The test `flow::tests::map_editor_controls_leave_the_arena_most_of_a_landscape_phone` checks and prints it.
+
+| Size | Controls | Arena | Board |
+|---|---|---|---|
+| 914x411 (phone) | 19.6 % | 80.4 % | 20.0 % |
+| 1280x720 (desktop) | 11.0 % | 89.0 % | 10.9 % |
+
+## Decisions
+
+- **Add rather than Show:** Check's per-issue action is labelled **Add**. A missing spawn or objective has no place on the map to show; what helps is the asset that fixes it. Locating validator rule errors on the map is deferred to BRL-855z, because the validator does not report cells.
+- **Test stays pressable:** the board drew Test as disabled. Production keeps it pressable and muted, so that a refused Test can point to Check, as required.
+- **Category picker:** a dropdown list inside the panel, not chips.
+- **Asset rows:** a flat footprint swatch in the category colour. The single live 3D preview lives in the corner chip and follows the selection without a rebuild, using one camera instead of one per row.
+- **Library tiles:** the overview is drawn from the recipe as flat UI nodes, at most 320 items. There is no render-to-texture and no cache.
+- **Retired shell toolkit pieces:** `SurfaceStyle` and its `MAP_*` geometry, and `TouchTarget::exempt()`. Map Maker was their only user. No new shell-toolkit variant was added.
+
+## Verification
+
+- **`just lint`:** passes, with ripgrep on `PATH`.
+- **`just test`:** passes. All 24 suites, 2613 tests, including the network and performance gates. No reruns were needed.
+- **New and updated tests:**
+  - `widgets::compact_controls_are_48_dp_at_every_ui_scale`;
+  - `check::*` (requirement counts, validator readiness);
+  - `library::spatial_focus_stays_in_its_row_and_column`;
+  - `map_maker::tests`: panel and tool states, Check Add, asset selection and cycling without a rebuild, the chip following the selection without a rebuild, value-only edits, and key sounds;
+  - `flow::tests::shell_controls_are_48_dp_touch_targets_on_a_landscape_phone`, now covering Map Maker;
+  - `flow::tests::map_editor_controls_leave_the_arena_most_of_a_landscape_phone`;
+  - `flow::tests::shell_capture_route_steps_match_the_reducer`.
+- **Captures:** all 11 Map Maker routes at 1280x720 and 914x411, taken with `BRAWLER_SHELL_CAPTURE_BIND=127.0.0.1:5061 just shell-capture <route>`, off-screen. I looked at every capture.
+  - Routes: map-library (empty), map-library-drafts, map-create, map-rename, map-delete, map-editor, map-editor-palette, map-editor-select, map-editor-issues, map-editor-test, map-editor-saved.
+  - Before/after contact sheets are in `target/2xpc/final/` and attached here.
+- **Phone captures and touch:** the macOS capture client runs without the Android touch policy. Compact metrics still author 48 dp controls at the phone viewport, so the 914x411 captures show the Android layout at 100 % UI scale.
+
+## Feedback
+
+- **Owner (2026-11-19):** "The wide slanted button work well for the game shell design but they don't work very well for what is fundamentally an application." **Implemented:** flat controls everywhere except My Maps' shell Back and primary actions.
+- **Audit problems 1–9:** all implemented as described above.
+  - The library is now a shell screen, with Back at the top left.
+  - The library scrolls.
+  - Tiles show maps, not button stacks.
+  - Rename and delete work in place, with a real field and a dialog.
+  - The create preview is fixed.
+  - Editor priorities are clear: Back at the left, Test as the orange primary.
+  - Phone controls are reachable and at least 48 dp.
+  - Check shows counts and actions instead of a raw string.
+  - The status toast no longer covers the canvas.
+
+## Mistakes and prevention
+
+- **Interim captures:** the first desktop tiles were taller than their content. In the wrapping tile grid, wrapping labels were measured at min-content width. Fixed: single-line labels use `Kit::line` (no wrap). Prevention: use no-wrap text inside auto-sized flex children in wrapping rows.
+- **Test apps without assets:** test apps that run the views panicked until they called `init_asset::<Font>()`, because the views now load a bundled font handle.
+- **A misgrouped local commit:** I reset and redid it before anything left the worktree.
+
+## Deferred
+
+- BRL-q5sm: controller focus in the editor toolbar and panel.
+- BRL-855z: Show where a rule error is on the map.
+- BRL-tztp: re-scoped against D in its own spec.
+
+## Pixel playtest (Pixel 8a, landscape)
+
+- **Run:** `BRAWLER_ROUTED_BIND=0.0.0.0:5000 just server` on the Mac, then `just android-build <mac-lan-ip>:5000` and `just android-install`.
+- **Try:**
+  1. My Maps: Create map. Check that the dialog shows the selected game's mode and the size you get. Then create.
+  2. Editor: the panel starts collapsed and the chip shows the current asset.
+  3. Tap Check, then Add on "Team A spawns: 0 of 3". Assets opens on Team A Spawn. Place three spawns by tapping, then do the same for Team B.
+  4. Collapse the panel with the chevron. Switch to Erase in the top bar and drag to erase. Undo and Redo.
+  5. Tap Test while the map still has issues: it should open Check. Then fix them and Test.
+  6. Back in My Maps: Rename with the keyboard, Duplicate, then Delete through the dialog. Scroll the tiles with 4 or more maps.
+  7. Repeat at 80 % UI scale (Settings).
+- **Look for:**
+  - every control comfortably tappable and nothing overlapping;
+  - the arena framed in the free area, not under the panel;
+  - text sharp in Fira Sans;
+  - search typing through the on-screen keyboard;
+  - no focus ring after taps, and the ring back after a controller press.
+
+## Commits (branch worktree-agent-a6ed99760a650c1e4)
+
+d17d1460 (font), 847acccb (spawn constant and asset-search field), b5ce56af (arena camera viewport), bccfdd1d (Map Maker D views and tests).
+
+## Final sheets
+
+`target/2xpc/final/after-1280x720.png`, `after-914x411.png`, `before-after-1280x720.png` and `before-after-914x411.png` in the worktree; attached below.
+
+
+![Final 1280x720](assets/2xpc-final-1280x720.png)
+
+![Final 914x411](assets/2xpc-final-914x411.png)
+
+![Before and after 1280x720](assets/2xpc-before-after-1280x720.png)
+
+![Before and after 914x411](assets/2xpc-before-after-914x411.png)
+
+# Integration on main (2026-11-19)
+
+- The four D commits were cherry-picked onto main (89d18cc2 and its three parents); one conflict in `shell_capture_route_steps_match_the_reducer` was resolved by keeping BRL-wqst live-route filter plus this ticket font harness.
+- On main `shell_capture_route_steps_match_the_reducer` then failed deterministically (also in the agent worktree): `Map Maker library limit reached (64)`. Cause: default `MapDraftStorage` (and settings/connections paths) resolved to the real per-user config dir in tests, and flow tests had written 63 "Untitled Map" drafts there during the day. Fixed in a separate commit: `platform_dirs::config_directory()` returns a fresh temp dir per call under `cfg(test)` / `network-test`. The owner removed the polluted drafts.
+- After the fix: `just lint` pass; `just test` pass (all suites); `scripts/shell-capture.sh map-editor-issues 914x411` pass; the real config dir was unchanged by a full client test run.
+- Lesson: a green report from a worktree does not prove the test is environment-independent; tests must never default to player-local paths.

@@ -14,3 +14,39 @@
 # Acceptance
 - With touch mode on, at 868x411, at 100 % and 80 % UI scale, every visible, enabled Map Maker button is reachable and >= 48 dp, and no two controls overlap.
 - Desktop 1280x720 Map Maker layout is unchanged.
+
+# Delivered with BRL-2xpc direction D (2026-11-19)
+
+## What changed
+
+- **Library:** My Maps (lighter-shell library) scrolls its tiles. The selected map's actions sit in one bar, and dialogs (create, delete) are their own UI layer. Every My Maps control can be reached at 868x411.
+- **Editor:** a compact layout with a thin top bar and a collapsible Assets/Check side panel. Erase is in the top bar's segmented control, so a phone can always reach it.
+- **Control sizing:**
+  - `TouchTarget::exempt()` is gone from Map Maker and from the code.
+  - Flat controls are authored at 48 dp: `ctl = max(76, ceil(48 / UiScale))` UI px whenever the window is under 640 logical px tall or touch is on. The Android floor therefore never resizes the layout, including at 80 % UI scale (93 UI px).
+- **Desktop 1280x720:** the layout was redesigned with D, not kept unchanged. That was the owner's direction, which supersedes the original "desktop unchanged" acceptance.
+
+## Verification
+
+`flow::tests::shell_controls_are_48_dp_touch_targets_on_a_landscape_phone` now also covers Map Maker through `assert_map_maker_phone_touch_targets`, at 868x411 with touch on, at 100 % and 80 % UI scale:
+
+- My Maps with 5 drafts;
+- the Create map dialog;
+- the editor collapsed;
+- the editor with Assets open;
+- the editor's category menu;
+- the editor with Check open;
+- the editor with the Erase tool active.
+
+In every state, every visible enabled button is reachable (directly or inside a scroll area), at least 48 dp, and overlaps no other button. The test passes.
+
+## Arena share
+
+With the side panel collapsed, the editor's controls cover:
+
+- 19.6 % of the screen at 914x411 (the board's estimate was 20.0 %);
+- 11.0 % at 1280x720.
+
+The test `map_editor_controls_leave_the_arena_most_of_a_landscape_phone` checks this.
+
+The Pixel playtest is described in BRL-2xpc's spec.

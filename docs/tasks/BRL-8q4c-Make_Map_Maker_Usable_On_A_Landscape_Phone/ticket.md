@@ -3,9 +3,9 @@ id: BRL-8q4c
 
 title: Make Map Maker usable on a landscape phone
 
-status: doing
-closed:
-status_changed: 2026-11-19T15:09:37Z
+status: done
+closed: 2026-11-19T16:43:27Z
+status_changed: 2026-11-19T16:43:27Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-2xpc, BRL-q148, BRL-qq21]
 
 parent: BRL-q5c4
 
-rank: 11730944
+rank:
 ---
 
 # Description
