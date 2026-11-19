@@ -3,9 +3,9 @@ id: BRL-jx6p
 
 title: Let clients on a slow link connect within the pre-auth ingress budget
 
-status: doing
-closed:
-status_changed: 2026-11-19T11:18:28Z
+status: done
+closed: 2026-11-19T12:11:43Z
+status_changed: 2026-11-19T12:11:43Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-2nsg]
 
 parent:
 
-rank: 11599872
+rank:
 ---
 
 # Description

@@ -38,8 +38,9 @@ const MAX_CAPABILITY_ROUTE_SOURCES: usize = 1_024;
 /// A `(route, source)` pair silent for this long may be evicted from the first-seen table.
 const CAPABILITY_SOURCE_FORGET_MILLIS: u64 = 60_000;
 /// Size of a Netcode 1.02 connection request (prefix, version, protocol, expiry, nonce, token).
-/// The supervisor never parses Netcode; this shape check only classifies a diagnostic line.
-const NETCODE_CONNECTION_REQUEST_BYTES: usize = 1 + 13 + 8 + 8 + 24 + 1_024;
+/// The supervisor never parses Netcode; this shape check only classifies diagnostic lines and
+/// picks which pre-auth allowance a default-lobby datagram draws from.
+pub(super) const NETCODE_CONNECTION_REQUEST_BYTES: usize = 1 + 13 + 8 + 8 + 24 + 1_024;
 
 /// Whether an opaque lobby payload has the shape of a Netcode connection request. Every other
 /// Netcode packet carries a nonzero sequence-length nibble in its prefix byte, so prefix 0 with

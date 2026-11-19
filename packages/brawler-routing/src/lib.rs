@@ -45,7 +45,7 @@ pub use ids::{
     AllocationId, Generation, LobbySessionId, LogicalServerId, MatchId, NetcodeClientId, PeerId,
     PlayerId, ProcessId, RequestId, RouteId, Sequence, StopId, WorkerId,
 };
-pub use ingress::{IngressDecision, SourceIngressLimiter};
+pub use ingress::{IngressDecision, PreauthDatagram, SourceIngressLimiter};
 pub use ipc::{
     FramedReader, FramedWriter, IpcChannel, IpcIoError, IpcReadProgress, IpcWriteProgress,
     PrivateRuntimeDir, UnixWorkerChannels, UnixWorkerListeners,

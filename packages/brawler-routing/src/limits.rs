@@ -62,8 +62,21 @@ const _: () = assert!(CAPABILITY_RETURN_GRACE_MILLIS <= CAPABILITY_REBIND_WINDOW
 /// also has at most one live grant at a time.
 pub const MAX_REJOINS_PER_SEAT: u8 = 3;
 
-pub const PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW: usize = 8;
-pub const PUBLIC_PREAUTH_BYTES_PER_WINDOW: usize = 9_216;
+/// Netcode connection requests one unauthenticated source may forward to the lobby per window.
+/// A client repeats one identical request at 10 Hz until a challenge arrives, so copies past
+/// this bound are redundant and are dropped; on a slow link they no longer starve the handshake
+/// datagrams that follow (BRL-jx6p).
+pub const PUBLIC_PREAUTH_CONNECTION_REQUESTS_PER_WINDOW: usize = 8;
+/// Public bytes of those connection requests per window: eight 1,120-byte routed requests.
+pub const PUBLIC_PREAUTH_CONNECTION_REQUEST_BYTES_PER_WINDOW: usize = 9_216;
+/// Every other unauthenticated default-lobby datagram per window (challenge responses, early
+/// keep-alives). This allowance is separate from the request allowance, so a challenge that
+/// arrives after a long round trip can still be answered. The lobby worker promotes the source
+/// as soon as one response authenticates, so 16 covers 1.6 s of 10 Hz retries for lost ones.
+pub const PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW: usize = 16;
+/// Public bytes of those handshake datagrams per window: 16 routed challenge responses (about
+/// 380 bytes each) fit, while one source still adds at most 6 KiB of non-request traffic.
+pub const PUBLIC_PREAUTH_HANDSHAKE_BYTES_PER_WINDOW: usize = 6_144;
 pub const PUBLIC_MALFORMED_PER_WINDOW: usize = 32;
 pub const PUBLIC_WINDOW_MILLIS: u64 = 10_000;
 pub const PUBLIC_SUPPRESSION_MILLIS: u64 = 60_000;

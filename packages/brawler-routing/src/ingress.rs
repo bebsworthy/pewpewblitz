@@ -7,9 +7,11 @@
 use std::{collections::BTreeMap, net::SocketAddr};
 
 use crate::{
-    MonotonicMillis, PUBLIC_MALFORMED_PER_WINDOW, PUBLIC_PREAUTH_BYTES_PER_WINDOW,
-    PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW, PUBLIC_SOURCE_REGISTRY_MAX, PUBLIC_SUPPRESSION_MILLIS,
-    PUBLIC_WINDOW_MILLIS,
+    MonotonicMillis, PUBLIC_MALFORMED_PER_WINDOW,
+    PUBLIC_PREAUTH_CONNECTION_REQUEST_BYTES_PER_WINDOW,
+    PUBLIC_PREAUTH_CONNECTION_REQUESTS_PER_WINDOW, PUBLIC_PREAUTH_HANDSHAKE_BYTES_PER_WINDOW,
+    PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW, PUBLIC_SOURCE_REGISTRY_MAX,
+    PUBLIC_SUPPRESSION_MILLIS, PUBLIC_WINDOW_MILLIS,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,12 +21,49 @@ pub enum IngressDecision {
     Suppressed,
 }
 
+/// Which pre-auth allowance an unauthenticated default-lobby datagram draws from. The caller
+/// classifies the opaque payload by shape; the limiter never parses Netcode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreauthDatagram {
+    /// A Netcode connection request. Retries repeat the same request, so only the first
+    /// [`PUBLIC_PREAUTH_CONNECTION_REQUESTS_PER_WINDOW`] per window are worth forwarding.
+    ConnectionRequest,
+    /// Any other pre-auth datagram, such as a challenge response sent after a slow round trip.
+    Handshake,
+}
+
+/// One bounded per-window datagram and byte allowance.
+#[derive(Clone, Copy, Debug, Default)]
+struct PreauthAllowance {
+    datagrams: u16,
+    bytes: u32,
+}
+
+impl PreauthAllowance {
+    /// Spend one datagram if it fits under both bounds; leave the allowance unchanged otherwise.
+    fn try_spend(&mut self, bytes: usize, max_datagrams: usize, max_bytes: usize) -> bool {
+        if usize::from(self.datagrams) >= max_datagrams
+            || usize::try_from(self.bytes)
+                .unwrap_or(usize::MAX)
+                .saturating_add(bytes)
+                > max_bytes
+        {
+            return false;
+        }
+        self.datagrams = self.datagrams.saturating_add(1);
+        self.bytes = self
+            .bytes
+            .saturating_add(u32::try_from(bytes).unwrap_or(u32::MAX));
+        true
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct SourceRecord {
     window_start: MonotonicMillis,
     last_seen: MonotonicMillis,
-    preauth_datagrams: u16,
-    preauth_bytes: u32,
+    connection_requests: PreauthAllowance,
+    handshake: PreauthAllowance,
     malformed: u16,
     suppressed_until: Option<MonotonicMillis>,
     /// A source that has presented a currently valid capability is no longer treated as an
@@ -37,8 +76,14 @@ impl SourceRecord {
         Self {
             window_start: now,
             last_seen: now,
-            preauth_datagrams: 0,
-            preauth_bytes: 0,
+            connection_requests: PreauthAllowance {
+                datagrams: 0,
+                bytes: 0,
+            },
+            handshake: PreauthAllowance {
+                datagrams: 0,
+                bytes: 0,
+            },
             malformed: 0,
             suppressed_until: None,
             authenticated: false,
@@ -48,8 +93,8 @@ impl SourceRecord {
     fn roll_window(&mut self, now: MonotonicMillis) {
         if now.0.saturating_sub(self.window_start.0) >= PUBLIC_WINDOW_MILLIS {
             self.window_start = now;
-            self.preauth_datagrams = 0;
-            self.preauth_bytes = 0;
+            self.connection_requests = PreauthAllowance::default();
+            self.handshake = PreauthAllowance::default();
             self.malformed = 0;
         }
         self.last_seen = now;
@@ -77,10 +122,11 @@ impl SourceIngressLimiter {
         }
     }
 
-    /// Admit one default-lobby datagram under the pre-auth budget.
+    /// Admit one default-lobby datagram under the pre-auth allowance for its kind.
     pub fn admit_default(
         &mut self,
         source: SocketAddr,
+        kind: PreauthDatagram,
         bytes: usize,
         now: MonotonicMillis,
     ) -> IngressDecision {
@@ -92,19 +138,23 @@ impl SourceIngressLimiter {
         if record.authenticated {
             return IngressDecision::Allowed;
         }
-        if usize::from(record.preauth_datagrams) >= PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW
-            || usize::try_from(record.preauth_bytes)
-                .unwrap_or(usize::MAX)
-                .saturating_add(bytes)
-                > PUBLIC_PREAUTH_BYTES_PER_WINDOW
-        {
-            return IngressDecision::SourceLimited;
+        let admitted = match kind {
+            PreauthDatagram::ConnectionRequest => record.connection_requests.try_spend(
+                bytes,
+                PUBLIC_PREAUTH_CONNECTION_REQUESTS_PER_WINDOW,
+                PUBLIC_PREAUTH_CONNECTION_REQUEST_BYTES_PER_WINDOW,
+            ),
+            PreauthDatagram::Handshake => record.handshake.try_spend(
+                bytes,
+                PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW,
+                PUBLIC_PREAUTH_HANDSHAKE_BYTES_PER_WINDOW,
+            ),
+        };
+        if admitted {
+            IngressDecision::Allowed
+        } else {
+            IngressDecision::SourceLimited
         }
-        record.preauth_datagrams = record.preauth_datagrams.saturating_add(1);
-        record.preauth_bytes = record
-            .preauth_bytes
-            .saturating_add(u32::try_from(bytes).unwrap_or(u32::MAX));
-        IngressDecision::Allowed
     }
 
     /// Promote a source after the supervisor has successfully authorized a capability-bearing
@@ -115,8 +165,8 @@ impl SourceIngressLimiter {
         let record = self.record(source, now);
         record.roll_window(now);
         record.authenticated = true;
-        record.preauth_datagrams = 0;
-        record.preauth_bytes = 0;
+        record.connection_requests = PreauthAllowance::default();
+        record.handshake = PreauthAllowance::default();
     }
 
     /// Record a malformed public datagram. Returns `Suppressed` only once the 60-second source
@@ -190,34 +240,99 @@ mod tests {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)
     }
 
+    use PreauthDatagram::{ConnectionRequest, Handshake};
+
+    /// Public size of one routed Netcode connection request.
+    const REQUEST_BYTES: usize = 1_120;
+    /// Public size of one routed Netcode challenge response.
+    const RESPONSE_BYTES: usize = 368;
+
     #[test]
-    fn default_budget_is_eight_datagrams_and_nine_kibibytes_per_window() {
+    fn connection_requests_are_bounded_to_eight_datagrams_and_nine_kibibytes_per_window() {
         let mut limiter = SourceIngressLimiter::default();
         let now = MonotonicMillis(0);
-        for _ in 0..PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW {
+        for _ in 0..PUBLIC_PREAUTH_CONNECTION_REQUESTS_PER_WINDOW {
             assert_eq!(
-                limiter.admit_default(source(1), 1_120, now),
+                limiter.admit_default(source(1), ConnectionRequest, REQUEST_BYTES, now),
                 IngressDecision::Allowed
             );
         }
         assert_eq!(
-            limiter.admit_default(source(1), 1, now),
+            limiter.admit_default(source(1), ConnectionRequest, 1, now),
             IngressDecision::SourceLimited
         );
         assert_eq!(
-            limiter.admit_default(source(2), 9_000, now),
+            limiter.admit_default(source(2), ConnectionRequest, 9_000, now),
             IngressDecision::Allowed
         );
         assert_eq!(
-            limiter.admit_default(source(2), 216, now),
+            limiter.admit_default(source(2), ConnectionRequest, 216, now),
             IngressDecision::Allowed
         );
         assert_eq!(
-            limiter.admit_default(source(2), 1, now),
+            limiter.admit_default(source(2), ConnectionRequest, 1, now),
             IngressDecision::SourceLimited
         );
         assert_eq!(
-            limiter.admit_default(source(1), 1, MonotonicMillis(PUBLIC_WINDOW_MILLIS)),
+            limiter.admit_default(
+                source(1),
+                ConnectionRequest,
+                1,
+                MonotonicMillis(PUBLIC_WINDOW_MILLIS)
+            ),
+            IngressDecision::Allowed
+        );
+    }
+
+    #[test]
+    fn handshake_datagrams_have_their_own_bounded_allowance() {
+        let mut limiter = SourceIngressLimiter::default();
+        let now = MonotonicMillis(0);
+        for _ in 0..PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW {
+            assert_eq!(
+                limiter.admit_default(source(1), Handshake, RESPONSE_BYTES, now),
+                IngressDecision::Allowed
+            );
+        }
+        assert_eq!(
+            limiter.admit_default(source(1), Handshake, 1, now),
+            IngressDecision::SourceLimited
+        );
+        assert_eq!(
+            limiter.admit_default(
+                source(2),
+                Handshake,
+                PUBLIC_PREAUTH_HANDSHAKE_BYTES_PER_WINDOW,
+                now
+            ),
+            IngressDecision::Allowed
+        );
+        assert_eq!(
+            limiter.admit_default(source(2), Handshake, 1, now),
+            IngressDecision::SourceLimited
+        );
+    }
+
+    #[test]
+    fn retried_requests_on_a_slow_link_leave_room_for_the_challenge_response() {
+        // BRL-jx6p: a 1.5 s round trip means 15 identical requests at 10 Hz before the
+        // challenge arrives. The surplus requests are dropped, but the response still passes.
+        let mut limiter = SourceIngressLimiter::default();
+        let mut forwarded = 0;
+        for retry in 0..15_u64 {
+            let decision = limiter.admit_default(
+                source(1),
+                ConnectionRequest,
+                REQUEST_BYTES,
+                MonotonicMillis(retry * 100),
+            );
+            if decision == IngressDecision::Allowed {
+                forwarded += 1;
+            }
+        }
+        assert_eq!(forwarded, PUBLIC_PREAUTH_CONNECTION_REQUESTS_PER_WINDOW);
+        assert_eq!(
+            limiter.admit_default(source(1), Handshake, RESPONSE_BYTES, MonotonicMillis(1_500)),
             IngressDecision::Allowed
         );
     }
@@ -254,20 +369,20 @@ mod tests {
     fn authenticated_source_is_promoted_out_of_preauth_budget() {
         let mut limiter = SourceIngressLimiter::default();
         let now = MonotonicMillis(7);
-        for _ in 0..PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW {
+        for _ in 0..PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW {
             assert_eq!(
-                limiter.admit_default(source(6), 1, now),
+                limiter.admit_default(source(6), Handshake, 1, now),
                 IngressDecision::Allowed
             );
         }
         assert_eq!(
-            limiter.admit_default(source(6), 1, now),
+            limiter.admit_default(source(6), Handshake, 1, now),
             IngressDecision::SourceLimited
         );
         limiter.promote_authenticated(source(6), now);
-        for _ in 0..(PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW * 2) {
+        for _ in 0..(PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW * 2) {
             assert_eq!(
-                limiter.admit_default(source(6), 1, now),
+                limiter.admit_default(source(6), Handshake, 1, now),
                 IngressDecision::Allowed
             );
         }

@@ -54,7 +54,7 @@ impl SupervisorRuntime {
             // The lobby route is published only after the worker's Ready handshake.  A client
             // may legitimately send Netcode handshake retries in that startup window; dropping
             // them here keeps the pre-auth limiter reserved for packets that can actually reach
-            // an admitted route, while retaining the exact 8-datagram/9-KiB budget thereafter.
+            // an admitted route, while retaining the exact pre-auth allowances thereafter.
             // Boundary counters still include these valid envelopes so public/inner accounting
             // remains an exact per-datagram relation even when readiness races the first retry.
             if default_lobby && !self.core.default_lobby_ready() {
@@ -63,7 +63,15 @@ impl SupervisorRuntime {
                 continue;
             }
             if default_lobby {
-                let decision = self.ingress.admit_default(source, length, now);
+                // Connection requests and the rest of the handshake draw from separate
+                // allowances, so a long round trip's surplus request retries cannot starve the
+                // challenge response that follows (BRL-jx6p).
+                let kind = if looks_like_netcode_connection_request(envelope.payload()) {
+                    crate::PreauthDatagram::ConnectionRequest
+                } else {
+                    crate::PreauthDatagram::Handshake
+                };
+                let decision = self.ingress.admit_default(source, kind, length, now);
                 if decision != crate::IngressDecision::Allowed {
                     report.public_dropped += 1;
                     self.core.note_error(RoutingErrorCategory::SourceLimited);

@@ -69,6 +69,10 @@ practice-e2e game_type="wipeout-1v1":
 network-change-e2e game_type="wipeout-1v1":
     ./scripts/e2e-network-change.sh {{game_type}}
 
+# Reach the lobby welcome on the first attempt through a proxy that delays every supervisor-to-client datagram.
+slow-link-e2e delay_ms="1500":
+    ./scripts/e2e-slow-link.sh {{delay_ms}}
+
 # Lose one routed Practice match session beyond the 10 s session bound, then rejoin the same fighter in the still-running match.
 rejoin-e2e game_type="wipeout-1v1":
     ./scripts/e2e-rejoin.sh {{game_type}}

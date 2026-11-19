@@ -386,6 +386,13 @@ built-in Practice; local draft persistence remains client-owned.
 - Reject malformed, oversized, unknown-version, expired, revoked, replayed where prohibited, or
   unauthorized envelopes before allocating unbounded state.
 - Rate-limit default-route traffic and capability failures separately from established routes.
+  Each unauthenticated source gets two separate allowances per 10 s window. Connection requests
+  (Netcode-request-shaped payloads) get 8 datagrams and 9 KiB. Every other pre-auth datagram,
+  such as a challenge response, gets 16 datagrams and 6 KiB. A client repeats its one request at
+  10 Hz until the challenge arrives, so a slow link wastes only the surplus copies and the
+  response can still get through. Lobby round trips of 1.5 s connect (BRL-jx6p). Netcode
+  authentication promotes the source out of both allowances. The bounds are the
+  `PUBLIC_PREAUTH_*` constants in `packages/brawler-routing/src/limits.rs`.
 - Bound routes, routes per peer/session, workers, pending spawns, packet queues, control frames, and
   retained results.
 - Detect worker exit/heartbeat failure, revoke its routes once, release capacity, and notify the

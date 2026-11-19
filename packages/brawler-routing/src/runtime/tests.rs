@@ -360,8 +360,8 @@ fn lobby_startup_retries_do_not_spend_preauth_budget_before_ready() {
         .unwrap();
 
     // The route is not published until Ready. These retries are dropped without consuming
-    // the source's 8-datagram/9-KiB pre-auth allowance.
-    for _ in 0..crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW {
+    // the source's pre-auth handshake allowance.
+    for _ in 0..crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW {
         client
             .send_to(&envelope, runtime.public_addr().unwrap())
             .unwrap();
@@ -372,20 +372,26 @@ fn lobby_startup_retries_do_not_spend_preauth_budget_before_ready() {
         let report = runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
         received += report.public_received;
         dropped += report.public_dropped;
-        if received == crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW {
+        if received == crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW {
             break;
         }
     }
-    assert_eq!(received, crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW);
-    assert_eq!(dropped, crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW);
+    assert_eq!(
+        received,
+        crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW
+    );
+    assert_eq!(
+        dropped,
+        crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW
+    );
     assert_eq!(runtime.core().metrics().source_limited, 0);
     assert_eq!(
         runtime.metrics().public_ingress.datagrams,
-        crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW as u64
+        crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW as u64
     );
     assert_eq!(
         runtime.metrics().inner_ingress.datagrams,
-        crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW as u64
+        crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW as u64
     );
     assert!(!runtime.core().default_lobby_ready());
 
@@ -395,12 +401,12 @@ fn lobby_startup_retries_do_not_spend_preauth_budget_before_ready() {
         .register_route(route(2, worker.worker_id, true))
         .unwrap();
     assert!(runtime.core().default_lobby_ready());
-    for _ in 0..=crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW {
+    for _ in 0..=crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW {
         client
             .send_to(&envelope, runtime.public_addr().unwrap())
             .unwrap();
     }
-    let expected = crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW + 1;
+    let expected = crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW + 1;
     let mut received = 0;
     let mut dropped = 0;
     for _ in 0..4 {
@@ -471,7 +477,7 @@ fn ingress_drops_name_their_reason_and_source_once_per_window() {
         .core_mut()
         .register_route(route(2, worker.worker_id, true))
         .unwrap();
-    let datagrams = crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW + 2;
+    let datagrams = crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW + 2;
     for _ in 0..datagrams {
         client
             .send_to(&envelope, runtime.public_addr().unwrap())
@@ -933,6 +939,117 @@ fn malformed_public_datagram_is_dropped_without_worker_work() {
     assert_eq!(runtime.core().metrics().packet_current.frames, 0);
 }
 
+/// Read worker-bound packet records until `expected` have arrived, polling the runtime between
+/// nonblocking reads so its bounded flush can make progress.
+fn read_worker_records(
+    runtime: &mut SupervisorRuntime,
+    worker: &mut UnixWorkerChannels,
+    expected: usize,
+) -> Vec<PacketRecord> {
+    let mut records = Vec::new();
+    for _ in 0..16 {
+        for record in worker.packet_read_ready(64).unwrap().records {
+            records
+                .push(PacketRecord::decode(&record, PacketDirection::SupervisorToWorker).unwrap());
+        }
+        if records.len() >= expected {
+            break;
+        }
+        runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+    }
+    assert_eq!(records.len(), expected);
+    records
+}
+
+/// BRL-jx6p: on a 1.5 s round trip a Netcode client sends 15 identical connection requests at
+/// 10 Hz before the lobby's challenge reaches it. The surplus requests are dropped, but the
+/// challenge responses that follow the delayed reply must still reach the lobby worker.
+#[test]
+fn challenge_responses_after_a_delayed_lobby_reply_reach_the_worker() {
+    let (mut runtime, worker, mut worker_channels) = lobby_runtime_without_ready_route();
+    runtime
+        .core_mut()
+        .register_route(route(2, worker.worker_id, true))
+        .unwrap();
+    let client = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    client.set_nonblocking(true).unwrap();
+    let request_payload = vec![0_u8; ingress_diagnostics::NETCODE_CONNECTION_REQUEST_BYTES];
+    assert!(looks_like_netcode_connection_request(&request_payload));
+    let request = PublicEnvelope::new(RouteSelector::DefaultLobby, request_payload)
+        .unwrap()
+        .encode()
+        .unwrap();
+    let retries = 15;
+    for _ in 0..retries {
+        client
+            .send_to(&request, runtime.public_addr().unwrap())
+            .unwrap();
+    }
+    let report = poll_until_received(&mut runtime, retries);
+    let forwarded = crate::PUBLIC_PREAUTH_CONNECTION_REQUESTS_PER_WINDOW;
+    assert_eq!(report.public_dropped, retries - forwarded);
+    let requests = read_worker_records(&mut runtime, &mut worker_channels, forwarded);
+
+    // The lobby's challenge reaches the client 1.5 s after its first request.
+    runtime.started = runtime
+        .started
+        .checked_sub(Duration::from_millis(1_500))
+        .expect("the delay fits before the runtime start");
+    let challenge = PacketRecord::new(
+        PacketDirection::WorkerToSupervisor,
+        worker.worker_id,
+        requests[0].route_id,
+        requests[0].peer_id,
+        vec![0x12; 200],
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
+    worker_channels.enqueue_packet(&challenge).unwrap();
+    worker_channels.flush_packet(1).unwrap();
+    let mut received = [0; crate::PUBLIC_MAX_DATAGRAM_BYTES];
+    let mut delivered = None;
+    for _ in 0..8 {
+        runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+        if let Ok((length, _)) = client.recv_from(&mut received) {
+            delivered = Some(length);
+            break;
+        }
+    }
+    let length = delivered.expect("the delayed challenge reached the client");
+    assert_eq!(
+        PublicEnvelope::decode(&received[..length])
+            .unwrap()
+            .payload()
+            .len(),
+        200
+    );
+
+    // The client answers at 10 Hz until the lobby authenticates it; every answer is forwarded.
+    let response = PublicEnvelope::new(RouteSelector::DefaultLobby, vec![0x13; 326])
+        .unwrap()
+        .encode()
+        .unwrap();
+    let responses = 3;
+    for _ in 0..responses {
+        client
+            .send_to(&response, runtime.public_addr().unwrap())
+            .unwrap();
+    }
+    let report = poll_until_received(&mut runtime, responses);
+    assert_eq!(report.public_dropped, 0);
+    let answers = read_worker_records(&mut runtime, &mut worker_channels, responses);
+    assert!(
+        answers
+            .iter()
+            .all(|answer| answer.payload.len() == 326 && answer.route_id == requests[0].route_id)
+    );
+    assert_eq!(
+        runtime.core().metrics().source_limited,
+        (retries - forwarded) as u64
+    );
+}
+
 #[test]
 fn public_default_flood_is_limited_before_route_queue_and_does_not_spawn_workers() {
     let mut runtime = SupervisorRuntime::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
@@ -955,12 +1072,12 @@ fn public_default_flood_is_limited_before_route_queue_and_does_not_spawn_workers
         .unwrap()
         .encode()
         .unwrap();
-    for _ in 0..=crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW {
+    for _ in 0..=crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW {
         client
             .send_to(&envelope, runtime.public_addr().unwrap())
             .unwrap();
     }
-    let expected = crate::PUBLIC_PREAUTH_DATAGRAMS_PER_WINDOW + 1;
+    let expected = crate::PUBLIC_PREAUTH_HANDSHAKE_DATAGRAMS_PER_WINDOW + 1;
     let mut received = 0;
     let mut dropped = 0;
     for _ in 0..4 {
