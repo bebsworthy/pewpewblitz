@@ -26,3 +26,7 @@ What the category switches on (logcat, `game` launch only; none of these lines a
 - `GameManagerService: setDefaultFrameRateOverride : <uid>, 60.0` and `Game power mode ON (only games in foreground)`.
 
 **Cause confirmed:** the overlay is the Play Services game session (Game Dashboard entry) that Android attaches because the manifest declares `android:appCategory="game"`. Without the category, cold-launch taps at 1.8–2.2 s reach the app. The shipped manifest is unchanged; keep vs drop is an owner decision (Ticket question on this ticket). Evidence: session scratchpad `gv67/` (`results.txt`, per-run `*-input.txt`, `*-logcat.txt`, screenshots).
+
+## Decision (owner, 2026-11-20)
+
+Keep `android:appCategory="game"` (answer to q-2p7g5hs). The manifest is unchanged: the app keeps Android game power mode, the 60 FPS game override and the Game Dashboard entry. Accepted limitation: on a cold launch, taps in roughly the first 2.2 s can be swallowed by the Play Services game overlay.
