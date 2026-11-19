@@ -319,6 +319,9 @@ fn canonicalize_placements(placements: &mut [MapAssetPlacement], catalog: &MapCo
     });
 }
 
+/// Player spawns each team of a two-team grid map needs; Map Maker's check shows the same count.
+pub const MIN_SPAWNS_PER_TEAM: usize = 3;
+
 fn validate_mode_topology(
     recipe: &MapRecipe,
     topology: ModeTopologyPolicy,
@@ -343,7 +346,7 @@ fn validate_mode_topology(
         }
     } else {
         for team in 0..=1 {
-            if spawn_count(team) < 3 {
+            if spawn_count(team) < MIN_SPAWNS_PER_TEAM {
                 return Err("grid map lacks spawn capacity".to_string());
             }
         }

@@ -31,6 +31,8 @@ pub enum TextEntryField {
     BrawlerName,
     /// Map Maker new or renamed map (Backspace removes one character).
     MapName,
+    /// Map Maker asset search (Backspace removes one character).
+    AssetSearch,
 }
 
 /// The field being edited, its text, and its caret (a byte offset into the text).
@@ -106,14 +108,18 @@ impl TextEntry {
                 .take_while(|index| *index <= prefix)
                 .last()
                 .unwrap_or(0),
-            TextEntryField::ServerAddress | TextEntryField::MapName => prefix,
+            TextEntryField::ServerAddress
+            | TextEntryField::MapName
+            | TextEntryField::AssetSearch => prefix,
         };
         let removed = &before[removed_start..];
         let backspaces = match self.field {
             TextEntryField::PlayerName | TextEntryField::BrawlerName => {
                 removed.graphemes(true).count()
             }
-            TextEntryField::ServerAddress | TextEntryField::MapName => removed.chars().count(),
+            TextEntryField::ServerAddress
+            | TextEntryField::MapName
+            | TextEntryField::AssetSearch => removed.chars().count(),
         };
         let inserted = &target_before[removed_start..];
         let (insert, submit) = match inserted.find(['\n', '\r']) {
@@ -169,6 +175,7 @@ fn strip_label(entry: &TextEntry) -> String {
         TextEntryField::PlayerName => "Your name",
         TextEntryField::BrawlerName => "Brawler name",
         TextEntryField::MapName => "Map name",
+        TextEntryField::AssetSearch => "Search assets",
     };
     format!(
         "{label}:  {}|{}",
