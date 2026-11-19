@@ -75,6 +75,59 @@ pub(crate) fn cursor_ground_point(
         .map(ground_point)
 }
 
+/// The window area below the editor's top bar and left of its side panel, in physical pixels;
+/// `None` when the chrome leaves no sensible area.
+fn editor_arena_viewport(
+    window: &Window,
+    insets: super::MapEditorArenaInsets,
+) -> Option<bevy::camera::Viewport> {
+    let size = UVec2::new(window.physical_width(), window.physical_height());
+    let inset = Vec2::new(insets.right, insets.top)
+        .round()
+        .max(Vec2::ZERO)
+        .as_uvec2();
+    let (right, top) = (inset.x, inset.y);
+    let width = size.x.checked_sub(right)?;
+    let height = size.y.checked_sub(top)?;
+    (width >= 64 && height >= 64).then(|| bevy::camera::Viewport {
+        physical_position: UVec2::new(0, top),
+        physical_size: UVec2::new(width, height),
+        ..default()
+    })
+}
+
+/// The Map Maker editor draws the arena only where its chrome leaves room (BRL-2xpc); every
+/// other view uses the whole window.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+pub(super) fn frame_map_editor_viewport(
+    editor: Option<Res<MapEditorPreview>>,
+    insets: Option<Res<super::MapEditorArenaInsets>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut cameras: Query<&mut Camera, With<ArenaCamera>>,
+) {
+    let wanted = editor
+        .as_ref()
+        .and(insets.as_deref())
+        .zip(windows.iter().next())
+        .and_then(|(insets, window)| editor_arena_viewport(window, *insets));
+    for mut camera in &mut cameras {
+        let same = match (&camera.viewport, &wanted) {
+            (Some(current), Some(wanted)) => {
+                current.physical_position == wanted.physical_position
+                    && current.physical_size == wanted.physical_size
+            }
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            camera.viewport.clone_from(&wanted);
+        }
+    }
+}
+
 /// Presentation inputs of the camera rig: frame time, rig state and tuning, the local aim
 /// sample, and the motion/effects accessibility settings.
 #[derive(bevy::ecs::system::SystemParam)]
@@ -95,6 +148,7 @@ pub(super) struct CameraRigParams<'w> {
 pub(super) fn follow_3d_camera(
     map: Option<Res<brawler::map::PresentedMap>>,
     editor: Option<Res<MapEditorPreview>>,
+    insets: Option<Res<super::MapEditorArenaInsets>>,
     fighters: Query<
         (&Position, Option<&brawler::builds::ResolvedMatchLoadout>),
         (With<Fighter>, With<Controlled>, Without<ArenaCamera>),
@@ -110,12 +164,18 @@ pub(super) fn follow_3d_camera(
     >,
     mut rig: CameraRigParams,
 ) {
-    let viewport = windows
-        .iter()
-        .next()
-        .map_or(DEFAULT_GAMEPLAY_VIEWPORT, |window| {
-            Vec2::new(window.width(), window.height())
-        });
+    let window = windows.iter().next();
+    // The editor frames the arena inside the area its chrome leaves (`frame_map_editor_viewport`).
+    let editor_viewport = editor
+        .as_ref()
+        .and(insets.as_deref())
+        .zip(window)
+        .and_then(|(insets, window)| editor_arena_viewport(window, *insets));
+    let viewport = match (&editor_viewport, window) {
+        (Some(arena), Some(window)) => arena.physical_size.as_vec2() / window.scale_factor(),
+        (None, Some(window)) => Vec2::new(window.width(), window.height()),
+        _ => DEFAULT_GAMEPLAY_VIEWPORT,
+    };
     let fov = camera_vertical_fov(viewport_aspect(viewport));
     for (_, mut projection, _) in &mut cameras {
         if let Projection::Perspective(perspective) = projection.bypass_change_detection()

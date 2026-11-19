@@ -25,6 +25,14 @@ pub(crate) struct MapEditorPreviewOptions {
     pub(crate) selection_rect: Option<(brawler::map::MapCell, brawler::map::MapCell)>,
 }
 
+/// What the Map Maker editor's chrome covers, in physical pixels: the top bar's height and the
+/// side panel's width. The editor camera draws the arena into the rest of the window (BRL-2xpc).
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MapEditorArenaInsets {
+    pub(crate) top: f32,
+    pub(crate) right: f32,
+}
+
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub(crate) struct MapEditorPreview {
     pub(crate) snapshot: brawler::map::ResolvedMapSnapshot,

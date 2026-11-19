@@ -55,7 +55,10 @@ mod world_look;
 mod zombie;
 
 pub(super) use camera::cursor_ground_point;
-use camera::{CAMERA_VERTICAL_FOV_RADIANS, arena_shadow_cascades, camera_offset, follow_3d_camera};
+use camera::{
+    CAMERA_VERTICAL_FOV_RADIANS, arena_shadow_cascades, camera_offset, follow_3d_camera,
+    frame_map_editor_viewport,
+};
 pub(super) use camera_rig::{ArenaAimCameras, arena_aim_view};
 pub(super) use combat::collect_vfx_evidence_snapshot;
 #[cfg(feature = "automation")]
@@ -78,7 +81,9 @@ pub(crate) use fighter_weapons::{
     FighterWeaponCatalog, HeldWeapon, advertised_weapon_family, selected_weapon_family,
 };
 use map::{GeneratedMapMesh, Presented3dMap};
-pub(crate) use map_editor::{MapEditorPointerMode, MapEditorPreview, MapEditorPreviewOptions};
+pub(crate) use map_editor::{
+    MapEditorArenaInsets, MapEditorPointerMode, MapEditorPreview, MapEditorPreviewOptions,
+};
 use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_health_ui};
 #[cfg(feature = "automation")]
 pub(crate) use toon::install as install_toon_shading;
@@ -552,7 +557,12 @@ impl Plugin for WorldPresentationPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    (combat::write_fighter_visual_poses, follow_3d_camera).chain(),
+                    (
+                        combat::write_fighter_visual_poses,
+                        frame_map_editor_viewport,
+                        follow_3d_camera,
+                    )
+                        .chain(),
                     (
                         combat::advance_local_projectiles,
                         combat::write_projectile_visual_poses,
