@@ -3,9 +3,9 @@ id: BRL-p246
 
 title: Make late-join and direct-admission network tests wait for input sync instead of counting steps
 
-status: doing
-closed:
-status_changed: 2026-11-19T13:09:26Z
+status: done
+closed: 2026-11-19T13:51:21Z
+status_changed: 2026-11-19T13:51:21Z
 
 theme:
 
@@ -15,11 +15,11 @@ created: 2026-11-17T18:56:57Z
 
 blocks: []
 
-related: [BRL-thwh]
+related: [BRL-thwh, BRL-yg57]
 
 parent:
 
-rank: 11665408
+rank:
 ---
 
 # Description

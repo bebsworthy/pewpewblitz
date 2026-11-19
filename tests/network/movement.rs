@@ -182,14 +182,15 @@ fn late_join_receives_current_poses_without_duplicating_static_arena() {
             && harness.server_ids().len() == 1
             && harness.client_ids(0).len() == 1
     });
+    harness.step_until_within(240, "client 0 input timeline sync", |harness| {
+        harness.client_input_synced(0)
+    });
     let static_count = harness.server_static_arena_count();
     let initial = harness.server_positions()[0].1;
     harness.set_controlled_input(0, FighterInput::from_axes(Vec2::X, Some(Vec2::Y), 0));
-    for _ in 0..24 {
-        harness.step();
-    }
-    let before_join = harness.server_positions()[0].1;
-    assert!((before_join.0 - initial.0).length() > 1.0);
+    harness.step_until_within(60, "server movement from client 0 input", |harness| {
+        (harness.server_positions()[0].1.0 - initial.0).length() > 1.0
+    });
     harness.set_controlled_input(0, FighterInput::default());
     for _ in 0..60 {
         harness.step();

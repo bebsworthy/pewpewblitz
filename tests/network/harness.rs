@@ -858,6 +858,33 @@ impl Harness {
         panic!("network harness condition did not become true");
     }
 
+    /// Step until `condition` holds, failing with `what` after `limit` steps.
+    #[track_caller]
+    pub(super) fn step_until_within(
+        &mut self,
+        limit: usize,
+        what: &str,
+        mut condition: impl FnMut(&mut Self) -> bool,
+    ) {
+        for _ in 0..limit {
+            self.step();
+            if condition(self) {
+                return;
+            }
+        }
+        panic!("network harness: {what} did not happen within {limit} steps");
+    }
+
+    /// Whether the client's local timeline finished Lightyear's initial sync. Until then the
+    /// client sends no input, so the server sees none of `set_controlled_input`. When sync lands
+    /// depends on ping exchanges and the link RTT, not on a fixed step count (BRL-p246).
+    pub(super) fn client_input_synced(&self, index: usize) -> bool {
+        self.clients[index]
+            .world()
+            .get_resource::<lightyear_sync::prelude::LocalTimelineSync>()
+            .is_some_and(lightyear_sync::prelude::LocalTimelineSync::is_synced)
+    }
+
     pub(super) fn server_ids(&mut self) -> Vec<(PlayerId, NetworkEntityId)> {
         let mut query = self
             .server

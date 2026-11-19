@@ -10,9 +10,9 @@ fn direct_admission_resolves_distinct_weapon_bases_and_spawns_expected_deliverie
             && harness.client_is_active(1)
             && harness.server_ids().len() == 2
     });
-    for _ in 0..60 {
-        harness.step();
-    }
+    harness.step_until_within(240, "both clients' input timeline sync", |harness| {
+        harness.client_input_synced(0) && harness.client_input_synced(1)
+    });
 
     let world = harness.server.world_mut();
     let mut query = world.query_filtered::<(
@@ -44,10 +44,16 @@ fn direct_admission_resolves_distinct_weapon_bases_and_spawns_expected_deliverie
             FighterInput::from_axes(Vec2::ZERO, Some(Vec2::X), FighterInput::PRIMARY_FIRE),
         );
     }
-    for _ in 0..3 {
-        harness.step();
-    }
+    // Both opening volleys land once the fire input reaches the server; how many steps that
+    // takes follows the input delay and link RTT, so wait for the deliveries themselves.
+    harness.step_until_within(30, "both opening volleys", |harness| {
+        server_projectile_deliveries(harness) >= 6
+    });
+    assert_eq!(server_projectile_deliveries(&mut harness), 6);
+}
+
+fn server_projectile_deliveries(harness: &mut Harness) -> usize {
     let world = harness.server.world_mut();
     let mut deliveries = world.query_filtered::<&AttackDelivery, With<Projectile>>();
-    assert_eq!(deliveries.iter(world).count(), 6);
+    deliveries.iter(world).count()
 }
