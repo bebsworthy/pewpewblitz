@@ -753,7 +753,9 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::MapMakerToggleAssets
         | FlowUiAction::MapMakerToggleValidation
         | FlowUiAction::MapMakerToggleGrid
-        | FlowUiAction::MapMakerFitView => {}
+        | FlowUiAction::MapMakerFitView
+        | FlowUiAction::MapMakerShowRuleIssue
+        | FlowUiAction::MapMakerToggleChromeFocus => {}
     }
     let _ = flow;
 }

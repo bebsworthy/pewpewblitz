@@ -64,12 +64,78 @@ pub struct ResolvedZombieIngressAnchor {
     pub position: Vec2,
 }
 
+/// A recipe rule refusal: the resolver's reason plus, when the rule names them, the placements
+/// and cells it refused (BRL-855z). Map Maker uses the location to point at the problem; every
+/// other caller reads only the reason, which is the same text the resolver always reported.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapRuleRefusal {
+    pub reason: String,
+    /// The refused placements: source or expanded placement IDs.
+    pub placements: Vec<MapPlacementId>,
+    /// The cells the refusal is about, in the order the rule found them.
+    pub cells: Vec<MapCell>,
+}
+
+impl MapRuleRefusal {
+    pub(super) fn located(
+        reason: &str,
+        placements: impl IntoIterator<Item = MapPlacementId>,
+        cells: impl IntoIterator<Item = MapCell>,
+    ) -> Self {
+        Self {
+            reason: reason.to_string(),
+            placements: placements.into_iter().collect(),
+            cells: cells.into_iter().collect(),
+        }
+    }
+
+    /// Whether the refusal names anything on the map.
+    #[must_use]
+    pub fn is_located(&self) -> bool {
+        !self.placements.is_empty() || !self.cells.is_empty()
+    }
+}
+
+impl From<String> for MapRuleRefusal {
+    fn from(reason: String) -> Self {
+        Self {
+            reason,
+            placements: Vec::new(),
+            cells: Vec::new(),
+        }
+    }
+}
+
+impl From<&str> for MapRuleRefusal {
+    fn from(reason: &str) -> Self {
+        reason.to_string().into()
+    }
+}
+
+impl core::fmt::Display for MapRuleRefusal {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str(&self.reason)
+    }
+}
+
 pub(super) fn resolve_grid_recipe(
     recipe: &MapRecipe,
     preset_id: Option<MapPresetId>,
     instance_id: MapInstanceId,
     catalog: &MapContentCatalog,
 ) -> Result<ResolvedMap, String> {
+    resolve_located_grid_recipe(recipe, preset_id, instance_id, catalog)
+        .map_err(|refusal| refusal.reason)
+}
+
+/// [`resolve_grid_recipe`] with the refused placements and cells kept beside the reason. The
+/// rules, their order and every accept/refuse decision are the same.
+pub(super) fn resolve_located_grid_recipe(
+    recipe: &MapRecipe,
+    preset_id: Option<MapPresetId>,
+    instance_id: MapInstanceId,
+    catalog: &MapContentCatalog,
+) -> Result<ResolvedMap, MapRuleRefusal> {
     let default_surface_tag = validate_recipe_identity(recipe, instance_id, catalog)?;
     let topology = crate::modes::builtin_mode_catalog()
         .descriptor_for_definition(recipe.mode_definition_id)
@@ -271,7 +337,7 @@ fn validate_effective_surfaces(
     placements: &[MapAssetPlacement],
     default_tag: super::MapSurfaceTagId,
     catalog: &MapContentCatalog,
-) -> Result<(), String> {
+) -> Result<(), MapRuleRefusal> {
     let mut effective_surface_tags = BTreeMap::new();
     for placement in placements {
         let asset = catalog
@@ -293,12 +359,20 @@ fn validate_effective_surfaces(
         }
         let cells = placement_cells(dimensions, asset, placement)
             .ok_or_else(|| "placement footprint disappeared".to_string())?;
-        if cells.into_iter().any(|cell| {
-            !asset
-                .allowed_surface_tags
-                .contains(effective_surface_tags.get(&cell).unwrap_or(&default_tag))
-        }) {
-            return Err("placement is incompatible with the effective surface".to_string());
+        let refused: Vec<_> = cells
+            .into_iter()
+            .filter(|cell| {
+                !asset
+                    .allowed_surface_tags
+                    .contains(effective_surface_tags.get(cell).unwrap_or(&default_tag))
+            })
+            .collect();
+        if !refused.is_empty() {
+            return Err(MapRuleRefusal::located(
+                "placement is incompatible with the effective surface",
+                [placement.placement_id],
+                refused,
+            ));
         }
     }
     Ok(())
@@ -328,7 +402,7 @@ fn validate_mode_topology(
     placements: &[MapAssetPlacement],
     mode_anchors: &[MapModeAnchorPlacement],
     catalog: &MapContentCatalog,
-) -> Result<(), String> {
+) -> Result<(), MapRuleRefusal> {
     let spawn_count = |team| {
         placements
             .iter()
@@ -342,12 +416,12 @@ fn validate_mode_topology(
     };
     if topology == ModeTopologyPolicy::ZombieIngress {
         if spawn_count(0) < 3 || spawn_count(1) != 0 {
-            return Err("Zombie maps require one three-slot cooperative spawn family".to_string());
+            return Err("Zombie maps require one three-slot cooperative spawn family".into());
         }
     } else {
         for team in 0..=1 {
             if spawn_count(team) < MIN_SPAWNS_PER_TEAM {
-                return Err("grid map lacks spawn capacity".to_string());
+                return Err("grid map lacks spawn capacity".into());
             }
         }
     }
@@ -520,8 +594,8 @@ pub(super) fn validate_placement_capacity(
 fn validate_effect_tile_spawn_safety(
     placements: &[MapAssetPlacement],
     catalog: &MapContentCatalog,
-) -> Result<(), String> {
-    let spawn_cells: Vec<_> = placements
+) -> Result<(), MapRuleRefusal> {
+    let spawns: Vec<_> = placements
         .iter()
         .filter(|placement| {
             matches!(
@@ -529,7 +603,7 @@ fn validate_effect_tile_spawn_safety(
                 MapPlacementParameters::PlayerSpawn { .. }
             )
         })
-        .map(|placement| placement.cell)
+        .map(|placement| (placement.placement_id, placement.cell))
         .collect();
     for placement in placements {
         let Some(tile) = catalog
@@ -554,9 +628,13 @@ fn validate_effect_tile_spawn_safety(
         else {
             continue;
         };
-        for spawn in &spawn_cells {
-            if tile.violates_spawn_clearance(*spawn) {
-                return Err("effect tile violates spawn safety clearance".to_string());
+        for (spawn_id, spawn_cell) in &spawns {
+            if tile.violates_spawn_clearance(*spawn_cell) {
+                return Err(MapRuleRefusal::located(
+                    "effect tile violates spawn safety clearance",
+                    [tile.placement_id, *spawn_id],
+                    [tile.cell, *spawn_cell],
+                ));
             }
         }
     }

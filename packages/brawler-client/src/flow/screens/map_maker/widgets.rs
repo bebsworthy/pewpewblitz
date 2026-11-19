@@ -446,8 +446,13 @@ pub(in crate::flow) fn style_flat_controls(
         &mut Outline,
     )>,
 ) {
-    let focus_visible =
-        focus.as_deref().is_none_or(|focus| focus.visible) && *flow.get() == ClientFlow::MapLibrary;
+    // The editor shows the ring only in chrome-focus mode; the map cursor is its focus otherwise.
+    let focus_visible = focus.as_deref().is_none_or(|focus| focus.visible)
+        && match *flow.get() {
+            ClientFlow::MapLibrary => true,
+            ClientFlow::MapEditor => runtime.chrome_focus,
+            _ => false,
+        };
     for (control, button, interaction, disabled, mut fill, mut border, mut outline) in &mut controls
     {
         let current = runtime.action_is_current(&button.action);

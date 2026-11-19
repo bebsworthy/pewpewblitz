@@ -35,10 +35,11 @@ use screens::{
     },
     map_maker::{
         MapMakerRuntime, MapMakerScrollMemory, follow_chip_preview, keep_map_selection_valid,
-        load_map_library, map_maker_input, navigate_map_library, observe_map_publish_outcome,
-        position_map_editor_selection_toolbar, present_map_editor, present_map_library,
-        publish_map_editor_arena_insets, resolve_map_maker_action, return_to_editor_after_practice,
-        reveal_map_maker_focus, scroll_map_maker, style_flat_controls, sync_map_editor_preview,
+        load_map_library, map_maker_input, navigate_map_editor, navigate_map_library,
+        observe_map_publish_outcome, position_map_editor_selection_toolbar, present_map_editor,
+        present_map_library, publish_map_editor_arena_insets, resolve_map_maker_action,
+        return_to_editor_after_practice, reveal_map_maker_focus, scroll_map_maker,
+        show_map_editor_focus_badge, style_flat_controls, sync_map_editor_preview,
         update_map_editor_values, update_map_library_values,
     },
     match_loading::{spawn_match_loading, update_match_loading},
@@ -190,6 +191,10 @@ impl Plugin for ClientFlowPlugin {
                         .after(map_maker_input)
                         .run_if(in_state(ClientFlow::MapLibrary))
                         .in_set(ClientFlowSet::CollectFlowInput),
+                    navigate_map_editor
+                        .after(map_maker_input)
+                        .run_if(in_state(ClientFlow::MapEditor))
+                        .in_set(ClientFlowSet::CollectFlowInput),
                     practice_map_input
                         .after(collect_flow_input)
                         .in_set(ClientFlowSet::CollectFlowInput),
@@ -246,7 +251,11 @@ impl Plugin for ClientFlowPlugin {
                         position_map_editor_selection_toolbar
                             .after(present_map_editor)
                             .run_if(in_state(ClientFlow::MapEditor)),
-                        (update_map_editor_values, follow_chip_preview)
+                        (
+                            update_map_editor_values,
+                            follow_chip_preview,
+                            show_map_editor_focus_badge,
+                        )
                             .after(present_map_editor)
                             .after(position_map_editor_selection_toolbar)
                             .run_if(in_state(ClientFlow::MapEditor)),

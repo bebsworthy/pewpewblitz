@@ -1147,6 +1147,98 @@ fn effect_tiles_accept_bounded_authored_values_and_reject_unsafe_values_and_spaw
     );
 }
 
+/// BRL-855z: a rule refusal keeps its reason and names the refused placements and cells, so
+/// Map Maker can point at them. The decision and the reason text are unchanged.
+#[test]
+fn authored_rule_refusals_locate_the_refused_placements_and_cells() {
+    let catalog = MapContentCatalog::embedded().unwrap();
+    let preset = catalog.preset(FEATURE_YARD_WIPEOUT_PRESET).unwrap();
+    let mode = preset.recipe.mode_definition_id;
+    let validate = |recipe: &MapRecipe| {
+        validate_authored_recipe(recipe, mode, &catalog, MapInstanceId(1)).unwrap_err()
+    };
+    assert!(validate_authored_recipe(&preset.recipe, mode, &catalog, MapInstanceId(1)).is_ok());
+
+    let mut too_close = preset.recipe.clone();
+    let tile = too_close
+        .placements
+        .iter_mut()
+        .find(|placement| placement.asset_id == DAMAGE_TILE_ASSET)
+        .unwrap();
+    tile.cell = MapCell::new(9, 10);
+    let tile_id = tile.placement_id;
+    let error = validate(&too_close);
+    assert_eq!(
+        error.to_string(),
+        "effect tile violates spawn safety clearance"
+    );
+    let refusal = error.rule_refusal().unwrap();
+    assert_eq!(refusal.placements.len(), 2);
+    assert_eq!(refusal.placements[0], tile_id);
+    let spawn = too_close
+        .placements
+        .iter()
+        .find(|placement| placement.placement_id == refusal.placements[1])
+        .unwrap();
+    assert!(matches!(
+        spawn.parameters,
+        MapPlacementParameters::PlayerSpawn { .. }
+    ));
+    assert_eq!(refusal.cells, [MapCell::new(9, 10), spawn.cell]);
+
+    let mut flooded = preset.recipe.clone();
+    let wall = flooded
+        .placements
+        .iter()
+        .find(|placement| {
+            catalog.asset(placement.asset_id).is_some_and(|asset| {
+                asset.slot == MapAssetSlot::Feature
+                    && !asset.allowed_surface_tags.is_empty()
+                    && catalog
+                        .asset(WATER_ASSET)
+                        .and_then(|water| water.surface_tag)
+                        .is_some_and(|water| !asset.allowed_surface_tags.contains(&water))
+                    && asset.footprint_cells.width == 1
+                    && asset.footprint_cells.height == 1
+            })
+        })
+        .unwrap()
+        .clone();
+    let next_id = flooded
+        .placements
+        .iter()
+        .map(|placement| placement.placement_id.0)
+        .chain(
+            flooded
+                .mode_anchors
+                .iter()
+                .map(|anchor| anchor.placement_id.0),
+        )
+        .max()
+        .unwrap()
+        + 10_000;
+    flooded.placements.push(MapAssetPlacement {
+        placement_id: MapPlacementId(next_id),
+        cell: wall.cell,
+        asset_id: WATER_ASSET,
+        quarter_turns: 0,
+        parameters: MapPlacementParameters::None,
+    });
+    let error = validate(&flooded);
+    assert_eq!(
+        error.to_string(),
+        "placement is incompatible with the effective surface"
+    );
+    let refusal = error.rule_refusal().unwrap();
+    assert_eq!(refusal.placements, [wall.placement_id]);
+    assert_eq!(refusal.cells, [wall.cell]);
+
+    // Limits are not rule refusals and name nothing on the map.
+    let mut oversized = preset.recipe.clone();
+    oversized.dimensions.width = AUTHORING_LIMITS.maximum_axis_cells + 1;
+    assert!(validate(&oversized).rule_refusal().is_none());
+}
+
 #[test]
 fn barrel_yard_places_one_dungeon_wall_directly_beside_the_reference_barrel() {
     let catalog = MapContentCatalog::embedded().unwrap();

@@ -4,8 +4,9 @@
 
 use super::PaletteItem;
 use brawler::map::{
-    HEIST_MODE_DEFINITION, HOT_ZONE_MODE_DEFINITION, MIN_SPAWNS_PER_TEAM, MapContentCatalog,
-    MapInstanceId, MapModeAnchorKind, MapPlacementParameters, MapRecipe, validate_authored_recipe,
+    HEIST_MODE_DEFINITION, HOT_ZONE_MODE_DEFINITION, MIN_SPAWNS_PER_TEAM, MapCell,
+    MapContentCatalog, MapInstanceId, MapModeAnchorKind, MapPlacementId, MapPlacementParameters,
+    MapRecipe, validate_authored_recipe,
 };
 
 /// One countable requirement of the draft's mode.
@@ -56,12 +57,30 @@ impl Requirement {
     }
 }
 
+/// A validator refusal the requirement counts do not explain, and where it is on the map when
+/// the rule names placements or cells (BRL-855z).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RuleIssue {
+    /// The validator's reason as a sentence.
+    pub(super) text: String,
+    pub(super) placements: Vec<MapPlacementId>,
+    pub(super) cells: Vec<MapCell>,
+}
+
+impl RuleIssue {
+    /// Whether Check can show this issue on the map.
+    pub(super) fn located(&self) -> bool {
+        !self.placements.is_empty() || !self.cells.is_empty()
+    }
+}
+
 /// The check result for one recipe.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct MapCheck {
     pub(super) requirements: Vec<Requirement>,
-    /// The validator's refusal, when it is not already explained by an unmet requirement.
-    pub(super) rule_error: Option<String>,
+    /// The validator's refusal, when it is not already explained by an unmet requirement. A
+    /// located refusal always shows: no count explains it.
+    pub(super) rule_error: Option<RuleIssue>,
     /// Whether the authoritative validator accepts the recipe (Test may run).
     pub(super) ready: bool,
 }
@@ -141,10 +160,19 @@ pub(super) fn map_check(recipe: &MapRecipe, catalog: &MapContentCatalog) -> MapC
     let verdict = validate_authored_recipe(recipe, mode, catalog, MapInstanceId(1));
     let ready = verdict.is_ok();
     let all_met = requirements.iter().all(Requirement::met);
-    let rule_error = verdict
-        .err()
-        .filter(|_| all_met)
-        .map(|error| sentence(&error.to_string()));
+    let rule_error = verdict.err().and_then(|error| {
+        let refusal = error.rule_refusal().filter(|refusal| refusal.is_located());
+        (all_met || refusal.is_some()).then(|| {
+            let (placements, cells) = refusal.map_or_else(Default::default, |refusal| {
+                (refusal.placements.clone(), refusal.cells.clone())
+            });
+            RuleIssue {
+                text: sentence(&error.to_string()),
+                placements,
+                cells,
+            }
+        })
+    });
     MapCheck {
         requirements,
         rule_error,

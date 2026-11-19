@@ -109,7 +109,8 @@ pub use pickups::{
 #[cfg(feature = "server")]
 pub use pickups::{PickupOutbox, PickupTelemetry};
 pub use resolution::{
-    MIN_SPAWNS_PER_TEAM, ResolvedHeistSafeAnchor, ResolvedMap, ResolvedZombieIngressAnchor,
+    MIN_SPAWNS_PER_TEAM, MapRuleRefusal, ResolvedHeistSafeAnchor, ResolvedMap,
+    ResolvedZombieIngressAnchor,
 };
 #[cfg(feature = "server")]
 pub use runtime::{

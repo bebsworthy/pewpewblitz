@@ -29,7 +29,8 @@ all_routes=(
     brawler-list brawler-details brawler-create brawler-editor ultimate-picker
     weapon-equipment weapon-parts delete-brawler
     game-select practice-maps map-library map-editor map-editor-palette
-    map-create map-editor-select map-editor-issues map-editor-test map-editor-saved
+    map-create map-editor-select map-editor-issues map-editor-test
+    map-editor-rule map-editor-rule-show map-editor-focus map-editor-saved
     map-library-drafts map-rename map-delete queue
     match-loading match-menu leave-confirmation results
 )

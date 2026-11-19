@@ -5,7 +5,8 @@
 
 use super::{
     MapAssetDefinition, MapAssetPlacement, MapCell, MapContentCatalog, MapDimensions,
-    MapInstanceId, MapPlacementParameterKind, MapRecipe, ModeDefinitionId, ResolvedMap,
+    MapInstanceId, MapPlacementParameterKind, MapRecipe, MapRuleRefusal, ModeDefinitionId,
+    ResolvedMap,
 };
 
 #[cfg(feature = "client")]
@@ -55,7 +56,19 @@ pub enum AuthoringRecipeError {
     SourceItems,
     ExpandedPlacements,
     SourceBytes,
-    Recipe(String),
+    /// A recipe rule refused the map; the refusal may locate the problem (BRL-855z).
+    Recipe(MapRuleRefusal),
+}
+
+impl AuthoringRecipeError {
+    /// The recipe rule refusal, when a rule (not a limit) refused the map.
+    #[must_use]
+    pub fn rule_refusal(&self) -> Option<&MapRuleRefusal> {
+        match self {
+            Self::Recipe(refusal) => Some(refusal),
+            _ => None,
+        }
+    }
 }
 
 impl core::fmt::Display for AuthoringRecipeError {
@@ -84,7 +97,7 @@ impl core::fmt::Display for AuthoringRecipeError {
                 "map recipe exceeds the {} KiB source limit",
                 AUTHORING_LIMITS.maximum_recipe_bytes / 1024
             ),
-            Self::Recipe(reason) => formatter.write_str(reason),
+            Self::Recipe(refusal) => formatter.write_str(&refusal.reason),
         }
     }
 }
@@ -160,13 +173,12 @@ pub fn validate_authored_recipe(
         }
     }
     let bytes = postcard::to_allocvec(recipe).map_err(|error| {
-        AuthoringRecipeError::Recipe(format!("map recipe serialization failed: {error}"))
+        AuthoringRecipeError::Recipe(format!("map recipe serialization failed: {error}").into())
     })?;
     if bytes.len() > AUTHORING_LIMITS.maximum_recipe_bytes as usize {
         return Err(AuthoringRecipeError::SourceBytes);
     }
-    catalog
-        .resolve_recipe(recipe, instance_id)
+    super::resolution::resolve_located_grid_recipe(recipe, None, instance_id, catalog)
         .map_err(AuthoringRecipeError::Recipe)
 }
 

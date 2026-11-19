@@ -4100,6 +4100,154 @@ fn map_editor_controls_leave_the_arena_most_of_a_landscape_phone() {
     }
 }
 
+/// A new draft open in the editor at 1280x720, laid out.
+fn laid_out_map_editor_app() -> App {
+    let membership = lobby_membership_with_brawler();
+    let mut app = configured_lobby_flow_app_with(membership, |app| {
+        crate::ui::layout_harness::add_layout(app, 1280, 720);
+        app.insert_resource(brawler::map::MapCatalogResource(
+            brawler::map::MapContentCatalog::embedded().unwrap(),
+        ));
+    });
+    crate::ui::layout_harness::apply_viewport_fit(&mut app);
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::MapLibrary);
+    app.update();
+    inject_action(&mut app, FlowUiAction::CreateMap);
+    inject_action(&mut app, FlowUiAction::ConfirmCreateMap);
+    app.update();
+    assert_eq!(current_flow(&app), ClientFlow::MapEditor);
+    settle_layout(&mut app);
+    app
+}
+
+/// The indices of the flat controls drawing the focus ring.
+fn flat_focus_rings(app: &mut App) -> Vec<usize> {
+    use screens::map_maker::FlatControl;
+    let world = app.world_mut();
+    world
+        .query::<(&FlowButton, &FlatControl, &Outline)>()
+        .iter(world)
+        .filter(|(_, _, outline)| outline.width != Val::Px(0.0))
+        .map(|(button, ..)| button.index)
+        .collect()
+}
+
+/// BRL-q5sm: Q switches the editor between the map cursor and chrome focus. In chrome focus the
+/// arrows walk the laid-out controls (top bar, side-panel tabs, asset rows) with the flat ring,
+/// Enter presses the focused control, and Esc returns the arrows to the map cursor.
+#[test]
+fn map_editor_chrome_focus_walks_the_controls_and_returns_to_the_map_cursor() {
+    use screens::map_maker::MapMakerRuntime;
+    // Editor control indices (`map_maker/editor.rs`).
+    const PLACE: usize = 1001;
+    const SELECT: usize = 1002;
+    const ASSETS_TAB: usize = 1020;
+    const FIRST_ASSET: usize = 1100;
+    let mut app = laid_out_map_editor_app();
+    // Returns the map cursor on the press frame: later frames may snap it back under the
+    // harness window's pointer.
+    // Keys go through `InputPlugin`, which the layout harness installs.
+    let tap = |app: &mut App, key: KeyCode| {
+        let message = |state| KeyboardInput {
+            key_code: key,
+            logical_key: bevy::input::keyboard::Key::Unidentified(
+                bevy::input::keyboard::NativeKey::Unidentified,
+            ),
+            state,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        };
+        app.world_mut()
+            .write_message(message(bevy::input::ButtonState::Pressed));
+        app.update();
+        let cursor = app
+            .world()
+            .resource::<MapMakerRuntime>()
+            .focus_test_state()
+            .2;
+        app.world_mut()
+            .write_message(message(bevy::input::ButtonState::Released));
+        settle_layout(app);
+        cursor
+    };
+    let state = |app: &App| app.world().resource::<MapMakerRuntime>().focus_test_state();
+    let focused = |app: &App| app.world().resource::<FlowNavigation>().focused;
+    let ring_on = |app: &mut App| flat_focus_rings(app) == vec![focused(app)];
+    let texts = |app: &mut App| {
+        let world = app.world_mut();
+        world
+            .query::<&Text>()
+            .iter(world)
+            .map(|text| text.0.clone())
+            .collect::<Vec<_>>()
+    };
+
+    // Map-cursor mode: the arrows move the cursor, no control shows the ring, the badge says so.
+    let (chrome, _, cursor) = state(&app);
+    assert!(!chrome);
+    assert!(
+        texts(&mut app)
+            .iter()
+            .any(|text| text.starts_with("Map cursor"))
+    );
+    assert_eq!(tap(&mut app, KeyCode::ArrowRight).x, cursor.x + 1);
+    assert!(flat_focus_rings(&mut app).is_empty());
+
+    // Q enters chrome focus on the active tool; the arrows now move focus, not the cursor.
+    tap(&mut app, KeyCode::KeyQ);
+    assert!(state(&app).0);
+    assert!(
+        texts(&mut app)
+            .iter()
+            .any(|text| text.starts_with("Controls"))
+    );
+    assert_eq!(focused(&app), PLACE);
+    assert!(ring_on(&mut app));
+    assert_eq!(
+        tap(&mut app, KeyCode::ArrowRight),
+        state(&app).2,
+        "the map cursor stays put"
+    );
+    assert_eq!(focused(&app), SELECT);
+    assert!(ring_on(&mut app));
+
+    // From the Assets tab, Down reaches the asset rows, and Enter selects the focused row.
+    app.world_mut().resource_mut::<FlowNavigation>().focused = ASSETS_TAB;
+    let mut visited = Vec::new();
+    for _ in 0..8 {
+        tap(&mut app, KeyCode::ArrowDown);
+        visited.push(focused(&app));
+        if focused(&app) >= FIRST_ASSET {
+            break;
+        }
+    }
+    assert!(
+        focused(&app) >= FIRST_ASSET,
+        "down from the tab: {visited:?}"
+    );
+    tap(&mut app, KeyCode::ArrowDown);
+    let row = focused(&app);
+    assert!(row > FIRST_ASSET || visited.len() > 1);
+    tap(&mut app, KeyCode::Enter);
+    assert_eq!(state(&app).1, row - FIRST_ASSET);
+    assert!(state(&app).0, "pressing a control keeps chrome focus");
+
+    // Esc returns to the map cursor; the arrows move it again and the ring goes.
+    tap(&mut app, KeyCode::Escape);
+    assert!(!state(&app).0);
+    assert_eq!(
+        current_flow(&app),
+        ClientFlow::MapEditor,
+        "Esc did not leave"
+    );
+    let before = state(&app).2;
+    assert_eq!(tap(&mut app, KeyCode::ArrowRight).x, before.x + 1);
+    assert!(flat_focus_rings(&mut app).is_empty());
+}
+
 /// Wipeout 3v3, Hot Zone and Heist victories for the local team 1, as Results presents them.
 fn results_layout_contexts(
     game_type_id: &brawler::lobby::GameTypeId,

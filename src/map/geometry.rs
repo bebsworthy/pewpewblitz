@@ -425,7 +425,7 @@ pub(super) fn validate_spawn_clearance(
     placements: &[MapAssetPlacement],
     dimensions: MapDimensions,
     catalog: &MapContentCatalog,
-) -> Result<(), String> {
+) -> Result<(), super::MapRuleRefusal> {
     let blocked = blocking_shapes(placements, dimensions, catalog);
     for placement in placements {
         if matches!(
@@ -440,10 +440,18 @@ pub(super) fn validate_spawn_clearance(
                     *shape,
                 )
             }) {
-                return Err("spawn overlaps blocking feature".to_string());
+                return Err(super::MapRuleRefusal::located(
+                    "spawn overlaps blocking feature",
+                    [placement.placement_id],
+                    [placement.cell],
+                ));
             }
             if !dimensions.bounds().contains_with_inset(center, 32.0) {
-                return Err("spawn lacks perimeter clearance".to_string());
+                return Err(super::MapRuleRefusal::located(
+                    "spawn lacks perimeter clearance",
+                    [placement.placement_id],
+                    [placement.cell],
+                ));
             }
         }
     }

@@ -68,6 +68,12 @@ pub enum ShellCaptureRoute {
     MapEditorIssues,
     /// A painted draft after Test Map is refused by local validation (BRL-2xpc audit).
     MapEditorTest,
+    /// A wall standing on painted water, with Check open on the located rule error (BRL-855z).
+    MapEditorRule,
+    /// The same draft after Check's Show selected and framed the wall (BRL-855z).
+    MapEditorRuleShow,
+    /// The editor in chrome-focus mode with the Assets panel open (BRL-q5sm).
+    MapEditorFocus,
     /// A painted draft right after Save (BRL-2xpc audit).
     MapEditorSaved,
     /// The library after saving one painted draft (BRL-2xpc audit).
@@ -89,7 +95,7 @@ pub enum ShellCaptureRoute {
 
 impl ShellCaptureRoute {
     /// Every route, in the order `scripts/shell-capture.sh` runs them on a fresh profile.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 35] = [
         Self::FirstBrawler,
         Self::Dashboard,
         Self::DashboardMenu,
@@ -113,6 +119,9 @@ impl ShellCaptureRoute {
         Self::MapEditorSelect,
         Self::MapEditorIssues,
         Self::MapEditorTest,
+        Self::MapEditorRule,
+        Self::MapEditorRuleShow,
+        Self::MapEditorFocus,
         Self::MapEditorSaved,
         Self::MapLibraryDrafts,
         Self::MapRename,
@@ -151,6 +160,9 @@ impl ShellCaptureRoute {
             Self::MapEditorSelect => "map-editor-select",
             Self::MapEditorIssues => "map-editor-issues",
             Self::MapEditorTest => "map-editor-test",
+            Self::MapEditorRule => "map-editor-rule",
+            Self::MapEditorRuleShow => "map-editor-rule-show",
+            Self::MapEditorFocus => "map-editor-focus",
             Self::MapEditorSaved => "map-editor-saved",
             Self::MapLibraryDrafts => "map-library-drafts",
             Self::MapRename => "map-rename",
@@ -265,6 +277,9 @@ impl ShellCaptureRoute {
             | Self::MapEditorSelect
             | Self::MapEditorIssues
             | Self::MapEditorTest
+            | Self::MapEditorRule
+            | Self::MapEditorRuleShow
+            | Self::MapEditorFocus
             | Self::MapEditorSaved
             | Self::MapLibraryDrafts
             | Self::MapRename
@@ -369,6 +384,35 @@ impl ShellCaptureRoute {
                 with(painted(), vec![in_editor(Action::MapMakerToggleValidation)])
             }
             Self::MapEditorTest => with(painted(), vec![in_editor(Action::TestAuthoredMap)]),
+            Self::MapEditorRule | Self::MapEditorRuleShow => {
+                // Water painted under two cells of the wall line: the walls refuse that surface.
+                let catalog = brawler::map::MapContentCatalog::embedded()
+                    .expect("the embedded map catalog is valid");
+                let water = brawler::map::authorable_assets(&catalog)
+                    .iter()
+                    .position(|asset| asset.id == brawler::map::WATER_ASSET)
+                    .expect("water is an authorable surface");
+                let flooded = (8..10).map(|x| brawler::map::MapCell::new(x, 6)).collect();
+                let mut steps = with(
+                    painted(),
+                    vec![
+                        in_editor(Action::MapMakerShowPaletteItem(water)),
+                        in_editor(Action::MapMakerPaintStroke(flooded)),
+                        in_editor(Action::MapMakerToggleValidation),
+                    ],
+                );
+                if self == Self::MapEditorRuleShow {
+                    steps.push(in_editor(Action::MapMakerShowRuleIssue));
+                }
+                steps
+            }
+            Self::MapEditorFocus => with(
+                map_editor.to_vec(),
+                vec![
+                    in_editor(Action::MapMakerSelectCategory(1)),
+                    in_editor(Action::MapMakerToggleChromeFocus),
+                ],
+            ),
             Self::MapEditorSaved => with(painted(), vec![in_editor(Action::SaveMapDraft)]),
             Self::MapLibraryDrafts => saved_library(),
             Self::MapRename => with(

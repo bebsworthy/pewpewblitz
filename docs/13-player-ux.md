@@ -355,6 +355,16 @@ server's advertised mode and roster, then submitting that saved revision for aut
 admission. Results and deliberate Practice exit retain a return path to the same document. Player
 drafts stay in app-owned local storage.
 
+The editor has two keyboard/controller input modes (BRL-q5sm). In map-cursor mode the arrows and
+D-pad move the grid cursor and Enter/South places. **Q** or the controller's **Select** switches to
+chrome focus: the arrows and D-pad move the flat focus ring through the top bar, the side-panel
+tabs, asset and Check rows and the asset chip, Enter, Space or South presses the focused control,
+and Esc or East (or Q/Select again) returns to the map cursor. Every letter, trigger and face-button
+shortcut works in both modes. A corner badge names the active mode; like the ring, it hides after a
+touch press. The Check tab lists the authoritative validator's refusal when no requirement count
+explains it; when the refusal names placements or cells, its **Show** action switches to Select,
+selects them and frames the camera on them (BRL-855z).
+
 Each My Maps card also has **Publish** (BRL-w9z1). It sends the saved draft to the connected server
 for that server's community rotation, targeting the draft's intended game type when the server
 opens it to community maps, otherwise the first opted-in game type of the draft's mode. The library

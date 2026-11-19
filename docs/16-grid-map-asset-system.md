@@ -515,6 +515,13 @@ debris/replacement assets and exposes only the sealed catalog's explicit authora
 These limits are advertised for supported modes and are checked before rectangle expansion or large
 allocation as well as by authoritative resolution.
 
+A rule refusal from `validate_authored_recipe` is `AuthoringRecipeError::Recipe(MapRuleRefusal)`:
+the same reason text the resolver always reported, plus the refused placement IDs and cells when the
+rule names them (BRL-855z). Today the effect-tile spawn clearance, spawn blocking and perimeter
+clearance, and effective-surface rules are located. The location is a client-side affordance only:
+it is not serialized, every caller other than Map Maker reads only the reason, and adding a location
+never changes a decision.
+
 A published map (BRL-w9z1) is the same canonical recipe, stored by the server under a
 server-assigned identity: `recipe_id = 2^48 + published_map_id` and revision 1, so its recipe
 fingerprint is unique on that server and never collides with a built-in preset or local draft ID.

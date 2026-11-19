@@ -1020,7 +1020,11 @@ pub(in crate::flow) fn navigate_map_library(
 
 /// The control nearest `from` in `direction`: candidates must lie ahead along the direction;
 /// sideways distance counts double so moves stay in their row or column.
-fn spatial_neighbor(from: usize, direction: Vec2, controls: &[(usize, Vec2)]) -> Option<usize> {
+pub(super) fn spatial_neighbor(
+    from: usize,
+    direction: Vec2,
+    controls: &[(usize, Vec2)],
+) -> Option<usize> {
     let origin = controls.iter().find(|(index, _)| *index == from)?.1;
     controls
         .iter()

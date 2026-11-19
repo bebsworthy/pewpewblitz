@@ -115,6 +115,10 @@ pub(super) enum FlowUiAction {
     MapMakerToggleValidation,
     MapMakerToggleGrid,
     MapMakerFitView,
+    /// Check's Show: selects and frames the placements a located rule refusal names.
+    MapMakerShowRuleIssue,
+    /// Switches the editor's keyboard/controller input between the map cursor and the chrome.
+    MapMakerToggleChromeFocus,
     CancelQueue,
     RetryQueue,
     TryAgainQueue,

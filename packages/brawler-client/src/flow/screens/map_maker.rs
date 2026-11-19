@@ -4,6 +4,7 @@
 
 mod check;
 mod editor;
+mod focus;
 mod library;
 mod scroll;
 mod widgets;
@@ -14,6 +15,7 @@ pub(in crate::flow) use editor::{
     follow_chip_preview, position_map_editor_selection_toolbar, present_map_editor,
     publish_map_editor_arena_insets, update_map_editor_values,
 };
+pub(in crate::flow) use focus::{navigate_map_editor, show_map_editor_focus_badge};
 pub(in crate::flow) use library::{
     keep_map_selection_valid, navigate_map_library, present_map_library, update_map_library_values,
 };
@@ -147,6 +149,8 @@ pub(in crate::flow) struct MapMakerRuntime {
     return_to_editor: bool,
     camera_center: Vec2,
     camera_zoom: f32,
+    /// Keyboard and controller input drive the editor chrome, not the map cursor (BRL-q5sm).
+    chrome_focus: bool,
 }
 
 impl MapMakerRuntime {
@@ -155,6 +159,12 @@ impl MapMakerRuntime {
         self.creating
             .as_deref()
             .or(self.renaming.as_ref().map(|(_, name)| name.as_str()))
+    }
+
+    /// Chrome-focus mode, the selected palette index and the map cursor, for flow tests.
+    #[cfg(test)]
+    pub(in crate::flow) fn focus_test_state(&self) -> (bool, usize, MapCell) {
+        (self.chrome_focus, self.palette_index, self.cursor)
     }
 
     /// The asset search being typed in the editor, if any.
@@ -190,6 +200,7 @@ impl Default for MapMakerRuntime {
             return_to_editor: false,
             camera_center: Vec2::ZERO,
             camera_zoom: 1.0,
+            chrome_focus: false,
         }
     }
 }
@@ -794,6 +805,12 @@ pub(in crate::flow) fn resolve_map_maker_action(
             runtime.camera_center = Vec2::ZERO;
             runtime.camera_zoom = 1.0;
         }
+        FlowUiAction::MapMakerShowRuleIssue => show_rule_issue(&catalog.0, &mut runtime),
+        FlowUiAction::MapMakerToggleChromeFocus if *flow.get() == ClientFlow::MapEditor => {
+            runtime.chrome_focus = !runtime.chrome_focus;
+            runtime.interaction = EditorInteraction::Idle;
+            runtime.bump_render();
+        }
         _ => {}
     }
 }
@@ -846,6 +863,8 @@ fn is_map_maker_action(action: &FlowUiAction) -> bool {
             | FlowUiAction::MapMakerToggleValidation
             | FlowUiAction::MapMakerToggleGrid
             | FlowUiAction::MapMakerFitView
+            | FlowUiAction::MapMakerShowRuleIssue
+            | FlowUiAction::MapMakerToggleChromeFocus
     )
 }
 
@@ -1187,6 +1206,7 @@ impl MapMakerRuntime {
                 .is_some_and(|session| session.symmetry != MapSymmetry::None),
             FlowUiAction::MapMakerToggleGrid => self.grid_visible,
             FlowUiAction::MapMakerClear => self.clear_armed,
+            FlowUiAction::MapMakerToggleChromeFocus => self.chrome_focus,
             _ => false,
         }
     }
@@ -1207,6 +1227,68 @@ fn activate_editor_tool(runtime: &mut MapMakerRuntime, tool: EditorTool) {
     if tool != EditorTool::Select {
         runtime.selection.clear();
     }
+}
+
+/// Check's Show (BRL-855z): the Select tool with the placements a located rule refusal names,
+/// and the camera framed on its cells. Placements the editor cannot select by ID (cells of a
+/// filled rectangle) are selected by their cells instead.
+fn show_rule_issue(catalog: &brawler::map::MapContentCatalog, runtime: &mut MapMakerRuntime) {
+    let Some(session) = runtime.session.as_ref() else {
+        return;
+    };
+    let recipe = &session.document.recipe;
+    let Some(issue) = check::map_check(recipe, catalog)
+        .rule_error
+        .filter(check::RuleIssue::located)
+    else {
+        return;
+    };
+    let selectable: BTreeSet<_> = recipe
+        .placements
+        .iter()
+        .map(|placement| placement.placement_id)
+        .chain(recipe.mode_anchors.iter().map(|anchor| anchor.placement_id))
+        .collect();
+    let mut selected: BTreeSet<_> = issue
+        .placements
+        .iter()
+        .copied()
+        .filter(|id| selectable.contains(id))
+        .collect();
+    if selected.len() < issue.placements.len() || selected.is_empty() {
+        for cell in &issue.cells {
+            selected.extend(session.placements_in_rect(catalog, *cell, *cell));
+        }
+    }
+    let dimensions = recipe.dimensions;
+    let mut cells = issue.cells.clone();
+    cells.extend(recipe.placements.iter().filter_map(|placement| {
+        selected
+            .contains(&placement.placement_id)
+            .then_some(placement.cell)
+    }));
+    activate_editor_tool(runtime, EditorTool::Select);
+    runtime.selection = selected;
+    if let Some((center, zoom)) = framing(dimensions, &cells) {
+        runtime.camera_center = center;
+        runtime.camera_zoom = zoom;
+    }
+    runtime.status = Some(issue.text);
+    runtime.bump_render();
+}
+
+/// The camera centre and zoom that frame `cells` with a margin; zoom 1 fits the whole map.
+fn framing(dimensions: brawler::map::MapDimensions, cells: &[MapCell]) -> Option<(Vec2, f32)> {
+    let mut points = cells.iter().map(|cell| dimensions.cell_center(*cell));
+    let first = points.next()?;
+    let (min, max) = points.fold((first, first), |(min, max), point| {
+        (min.min(point), max.max(point))
+    });
+    let margin = Vec2::splat(brawler::map::MAP_CELL_SIZE_WORLD * 6.0);
+    let extent = max - min + margin;
+    let world = dimensions.world_size();
+    let zoom = (extent.x / world.x).max(extent.y / world.y).clamp(0.5, 1.0);
+    Some(((min + max) * 0.5, zoom))
 }
 
 /// The Assets tab: opens it (with the Place tool) or collapses it.
@@ -1639,6 +1721,25 @@ pub(in crate::flow) fn map_maker_input(
         }
         return;
     }
+    let pad = |button| gamepads.iter().any(|gamepad| gamepad.just_pressed(button));
+    if keyboard.just_pressed(focus::CHROME_FOCUS_KEY) || pad(focus::CHROME_FOCUS_BUTTON) {
+        queue_ui_action(&mut actions, FlowUiAction::MapMakerToggleChromeFocus);
+        feedback.write(UiFeedback::Activated(None));
+        return;
+    }
+    // Chrome focus owns the arrows, D-pad, Enter, Space and South (`navigate_map_editor`); Esc
+    // and East close the category menu, then return to the map cursor.
+    let chrome_mode = runtime.chrome_focus;
+    if chrome_mode && (escape || pad(GamepadButton::East)) {
+        if runtime.category_menu_open {
+            runtime.category_menu_open = false;
+            runtime.bump_render();
+        } else {
+            queue_ui_action(&mut actions, FlowUiAction::MapMakerToggleChromeFocus);
+        }
+        feedback.write(UiFeedback::Back);
+        return;
+    }
     if keyboard.just_pressed(KeyCode::Slash) {
         activate_editor_tool(&mut runtime, EditorTool::Place);
         runtime.palette_search_active = true;
@@ -1664,10 +1765,9 @@ pub(in crate::flow) fn map_maker_input(
     {
         runtime.cursor = cell;
     }
-    let pad = |button| gamepads.iter().any(|gamepad| gamepad.just_pressed(button));
     // Keyed cursor moves tick only when the cursor really moved: a grid edge is silent.
     let cursor_before = runtime.cursor;
-    if let Some(dimensions) = dimensions {
+    if let Some(dimensions) = dimensions.filter(|_| !chrome_mode) {
         if keyboard.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft) {
             runtime.cursor.x = runtime.cursor.x.saturating_sub(1);
         }
@@ -1846,9 +1946,10 @@ pub(in crate::flow) fn map_maker_input(
             _ => {}
         }
     }
-    if keyboard.just_pressed(KeyCode::Enter)
-        || (keyboard.just_pressed(KeyCode::Space) && !mouse_pressed)
-        || pad(GamepadButton::South)
+    if !chrome_mode
+        && (keyboard.just_pressed(KeyCode::Enter)
+            || (keyboard.just_pressed(KeyCode::Space) && !mouse_pressed)
+            || pad(GamepadButton::South))
     {
         let action = match runtime.tool {
             EditorTool::Place => Some(FlowUiAction::MapMakerPlace),
@@ -2110,6 +2211,124 @@ mod tests {
             selected_palette_item(&catalog, &runtime, mode),
             Some(PaletteItem::Spawn(1))
         );
+    }
+
+    /// A Wipeout draft with three spawns per team, so only the rule under test refuses it.
+    fn spawned_session(catalog: &brawler::map::MapContentCatalog) -> MapEditorSession {
+        let mut session = MapEditorSession::open(blank_feedback_document());
+        for (team, x) in [(0, 4), (1, 26)] {
+            for y in [5, 11, 17] {
+                session
+                    .place_spawn(catalog, MapCell::new(x, y), team, 0)
+                    .unwrap();
+            }
+        }
+        session
+    }
+
+    fn placement_at(
+        session: &MapEditorSession,
+        asset: MapAssetId,
+        cell: MapCell,
+    ) -> brawler::map::MapPlacementId {
+        session
+            .document
+            .recipe
+            .placements
+            .iter()
+            .find(|placement| placement.asset_id == asset && placement.cell == cell)
+            .unwrap()
+            .placement_id
+    }
+
+    /// BRL-855z: Show selects exactly what the rule refused and frames the camera on it.
+    #[test]
+    fn check_show_selects_and_frames_a_spawn_clearance_refusal() {
+        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+        let mut session = spawned_session(&catalog);
+        let tile_cell = MapCell::new(5, 11);
+        session
+            .place(&catalog, brawler::map::DAMAGE_TILE_ASSET, tile_cell, 0)
+            .unwrap();
+        let tile = placement_at(&session, brawler::map::DAMAGE_TILE_ASSET, tile_cell);
+        let spawn = session
+            .document
+            .recipe
+            .placements
+            .iter()
+            .find(|placement| placement.cell == MapCell::new(4, 11))
+            .unwrap()
+            .placement_id;
+        let issue = check::map_check(&session.document.recipe, &catalog)
+            .rule_error
+            .unwrap();
+        assert!(issue.located(), "{issue:?}");
+        assert_eq!(issue.text, "Effect tile violates spawn safety clearance.");
+        let mut runtime = MapMakerRuntime {
+            session: Some(session),
+            panel: SidePanel::Check,
+            ..MapMakerRuntime::default()
+        };
+        show_rule_issue(&catalog, &mut runtime);
+        assert_eq!(runtime.tool, EditorTool::Select);
+        assert_eq!(runtime.selection, BTreeSet::from([tile, spawn]));
+        assert_eq!(runtime.panel, SidePanel::Check, "Check stays open");
+        let dimensions = runtime.session.as_ref().unwrap().document.recipe.dimensions;
+        let expected =
+            (dimensions.cell_center(tile_cell) + dimensions.cell_center(MapCell::new(4, 11))) * 0.5;
+        assert!(runtime.camera_center.distance(expected) < 1.0);
+        assert!(runtime.camera_zoom < 1.0, "zoomed in on the problem");
+        assert_eq!(runtime.status.as_deref(), Some(issue.text.as_str()));
+    }
+
+    #[test]
+    fn check_show_selects_a_placement_on_an_incompatible_surface() {
+        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+        let mut session = spawned_session(&catalog);
+        let wall_cell = MapCell::new(15, 11);
+        let wall_asset = brawler::map::WALL_ARENA_ASSET;
+        session.place(&catalog, wall_asset, wall_cell, 0).unwrap();
+        session
+            .place(&catalog, brawler::map::WATER_ASSET, wall_cell, 0)
+            .unwrap();
+        let wall = placement_at(&session, wall_asset, wall_cell);
+        let check = check::map_check(&session.document.recipe, &catalog);
+        let issue = check.rule_error.unwrap();
+        assert_eq!(
+            issue.text,
+            "Placement is incompatible with the effective surface."
+        );
+        assert_eq!(issue.placements, [wall]);
+        let mut runtime = MapMakerRuntime {
+            session: Some(session),
+            ..MapMakerRuntime::default()
+        };
+        show_rule_issue(&catalog, &mut runtime);
+        assert_eq!(runtime.selection, BTreeSet::from([wall]));
+        assert_eq!(runtime.tool, EditorTool::Select);
+    }
+
+    #[test]
+    fn a_located_refusal_shows_even_while_counts_are_unmet() {
+        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+        let mut session = MapEditorSession::open(blank_feedback_document());
+        let cell = MapCell::new(15, 11);
+        session
+            .place(&catalog, brawler::map::WALL_ARENA_ASSET, cell, 0)
+            .unwrap();
+        let check = check::map_check(&session.document.recipe, &catalog);
+        assert_eq!(check.rule_error, None, "the counts explain a plain draft");
+        session
+            .place(&catalog, brawler::map::WATER_ASSET, cell, 0)
+            .unwrap();
+        let check = check::map_check(&session.document.recipe, &catalog);
+        assert!(
+            check
+                .rule_error
+                .as_ref()
+                .is_some_and(check::RuleIssue::located)
+        );
+        assert_eq!(check.issue_count(), 3, "two spawn counts and the surface");
     }
 
     #[test]
@@ -2756,7 +2975,12 @@ mod tests {
             SidePanel::Collapsed
         );
         // Plain unbound keys are silent.
-        assert_eq!(key(&mut app, KeyCode::KeyQ), Vec::new());
+        assert_eq!(key(&mut app, KeyCode::KeyK), Vec::new());
+        // Q switches to chrome focus (BRL-q5sm) and clicks like a control.
+        assert_eq!(
+            key(&mut app, KeyCode::KeyQ),
+            vec![UiFeedback::Activated(None)]
+        );
     }
 
     #[test]

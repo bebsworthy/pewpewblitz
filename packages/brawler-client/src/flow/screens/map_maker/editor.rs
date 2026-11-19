@@ -6,7 +6,7 @@
 use super::{
     EditorTool, MapMakerRoot, MapMakerRuntime, MapPalettePreviewHost, PaletteCategory, PaletteItem,
     SidePanel,
-    check::{MapCheck, Requirement, map_check},
+    check::{MapCheck, Requirement, RuleIssue, map_check},
     library::{mode_identity, pennant_icon},
     palette, palette_category, palette_color, palette_label,
     scroll::{MapMakerScroll, MapMakerScrollMemory, ScrollArea},
@@ -23,32 +23,34 @@ use brawler::map::{MapAssetSlot, MapCatalogResource, MapCell, MapContentCatalog,
 use std::collections::BTreeSet;
 
 /// Editor control indices (kept clear of the library's focus order).
-mod index {
-    pub(super) const BACK: usize = 1000;
-    pub(super) const PLACE: usize = 1001;
-    pub(super) const SELECT: usize = 1002;
-    pub(super) const ERASE: usize = 1003;
-    pub(super) const UNDO: usize = 1004;
-    pub(super) const REDO: usize = 1005;
-    pub(super) const GRID: usize = 1006;
-    pub(super) const MIRROR: usize = 1007;
-    pub(super) const FIT: usize = 1008;
-    pub(super) const SAVE: usize = 1009;
-    pub(super) const TEST: usize = 1010;
-    pub(super) const CHIP: usize = 1011;
-    pub(super) const ASSETS_TAB: usize = 1020;
-    pub(super) const CHECK_TAB: usize = 1021;
-    pub(super) const COLLAPSE: usize = 1022;
-    pub(super) const CATEGORY: usize = 1023;
-    pub(super) const SEARCH: usize = 1024;
-    pub(super) const CLEAR_SEARCH: usize = 1025;
-    pub(super) const FIRST_CATEGORY: usize = 1030;
-    pub(super) const ROTATE: usize = 1040;
-    pub(super) const DUPLICATE: usize = 1041;
-    pub(super) const DELETE: usize = 1042;
-    pub(super) const DESELECT: usize = 1043;
-    pub(super) const FIRST_FIX: usize = 1050;
-    pub(super) const FIRST_ASSET: usize = 1100;
+pub(super) mod index {
+    pub(in super::super) const BACK: usize = 1000;
+    pub(in super::super) const PLACE: usize = 1001;
+    pub(in super::super) const SELECT: usize = 1002;
+    pub(in super::super) const ERASE: usize = 1003;
+    pub(in super::super) const UNDO: usize = 1004;
+    pub(in super::super) const REDO: usize = 1005;
+    pub(in super::super) const GRID: usize = 1006;
+    pub(in super::super) const MIRROR: usize = 1007;
+    pub(in super::super) const FIT: usize = 1008;
+    pub(in super::super) const SAVE: usize = 1009;
+    pub(in super::super) const TEST: usize = 1010;
+    pub(in super::super) const CHIP: usize = 1011;
+    pub(in super::super) const ASSETS_TAB: usize = 1020;
+    pub(in super::super) const CHECK_TAB: usize = 1021;
+    pub(in super::super) const COLLAPSE: usize = 1022;
+    pub(in super::super) const CATEGORY: usize = 1023;
+    pub(in super::super) const SEARCH: usize = 1024;
+    pub(in super::super) const CLEAR_SEARCH: usize = 1025;
+    pub(in super::super) const FIRST_CATEGORY: usize = 1030;
+    pub(in super::super) const ROTATE: usize = 1040;
+    pub(in super::super) const DUPLICATE: usize = 1041;
+    pub(in super::super) const DELETE: usize = 1042;
+    pub(in super::super) const DESELECT: usize = 1043;
+    pub(in super::super) const SHOW_RULE: usize = 1045;
+    pub(in super::super) const FOCUS_MODE: usize = 1046;
+    pub(in super::super) const FIRST_FIX: usize = 1050;
+    pub(in super::super) const FIRST_ASSET: usize = 1100;
 }
 
 /// The editor's top bar; its laid-out height is the arena's top inset.
@@ -158,6 +160,7 @@ pub(in crate::flow) fn present_map_editor(
                 corner_chip(root, &kit, &runtime, session, catalog);
             }
             status_toast(root, &kit, &runtime);
+            super::focus::focus_badge(root, &kit, &runtime, panel_width(&kit, runtime.panel));
             selection_toolbar(root, &kit, &runtime, toolbar);
         });
 }
@@ -844,16 +847,17 @@ fn check_tab(
                     fix_slot += 1;
                     (index::FIRST_FIX + fix_slot, position)
                 });
-            issue_row(
-                list,
-                kit,
-                &requirement.headline(),
-                &requirement.advice(),
-                fix,
-            );
+            let headline = requirement.headline();
+            let fix = fix.map(|(index, palette_index)| IssueAction {
+                index,
+                action: FlowUiAction::MapMakerShowPaletteItem(palette_index),
+                label: "Add",
+                spoken: format!("Show the asset that fixes: {headline}"),
+            });
+            issue_row(list, kit, &headline, &requirement.advice(), fix);
         }
-        if let Some(rule) = check.rule_error.as_deref() {
-            issue_row(list, kit, rule, "Fix this, then check again.", None);
+        if let Some(rule) = check.rule_error.as_ref() {
+            rule_issue_row(list, kit, rule);
         }
         kit.label(list, "Passed", kit.pick(12.0, 15.0), ACCENT);
         let passed: Vec<String> = check
@@ -889,13 +893,37 @@ fn check_tab(
     });
 }
 
-/// One Check issue: what is wrong, how to fix it, and Add when a palette entry fixes it.
+/// The validator refusal no count explains, with Show when it names placements or cells.
+fn rule_issue_row(list: &mut ChildSpawnerCommands, kit: &Kit, rule: &RuleIssue) {
+    let show = rule.located().then(|| IssueAction {
+        index: index::SHOW_RULE,
+        action: FlowUiAction::MapMakerShowRuleIssue,
+        label: "Show",
+        spoken: format!("Show on the map: {}", rule.text),
+    });
+    let advice = if rule.located() {
+        "Show selects it on the map. Fix it, then check again."
+    } else {
+        "Fix this, then check again."
+    };
+    issue_row(list, kit, &rule.text, advice, show);
+}
+
+/// A Check issue's action: Add (the palette entry that fixes it) or Show (where it is).
+struct IssueAction {
+    index: usize,
+    action: FlowUiAction,
+    label: &'static str,
+    spoken: String,
+}
+
+/// One Check issue: what is wrong, how to fix it, and its Add or Show action.
 fn issue_row(
     list: &mut ChildSpawnerCommands,
     kit: &Kit,
     headline: &str,
     advice: &str,
-    fix: Option<(usize, usize)>,
+    action: Option<IssueAction>,
 ) {
     list.spawn((
         Node {
@@ -920,16 +948,12 @@ fn issue_row(
                 kit.label(copy, headline, kit.pick(13.0, 17.0), TEXT);
                 kit.label(copy, advice, kit.pick(11.0, 14.0), ACCENT);
             });
-        if let Some((index, palette_index)) = fix {
+        if let Some(action) = action {
             kit.button(
                 issue,
-                ButtonSpec::new(
-                    index,
-                    FlowUiAction::MapMakerShowPaletteItem(palette_index),
-                    Tone::Plain,
-                )
-                .label("Add")
-                .named(&format!("Show the asset that fixes: {headline}")),
+                ButtonSpec::new(action.index, action.action, Tone::Plain)
+                    .label(action.label)
+                    .named(&action.spoken),
             );
         }
     });

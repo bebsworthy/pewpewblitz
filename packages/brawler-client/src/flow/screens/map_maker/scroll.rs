@@ -73,8 +73,8 @@ pub(in crate::flow) fn scroll_map_maker(
     }
 }
 
-/// Keeps the focused library control and the selected asset row inside their scroll area when
-/// focus or the selection moves (not on every frame, so wheel and touch scrolling stay free).
+/// Keeps the focused control (library, or editor chrome focus) and the selected asset row inside
+/// their scroll area when focus or the selection moves (not on every frame, so wheel and touch scrolling stay free).
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
@@ -83,7 +83,7 @@ pub(in crate::flow) fn scroll_map_maker(
 pub(in crate::flow) fn reveal_map_maker_focus(
     navigation: Res<FlowNavigation>,
     runtime: Res<MapMakerRuntime>,
-    mut last: Local<(Option<(usize, usize)>, bool)>,
+    mut last: Local<(Option<(usize, usize, bool)>, bool)>,
     buttons: Query<(&FlowButton, &ComputedNode, &UiGlobalTransform, &ChildOf)>,
     parents: Query<&ChildOf>,
     mut areas: Query<
@@ -92,7 +92,11 @@ pub(in crate::flow) fn reveal_map_maker_focus(
     >,
 ) {
     // A move stays pending until its control is laid out (a rebuild lays out a frame later).
-    let key = (navigation.focused, runtime.palette_index);
+    let key = (
+        navigation.focused,
+        runtime.palette_index,
+        runtime.chrome_focus,
+    );
     if last.0 != Some(key) {
         *last = (Some(key), true);
     }
@@ -100,8 +104,11 @@ pub(in crate::flow) fn reveal_map_maker_focus(
         return;
     }
     for (button, computed, transform, parent) in &buttons {
+        // Asset rows follow the selection, except in chrome focus, where they follow focus.
         let revealed = match button.action {
-            crate::flow::actions::FlowUiAction::MapMakerSelectAsset(index) => {
+            crate::flow::actions::FlowUiAction::MapMakerSelectAsset(index)
+                if !runtime.chrome_focus =>
+            {
                 index == runtime.palette_index
             }
             _ => button.index == navigation.focused,
