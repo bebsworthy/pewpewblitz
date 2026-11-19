@@ -37,7 +37,7 @@ use screens::{
     game_select::GameTypeSelectRoot,
     match_loading::match_loading_text,
     overlays::{FlowErrorRoot, RateLimitTryAgain},
-    queue::{queue_cancel_presentation, queue_membership_text},
+    queue::{queue_cancel_presentation, queue_copy},
     results::MatchCompletionRoot,
     server_select::{EditingField, ServerSelectModel},
     shared::{FlowButton, FlowRoot},
@@ -2203,16 +2203,32 @@ fn queue_copy_uses_advertised_game_and_saved_brawler_recipe() {
         },
         admitted_at_pool_state_revision: 2,
     };
-    let copy = queue_membership_text(
+    let copy = queue_copy(
         &super::super::ClientQueueModel::default(),
         &membership,
         Some(&lobby_membership()),
         &builds,
     );
-    assert!(copy.contains("Wipeout 2v2"));
-    assert!(copy.contains("Saved brawler"));
-    assert!(copy.contains("Updating queue"));
-    assert!(!copy.contains("points"));
+    assert_eq!(copy.mode, "WIPEOUT");
+    assert_eq!(copy.game, "Wipeout 2v2");
+    assert_eq!(copy.brawler, "Saved brawler");
+    assert_eq!(copy.population, "Updating queue");
+    assert!(copy.build.contains(" · "));
+    assert!(!copy.build.contains("points"));
+    let queued_saved_brawler = brawler::lobby::QueueMembership {
+        brawler_id: brawler::profiles::SavedBrawlerId::new(2).unwrap(),
+        ..membership.clone()
+    };
+    assert_eq!(
+        queue_copy(
+            &super::super::ClientQueueModel::default(),
+            &queued_saved_brawler,
+            Some(&lobby_membership_with_brawler()),
+            &builds,
+        )
+        .brawler,
+        "Test Brawler"
+    );
 
     let loading_copy = match_loading_text(
         &brawler::lobby::ReservationStarted {
@@ -2243,7 +2259,7 @@ fn cancel_pending_copy_is_explicit_and_disables_only_cancel() {
     });
     assert_eq!(
         queue_cancel_presentation(Some(&cancel)),
-        ("CANCELLING…", true)
+        ("CANCELLING...", true)
     );
     assert_eq!(queue_cancel_presentation(None), ("CANCEL QUEUE", false));
 }

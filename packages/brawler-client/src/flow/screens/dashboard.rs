@@ -595,7 +595,9 @@ fn dashboard_team_summary(game: &brawler::lobby::AdvertisedGameType) -> String {
     }
 }
 
-fn dashboard_mode_title(game: &brawler::lobby::AdvertisedGameType) -> &'static str {
+pub(in crate::flow) fn dashboard_mode_title(
+    game: &brawler::lobby::AdvertisedGameType,
+) -> &'static str {
     match game.rules_summary {
         brawler::lobby::AdvertisedRulesSummary::Wipeout { .. } => "WIPEOUT",
         brawler::lobby::AdvertisedRulesSummary::HotZone { .. } => "HOT ZONE",
@@ -604,7 +606,7 @@ fn dashboard_mode_title(game: &brawler::lobby::AdvertisedGameType) -> &'static s
     }
 }
 
-fn dashboard_badge_index(game: &brawler::lobby::AdvertisedGameType) -> usize {
+pub(in crate::flow) fn dashboard_badge_index(game: &brawler::lobby::AdvertisedGameType) -> usize {
     match game.rules_summary {
         brawler::lobby::AdvertisedRulesSummary::Wipeout { .. } => 0,
         brawler::lobby::AdvertisedRulesSummary::HotZone { .. } => 1,
