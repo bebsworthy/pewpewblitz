@@ -234,11 +234,10 @@ pub(crate) fn on_screen(world: &mut World, entity: Entity) -> bool {
 /// (`ContentReserve`: frame, current rim, focus pointer, slanted sides and lip), so no state's
 /// frame or pointer can draw over it. Absolutely positioned overlays (marks, badges) are exempt.
 pub(crate) fn surface_ring_intrusions(world: &mut World) -> Vec<String> {
-    use super::surface::{ContentReserve, Surface, SurfaceStyle};
+    use super::surface::{ContentReserve, Surface};
     let mut surfaces = world.query::<(
         Entity,
         &Surface,
-        Option<&SurfaceStyle>,
         &ComputedNode,
         &InheritedVisibility,
         Option<&Children>,
@@ -246,7 +245,7 @@ pub(crate) fn surface_ring_intrusions(world: &mut World) -> Vec<String> {
     )>();
     let mut failures = Vec::new();
     let mut checked = 0;
-    for (entity, role, style, computed, visible, children, focusable) in surfaces.iter(world) {
+    for (entity, role, computed, visible, children, focusable) in surfaces.iter(world) {
         if !visible.get() || computed.is_empty() {
             continue;
         }
@@ -255,7 +254,7 @@ pub(crate) fn surface_ring_intrusions(world: &mut World) -> Vec<String> {
             continue;
         };
         let scale = 1.0 / computed.inverse_scale_factor();
-        let reserve = ContentReserve::for_surface(*role, style, focusable);
+        let reserve = ContentReserve::for_surface(*role, focusable);
         let content = Rect::from_corners(
             rect.min + Vec2::new(reserve.left, reserve.top) * scale,
             rect.max - Vec2::new(reserve.right, reserve.bottom) * scale,

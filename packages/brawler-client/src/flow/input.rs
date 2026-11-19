@@ -187,10 +187,15 @@ pub(super) fn publish_text_entry(
         ClientFlow::PracticeMapSelect | ClientFlow::MapLibrary | ClientFlow::MapEditor
     ) && matches!(*overlay, ClientOverlay::None);
     let active = if map_shell {
-        (*flow.get() == ClientFlow::MapLibrary)
-            .then(|| map_maker.editing_map_name())
-            .flatten()
-            .map(|name| TextEntry::new(TextEntryField::MapName, name, name.len()))
+        match *flow.get() {
+            ClientFlow::MapLibrary => map_maker
+                .editing_map_name()
+                .map(|name| TextEntry::new(TextEntryField::MapName, name, name.len())),
+            ClientFlow::MapEditor => map_maker
+                .editing_asset_search()
+                .map(|query| TextEntry::new(TextEntryField::AssetSearch, query, query.len())),
+            _ => None,
+        }
     } else if matches!(
         *overlay,
         ClientOverlay::BrawlerEditor | ClientOverlay::BrawlerDetails(_)

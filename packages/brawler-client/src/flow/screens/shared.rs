@@ -131,13 +131,14 @@ pub(in crate::flow) fn update_flow_button_chrome(
         Option<&DashboardButtonStyle>,
         Option<&mut SurfaceState>,
         Option<&Surface>,
+        Has<super::map_maker::FlatControl>,
     )>,
 ) {
     let selected_brawler = memberships
         .iter()
         .next()
         .and_then(|m| m.profile.selected_brawler_id);
-    for (entity, button, disabled, dashboard, state, role) in &mut buttons {
+    for (entity, button, disabled, dashboard, state, role, flat) in &mut buttons {
         if matches!(dashboard, Some(DashboardButtonStyle::Preview)) {
             continue;
         }
@@ -193,7 +194,8 @@ pub(in crate::flow) fn update_flow_button_chrome(
         } else {
             commands.entity(entity).insert(next);
         }
-        if role.is_none() {
+        // Map Maker's flat controls draw themselves (BRL-2xpc); they are not shell surfaces.
+        if role.is_none() && !flat {
             commands.entity(entity).insert(surface_role(&button.action));
         }
     }

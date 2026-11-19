@@ -3891,7 +3891,10 @@ fn shell_controls_are_48_dp_touch_targets_on_a_landscape_phone() {
         let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
             crate::ui::layout_harness::add_layout(app, PHONE_VIEWPORT.0, PHONE_VIEWPORT.1);
             app.insert_resource(crate::ui::touch_target::TouchTargetPolicy { enabled: true })
-                .insert_resource(super::super::ClientInputContext::Shell);
+                .insert_resource(super::super::ClientInputContext::Shell)
+                .insert_resource(brawler::map::MapCatalogResource(
+                    brawler::map::MapContentCatalog::embedded().unwrap(),
+                ));
         });
         crate::ui::layout_harness::apply_viewport_fit(&mut app);
         app.world_mut().resource_mut::<UiScale>().0 *= ui_scale;
@@ -3982,6 +3985,118 @@ fn shell_controls_are_48_dp_touch_targets_on_a_landscape_phone() {
             .resource_mut::<NextState<ClientFlow>>()
             .set(ClientFlow::Results);
         assert_phone_touch_targets(&mut app, &at("Results"));
+
+        assert_map_maker_phone_touch_targets(&mut app, &at);
+    }
+}
+
+/// BRL-8q4c: Map Maker's library, create dialog and editor (every panel state) on the phone.
+fn assert_map_maker_phone_touch_targets(app: &mut App, at: &dyn Fn(&str) -> String) {
+    *app.world_mut()
+        .resource_mut::<super::super::MapDraftLibrary>() = sample_map_drafts(5);
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::MapLibrary);
+    assert_phone_touch_targets(app, &at("My Maps"));
+    inject_action(app, FlowUiAction::CreateMap);
+    assert_phone_touch_targets(app, &at("Create map"));
+    inject_action(app, FlowUiAction::ConfirmCreateMap);
+    // The committed flow change applies on the next frame's state transition.
+    app.update();
+    assert_eq!(current_flow(app), ClientFlow::MapEditor);
+    assert_phone_touch_targets(app, &at("Map editor"));
+    inject_action(app, FlowUiAction::MapMakerToggleAssets);
+    assert_phone_touch_targets(app, &at("Map editor assets"));
+    inject_action(app, FlowUiAction::MapMakerToggleCategoryMenu);
+    assert_phone_touch_targets(app, &at("Map editor categories"));
+    inject_action(app, FlowUiAction::MapMakerToggleValidation);
+    assert_phone_touch_targets(app, &at("Map editor check"));
+    inject_action(app, FlowUiAction::MapMakerUseEraseTool);
+    assert_phone_touch_targets(app, &at("Map editor erase"));
+}
+
+/// `count` saved drafts in every Map Maker mode, for library layout checks.
+fn sample_map_drafts(count: u64) -> super::super::MapDraftLibrary {
+    let modes = [
+        brawler::map::WIPEOUT_MODE_DEFINITION,
+        brawler::map::HOT_ZONE_MODE_DEFINITION,
+        brawler::map::HEIST_MODE_DEFINITION,
+    ];
+    let mut library = super::super::MapDraftLibrary::default();
+    for id in 1..=count {
+        let document = super::super::MapDraftDocument::blank(
+            super::super::MapDraftId(id),
+            &format!("Sample Arena {id}"),
+            modes[usize::try_from(id).unwrap() % modes.len()],
+            brawler::map::MapDimensions {
+                width: 48,
+                height: 32,
+            },
+            brawler::map::MapPresentationThemeId(1),
+            brawler::map::GROUND_ASSET,
+        )
+        .unwrap();
+        library.insert(document).unwrap();
+    }
+    library
+}
+
+/// BRL-2xpc: with the side panel collapsed, the phone editor's controls (top bar, collapsed
+/// panel and asset chip) cover about a fifth of the screen, as on the approved design board.
+/// Measured like the board: the summed laid-out areas of the control containers over the screen.
+#[test]
+fn map_editor_controls_leave_the_arena_most_of_a_landscape_phone() {
+    use screens::map_maker::{CurrentAssetChip, EditorSidePanel, EditorTopBar};
+    for (width, height, limit) in [(914, 411, 22.0), (1280, 720, 13.0)] {
+        let membership = lobby_membership_with_brawler();
+        let mut app = configured_lobby_flow_app_with(membership, |app| {
+            crate::ui::layout_harness::add_layout(app, width, height);
+            app.insert_resource(brawler::map::MapCatalogResource(
+                brawler::map::MapContentCatalog::embedded().unwrap(),
+            ));
+        });
+        crate::ui::layout_harness::apply_viewport_fit(&mut app);
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::MapLibrary);
+        app.update();
+        inject_action(&mut app, FlowUiAction::CreateMap);
+        inject_action(&mut app, FlowUiAction::ConfirmCreateMap);
+        // The committed flow change applies on the next frame's state transition.
+        app.update();
+        assert_eq!(current_flow(&app), ClientFlow::MapEditor);
+        if height >= 640 {
+            // Desktop opens on Assets; collapse it to compare the same state.
+            inject_action(&mut app, FlowUiAction::MapMakerToggleAssets);
+        }
+        settle_layout(&mut app);
+        let world = app.world_mut();
+        let area = |node: &ComputedNode| node.size().x * node.size().y;
+        let mut covered = 0.0;
+        let mut regions = 0;
+        let mut bar = world.query_filtered::<&ComputedNode, With<EditorTopBar>>();
+        let mut panel = world.query_filtered::<&ComputedNode, With<EditorSidePanel>>();
+        let mut chip = world.query_filtered::<&ComputedNode, With<CurrentAssetChip>>();
+        for node in bar
+            .iter(world)
+            .chain(panel.iter(world))
+            .chain(chip.iter(world))
+        {
+            covered += area(node);
+            regions += 1;
+        }
+        assert_eq!(regions, 3, "top bar, collapsed panel and asset chip");
+        let screen =
+            f32::from(u16::try_from(width).unwrap()) * f32::from(u16::try_from(height).unwrap());
+        let share = 100.0 * covered / screen;
+        println!(
+            "map editor at {width}x{height}, panel collapsed: controls {share:.1}% of the screen, arena {:.1}%",
+            100.0 - share
+        );
+        assert!(
+            share <= limit,
+            "{width}x{height}: editor controls cover {share:.1}% of the screen"
+        );
     }
 }
 
@@ -5518,10 +5633,12 @@ fn shell_capture_route_steps_match_the_reducer() {
         .into_iter()
         .filter(|route| !route.live())
     {
-        // The Map Maker editor loads palette images, so this harness carries an asset server.
+        // The Map Maker views load icons, previews and their body font, so this harness carries
+        // an asset server.
         let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
             app.add_plugins(AssetPlugin::default())
                 .init_asset::<Image>()
+                .init_asset::<Font>()
                 .init_resource::<brawler::map::MapCatalogResource>();
         });
         app.world_mut()

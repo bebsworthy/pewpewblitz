@@ -714,6 +714,10 @@ pub(super) fn resolve_flow_action(
         | FlowUiAction::ConfirmCreateMap
         | FlowUiAction::CancelCreateMap
         | FlowUiAction::OpenMapDraft(_)
+        | FlowUiAction::SelectMapDraft(_)
+        | FlowUiAction::CancelDeleteMapDraft
+        | FlowUiAction::MapMakerShowPaletteItem(_)
+        | FlowUiAction::MapMakerToggleCategoryMenu
         | FlowUiAction::BeginRenameMapDraft(_)
         | FlowUiAction::ConfirmRenameMapDraft
         | FlowUiAction::CancelRenameMapDraft

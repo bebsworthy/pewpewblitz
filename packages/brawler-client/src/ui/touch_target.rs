@@ -38,19 +38,6 @@ impl Default for TouchTargetPolicy {
 pub(crate) struct TouchTarget {
     authored: Option<Val>,
     applied: Option<Val>,
-    exempt: bool,
-}
-
-impl TouchTarget {
-    /// Keeps the authored height on every platform, for a screen whose phone layout is tracked
-    /// separately (Map Maker, BRL-8q4c). Supplied explicitly, it replaces the required default.
-    pub(crate) const fn exempt() -> Self {
-        Self {
-            authored: None,
-            applied: None,
-            exempt: true,
-        }
-    }
 }
 
 struct TouchTargetPlugin;
@@ -99,9 +86,6 @@ fn apply_touch_target_floor(
 ) {
     let floor = touch_floor_px(*policy, scale.map_or(1.0, |scale| scale.0));
     for (mut node, mut target) in &mut targets {
-        if target.exempt {
-            continue;
-        }
         if target.applied != Some(node.min_height) {
             target.authored = Some(node.min_height);
         }

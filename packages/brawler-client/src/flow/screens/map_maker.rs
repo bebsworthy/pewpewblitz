@@ -1,8 +1,26 @@
-//! Native Map Maker library, editor presentation, and input ownership.
+//! Native Map Maker: library and editor state, action resolution and input ownership. The
+//! views live in `library` (My Maps) and `editor`, built from the flat controls in `widgets`
+//! (BRL-2xpc direction D).
 
-use super::shared::{FlowButton, FlowRoot, surface_role};
+mod check;
+mod editor;
+mod library;
+mod scroll;
+mod widgets;
+
+#[cfg(test)]
+pub(in crate::flow) use editor::{CurrentAssetChip, EditorSidePanel, EditorTopBar};
+pub(in crate::flow) use editor::{
+    follow_chip_preview, position_map_editor_selection_toolbar, present_map_editor,
+    publish_map_editor_arena_insets, update_map_editor_values,
+};
+pub(in crate::flow) use library::{
+    keep_map_selection_valid, navigate_map_library, present_map_library, update_map_library_values,
+};
+pub(in crate::flow) use scroll::{MapMakerScrollMemory, reveal_map_maker_focus, scroll_map_maker};
+pub(in crate::flow) use widgets::{FlatControl, style_flat_controls};
+
 use crate::text_entry::TextEdit;
-use crate::ui::icons;
 use crate::{
     ArenaCamera, ClientLobbyMembership, ClientPracticeModel, MapDraftDocument, MapDraftId,
     MapDraftLibrary, MapEditorSession,
@@ -10,28 +28,22 @@ use crate::{
         ClientFlow, SelectedGameType, SessionPurpose,
         actions::{FlowCommit, FlowUiAction, OverlayCommit, PendingFlowActions},
         input::queue_ui_action,
+        screens::shared::FlowButton,
     },
     map_maker::{MapDraftStorage, delete_map_draft, load_map_drafts, save_map_draft},
-    ui::{
-        surface::{Surface, SurfaceState, SurfaceStyle},
-        theme::{ACCENT, INK, PANEL, PANEL_RAISED, PLAY, TEXT, font},
-    },
+    ui::theme::{PLAY_HIGHLIGHT, TEXT},
 };
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, MouseWheel},
     prelude::*,
-    ui::InteractionDisabled,
     window::PrimaryWindow,
 };
 use brawler::map::{
     AuthoredMapCandidate, MapAssetId, MapAssetSlot, MapCatalogResource, MapCell, MapSymmetry,
-    authorable_assets, placement_cells,
+    authorable_assets,
 };
 use lightyear::prelude::client::Client;
 use std::collections::BTreeSet;
-
-const VISIBLE_PALETTE_ITEMS: usize = 6;
-const PALETTE_PAGE_DELTA: i8 = 6;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum EditorTool {
@@ -61,6 +73,15 @@ enum EditorInteraction {
     },
 }
 
+/// The editor's side panel: open on Assets or Check, or collapsed to its two tabs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SidePanel {
+    Collapsed,
+    #[default]
+    Assets,
+    Check,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
 enum PaletteCategory {
@@ -82,17 +103,6 @@ impl PaletteCategory {
         Self::Decorations,
         Self::SpawnsObjectives,
     ];
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Ground => "GROUND",
-            Self::CoverObjects => "COVER",
-            Self::Vegetation => "VEGETATION",
-            Self::EffectTiles => "EFFECTS",
-            Self::Decorations => "DECOR",
-            Self::SpawnsObjectives => "SPAWNS + GOALS",
-        }
-    }
 
     const fn from_u8(value: u8) -> Option<Self> {
         match value {
@@ -121,6 +131,8 @@ pub(in crate::flow) struct MapMakerRuntime {
     pending_delete: Option<MapDraftId>,
     renaming: Option<(MapDraftId, String)>,
     creating: Option<String>,
+    /// The library tile the detail actions act on.
+    selected_draft: Option<MapDraftId>,
     clear_armed: bool,
     grid_visible: bool,
     tool: EditorTool,
@@ -129,8 +141,8 @@ pub(in crate::flow) struct MapMakerRuntime {
     palette_category: PaletteCategory,
     palette_query: String,
     palette_search_active: bool,
-    assets_open: bool,
-    validation_open: bool,
+    category_menu_open: bool,
+    panel: SidePanel,
     render_revision: u64,
     return_to_editor: bool,
     camera_center: Vec2,
@@ -143,6 +155,12 @@ impl MapMakerRuntime {
         self.creating
             .as_deref()
             .or(self.renaming.as_ref().map(|(_, name)| name.as_str()))
+    }
+
+    /// The asset search being typed in the editor, if any.
+    pub(in crate::flow) fn editing_asset_search(&self) -> Option<&str> {
+        self.palette_search_active
+            .then_some(self.palette_query.as_str())
     }
 }
 
@@ -157,6 +175,7 @@ impl Default for MapMakerRuntime {
             pending_delete: None,
             renaming: None,
             creating: None,
+            selected_draft: None,
             clear_armed: false,
             grid_visible: true,
             tool: EditorTool::Place,
@@ -165,8 +184,8 @@ impl Default for MapMakerRuntime {
             palette_category: PaletteCategory::CoverObjects,
             palette_query: String::new(),
             palette_search_active: false,
-            assets_open: true,
-            validation_open: false,
+            category_menu_open: false,
+            panel: SidePanel::Assets,
             render_revision: 0,
             return_to_editor: false,
             camera_center: Vec2::ZERO,
@@ -175,42 +194,14 @@ impl Default for MapMakerRuntime {
     }
 }
 
-#[derive(Component)]
-pub(in crate::flow) struct MapMakerRoot(u64);
-
-/// Retained editor labels whose text changes on value-only edits (BRL-0175).
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::flow) enum MapMakerValueLabel {
-    Grid,
-    Symmetry,
-    Search,
-    Status,
+/// A Map Maker view root: rebuilt when the render revision or the layout metrics change.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(in crate::flow) struct MapMakerRoot {
+    revision: u64,
+    metrics: widgets::Metrics,
 }
 
-/// A palette card's selected border or badge, keyed by palette index; shown only on the card
-/// whose index is `MapMakerRuntime::palette_index` (BRL-kgba).
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::flow) struct PaletteSelectionMark(usize);
-
-impl PaletteSelectionMark {
-    fn visibility(self, selected_index: usize) -> Visibility {
-        if self.0 == selected_index {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        }
-    }
-}
-
-/// The always-spawned status line; value-only edits show, hide, or retext it in place.
-#[derive(Component)]
-pub(in crate::flow) struct MapMakerStatusLine;
-
-/// The selection toolbar follows the editor camera without rebuilding the editor UI.
-#[derive(Component)]
-pub(in crate::flow) struct MapMakerSelectionToolbar;
-
-#[derive(Component, Clone, Copy)]
 enum PaletteItem {
     Asset(MapAssetId),
     Spawn(u8),
@@ -384,6 +375,7 @@ pub(in crate::flow) fn resolve_map_maker_action(
     mut publish: ResMut<crate::ClientMapPublishModel>,
     mut purpose: ResMut<SessionPurpose>,
     mut commit: ResMut<FlowCommit>,
+    metrics: widgets::MetricsParam,
 ) {
     let Some(action) = actions.ordinary.as_ref() else {
         return;
@@ -426,6 +418,9 @@ pub(in crate::flow) fn resolve_map_maker_action(
                 &mut commit,
                 &name,
             );
+            if commit.next_flow == Some(ClientFlow::MapEditor) {
+                runtime.panel = SidePanel::opening(metrics.get().compact);
+            }
         }
         FlowUiAction::CancelCreateMap if *flow.get() == ClientFlow::MapLibrary => {
             runtime.creating = None;
@@ -433,19 +428,45 @@ pub(in crate::flow) fn resolve_map_maker_action(
             runtime.bump_render();
         }
         FlowUiAction::OpenMapDraft(id) if *flow.get() == ClientFlow::MapLibrary => {
-            if let Some(document) = library.drafts.get(&id).cloned() {
-                runtime.session = Some(MapEditorSession::open(document));
-                select_first_visible_palette_item(&catalog.0, &mut runtime);
+            open_map_draft(
+                &library,
+                &catalog.0,
+                &mut runtime,
+                &mut commit,
+                metrics.get().compact,
+                id,
+            );
+        }
+        FlowUiAction::SelectMapDraft(id) if *flow.get() == ClientFlow::MapLibrary => {
+            if runtime.selected_draft == Some(id) && runtime.renaming.is_none() {
+                // Choosing the selected tile again opens it.
+                open_map_draft(
+                    &library,
+                    &catalog.0,
+                    &mut runtime,
+                    &mut commit,
+                    metrics.get().compact,
+                    id,
+                );
+            } else if library.drafts.contains_key(&id) {
+                runtime.selected_draft = Some(id);
+                if runtime
+                    .renaming
+                    .as_ref()
+                    .is_some_and(|(renamed, _)| *renamed != id)
+                {
+                    runtime.renaming = None;
+                }
                 runtime.status = None;
                 runtime.bump_render();
-                commit.next_flow = Some(ClientFlow::MapEditor);
             }
         }
         FlowUiAction::BeginRenameMapDraft(id) if *flow.get() == ClientFlow::MapLibrary => {
             if let Some(document) = library.drafts.get(&id) {
                 runtime.renaming = Some((id, document.name.clone()));
+                runtime.selected_draft = Some(id);
                 runtime.pending_delete = None;
-                runtime.status = Some("Type a new local map name, then confirm.".to_string());
+                runtime.status = None;
                 runtime.bump_render();
             }
         }
@@ -485,9 +506,16 @@ pub(in crate::flow) fn resolve_map_maker_action(
                 .and_then(|document| document.duplicate(library.next_id()))
                 .and_then(|duplicate| {
                     save_map_draft(&storage, &duplicate)?;
-                    library.insert(duplicate)
+                    let id = duplicate.id;
+                    library.insert(duplicate).map(|()| id)
                 });
-            runtime.status = result.err().or_else(|| Some("Map duplicated.".to_string()));
+            match result {
+                Ok(id) => {
+                    runtime.selected_draft = Some(id);
+                    runtime.status = Some("Map duplicated.".to_string());
+                }
+                Err(error) => runtime.status = Some(error),
+            }
             runtime.pending_delete = None;
             runtime.bump_render();
         }
@@ -502,10 +530,15 @@ pub(in crate::flow) fn resolve_map_maker_action(
                 }
                 runtime.pending_delete = None;
             } else {
+                // Opens the delete confirmation dialog.
                 runtime.pending_delete = Some(id);
-                runtime.status =
-                    Some("Press DELETE again to confirm. This cannot be undone.".to_string());
+                runtime.renaming = None;
+                runtime.status = None;
             }
+            runtime.bump_render();
+        }
+        FlowUiAction::CancelDeleteMapDraft if *flow.get() == ClientFlow::MapLibrary => {
+            runtime.pending_delete = None;
             runtime.bump_render();
         }
         FlowUiAction::PublishMapDraft(id) if *flow.get() == ClientFlow::MapLibrary => {
@@ -529,6 +562,8 @@ pub(in crate::flow) fn resolve_map_maker_action(
                 runtime.status = Some("Unsaved changes: Save before leaving, or use Clear/Undo to restore the saved revision.".to_string());
             } else {
                 runtime.session = None;
+                // Editor messages do not carry over into My Maps.
+                runtime.status = None;
                 commit.next_flow = Some(ClientFlow::MapLibrary);
             }
         }
@@ -595,8 +630,10 @@ pub(in crate::flow) fn resolve_map_maker_action(
                     MapSymmetry::Rotate180 => MapSymmetry::FourWay,
                     MapSymmetry::FourWay => MapSymmetry::None,
                 };
+                let symmetry = session.symmetry;
+                runtime.status = Some(format!("Mirror: {}.", symmetry_label(symmetry)));
             }
-            // Value-only: the retained symmetry label updates in place.
+            // Value-only: the retained mirror label and status toast update in place.
         }
         FlowUiAction::MapMakerRotate => {
             if runtime.tool == EditorTool::Select && !runtime.selection.is_empty() {
@@ -697,14 +734,38 @@ pub(in crate::flow) fn resolve_map_maker_action(
         }
         FlowUiAction::MapMakerSelectCategory(category) => {
             if let Some(category) = PaletteCategory::from_u8(category) {
+                if runtime.tool != EditorTool::Place {
+                    activate_editor_tool(&mut runtime, EditorTool::Place);
+                }
                 runtime.palette_category = category;
+                runtime.category_menu_open = false;
+                runtime.panel = SidePanel::Assets;
                 select_first_visible_palette_item(&catalog.0, &mut runtime);
                 runtime.bump_render();
             }
         }
+        FlowUiAction::MapMakerShowPaletteItem(index) => {
+            show_palette_item(&catalog.0, &mut runtime, index);
+        }
+        FlowUiAction::MapMakerToggleCategoryMenu => {
+            runtime.category_menu_open = !runtime.category_menu_open;
+            runtime.bump_render();
+        }
         FlowUiAction::MapMakerToggleSearch => {
-            // Value-only: the retained search label and button chrome update in place.
+            let field_before = search_field_shown(&runtime);
+            let panel_before = runtime.panel;
             runtime.palette_search_active = !runtime.palette_search_active;
+            if runtime.palette_search_active {
+                runtime.panel = SidePanel::Assets;
+            }
+            // Only a search field that appears or goes rebuilds; otherwise it retexts in place.
+            if search_field_shown(&runtime) != field_before
+                || runtime.panel != panel_before
+                || runtime.category_menu_open
+            {
+                runtime.category_menu_open = false;
+                runtime.bump_render();
+            }
         }
         FlowUiAction::MapMakerClearSearch => {
             runtime.palette_query.clear();
@@ -717,7 +778,12 @@ pub(in crate::flow) fn resolve_map_maker_action(
             runtime.bump_render();
         }
         FlowUiAction::MapMakerToggleValidation => {
-            runtime.validation_open = !runtime.validation_open;
+            runtime.panel = if runtime.panel == SidePanel::Check {
+                SidePanel::Collapsed
+            } else {
+                SidePanel::Check
+            };
+            runtime.palette_search_active = false;
             runtime.bump_render();
         }
         FlowUiAction::MapMakerToggleGrid => {
@@ -740,6 +806,10 @@ fn is_map_maker_action(action: &FlowUiAction) -> bool {
             | FlowUiAction::ConfirmCreateMap
             | FlowUiAction::CancelCreateMap
             | FlowUiAction::OpenMapDraft(_)
+            | FlowUiAction::SelectMapDraft(_)
+            | FlowUiAction::CancelDeleteMapDraft
+            | FlowUiAction::MapMakerShowPaletteItem(_)
+            | FlowUiAction::MapMakerToggleCategoryMenu
             | FlowUiAction::BeginRenameMapDraft(_)
             | FlowUiAction::ConfirmRenameMapDraft
             | FlowUiAction::CancelRenameMapDraft
@@ -779,18 +849,55 @@ fn is_map_maker_action(action: &FlowUiAction) -> bool {
     )
 }
 
-fn create_default_document(
-    memberships: &Query<&ClientLobbyMembership, With<Client>>,
-    selection: &SelectedGameType,
+fn open_map_draft(
+    library: &MapDraftLibrary,
     catalog: &brawler::map::MapContentCatalog,
-    library: &mut MapDraftLibrary,
     runtime: &mut MapMakerRuntime,
     commit: &mut FlowCommit,
-    name: &str,
+    compact: bool,
+    id: MapDraftId,
 ) {
-    let Some(membership) = memberships.iter().next() else {
-        return;
-    };
+    if let Some(document) = library.drafts.get(&id).cloned() {
+        runtime.session = Some(MapEditorSession::open(document));
+        runtime.selected_draft = Some(id);
+        runtime.panel = SidePanel::opening(compact);
+        runtime.category_menu_open = false;
+        select_first_visible_palette_item(catalog, runtime);
+        runtime.status = None;
+        runtime.bump_render();
+        commit.next_flow = Some(ClientFlow::MapEditor);
+    }
+}
+
+impl SidePanel {
+    /// The panel a freshly opened draft shows: Assets on desktop; collapsed on a phone, where
+    /// the arena needs the room and the corner chip names the current asset.
+    const fn opening(compact: bool) -> Self {
+        if compact {
+            Self::Collapsed
+        } else {
+            Self::Assets
+        }
+    }
+}
+
+/// What a new map gets from the connected server: the selected game's mode, and the size, theme
+/// and ground of that game's first Practice preset. The create dialog shows exactly these.
+pub(in crate::flow) struct CreateDefaults {
+    game_type_id: brawler::lobby::GameTypeId,
+    game: String,
+    mode: brawler::map::ModeDefinitionId,
+    dimensions: brawler::map::MapDimensions,
+    theme_id: brawler::map::MapPresentationThemeId,
+    theme: String,
+    surface: MapAssetId,
+}
+
+fn create_defaults(
+    membership: &ClientLobbyMembership,
+    selection: &SelectedGameType,
+    catalog: &brawler::map::MapContentCatalog,
+) -> Result<CreateDefaults, String> {
     let game = membership
         .game_types
         .iter()
@@ -803,45 +910,68 @@ fn create_default_document(
                 .game_types
                 .iter()
                 .find(|game| supported_mode(game.mode_definition_id))
-        });
-    let Some(game) = game else {
-        runtime.status = Some("This server does not advertise a Map Maker mode.".to_string());
-        return;
-    };
-    let Some(preset) = game
+        })
+        .ok_or_else(|| "This server does not advertise a Map Maker mode.".to_string())?;
+    let preset = game
         .practice_map_preset_ids
         .first()
         .and_then(|id| catalog.preset(*id))
-    else {
-        runtime.status = Some("No compatible map defaults are available.".to_string());
+        .ok_or_else(|| "No compatible map defaults are available.".to_string())?;
+    Ok(CreateDefaults {
+        game_type_id: game.id.clone(),
+        game: game.display_name.clone(),
+        mode: game.mode_definition_id,
+        dimensions: preset.recipe.dimensions,
+        theme_id: preset.recipe.presentation_theme_id,
+        theme: library::theme_name(catalog, preset.recipe.presentation_theme_id),
+        surface: preset.recipe.default_surface_asset_id,
+    })
+}
+
+fn create_default_document(
+    memberships: &Query<&ClientLobbyMembership, With<Client>>,
+    selection: &SelectedGameType,
+    catalog: &brawler::map::MapContentCatalog,
+    library: &mut MapDraftLibrary,
+    runtime: &mut MapMakerRuntime,
+    commit: &mut FlowCommit,
+    name: &str,
+) {
+    let Some(membership) = memberships.iter().next() else {
         return;
+    };
+    let defaults = match create_defaults(membership, selection, catalog) {
+        Ok(defaults) => defaults,
+        Err(error) => {
+            runtime.status = Some(error);
+            return;
+        }
     };
     let id = library.next_id();
     match MapDraftDocument::blank(
         id,
         name,
-        game.mode_definition_id,
-        preset.recipe.dimensions,
-        preset.recipe.presentation_theme_id,
-        preset.recipe.default_surface_asset_id,
+        defaults.mode,
+        defaults.dimensions,
+        defaults.theme_id,
+        defaults.surface,
     ) {
         Ok(mut document) => {
-            document.intended_game_type_id = Some(game.id.clone());
+            document.intended_game_type_id = Some(defaults.game_type_id);
             if let Err(error) = library.insert(document.clone()) {
                 runtime.status = Some(error);
                 return;
             }
             runtime.session = Some(MapEditorSession::open(document));
             runtime.creating = None;
+            runtime.selected_draft = Some(id);
             runtime.cursor = MapCell::new(
-                preset.recipe.dimensions.width / 2,
-                preset.recipe.dimensions.height / 2,
+                defaults.dimensions.width / 2,
+                defaults.dimensions.height / 2,
             );
             select_first_visible_palette_item(catalog, runtime);
-            runtime.status = Some(
-                "Draft created. Add spawns and the selected mode objective before testing."
-                    .to_string(),
-            );
+            runtime.status =
+                Some("Draft created. Add spawns and the mode objective, then Test.".to_string());
             runtime.bump_render();
             commit.next_flow = Some(ClientFlow::MapEditor);
         }
@@ -977,17 +1107,24 @@ fn test_open_document(
         runtime.status = Some("The connected server no longer offers this mode.".to_string());
         return;
     };
-    match brawler::map::validate_authored_recipe(
+    if brawler::map::validate_authored_recipe(
         &session.document.recipe,
         game.mode_definition_id,
         catalog,
         brawler::map::MapInstanceId(1),
-    ) {
-        Ok(_) => {}
-        Err(error) => {
-            runtime.status = Some(error.to_string());
-            return;
-        }
+    )
+    .is_err()
+    {
+        // A refused Test points to Check, which lists what to fix.
+        let issues = check::map_check(&session.document.recipe, catalog).issue_count();
+        runtime.status = Some(match issues {
+            0 | 1 => "Test needs one fix first. See Check.".to_string(),
+            count => format!("Test needs {count} fixes first. See Check."),
+        });
+        runtime.panel = SidePanel::Check;
+        runtime.palette_search_active = false;
+        runtime.bump_render();
+        return;
     }
     if let Err(error) = save_map_draft(storage, &session.document)
         .and_then(|()| library.insert(session.document.clone()))
@@ -1040,8 +1177,10 @@ impl MapMakerRuntime {
                 PaletteCategory::from_u8(*category) == Some(self.palette_category)
             }
             FlowUiAction::MapMakerToggleSearch => self.palette_search_active,
-            FlowUiAction::MapMakerToggleAssets => self.assets_open,
-            FlowUiAction::MapMakerToggleValidation => self.validation_open,
+            FlowUiAction::MapMakerToggleAssets => self.panel == SidePanel::Assets,
+            FlowUiAction::MapMakerToggleValidation => self.panel == SidePanel::Check,
+            FlowUiAction::MapMakerToggleCategoryMenu => self.category_menu_open,
+            FlowUiAction::SelectMapDraft(id) => self.selected_draft == Some(*id),
             FlowUiAction::MapMakerCycleSymmetry => self
                 .session
                 .as_ref()
@@ -1053,29 +1192,64 @@ impl MapMakerRuntime {
     }
 }
 
+/// Switches tools. Select and Erase have no assets to choose, so an open Assets panel collapses
+/// for them; the Check panel stays as it was.
 fn activate_editor_tool(runtime: &mut MapMakerRuntime, tool: EditorTool) {
     runtime.tool = tool;
     runtime.interaction = EditorInteraction::Idle;
-    runtime.validation_open = false;
-    runtime.assets_open = tool == EditorTool::Place;
     if tool != EditorTool::Place {
         runtime.palette_search_active = false;
+        runtime.category_menu_open = false;
+        if runtime.panel == SidePanel::Assets {
+            runtime.panel = SidePanel::Collapsed;
+        }
     }
     if tool != EditorTool::Select {
         runtime.selection.clear();
     }
 }
 
+/// The Assets tab: opens it (with the Place tool) or collapses it.
 fn toggle_assets_drawer(runtime: &mut MapMakerRuntime) {
-    if runtime.tool == EditorTool::Place {
-        runtime.assets_open = !runtime.assets_open;
-        runtime.validation_open = false;
-        if !runtime.assets_open {
-            runtime.palette_search_active = false;
-        }
+    if runtime.tool == EditorTool::Place && runtime.panel == SidePanel::Assets {
+        runtime.panel = SidePanel::Collapsed;
+        runtime.palette_search_active = false;
+        runtime.category_menu_open = false;
     } else {
+        if runtime.tool != EditorTool::Place {
+            activate_editor_tool(runtime, EditorTool::Place);
+        }
+        runtime.panel = SidePanel::Assets;
+    }
+}
+
+/// Check's Add: the Assets panel on the palette entry that fixes an issue.
+fn show_palette_item(
+    catalog: &brawler::map::MapContentCatalog,
+    runtime: &mut MapMakerRuntime,
+    index: usize,
+) {
+    let Some(item) = runtime.session.as_ref().and_then(|session| {
+        palette(catalog, session.document.recipe.mode_definition_id)
+            .get(index)
+            .copied()
+    }) else {
+        return;
+    };
+    if runtime.tool != EditorTool::Place {
         activate_editor_tool(runtime, EditorTool::Place);
     }
+    runtime.palette_category = palette_category(item, catalog);
+    runtime.palette_query.clear();
+    runtime.palette_search_active = false;
+    runtime.category_menu_open = false;
+    runtime.palette_index = index;
+    runtime.panel = SidePanel::Assets;
+    runtime.status = Some(format!(
+        "{} selected. Tap the map to place it.",
+        palette_label(Some(item), catalog)
+    ));
+    runtime.bump_render();
 }
 
 fn palette(
@@ -1115,7 +1289,7 @@ fn cycle_palette(
         let next = cycled_palette_index(current, visible.len(), delta);
         runtime.palette_index = visible[next].0;
     }
-    // Only crossing a page edge changes the visible cards; otherwise the marks move in place.
+    // The list is unchanged, so the selection moves in place without a rebuild.
     if palette_layout(catalog, runtime) != before {
         runtime.bump_render();
     }
@@ -1157,13 +1331,12 @@ fn visible_palette_entries(
     entries
 }
 
-/// What the palette tray's spawned structure depends on besides tool/drawer state: the visible
-/// cards, the page window the selection falls in, and whether the clear-search button exists.
-/// The selected card within that page is a retained `PaletteSelectionMark`, not structure.
+/// What the asset list's spawned structure depends on besides tool and panel state: the visible
+/// rows and whether the search field exists. The selected row is live control state, not
+/// structure.
 #[derive(PartialEq, Eq)]
 struct PaletteLayout {
     visible: Vec<usize>,
-    page_start: usize,
     query_empty: bool,
 }
 
@@ -1177,12 +1350,7 @@ fn palette_layout(
             .into_iter()
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
-    let selected_position = visible
-        .iter()
-        .position(|index| *index == runtime.palette_index)
-        .unwrap_or(0);
     Some(PaletteLayout {
-        page_start: palette_window(selected_position, visible.len()).0,
         visible,
         query_empty: runtime.palette_query.is_empty(),
     })
@@ -1229,16 +1397,6 @@ fn palette_category(
 fn cycled_palette_index(current: usize, count: usize, delta: i8) -> usize {
     if count == 0 {
         return 0;
-    }
-    if usize::from(delta.unsigned_abs()) == VISIBLE_PALETTE_ITEMS {
-        let page_count = count.div_ceil(VISIBLE_PALETTE_ITEMS);
-        let page = (current / VISIBLE_PALETTE_ITEMS).min(page_count - 1);
-        let next_page = if delta.is_negative() {
-            page.saturating_sub(1)
-        } else {
-            (page + 1).min(page_count - 1)
-        };
-        return next_page * VISIBLE_PALETTE_ITEMS;
     }
     let amount = usize::from(delta.unsigned_abs()) % count;
     if delta.is_negative() {
@@ -1338,7 +1496,8 @@ fn edit_map_name(name: &mut String, edits: &[TextEdit]) {
     clippy::cast_sign_loss,
     clippy::needless_pass_by_value,
     clippy::too_many_arguments,
-    clippy::too_many_lines
+    clippy::too_many_lines,
+    clippy::type_complexity
 )]
 pub(in crate::flow) fn map_maker_input(
     flow: Res<State<ClientFlow>>,
@@ -1352,11 +1511,16 @@ pub(in crate::flow) fn map_maker_input(
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
     catalog: Option<Res<MapCatalogResource>>,
-    buttons: Query<(
-        &FlowButton,
-        &Interaction,
-        &crate::ui::press::ReleaseActivation,
-    )>,
+    // Paired to stay within Bevy's system parameter limit: Map Maker controls and the chrome
+    // under the pointer.
+    (buttons, chrome): (
+        Query<(
+            &FlowButton,
+            &Interaction,
+            &crate::ui::press::ReleaseActivation,
+        )>,
+        Query<&Interaction, With<editor::MapMakerChrome>>,
+    ),
     mut runtime: ResMut<MapMakerRuntime>,
     mut actions: ResMut<PendingFlowActions>,
     mut feedback: MessageWriter<crate::ui::feedback::UiFeedback>,
@@ -1388,20 +1552,18 @@ pub(in crate::flow) fn map_maker_input(
             ui_activated = true;
         }
     }
-    let validation_trigger_owns_pointer = buttons.iter().any(|(button, interaction, _)| {
-        button.action == FlowUiAction::MapMakerToggleValidation
-            && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
-    });
-    if runtime.validation_open
-        && mouse
-            .as_deref()
-            .is_some_and(|mouse| mouse.just_pressed(MouseButton::Left))
-        && !validation_trigger_owns_pointer
-    {
-        runtime.validation_open = false;
-        runtime.bump_render();
-    }
     if *flow.get() == ClientFlow::MapLibrary {
+        if runtime.pending_delete.is_some() {
+            if escape
+                || gamepads
+                    .iter()
+                    .any(|pad| pad.just_pressed(GamepadButton::East))
+            {
+                queue_ui_action(&mut actions, FlowUiAction::CancelDeleteMapDraft);
+                feedback.write(UiFeedback::Back);
+            }
+            return;
+        }
         if let Some(name) = runtime.creating.as_mut() {
             edit_map_name(name, &typed.edits());
             if keyboard.just_pressed(KeyCode::Enter) {
@@ -1558,13 +1720,11 @@ pub(in crate::flow) fn map_maker_input(
         keyed = true;
     }
     let ui_owns_pointer = ui_activated
-        || buttons.iter().any(|(_, interaction, _)| {
-            matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
-        });
-    let palette_owns_pointer = buttons.iter().any(|(button, interaction, _)| {
-        is_palette_action(&button.action)
-            && matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
-    });
+        || buttons
+            .iter()
+            .map(|(_, interaction, _)| interaction)
+            .chain(&chrome)
+            .any(|interaction| matches!(*interaction, Interaction::Hovered | Interaction::Pressed));
     let pointer_over_world = world_cursor
         .zip(dimensions)
         .is_some_and(|(world, dimensions)| dimensions.world_cell(world).is_some());
@@ -1592,15 +1752,9 @@ pub(in crate::flow) fn map_maker_input(
         }
         runtime.interaction = EditorInteraction::Idle;
     }
+    // Over the chrome the wheel scrolls its lists (`scroll_map_maker`); over the arena it zooms.
     for event in mouse_wheel.read() {
-        if palette_owns_pointer {
-            let direction = if event.y > 0.0 || event.x < 0.0 {
-                -1
-            } else {
-                1
-            };
-            queue_ui_action(&mut actions, FlowUiAction::MapMakerCycleAsset(direction));
-        } else if !ui_owns_pointer {
+        if !ui_owns_pointer {
             runtime.camera_zoom = (runtime.camera_zoom * (-event.y * 0.10).exp()).clamp(0.5, 3.0);
         }
     }
@@ -1736,8 +1890,11 @@ pub(in crate::flow) fn map_maker_input(
         feedback.write(UiFeedback::Activated(None));
     }
     if escape || pad(GamepadButton::East) {
-        if runtime.validation_open {
-            runtime.validation_open = false;
+        if runtime.category_menu_open || runtime.panel == SidePanel::Check {
+            runtime.category_menu_open = false;
+            if runtime.panel == SidePanel::Check {
+                runtime.panel = SidePanel::Collapsed;
+            }
             runtime.bump_render();
             feedback.write(UiFeedback::Back);
         } else if runtime.interaction != EditorInteraction::Idle || !runtime.selection.is_empty() {
@@ -1751,18 +1908,6 @@ pub(in crate::flow) fn map_maker_input(
             feedback.write(UiFeedback::Back);
         }
     }
-}
-
-fn is_palette_action(action: &FlowUiAction) -> bool {
-    matches!(
-        action,
-        FlowUiAction::MapMakerCycleAsset(_)
-            | FlowUiAction::MapMakerSelectAsset(_)
-            | FlowUiAction::MapMakerSelectCategory(_)
-            | FlowUiAction::MapMakerToggleSearch
-            | FlowUiAction::MapMakerClearSearch
-            | FlowUiAction::MapMakerToggleAssets
-    )
 }
 
 fn append_interpolated_cells(cells: &mut Vec<MapCell>, destination: MapCell) {
@@ -1805,444 +1950,9 @@ fn append_interpolated_cells(cells: &mut Vec<MapCell>, destination: MapCell) {
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::flow) fn present_map_library(
-    mut commands: Commands,
-    flow: Res<State<ClientFlow>>,
-    library: Res<MapDraftLibrary>,
-    runtime: Res<MapMakerRuntime>,
-    catalog: Option<Res<MapCatalogResource>>,
-    roots: Query<(Entity, &MapMakerRoot)>,
-    assets: Option<Res<crate::ClientAssetHandles>>,
-) {
-    if *flow.get() != ClientFlow::MapLibrary {
-        return;
-    }
-    if roots
-        .iter()
-        .any(|(_, root)| root.0 == runtime.render_revision)
-    {
-        return;
-    }
-    for (entity, _) in &roots {
-        commands.entity(entity).try_despawn();
-    }
-    commands
-        .spawn((
-            FlowRoot,
-            MapMakerRoot(runtime.render_revision),
-            DespawnOnExit(ClientFlow::MapLibrary),
-            root_node(),
-            BackgroundColor(INK),
-            GlobalZIndex(420),
-        ))
-        .with_children(|root| {
-            header(
-                root,
-                assets.as_deref(),
-                "MY MAPS",
-                "Create, reopen, duplicate, or delete local drafts.",
-            );
-            if let Some(status) = runtime.status.as_deref() {
-                root.spawn((
-                    Text::new(status),
-                    font(assets.as_deref(), 18.0),
-                    TextColor(PLAY),
-                ));
-            }
-            if let Some((_, name)) = runtime.renaming.as_ref() {
-                rename_panel(root, assets.as_deref(), name);
-            }
-            if let Some(name) = runtime.creating.as_deref() {
-                create_map_panel(root, assets.as_deref(), name, &runtime, catalog.as_deref());
-            }
-            if library.drafts.is_empty() {
-                root.spawn((
-                    Text::new("No maps yet. Create a bounded draft to begin."),
-                    font(assets.as_deref(), 22.0),
-                    TextColor(TEXT),
-                ));
-            }
-            root.spawn((Node {
-                width: percent(100),
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: px(16),
-                row_gap: px(16),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },))
-                .with_children(|cards| {
-                    for document in library.drafts.values() {
-                        map_card(
-                            cards,
-                            assets.as_deref(),
-                            document,
-                            runtime.pending_delete == Some(document.id),
-                            catalog.as_deref().map(|catalog| &catalog.0),
-                        );
-                    }
-                });
-            action_button(
-                root,
-                assets.as_deref(),
-                9000,
-                FlowUiAction::CreateMap,
-                "CREATE MAP",
-                PLAY,
-            );
-            action_button(
-                root,
-                assets.as_deref(),
-                9001,
-                FlowUiAction::CloseMapMaker,
-                "BACK",
-                ACCENT,
-            );
-        });
-}
-
-fn create_map_panel(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    name: &str,
-    _runtime: &MapMakerRuntime,
-    catalog: Option<&MapCatalogResource>,
-) {
-    let preview = catalog
-        .and_then(|catalog| catalog.0.presets.first())
-        .map_or("SERVER DEFAULT THEME".to_string(), |preset| {
-            format!(
-                "{} × {}  •  THEME {}",
-                preset.recipe.dimensions.width,
-                preset.recipe.dimensions.height,
-                preset.recipe.presentation_theme_id.0
-            )
-        });
-    parent
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: percent(24),
-                right: percent(24),
-                top: percent(18),
-                bottom: percent(18),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Stretch,
-                justify_content: JustifyContent::Center,
-                row_gap: px(16),
-                padding: UiRect::all(px(28)),
-                border: UiRect::all(px(3)),
-                ..default()
-            },
-            BackgroundColor(INK.with_alpha(0.98)),
-            BorderColor::all(ACCENT),
-            GlobalZIndex(460),
-        ))
-        .with_children(|modal| {
-            modal.spawn((Text::new("CREATE MAP"), font(assets, 32.0), TextColor(TEXT)));
-            modal.spawn((Text::new("MAP NAME"), font(assets, 14.0), TextColor(ACCENT)));
-            modal
-                .spawn((
-                    Node {
-                        min_height: px(54),
-                        align_items: AlignItems::Center,
-                        padding: UiRect::axes(px(14), px(8)),
-                        border: UiRect::all(px(2)),
-                        ..default()
-                    },
-                    BackgroundColor(INK.mix(&PANEL, 0.5)),
-                    BorderColor::all(PLAY),
-                ))
-                .with_child((
-                    Text::new(format!("{name}|")),
-                    font(assets, 21.0),
-                    TextColor(TEXT),
-                ));
-            modal
-                .spawn((
-                    Node {
-                        min_height: px(150),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        border: UiRect::all(px(2)),
-                        ..default()
-                    },
-                    BackgroundColor(PANEL_RAISED),
-                    BorderColor::all(ACCENT),
-                ))
-                .with_child((Text::new(preview), font(assets, 19.0), TextColor(TEXT)));
-            modal
-                .spawn((Node {
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::FlexEnd,
-                    column_gap: px(12),
-                    ..default()
-                },))
-                .with_children(|actions| {
-                    action_button(
-                        actions,
-                        assets,
-                        8_980,
-                        FlowUiAction::CancelCreateMap,
-                        "CANCEL",
-                        ACCENT,
-                    );
-                    action_button(
-                        actions,
-                        assets,
-                        8_981,
-                        FlowUiAction::ConfirmCreateMap,
-                        "CREATE",
-                        PLAY,
-                    );
-                });
-        });
-}
-
-fn rename_panel(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    name: &str,
-) {
-    parent.spawn((
-        Text::new(format!("RENAME: {name}|")),
-        font(assets, 22.0),
-        TextColor(TEXT),
-    ));
-    parent
-        .spawn((Node {
-            flex_direction: FlexDirection::Row,
-            column_gap: px(10),
-            ..default()
-        },))
-        .with_children(|actions| {
-            action_button(
-                actions,
-                assets,
-                8990,
-                FlowUiAction::ConfirmRenameMapDraft,
-                "CONFIRM RENAME",
-                PLAY,
-            );
-            action_button(
-                actions,
-                assets,
-                8991,
-                FlowUiAction::CancelRenameMapDraft,
-                "CANCEL",
-                ACCENT,
-            );
-        });
-}
-
-fn map_card(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    document: &MapDraftDocument,
-    confirming_delete: bool,
-    catalog: Option<&brawler::map::MapContentCatalog>,
-) {
-    let button_base = usize::try_from(document.id.0)
-        .unwrap_or(usize::MAX / 10)
-        .saturating_mul(10);
-    parent
-        .spawn((
-            Node {
-                width: px(300),
-                min_height: px(190),
-                flex_direction: FlexDirection::Column,
-                row_gap: px(8),
-                padding: UiRect::all(px(14)),
-                border: UiRect::all(px(2)),
-                ..default()
-            },
-            BackgroundColor(PANEL),
-            BorderColor::all(ACCENT),
-        ))
-        .with_children(|card| {
-            card.spawn((
-                Text::new(document.name.clone()),
-                font(assets, 25.0),
-                TextColor(TEXT),
-            ));
-            if let Some(catalog) = catalog {
-                let known = document
-                    .recipe
-                    .placements
-                    .iter()
-                    .filter(|placement| catalog.asset(placement.asset_id).is_some())
-                    .count();
-                card.spawn((
-                    Text::new(format!(
-                        "THEME {}  •  {known} rendered assets",
-                        document.recipe.presentation_theme_id.0
-                    )),
-                    font(assets, 14.0),
-                    TextColor(ACCENT),
-                ));
-            }
-            card.spawn((
-                Text::new(format!(
-                    "{} × {} cells  •  {} placements",
-                    document.recipe.dimensions.width,
-                    document.recipe.dimensions.height,
-                    document.recipe.placements.len()
-                )),
-                font(assets, 16.0),
-                TextColor(TEXT),
-            ));
-            action_button(
-                card,
-                assets,
-                button_base,
-                FlowUiAction::OpenMapDraft(document.id),
-                "OPEN",
-                PLAY,
-            );
-            action_button(
-                card,
-                assets,
-                button_base.saturating_add(1),
-                FlowUiAction::BeginRenameMapDraft(document.id),
-                "RENAME",
-                ACCENT,
-            );
-            action_button(
-                card,
-                assets,
-                button_base.saturating_add(2),
-                FlowUiAction::DuplicateMapDraft(document.id),
-                "DUPLICATE",
-                ACCENT,
-            );
-            action_button(
-                card,
-                assets,
-                button_base.saturating_add(4),
-                FlowUiAction::PublishMapDraft(document.id),
-                "PUBLISH",
-                ACCENT,
-            );
-            action_button(
-                card,
-                assets,
-                button_base.saturating_add(3),
-                FlowUiAction::DeleteMapDraft(document.id),
-                if confirming_delete {
-                    "CONFIRM DELETE"
-                } else {
-                    "DELETE"
-                },
-                Color::srgb(0.75, 0.18, 0.15),
-            );
-        });
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::too_many_arguments,
-    reason = "the editor shell consumes independent Bevy-owned resources and queries"
-)]
-pub(in crate::flow) fn present_map_editor(
-    mut commands: Commands,
-    flow: Res<State<ClientFlow>>,
-    runtime: Res<MapMakerRuntime>,
-    catalog: Option<Res<MapCatalogResource>>,
-    roots: Query<(Entity, &MapMakerRoot)>,
-    assets: Option<Res<crate::ClientAssetHandles>>,
-    asset_server: Res<AssetServer>,
-    cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
-) {
-    if *flow.get() != ClientFlow::MapEditor {
-        return;
-    }
-    if roots
-        .iter()
-        .any(|(_, root)| root.0 == runtime.render_revision)
-    {
-        return;
-    }
-    for (entity, _) in &roots {
-        commands.entity(entity).try_despawn();
-    }
-    let (Some(session), Some(catalog)) = (runtime.session.as_ref(), catalog.as_deref()) else {
-        return;
-    };
-    let validation_error = local_validation_error(session, &catalog.0);
-    let selection_toolbar_position = selection_toolbar_position(
-        session,
-        &catalog.0,
-        &runtime.selection,
-        cameras.iter().next(),
-    );
-    commands
-        .spawn((
-            FlowRoot,
-            MapMakerRoot(runtime.render_revision),
-            DespawnOnExit(ClientFlow::MapEditor),
-            Node {
-                position_type: PositionType::Absolute,
-                width: percent(100),
-                height: percent(100),
-                ..default()
-            },
-            GlobalZIndex(420),
-        ))
-        .with_children(|root| {
-            editor_document_bar(
-                root,
-                assets.as_deref(),
-                session,
-                validation_error.as_deref(),
-                runtime.validation_open,
-                &asset_server,
-            );
-            editor_tool_rail(root, assets.as_deref(), &runtime, &asset_server);
-            editor_canvas_controls(root, assets.as_deref(), &runtime, &asset_server);
-            editor_selection_toolbar(
-                root,
-                assets.as_deref(),
-                &runtime,
-                &asset_server,
-                selection_toolbar_position,
-            );
-            editor_validation_popover(
-                root,
-                assets.as_deref(),
-                &runtime,
-                validation_error.as_deref(),
-                &asset_server,
-            );
-            editor_palette(root, assets.as_deref(), &runtime, &catalog.0, &asset_server);
-            root.spawn((
-                MapMakerStatusLine,
-                Node {
-                    display: status_display(&runtime),
-                    position_type: PositionType::Absolute,
-                    left: percent(25),
-                    right: percent(25),
-                    bottom: px(
-                        if runtime.tool == EditorTool::Place && runtime.assets_open {
-                            302
-                        } else {
-                            34
-                        },
-                    ),
-                    padding: UiRect::axes(px(16), px(9)),
-                    justify_content: JustifyContent::Center,
-                    border: UiRect::all(px(2)),
-                    ..default()
-                },
-                BackgroundColor(INK.with_alpha(0.92)),
-                BorderColor::all(PLAY),
-            ))
-            .with_child((
-                MapMakerValueLabel::Status,
-                Text::new(runtime.status.clone().unwrap_or_default()),
-                font(assets.as_deref(), 15.0),
-                TextColor(TEXT),
-            ));
-        });
+/// The Assets tab shows its search field while a search is typed or applied.
+fn search_field_shown(runtime: &MapMakerRuntime) -> bool {
+    runtime.palette_search_active || !runtime.palette_query.is_empty()
 }
 
 fn status_display(runtime: &MapMakerRuntime) -> Display {
@@ -2253,1414 +1963,24 @@ fn status_display(runtime: &MapMakerRuntime) -> Display {
     }
 }
 
-fn grid_label(runtime: &MapMakerRuntime) -> &'static str {
-    if runtime.grid_visible {
-        "GRID\nON"
-    } else {
-        "GRID\nOFF"
-    }
-}
-
-fn symmetry_button_label(runtime: &MapMakerRuntime) -> String {
-    let symmetry = runtime
-        .session
-        .as_ref()
-        .map_or(MapSymmetry::None, |session| session.symmetry);
-    format!("SYMMETRY\n{}", symmetry_label(symmetry))
-}
-
+/// The asset search field's text: the query, with a caret while it is being typed.
 fn search_label(runtime: &MapMakerRuntime) -> String {
-    let cursor = if runtime.palette_search_active {
-        "_"
-    } else {
-        ""
-    };
     if runtime.palette_query.is_empty() && !runtime.palette_search_active {
-        "SEARCH ASSETS".to_string()
+        "Search assets".to_string()
+    } else if runtime.palette_search_active {
+        format!("{}|", runtime.palette_query)
     } else {
-        format!("{}{cursor}", runtime.palette_query)
+        runtime.palette_query.clone()
     }
-}
-
-fn value_label_text(label: MapMakerValueLabel, runtime: &MapMakerRuntime) -> String {
-    match label {
-        MapMakerValueLabel::Grid => grid_label(runtime).to_string(),
-        MapMakerValueLabel::Symmetry => symmetry_button_label(runtime),
-        MapMakerValueLabel::Search => search_label(runtime),
-        MapMakerValueLabel::Status => runtime.status.clone().unwrap_or_default(),
-    }
-}
-
-/// Applies value-only edits to retained editor labels and the status line; structural edits
-/// still bump the render revision and respawn the editor UI through `present_map_editor`.
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::flow) fn update_map_editor_values(
-    runtime: Res<MapMakerRuntime>,
-    mut labels: Query<(&MapMakerValueLabel, &mut Text)>,
-    mut status_lines: Query<&mut Node, With<MapMakerStatusLine>>,
-    mut selection_marks: Query<(&PaletteSelectionMark, &mut Visibility)>,
-) {
-    if !runtime.is_changed() {
-        return;
-    }
-    for (label, mut text) in &mut labels {
-        let next = value_label_text(*label, &runtime);
-        if text.0 != next {
-            text.0 = next;
-        }
-    }
-    let display = status_display(&runtime);
-    for mut node in &mut status_lines {
-        if node.display != display {
-            node.display = display;
-        }
-    }
-    for (mark, mut visibility) in &mut selection_marks {
-        visibility.set_if_neq(mark.visibility(runtime.palette_index));
-    }
-}
-
-fn local_validation_error(
-    session: &MapEditorSession,
-    catalog: &brawler::map::MapContentCatalog,
-) -> Option<String> {
-    brawler::map::validate_authored_recipe(
-        &session.document.recipe,
-        session.document.recipe.mode_definition_id,
-        catalog,
-        brawler::map::MapInstanceId(1),
-    )
-    .err()
-    .map(|error| error.to_string())
-}
-
-fn selection_toolbar_position(
-    session: &MapEditorSession,
-    catalog: &brawler::map::MapContentCatalog,
-    selection: &BTreeSet<brawler::map::MapPlacementId>,
-    camera: Option<(&Camera, &GlobalTransform)>,
-) -> Option<Vec2> {
-    let (camera, camera_transform) = camera?;
-    let recipe = &session.document.recipe;
-    let mut cells = recipe
-        .placements
-        .iter()
-        .filter(|placement| selection.contains(&placement.placement_id))
-        .flat_map(|placement| {
-            catalog
-                .asset(placement.asset_id)
-                .and_then(|asset| placement_cells(recipe.dimensions, asset, placement))
-                .unwrap_or_else(|| vec![placement.cell])
-        })
-        .collect::<Vec<_>>();
-    cells.extend(
-        recipe
-            .mode_anchors
-            .iter()
-            .filter(|anchor| selection.contains(&anchor.placement_id))
-            .map(|anchor| match anchor.kind {
-                brawler::map::MapModeAnchorKind::HotZoneCircle {
-                    center_half_cell, ..
-                }
-                | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
-                    MapCell::new(center_half_cell.x / 2, center_half_cell.y / 2)
-                }
-                brawler::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => origin_cell,
-            }),
-    );
-    let min_x = cells.iter().map(|cell| cell.x).min()?;
-    let max_x = cells.iter().map(|cell| cell.x).max()?;
-    let min_y = cells.iter().map(|cell| cell.y).min()?;
-    let max_y = cells.iter().map(|cell| cell.y).max()?;
-    let a = recipe.dimensions.cell_center(MapCell::new(min_x, min_y));
-    let b = recipe.dimensions.cell_center(MapCell::new(max_x, max_y));
-    let center = (a + b) * 0.5;
-    camera
-        .world_to_viewport(camera_transform, Vec3::new(center.x, 7.0, -center.y))
-        .ok()
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "the document bar declares one cohesive Bevy UI row and its child controls"
-)]
-fn editor_document_bar(
-    root: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    session: &MapEditorSession,
-    validation_error: Option<&str>,
-    validation_open: bool,
-    asset_server: &AssetServer,
-) {
-    let recipe = &session.document.recipe;
-    let ready_to_test = validation_error.is_none();
-    root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(14),
-            right: px(14),
-            top: px(12),
-            height: px(70),
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: px(10),
-            padding: UiRect::axes(px(18), px(7)),
-            border: UiRect::all(px(1)),
-            border_radius: BorderRadius::all(px(14)),
-            ..default()
-        },
-        BackgroundColor(INK.with_alpha(0.93)),
-        BorderColor::all(ACCENT.with_alpha(0.35)),
-    ))
-    .with_children(|panel| {
-        panel
-            .spawn(Node {
-                width: px(330),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            })
-            .with_children(|identity| {
-                identity.spawn((
-                    Text::new(session.document.name.to_uppercase()),
-                    font(assets, 19.0),
-                    TextColor(TEXT),
-                ));
-                identity
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        column_gap: px(5),
-                        ..default()
-                    })
-                    .with_children(|status| {
-                        if !session.dirty() {
-                            status.spawn((
-                                ImageNode::new(asset_server.load(icons::path("check"))),
-                                Node {
-                                    width: px(17),
-                                    height: px(17),
-                                    ..default()
-                                },
-                            ));
-                        }
-                        status.spawn((
-                            Text::new(format!(
-                                "{} × {}  •  r{}  •  {}",
-                                recipe.dimensions.width,
-                                recipe.dimensions.height,
-                                recipe.revision,
-                                if session.dirty() { "UNSAVED" } else { "SAVED" }
-                            )),
-                            font(assets, 11.0),
-                            TextColor(if ready_to_test && !session.dirty() {
-                                ACCENT
-                            } else {
-                                PLAY
-                            }),
-                        ));
-                    });
-            });
-        panel.spawn(Node {
-            flex_grow: 1.0,
-            ..default()
-        });
-        compact_action_button_disabled(
-            panel,
-            assets,
-            7,
-            FlowUiAction::MapMakerUndo,
-            "UNDO",
-            false,
-            !session.can_undo(),
-        );
-        compact_action_button_disabled(
-            panel,
-            assets,
-            8,
-            FlowUiAction::MapMakerRedo,
-            "REDO",
-            false,
-            !session.can_redo(),
-        );
-        panel.spawn(Node {
-            width: px(18),
-            ..default()
-        });
-        compact_action_button(
-            panel,
-            assets,
-            21,
-            FlowUiAction::SaveMapDraft,
-            "SAVE",
-            ACCENT,
-            false,
-        );
-        compact_icon_action_button_disabled(
-            panel,
-            assets,
-            asset_server,
-            22,
-            FlowUiAction::TestAuthoredMap,
-            "TEST MAP",
-            None,
-            icons::path("play"),
-            126.0,
-            true,
-            !ready_to_test,
-        );
-        compact_icon_action_button_disabled(
-            panel,
-            assets,
-            asset_server,
-            23,
-            FlowUiAction::MapMakerToggleValidation,
-            if ready_to_test { "READY" } else { "1 ISSUE" },
-            None,
-            if ready_to_test {
-                icons::path("check")
-            } else {
-                icons::path("warning")
-            },
-            112.0,
-            validation_open,
-            ready_to_test,
-        );
-        compact_action_button(
-            panel,
-            assets,
-            20,
-            FlowUiAction::BackToMapLibrary,
-            "MAPS",
-            ACCENT,
-            false,
-        );
-    });
-}
-
-fn editor_tool_rail(
-    root: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    runtime: &MapMakerRuntime,
-    asset_server: &AssetServer,
-) {
-    root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(14),
-            top: px(94),
-            width: px(116),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            row_gap: px(12),
-            padding: UiRect::all(px(10)),
-            border: UiRect::all(px(2)),
-            border_radius: BorderRadius::all(px(18)),
-            ..default()
-        },
-        BackgroundColor(INK.with_alpha(0.93)),
-        BorderColor::all(ACCENT.with_alpha(0.35)),
-    ))
-    .with_children(|panel| {
-        tool_button(
-            panel,
-            assets,
-            30,
-            FlowUiAction::MapMakerUsePlaceTool,
-            "PLACE",
-            asset_server.load(icons::path("place")),
-            runtime.tool == EditorTool::Place,
-        );
-        tool_button(
-            panel,
-            assets,
-            32,
-            FlowUiAction::MapMakerUseMoveTool,
-            "SELECT",
-            asset_server.load(icons::path("select")),
-            runtime.tool == EditorTool::Select,
-        );
-        tool_button(
-            panel,
-            assets,
-            31,
-            FlowUiAction::MapMakerUseEraseTool,
-            "ERASE",
-            asset_server.load(icons::path("erase")),
-            runtime.tool == EditorTool::Erase,
-        );
-    });
-}
-
-fn tool_button(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    icon: Handle<Image>,
-    current: bool,
-) {
-    parent
-        .spawn((
-            Button,
-            crate::ui::touch_target::TouchTarget::exempt(),
-            FlowButton {
-                index,
-                action,
-                error_action: false,
-            },
-            Node {
-                width: px(94),
-                height: px(104),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                row_gap: px(2),
-                ..default()
-            },
-            Surface::Card,
-            SurfaceStyle::MAP_TOOL,
-            SurfaceState {
-                current,
-                ..default()
-            },
-        ))
-        .with_children(|button| {
-            button.spawn((
-                ImageNode::new(icon),
-                Node {
-                    width: px(46),
-                    height: px(46),
-                    ..default()
-                },
-            ));
-            button.spawn((
-                Text::new(label),
-                font(assets, 17.0),
-                TextColor(TEXT),
-                TextLayout::justify(Justify::Center),
-            ));
-        });
-}
-
-fn editor_canvas_controls(
-    root: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    runtime: &MapMakerRuntime,
-    asset_server: &AssetServer,
-) {
-    root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            right: px(20),
-            top: px(96),
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: px(5),
-            padding: UiRect::all(px(5)),
-            border: UiRect::all(px(2)),
-            border_radius: BorderRadius::all(px(14)),
-            ..default()
-        },
-        BackgroundColor(INK.with_alpha(0.92)),
-        BorderColor::all(ACCENT.with_alpha(0.35)),
-    ))
-    .with_children(|panel| {
-        compact_icon_action_button_disabled(
-            panel,
-            assets,
-            asset_server,
-            10,
-            FlowUiAction::MapMakerToggleGrid,
-            grid_label(runtime),
-            Some(MapMakerValueLabel::Grid),
-            icons::path("grid"),
-            96.0,
-            runtime.grid_visible,
-            false,
-        );
-        compact_icon_action_button_disabled(
-            panel,
-            assets,
-            asset_server,
-            4,
-            FlowUiAction::MapMakerCycleSymmetry,
-            &symmetry_button_label(runtime),
-            Some(MapMakerValueLabel::Symmetry),
-            icons::path("symmetry"),
-            146.0,
-            false,
-            false,
-        );
-        compact_icon_action_button_disabled(
-            panel,
-            assets,
-            asset_server,
-            11,
-            FlowUiAction::MapMakerFitView,
-            "FIT",
-            None,
-            icons::path("fit"),
-            78.0,
-            false,
-            false,
-        );
-    });
-}
-
-fn editor_selection_toolbar(
-    root: &mut ChildSpawnerCommands,
-    _assets: Option<&crate::ClientAssetHandles>,
-    runtime: &MapMakerRuntime,
-    asset_server: &AssetServer,
-    position: Option<Vec2>,
-) {
-    if runtime.tool != EditorTool::Select || runtime.selection.is_empty() {
-        return;
-    }
-    let (left, top) = selection_toolbar_offset(position);
-    root.spawn((
-        MapMakerSelectionToolbar,
-        Node {
-            position_type: PositionType::Absolute,
-            left,
-            top,
-            flex_direction: FlexDirection::Row,
-            column_gap: px(5),
-            padding: UiRect::all(px(5)),
-            border: UiRect::all(px(2)),
-            border_radius: BorderRadius::all(px(10)),
-            ..default()
-        },
-        BackgroundColor(INK.with_alpha(0.94)),
-        BorderColor::all(ACCENT.with_alpha(0.35)),
-    ))
-    .with_children(|panel| {
-        icon_image_button(
-            panel,
-            40,
-            FlowUiAction::MapMakerRotate,
-            asset_server.load(icons::path("rotate")),
-            false,
-        );
-        icon_image_button(
-            panel,
-            41,
-            FlowUiAction::MapMakerDuplicateSelection,
-            asset_server.load(icons::path("duplicate")),
-            false,
-        );
-        icon_image_button(
-            panel,
-            42,
-            FlowUiAction::MapMakerDeleteSelection,
-            asset_server.load(icons::path("trash")),
-            true,
-        );
-        icon_image_button(
-            panel,
-            43,
-            FlowUiAction::MapMakerClearSelection,
-            asset_server.load(icons::path("close")),
-            false,
-        );
-    });
-}
-
-fn selection_toolbar_offset(position: Option<Vec2>) -> (Val, Val) {
-    let position = position.unwrap_or(Vec2::new(700.0, 220.0));
-    (
-        px((position.x - 102.0).max(126.0)),
-        px((position.y - 88.0).max(92.0)),
-    )
-}
-
-/// Keeps the retained selection toolbar anchored to the selection while the camera pans or zooms.
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::flow) fn position_map_editor_selection_toolbar(
-    runtime: Res<MapMakerRuntime>,
-    catalog: Option<Res<MapCatalogResource>>,
-    cameras: Query<(&Camera, Ref<GlobalTransform>), With<ArenaCamera>>,
-    mut toolbars: Query<&mut Node, With<MapMakerSelectionToolbar>>,
-    ui_scale: Option<Res<UiScale>>,
-) {
-    let camera = cameras.iter().next();
-    let camera_moved = camera
-        .as_ref()
-        .is_some_and(|(_, transform)| transform.is_changed());
-    if toolbars.is_empty() || !(runtime.is_changed() || camera_moved) {
-        return;
-    }
-    let (Some(session), Some(catalog)) = (runtime.session.as_ref(), catalog.as_deref()) else {
-        return;
-    };
-    let position = selection_toolbar_position(
-        session,
-        &catalog.0,
-        &runtime.selection,
-        camera
-            .as_ref()
-            .map(|(camera, transform)| (*camera, &**transform)),
-    )
-    .map(|point| crate::ui::viewport::viewport_to_ui(point, ui_scale.as_deref()));
-    let (left, top) = selection_toolbar_offset(position);
-    for mut node in &mut toolbars {
-        if node.left != left || node.top != top {
-            node.left = left;
-            node.top = top;
-        }
-    }
-}
-
-fn icon_image_button(
-    parent: &mut ChildSpawnerCommands,
-    index: usize,
-    action: FlowUiAction,
-    icon: Handle<Image>,
-    danger: bool,
-) {
-    let label = match &action {
-        FlowUiAction::MapMakerRotate => "Rotate selection 90 degrees",
-        FlowUiAction::MapMakerDuplicateSelection => "Duplicate selection",
-        FlowUiAction::MapMakerDeleteSelection => "Delete selection",
-        FlowUiAction::MapMakerClearSelection => "Clear selection",
-        FlowUiAction::MapMakerClearSearch => "Clear asset search",
-        _ => "Selection action",
-    };
-    parent
-        .spawn((
-            Button,
-            crate::ui::touch_target::TouchTarget::exempt(),
-            AccessibleLabel::new(label),
-            FlowButton {
-                index,
-                action,
-                error_action: false,
-            },
-            Node {
-                width: px(50),
-                height: px(46),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            if danger {
-                Surface::Danger
-            } else {
-                Surface::Action
-            },
-            SurfaceStyle::MAP_ACTION,
-            SurfaceState::default(),
-        ))
-        .with_child((
-            ImageNode {
-                color: TEXT,
-                ..ImageNode::new(icon)
-            },
-            Node {
-                width: px(25),
-                height: px(25),
-                ..default()
-            },
-        ));
-}
-
-fn editor_validation_popover(
-    root: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    runtime: &MapMakerRuntime,
-    validation_error: Option<&str>,
-    asset_server: &AssetServer,
-) {
-    let Some(error) = validation_popover_error(runtime, validation_error) else {
-        return;
-    };
-    root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            right: px(146),
-            top: px(88),
-            width: px(310),
-            flex_direction: FlexDirection::Column,
-            row_gap: px(7),
-            padding: UiRect::all(px(14)),
-            border: UiRect::all(px(2)),
-            border_radius: BorderRadius::all(px(14)),
-            ..default()
-        },
-        BackgroundColor(INK.with_alpha(0.97)),
-        BorderColor::all(PLAY),
-    ))
-    .with_children(|panel| {
-        panel
-            .spawn(Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: px(8),
-                ..default()
-            })
-            .with_children(|title| {
-                title.spawn((
-                    ImageNode::new(asset_server.load(icons::path("warning"))),
-                    Node {
-                        width: px(23),
-                        height: px(23),
-                        ..default()
-                    },
-                ));
-                title.spawn((
-                    Text::new("MAP CHECK  •  1 ISSUE"),
-                    font(assets, 17.0),
-                    TextColor(PLAY),
-                ));
-            });
-        panel
-            .spawn(Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::FlexStart,
-                column_gap: px(9),
-                ..default()
-            })
-            .with_children(|row| {
-                row.spawn((
-                    Node {
-                        width: px(18),
-                        height: px(18),
-                        flex_shrink: 0.0,
-                        border: UiRect::all(px(2)),
-                        ..default()
-                    },
-                    BorderColor::all(TEXT),
-                ));
-                row.spawn((
-                    Text::new(error),
-                    font(assets, 12.0),
-                    TextColor(TEXT),
-                    Node {
-                        max_width: px(250),
-                        ..default()
-                    },
-                ));
-            });
-    });
-}
-
-fn validation_popover_error<'a>(
-    runtime: &MapMakerRuntime,
-    validation_error: Option<&'a str>,
-) -> Option<&'a str> {
-    runtime
-        .validation_open
-        .then_some(validation_error)
-        .flatten()
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "the asset browser declares its category and visible-card rows together"
-)]
-fn editor_palette(
-    root: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    runtime: &MapMakerRuntime,
-    catalog: &brawler::map::MapContentCatalog,
-    asset_server: &AssetServer,
-) {
-    let Some(session) = runtime.session.as_ref() else {
-        return;
-    };
-    if runtime.tool != EditorTool::Place || !runtime.assets_open {
-        root.spawn((
-            Button,
-            crate::ui::touch_target::TouchTarget::exempt(),
-            FlowButton {
-                index: 60,
-                action: FlowUiAction::MapMakerToggleAssets,
-                error_action: false,
-            },
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(14),
-                bottom: px(8),
-                width: px(184),
-                height: px(58),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            Surface::Dark,
-            SurfaceStyle::MAP_ACTION,
-            SurfaceState::default(),
-        ))
-        .with_children(|button| {
-            button.spawn((Text::new("ASSETS"), font(assets, 20.0), TextColor(TEXT)));
-            button.spawn((
-                ImageNode {
-                    color: TEXT,
-                    ..ImageNode::new(asset_server.load(icons::path("chevron-up")))
-                },
-                Node {
-                    width: px(20),
-                    height: px(20),
-                    margin: UiRect::left(px(10)),
-                    ..default()
-                },
-            ));
-        });
-        root.spawn((
-            Text::new(match runtime.tool {
-                EditorTool::Select => {
-                    "Drag empty space to select  •  Shift-click to add  •  Delete to remove  •  Space-drag to pan"
-                }
-                EditorTool::Erase => {
-                    "Click or drag to erase  •  Esc cancels  •  Space-drag to pan  •  Wheel to zoom"
-                }
-                EditorTool::Place => {
-                    "Click or drag to place  •  R rotates  •  Esc cancels  •  Space-drag to pan"
-                }
-            }),
-            font(assets, 11.0),
-            TextColor(TEXT.with_alpha(0.78)),
-            Node {
-                position_type: PositionType::Absolute,
-                left: percent(28),
-                right: percent(20),
-                bottom: px(15),
-                ..default()
-            },
-            TextLayout::justify(Justify::Center),
-        ));
-        return;
-    }
-    let theme = session.document.recipe.presentation_theme_id;
-    let entries =
-        visible_palette_entries(catalog, runtime, session.document.recipe.mode_definition_id);
-    let selected_position = entries
-        .iter()
-        .position(|(index, _)| *index == runtime.palette_index)
-        .unwrap_or(0);
-    let (start, end) = palette_window(selected_position, entries.len());
-    root.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(14),
-            right: px(14),
-            bottom: px(8),
-            height: px(282),
-            flex_direction: FlexDirection::Column,
-            row_gap: px(8),
-            padding: UiRect::axes(px(12), px(9)),
-            border: UiRect::all(px(2)),
-            border_radius: BorderRadius::all(px(18)),
-            overflow: Overflow::clip(),
-            ..default()
-        },
-        BackgroundColor(INK.with_alpha(0.94)),
-        BorderColor::all(ACCENT.with_alpha(0.35)),
-    ))
-    .with_children(|tray| {
-        tray.spawn(Node {
-            width: percent(100),
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: px(7),
-            ..default()
-        })
-        .with_children(|header| {
-            header
-                .spawn((
-                    Button,
-                    crate::ui::touch_target::TouchTarget::exempt(),
-                    FlowButton {
-                        index: 60,
-                        action: FlowUiAction::MapMakerToggleAssets,
-                        error_action: false,
-                    },
-                    Node {
-                        width: px(164),
-                        height: px(42),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    },
-                    Surface::Dark,
-                    SurfaceStyle::MAP_ACTION,
-                    SurfaceState::default(),
-                ))
-                .with_children(|button| {
-                    button.spawn((Text::new("ASSETS"), font(assets, 18.0), TextColor(TEXT)));
-                    button.spawn((
-                        ImageNode {
-                            color: TEXT,
-                            ..ImageNode::new(asset_server.load(icons::path("chevron-down")))
-                        },
-                        Node {
-                            width: px(18),
-                            height: px(18),
-                            margin: UiRect::left(px(8)),
-                            ..default()
-                        },
-                    ));
-                });
-            for (index, category) in PaletteCategory::ALL.into_iter().enumerate() {
-                palette_category_button(
-                    header,
-                    assets,
-                    50 + index,
-                    FlowUiAction::MapMakerSelectCategory(category as u8),
-                    category.label(),
-                    runtime.palette_category == category,
-                );
-            }
-            header.spawn(Node {
-                flex_grow: 1.0,
-                ..default()
-            });
-            let search = search_label(runtime);
-            search_button(
-                header,
-                assets,
-                asset_server,
-                56,
-                FlowUiAction::MapMakerToggleSearch,
-                &search,
-                runtime.palette_search_active,
-            );
-            if !runtime.palette_query.is_empty() {
-                icon_image_button(
-                    header,
-                    57,
-                    FlowUiAction::MapMakerClearSearch,
-                    asset_server.load(icons::path("close")),
-                    false,
-                );
-            }
-        });
-        tray.spawn(Node {
-            width: percent(100),
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            column_gap: px(8),
-            ..default()
-        })
-        .with_children(|items| {
-            palette_arrow_button(
-                items,
-                assets,
-                asset_server,
-                1,
-                FlowUiAction::MapMakerCycleAsset(-PALETTE_PAGE_DELTA),
-                "‹",
-                start == 0,
-            );
-            for (slot, (index, item)) in entries
-                .iter()
-                .copied()
-                .enumerate()
-                .skip(start)
-                .take(VISIBLE_PALETTE_ITEMS)
-            {
-                palette_item_button(
-                    items,
-                    assets,
-                    index,
-                    &palette_short_label(item, catalog),
-                    MapPalettePreviewHost {
-                        slot: slot - start,
-                        visual: item.into(),
-                        theme,
-                    },
-                    runtime.palette_index,
-                );
-            }
-            if entries.is_empty() {
-                items.spawn((
-                    Text::new("NO ASSETS MATCH THIS CATEGORY AND SEARCH"),
-                    font(assets, 13.0),
-                    TextColor(TEXT),
-                    Node {
-                        width: px(812),
-                        ..default()
-                    },
-                    TextLayout::justify(Justify::Center),
-                ));
-            }
-            palette_arrow_button(
-                items,
-                assets,
-                asset_server,
-                2,
-                FlowUiAction::MapMakerCycleAsset(PALETTE_PAGE_DELTA),
-                "›",
-                end >= entries.len(),
-            );
-            items.spawn((
-                Text::new(if entries.is_empty() {
-                    "0 OF 0".to_string()
-                } else {
-                    format!("{}–{} OF {}", start + 1, end, entries.len())
-                }),
-                font(assets, 12.0),
-                TextLayout::justify(Justify::Center),
-                TextColor(ACCENT),
-                Node {
-                    width: px(82),
-                    ..default()
-                },
-            ));
-        });
-        tray.spawn((
-            Text::new("Click or drag to place  •  R rotates  •  Esc cancels  •  Space-drag to pan"),
-            font(assets, 10.0),
-            TextColor(TEXT.with_alpha(0.78)),
-            Node {
-                width: percent(100),
-                ..default()
-            },
-            TextLayout::justify(Justify::Center),
-        ));
-    });
-}
-
-fn palette_window(selected_position: usize, entry_count: usize) -> (usize, usize) {
-    let start = (selected_position / VISIBLE_PALETTE_ITEMS) * VISIBLE_PALETTE_ITEMS;
-    (start, (start + VISIBLE_PALETTE_ITEMS).min(entry_count))
-}
-
-fn search_button(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    asset_server: &AssetServer,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    current: bool,
-) {
-    parent
-        .spawn((
-            Button,
-            crate::ui::touch_target::TouchTarget::exempt(),
-            FlowButton {
-                index,
-                action,
-                error_action: false,
-            },
-            Node {
-                width: px(286),
-                height: px(40),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: px(9),
-                padding: UiRect::axes(px(14), px(6)),
-                ..default()
-            },
-            Surface::Dark,
-            SurfaceStyle::MAP_ASSET,
-            SurfaceState {
-                current,
-                ..default()
-            },
-        ))
-        .with_children(|button| {
-            button.spawn((
-                ImageNode {
-                    color: TEXT,
-                    ..ImageNode::new(asset_server.load(icons::path("search")))
-                },
-                Node {
-                    width: px(24),
-                    height: px(24),
-                    ..default()
-                },
-            ));
-            button.spawn((
-                MapMakerValueLabel::Search,
-                Text::new(label),
-                font(assets, 13.0),
-                TextColor(TEXT),
-            ));
-        });
-}
-
-fn palette_arrow_button(
-    parent: &mut ChildSpawnerCommands,
-    _assets: Option<&crate::ClientAssetHandles>,
-    asset_server: &AssetServer,
-    index: usize,
-    action: FlowUiAction,
-    glyph: &str,
-    disabled: bool,
-) {
-    let mut button = parent.spawn((
-        Button,
-        crate::ui::touch_target::TouchTarget::exempt(),
-        FlowButton {
-            index,
-            action,
-            error_action: false,
-        },
-        Node {
-            width: px(64),
-            height: px(76),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            ..default()
-        },
-        Surface::Dark,
-        SurfaceStyle::MAP_ACTION,
-        SurfaceState {
-            disabled,
-            ..default()
-        },
-    ));
-    if disabled {
-        button.insert(InteractionDisabled);
-    }
-    button.with_child((
-        ImageNode {
-            color: if disabled {
-                TEXT.with_alpha(0.45)
-            } else {
-                TEXT
-            },
-            ..ImageNode::new(asset_server.load(icons::path("chevron-down")))
-        },
-        Node {
-            width: px(28),
-            height: px(28),
-            ..default()
-        },
-        UiTransform::from_rotation(Rot2::radians(if glyph == "‹" {
-            core::f32::consts::FRAC_PI_2
-        } else {
-            -core::f32::consts::FRAC_PI_2
-        })),
-    ));
-}
-
-fn palette_category_button(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    current: bool,
-) {
-    parent
-        .spawn((
-            Button,
-            crate::ui::touch_target::TouchTarget::exempt(),
-            FlowButton {
-                index,
-                action,
-                error_action: false,
-            },
-            Node {
-                width: px(if label == "SPAWNS + GOALS" { 152 } else { 112 }),
-                height: px(40),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::axes(px(6), px(5)),
-                ..default()
-            },
-            Surface::Dark,
-            SurfaceStyle::MAP_TAB,
-            SurfaceState {
-                current,
-                ..default()
-            },
-        ))
-        .with_child((
-            Text::new(label),
-            font(assets, 10.0),
-            TextLayout::justify(Justify::Center),
-            TextColor(TEXT),
-        ));
-}
-
-fn palette_item_button(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    palette_index: usize,
-    label: &str,
-    preview: MapPalettePreviewHost,
-    selected_index: usize,
-) {
-    parent
-        .spawn((
-            Button,
-            crate::ui::touch_target::TouchTarget::exempt(),
-            FlowButton {
-                index: 100 + palette_index,
-                action: FlowUiAction::MapMakerSelectAsset(palette_index),
-                error_action: false,
-            },
-            Node {
-                width: px(180),
-                height: px(174),
-                position_type: PositionType::Relative,
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::axes(px(5), px(6)),
-                row_gap: px(3),
-                ..default()
-            },
-            Surface::Dark,
-            SurfaceStyle::MAP_ASSET,
-            SurfaceState {
-                current: palette_index == selected_index,
-                ..default()
-            },
-        ))
-        .with_children(|button| {
-            // Every card carries a hidden mark so a same-page selection change only toggles
-            // visibility in `update_map_editor_values` instead of respawning the editor UI.
-            let mark = PaletteSelectionMark(palette_index);
-            let visibility = mark.visibility(selected_index);
-            button.spawn((
-                mark,
-                visibility,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: px(0),
-                    right: px(0),
-                    top: px(0),
-                    bottom: px(0),
-                    border: UiRect::all(px(3)),
-                    ..default()
-                },
-                BorderColor::all(ACCENT),
-            ));
-            palette_selection_badge(button, mark, visibility);
-            button.spawn((
-                preview,
-                // Fits inside the card's ring reserve at the preview's 168:124 aspect, so the card
-                // keeps its 180 px width (BRL-fe7t).
-                Node {
-                    width: percent(100),
-                    max_width: px(168),
-                    aspect_ratio: Some(168.0 / 124.0),
-                    ..default()
-                },
-                BackgroundColor(PANEL),
-            ));
-            button.spawn((
-                Text::new(label.replace('\n', " · ")),
-                font(assets, 11.0),
-                TextLayout::justify(Justify::Center),
-                TextColor(TEXT),
-            ));
-        });
-}
-
-fn palette_selection_badge(
-    button: &mut ChildSpawnerCommands,
-    mark: PaletteSelectionMark,
-    visibility: Visibility,
-) {
-    button
-        .spawn((
-            mark,
-            visibility,
-            Node {
-                position_type: PositionType::Absolute,
-                right: px(7),
-                top: px(7),
-                width: px(30),
-                height: px(30),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border: UiRect::all(px(2)),
-                border_radius: BorderRadius::MAX,
-                ..default()
-            },
-            BackgroundColor(ACCENT),
-            BorderColor::all(INK),
-            ZIndex(4),
-        ))
-        .with_children(|badge| {
-            for (left, top, width, angle) in [(7, 15, 9, 0.72), (12, 12, 13, -0.78)] {
-                badge.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: px(left),
-                        top: px(top),
-                        width: px(width),
-                        height: px(3),
-                        ..default()
-                    },
-                    BackgroundColor(INK),
-                    UiTransform::from_rotation(Rot2::radians(angle)),
-                ));
-            }
-        });
-}
-
-fn palette_short_label(item: PaletteItem, catalog: &brawler::map::MapContentCatalog) -> String {
-    match item {
-        PaletteItem::Asset(id) => catalog.asset(id).map_or_else(
-            || "UNAVAILABLE".to_string(),
-            |asset| asset.display_name.to_uppercase(),
-        ),
-        PaletteItem::Spawn(0) => "TEAM A SPAWN".to_string(),
-        PaletteItem::Spawn(_) => "TEAM B SPAWN".to_string(),
-        PaletteItem::HotZone => "CAPTURE ZONE".to_string(),
-        PaletteItem::HeistSafe(0) => "TEAM A SAFE".to_string(),
-        PaletteItem::HeistSafe(_) => "TEAM B SAFE".to_string(),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn compact_action_button(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    _color: Color,
-    current: bool,
-) {
-    compact_action_button_disabled(parent, assets, index, action, label, current, false);
-}
-
-#[allow(clippy::too_many_arguments)]
-fn compact_icon_action_button_disabled(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    asset_server: &AssetServer,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    label_marker: Option<MapMakerValueLabel>,
-    icon_path: String,
-    min_width: f32,
-    current: bool,
-    disabled: bool,
-) {
-    let role = if matches!(
-        action,
-        FlowUiAction::MapMakerToggleGrid
-            | FlowUiAction::MapMakerCycleSymmetry
-            | FlowUiAction::MapMakerFitView
-    ) {
-        Surface::Dark
-    } else {
-        surface_role(&action)
-    };
-    let content_color = TEXT;
-    let mut button = parent.spawn((
-        Button,
-        crate::ui::touch_target::TouchTarget::exempt(),
-        FlowButton {
-            index,
-            action,
-            error_action: false,
-        },
-        Node {
-            min_width: px(min_width),
-            min_height: px(50),
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            column_gap: px(7),
-            padding: UiRect::axes(px(10), px(6)),
-            ..default()
-        },
-        role,
-        SurfaceStyle::MAP_ACTION,
-        SurfaceState {
-            current,
-            disabled,
-            ..default()
-        },
-    ));
-    if disabled {
-        button.insert(InteractionDisabled);
-    }
-    button.with_children(|button| {
-        button.spawn((
-            ImageNode {
-                color: if role == Surface::Dark {
-                    content_color
-                } else {
-                    Color::WHITE
-                },
-                ..ImageNode::new(asset_server.load(icon_path))
-            },
-            Node {
-                width: px(23),
-                height: px(23),
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ));
-        let mut text = button.spawn((
-            Text::new(label),
-            font(assets, 12.0),
-            TextLayout::justify(Justify::Center),
-            TextColor(content_color),
-        ));
-        if let Some(marker) = label_marker {
-            text.insert(marker);
-        }
-    });
-}
-
-#[allow(clippy::too_many_arguments)]
-fn compact_action_button_disabled(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    current: bool,
-    disabled: bool,
-) {
-    let role = surface_role(&action);
-    let mut button = parent.spawn((
-        Button,
-        crate::ui::touch_target::TouchTarget::exempt(),
-        FlowButton {
-            index,
-            action,
-            error_action: false,
-        },
-        Node {
-            min_width: px(94),
-            min_height: px(50),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            padding: UiRect::axes(px(9), px(6)),
-            ..default()
-        },
-        role,
-        SurfaceStyle::MAP_ACTION,
-        SurfaceState {
-            current,
-            disabled,
-            ..default()
-        },
-    ));
-    if disabled {
-        button.insert(InteractionDisabled);
-    }
-    button.with_child((
-        Text::new(label),
-        font(assets, 12.0),
-        TextLayout::justify(Justify::Center),
-        TextColor(TEXT),
-    ));
 }
 
 const fn symmetry_label(symmetry: MapSymmetry) -> &'static str {
     match symmetry {
-        MapSymmetry::None => "NONE",
-        MapSymmetry::LeftRight => "LEFT / RIGHT",
-        MapSymmetry::TopBottom => "TOP / BOTTOM",
-        MapSymmetry::Rotate180 => "ROTATE 180°",
-        MapSymmetry::FourWay => "FOUR-WAY",
+        MapSymmetry::None => "off",
+        MapSymmetry::LeftRight => "left / right",
+        MapSymmetry::TopBottom => "top / bottom",
+        MapSymmetry::Rotate180 => "rotate 180°",
+        MapSymmetry::FourWay => "four-way",
     }
 }
 
@@ -3673,65 +1993,34 @@ fn palette_label(item: Option<PaletteItem>, catalog: &brawler::map::MapContentCa
             }),
         Some(PaletteItem::Spawn(0)) => "Team A Spawn".to_string(),
         Some(PaletteItem::Spawn(_)) => "Team B Spawn".to_string(),
-        Some(PaletteItem::HotZone) => "Capture Circle".to_string(),
+        Some(PaletteItem::HotZone) => "Capture Zone".to_string(),
         Some(PaletteItem::HeistSafe(0)) => "Team A Safe".to_string(),
         Some(PaletteItem::HeistSafe(_)) => "Team B Safe".to_string(),
-        None => "No available asset".to_string(),
+        None => "No asset selected".to_string(),
     }
 }
 
-fn root_node() -> Node {
-    Node {
-        width: percent(100),
-        height: percent(100),
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::Center,
-        row_gap: px(10),
-        padding: UiRect::axes(px(22), px(14)),
-        ..default()
+/// Team colours for spawns and safes in swatches and overviews.
+const TEAM_A: Color = Color::srgb(0.25, 0.60, 1.0);
+const TEAM_B: Color = Color::srgb(1.0, 0.36, 0.36);
+
+/// A palette entry's flat colour in asset swatches and library overviews, by category.
+fn palette_color(item: PaletteItem, catalog: &brawler::map::MapContentCatalog) -> Color {
+    match item {
+        PaletteItem::Spawn(0) => TEAM_A,
+        PaletteItem::Spawn(_) => TEAM_B,
+        PaletteItem::HeistSafe(0) => TEAM_A.darker(0.15),
+        PaletteItem::HeistSafe(_) => TEAM_B.darker(0.15),
+        PaletteItem::HotZone => PLAY_HIGHLIGHT,
+        PaletteItem::Asset(_) => match palette_category(item, catalog) {
+            PaletteCategory::Ground => Color::srgb(0.62, 0.56, 0.42),
+            PaletteCategory::CoverObjects => Color::srgb(0.42, 0.48, 0.58),
+            PaletteCategory::Vegetation => Color::srgb(0.24, 0.55, 0.30),
+            PaletteCategory::EffectTiles => Color::srgb(0.36, 0.78, 0.86),
+            PaletteCategory::Decorations => Color::srgb(0.72, 0.58, 0.42),
+            PaletteCategory::SpawnsObjectives => TEXT,
+        },
     }
-}
-
-fn header(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    title: &str,
-    subtitle: &str,
-) {
-    parent.spawn((Text::new(title), font(assets, 38.0), TextColor(TEXT)));
-    parent.spawn((Text::new(subtitle), font(assets, 17.0), TextColor(ACCENT)));
-}
-
-fn action_button(
-    parent: &mut ChildSpawnerCommands,
-    assets: Option<&crate::ClientAssetHandles>,
-    index: usize,
-    action: FlowUiAction,
-    label: &str,
-    color: Color,
-) {
-    parent
-        .spawn((
-            Button,
-            crate::ui::touch_target::TouchTarget::exempt(),
-            FlowButton {
-                index,
-                action,
-                error_action: false,
-            },
-            Node {
-                min_width: px(130),
-                min_height: px(38),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::axes(px(12), px(6)),
-                border: UiRect::all(px(2)),
-                ..default()
-            },
-            BackgroundColor(color),
-            BorderColor::all(TEXT),
-        ))
-        .with_child((Text::new(label), font(assets, 16.0), TextColor(TEXT)));
 }
 
 pub(in crate::flow) fn return_to_editor_after_practice(
@@ -3761,58 +2050,66 @@ mod tests {
         assert!(runtime.action_is_current(&FlowUiAction::MapMakerToggleGrid));
         assert!(!runtime.action_is_current(&FlowUiAction::MapMakerUseEraseTool));
         assert!(!runtime.action_is_current(&FlowUiAction::MapMakerCycleSymmetry));
-        assert_eq!(
-            usize::from(PALETTE_PAGE_DELTA.unsigned_abs()),
-            VISIBLE_PALETTE_ITEMS
-        );
+        assert!(runtime.action_is_current(&FlowUiAction::MapMakerToggleAssets));
+        assert!(!runtime.action_is_current(&FlowUiAction::MapMakerToggleValidation));
     }
 
     #[test]
-    fn palette_page_controls_stop_at_horizontal_range_edges() {
-        assert_eq!(cycled_palette_index(0, 34, -PALETTE_PAGE_DELTA), 0);
-        assert_eq!(cycled_palette_index(30, 34, PALETTE_PAGE_DELTA), 30);
-        assert_eq!(cycled_palette_index(7, 34, -PALETTE_PAGE_DELTA), 0);
+    fn asset_cycling_wraps_around_the_visible_list() {
         assert_eq!(cycled_palette_index(0, 34, -1), 33);
+        assert_eq!(cycled_palette_index(33, 34, 1), 0);
+        assert_eq!(cycled_palette_index(5, 34, 1), 6);
+        assert_eq!(cycled_palette_index(0, 0, 1), 0);
     }
 
     #[test]
-    fn approved_tool_states_drive_assets_visibility() {
+    fn tools_and_tabs_drive_the_side_panel() {
         let mut runtime = MapMakerRuntime::default();
-        assert!(runtime.assets_open);
+        assert_eq!(runtime.panel, SidePanel::Assets);
 
         activate_editor_tool(&mut runtime, EditorTool::Select);
-        assert!(!runtime.assets_open);
+        assert_eq!(runtime.panel, SidePanel::Collapsed, "Select has no assets");
         assert_eq!(runtime.tool, EditorTool::Select);
 
         toggle_assets_drawer(&mut runtime);
-        assert!(runtime.assets_open);
+        assert_eq!(runtime.panel, SidePanel::Assets);
         assert_eq!(runtime.tool, EditorTool::Place);
 
         toggle_assets_drawer(&mut runtime);
-        assert!(!runtime.assets_open);
+        assert_eq!(runtime.panel, SidePanel::Collapsed);
+
+        // Check stays open across tool switches.
+        runtime.panel = SidePanel::Check;
+        activate_editor_tool(&mut runtime, EditorTool::Erase);
+        assert_eq!(runtime.panel, SidePanel::Check);
+        assert_eq!(SidePanel::opening(true), SidePanel::Collapsed);
+        assert_eq!(SidePanel::opening(false), SidePanel::Assets);
     }
 
     #[test]
-    fn map_check_details_are_visible_only_while_requested() {
-        let mut runtime = MapMakerRuntime::default();
+    fn check_add_opens_assets_on_the_fixing_entry() {
+        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+        let mut runtime = MapMakerRuntime {
+            session: Some(MapEditorSession::open(blank_feedback_document())),
+            panel: SidePanel::Check,
+            tool: EditorTool::Erase,
+            palette_query: "wall".to_string(),
+            ..MapMakerRuntime::default()
+        };
+        let mode = brawler::map::WIPEOUT_MODE_DEFINITION;
+        let team_b = palette(&catalog, mode)
+            .iter()
+            .position(|item| *item == PaletteItem::Spawn(1))
+            .unwrap();
+        show_palette_item(&catalog, &mut runtime, team_b);
+        assert_eq!(runtime.panel, SidePanel::Assets);
+        assert_eq!(runtime.tool, EditorTool::Place);
+        assert_eq!(runtime.palette_category, PaletteCategory::SpawnsObjectives);
+        assert!(runtime.palette_query.is_empty());
         assert_eq!(
-            validation_popover_error(&runtime, Some("missing spawn")),
-            None
+            selected_palette_item(&catalog, &runtime, mode),
+            Some(PaletteItem::Spawn(1))
         );
-        runtime.validation_open = true;
-        assert_eq!(
-            validation_popover_error(&runtime, Some("missing spawn")),
-            Some("missing spawn")
-        );
-        assert_eq!(validation_popover_error(&runtime, None), None);
-    }
-
-    #[test]
-    fn asset_range_uses_direct_item_windows() {
-        assert_eq!(palette_window(0, 18), (0, 6));
-        assert_eq!(palette_window(7, 18), (6, 12));
-        assert_eq!(palette_window(17, 18), (12, 18));
-        assert_eq!(palette_window(0, 3), (0, 3));
     }
 
     #[test]
@@ -3899,6 +2196,7 @@ mod tests {
             AssetPlugin::default(),
         ))
         .init_asset::<Image>()
+        .init_asset::<Font>()
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             brawler::timing::SIMULATION_TICK,
         ))
@@ -3931,7 +2229,7 @@ mod tests {
                 .iter(world)
                 .collect::<Vec<_>>();
             let toolbars = world
-                .query_filtered::<Entity, With<MapMakerSelectionToolbar>>()
+                .query_filtered::<Entity, With<editor::MapMakerSelectionToolbar>>()
                 .iter(world)
                 .collect::<Vec<_>>();
             (roots, toolbars)
@@ -4074,6 +2372,7 @@ mod tests {
             AssetPlugin::default(),
         ))
         .init_asset::<Image>()
+        .init_asset::<Font>()
         .add_message::<KeyboardInput>()
         .add_message::<Ime>()
         .add_message::<MouseWheel>()
@@ -4103,6 +2402,7 @@ mod tests {
                 resolve_map_maker_action,
                 present_map_editor,
                 update_map_editor_values,
+                follow_chip_preview,
             )
                 .chain(),
         );
@@ -4112,22 +2412,10 @@ mod tests {
     #[test]
     fn value_only_edits_keep_the_same_editor_ui_nodes() {
         let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
-        let document = MapDraftDocument::blank(
-            MapDraftId(1),
-            "Values",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
-            brawler::map::MapDimensions {
-                width: 32,
-                height: 24,
-            },
-            brawler::map::MapPresentationThemeId(1),
-            brawler::map::GROUND_ASSET,
-        )
-        .unwrap();
-        // A non-empty query keeps the clear-search button present, so a trailing space or its
-        // removal changes only the search label: the trimmed filter and visible cards stay put.
+        // A non-empty query keeps the search field present, so a trailing space or its removal
+        // changes only the field's text: the trimmed filter and visible rows stay put.
         let mut runtime = MapMakerRuntime {
-            session: Some(MapEditorSession::open(document)),
+            session: Some(MapEditorSession::open(blank_feedback_document())),
             palette_query: "e".to_string(),
             ..MapMakerRuntime::default()
         };
@@ -4137,20 +2425,28 @@ mod tests {
         let mut app = value_edit_test_app(catalog, runtime);
         app.update();
         let initial = editor_ui_nodes(&mut app);
-        let previews = {
+        let rows = {
             let world = app.world_mut();
             world
-                .query_filtered::<Entity, With<MapPalettePreviewHost>>()
+                .query::<&FlowButton>()
                 .iter(world)
+                .filter(|button| matches!(button.action, FlowUiAction::MapMakerSelectAsset(_)))
                 .count()
         };
-        assert!(previews > 0, "the palette shows asset preview cards");
+        assert!(rows > 0, "the Assets panel lists asset rows");
+        let has_span = |app: &mut App, expected: &str| {
+            let world = app.world_mut();
+            world
+                .query::<&TextSpan>()
+                .iter(world)
+                .any(|span| span.0 == expected)
+        };
         let has_text =
             |app: &mut App, expected: &str| editor_texts(app).iter().any(|text| text == expected);
         let status_shown = |app: &mut App| {
             let world = app.world_mut();
             world
-                .query_filtered::<&Node, With<MapMakerStatusLine>>()
+                .query_filtered::<&Node, With<editor::MapMakerStatusLine>>()
                 .iter(world)
                 .any(|node| node.display != Display::None)
         };
@@ -4166,7 +2462,7 @@ mod tests {
             initial,
             "search toggle respawned"
         );
-        assert!(has_text(&mut app, "e_"));
+        assert!(has_text(&mut app, "e|"));
 
         press_editor_key(&mut app, KeyCode::Space, Some(" "));
         assert_eq!(
@@ -4174,7 +2470,7 @@ mod tests {
             initial,
             "search typing respawned"
         );
-        assert!(has_text(&mut app, "e _"));
+        assert!(has_text(&mut app, "e |"));
 
         press_editor_key(&mut app, KeyCode::Backspace, None);
         assert_eq!(
@@ -4182,7 +2478,7 @@ mod tests {
             initial,
             "search backspace respawned"
         );
-        assert!(has_text(&mut app, "e_"));
+        assert!(has_text(&mut app, "e|"));
 
         press_editor_key(&mut app, KeyCode::Enter, None);
         assert_eq!(editor_ui_nodes(&mut app), initial, "search close respawned");
@@ -4190,7 +2486,7 @@ mod tests {
 
         press_editor_key(&mut app, KeyCode::KeyG, None);
         assert_eq!(editor_ui_nodes(&mut app), initial, "grid toggle respawned");
-        assert!(has_text(&mut app, "GRID\nOFF"));
+        assert!(!app.world().resource::<MapMakerRuntime>().grid_visible);
 
         press_editor_key(&mut app, KeyCode::KeyM, None);
         assert_eq!(
@@ -4198,7 +2494,8 @@ mod tests {
             initial,
             "symmetry cycle respawned"
         );
-        assert!(has_text(&mut app, "SYMMETRY\nLEFT / RIGHT"));
+        assert!(has_span(&mut app, " · mirror left / right"));
+        assert!(has_text(&mut app, "Mirror: left / right."));
 
         press_editor_key(&mut app, KeyCode::KeyR, None);
         assert_eq!(editor_ui_nodes(&mut app), initial, "rotation respawned");
@@ -4225,22 +2522,10 @@ mod tests {
     }
 
     #[test]
-    fn same_page_palette_selection_keeps_the_editor_ui_nodes() {
+    fn asset_selection_and_cycling_keep_the_editor_ui_nodes() {
         let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
-        let document = MapDraftDocument::blank(
-            MapDraftId(1),
-            "Palette",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
-            brawler::map::MapDimensions {
-                width: 32,
-                height: 24,
-            },
-            brawler::map::MapPresentationThemeId(1),
-            brawler::map::GROUND_ASSET,
-        )
-        .unwrap();
         let mut runtime = MapMakerRuntime {
-            session: Some(MapEditorSession::open(document)),
+            session: Some(MapEditorSession::open(blank_feedback_document())),
             ..MapMakerRuntime::default()
         };
         let visible: Vec<usize> =
@@ -4249,8 +2534,8 @@ mod tests {
                 .map(|(index, _)| index)
                 .collect();
         assert!(
-            visible.len() > VISIBLE_PALETTE_ITEMS,
-            "the default category spans more than one palette page"
+            visible.len() > 3,
+            "the default category lists several assets"
         );
         select_first_visible_palette_item(&catalog, &mut runtime);
         runtime.bump_render();
@@ -4258,76 +2543,91 @@ mod tests {
         let mut app = value_edit_test_app(catalog, runtime);
         app.update();
         let initial = editor_ui_nodes(&mut app);
-        let preview_hosts = |app: &mut App| {
-            let world = app.world_mut();
-            world
-                .query_filtered::<Entity, With<MapPalettePreviewHost>>()
-                .iter(world)
-                .collect::<BTreeSet<_>>()
-        };
-        let initial_previews = preview_hosts(&mut app);
-        assert_eq!(initial_previews.len(), VISIBLE_PALETTE_ITEMS);
-        // Each card has a border and a badge mark; only the selected card's are shown.
-        let shown_marks = |app: &mut App| {
-            let world = app.world_mut();
-            world
-                .query::<(&PaletteSelectionMark, &Visibility)>()
-                .iter(world)
-                .filter(|(_, visibility)| **visibility != Visibility::Hidden)
-                .map(|(mark, _)| mark.0)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(shown_marks(&mut app), vec![visible[0], visible[0]]);
         let revision = app.world().resource::<MapMakerRuntime>().render_revision;
+        let current = |app: &App, index: usize| {
+            app.world()
+                .resource::<MapMakerRuntime>()
+                .action_is_current(&FlowUiAction::MapMakerSelectAsset(index))
+        };
 
         app.world_mut()
             .resource_mut::<PendingFlowActions>()
             .ordinary = Some(FlowUiAction::MapMakerSelectAsset(visible[2]));
         app.update();
-        assert_eq!(editor_ui_nodes(&mut app), initial, "card click respawned");
-        assert_eq!(preview_hosts(&mut app), initial_previews);
-        assert_eq!(shown_marks(&mut app), vec![visible[2], visible[2]]);
+        assert_eq!(editor_ui_nodes(&mut app), initial, "row click respawned");
+        assert!(current(&app, visible[2]));
 
         app.world_mut()
             .resource_mut::<PendingFlowActions>()
             .ordinary = Some(FlowUiAction::MapMakerCycleAsset(-1));
         app.update();
-        assert_eq!(
-            editor_ui_nodes(&mut app),
-            initial,
-            "palette cycle respawned"
-        );
-        assert_eq!(preview_hosts(&mut app), initial_previews);
-        assert_eq!(shown_marks(&mut app), vec![visible[1], visible[1]]);
-        assert_eq!(
-            app.world().resource::<MapMakerRuntime>().render_revision,
-            revision
-        );
+        assert_eq!(editor_ui_nodes(&mut app), initial, "asset cycle respawned");
+        assert!(current(&app, visible[1]));
 
-        // Cycling past the last card of the page crosses the page edge and rebuilds.
+        // Past the end of the list the selection wraps, still without a rebuild.
         app.world_mut()
             .resource_mut::<PendingFlowActions>()
             .ordinary = Some(FlowUiAction::MapMakerSelectAsset(
-            visible[VISIBLE_PALETTE_ITEMS - 1],
+            visible[visible.len() - 1],
         ));
         app.update();
-        assert_eq!(editor_ui_nodes(&mut app), initial, "card click respawned");
         app.world_mut()
             .resource_mut::<PendingFlowActions>()
             .ordinary = Some(FlowUiAction::MapMakerCycleAsset(1));
         app.update();
-        assert!(
-            editor_ui_nodes(&mut app).is_disjoint(&initial),
-            "crossing a page edge rebuilds the editor UI"
-        );
-        assert!(preview_hosts(&mut app).is_disjoint(&initial_previews));
-        let next_page = shown_marks(&mut app);
+        assert_eq!(editor_ui_nodes(&mut app), initial, "wrapping respawned");
+        assert!(current(&app, visible[0]));
         assert_eq!(
-            next_page,
-            vec![
-                visible[VISIBLE_PALETTE_ITEMS],
-                visible[VISIBLE_PALETTE_ITEMS]
-            ]
+            app.world().resource::<MapMakerRuntime>().render_revision,
+            revision
+        );
+    }
+
+    #[test]
+    fn the_collapsed_chip_follows_the_selected_asset_without_a_rebuild() {
+        let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
+        let mut runtime = MapMakerRuntime {
+            session: Some(MapEditorSession::open(blank_feedback_document())),
+            panel: SidePanel::Collapsed,
+            ..MapMakerRuntime::default()
+        };
+        select_first_visible_palette_item(&catalog, &mut runtime);
+        runtime.bump_render();
+        let mut app = value_edit_test_app(catalog, runtime);
+        app.update();
+        let initial = editor_ui_nodes(&mut app);
+        let chip_texts = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query::<(&editor::MapMakerValueLabel, &Text)>()
+                .iter(world)
+                .filter(|(label, _)| **label == editor::MapMakerValueLabel::Asset)
+                .map(|(_, text)| text.0.clone())
+                .collect::<Vec<_>>()
+        };
+        let before = chip_texts(&mut app);
+        assert_eq!(before.len(), 1, "the collapsed panel shows the asset chip");
+        let previews = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query::<&MapPalettePreviewHost>()
+                .iter(world)
+                .map(|host| host.visual)
+                .collect::<Vec<_>>()
+        };
+        let preview_before = previews(&mut app);
+        assert_eq!(preview_before.len(), 1);
+
+        press_editor_key(&mut app, KeyCode::Tab, None);
+        app.update();
+        assert_ne!(chip_texts(&mut app), before, "the chip names the new asset");
+        let preview_after = previews(&mut app);
+        assert_eq!(preview_after.len(), 1);
+        assert_ne!(preview_after, preview_before, "the chip preview follows");
+        let kept = editor_ui_nodes(&mut app);
+        assert!(
+            initial.iter().filter(|node| !kept.contains(node)).count() <= 1,
+            "only the chip's preview host was replaced"
         );
     }
 
@@ -4440,7 +2740,7 @@ mod tests {
         );
         assert_eq!(key(&mut app, KeyCode::Enter), Vec::new());
 
-        // Esc first clears an interaction, then closes validation, and only then leaves.
+        // Esc first clears an interaction, then closes Check, and only then leaves.
         app.world_mut()
             .resource_mut::<MapMakerRuntime>()
             .interaction = EditorInteraction::Erase { cells: Vec::new() };
@@ -4449,11 +2749,12 @@ mod tests {
             app.world().resource::<MapMakerRuntime>().interaction,
             EditorInteraction::Idle
         );
-        app.world_mut()
-            .resource_mut::<MapMakerRuntime>()
-            .validation_open = true;
+        app.world_mut().resource_mut::<MapMakerRuntime>().panel = SidePanel::Check;
         assert_eq!(key(&mut app, KeyCode::Escape), vec![UiFeedback::Back]);
-        assert!(!app.world().resource::<MapMakerRuntime>().validation_open);
+        assert_eq!(
+            app.world().resource::<MapMakerRuntime>().panel,
+            SidePanel::Collapsed
+        );
         // Plain unbound keys are silent.
         assert_eq!(key(&mut app, KeyCode::KeyQ), Vec::new());
     }

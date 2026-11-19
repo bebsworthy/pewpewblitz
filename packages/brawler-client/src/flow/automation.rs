@@ -58,13 +58,13 @@ pub enum ShellCaptureRoute {
     PracticeMaps,
     MapLibrary,
     MapEditor,
-    /// The new-map editor after cycling the palette selection to the next card on the page.
+    /// The new-map editor with the Assets panel open on Cover and the next asset selected.
     MapEditorPalette,
     /// The library with the create-map panel open (BRL-2xpc audit).
     MapCreate,
     /// A painted wall line marquee-selected with the Select tool (BRL-2xpc audit).
     MapEditorSelect,
-    /// A painted draft with the map-check popover open (BRL-2xpc audit).
+    /// A painted draft with the Check panel open (BRL-2xpc).
     MapEditorIssues,
     /// A painted draft after Test Map is refused by local validation (BRL-2xpc audit).
     MapEditorTest,
@@ -253,6 +253,11 @@ impl ShellCaptureRoute {
             Self::MapEditor => map_editor,
             Self::MapEditorPalette => {
                 let mut steps = map_editor;
+                // The Assets panel on Cover with the next asset selected, at every size.
+                steps.push(screen(
+                    Action::MapMakerSelectCategory(1),
+                    ClientFlow::MapEditor,
+                ));
                 steps.push(screen(Action::MapMakerCycleAsset(1), ClientFlow::MapEditor));
                 steps
             }

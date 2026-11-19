@@ -34,10 +34,12 @@ use screens::{
         spawn_game_type_select,
     },
     map_maker::{
-        MapMakerRuntime, load_map_library, map_maker_input, observe_map_publish_outcome,
+        MapMakerRuntime, MapMakerScrollMemory, follow_chip_preview, keep_map_selection_valid,
+        load_map_library, map_maker_input, navigate_map_library, observe_map_publish_outcome,
         position_map_editor_selection_toolbar, present_map_editor, present_map_library,
-        resolve_map_maker_action, return_to_editor_after_practice, sync_map_editor_preview,
-        update_map_editor_values,
+        publish_map_editor_arena_insets, resolve_map_maker_action, return_to_editor_after_practice,
+        reveal_map_maker_focus, scroll_map_maker, style_flat_controls, sync_map_editor_preview,
+        update_map_editor_values, update_map_library_values,
     },
     match_loading::{spawn_match_loading, update_match_loading},
     overlays::{
@@ -115,6 +117,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<super::map_maker::MapDraftStorage>()
             .init_resource::<super::MapDraftLibrary>()
             .init_resource::<MapMakerRuntime>()
+            .init_resource::<MapMakerScrollMemory>()
             .init_resource::<ClientLocalLoadFailures>()
             .init_resource::<super::ClientQueueModel>()
             .init_resource::<super::ClientPracticeModel>()
@@ -183,6 +186,10 @@ impl Plugin for ClientFlowPlugin {
                                 .or_else(in_state(ClientFlow::MapEditor)),
                         )
                         .in_set(ClientFlowSet::CollectFlowInput),
+                    navigate_map_library
+                        .after(map_maker_input)
+                        .run_if(in_state(ClientFlow::MapLibrary))
+                        .in_set(ClientFlowSet::CollectFlowInput),
                     practice_map_input
                         .after(collect_flow_input)
                         .in_set(ClientFlowSet::CollectFlowInput),
@@ -216,15 +223,30 @@ impl Plugin for ClientFlowPlugin {
                     update_queue_cancel_button,
                     update_queue_status,
                     spawn_game_type_select.before(update_flow_button_chrome),
-                    observe_map_publish_outcome.before(present_map_library),
-                    present_map_library.run_if(in_state(ClientFlow::MapLibrary)),
+                    (
+                        observe_map_publish_outcome.before(present_map_library),
+                        (
+                            keep_map_selection_valid,
+                            present_map_library,
+                            update_map_library_values,
+                        )
+                            .chain()
+                            .run_if(in_state(ClientFlow::MapLibrary)),
+                        (scroll_map_maker, style_flat_controls)
+                            .after(present_map_library)
+                            .after(present_map_editor)
+                            .run_if(
+                                in_state(ClientFlow::MapLibrary)
+                                    .or_else(in_state(ClientFlow::MapEditor)),
+                            ),
+                    ),
                     (
                         present_map_editor.run_if(in_state(ClientFlow::MapEditor)),
                         sync_map_editor_preview,
                         position_map_editor_selection_toolbar
                             .after(present_map_editor)
                             .run_if(in_state(ClientFlow::MapEditor)),
-                        update_map_editor_values
+                        (update_map_editor_values, follow_chip_preview)
                             .after(present_map_editor)
                             .after(position_map_editor_selection_toolbar)
                             .run_if(in_state(ClientFlow::MapEditor)),
@@ -289,6 +311,18 @@ impl Plugin for ClientFlowPlugin {
                 .after(UiSystems::Layout)
                 .run_if(in_state(ClientFlow::Dashboard)),
         );
+        // Map Maker reads its laid-out chrome: focus and selection reveal in its scroll areas,
+        // and the arena insets the editor camera draws inside.
+        app.add_systems(
+            PostUpdate,
+            (
+                reveal_map_maker_focus.run_if(
+                    in_state(ClientFlow::MapLibrary).or_else(in_state(ClientFlow::MapEditor)),
+                ),
+                publish_map_editor_arena_insets,
+            )
+                .after(UiSystems::Layout),
+        );
         app.add_systems(
             PostUpdate,
             keep_game_type_focus_visible
@@ -338,5 +372,3 @@ fn exit_match_input(mut context: ResMut<super::ClientInputContext>) {
 mod tests;
 
 pub(crate) use screens::equipment::WeaponPreviewHost;
-#[cfg(feature = "automation")]
-pub(crate) use screens::map_maker_mockups::add_map_maker_mockups;

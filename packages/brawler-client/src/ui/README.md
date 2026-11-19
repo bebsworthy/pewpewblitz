@@ -27,7 +27,7 @@ Bevy entities, not a separate widget runtime.
 - `touch_target`: the BRL-q148 touch-target floor. `TouchTarget` (required by flow, shell, match
   menu and scoreboard-close buttons) raises `Node::min_height` to `48 / UiScale` UI pixels while
   `TouchTargetPolicy` is enabled (default: the Android build), remembering the owner's authored
-  height so responsive owners can keep rewriting it; `TouchTarget::exempt()` opts a screen out.
+  height so responsive owners can keep rewriting it. No screen opts out.
 - `viewport`: the small-window fit. Below 640 logical pixels of height the effective `UiScale` is
   the player's setting times `height / 640` (floor 0.5), so landscape phones get the authored
   wide layouts on a 640-pixel-tall virtual canvas; taller windows are unchanged.

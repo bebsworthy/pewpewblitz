@@ -41,8 +41,8 @@ pub(crate) struct ClientAssetHandles {
 
 impl ClientAssetHandles {
     /// Placeholder handles with a caller-chosen shell font, so headless flow tests can tell the
-    /// shell typography from Bevy's default font. The UI gallery's design boards use it too.
-    #[cfg(any(test, feature = "automation"))]
+    /// shell typography from Bevy's default font.
+    #[cfg(test)]
     pub(crate) fn with_font_for_test(dashboard_font: Handle<Font>) -> Self {
         Self {
             audio: BTreeMap::new(),
@@ -468,7 +468,10 @@ mod tests {
     #[test]
     fn dashboard_font_icons_and_licenses_are_shipped() {
         let root = std::path::Path::new(REPOSITORY_ROOT);
-        let promoted = ["brawler/ui/fonts/lilita-one-regular.ttf"];
+        let promoted = [
+            "brawler/ui/fonts/lilita-one-regular.ttf",
+            "brawler/ui/fonts/fira-sans-bold.ttf",
+        ];
         let manifest: AssetManifest = ron::from_str(CLIENT_ASSET_MANIFEST).unwrap();
         let manifested = manifest
             .assets
@@ -484,6 +487,7 @@ mod tests {
         }
         for file in [
             "assets/licenses/LilitaOne-OFL-1.1.txt",
+            "assets/licenses/FiraSans-OFL-1.1.txt",
             "assets/licenses/pewpew-blitz-original-icons.txt",
         ] {
             assert!(root.join(file).is_file(), "missing promoted asset: {file}");

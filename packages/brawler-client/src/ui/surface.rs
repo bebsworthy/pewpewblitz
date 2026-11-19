@@ -46,48 +46,6 @@ pub(crate) struct SurfaceState {
     pub disabled: bool,
 }
 
-/// Optional per-component geometry for player-shell surfaces whose approved
-/// silhouette differs from the shared default. Colors and interaction remain
-/// owned by `Surface` and `SurfaceState`.
-#[derive(Component, Clone, Copy, Debug)]
-pub(crate) struct SurfaceStyle {
-    slope: f32,
-    border_width: f32,
-    cut: f32,
-    shadow_x: f32,
-    shadow_y: f32,
-}
-
-impl SurfaceStyle {
-    pub(crate) const MAP_TOOL: Self = Self {
-        slope: 0.07,
-        border_width: 5.0,
-        cut: 9.0,
-        shadow_x: 0.0,
-        shadow_y: 8.0,
-    };
-    pub(crate) const MAP_ACTION: Self = Self {
-        slope: 0.11,
-        border_width: 4.0,
-        cut: 7.0,
-        shadow_x: 0.0,
-        shadow_y: 6.0,
-    };
-    pub(crate) const MAP_ASSET: Self = Self {
-        slope: 0.025,
-        border_width: 3.0,
-        cut: 7.0,
-        shadow_x: 0.0,
-        shadow_y: 5.0,
-    };
-    pub(crate) const MAP_TAB: Self = Self {
-        slope: 0.045,
-        border_width: 3.0,
-        cut: 6.0,
-        shadow_x: 0.0,
-        shadow_y: 4.0,
-    };
-}
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub(crate) struct SurfaceMaterial {
     /// Gradient bottom color.
@@ -595,7 +553,7 @@ fn fill_top(role: Surface, state: SurfaceState, bottom: Color) -> Color {
     }
 }
 
-/// Shader geometry for one surface: the shared defaults per role, or its `SurfaceStyle`.
+/// Shader geometry for one surface: the shared defaults per role.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Geometry {
     slope: f32,
@@ -606,25 +564,17 @@ struct Geometry {
 }
 
 impl Geometry {
-    fn of(role: Surface, style: Option<&SurfaceStyle>) -> Self {
-        style.map_or_else(
-            || Self {
-                slope: match role {
-                    Surface::Row | Surface::Field => ROW_SLOPE,
-                    Surface::Card | Surface::Panel => PANEL_SLOPE,
-                    _ => ACTION_SLOPE,
-                },
-                border: BORDER_WIDTH,
-                cut: DEFAULT_DETAILS.x,
-                lip: Vec2::new(DEFAULT_DETAILS.y, DEFAULT_DETAILS.z),
+    fn of(role: Surface) -> Self {
+        Self {
+            slope: match role {
+                Surface::Row | Surface::Field => ROW_SLOPE,
+                Surface::Card | Surface::Panel => PANEL_SLOPE,
+                _ => ACTION_SLOPE,
             },
-            |style| Self {
-                slope: style.slope,
-                border: style.border_width,
-                cut: style.cut,
-                lip: Vec2::new(style.shadow_x, style.shadow_y),
-            },
-        )
+            border: BORDER_WIDTH,
+            cut: DEFAULT_DETAILS.x,
+            lip: Vec2::new(DEFAULT_DETAILS.y, DEFAULT_DETAILS.z),
+        }
     }
 }
 
@@ -670,12 +620,8 @@ impl ContentReserve {
 
     /// The reserve for a surface; `focusable` surfaces (buttons) also clear the focus pointer.
     #[cfg(test)]
-    pub(crate) fn for_surface(
-        role: Surface,
-        style: Option<&SurfaceStyle>,
-        focusable: bool,
-    ) -> Self {
-        Self::of(Geometry::of(role, style), focusable)
+    pub(crate) fn for_surface(role: Surface, focusable: bool) -> Self {
+        Self::of(Geometry::of(role), focusable)
     }
 }
 
@@ -704,14 +650,13 @@ pub(crate) fn reserve_surface_content(
     mut surfaces: Query<(
         Entity,
         &Surface,
-        Option<&SurfaceStyle>,
         Has<Interaction>,
         &mut Node,
         Option<&mut SurfacePadding>,
     )>,
 ) {
-    for (entity, role, style, focusable, mut node, padding) in &mut surfaces {
-        let geometry = Geometry::of(*role, style);
+    for (entity, role, focusable, mut node, padding) in &mut surfaces {
+        let geometry = Geometry::of(*role);
         let reserve = ContentReserve::of(geometry, focusable);
         let base = match padding.as_deref() {
             Some(padding) if padding.applied == node.padding => padding.base,
@@ -762,12 +707,11 @@ fn present(
         &ComputedNode,
         &MaterialNode<SurfaceMaterial>,
         Option<&Interaction>,
-        Option<&SurfaceStyle>,
         Option<&SurfaceMotion>,
         Has<InteractionDisabled>,
     )>,
 ) {
-    for (role, state, node, handle, interaction, style, motion, disabled) in &surfaces {
+    for (role, state, node, handle, interaction, motion, disabled) in &surfaces {
         let mut state = state.copied().unwrap_or_default();
         state.disabled |= disabled;
         let Some(mut mat) = materials.get_mut(&handle.0) else {
@@ -788,7 +732,7 @@ fn present(
         .to_linear()
         .to_vec4();
         let size = node.size() * node.inverse_scale_factor();
-        let geometry = Geometry::of(*role, style);
+        let geometry = Geometry::of(*role);
         mat.geometry = Vec4::new(size.x, size.y, geometry.slope, geometry.border);
         mat.flags = Vec4::new(
             f32::from(shows_focus(state, *visibility)),
@@ -1042,13 +986,6 @@ mod tests {
 
     #[test]
     fn content_reserve_clears_rings_pointer_and_lip_with_a_small_fixed_inset() {
-        let styles = [
-            None,
-            Some(SurfaceStyle::MAP_TOOL),
-            Some(SurfaceStyle::MAP_ACTION),
-            Some(SurfaceStyle::MAP_ASSET),
-            Some(SurfaceStyle::MAP_TAB),
-        ];
         let roles = [
             Surface::Back,
             Surface::Primary,
@@ -1058,30 +995,28 @@ mod tests {
             Surface::Row,
             Surface::Dark,
         ];
-        for style in styles {
-            for role in roles {
-                let geometry = Geometry::of(role, style.as_ref());
-                let (ring, tip) = drawn_extent(geometry);
-                let case = format!("{role:?} {style:?}");
-                let plain = ContentReserve::of(geometry, false);
-                let button = ContentReserve::of(geometry, true);
-                assert!(plain.top >= ring + RING_GAP, "{case}: top {plain:?}");
-                assert!(plain.left >= ring + RING_GAP, "{case}: side {plain:?}");
-                assert!(
-                    button.left >= tip + POINTER_GAP,
-                    "{case}: pointer {button:?}"
-                );
-                // Only focusable surfaces pay for the pointer, and only sideways.
-                assert!((button.top - plain.top).abs() < 1e-6, "{case}");
-                // Small: at most 10 px of rings above content, 20 px beside a pointer.
-                assert!(
-                    plain.top <= 10.0 && button.left <= 20.0,
-                    "{case}: {button:?}"
-                );
-                // Mirrored, plus the lip, so content centers on the visible face.
-                assert!((button.right - button.left - geometry.lip.x - 1.0).abs() < 1e-3);
-                assert!((button.bottom - button.top - geometry.lip.y - 1.0).abs() < 1e-3);
-            }
+        for role in roles {
+            let geometry = Geometry::of(role);
+            let (ring, tip) = drawn_extent(geometry);
+            let case = format!("{role:?}");
+            let plain = ContentReserve::of(geometry, false);
+            let button = ContentReserve::of(geometry, true);
+            assert!(plain.top >= ring + RING_GAP, "{case}: top {plain:?}");
+            assert!(plain.left >= ring + RING_GAP, "{case}: side {plain:?}");
+            assert!(
+                button.left >= tip + POINTER_GAP,
+                "{case}: pointer {button:?}"
+            );
+            // Only focusable surfaces pay for the pointer, and only sideways.
+            assert!((button.top - plain.top).abs() < 1e-6, "{case}");
+            // Small: at most 10 px of rings above content, 20 px beside a pointer.
+            assert!(
+                plain.top <= 10.0 && button.left <= 20.0,
+                "{case}: {button:?}"
+            );
+            // Mirrored, plus the lip, so content centers on the visible face.
+            assert!((button.right - button.left - geometry.lip.x - 1.0).abs() < 1e-3);
+            assert!((button.bottom - button.top - geometry.lip.y - 1.0).abs() < 1e-3);
         }
     }
 
@@ -1112,7 +1047,7 @@ mod tests {
     fn ring_band_padding_is_the_same_in_every_state_and_keeps_the_owner_total() {
         let (mut app, entity) = padding_app();
         // Not a button: the band alone, no pointer allowance.
-        let reserve = ContentReserve::for_surface(Surface::Secondary, None, false);
+        let reserve = ContentReserve::for_surface(Surface::Secondary, false);
         let rest = padding(&app, entity);
         assert_eq!(
             rest,
@@ -1168,7 +1103,7 @@ mod tests {
         app.world_mut().entity_mut(entity).insert(Interaction::None);
         app.world_mut().get_mut::<Node>(entity).unwrap().padding = UiRect::ZERO;
         app.update();
-        let button = ContentReserve::for_surface(Surface::Secondary, None, true);
+        let button = ContentReserve::for_surface(Surface::Secondary, true);
         assert_eq!(padding(&app, entity).left, px(button.left));
         assert_eq!(padding(&app, entity).right, px(button.right));
     }

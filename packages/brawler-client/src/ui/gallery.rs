@@ -39,10 +39,8 @@ pub fn build_ui_gallery_app() -> App {
             ..default()
         });
     let capture = std::env::var_os("BRAWLER_UI_GALLERY_CAPTURE");
-    // BRL-2xpc: `BRAWLER_UI_GALLERY_MOCKUPS=<dir>` renders the Map Maker design board instead.
-    let mockups = std::env::var_os("BRAWLER_UI_GALLERY_MOCKUPS");
     // A capture is scripted and exits by itself, so it renders off-screen (BRL-g7ny).
-    if capture.is_some() || mockups.is_some() {
+    if capture.is_some() {
         crate::automation::add_offscreen_plugins(
             &mut app,
             plugins,
@@ -58,10 +56,6 @@ pub fn build_ui_gallery_app() -> App {
             super::surface::SurfacePlugin,
             super::press::ReleaseActivationPlugin,
         ));
-    if let Some(dir) = mockups {
-        crate::flow::add_map_maker_mockups(&mut app, dir.into());
-        return app;
-    }
     app.init_resource::<GalleryFocus>()
         .add_systems(Startup, setup)
         .add_systems(
