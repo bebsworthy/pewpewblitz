@@ -102,6 +102,11 @@ weapon-assets blender="/Applications/Blender.app/Contents/MacOS/Blender":
 riff-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/characters/riff/build_riff.py
 
+# Rebuild Bumper's source master, review sheets, and runtime GLB (headless). Like Riff, his
+# two-handed clips read the weapons' support-grip anchors, and his build reuses Riff's builder.
+bumper-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
+    {{blender}} -b --factory-startup -P asset_src/characters/bumper/build_bumper.py
+
 # Rebuild the Crossroads Facility environment kit GLBs, source master, and review sheet (headless).
 facility-kit blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/environment/crossroads-facility/build_kit.py

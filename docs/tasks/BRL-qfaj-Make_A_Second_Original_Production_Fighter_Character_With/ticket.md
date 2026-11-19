@@ -3,9 +3,9 @@ id: BRL-qfaj
 
 title: 'Make a second original production fighter character with Riff''s clip contract'
 
-status: doing
-closed:
-status_changed: 2026-11-19T14:23:59Z
+status: done
+closed: 2026-11-19T15:18:58Z
+status_changed: 2026-11-19T15:18:58Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-tkmh]
 
 parent:
 
-rank: 11665408
+rank:
 ---
 
 # Description

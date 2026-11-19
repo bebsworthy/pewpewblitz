@@ -43,6 +43,13 @@ tickets tune them through native review but do not change the direction.
   `assets/brawler/models/original/characters/riff/`. For a long-eared character the head share is
   measured against the crown height (ears excluded) and the 1.6-cell visual height includes the
   ears. The source README owns the export contract and clip list.
+- Bumper (`asset_src/characters/bumper/`, `just bumper-asset`, BRL-qfaj), a stocky ram in padded
+  teal sports gear, is the second production character. His builder reuses Riff's pipeline and
+  exports the same clip names, sockets, weapon grip frame, and budgets, in the same source units,
+  so a character choice (BRL-tkmh) only swaps the GLB and its reviewed bounds. His silhouette is
+  wide rather than tall: curled horns and a wool cap instead of ears. At Riff's source-to-world
+  scale his body stays inside the 14-unit radius and he stands about 1.15 cells to his horn tops;
+  scaling him to 1.6 cells would push his hands well past the radius.
 - Each primary-weapon animation family has its own original held weapon (BRL-q29d): a one-handed
   blaster (`1h`), a two-handed heavy sprayer (`heavy`), a two-handed lobber (`throwable`), and a
   two-handed impact blade (`melee`), built by `asset_src/weapons/build_weapons.py`
@@ -981,7 +988,7 @@ Every redistributed third-party file must have exact provenance in the manifest 
 license text where required. Original replacements should also preserve their source masters and
 document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
-its README (for Riff, `asset_src/characters/riff/README.md`; for the held weapons,
+its README (for Riff and Bumper, `asset_src/characters/<name>/README.md`; for the held weapons,
 `asset_src/weapons/README.md`; for environment kits, `asset_src/environment/<kit>/README.md`),
 not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt`,
 `pewpew-blitz-original-weapons.txt` and `pewpew-blitz-original-characters.txt` point at the

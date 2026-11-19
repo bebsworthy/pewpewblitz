@@ -12,8 +12,14 @@ const RIFF_SOCKET_REST: Quat = Quat::from_xyzw(
 /// Largest horizontal reach of the bind pose below the head (feet, hands, torso), source units
 /// (build report `planar_half_extent_below_crown`).
 const RIFF_SOURCE_BODY_PLANAR_RADIUS: f32 = 0.6088;
-/// Size budget for the mobile pass (BRL-0161); the builder enforces the same ceiling.
-const RIFF_GLB_BYTE_BUDGET: usize = 700_000;
+/// Size budget for the mobile pass (BRL-0161); the builders enforce the same ceiling.
+const CHARACTER_GLB_BYTE_BUDGET: usize = 700_000;
+/// Bumper (BRL-qfaj), the second production character, built by
+/// `asset_src/characters/bumper/build_bumper.py` on Riff's clip and socket contract. Per-brawler
+/// character selection (BRL-tkmh) does not load it yet, so only the contract check names it.
+const BUMPER_ASSET_PATH: &str = "brawler/models/original/characters/bumper/chr_bumper.glb";
+/// Every shipped fighter character GLB the runtime contract covers.
+const SHIPPED_CHARACTER_ASSETS: [&str; 2] = [RIFF_ASSET_PATH, BUMPER_ASSET_PATH];
 
 fn inputs() -> MotionInputs {
     MotionInputs {
@@ -28,11 +34,11 @@ fn inputs() -> MotionInputs {
     }
 }
 
-fn shipped_glb_json() -> (serde_json::Value, usize) {
+fn shipped_glb_json(asset: &str) -> (serde_json::Value, usize) {
     let path = std::path::Path::new(REPOSITORY_ROOT)
         .join("assets")
-        .join(RIFF_ASSET_PATH);
-    let bytes = std::fs::read(&path).expect("Riff GLB is shipped at its asset path");
+        .join(asset);
+    let bytes = std::fs::read(&path).expect("character GLB is shipped at its asset path");
     assert_eq!(&bytes[0..4], b"glTF");
     let json_length = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
     assert_eq!(&bytes[16..20], b"JSON");
@@ -70,30 +76,46 @@ fn riff_and_its_held_weapon_face_the_fighter_root_forward() {
 }
 
 #[test]
-fn shipped_riff_glb_matches_the_runtime_contract() {
-    let (json, size) = shipped_glb_json();
-    assert!(size <= RIFF_GLB_BYTE_BUDGET, "Riff GLB is {size} bytes");
-    let meshes = json["meshes"].as_array().unwrap();
-    assert_eq!(meshes.len(), 1, "one joined body mesh, so one outline hull");
-    let primitives = meshes[0]["primitives"].as_array().unwrap();
-    assert_eq!(primitives.len(), 1);
-    assert!(primitives[0]["attributes"].get("COLOR_0").is_some());
-    assert!(primitives[0]["attributes"].get("JOINTS_0").is_some());
-    assert_eq!(json["materials"].as_array().unwrap().len(), 1);
-    assert!(json.get("cameras").is_none() && json.get("lights").is_none());
-    let clips = json["animations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|animation| animation["name"].as_str().unwrap())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(clips, CLIP_NAMES.into_iter().collect::<BTreeSet<_>>());
-    let socket = json["nodes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|node| node["name"] == RIFF_WEAPON_SOCKET);
-    assert!(socket.is_some(), "weapon socket node is exported");
+fn shipped_character_glbs_match_the_runtime_contract() {
+    for asset in SHIPPED_CHARACTER_ASSETS {
+        let (json, size) = shipped_glb_json(asset);
+        assert!(size <= CHARACTER_GLB_BYTE_BUDGET, "{asset} is {size} bytes");
+        let meshes = json["meshes"].as_array().unwrap();
+        assert_eq!(
+            meshes.len(),
+            1,
+            "{asset}: one joined body mesh, so one outline hull"
+        );
+        let primitives = meshes[0]["primitives"].as_array().unwrap();
+        assert_eq!(primitives.len(), 1, "{asset}");
+        assert!(
+            primitives[0]["attributes"].get("COLOR_0").is_some(),
+            "{asset}"
+        );
+        assert!(
+            primitives[0]["attributes"].get("JOINTS_0").is_some(),
+            "{asset}"
+        );
+        assert_eq!(json["materials"].as_array().unwrap().len(), 1, "{asset}");
+        assert!(json.get("cameras").is_none() && json.get("lights").is_none());
+        let clips = json["animations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|animation| animation["name"].as_str().unwrap())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            clips,
+            CLIP_NAMES.into_iter().collect::<BTreeSet<_>>(),
+            "{asset} exports exactly the clip contract"
+        );
+        let socket = json["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["name"] == RIFF_WEAPON_SOCKET);
+        assert!(socket.is_some(), "{asset}: weapon socket node is exported");
+    }
 }
 
 #[test]

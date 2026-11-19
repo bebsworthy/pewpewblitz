@@ -8,3 +8,10 @@ asset_src/characters/riff/build_riff.py, which loads the frozen earlier passes i
 asset_src/characters/riff/versions/ and writes the source master riff.blend and review renders
 beside it. It contains no third-party, purchased, commissioned or hand-edited model data. The
 README beside the script records the brief, build command, clip contract and budgets.
+
+The Bumper fighter (brawler/models/original/characters/bumper/chr_bumper.glb, BRL-qfaj) is
+original work of the PewPew Blitz project, built the same way by
+asset_src/characters/bumper/build_bumper.py (which reuses the Riff builder's pipeline) from the
+brief in asset_src/characters/bumper/spec.md. It writes the source master bumper.blend and review
+renders beside the script and contains no third-party, purchased, commissioned or hand-edited
+model data.
