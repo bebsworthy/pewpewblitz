@@ -12,7 +12,7 @@ pub(super) struct AutomationHooks<'w> {
     #[cfg(feature = "automation")]
     config: Option<Res<'w, crate::ClientAutomationConfig>>,
     #[cfg(feature = "automation")]
-    runtime: Option<Res<'w, brawler::config::HeadlessAutomation>>,
+    runtime: Option<Res<'w, crate::HeadlessAutomation>>,
     #[cfg(not(feature = "automation"))]
     player: core::marker::PhantomData<&'w ()>,
 }

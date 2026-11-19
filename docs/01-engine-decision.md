@@ -51,8 +51,8 @@ these dependencies casually or enable broad default feature sets for convenience
 The workspace has these demonstrated package boundaries:
 
 - the root `brawler` package owns shared gameplay/data modules, the protocol, the client-side
-  adapters that live beside their shared domain (combat cues/preview, map presentation readiness,
-  combat evidence), and the authoritative server, lobby, Practice, and Balance Lab composition,
+  adapters that live beside their shared domain (combat cues/preview, map presentation readiness),
+  and the authoritative server, lobby, Practice, and Balance Lab composition,
   plus the `brawler-server` and `brawler-profile-admin` binaries;
 - `packages/brawler-client` owns the player client application (input, session, flow/UI, HUD,
   3D presentation, audio, VFX, settings, map maker), the `brawler-client`, VfxLab, and UI gallery
@@ -68,8 +68,8 @@ artifact. The shared crate deliberately keeps the name `brawler`, because Lighty
 registry fingerprint hashes replicated type paths (`brawler::protocol::...`); replicated, message,
 and channel types therefore stay in `brawler`. `brawler` never depends on `brawler-client`, so
 shared code cannot name client-application types; a resource that a shared client adapter reads
-(for example `HeadlessAutomation` or `ClientPlayableGate`) is defined in `brawler` and re-exported
-by `brawler-client`.
+(for example `ClientPlayableGate`) is defined in `brawler` and re-exported by `brawler-client`.
+Automation-only state such as `HeadlessAutomation` lives in `brawler-client::automation`.
 
 The production topology contains several process roles:
 
@@ -318,9 +318,10 @@ The packages' feature graphs express compile-time execution roles:
   and the developer-only VfxLab and UI gallery binaries. Its settings live in
   `brawler_client::ClientAutomationConfig`, a resource beside the shared `ClientNetworkConfig`;
   product session systems reach it only through the session `AutomationHooks` parameter, whose
-  player-build answers are constants. The feature also installs the shared crate's legacy
-  direct-UDP `ClientCombatEvidencePlugin` and client process closeout/window sampling
-  (`ProcessDiagnosticsPlugin`); failure records stay in the player build. Every E2E, evidence, and
+  player-build answers are constants. The feature also installs the shared crate's client process
+  closeout/window sampling (`ProcessDiagnosticsPlugin`); failure records stay in the player build.
+  The legacy direct-UDP client combat evidence and combat-profile gate were retired (BRL-rhw3);
+  routed evidence covers normal play. Every E2E, evidence, and
   dev-tool script enables it; `scripts/check-client-features.sh` (in `just lint`) proves the player
   binary excludes it;
 - `brawler/server` enables the dedicated-server and worker surface without Bevy presentation

@@ -4,11 +4,7 @@
 use crate::combat::TestDummy;
 use crate::{
     VERSION,
-    combat::{
-        CombatCue, CombatEvidenceSnapshots, CombatStateSnapshot, CombatTelemetry,
-        ServerCombatPlugin, TeamId, WeaponCatalogResource, WeaponPresetId, WeaponTelemetry,
-        WeaponTelemetryKey, decode_combat_cue, encode_state_snapshot,
-    },
+    combat::{ServerCombatPlugin, TeamId, WeaponCatalogResource, WeaponPresetId},
     config::{MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
     content::GameplayContentPlugin,
     gameplay::GameplayPlugin,
@@ -46,12 +42,7 @@ use lightyear::prelude::{Connected, Disconnected, LinkOf, Linked, LocalAddr, Rem
 use lightyear::prelude::{
     ControlledBy, MessageReceiver, MessageSender, ReplicationMetadata, ReplicationSender,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    env, fs,
-    path::PathBuf,
-    time::Instant,
-};
+use std::{collections::BTreeSet, env, fs, path::PathBuf};
 
 mod admission;
 #[cfg(feature = "balance-lab")]
@@ -80,12 +71,7 @@ pub use routed_worker::{
 #[cfg(feature = "network-test")]
 pub(crate) use seat_hold::{CompletedSeats, SEAT_HOLD_TICKS, SeatRebindQueue};
 pub(crate) use seat_hold::{RoutedSeat, SeatHold};
-#[cfg(test)]
-use verification::{
-    checkpoint_reports_converge, combat_prerequisites_met, cues_matching_expected,
-    cues_through_first_reset, fire_to_cue_latency_evidence, report_matches_snapshot,
-};
-use verification::{verify_process_combat, verify_process_match, verify_process_movement};
+use verification::{verify_process_match, verify_process_movement};
 pub use worker::{
     LobbyControlInbox, LobbyControlOutbox, WorkerBootstrap, WorkerBootstrapError,
     WorkerEntrypointRole, WorkerLaunchArguments, install_routed_worker_endpoint,
@@ -185,18 +171,6 @@ struct ProcessMovementCheck {
 }
 
 #[derive(Resource, Debug)]
-struct ProcessCombatCheck {
-    enabled: bool,
-    ready_file: Option<PathBuf>,
-    client_ready_dir: Option<PathBuf>,
-    report_file: Option<PathBuf>,
-    run_id: String,
-    expected_preset_id: Option<WeaponPresetId>,
-    started_at: Instant,
-    completed: bool,
-}
-
-#[derive(Resource, Debug)]
 struct ProcessMatchCheck {
     enabled: bool,
     report_file: Option<PathBuf>,
@@ -210,24 +184,6 @@ impl FromWorld for ProcessMatchCheck {
             enabled: env::var("BRAWLER_NETWORK_ASSERT_MATCH").as_deref() == Ok("1"),
             report_file: env::var_os("BRAWLER_NETWORK_MATCH_REPORT_FILE").map(PathBuf::from),
             initial_match_id: None,
-            completed: false,
-        }
-    }
-}
-
-impl FromWorld for ProcessCombatCheck {
-    fn from_world(_: &mut World) -> Self {
-        Self {
-            enabled: env::var("BRAWLER_NETWORK_ASSERT_COMBAT").as_deref() == Ok("1"),
-            ready_file: env::var_os("BRAWLER_NETWORK_COMBAT_READY_FILE").map(PathBuf::from),
-            client_ready_dir: env::var_os("BRAWLER_NETWORK_COMBAT_READY_DIR").map(PathBuf::from),
-            report_file: env::var_os("BRAWLER_NETWORK_COMBAT_REPORT_FILE").map(PathBuf::from),
-            run_id: env::var("BRAWLER_NETWORK_RUN_ID").unwrap_or_else(|_| "unknown".to_string()),
-            expected_preset_id: env::var("BRAWLER_NETWORK_WEAPON_PRESET")
-                .ok()
-                .and_then(|value| value.parse::<u16>().ok())
-                .map(WeaponPresetId),
-            started_at: Instant::now(),
             completed: false,
         }
     }
@@ -386,7 +342,6 @@ impl Plugin for ServerNetworkPlugin {
             .init_resource::<ServerShutdown>()
             .init_resource::<ServerStartup>()
             .init_resource::<ProcessMovementCheck>()
-            .init_resource::<ProcessCombatCheck>()
             .init_resource::<ProcessMatchCheck>()
             .init_resource::<crate::diagnostics::ProcessExitClassification>()
             .insert_resource(ReplicationMetadata::new(crate::timing::SIMULATION_TICK))
@@ -424,11 +379,7 @@ impl Plugin for ServerNetworkPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    verify_process_movement,
-                    verify_process_combat,
-                    verify_process_match,
-                )
+                (verify_process_movement, verify_process_match)
                     .chain()
                     .in_set(ServerSessionSet::Observe),
             )
@@ -1297,7 +1248,6 @@ fn enforce_session_deadlines(
 fn exit_after_verification(
     tick: Res<crate::timing::SimulationTick>,
     movement: Res<ProcessMovementCheck>,
-    combat: Res<ProcessCombatCheck>,
     match_check: Res<ProcessMatchCheck>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
@@ -1317,7 +1267,6 @@ fn exit_after_verification(
     }
     let checks = [
         (movement.enabled, movement.completed),
-        (combat.enabled, combat.completed),
         (match_check.enabled, match_check.completed),
     ];
     let any_enabled = checks.iter().any(|(enabled, _)| *enabled);

@@ -28,3 +28,27 @@ BRL-3p70 moved all automation configuration into `brawler-client` (`ClientAutoma
 - `cargo check -p brawler --features client` compiles none of the legacy client evidence or client closeout projection (verify with `rg` on the items behind cfg, or `cargo rustc ... -- --emit=metadata` symbol listing).
 - `scripts/check-client-features.sh`, `just lint`, `just test`, and the combat-profile script (see BRL-5fk5) still pass.
 - Low priority: player-visible behavior and binary content are already correct.
+
+# Outcome (2026-11-19, commit f1a198bb on worktree-agent-a238017c9bea50f93)
+
+Owner answer q-kzvs6r0: retire the legacy path (option 3). BRL-5fk5 is canceled as obsolete.
+
+## Removed
+- Shared crate client role: `ClientCombatEvidencePlugin`, `ClientCombatObservation`, `ClientCombatEvidenceStatus`, `CombatClientSet::Evidence`, client checkpoint ingestion/capture/report (`receive_combat_evidence_checkpoints`, `capture_client_combat_checkpoints`, `record_headless_combat_observation`, `write_client_combat_evidence`, `required_client_checkpoints`, `enqueue_pending_checkpoint`), the cue-stream evidence hooks in `receive_combat_cues`, and the client closeout projection `client_closeout_evidence`. `dep:atomic-write-file` dropped from the `client` feature.
+- `HeadlessAutomation` moved from `src/config.rs` to `brawler-client::automation` (its `weapon_preset` copy, read only by the evidence, removed).
+- brawler-client: the evidence plugin install and the headless exit gate on `ClientCombatEvidenceStatus`.
+- Server: `ProcessCombatCheck` / `verify_process_combat` and its client-report parsing helpers and unit tests (they only read the deleted client ready files).
+- Scripts: `scripts/network-combat-profiles.sh`; `scripts/network.sh` combat-assert mode (`BRAWLER_NETWORK_ASSERT_COMBAT`, ready dir/report, combat client env); the two retired markers in `scripts/check-client-features.sh`.
+- Docs: README script table, `docs/01-engine-decision.md` package/feature notes, `docs/backlog.md` MAINT-COMBAT-PROFILES row.
+
+## Kept, and why
+- `scripts/network.sh` (movement mode): `scripts/network-paired-evidence.py` drives its direct side. Smoke run on 127.0.0.1:5090 with diagnostics passed (closeout reports validated).
+- Wire-bound and server test-mode residue, unchanged to avoid a protocol change: `CombatEvidenceCheckpoint` (registered in `protocol.rs`) and payload types, server checkpoint capture/send, `CombatEvidenceMode`, the combat-assert `TestDummyFixture`, server closeout digest, `validate-closeout` EXPECT-CHECKPOINTS / `required-checkpoint-count`. Follow-up: BRL-stws.
+
+## Replacement
+Routed evidence (`just v3-render-evidence`, `just shell-capture`, the e2e recipes, `scripts/network-routed-evidence.py`) covers normal play; nothing replaces the per-preset direct-UDP checkpoint convergence gate.
+
+## Verification
+- `just lint`: pass (feature isolation: "server feature graph excludes client presentation capabilities", "player client build excludes automation and evidence tooling").
+- `just test`: pass, 2582 passed, 0 failed.
+- `rg` for removed symbols, env vars, and script names outside `docs/implementation/` (historical) and references: no hits.

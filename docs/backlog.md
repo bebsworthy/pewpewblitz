@@ -80,7 +80,6 @@ them in a focused ticket when their trigger occurs or another ticket changes the
 | MAINT-WINDOWS-IPC | Implement the production Windows named-pipe backend | Windows becomes an active supported target; [`V2-WINDOWS-IPC`](./implementation/v2/roadmap.md#v2-backlog) |
 | MAINT-TRANSPORT-CONTINGENCY | Reconsider bounded worker-port Lightyear UDP instead of routed transport | Only a qualifying routed hard-gate failure and explicit user approval; [`V2-TRANSPORT-CONTINGENCY`](./implementation/v2/roadmap.md#v2-backlog) |
 | MAINT-LEGACY-DIRECT-UDP | Retire the V1 direct-UDP scripts and documentation | Their explicit comparison/debug value is gone; [`V2-V1-DIRECT-UDP-RETIREMENT`](./implementation/v2/roadmap.md#v2-backlog) |
-| MAINT-COMBAT-PROFILES | Repair, replace with routed evidence, or retire the documented legacy `network-combat-profiles` gate | Before relying on it for evidence or when retiring the legacy direct-UDP path; the historical failure predates terrain work and requires fresh reproduction |
 | MAINT-LIFECYCLE-SOAK | Re-run simultaneous heterogeneous-mode and repeated completion/requeue bounded-growth campaigns | Host scale, lifecycle changes, or leak evidence; [`V2-M06-LIFECYCLE-SOAK`](./implementation/v2/roadmap.md#v2-backlog) |
 
 ## Dependency and scoping rules

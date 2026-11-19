@@ -1,36 +1,12 @@
 //! Combat cue ingestion and deduplication.
 
 use super::{
-    BTreeMap, CombatCue, CombatEventId, CombatEvidenceCheckpoint, CombatStateSnapshot,
-    DamageSource, DeduplicatedCombatCue, Fighter, Instant, MAX_COMBAT_EVIDENCE_EVENTS,
-    NetworkEntityId, PathBuf, ShotId, VecDeque, WeaponDefinitionId, env, unix_epoch_micros,
+    CombatCue, CombatEventId, DamageSource, DeduplicatedCombatCue, Fighter,
+    MAX_COMBAT_EVIDENCE_EVENTS, NetworkEntityId, VecDeque, WeaponDefinitionId,
 };
 use bevy::input::gamepad::{Gamepad, GamepadRumbleIntensity, GamepadRumbleRequest};
 use bevy::prelude::*;
 use std::time::Duration;
-#[derive(Resource, Debug)]
-pub struct ClientCombatEvidenceStatus {
-    pub(crate) required: bool,
-    pub ready: bool,
-}
-
-#[cfg(feature = "client")]
-impl ClientCombatEvidenceStatus {
-    #[must_use]
-    pub fn permits_exit(&self) -> bool {
-        !self.required || self.ready
-    }
-}
-
-#[cfg(feature = "client")]
-impl FromWorld for ClientCombatEvidenceStatus {
-    fn from_world(_: &mut World) -> Self {
-        Self {
-            required: env::var_os("BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE").is_some(),
-            ready: false,
-        }
-    }
-}
 
 #[cfg(feature = "client")]
 #[derive(Resource, Default, Debug)]
@@ -63,59 +39,9 @@ pub(crate) fn remember_combat_event(
 }
 
 #[cfg(feature = "client")]
-#[derive(Resource, Debug)]
-pub struct ClientCombatObservation {
-    pub(crate) saw_defeat: bool,
-    pub(crate) saw_reset: bool,
-    pub(crate) cue_timestamps: Vec<(ShotId, u128)>,
-    pub(crate) cue_stream: Vec<CombatCue>,
-    pub(crate) dropped_cue_timestamps: u64,
-    pub(crate) dropped_cue_stream: u64,
-    pub(crate) checkpoints: BTreeMap<String, CombatStateSnapshot>,
-    pub(crate) checkpoint_matches: BTreeMap<String, Vec<CombatStateSnapshot>>,
-    pub(crate) expected_checkpoints: Vec<CombatEvidenceCheckpoint>,
-    pub(crate) snapshot_history: BTreeMap<u64, CombatStateSnapshot>,
-    pub(crate) checkpoint_timestamps: BTreeMap<String, u128>,
-    pub(crate) state_mutation_timestamps: Vec<(u64, u128)>,
-    pub(crate) last_encoded_snapshot: Option<String>,
-    pub(crate) ready_file: Option<PathBuf>,
-    pub(crate) started_at: Instant,
-    pub(crate) wrote_ready: bool,
-    pub(crate) waiting_reported_at_tick: Option<u32>,
-}
-
-#[cfg(feature = "client")]
-impl FromWorld for ClientCombatObservation {
-    fn from_world(_: &mut World) -> Self {
-        let ready_file = env::var_os("BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE").map(PathBuf::from);
-        Self {
-            saw_defeat: false,
-            saw_reset: false,
-            cue_timestamps: Vec::new(),
-            cue_stream: Vec::new(),
-            dropped_cue_timestamps: 0,
-            dropped_cue_stream: 0,
-            checkpoints: BTreeMap::new(),
-            checkpoint_matches: BTreeMap::new(),
-            expected_checkpoints: Vec::new(),
-            snapshot_history: BTreeMap::new(),
-            checkpoint_timestamps: BTreeMap::new(),
-            state_mutation_timestamps: Vec::new(),
-            last_encoded_snapshot: None,
-            ready_file,
-            started_at: Instant::now(),
-            wrote_ready: false,
-            waiting_reported_at_tick: None,
-        }
-    }
-}
-
-#[cfg(feature = "client")]
-#[cfg(feature = "client")]
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn receive_combat_cues(
     mut recent: ResMut<RecentCombatEvents>,
-    mut observation: Option<ResMut<ClientCombatObservation>>,
     mut capture: Option<ResMut<CaptureCombatCues>>,
     mut presented_cues: MessageWriter<DeduplicatedCombatCue>,
     mut receivers: Query<
@@ -129,9 +55,6 @@ pub(crate) fn receive_combat_cues(
         };
         let cues: Vec<_> = receiver.receive().collect();
         for cue in cues {
-            if let Some(observation) = observation.as_mut() {
-                observe_defeat_and_reset(observation, &cue);
-            }
             let event_id = match &cue {
                 CombatCue::AttackAccepted { event_id, .. }
                 | CombatCue::DeliveryImpact { event_id, .. }
@@ -166,9 +89,6 @@ pub(crate) fn receive_combat_cues(
                     capture.dropped_cues = capture.dropped_cues.saturating_add(1);
                 }
             }
-            if let Some(observation) = observation.as_mut() {
-                record_cue_evidence(observation, &cue);
-            }
             if is_superseded_legacy_cue(&cue) {
                 continue;
             }
@@ -189,49 +109,6 @@ pub(super) fn is_superseded_legacy_cue(cue: &CombatCue) -> bool {
         | CombatCue::Defeat { .. }
         | CombatCue::Reset { .. } => true,
         _ => false,
-    }
-}
-
-/// Legacy direct-UDP evidence (automation only): note authoritative defeat/reset cues.
-#[cfg(feature = "client")]
-fn observe_defeat_and_reset(observation: &mut ClientCombatObservation, cue: &CombatCue) {
-    match cue {
-        CombatCue::Defeat { .. } | CombatCue::FighterDefeated { .. } => {
-            observation.saw_defeat = true;
-        }
-        CombatCue::Reset { .. } | CombatCue::FighterReset { .. } => {
-            observation.saw_reset = true;
-        }
-        _ => {}
-    }
-}
-
-/// Legacy direct-UDP evidence (automation only): keep the bounded cue stream and shot timestamps
-/// when a ready file was requested.
-#[cfg(feature = "client")]
-fn record_cue_evidence(observation: &mut ClientCombatObservation, cue: &CombatCue) {
-    if observation.ready_file.is_none() {
-        return;
-    }
-    if observation.cue_stream.len() < MAX_COMBAT_EVIDENCE_EVENTS {
-        observation.cue_stream.push(cue.clone());
-    } else {
-        observation.dropped_cue_stream = observation.dropped_cue_stream.saturating_add(1);
-    }
-    let timestamp = match cue {
-        CombatCue::Muzzle { shot_id, .. } => Some(*shot_id),
-        CombatCue::AttackAccepted { attack_id, .. } => Some(ShotId(attack_id.0)),
-        _ => None,
-    };
-    if let Some(shot_id) = timestamp {
-        if observation.cue_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS {
-            observation
-                .cue_timestamps
-                .push((shot_id, unix_epoch_micros()));
-        } else {
-            observation.dropped_cue_timestamps =
-                observation.dropped_cue_timestamps.saturating_add(1);
-        }
     }
 }
 

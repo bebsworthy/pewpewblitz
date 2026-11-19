@@ -40,12 +40,8 @@ fn headless_client_builder_explicitly_installs_content_gameplay_and_session_plug
     assert!(app.is_plugin_added::<ClientProfilePlugin>());
     assert!(app.is_plugin_added::<ClientNetworkPlugin>());
     assert!(!app.is_plugin_added::<ClientPresentationPlugin>());
-    // Legacy combat evidence and process closeout/window sampling are automation-only.
+    // Process closeout/window sampling is automation-only.
     let automation = cfg!(feature = "automation");
-    assert_eq!(
-        app.is_plugin_added::<brawler::combat::ClientCombatEvidencePlugin>(),
-        automation
-    );
     assert_eq!(
         app.is_plugin_added::<brawler::diagnostics::ProcessDiagnosticsPlugin>(),
         automation

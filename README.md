@@ -434,8 +434,8 @@ Advanced scripts remain available for focused evidence and historical comparison
 | [`scripts/network-routed.sh`](scripts/network-routed.sh) | Focused production routed-process smoke, including explicit IPv6 runs |
 | [`scripts/network-routed-capture.sh`](scripts/network-routed-capture.sh) | macOS loopback packet capture and MTU/fragment verification |
 | [`scripts/network-paired-evidence.py`](scripts/network-paired-evidence.py) | Historical direct-versus-routed comparison campaign |
-| [`scripts/network.sh`](scripts/network.sh) | Retained legacy direct-UDP diagnostic baseline |
-| [`scripts/network-match.sh`](scripts/network-match.sh) and [`scripts/network-combat-profiles.sh`](scripts/network-combat-profiles.sh) | Legacy direct-UDP match and impairment gates |
+| [`scripts/network.sh`](scripts/network.sh) | Retained legacy direct-UDP movement baseline, used by the direct side of `network-paired-evidence.py` |
+| [`scripts/network-match.sh`](scripts/network-match.sh) | Legacy direct-UDP match gate |
 | [`scripts/macos-client-bundle.sh`](scripts/macos-client-bundle.sh) | Temporary addressable `.app` wrapper for native visual automation |
 
 These scripts must report unsupported or unavailable evidence honestly. Their historical thresholds,

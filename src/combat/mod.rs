@@ -54,11 +54,6 @@ use effects::{
     finish_attack_delivery, flush_completed_attack_telemetry, payload_target_visible,
     resolve_composed_payloads,
 };
-#[cfg(feature = "client")]
-pub(crate) use evidence::{
-    capture_client_combat_checkpoints, receive_combat_evidence_checkpoints,
-    record_headless_combat_observation,
-};
 #[cfg(feature = "server")]
 use evidence::{capture_server_combat_checkpoints, send_combat_evidence_checkpoints};
 #[cfg(feature = "server")]
@@ -66,11 +61,9 @@ use recovery::restore_attack_idle_health;
 
 pub use crate::content::GameplayContentFingerprint;
 #[cfg(feature = "client")]
-pub use client::ClientCombatEvidenceStatus;
+pub use client::ClientCombatPlugin;
 #[cfg(feature = "client")]
 pub use client::DeduplicatedCombatCue;
-#[cfg(feature = "client")]
-pub use client::{ClientCombatEvidencePlugin, ClientCombatPlugin};
 pub use cues::{
     CombatCue, CombatCueKey, CombatCueKind, CombatEffectCue, DamageSource, SelfCloakEndReason,
     combat_cue_key, decode_combat_cue, encode_combat_cue,
@@ -183,9 +176,8 @@ use std::collections::HashMap;
 use std::env;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use avian2d::prelude::Position;
-#[cfg(any(feature = "server", feature = "client"))]
-use avian2d::prelude::Rotation;
+#[cfg(feature = "server")]
+use avian2d::prelude::{Position, Rotation};
 
 #[cfg(feature = "server")]
 use avian2d::prelude::{
@@ -289,8 +281,6 @@ struct CombatEvidenceMode {
 
 #[cfg(feature = "server")]
 const COMBAT_CHECKPOINT_LATCH_TICKS: u16 = 600;
-#[cfg(feature = "client")]
-const MAX_COMBAT_SNAPSHOT_HISTORY: usize = 2048;
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NextCombatIds {

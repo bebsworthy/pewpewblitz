@@ -1,11 +1,10 @@
 use super::automation_hooks::AutomationHooks;
 use super::{
-    AppExit, Client, ClientCombatEvidenceStatus, ClientJoinPhase, ClientJoinStatus,
-    ClientNetworkConfig, ClientShutdown, Commands, Connecting, Disconnect, Disconnected, Entity,
-    Fighter, Has, MessageWriter, Messages, NetworkEntityId, NetworkTransport, PendingClientConnect,
-    PlayerId, Query, Real, Remote, Res, ResMut, RosterLogState, RoutedClientLifecycle,
-    RoutedClientPhase, Time, ToString, Vec, With, Without, error, format, info,
-    record_client_failure, warn,
+    AppExit, Client, ClientJoinPhase, ClientJoinStatus, ClientNetworkConfig, ClientShutdown,
+    Commands, Connecting, Disconnect, Disconnected, Entity, Fighter, Has, MessageWriter, Messages,
+    NetworkEntityId, NetworkTransport, PendingClientConnect, PlayerId, Query, Real, Remote, Res,
+    ResMut, RosterLogState, RoutedClientLifecycle, RoutedClientPhase, Time, ToString, Vec, With,
+    Without, error, format, info, record_client_failure, warn,
 };
 
 #[allow(
@@ -73,7 +72,6 @@ pub(super) fn log_replicated_roster(
     config: Res<ClientNetworkConfig>,
     routed: Res<RoutedClientLifecycle>,
     automation: AutomationHooks,
-    combat_evidence: Option<Res<ClientCombatEvidenceStatus>>,
     mut roster_state: ResMut<RosterLogState>,
     status_query: Query<&ClientJoinStatus, With<Client>>,
     roster: Query<(&PlayerId, &NetworkEntityId), (With<Remote>, With<Fighter>)>,
@@ -103,7 +101,6 @@ pub(super) fn log_replicated_roster(
             .any(|status| matches!(status.phase, ClientJoinPhase::Active { .. }))
         && current.len() >= target
         && automation.run_complete()
-        && combat_evidence.is_none_or(|status| status.permits_exit())
     {
         app_exit.write(AppExit::Success);
     }

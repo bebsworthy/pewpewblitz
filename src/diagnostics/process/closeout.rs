@@ -42,34 +42,9 @@ fn server_closeout_evidence(
     }
 }
 
-/// The client is the converging endpoint: it digests the checkpoints it reproduced, sums
-/// its dropped cue counters, and labels the first expected checkpoint it never matched.
-#[cfg(feature = "client")]
-fn client_closeout_evidence(
-    observation: &crate::combat::client::ClientCombatObservation,
-) -> CloseoutEvidence {
-    let (checkpoint_digest, observed_checkpoints) =
-        checkpoint_evidence_digest(&observation.checkpoints);
-    let dropped_messages = observation
-        .dropped_cue_stream
-        .saturating_add(observation.dropped_cue_timestamps);
-    let first_divergence = observation.expected_checkpoints.first().map(|unmatched| {
-        format!(
-            "checkpoint {} unmatched at tick {}",
-            unmatched.checkpoint.as_str(),
-            unmatched.snapshot.authoritative_tick
-        )
-    });
-    CloseoutEvidence {
-        checkpoint_digest,
-        observed_checkpoints,
-        first_divergence,
-        dropped_messages,
-    }
-}
-
 /// Digest over a process's recorded checkpoint evidence: ordered `name:encoded-snapshot`
 /// pairs, so equal digests across endpoints prove both checkpoint sets and payloads agree.
+#[cfg(any(feature = "server", test))]
 pub(in crate::diagnostics) fn checkpoint_evidence_digest(
     checkpoints: &std::collections::BTreeMap<String, crate::combat::CombatStateSnapshot>,
 ) -> (u64, usize) {
@@ -89,12 +64,13 @@ pub(in crate::diagnostics) fn checkpoint_evidence_digest(
 }
 
 // Bevy system parameters are owned by the scheduling runtime; `Res` cannot be borrowed here.
-// The role-gated evidence parameters are how one finalizer serves both role lanes.
+// The server-gated evidence parameters let one finalizer serve both role lanes; clients report
+// the default (no checkpoint) evidence.
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
     clippy::too_many_arguments,
-    reason = "every parameter is a Bevy system parameter owned by the schedule runtime; the role-gated evidence reads keep one finalization phase instead of duplicated per-role systems"
+    reason = "every parameter is a Bevy system parameter owned by the schedule runtime; the server-gated evidence reads keep one finalization phase instead of duplicated per-role systems"
 )]
 pub(super) fn finalize_closeout_report(
     mut exits: MessageReader<AppExit>,
@@ -105,9 +81,6 @@ pub(super) fn finalize_closeout_report(
     content: Option<Res<crate::content::GameplayContentFingerprint>>,
     #[cfg(feature = "server")] server_evidence: Option<Res<crate::combat::CombatEvidenceSnapshots>>,
     #[cfg(feature = "server")] combat_telemetry: Option<Res<crate::combat::CombatTelemetry>>,
-    #[cfg(feature = "client")] client_observation: Option<
-        Res<crate::combat::client::ClientCombatObservation>,
-    >,
 ) {
     if !state.enabled || state.report_written {
         return;
@@ -125,8 +98,6 @@ pub(super) fn finalize_closeout_report(
         server_evidence.as_deref(),
         #[cfg(feature = "server")]
         combat_telemetry.as_deref(),
-        #[cfg(feature = "client")]
-        client_observation.as_deref(),
     );
     let gameplay = std::mem::take(&mut state.gameplay);
     let report = assemble_closeout_report(
@@ -164,21 +135,12 @@ fn completed_manifest(
 fn resolve_closeout_evidence(
     #[cfg(feature = "server")] server_evidence: Option<&crate::combat::CombatEvidenceSnapshots>,
     #[cfg(feature = "server")] combat_telemetry: Option<&crate::combat::CombatTelemetry>,
-    #[cfg(feature = "client")] client_observation: Option<
-        &crate::combat::client::ClientCombatObservation,
-    >,
 ) -> CloseoutEvidence {
-    #[cfg_attr(not(any(feature = "server", feature = "client")), allow(unused_mut))]
-    let mut evidence = CloseoutEvidence::default();
     #[cfg(feature = "server")]
     if let Some(server) = server_evidence {
-        evidence = server_closeout_evidence(server, combat_telemetry);
+        return server_closeout_evidence(server, combat_telemetry);
     }
-    #[cfg(feature = "client")]
-    if let Some(observation) = client_observation {
-        evidence = client_closeout_evidence(observation);
-    }
-    evidence
+    CloseoutEvidence::default()
 }
 
 fn write_closeout_report(path: Option<&Path>, report: &CloseoutReportV1) {

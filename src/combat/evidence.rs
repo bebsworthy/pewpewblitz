@@ -2,47 +2,35 @@
 
 #[cfg(feature = "server")]
 use super::CombatCue;
-#[cfg(feature = "client")]
-use super::client::ClientCombatObservation;
 use super::{
-    ActiveEffects, AttackDelivery, AttackId, AuthoritativeTick, Defeated, KnockbackFeedback,
-    NetworkEntityId, ProjectileBody, ProjectileDeadline, ReplicatedAttackSource, ResolvedWeapon,
-    StraightFlight, WeaponRecipeFingerprint, WeaponState, WorldPoint,
+    ActiveEffects, AttackDelivery, AttackId, AuthoritativeTick, ConeSprayState, Defeated,
+    KnockbackFeedback, LobbedFlight, NetworkEntityId, ProjectileBody, ProjectileDeadline,
+    ReplicatedAttackSource, ResolvedWeapon, StraightFlight, WeaponPresetId,
+    WeaponRecipeFingerprint, WeaponState, WorldPoint,
 };
-#[cfg(any(feature = "server", feature = "client"))]
+#[cfg(feature = "server")]
 use super::{
-    AuthoritativePose, ConeSpray, ConeSprayState, CurrentHealth, DUMMY_NETWORK_ENTITY, Fighter,
-    LobbedFlight, MAX_COMBAT_EVIDENCE_EVENTS, Position, Projectile, Rotation, WeaponPresetId,
-    unix_epoch_micros,
+    AuthoritativePose, ConeSpray, CurrentHealth, DUMMY_NETWORK_ENTITY, Fighter,
+    MAX_COMBAT_EVIDENCE_EVENTS, Position, Projectile, Rotation, unix_epoch_micros,
 };
 #[cfg(feature = "server")]
 use super::{
     COMBAT_CHECKPOINT_LATCH_TICKS, ExternalMotion, LinkOf, SimulationTick, WeaponCatalogResource,
     env,
 };
-#[cfg(feature = "client")]
-use super::{
-    ClientCombatEvidenceStatus, FighterDefinitionId, MAX_COMBAT_SNAPSHOT_HISTORY, encode_combat_cue,
-};
-#[cfg(any(feature = "server", test))]
+#[cfg(feature = "server")]
 use super::{FiringPattern, WeaponCatalog};
-#[cfg(feature = "client")]
-use atomic_write_file::AtomicWriteFile;
 #[cfg(feature = "server")]
 use bevy::prelude::Resource;
-#[cfg(any(feature = "server", feature = "client"))]
+#[cfg(feature = "server")]
 use bevy::prelude::*;
 use bevy::prelude::{Message, Vec2};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-#[cfg(feature = "client")]
-use std::io::Write as _;
 
 pub const MAX_STATE_SNAPSHOT_BYTES: usize = 32 * 1024;
-#[cfg(feature = "client")]
-const MAX_PENDING_CHECKPOINTS_PER_KIND: usize = 32;
 
 /// Network-visible gameplay state keyed only by stable identities.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -166,7 +154,7 @@ impl CombatProjectileSnapshot {
 }
 
 #[must_use]
-#[cfg(any(feature = "server", test))]
+#[cfg(feature = "server")]
 fn is_active_spread_flight(projectile: &CombatProjectileSnapshot, weapons: &WeaponCatalog) -> bool {
     projectile.lobbed_flight.is_none()
         && projectile
@@ -240,7 +228,7 @@ impl CombatCheckpoint {
     }
 }
 
-#[cfg(any(feature = "server", feature = "client"))]
+#[cfg(feature = "server")]
 fn normalize_checkpoint_snapshot(
     checkpoint: CombatCheckpoint,
     mut snapshot: CombatStateSnapshot,
@@ -348,28 +336,6 @@ fn record_distinct_checkpoint_candidate(
             .is_none_or(|(candidate, _)| candidate != snapshot)
     {
         candidates.push((snapshot.clone(), timestamp));
-    }
-}
-
-#[cfg(feature = "client")]
-fn enqueue_pending_checkpoint(
-    pending: &mut Vec<CombatEvidenceCheckpoint>,
-    checkpoint: CombatEvidenceCheckpoint,
-) {
-    let checkpoint_kind = checkpoint.checkpoint;
-    let same_kind = pending
-        .iter()
-        .filter(|pending| pending.checkpoint == checkpoint_kind)
-        .count();
-    if same_kind >= MAX_PENDING_CHECKPOINTS_PER_KIND
-        && let Some(oldest) = pending
-            .iter()
-            .position(|pending| pending.checkpoint == checkpoint_kind)
-    {
-        pending.remove(oldest);
-    }
-    if pending.len() < MAX_COMBAT_EVIDENCE_EVENTS {
-        pending.push(checkpoint);
     }
 }
 
@@ -638,449 +604,10 @@ pub(super) fn send_combat_evidence_checkpoints(
     }
 }
 
-#[cfg(feature = "client")]
-pub fn receive_combat_evidence_checkpoints(
-    mut observation: ResMut<ClientCombatObservation>,
-    mut receivers: Query<
-        Option<&mut lightyear::prelude::MessageReceiver<CombatEvidenceCheckpoint>>,
-        With<lightyear::prelude::client::Client>,
-    >,
-) {
-    for receiver in &mut receivers {
-        let Some(mut receiver) = receiver else {
-            continue;
-        };
-        for checkpoint in receiver.receive() {
-            enqueue_pending_checkpoint(&mut observation.expected_checkpoints, checkpoint);
-        }
-    }
-}
-
-#[cfg(feature = "client")]
-#[allow(clippy::too_many_lines)]
-#[allow(
-    clippy::type_complexity,
-    reason = "the queries declare the full snapshot view this checkpoint records"
-)]
-pub fn capture_client_combat_checkpoints(
-    mut observation: ResMut<ClientCombatObservation>,
-    fighters: Query<
-        (
-            &NetworkEntityId,
-            Option<&crate::builds::SelectedBuild>,
-            Option<&crate::builds::ResolvedMatchLoadout>,
-            Option<&WeaponState>,
-            Option<&ActiveEffects>,
-            Option<&KnockbackFeedback>,
-            Option<&Defeated>,
-            Option<&CurrentHealth>,
-            Option<&AuthoritativePose>,
-            &Position,
-            &Rotation,
-            Option<&AuthoritativeTick>,
-        ),
-        With<Fighter>,
-    >,
-    projectiles: Query<
-        (
-            &Position,
-            Option<&AttackDelivery>,
-            Option<&ReplicatedAttackSource>,
-            Option<&ProjectileBody>,
-            Option<&LobbedFlight>,
-            Option<&ProjectileDeadline>,
-            Option<&StraightFlight>,
-        ),
-        With<Projectile>,
-    >,
-    cone_sprays: Query<
-        (
-            Option<&AttackDelivery>,
-            Option<&ReplicatedAttackSource>,
-            &ConeSprayState,
-        ),
-        With<ConeSpray>,
-    >,
-) {
-    if observation.ready_file.is_none() {
-        return;
-    }
-    let mut fighter_snapshots = fighters
-        .iter()
-        .map(
-            |(
-                network_id,
-                selected_build,
-                resolved_weapon,
-                weapon_state,
-                active_effects,
-                knockback_feedback,
-                defeated,
-                health,
-                authoritative_pose,
-                position,
-                rotation,
-                authoritative_tick,
-            )| CombatFighterSnapshot {
-                network_entity_id: *network_id,
-                selected_build: selected_build.copied(),
-                resolved_weapon: resolved_weapon.map(|loadout| loadout.primary_weapon.clone()),
-                weapon_state: weapon_state.copied(),
-                active_effects: active_effects.copied(),
-                knockback_feedback: knockback_feedback.copied(),
-                defeated: defeated.copied(),
-                health: health.map(|health| health.0),
-                position: authoritative_pose
-                    .map_or_else(|| WorldPoint::from(position.0), |pose| pose.position),
-                facing: authoritative_pose
-                    .map_or_else(|| rotation.as_radians(), |pose| pose.facing),
-                authoritative_tick: authoritative_tick.copied().unwrap_or_default(),
-            },
-        )
-        .collect::<Vec<_>>();
-    fighter_snapshots.sort_by_key(|fighter| fighter.network_entity_id.0);
-    let authoritative_tick = fighter_snapshots
-        .iter()
-        .map(|fighter| fighter.authoritative_tick.0)
-        .max()
-        .unwrap_or(0);
-    let mut projectile_snapshots = projectiles
-        .iter()
-        .filter_map(
-            |(position, delivery, source, body, lobbed_flight, deadline, straight_flight)| {
-                CombatProjectileSnapshot::from_components(
-                    WorldPoint::from(position.0),
-                    delivery,
-                    source,
-                    body,
-                    lobbed_flight,
-                    deadline,
-                    straight_flight,
-                    authoritative_tick,
-                )
-            },
-        )
-        .collect::<Vec<_>>();
-    projectile_snapshots
-        .sort_by_key(|projectile| (projectile.attack_id.0, projectile.delivery_index));
-    let mut cone_spray_snapshots = cone_sprays
-        .iter()
-        .filter_map(|(delivery, source, state)| {
-            CombatConeSpraySnapshot::from_components(delivery, source, state)
-        })
-        .collect::<Vec<_>>();
-    cone_spray_snapshots.sort_by_key(|spray| spray.attack_id.0);
-    let snapshot = CombatStateSnapshot {
-        authoritative_tick,
-        fighters: fighter_snapshots,
-        projectiles: projectile_snapshots,
-        cone_sprays: cone_spray_snapshots,
-    };
-    observation
-        .snapshot_history
-        .insert(authoritative_tick, snapshot.clone());
-    while observation.snapshot_history.len() > MAX_COMBAT_SNAPSHOT_HISTORY {
-        observation.snapshot_history.pop_first();
-    }
-    let Some(encoded) = encode_state_snapshot(&snapshot) else {
-        return;
-    };
-    if observation.last_encoded_snapshot.as_deref() != Some(encoded.as_str()) {
-        if observation.state_mutation_timestamps.len() < MAX_COMBAT_EVIDENCE_EVENTS {
-            observation
-                .state_mutation_timestamps
-                .push((authoritative_tick, unix_epoch_micros()));
-        }
-        observation.last_encoded_snapshot = Some(encoded);
-    }
-    let expected_checkpoints = std::mem::take(&mut observation.expected_checkpoints);
-    let mut unmatched_checkpoints = Vec::new();
-    for expected in expected_checkpoints {
-        let checkpoint = expected.checkpoint.as_str();
-        if observation
-            .checkpoint_matches
-            .get(checkpoint)
-            .is_some_and(|matches| matches.len() >= 16)
-        {
-            continue;
-        }
-        // Reconstruct the checkpoint tick from replicated immutable flight data. The rendered
-        // Position is intentionally interpolated and the fighter tick can advance before an
-        // ordered evidence message is consumed, so comparing only the latest render snapshot
-        // makes short-lived projectile checkpoints impossible to observe exactly.
-        let mut checkpoint_fighters = snapshot.fighters.clone();
-        for fighter in &mut checkpoint_fighters {
-            fighter.authoritative_tick = AuthoritativeTick(expected.snapshot.authoritative_tick);
-        }
-        let mut checkpoint_projectiles = projectiles
-            .iter()
-            .filter(|(_, _, _, _, lobbed, deadline, straight)| {
-                let launched_at_tick = straight
-                    .map(|flight| flight.launched_at_tick)
-                    .or_else(|| lobbed.map(|flight| flight.launched_at_tick))
-                    .unwrap_or(expected.snapshot.authoritative_tick);
-                let expires_at_tick = deadline
-                    .map(|deadline| deadline.expires_at_tick)
-                    .or_else(|| lobbed.map(|flight| flight.lands_at_tick))
-                    .unwrap_or(u64::MAX);
-                launched_at_tick <= expected.snapshot.authoritative_tick
-                    && expected.snapshot.authoritative_tick <= expires_at_tick
-            })
-            .filter_map(
-                |(position, delivery, source, body, lobbed_flight, deadline, straight_flight)| {
-                    CombatProjectileSnapshot::from_components(
-                        WorldPoint::from(position.0),
-                        delivery,
-                        source,
-                        body,
-                        lobbed_flight,
-                        deadline,
-                        straight_flight,
-                        expected.snapshot.authoritative_tick,
-                    )
-                },
-            )
-            .collect::<Vec<_>>();
-        checkpoint_projectiles
-            .sort_by_key(|projectile| (projectile.attack_id.0, projectile.delivery_index));
-        let checkpoint_snapshot = normalize_checkpoint_snapshot(
-            expected.checkpoint,
-            CombatStateSnapshot {
-                authoritative_tick: expected.snapshot.authoritative_tick,
-                fighters: checkpoint_fighters,
-                projectiles: checkpoint_projectiles,
-                cone_sprays: cone_sprays
-                    .iter()
-                    .filter(|(_, _, state)| state.active_at(expected.snapshot.authoritative_tick))
-                    .filter_map(|(delivery, source, state)| {
-                        CombatConeSpraySnapshot::from_components(delivery, source, state)
-                    })
-                    .collect(),
-            },
-        );
-        let Some(snapshot) = observation
-            .snapshot_history
-            .values()
-            .chain(std::iter::once(&snapshot))
-            .chain(std::iter::once(&checkpoint_snapshot))
-            .find_map(|candidate| {
-                let candidate = if matches!(checkpoint, "defeat" | "reset") {
-                    CombatStateSnapshot {
-                        projectiles: Vec::new(),
-                        ..candidate.clone()
-                    }
-                } else {
-                    candidate.clone()
-                };
-                let mut candidate = normalize_checkpoint_snapshot(expected.checkpoint, candidate);
-                // Preserve the server checkpoint tick long enough to reconstruct transient
-                // deliveries, then compare the gameplay payload independently of when the
-                // replicated state was observed on this client.
-                candidate.authoritative_tick = expected.snapshot.authoritative_tick;
-                (candidate == expected.snapshot).then_some(candidate)
-            })
-        else {
-            if observation.checkpoints.contains_key(checkpoint) {
-                continue;
-            }
-            unmatched_checkpoints.push(expected);
-            continue;
-        };
-        let matches = observation
-            .checkpoint_matches
-            .entry(checkpoint.to_string())
-            .or_default();
-        if !matches.iter().any(|candidate| candidate == &snapshot) {
-            matches.push(snapshot.clone());
-        }
-        observation
-            .checkpoint_timestamps
-            .entry(checkpoint.to_string())
-            .or_insert_with(unix_epoch_micros);
-        observation
-            .checkpoints
-            .entry(checkpoint.to_string())
-            .or_insert(snapshot);
-    }
-    observation.expected_checkpoints = unmatched_checkpoints;
-}
-
-#[cfg(feature = "client")]
-#[allow(clippy::too_many_lines)]
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::type_complexity,
-    reason = "every parameter is a Bevy system parameter owned by the scheduling runtime; the query declares this system's complete world view inline at its schedule boundary"
-)]
-pub fn record_headless_combat_observation(
-    mut observation: ResMut<ClientCombatObservation>,
-    mut status: ResMut<ClientCombatEvidenceStatus>,
-    automation: Res<crate::config::HeadlessAutomation>,
-    fighters: Query<
-        (
-            &NetworkEntityId,
-            &CurrentHealth,
-            &WeaponState,
-            &FighterDefinitionId,
-            Option<&Defeated>,
-        ),
-        With<Fighter>,
-    >,
-) {
-    let Some(path) = observation.ready_file.clone() else {
-        return;
-    };
-    if automation
-        .simulation_ticks
-        .is_some_and(|limit| automation.elapsed_ticks < limit)
-    {
-        return;
-    }
-    if !observation.wrote_ready && observation.waiting_reported_at_tick.is_none() {
-        let required = automation
-            .weapon_preset
-            .map(required_client_checkpoints)
-            .unwrap_or_default();
-        let missing = required
-            .iter()
-            .filter(|checkpoint| !observation.checkpoints.contains_key(**checkpoint))
-            .copied()
-            .collect::<Vec<_>>();
-        if !observation.saw_defeat || !observation.saw_reset || !missing.is_empty() {
-            let history_saw_slow = observation.snapshot_history.values().any(|snapshot| {
-                snapshot.fighters.iter().any(|fighter| {
-                    fighter
-                        .active_effects
-                        .is_some_and(|effects| effects.slow.is_some())
-                })
-            });
-            let history_saw_knockback = observation.snapshot_history.values().any(|snapshot| {
-                snapshot
-                    .fighters
-                    .iter()
-                    .any(|fighter| fighter.knockback_feedback.is_some())
-            });
-            observation.waiting_reported_at_tick = Some(automation.elapsed_ticks);
-            warn!(
-                saw_defeat = observation.saw_defeat,
-                saw_reset = observation.saw_reset,
-                history_saw_slow,
-                history_saw_knockback,
-                ?missing,
-                pending_checkpoints = observation.expected_checkpoints.len(),
-                "headless client is extending its run until combat evidence completes"
-            );
-        }
-    }
-    if observation.wrote_ready
-        || !observation.saw_defeat
-        || !observation.saw_reset
-        || automation.weapon_preset.is_some_and(|preset| {
-            required_client_checkpoints(preset)
-                .iter()
-                .any(|checkpoint| !observation.checkpoints.contains_key(*checkpoint))
-        })
-    {
-        return;
-    }
-    let Some(_) = fighters
-        .iter()
-        .find(|(network_id, _, _, _, _)| network_id.0 != DUMMY_NETWORK_ENTITY.0)
-    else {
-        return;
-    };
-    let mut report = format!(
-        "client_elapsed_ms={}\nclient_observation_epoch_us={}\ncue_count={}\nstate_mutation_count={}\npending_checkpoint_count={}\ndropped_cue_stream={}\ndropped_cue_timestamps={}\n",
-        observation.started_at.elapsed().as_millis(),
-        unix_epoch_micros(),
-        observation.cue_stream.len(),
-        observation.state_mutation_timestamps.len(),
-        observation.expected_checkpoints.len(),
-        observation.dropped_cue_stream,
-        observation.dropped_cue_timestamps,
-    );
-    for (checkpoint, snapshot) in &observation.checkpoints {
-        if let Some(encoded) = encode_state_snapshot(snapshot) {
-            let _ = writeln!(report, "checkpoint_{checkpoint}={encoded}");
-            let _ = writeln!(
-                report,
-                "checkpoint_{checkpoint}_tick={}",
-                snapshot.authoritative_tick
-            );
-        }
-        if let Some(timestamp) = observation.checkpoint_timestamps.get(checkpoint) {
-            let _ = writeln!(
-                report,
-                "checkpoint_{checkpoint}_observed_epoch_us={timestamp}"
-            );
-        }
-    }
-    for (checkpoint, snapshots) in &observation.checkpoint_matches {
-        for snapshot in snapshots {
-            if let Some(encoded) = encode_state_snapshot(snapshot) {
-                let _ = writeln!(report, "checkpoint_{checkpoint}_candidate={encoded}");
-            }
-        }
-    }
-    for (tick, timestamp) in &observation.state_mutation_timestamps {
-        let _ = writeln!(report, "state_mutation_tick={tick}_epoch_us={timestamp}");
-    }
-    for (shot_id, timestamp) in &observation.cue_timestamps {
-        let _ = writeln!(report, "cue_shot_id={}_epoch_us={}", shot_id.0, timestamp);
-    }
-    for cue in &observation.cue_stream {
-        let _ = writeln!(report, "cue_stream={}", encode_combat_cue(cue));
-    }
-    match write_client_combat_evidence(&path, &report) {
-        Ok(()) => {
-            observation.wrote_ready = true;
-            status.ready = true;
-            info!(path = %path.display(), "headless client observed combat defeat and reset");
-        }
-        Err(error) => warn!(
-            path = %path.display(),
-            ?error,
-            "headless combat observation write failed"
-        ),
-    }
-}
-
-#[cfg(feature = "client")]
-fn write_client_combat_evidence(path: &std::path::Path, report: &str) -> Result<(), String> {
-    let mut file = AtomicWriteFile::open(path)
-        .map_err(|error| format!("could not open atomic combat evidence file: {error}"))?;
-    file.write_all(report.as_bytes())
-        .map_err(|error| format!("could not write combat evidence: {error}"))?;
-    file.commit()
-        .map_err(|error| format!("could not publish combat evidence: {error}"))
-}
-
-#[cfg(feature = "client")]
-fn required_client_checkpoints(preset_id: u16) -> &'static [&'static str] {
-    match preset_id {
-        1 => &["defeat", "reset"],
-        2 => &["active_scatter_flight", "defeat", "reset"],
-        3 => &[
-            "active_lob_flight",
-            "active_slow",
-            "active_knockback",
-            "defeat",
-            "reset",
-        ],
-        4 => &["active_knockback", "defeat", "reset"],
-        6 => &["active_cone_spray", "defeat", "reset"],
-        _ => &[],
-    }
-}
-
-#[cfg(all(test, any(feature = "server", feature = "client")))]
+#[cfg(all(test, feature = "server"))]
 mod tests {
     use super::*;
     use crate::combat::{CombatEventId, SlowEffect, WeaponPhase};
-    #[cfg(feature = "client")]
-    use std::env;
-    #[cfg(feature = "client")]
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fighter(network_entity_id: NetworkEntityId) -> CombatFighterSnapshot {
         CombatFighterSnapshot {
@@ -1211,79 +738,6 @@ mod tests {
         assert!(reset.fighters[0].weapon_state.is_some());
         assert_eq!(reset.fighters[1].health, None);
         assert_eq!(reset.fighters[1].weapon_state, None);
-    }
-
-    #[cfg(feature = "client")]
-    #[test]
-    fn client_combat_evidence_is_atomically_published() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock after epoch")
-            .as_nanos();
-        let directory = env::temp_dir().join(format!(
-            "brawler-combat-evidence-{}-{nonce}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&directory).expect("create evidence test directory");
-        let path = directory.join("client-1.ready");
-
-        write_client_combat_evidence(&path, "complete-evidence\n")
-            .expect("publish combat evidence");
-
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read published combat evidence"),
-            "complete-evidence\n"
-        );
-        std::fs::remove_dir_all(directory).expect("remove evidence test directory");
-    }
-
-    #[cfg(feature = "client")]
-    #[test]
-    fn repeated_transient_checkpoints_cannot_starve_durable_checkpoints() {
-        let mut pending = Vec::new();
-        for tick in 0..(MAX_PENDING_CHECKPOINTS_PER_KIND * 4) {
-            let mut snapshot = snapshot();
-            snapshot.authoritative_tick = tick as u64;
-            enqueue_pending_checkpoint(
-                &mut pending,
-                CombatEvidenceCheckpoint {
-                    checkpoint: CombatCheckpoint::ActiveScatterFlight,
-                    snapshot,
-                },
-            );
-        }
-        enqueue_pending_checkpoint(
-            &mut pending,
-            CombatEvidenceCheckpoint {
-                checkpoint: CombatCheckpoint::Defeat,
-                snapshot: snapshot(),
-            },
-        );
-        enqueue_pending_checkpoint(
-            &mut pending,
-            CombatEvidenceCheckpoint {
-                checkpoint: CombatCheckpoint::Reset,
-                snapshot: snapshot(),
-            },
-        );
-
-        assert_eq!(
-            pending
-                .iter()
-                .filter(|pending| pending.checkpoint == CombatCheckpoint::ActiveScatterFlight)
-                .count(),
-            MAX_PENDING_CHECKPOINTS_PER_KIND
-        );
-        assert!(
-            pending
-                .iter()
-                .any(|pending| pending.checkpoint == CombatCheckpoint::Defeat)
-        );
-        assert!(
-            pending
-                .iter()
-                .any(|pending| pending.checkpoint == CombatCheckpoint::Reset)
-        );
     }
 
     #[cfg(feature = "server")]

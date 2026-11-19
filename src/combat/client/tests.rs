@@ -1,9 +1,9 @@
 use super::*;
 use crate::combat::client::cues::{
-    ClientCombatEvidenceStatus, RecentCombatEvents, is_superseded_legacy_cue, remember_combat_event,
+    RecentCombatEvents, is_superseded_legacy_cue, remember_combat_event,
 };
 use crate::combat::client::preview::{AimMark, AimTraceBlockerIndex, aim_lane_marks};
-use crate::combat::{CombatEventId, fighter_color, projectile_color};
+use crate::combat::{CombatEventId, ShotId, fighter_color, projectile_color};
 use crate::combat::{DistanceBand, WorldPoint};
 use crate::combat::{WeaponCatalog, WeaponPresetId};
 use crate::map::{MapContentCatalog, MapDynamicState, MapInstanceId, MapPresetId as ArenaPresetId};
@@ -122,24 +122,6 @@ fn combat_cue_event_ids_are_deduplicated_with_a_bounded_history() {
 }
 
 #[test]
-fn headless_exit_waits_for_required_combat_evidence() {
-    let mut status = ClientCombatEvidenceStatus {
-        required: true,
-        ready: false,
-    };
-    assert!(!status.permits_exit());
-    status.ready = true;
-    assert!(status.permits_exit());
-    assert!(
-        ClientCombatEvidenceStatus {
-            required: false,
-            ready: false,
-        }
-        .permits_exit()
-    );
-}
-
-#[test]
 fn fighter_and_projectile_palettes_distinguish_replicated_sources() {
     assert_ne!(fighter_color(PlayerId(1)), fighter_color(PlayerId(2)));
     assert_ne!(projectile_color(PlayerId(1)), projectile_color(PlayerId(2)));
@@ -158,30 +140,24 @@ fn named_client_combat_sets_preserve_the_locked_update_order() {
     }
 
     let mut app = App::new();
-    app.add_plugins((
-        MinimalPlugins,
-        ClientCombatPlugin,
-        ClientCombatEvidencePlugin,
-    ))
-    .init_resource::<crate::config::HeadlessAutomation>()
-    .init_resource::<SetTrace>()
-    .add_systems(
-        Update,
-        (
-            probe("ingest").in_set(CombatClientSet::Ingest),
-            probe("ensure").in_set(CombatClientSet::Ensure),
-            probe("sync").in_set(CombatClientSet::Sync),
-            probe("hud").in_set(CombatClientSet::HudAndStatus),
-            probe("effects").in_set(CombatClientSet::Effects),
-            probe("evidence").in_set(CombatClientSet::Evidence),
-        ),
-    );
+    app.add_plugins((MinimalPlugins, ClientCombatPlugin))
+        .init_resource::<SetTrace>()
+        .add_systems(
+            Update,
+            (
+                probe("ingest").in_set(CombatClientSet::Ingest),
+                probe("ensure").in_set(CombatClientSet::Ensure),
+                probe("sync").in_set(CombatClientSet::Sync),
+                probe("hud").in_set(CombatClientSet::HudAndStatus),
+                probe("effects").in_set(CombatClientSet::Effects),
+            ),
+        );
     crate::test_app::reject_owned_schedule_ambiguities(&mut app, Update);
     app.update();
     let trace = app.world().resource::<SetTrace>().0.clone();
     assert_eq!(
         trace,
-        vec!["ingest", "ensure", "sync", "hud", "effects", "evidence"],
+        vec!["ingest", "ensure", "sync", "hud", "effects"],
         "named sets must execute in the documented phase order"
     );
 }

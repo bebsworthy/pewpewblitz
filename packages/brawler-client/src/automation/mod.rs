@@ -4,8 +4,7 @@
 
 use super::{
     ActiveInputDevice, Client, ClientJoinPhase, ClientJoinStatus, Controlled, Fighter,
-    FighterInput, HeadlessAutomation, NetworkEntityId, PendingLocalActions, Position, World,
-    evidence_capture,
+    FighterInput, NetworkEntityId, PendingLocalActions, Position, World, evidence_capture,
 };
 use bevy::prelude::*;
 
@@ -13,8 +12,8 @@ mod config;
 mod offscreen;
 
 pub use config::{
-    ClientAutomationConfig, RenderMeasurementConfig, ScreenshotSchedule, WindowedCombatDemo,
-    WindowedControllerDemo,
+    ClientAutomationConfig, HeadlessAutomation, RenderMeasurementConfig, ScreenshotSchedule,
+    WindowedCombatDemo, WindowedControllerDemo,
 };
 pub(crate) use config::{
     RENDER_REPORT_MINIMUM_SAMPLES, automatic_match_command_enabled, install_automation_state,

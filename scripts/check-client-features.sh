@@ -5,9 +5,10 @@
 #      `brawler` crate has no automation feature;
 #   2. automation-owned module declarations stay behind `#[cfg(feature = "automation")]`;
 #   3. the built player binary contains none of the automation marker strings, including the
-#      automation-only configuration validation, the legacy direct-UDP client combat evidence,
-#      client process closeout/window sampling that live in the shared crate (BRL-3p70), and the
-#      `--shell-capture` flag and its flow driver (BRL-pw9k), and off-screen rendering (BRL-g7ny).
+#      automation-only configuration validation, the client process closeout/window sampling that
+#      lives in the shared crate (BRL-3p70), the `--shell-capture` flag and its flow driver
+#      (BRL-pw9k), and off-screen rendering (BRL-g7ny). The legacy direct-UDP client combat
+#      evidence these markers once covered was deleted (BRL-rhw3).
 # Set BRAWLER_CLIENT_FEATURES_POSITIVE_CONTROL=1 to also build the automation client and assert
 # that it contains every marker, proving the markers are real.
 set -euo pipefail
@@ -80,8 +81,6 @@ markers=(
     "capturing scheduled frame + client state"
     "--product-practice-smoke requires product match automation"
     "timing handoff-connected"
-    "headless client is extending its run until combat evidence completes"
-    "BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE"
     "BRAWLER_DIAGNOSTICS_CLOSEOUT_FILE"
     "--shell-capture"
     "shell capture route reached a step"

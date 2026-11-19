@@ -3,9 +3,9 @@ id: BRL-5fk5
 
 title: Fix legacy direct-UDP combat-profile preset 3 (lob) client checkpoint timeout
 
-status: backlog
-closed:
-status_changed: 2026-11-14T21:47:00Z
+status: canceled
+closed: 2026-11-19T14:08:01Z
+status_changed: 2026-11-19T14:08:01Z
 
 theme: quality
 
@@ -19,7 +19,7 @@ related: [BRL-3p70]
 
 parent: BRL-q5c4
 
-rank: 2398886
+rank:
 ---
 
 # Description

@@ -378,25 +378,6 @@ impl ClientNetworkConfig {
     }
 }
 
-/// Runtime state of the configured client automation, owned here so the shared legacy combat
-/// evidence adapter and the `brawler-client` drivers read one resource. Only `brawler-client`'s
-/// `automation` feature inserts it, from its `ClientAutomationConfig`; the player client never
-/// has it.
-#[cfg(feature = "client")]
-#[derive(bevy::prelude::Resource, Clone, Copy, Debug, Default, PartialEq)]
-pub struct HeadlessAutomation {
-    pub move_axis: bevy::math::Vec2,
-    pub aim_axis: Option<bevy::math::Vec2>,
-    pub aim_at_dummy: bool,
-    pub fire: bool,
-    pub ultimate: bool,
-    pub simulation_ticks: Option<u32>,
-    pub elapsed_ticks: u32,
-    /// Requested automation weapon (a build-catalog weapon ID), copied when the client is
-    /// composed; the legacy combat evidence report derives its required checkpoints from it.
-    pub weapon_preset: Option<u16>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

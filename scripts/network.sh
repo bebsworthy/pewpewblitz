@@ -4,13 +4,10 @@ set -euo pipefail
 network_addr="${BRAWLER_NETWORK_ADDR:-127.0.0.1:5000}"
 game_mode="${BRAWLER_NETWORK_GAME_MODE:-wipeout}"
 headless="${BRAWLER_NETWORK_HEADLESS:-0}"
-combat_assert="${BRAWLER_NETWORK_ASSERT_COMBAT:-0}"
 windowed_combat_demo="${BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO:-0}"
 windowed_controller_demo="${BRAWLER_NETWORK_WINDOWED_CONTROLLER_DEMO:-0}"
 screenshot_dir="${BRAWLER_NETWORK_SCREENSHOT_DIR:-}"
 screenshot_first="${BRAWLER_NETWORK_SCREENSHOT_FIRST:-30}"
-combat_report_file="${BRAWLER_NETWORK_COMBAT_REPORT_FILE:-}"
-combat_test_preset="${BRAWLER_NETWORK_COMBAT_TEST_PRESET:-}"
 network_run_id="${BRAWLER_NETWORK_RUN_ID:-network-script}"
 diagnostics_dir="${BRAWLER_DIAGNOSTICS_DIR:-}"
 client_count="${BRAWLER_NETWORK_CLIENT_COUNT:-2}"
@@ -32,11 +29,7 @@ client_binary="$target_dir/debug/brawler-client"
 
 if [[ -z "$network_timeout_seconds" ]]; then
     if [[ "$headless" == "1" ]]; then
-        if [[ "$combat_assert" == "1" ]]; then
-            network_timeout_seconds=60
-        else
-            network_timeout_seconds=30
-        fi
+        network_timeout_seconds=30
     else
         network_timeout_seconds=0
     fi
@@ -61,20 +54,12 @@ if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" && "$game_mode" !=
     printf 'brawler network: BRAWLER_NETWORK_GAME_MODE must be wipeout, hot-zone, or heist\n' >&2
     exit 2
 fi
-if [[ "$combat_assert" != "0" && "$combat_assert" != "1" ]]; then
-    printf 'brawler network: BRAWLER_NETWORK_ASSERT_COMBAT must be 0 or 1\n' >&2
-    exit 2
-fi
 if [[ "$windowed_combat_demo" != "0" && "$windowed_combat_demo" != "1" ]]; then
     printf 'brawler network: BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO must be 0 or 1\n' >&2
     exit 2
 fi
 if [[ "$windowed_controller_demo" != "0" && "$windowed_controller_demo" != "1" ]]; then
     printf 'brawler network: BRAWLER_NETWORK_WINDOWED_CONTROLLER_DEMO must be 0 or 1\n' >&2
-    exit 2
-fi
-if [[ "$combat_assert" == "1" && "$headless" != "1" ]]; then
-    printf 'brawler network: combat assertion requires BRAWLER_NETWORK_HEADLESS=1\n' >&2
     exit 2
 fi
 if [[ "$windowed_combat_demo" == "1" && "$headless" == "1" ]]; then
@@ -106,14 +91,6 @@ client_done=()
 ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-server-ready.XXXXXX")"
 movement_ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-movement-ready.XXXXXX")"
 rm -f "$movement_ready_file"
-combat_ready_file="$(mktemp "${TMPDIR:-/tmp}/brawler-combat-ready.XXXXXX")"
-rm -f "$combat_ready_file"
-combat_client_ready_dir="${BRAWLER_NETWORK_COMBAT_READY_DIR:-}"
-combat_client_ready_dir_owned=0
-if [[ -z "$combat_client_ready_dir" ]]; then
-    combat_client_ready_dir="$(mktemp -d "${TMPDIR:-/tmp}/brawler-combat-clients.XXXXXX")"
-    combat_client_ready_dir_owned=1
-fi
 server_done=0
 
 job_is_running() {
@@ -172,10 +149,6 @@ cleanup() {
     stop_child "$server_pid" "$signal"
     rm -f "$ready_file"
     rm -f "$movement_ready_file"
-    rm -f "$combat_ready_file"
-    if [[ "$combat_client_ready_dir_owned" -eq 1 ]]; then
-        rmdir "$combat_client_ready_dir" 2>/dev/null || true
-    fi
     exit "$exit_code"
 }
 trap cleanup EXIT
@@ -191,16 +164,9 @@ validate_closeout_reports() {
     # participant rows, the gameplay-aggregate consistency rules, one shared run identity
     # including source revision and the canonical participant/build assignment, clean
     # exits, zero drops/rejections/errors, and cross-endpoint digest agreement) instead
-    # of a launcher-side subset that can drift from the writer. Combat-assert runs must
-    # carry nonzero checkpoint digests; movement and match profiles record no combat
-    # checkpoints, so their digests must be zero. Combat-assert runs also pass the
-    # asserted weapon preset so the gate re-derives and enforces the declared checkpoint
-    # requirement.
-    if [[ "$combat_assert" == "1" && -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
-        "$server_binary" validate-closeout "$diagnostics_dir" "$client_count" "$combat_assert" "$BRAWLER_NETWORK_WEAPON_PRESET"
-    else
-        "$server_binary" validate-closeout "$diagnostics_dir" "$client_count" "$combat_assert"
-    fi
+    # of a launcher-side subset that can drift from the writer. Movement and match profiles
+    # record no combat checkpoints, so their digests must be zero.
+    "$server_binary" validate-closeout "$diagnostics_dir" "$client_count" 0
     printf 'brawler network: closeout reports validated in %s\n' "$diagnostics_dir"
     if command -v shasum >/dev/null 2>&1; then
         printf 'brawler network: terminal digest '
@@ -235,21 +201,13 @@ if [[ -n "$diagnostics_dir" ]]; then
     # the seed names the deterministic reproduction (match ids, spawn selection, and map
     # recipes have no ambient randomness, so the declared seed is the scenario label all
     # endpoints must agree on); the scripted-action count is one per scripted input
-    # channel the launcher applies to the two scripted headless clients (move axis, aim
-    # source, and fire where the profile fires); combat-assert runs declare the asserted
-    # preset's required checkpoints. The server binary derives this from
-    # required_process_checkpoints, and validate-closeout re-derives the same requirement,
-    # so declaration and validation share the authoritative Rust mapping.
+    # channel the launcher applies to the two scripted headless clients (move axis and
+    # aim source). No profile declares combat checkpoints.
     diagnostics_seed="${BRAWLER_DIAGNOSTICS_SEED:-1}"
     scripted_actions=0
     declared_checkpoints=0
     if [[ "$headless" == "1" ]]; then
-        if [[ "$combat_assert" == "1" ]]; then
-            scripted_actions=6
-            declared_checkpoints="$($server_binary required-checkpoint-count "${BRAWLER_NETWORK_WEAPON_PRESET:-}")"
-        else
-            scripted_actions=4
-        fi
+        scripted_actions=4
     fi
     source_revision="$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     if [[ -n "$(git -C "$repo_root" status --porcelain 2>/dev/null)" ]]; then
@@ -277,25 +235,10 @@ if [[ -n "$diagnostics_dir" ]]; then
     )
 fi
 if [[ "$headless" == "1" ]]; then
-    if [[ "$combat_assert" == "1" ]]; then
-        server_env+=(
-            "BRAWLER_NETWORK_ASSERT_COMBAT=1"
-            "BRAWLER_NETWORK_COMBAT_READY_FILE=$combat_ready_file"
-            "BRAWLER_NETWORK_COMBAT_READY_DIR=$combat_client_ready_dir"
-            "BRAWLER_NETWORK_RUN_ID=$network_run_id"
-        )
-        if [[ -n "$combat_test_preset" ]]; then
-            server_env+=("BRAWLER_NETWORK_COMBAT_TEST_PRESET=$combat_test_preset")
-        fi
-        if [[ -n "$combat_report_file" ]]; then
-            server_env+=("BRAWLER_NETWORK_COMBAT_REPORT_FILE=$combat_report_file")
-        fi
-    else
-        server_env+=(
-            "BRAWLER_NETWORK_ASSERT_MOVEMENT=1"
-            "BRAWLER_NETWORK_MOVEMENT_READY_FILE=$movement_ready_file"
-        )
-    fi
+    server_env+=(
+        "BRAWLER_NETWORK_ASSERT_MOVEMENT=1"
+        "BRAWLER_NETWORK_MOVEMENT_READY_FILE=$movement_ready_file"
+    )
 fi
 
 server_args=(--bind "$network_addr" --mode "$game_mode")
@@ -329,11 +272,6 @@ client_args=(--server "$network_addr" --auto-connect)
 if [[ "$headless" == "1" ]]; then
     if [[ -n "$simulation_ticks" ]]; then
         client_args+=(--headless --exit-after-roster 2 --simulation-ticks "$simulation_ticks")
-        if [[ "$combat_assert" == "1" ]]; then
-            client_args+=(--fire)
-        fi
-    elif [[ "$combat_assert" == "1" ]]; then
-        client_args+=(--headless --exit-after-roster 2 --simulation-ticks 1200 --fire)
     else
         # Outlast the production countdown (180 ticks) plus travel so the movement
         # assertion observes real displacement instead of racing client shutdown.
@@ -361,31 +299,12 @@ if [[ "$windowed_controller_demo" == "1" ]]; then
     client_one_args+=(--controller-demo)
 fi
 if [[ "$headless" == "1" ]]; then
-    if [[ "$combat_assert" == "1" ]]; then
-        # Walk the two clients toward the neutral dummy so every authored M05 delivery family
-        # reaches its acceptance range (scatter and melee are intentionally short-range).
-        if [[ "${BRAWLER_NETWORK_WEAPON_PRESET:-}" == "2" ]]; then
-            client_one_args+=(--move-axis 0,0 --aim-dummy)
-            client_two_args+=(--move-axis 0,0 --aim-dummy)
-        elif [[ "${BRAWLER_NETWORK_WEAPON_PRESET:-}" == "3" || "${BRAWLER_NETWORK_WEAPON_PRESET:-}" == "4" ]]; then
-            client_one_args+=(--move-axis 1,0 --aim-dummy)
-            client_two_args+=(--move-axis 0,0 --aim-dummy)
-        else
-            client_one_args+=(--move-axis 1,0 --aim-dummy)
-            client_two_args+=(--move-axis -1,0 --aim-dummy)
-        fi
-    else
-        client_one_args+=(--move-axis 1,0 --aim-axis 0,1)
-        client_two_args+=(--move-axis -1,0 --aim-axis 0,-1)
-    fi
+    client_one_args+=(--move-axis 1,0 --aim-axis 0,1)
+    client_two_args+=(--move-axis -1,0 --aim-axis 0,-1)
 fi
 
 client_one_env=(env)
 client_two_env=(env)
-if [[ "$combat_assert" == "1" ]]; then
-    client_one_env+=("BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE=$combat_client_ready_dir/client-1.ready")
-    client_two_env+=("BRAWLER_NETWORK_COMBAT_CLIENT_READY_FILE=$combat_client_ready_dir/client-2.ready")
-fi
 if [[ -n "$diagnostics_dir" ]]; then
     client_one_env+=(
         "${identity_env[@]}"
@@ -417,7 +336,7 @@ for index in $(seq 1 "$client_count"); do
             if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
                 args+=(--weapon-preset "$BRAWLER_NETWORK_WEAPON_PRESET")
             fi
-            if [[ "$headless" == "1" && "$combat_assert" != "1" ]]; then
+            if [[ "$headless" == "1" ]]; then
                 args+=(--headless --exit-after-roster "$client_count" --simulation-ticks 600)
             fi
             envs=(env)
@@ -480,16 +399,7 @@ while :; do
     fi
 
     if [[ "$headless" == "1" ]] && all_clients_done; then
-        if [[ "$combat_assert" == "1" ]]; then
-            if [[ -s "$combat_ready_file" \
-                && -s "$combat_client_ready_dir/client-1.ready" \
-                && -s "$combat_client_ready_dir/client-2.ready" ]]; then
-                wait_for_server_closeout
-                validate_closeout_reports
-                exit 0
-            fi
-            printf 'brawler network: clients finished before combat assertion completed; waiting for server evidence\n' >&2
-        elif [[ -s "$movement_ready_file" ]]; then
+        if [[ -s "$movement_ready_file" ]]; then
             wait_for_server_closeout
             validate_closeout_reports
             exit 0
@@ -498,13 +408,6 @@ while :; do
         fi
     fi
     if [[ "$deadline_epoch" -gt 0 && "$(date +%s)" -ge "$deadline_epoch" ]]; then
-        if [[ "$combat_assert" == "1" ]]; then
-            printf 'brawler network: combat client evidence directory:\n' >&2
-            ls -la "$combat_client_ready_dir" >&2 || true
-            if [[ -n "$combat_report_file" && -f "$combat_report_file" ]]; then
-                cat "$combat_report_file" >&2
-            fi
-        fi
         client_status="server=$server_done"
         if [[ "${#client_pids[@]}" -gt 0 ]]; then
             for index in "${!client_pids[@]}"; do

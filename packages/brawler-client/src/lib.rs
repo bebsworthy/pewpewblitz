@@ -5,11 +5,9 @@
 
 #[cfg(feature = "automation")]
 pub use automation::{
-    ClientAutomationConfig, RenderMeasurementConfig, ScreenshotSchedule, WindowedCombatDemo,
-    WindowedControllerDemo,
+    ClientAutomationConfig, HeadlessAutomation, RenderMeasurementConfig, ScreenshotSchedule,
+    WindowedCombatDemo, WindowedControllerDemo,
 };
-#[cfg(feature = "automation")]
-pub use brawler::config::HeadlessAutomation;
 pub use brawler::map::ClientPlayableGate;
 #[cfg(feature = "automation")]
 pub use flow::ShellCaptureRoute;
@@ -30,7 +28,7 @@ use bevy::{
 };
 use brawler::{
     VERSION,
-    combat::{AuthoritativeTick, ClientCombatEvidenceStatus, ClientCombatPlugin},
+    combat::{AuthoritativeTick, ClientCombatPlugin},
     config::{ClientNetworkConfig, NetworkTransport, RenderProfile},
     content::GameplayContentPlugin,
     gameplay::GameplayPlugin,
@@ -149,11 +147,8 @@ pub struct ClientReplicatedGameplayPlugin;
 
 impl Plugin for ClientReplicatedGameplayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ClientCombatPlugin);
-        // Legacy direct-UDP combat evidence is automation-only (BRL-3p70).
-        #[cfg(feature = "automation")]
-        app.add_plugins(brawler::combat::ClientCombatEvidencePlugin);
         app.add_plugins((
+            ClientCombatPlugin,
             brawler::map::ClientMapPlugin,
             brawler::map::MapPresentationPlugin,
             ClientQueuePlugin,

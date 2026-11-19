@@ -3,9 +3,9 @@ id: BRL-rhw3
 
 title: 'Compile legacy client combat evidence and closeout projection out of the shared crate''s client role'
 
-status: doing
-closed:
-status_changed: 2026-11-19T13:26:36Z
+status: done
+closed: 2026-11-19T14:23:44Z
+status_changed: 2026-11-19T14:23:44Z
 
 theme: quality
 
@@ -15,11 +15,11 @@ created: 2026-11-14T21:47:00Z
 
 blocks: [BRL-5fk5]
 
-related: [BRL-3p70]
+related: [BRL-3p70, BRL-stws]
 
 parent: BRL-q5c4
 
-rank: 11730944
+rank:
 ---
 
 # Description

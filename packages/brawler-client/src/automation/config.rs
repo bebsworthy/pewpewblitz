@@ -4,7 +4,7 @@
 //! carries none of these fields or their validation messages.
 
 use bevy::prelude::{App, Resource, Vec2};
-use brawler::config::{ClientNetworkConfig, HeadlessAutomation, NetworkTransport};
+use brawler::config::{ClientNetworkConfig, NetworkTransport};
 use core::time::Duration;
 
 /// Settings only automation callers set (the automation CLI and separate-App tests).
@@ -57,8 +57,7 @@ pub struct ClientAutomationConfig {
     pub headless_fire: bool,
     pub headless_ultimate: bool,
     pub headless_simulation_ticks: Option<u32>,
-    /// Requested automation-brawler weapon. Saved-brawler preparation reads it here; the legacy
-    /// combat evidence reads the copy in [`HeadlessAutomation`] made at composition.
+    /// Requested automation-brawler weapon, read by saved-brawler preparation.
     pub weapon_preset: Option<u16>,
     pub windowed_combat_demo: Option<WindowedCombatDemo>,
     pub windowed_controller_demo: Option<WindowedControllerDemo>,
@@ -134,6 +133,20 @@ pub struct RenderMeasurementConfig {
     pub reduced_effects: bool,
 }
 
+/// Runtime state of the configured client automation: the scripted intent the headless drivers
+/// apply and the simulation budget they count down. Inserted only by [`install_automation_state`];
+/// the player client never has it.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub struct HeadlessAutomation {
+    pub move_axis: Vec2,
+    pub aim_axis: Option<Vec2>,
+    pub aim_at_dummy: bool,
+    pub fire: bool,
+    pub ultimate: bool,
+    pub simulation_ticks: Option<u32>,
+    pub elapsed_ticks: u32,
+}
+
 /// Installs the automation configuration (default when the caller set none) and the runtime
 /// [`HeadlessAutomation`] derived from it. Runs while `ClientNetworkPlugin` builds, so every
 /// composition path — the executable and the separate-App tests — gets one copy.
@@ -172,7 +185,6 @@ impl ClientAutomationConfig {
             ultimate: self.headless_ultimate,
             simulation_ticks: self.headless_simulation_ticks,
             elapsed_ticks: 0,
-            weapon_preset: self.weapon_preset,
         }
     }
 
@@ -742,7 +754,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_state_copies_scripted_intent_and_weapon() {
+    fn runtime_state_copies_scripted_intent() {
         let config = ClientAutomationConfig {
             headless_move: Some((1, -1)),
             headless_fire: true,
@@ -754,7 +766,6 @@ mod tests {
         assert_eq!(runtime.move_axis, Vec2::new(1.0, -1.0));
         assert!(runtime.fire);
         assert_eq!(runtime.simulation_ticks, Some(30));
-        assert_eq!(runtime.weapon_preset, Some(3));
         assert_eq!(runtime.elapsed_ticks, 0);
     }
 }
