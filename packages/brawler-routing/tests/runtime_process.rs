@@ -517,3 +517,144 @@ fn runtime_keeps_catalog_opaque_and_accepts_policy_supported_allocation_mode() {
     runtime.stop_handle().request().unwrap();
     runtime.run().unwrap();
 }
+
+/// Allocate one match whose fake worker runs `mode`, then poll until that match is reaped.
+fn allocate_match_and_collect_until_reaped(mode: &str) -> (SupervisorRuntime, Vec<LifecycleEvent>) {
+    let logical_server_id = id128(1);
+    let supervisor_generation = id64(2);
+    let executable = PathBuf::from(env!("CARGO_BIN_EXE_brawler-routing-fake-worker"));
+    let mut runtime = SupervisorRuntime::new(RuntimeConfig {
+        public_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+        core: CoreConfig::with_identity(logical_server_id, supervisor_generation, 3, 4),
+        process_supervisor: Some(ProcessSupervisorConfig::new(
+            logical_server_id,
+            supervisor_generation,
+            3,
+            4,
+        )),
+        allocation_policy: Some(AllocationPolicy::brawler_m01()),
+        worker_executable: Some(executable),
+        protocol_registry_fingerprint: Some(0),
+        ..RuntimeConfig::default()
+    })
+    .unwrap();
+    runtime.spawn_worker(launch_spec_mode("ready")).unwrap();
+    let lobby_started = Instant::now();
+    let mut lobby_ready = false;
+    while lobby_started.elapsed() < Duration::from_secs(3) && !lobby_ready {
+        let report = runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+        lobby_ready = report.lifecycle_events.iter().any(
+            |event| matches!(event, LifecycleEvent::Ready { worker_id } if worker_id.get() == 7),
+        );
+    }
+    assert!(lobby_ready, "lobby worker did not become ready");
+
+    let mut request = allocation_request();
+    request.map_preset = 0;
+    request.map_recipe = format!("fake-worker-mode={mode}").into_bytes();
+    let mut events = runtime
+        .submit_allocation_request(id128(7), request)
+        .unwrap();
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(5) {
+        let report = runtime.poll_once(Some(Duration::from_millis(10))).unwrap();
+        let reaped = report.lifecycle_events.iter().any(|event| {
+            matches!(event, LifecycleEvent::ChildReaped { worker_id, .. } if worker_id.get() != 7)
+        });
+        events.extend(report.lifecycle_events);
+        if reaped {
+            break;
+        }
+    }
+    // One more owner turn applies the terminal reconciliation that follows the reap.
+    let report = runtime.poll_once(Some(Duration::from_millis(150))).unwrap();
+    events.extend(report.lifecycle_events);
+    (runtime, events)
+}
+
+fn lobby_was_disturbed(events: &[LifecycleEvent]) -> bool {
+    events.iter().any(|event| match event {
+        LifecycleEvent::Failed { worker_id, .. }
+        | LifecycleEvent::RestartScheduled { worker_id, .. }
+        | LifecycleEvent::Stopped { worker_id, .. } => worker_id.get() == 7,
+        _ => false,
+    })
+}
+
+/// BRL-xndc/BRL-5yss: a match worker whose formation failed reports `CancelActivation`, then
+/// retires through an unsolicited Exit and a successful exit. The supervisor records an ordered
+/// stop rather than `WorkerExitMismatch`, retires the match routes, capabilities, and allocation,
+/// and leaves the lobby running.
+#[test]
+fn runtime_retires_a_formation_failed_match_through_exit_without_failure() {
+    let (mut runtime, events) = allocate_match_and_collect_until_reaped("formation-failure");
+    let match_worker = events
+        .iter()
+        .find_map(|event| match event {
+            LifecycleEvent::Spawned { worker_id, .. } if worker_id.get() != 7 => Some(*worker_id),
+            _ => None,
+        })
+        .expect("match worker spawned");
+    let exit_at = events.iter().position(|event| {
+        matches!(event, LifecycleEvent::ExitReceived { worker_id, exit }
+            if *worker_id == match_worker && exit.exit_category == 0)
+    });
+    let stopped_at = events.iter().position(|event| {
+        matches!(event, LifecycleEvent::Stopped { worker_id, forced: false }
+            if *worker_id == match_worker)
+    });
+    assert!(exit_at.is_some(), "match Exit was not observed: {events:?}");
+    assert!(
+        stopped_at.is_some(),
+        "match was not stopped gracefully: {events:?}"
+    );
+    assert!(exit_at < stopped_at, "Exit precedes the stop: {events:?}");
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, LifecycleEvent::Failed { .. })),
+        "a formation-failure retirement is not a worker failure: {events:?}"
+    );
+    assert!(!lobby_was_disturbed(&events), "{events:?}");
+    assert_eq!(runtime.core().worker_count(), 1, "only the lobby remains");
+    assert_eq!(
+        runtime.core().route_count(),
+        1,
+        "only the lobby default route remains"
+    );
+    assert_eq!(runtime.core().live_capability_count(), 0);
+    // The allocation record is retired, so the same request is admitted again rather than
+    // deduplicated against a stale record.
+    let resubmitted = runtime
+        .submit_allocation_request(id128(7), allocation_request())
+        .unwrap();
+    assert!(
+        resubmitted
+            .iter()
+            .any(|event| matches!(event, LifecycleEvent::Spawned { .. })),
+        "{resubmitted:?}"
+    );
+    runtime.stop_handle().request().unwrap();
+    runtime.run().unwrap();
+}
+
+/// A match that crashes after Ready, without Exit, remains a genuine worker failure.
+#[test]
+fn runtime_still_classifies_a_crashed_match_as_a_failure() {
+    let (mut runtime, events) = allocate_match_and_collect_until_reaped("crash-after-ready");
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Failed {
+                worker_id,
+                category: brawler_routing::RoutingErrorCategory::WorkerCrash,
+            } if worker_id.get() != 7
+        )),
+        "{events:?}"
+    );
+    assert!(!lobby_was_disturbed(&events), "{events:?}");
+    assert_eq!(runtime.core().worker_count(), 1);
+    assert_eq!(runtime.core().live_capability_count(), 0);
+    runtime.stop_handle().request().unwrap();
+    runtime.run().unwrap();
+}

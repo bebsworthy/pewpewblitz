@@ -1075,7 +1075,16 @@ fn process_match_loading_messages(
             .is_some_and(|deadline| time.elapsed() >= deadline)
     {
         gate.terminal_exit_requested = true;
-        exit.write(AppExit::Success);
+        // The two-second grace above lets TerminalFailure/CancellationAccepted reach clients.
+        // A routed worker then retires through its ordered Unlink -> Exit control lifecycle so
+        // the supervisor records a declared stop rather than an unannounced exit
+        // (BRL-xndc/BRL-5yss). Only an unrouted app, which has no supervisor, exits directly.
+        match control_outbox.as_mut() {
+            Some(outbox) => outbox.retire(),
+            None => {
+                exit.write(AppExit::Success);
+            }
+        }
     }
 }
 

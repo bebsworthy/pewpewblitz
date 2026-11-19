@@ -46,6 +46,12 @@ impl AutomationHooks<'_> {
             .is_some_and(|config| config.exit_after_lobby_return)
     }
 
+    /// Scripted formation-failure evidence cancels the match start instead of checking in.
+    pub(super) fn cancels_match_start(&self) -> bool {
+        self.config()
+            .is_some_and(|config| config.cancel_match_start)
+    }
+
     pub(super) fn roster_exit_target(&self) -> Option<usize> {
         self.config().and_then(|config| config.exit_after_roster)
     }
@@ -124,6 +130,10 @@ impl AutomationHooks<'_> {
     }
 
     pub(super) const fn exits_after_lobby_return(&self) -> bool {
+        false
+    }
+
+    pub(super) const fn cancels_match_start(&self) -> bool {
         false
     }
 

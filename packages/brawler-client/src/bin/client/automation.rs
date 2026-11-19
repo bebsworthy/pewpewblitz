@@ -11,7 +11,7 @@ use brawler_client::{
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
 
-pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE>] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen] [--check-config]";
+pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE> | --cancel-match-start] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen] [--check-config]";
 
 fn parse_value<T: core::str::FromStr>(flag: &str, value: Option<String>) -> Result<T, String> {
     value
@@ -53,6 +53,7 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
     let mut auto_connect = false;
     let mut exit_after_roster = None;
     let mut exit_after_lobby_return = false;
+    let mut cancel_match_start = false;
     let mut exit_after_lobby_welcome = false;
     let mut product_queue_smoke = false;
     let mut product_match_smoke = false;
@@ -97,6 +98,7 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
                 exit_after_roster = Some(parse_value(&flag, args.next())?);
             }
             "--exit-after-lobby-return" => exit_after_lobby_return = true,
+            "--cancel-match-start" => cancel_match_start = true,
             "--exit-after-lobby-welcome" => exit_after_lobby_welcome = true,
             "--product-queue-smoke" => product_queue_smoke = true,
             "--product-match-smoke" => product_match_smoke = true,
@@ -288,6 +290,7 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
         product_rejoin_smoke,
         product_completed_rejoin_cue,
         leave_match_cue,
+        cancel_match_start,
         product_match_players_per_team,
         product_match_game_type,
         headless_move,

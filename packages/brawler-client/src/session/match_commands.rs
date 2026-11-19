@@ -164,6 +164,23 @@ pub(super) fn drive_match_loading_check_in(
         if let Some(mut receiver) = receiver {
             consume_match_loading_outcomes(&mut receiver, correlation, &mut loading, &mut routed);
         }
+        let waiting_for_same_match = roots.single().is_ok_and(|root| {
+            root.match_id.0 == correlation.2 && matches!(root.phase, MatchPhase::Waiting)
+        });
+        if automation.cancels_match_start()
+            && state.cancel_sent_for != Some(correlation)
+            && match_loading_ready_to_send(
+                playable.0,
+                loading.phase(),
+                true,
+                waiting_for_same_match,
+                controlled.single().is_ok(),
+            )
+        {
+            // Automation cancels at the moment a player could first check in, so the routed
+            // worker has an Active session and receives the cancel; it never checks in.
+            let _ = loading.request_cancel();
+        }
         if loading.match_cancel_requested() && state.cancel_sent_for != Some(correlation) {
             send_match_loading_action(
                 &mut sender,
@@ -174,13 +191,14 @@ pub(super) fn drive_match_loading_check_in(
             loading.mark_match_cancel_sent();
             continue;
         }
+        if automation.cancels_match_start() {
+            continue;
+        }
         if !match_loading_ready_to_send(
             playable.0,
             loading.phase(),
             ready_retry_due(&state, correlation, time.elapsed()),
-            roots.single().is_ok_and(|root| {
-                root.match_id.0 == correlation.2 && matches!(root.phase, MatchPhase::Waiting)
-            }),
+            waiting_for_same_match,
             controlled.single().is_ok(),
         ) {
             continue;

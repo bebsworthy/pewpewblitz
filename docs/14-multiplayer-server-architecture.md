@@ -390,6 +390,13 @@ built-in Practice; local draft persistence remains client-owned.
   retained results.
 - Detect worker exit/heartbeat failure, revoke its routes once, release capacity, and notify the
   lobby of affected reservations/matches.
+- A match worker whose formation fails (readiness deadline, accepted Cancel Match Start, or a
+  start failure) is a planned end, not a worker failure. It reports `CancelActivation` or
+  `StartFailed`, keeps a 2 s grace so clients receive `TerminalFailure`/`CancellationAccepted`,
+  then retires through the same ordered path as a supervisor Stop: unlink every peer, send
+  `Exit` (category 0, no Result), and exit successfully. The supervisor logs
+  `worker stopped forced=false` and reclaims the routes and allocation; an exit without `Exit`
+  still classifies as `WorkerExitMismatch` or `WorkerCrash` (BRL-xndc).
 - Detect lobby-worker failure, reject new default-route admission, preserve bounded supervision of
   active match workers, and follow an explicit restart/reconciliation policy researched by M01.
 - A worker crash may terminate its match but not another worker. Supervisor failure remains a

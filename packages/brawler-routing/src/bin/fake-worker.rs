@@ -6,10 +6,14 @@
 use std::{env, io::Write, os::unix::net::UnixStream, thread, time::Duration};
 
 use brawler_routing::{
-    CONTROL_VERSION_CURRENT, ControlBody, ControlFrame, ControlType, FramedReader, IpcChannel,
-    ManifestBody, PACKET_VERSION_V1, PacketDirection, PacketRecord, ProcessId, ROUTE_VERSION_V1,
-    ReadyBody, StopBody, WorkerId, WorkerRole,
+    ActivationBody, CONTROL_VERSION_CURRENT, ControlBody, ControlFrame, ControlType, FramedReader,
+    IpcChannel, ManifestBody, MatchManifestV1, PACKET_VERSION_V1, PacketDirection, PacketRecord,
+    ProcessId, ROUTE_VERSION_V1, ReadyBody, StopBody, WorkerId, WorkerRole,
 };
+
+/// Allocation-spawned match children inherit no per-test environment, so a runtime test selects
+/// a match fixture mode through the opaque authored-map recipe bytes it already controls.
+const MATCH_MODE_RECIPE_PREFIX: &[u8] = b"fake-worker-mode=";
 
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,6 +38,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if manifest.role != args.role {
         return Err("manifest role did not match argv".into());
     }
+    let match_manifest = (manifest.role == WorkerRole::Match)
+        .then(|| MatchManifestV1::decode(&manifest.manifest))
+        .transpose()?;
+    let mode = match_manifest
+        .as_ref()
+        .and_then(|manifest| manifest.map_recipe.strip_prefix(MATCH_MODE_RECIPE_PREFIX))
+        .map_or(mode, |recipe_mode| {
+            String::from_utf8_lossy(recipe_mode).into_owned()
+        });
 
     if mode == "crash" {
         std::process::exit(17);
@@ -94,6 +107,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(17);
     }
 
+    if mode == "formation-failure" {
+        // Mirrors a real match worker whose loading failed: report CancelActivation, observe the
+        // supervisor's ActivationDissolved during the notice grace, then retire through an
+        // unsolicited Exit and a successful process exit, with no supervisor Stop.
+        let match_manifest = match_manifest.ok_or("formation-failure requires a match role")?;
+        let cancel = ControlFrame::from_raw_sequence(
+            2,
+            args.process_id,
+            args.worker_id,
+            ControlBody::CancelActivation(ActivationBody {
+                request_id: match_manifest.request_id,
+                allocation_id: match_manifest.allocation_id,
+                match_id: match_manifest.match_id,
+            }),
+        )?;
+        control.write_all(&cancel.encode_framed()?)?;
+        control.flush()?;
+        read_control(
+            &mut reader,
+            &mut control,
+            &args,
+            ControlType::ActivationDissolved,
+        )?
+        .ok_or("supervisor closed control before ActivationDissolved")?;
+        send_exit(&mut control, &args, 3)?;
+        drop(packet);
+        return Ok(());
+    }
+
     if mode == "no-heartbeat" || mode == "stall" {
         thread::park();
     }
@@ -123,15 +165,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             control.flush()?;
             sequence = sequence.saturating_add(1);
             thread::sleep(Duration::from_millis(50));
-            if let Some(stop) = read_stop(&mut reader, &mut control, &args)? {
-                send_exit(&mut control, &args, Some(stop.stop_id))?;
+            if read_stop(&mut reader, &mut control, &args)?.is_some() {
+                send_exit(&mut control, &args, 2)?;
                 break;
             }
         }
     } else {
-        let stop = read_stop(&mut reader, &mut control, &args)?;
+        let _stop = read_stop(&mut reader, &mut control, &args)?;
         if mode != "no-exit" {
-            send_exit(&mut control, &args, stop.map(|stop| stop.stop_id))?;
+            send_exit(&mut control, &args, 2)?;
         }
     }
     drop(packet);
@@ -229,9 +271,7 @@ fn parse_args(
 fn manifest_digest(manifest: &ManifestBody) -> Result<[u8; 32], Box<dyn std::error::Error>> {
     match manifest.role {
         WorkerRole::Lobby => Ok(brawler_routing::LobbyManifest::decode(&manifest.manifest)?.digest),
-        WorkerRole::Match => {
-            Ok(brawler_routing::MatchManifestV1::decode(&manifest.manifest)?.digest)
-        }
+        WorkerRole::Match => Ok(MatchManifestV1::decode(&manifest.manifest)?.digest),
     }
 }
 
@@ -240,6 +280,21 @@ fn read_stop(
     control: &mut UnixStream,
     args: &Arguments,
 ) -> Result<Option<StopBody>, Box<dyn std::error::Error>> {
+    Ok(
+        read_control(reader, control, args, ControlType::Stop)?.and_then(|body| match body {
+            ControlBody::Stop(stop) => Some(stop),
+            _ => None,
+        }),
+    )
+}
+
+/// Block until one control frame of `wanted` type arrives, or return `None` on EOF.
+fn read_control(
+    reader: &mut FramedReader,
+    control: &mut UnixStream,
+    args: &Arguments,
+    wanted: ControlType,
+) -> Result<Option<ControlBody>, Box<dyn std::error::Error>> {
     loop {
         let mut progress = reader.read_ready(control, 1)?;
         let Some(record) = progress.records.pop() else {
@@ -249,10 +304,8 @@ fn read_stop(
             continue;
         };
         let frame = ControlFrame::decode_for(&record, args.process_id, args.worker_id)?;
-        if frame.control_type() == ControlType::Stop
-            && let ControlBody::Stop(stop) = frame.body
-        {
-            return Ok(Some(stop));
+        if frame.control_type() == wanted {
+            return Ok(Some(frame.body));
         }
     }
 }
@@ -260,10 +313,10 @@ fn read_stop(
 fn send_exit(
     control: &mut UnixStream,
     args: &Arguments,
-    _stop_id: Option<brawler_routing::StopId>,
+    sequence: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let exit = ControlFrame::from_raw_sequence(
-        2,
+        sequence,
         args.process_id,
         args.worker_id,
         ControlBody::Exit(brawler_routing::ExitBody {

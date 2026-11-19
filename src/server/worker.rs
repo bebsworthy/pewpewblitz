@@ -85,6 +85,7 @@ pub(crate) struct MatchControlOutbox {
     cancel: Option<ActivationBody>,
     activated: Option<ActivationBody>,
     start_failed: Option<ActivationBody>,
+    retire: bool,
 }
 
 impl MatchControlOutbox {
@@ -99,6 +100,25 @@ impl MatchControlOutbox {
     pub(crate) fn start_failed(&mut self, body: ActivationBody) {
         self.start_failed.get_or_insert(body);
         self.cancel = None;
+    }
+
+    /// Request worker-owned retirement after a terminal formation failure. The worker begins the
+    /// same ordered Unlink -> Exit -> `AppExit` path a supervisor Stop uses, but only after every
+    /// queued activation fact has entered the control stream, so the supervisor always observes
+    /// `CancelActivation`/`StartFailed` before the Exit that retires the allocation.
+    pub(crate) fn retire(&mut self) {
+        self.retire = true;
+    }
+
+    fn take_retirement(&mut self) -> bool {
+        let ready = self.retire
+            && self.start_failed.is_none()
+            && self.cancel.is_none()
+            && self.activated.is_none();
+        if ready {
+            self.retire = false;
+        }
+        ready
     }
 }
 
@@ -495,7 +515,6 @@ pub(crate) struct WorkerControlState {
     next_sequence: u64,
     sequences: ControlSequenceTracker,
     shutdown_requested: bool,
-    pending_stop: Option<StopBody>,
     exit_sent: bool,
     app_exit_requested: bool,
     result_sent: bool,
@@ -551,7 +570,6 @@ impl WorkerControlState {
             next_sequence: 2,
             sequences,
             shutdown_requested: false,
-            pending_stop: None,
             exit_sent: false,
             app_exit_requested: false,
             result_sent: false,
@@ -794,17 +812,31 @@ fn admit_control_stop(
     state: &mut WorkerControlState,
     commands: &mut Commands,
 ) {
-    if let Some(stop_body) = stop
-        && !state.shutdown_requested
-    {
-        state.shutdown_requested = true;
-        state.pending_stop = Some(stop_body);
-        worker.request_unlink();
-        commands.trigger(lightyear::prelude::Unlink {
-            entity: worker_entity,
-            reason: lightyear::prelude::UnlinkReason::UserRequested(None),
-        });
+    if stop.is_some() {
+        begin_ordered_shutdown(worker_entity, worker, state, commands);
     }
+}
+
+/// Start the one ordered worker shutdown: unlink every peer, then
+/// `worker_control_finish_shutdown` queues Exit once the endpoint is empty and drained, and
+/// `worker_control_flush` requests `AppExit` only after that Exit has left the writer. A
+/// supervisor Stop and a worker-owned formation-failure retirement share this path, so the
+/// supervisor always reconciles a declared Exit rather than an unannounced process exit.
+fn begin_ordered_shutdown(
+    worker_entity: Entity,
+    worker: &mut RoutedWorker,
+    state: &mut WorkerControlState,
+    commands: &mut Commands,
+) {
+    if state.shutdown_requested {
+        return;
+    }
+    state.shutdown_requested = true;
+    worker.request_unlink();
+    commands.trigger(lightyear::prelude::Unlink {
+        entity: worker_entity,
+        reason: lightyear::prelude::UnlinkReason::UserRequested(None),
+    });
 }
 
 #[derive(Default)]
@@ -873,6 +905,28 @@ fn drain_match_control_outbox(
             Err(_) => drain.failed = true,
         }
     }
+}
+
+/// Drain the role's bounded outboxes in priority order: match activation facts, seat rebind
+/// replies, then lobby facts. Backpressure stops the pass; the next frame resumes it.
+fn drain_role_control_outboxes(
+    worker: &mut RoutedWorker,
+    state: &mut WorkerControlState,
+    match_outbox: Option<&mut MatchControlOutbox>,
+    rebinds: Option<&mut super::seat_hold::SeatRebindQueue>,
+    lobby_outbox: Option<&mut LobbyControlOutbox>,
+) -> OutboxDrain {
+    let mut drain = OutboxDrain::default();
+    if let Some(outbox) = match_outbox {
+        drain_match_control_outbox(worker, state, outbox, &mut drain);
+        if let Some(queue) = rebinds {
+            drain_seat_rebind_replies(worker, state, queue, &mut drain);
+        }
+    }
+    if let Some(outbox) = lobby_outbox {
+        drain_lobby_control_outbox(worker, state, outbox, &mut drain);
+    }
+    drain
 }
 
 fn control_outbox_backpressure(error: &IpcIoError) -> bool {
@@ -1057,15 +1111,19 @@ fn worker_control_receive(
         return;
     }
     if !state.shutdown_requested {
-        let mut drain = OutboxDrain::default();
-        if let Some(outbox) = match_outbox.as_mut() {
-            drain_match_control_outbox(&mut worker, &mut state, outbox, &mut drain);
-            if let Some(queue) = rebinds.as_mut() {
-                drain_seat_rebind_replies(&mut worker, &mut state, queue, &mut drain);
-            }
-        }
-        if let Some(outbox) = lobby_outbox.as_mut() {
-            drain_lobby_control_outbox(&mut worker, &mut state, outbox, &mut drain);
+        let drain = drain_role_control_outboxes(
+            &mut worker,
+            &mut state,
+            match_outbox.as_deref_mut(),
+            rebinds.as_deref_mut(),
+            lobby_outbox.as_deref_mut(),
+        );
+        if !drain.failed
+            && match_outbox
+                .as_mut()
+                .is_some_and(|outbox| outbox.take_retirement())
+        {
+            begin_ordered_shutdown(worker_entity, &mut worker, &mut state, &mut commands);
         }
         if drain.failed {
             error!(worker = ?state.worker_id, "brawler routed worker lobby control outbox failed");
@@ -1118,15 +1176,8 @@ fn worker_control_finish_shutdown(
     {
         return;
     }
-    let Some(stop) = state.pending_stop.take() else {
-        return;
-    };
-    match queue_exit(&mut worker, &mut state, stop) {
-        Ok(()) => {}
-        Err(_) => {
-            state.pending_stop = Some(stop);
-        }
-    }
+    // A failed enqueue leaves `exit_sent` false, so the next `Last` pass retries the same Exit.
+    let _ = queue_exit(&mut worker, &mut state);
 }
 
 fn worker_control_flush(
@@ -1234,7 +1285,6 @@ fn worker_control_flush(
 fn queue_exit(
     worker: &mut RoutedWorker,
     state: &mut WorkerControlState,
-    _stop: StopBody,
 ) -> Result<(), WorkerBootstrapError> {
     if state.exit_sent {
         return Ok(());
@@ -1980,6 +2030,203 @@ mod tests {
     }
 
     #[test]
+    fn retirement_waits_for_every_queued_activation_fact() {
+        let mut outbox = MatchControlOutbox::default();
+        outbox.cancel(activation_body(1));
+        outbox.retire();
+        assert!(!outbox.take_retirement());
+        outbox.cancel = None;
+        assert!(outbox.take_retirement());
+        assert!(!outbox.take_retirement(), "retirement is one-shot");
+    }
+
+    #[test]
+    fn formation_retirement_flushes_cancel_before_an_ordered_exit() {
+        let mut harness = WorkerControlHarness::new(WorkerEntrypointRole::Match);
+        {
+            let mut outbox = harness.app.world_mut().resource_mut::<MatchControlOutbox>();
+            outbox.cancel(activation_body(2));
+            outbox.retire();
+        }
+
+        // Exit waits for the queued CancelActivation to leave the control writer.
+        harness.run_frame();
+        let first = harness.receive();
+        assert!(
+            matches!(
+                first.as_slice(),
+                [ControlFrame { sequence, body: ControlBody::CancelActivation(_), .. }]
+                    if sequence.get() == 2
+            ),
+            "{first:?}"
+        );
+        assert!(
+            harness
+                .app
+                .world()
+                .resource::<WorkerControlState>()
+                .shutdown_requested
+        );
+
+        harness.run_frame();
+        let frames = harness.receive();
+        assert!(
+            matches!(
+                frames.as_slice(),
+                [ControlFrame { sequence: exit_sequence, body: ControlBody::Exit(exit), .. }]
+                    if exit_sequence.get() == 3
+                    && exit.exit_category == 0
+                    && !exit.result_sent
+                    && exit.terminal_peers == 0
+                    && exit.terminal_queue_bytes == 0
+            ),
+            "{frames:?}"
+        );
+        let state = harness.app.world().resource::<WorkerControlState>();
+        assert!(state.shutdown_requested && state.exit_sent && state.app_exit_requested);
+    }
+
+    /// The loading gate reads only the activation identity and participant count, so this
+    /// manifest leaves map, rules, and build bytes at inert values.
+    fn loading_gate_manifest() -> MatchManifestV1 {
+        let participant = |value: u8| brawler_routing::MatchManifestParticipant {
+            lobby_session_id: brawler_routing::LobbySessionId::new(u128::from(value)).unwrap(),
+            player_id: brawler_routing::PlayerId::new(u64::from(value)).unwrap(),
+            netcode_client_id: brawler_routing::NetcodeClientId::new(u64::from(value)).unwrap(),
+            peer_id: brawler_routing::PeerId::new(u128::from(value)).unwrap(),
+            team: value - 1,
+            display_name: brawler_routing::MatchDisplayName::new("Player").unwrap(),
+            recipe_fingerprint: 1,
+            revision: 1,
+            build_snapshot: brawler_routing::MatchBuildSnapshot::new(&[1]).unwrap(),
+        };
+        MatchManifestV1 {
+            common: brawler_routing::ManifestCommon {
+                manifest_version: 5,
+                role: WorkerRole::Match,
+                logical_server_id: brawler_routing::LogicalServerId::new(1).unwrap(),
+                process_id: ProcessId::new(TEST_PROCESS_ID).unwrap(),
+                worker_id: WorkerId::new(TEST_WORKER_ID).unwrap(),
+                generation: brawler_routing::Generation::new(1).unwrap(),
+                network_protocol: 1,
+                protocol_registry_fingerprint: 0,
+                content_fingerprint: 0,
+                route_version: ROUTE_VERSION_V1,
+                packet_version: PACKET_VERSION_V1,
+                control_version: CONTROL_VERSION_CURRENT,
+                flags: 0,
+            },
+            request_id: brawler_routing::RequestId::new(3).unwrap(),
+            match_id: brawler_routing::MatchId::new(4).unwrap(),
+            allocation_id: brawler_routing::AllocationId::new(5).unwrap(),
+            mode: brawler_routing::GameMode::Wipeout,
+            map_preset: 1,
+            map_revision: 1,
+            map_recipe_fingerprint: 1,
+            map_recipe: Vec::new(),
+            rules_profile: 1,
+            objective_target: 10,
+            match_duration_ticks: 10_800,
+            countdown_ticks: 180,
+            respawn_ticks: 180,
+            spawn_protection_ticks: 90,
+            completed_input_lock_ticks: 60,
+            wipeout_recent_hostile_damage_credit_ticks: 300,
+            heist_critical_health_percent: 25,
+            reserved: 0,
+            seed: 1,
+            participants: vec![participant(1), participant(2)],
+            bots: Vec::new(),
+            heartbeat_ms: 1_000,
+            nonce: 1,
+            digest: [0; 32],
+        }
+    }
+
+    /// BRL-xndc/BRL-5yss lifecycle regression: a loading deadline with no client check-in keeps
+    /// its 20 s readiness deadline and 2 s notice grace, then retires through Exit instead of an
+    /// unannounced `AppExit` that the supervisor classifies as `WorkerExitMismatch`.
+    #[test]
+    fn loading_deadline_retires_through_cancel_then_exit() {
+        let mut harness = WorkerControlHarness::new(WorkerEntrypointRole::Match);
+        harness
+            .app
+            .insert_resource(super::super::ServerRoleResource::match_worker(
+                loading_gate_manifest(),
+            ))
+            .init_resource::<super::super::MatchLoadingGate>()
+            .add_systems(
+                Update,
+                super::super::process_match_loading_messages.before(worker_control_receive),
+            );
+        harness.app.world_mut().spawn((
+            MatchRoot,
+            MatchState {
+                match_id: crate::matchplay::MatchId(1),
+                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                phase: MatchPhase::Waiting,
+                rules_revision: 1,
+            },
+        ));
+        let app_exits = |harness: &WorkerControlHarness| {
+            harness
+                .app
+                .world()
+                .resource::<Messages<AppExit>>()
+                .iter_current_update_messages()
+                .count()
+        };
+        let advance = |harness: &mut WorkerControlHarness, seconds: u64| {
+            harness
+                .app
+                .world_mut()
+                .resource_mut::<Time<Real>>()
+                .update_with_duration(Duration::from_secs(seconds));
+            harness.run_frame();
+            harness.receive()
+        };
+
+        assert!(advance(&mut harness, 0).is_empty());
+        assert!(advance(&mut harness, 19).is_empty(), "deadline unchanged");
+        let cancelled = advance(&mut harness, 2);
+        assert!(
+            matches!(
+                cancelled.as_slice(),
+                [ControlFrame {
+                    body: ControlBody::CancelActivation(_),
+                    ..
+                }]
+            ),
+            "{cancelled:?}"
+        );
+        assert!(
+            advance(&mut harness, 1).is_empty(),
+            "notice grace unchanged"
+        );
+        assert!(
+            !harness
+                .app
+                .world()
+                .resource::<WorkerControlState>()
+                .shutdown_requested
+        );
+        assert_eq!(app_exits(&harness), 0);
+
+        let retired = advance(&mut harness, 1);
+        assert!(
+            matches!(
+                retired.as_slice(),
+                [ControlFrame { body: ControlBody::Exit(exit), .. }]
+                    if exit.exit_category == 0 && !exit.result_sent
+            ),
+            "{retired:?}"
+        );
+        let state = harness.app.world().resource::<WorkerControlState>();
+        assert!(state.exit_sent && state.app_exit_requested);
+        assert_eq!(app_exits(&harness), 1);
+    }
+
+    #[test]
     fn full_control_writer_retains_lobby_request_until_the_next_frame() {
         let mut harness = WorkerControlHarness::new(WorkerEntrypointRole::Lobby);
         harness
@@ -2145,7 +2392,6 @@ mod tests {
         {
             let mut state = harness.app.world_mut().resource_mut::<WorkerControlState>();
             state.shutdown_requested = true;
-            state.pending_stop = Some(stop_body(11));
         }
 
         harness.app.world_mut().run_schedule(Last);

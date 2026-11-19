@@ -46,6 +46,9 @@ pub struct ClientAutomationConfig {
     /// Headless opponent for rejoin checks: send Leave Match once this file exists while the
     /// match is Active (BRL-jxfy). A person can create it by hand during a device check.
     pub leave_match_cue: Option<std::path::PathBuf>,
+    /// Headless BRL-xndc evidence: once the match session can check in, send Cancel Match Start
+    /// instead of Ready, so the routed worker's formation fails through an accepted cancellation.
+    pub cancel_match_start: bool,
     pub product_match_players_per_team: u8,
     pub product_match_game_type: Option<brawler::lobby::GameTypeId>,
     pub headless_move: Option<(i8, i8)>,
@@ -83,6 +86,7 @@ impl Default for ClientAutomationConfig {
             product_rejoin_smoke: false,
             product_completed_rejoin_cue: None,
             leave_match_cue: None,
+            cancel_match_start: false,
             product_match_players_per_team: 2,
             product_match_game_type: None,
             headless_move: None,
@@ -321,6 +325,16 @@ impl ClientAutomationConfig {
         }
         if self.leave_match_cue.is_some() && !pvp_match {
             return Err("--leave-match-cue requires PvP match automation".to_string());
+        }
+        if self.cancel_match_start
+            && (!pvp_match
+                || self.leave_match_cue.is_some()
+                || self.product_completed_rejoin_cue.is_some())
+        {
+            return Err(
+                "--cancel-match-start requires PvP match automation without a rejoin or leave cue"
+                    .to_string(),
+            );
         }
         Ok(())
     }
