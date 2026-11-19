@@ -4,9 +4,9 @@ was: BRL-0044
 
 title: Fix six-client E2E weapon preset assignment
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-08-28T14:02:42Z
+status_changed: 2026-11-19T13:09:26Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-1t80]
 
 parent:
 
-rank: 1544770
+rank: 11534336
 ---
 
 # Description
