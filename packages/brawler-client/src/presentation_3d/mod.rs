@@ -57,7 +57,7 @@ mod zombie;
 pub(super) use camera::cursor_ground_point;
 use camera::{
     CAMERA_VERTICAL_FOV_RADIANS, arena_shadow_cascades, camera_offset, follow_3d_camera,
-    frame_map_editor_viewport,
+    frame_map_editor_viewport, render_arena_only_where_shown,
 };
 pub(super) use camera_rig::{ArenaAimCameras, arena_aim_view};
 pub(super) use combat::collect_vfx_evidence_snapshot;
@@ -559,6 +559,7 @@ impl Plugin for WorldPresentationPlugin {
                 (
                     (
                         combat::write_fighter_visual_poses,
+                        render_arena_only_where_shown,
                         frame_map_editor_viewport,
                         follow_3d_camera,
                     )

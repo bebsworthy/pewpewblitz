@@ -829,16 +829,16 @@ pub(crate) fn animate_fire_area_material(
         return;
     };
     let tick = ticks.iter().map(|tick| tick.0).max().unwrap_or_default();
+    let cycle_ticks = brawler::timing::SIMULATION_TICK_HZ * VISUAL_CYCLE_SECONDS;
+    let visual_tick =
+        u16::try_from(tick % cycle_ticks).expect("the fifteen-minute Fire visual cycle fits u16");
+    let tick_hz = u16::try_from(brawler::timing::SIMULATION_TICK_HZ)
+        .expect("the simulation tick rate fits u16");
+    let time = f32::from(visual_tick) / f32::from(tick_hz);
     for handle in handles.elemental_fire_area.handles() {
-        let Some(mut material) = materials.get_mut(handle) else {
-            continue;
-        };
-        let cycle_ticks = brawler::timing::SIMULATION_TICK_HZ * VISUAL_CYCLE_SECONDS;
-        let visual_tick = u16::try_from(tick % cycle_ticks)
-            .expect("the fifteen-minute Fire visual cycle fits u16");
-        let tick_hz = u16::try_from(brawler::timing::SIMULATION_TICK_HZ)
-            .expect("the simulation tick rate fits u16");
-        material.params.x = f32::from(visual_tick) / f32::from(tick_hz);
+        super::common::advance_material_time(materials.get_mut(handle), time, |material| {
+            &mut material.params.x
+        });
     }
 }
 
@@ -865,9 +865,9 @@ pub(crate) fn animate_elemental_support_area_materials(
         .into_iter()
         .chain(handles.elemental_restoration_area.handles())
     {
-        if let Some(mut material) = materials.get_mut(handle) {
-            material.params.x = time;
-        }
+        super::common::advance_material_time(materials.get_mut(handle), time, |material| {
+            &mut material.params.x
+        });
     }
 }
 

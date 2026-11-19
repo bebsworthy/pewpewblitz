@@ -24,6 +24,9 @@ fn main() {
             let mut app = build_app_with_config(config);
             #[cfg(target_os = "android")]
             frame_pacing::install(&mut app);
+            // Menus run single-threaded; Match keeps parallel systems (BRL-fs5k).
+            #[cfg(target_os = "android")]
+            app.add_plugins(brawler_client::FlowExecutorPolicyPlugin);
             #[cfg(target_os = "android")]
             back::install(&mut app);
             #[cfg(target_os = "android")]

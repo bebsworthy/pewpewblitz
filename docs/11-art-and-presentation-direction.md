@@ -304,7 +304,13 @@ once the render device exists: no compute-capable GPU particles selects `Low`, A
 (MSAA at most 4 samples, bloom requires HDR). On Android the entry crate additionally votes 60 Hz for
 the game surface, limits Bevy's compute pool to two workers, and reports each frame to an Android
 Dynamic Performance Framework hint session (16.7 ms target), which is what lets the Pixel 8a hold
-60 FPS; see BRL-0161 for the measurements.
+60 FPS; see BRL-0161 for the measurements. Android menus update reactively at 30 Hz (BRL-m4eh)
+and run every main- and render-world schedule on Bevy's single-threaded executor, because waking
+and parking the compute workers for a menu's many small systems cost more CPU than the systems
+themselves; Match and its loading screen switch back to the multi-threaded executor
+(`FlowExecutorPolicyPlugin`, BRL-fs5k).
+On every platform the arena camera renders only in Match, its loading screen, and the Map Maker
+editor; the other shell screens are opaque, so the HUD camera clears the window instead.
 
 The playable floor (`presentation_3d/floor_tiles.rs`) is one generated mesh with one quad per
 authoritative map cell, so tile seams always coincide with the gameplay grid. Each theme's `floor`

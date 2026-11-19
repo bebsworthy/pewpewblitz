@@ -178,9 +178,9 @@ pub(crate) fn animate_straight_projectile_trail_materials(
         &handles.projectile_trail_ally_reduced,
         &handles.projectile_trail_enemy_reduced,
     ] {
-        if let Some(mut material) = materials.get_mut(handle) {
-            material.params.x = time;
-        }
+        super::common::advance_material_time(materials.get_mut(handle), time, |material| {
+            &mut material.params.x
+        });
     }
 }
 

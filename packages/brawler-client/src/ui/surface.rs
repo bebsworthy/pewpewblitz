@@ -46,7 +46,7 @@ pub(crate) struct SurfaceState {
     pub disabled: bool,
 }
 
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone, PartialEq)]
 pub(crate) struct SurfaceMaterial {
     /// Gradient bottom color.
     #[uniform(0)]
@@ -714,9 +714,10 @@ fn present(
     for (role, state, node, handle, interaction, motion, disabled) in &surfaces {
         let mut state = state.copied().unwrap_or_default();
         state.disabled |= disabled;
-        let Some(mut mat) = materials.get_mut(&handle.0) else {
+        let Some(current) = materials.get(&handle.0) else {
             continue;
         };
+        let mut mat = current.clone();
         let bottom = fill(
             *role,
             state,
@@ -743,6 +744,14 @@ fn present(
         mat.details = Vec4::new(geometry.cut, geometry.lip.x, geometry.lip.y, 0.0);
         let motion = motion.copied().unwrap_or_default();
         mat.motion = Vec4::new(motion.lip, motion.shine.unwrap_or(-1.0), motion.flash, 0.0);
+        // A mutable asset borrow marks the material modified, and every modified material is
+        // re-prepared (new uniform buffers and bind group) on the render thread. Write only real
+        // changes so an idle menu does not rebuild every surface each frame (BRL-fs5k).
+        if mat != *current
+            && let Some(mut material) = materials.get_mut(&handle.0)
+        {
+            *material = mat;
+        }
     }
 }
 #[cfg(test)]
@@ -1128,6 +1137,63 @@ mod tests {
         // choice keeps its fill (and its rim, which `present` flags from `current`).
         assert!(state.focused);
         assert_eq!(fill(Surface::Card, state, Interaction::None), PANEL_RAISED);
+    }
+
+    #[derive(Resource, Default)]
+    struct ModifiedSurfaceMaterials(usize);
+
+    fn count_modified_materials(
+        mut events: MessageReader<AssetEvent<SurfaceMaterial>>,
+        mut modified: ResMut<ModifiedSurfaceMaterials>,
+    ) {
+        modified.0 += events
+            .read()
+            .filter(|event| matches!(event, AssetEvent::Modified { .. }))
+            .count();
+    }
+
+    #[test]
+    fn present_rewrites_a_surface_material_only_when_its_look_changes() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<SurfaceMaterial>()
+            .init_resource::<FocusVisibility>()
+            .init_resource::<ModifiedSurfaceMaterials>()
+            .add_systems(Update, (present, count_modified_materials).chain());
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<SurfaceMaterial>>()
+            .add(material());
+        let entity = app
+            .world_mut()
+            .spawn((
+                Surface::Card,
+                Interaction::None,
+                ComputedNode::default(),
+                MaterialNode(handle),
+            ))
+            .id();
+        // Asset events are published after `Update`, so each count trails its write by a frame.
+        app.update();
+        app.update();
+        let first = app.world().resource::<ModifiedSurfaceMaterials>().0;
+        assert_eq!(first, 1, "the first present writes the surface look");
+        for _ in 0..5 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource::<ModifiedSurfaceMaterials>().0,
+            first,
+            "an idle surface must not be re-prepared every frame"
+        );
+        *app.world_mut().get_mut::<Interaction>(entity).unwrap() = Interaction::Pressed;
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world().resource::<ModifiedSurfaceMaterials>().0,
+            first + 1,
+            "a real change is written once"
+        );
     }
 
     #[test]

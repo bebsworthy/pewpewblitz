@@ -4,12 +4,14 @@ use super::camera_rig::{
     ArenaCameraShake, CameraRig, CameraRigCatalog, CameraRigFrameInput, weapon_reach,
 };
 use super::combat::{OVERHEAD_AMMO_HEIGHT, OVERHEAD_WORLD_HEIGHT};
+use super::render_quality::WorldHudCamera;
 use super::{
     ArenaCamera, ClientShellSettings, Controlled, DEFAULT_GAMEPLAY_VIEWPORT,
     DEFAULT_GAMEPLAY_WINDOW_ASPECT, Fighter, MapEditorPreview, PendingLocalActions, Position,
     PrimaryWindow, TargetedUltimateInput, ground_point, ground_position, hud,
     targeted_ultimate_range,
 };
+use crate::ClientFlow;
 use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder};
 use bevy::prelude::*;
 
@@ -94,6 +96,48 @@ fn editor_arena_viewport(
         physical_size: UVec2::new(width, height),
         ..default()
     })
+}
+
+/// Product flows whose screens show the arena. Every other shell screen is an opaque full-screen
+/// UI, so rendering the 3D world behind it (HDR, MSAA, bloom, the shadow cascade) only costs
+/// power (BRL-fs5k). Match loading keeps the arena camera so its pipelines are ready for the
+/// first match frame.
+const fn flow_shows_arena(flow: ClientFlow) -> bool {
+    matches!(
+        flow,
+        ClientFlow::MatchLoading | ClientFlow::Match | ClientFlow::MapEditor
+    )
+}
+
+/// Renders the arena only in flows that show it. Without the arena pass nothing else clears the
+/// window, so the HUD camera clears it to the shell background instead. Apps without the product
+/// flow (automation, VFX Lab) always render the arena.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+pub(super) fn render_arena_only_where_shown(
+    flow: Option<Res<State<ClientFlow>>>,
+    mut arena: Query<&mut Camera, (With<ArenaCamera>, Without<WorldHudCamera>)>,
+    mut hud: Query<&mut Camera, (With<WorldHudCamera>, Without<ArenaCamera>)>,
+) {
+    let shows = flow.is_none_or(|flow| flow_shows_arena(*flow.get()));
+    for mut camera in &mut arena {
+        if camera.is_active != shows {
+            camera.is_active = shows;
+        }
+    }
+    for mut camera in &mut hud {
+        let clears = !matches!(camera.clear_color, ClearColorConfig::None);
+        if clears == shows {
+            camera.clear_color = if shows {
+                ClearColorConfig::None
+            } else {
+                ClearColorConfig::Custom(crate::ui::theme::SHELL_BG_BOTTOM)
+            };
+        }
+    }
 }
 
 /// The Map Maker editor draws the arena only where its chrome leaves room (BRL-2xpc); every
@@ -473,6 +517,69 @@ mod tests {
             (actual - expected).abs() < EPSILON,
             "expected {expected}, got {actual}"
         );
+    }
+
+    fn arena_flow_app(with_flow: bool) -> (App, Entity, Entity) {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        if with_flow {
+            app.init_state::<ClientFlow>();
+        }
+        app.add_systems(Update, render_arena_only_where_shown);
+        let arena = app.world_mut().spawn((ArenaCamera, Camera::default())).id();
+        let hud = app
+            .world_mut()
+            .spawn((
+                WorldHudCamera,
+                Camera {
+                    clear_color: ClearColorConfig::None,
+                    ..default()
+                },
+            ))
+            .id();
+        app.update();
+        (app, arena, hud)
+    }
+
+    fn arena_frame(app: &App, arena: Entity, hud: Entity) -> (bool, bool) {
+        let world = app.world();
+        (
+            world.get::<Camera>(arena).unwrap().is_active,
+            !matches!(
+                world.get::<Camera>(hud).unwrap().clear_color,
+                ClearColorConfig::None
+            ),
+        )
+    }
+
+    #[test]
+    fn opaque_shell_flows_skip_the_arena_pass_and_the_hud_clears_instead() {
+        let (mut app, arena, hud) = arena_flow_app(true);
+        for (flow, shows) in [
+            (ClientFlow::Dashboard, false),
+            (ClientFlow::Queue, false),
+            (ClientFlow::MatchLoading, true),
+            (ClientFlow::Match, true),
+            (ClientFlow::Results, false),
+            (ClientFlow::MapEditor, true),
+            (ClientFlow::ServerSelect, false),
+        ] {
+            app.world_mut()
+                .resource_mut::<NextState<ClientFlow>>()
+                .set(flow);
+            app.update();
+            assert_eq!(
+                arena_frame(&app, arena, hud),
+                (shows, !shows),
+                "{flow:?}: arena active, HUD clears"
+            );
+        }
+    }
+
+    #[test]
+    fn apps_without_the_product_flow_always_render_the_arena() {
+        let (app, arena, hud) = arena_flow_app(false);
+        assert_eq!(arena_frame(&app, arena, hud), (true, false));
     }
 
     #[test]

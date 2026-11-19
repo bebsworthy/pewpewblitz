@@ -3,9 +3,9 @@ id: BRL-d3hb
 
 title: Explain the rare lobby-to-match handoff connect timeout seen on the Pixel 8a
 
-status: doing
-closed:
-status_changed: 2026-11-19T20:14:06Z
+status: done
+closed: 2026-11-19T23:32:52Z
+status_changed: 2026-11-19T23:32:52Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-2nsg]
 
 parent:
 
-rank: 11468800
+rank:
 ---
 
 # Description

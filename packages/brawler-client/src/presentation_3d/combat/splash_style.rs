@@ -214,9 +214,9 @@ pub(crate) fn animate_splash_area_materials(
     };
     let time = bounded_visual_time(&ticks);
     for handle in [&handles.splash_area, &handles.splash_area_reduced] {
-        if let Some(mut material) = materials.get_mut(handle) {
-            material.params.x = time;
-        }
+        super::common::advance_material_time(materials.get_mut(handle), time, |material| {
+            &mut material.params.x
+        });
     }
 }
 

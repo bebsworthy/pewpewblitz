@@ -336,9 +336,9 @@ pub(crate) fn animate_cone_spray_materials(
         &handles.spray_gas_reduced,
         &handles.spray_gas_primitive,
     ] {
-        if let Some(mut material) = materials.get_mut(handle) {
-            material.params.x = time;
-        }
+        super::common::advance_material_time(materials.get_mut(handle), time, |material| {
+            &mut material.params.x
+        });
     }
 }
 

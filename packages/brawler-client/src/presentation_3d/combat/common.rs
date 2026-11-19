@@ -5,6 +5,23 @@ use std::collections::HashSet;
 
 pub(super) const GROUND_EFFECT_HEIGHT: f32 = 2.5;
 
+/// Writes a shared animated material's visual time only when it changed. A mutable borrow marks
+/// the material modified, and every modified material is re-prepared (new uniform buffer and bind
+/// group) on the render thread; outside a match the authoritative tick does not advance, so these
+/// materials stay untouched there (BRL-fs5k).
+pub(super) fn advance_material_time<M: Asset>(
+    material: Option<bevy::asset::AssetMut<'_, M>>,
+    time: f32,
+    time_of: fn(&mut M) -> &mut f32,
+) {
+    let Some(mut material) = material else {
+        return;
+    };
+    if time_of(material.bypass_change_detection()).to_bits() != time.to_bits() {
+        *time_of(&mut material) = time;
+    }
+}
+
 #[derive(SystemParam)]
 pub(crate) struct CombatVfxContext<'w> {
     cache: Res<'w, crate::vfx::VfxSignatureCache>,

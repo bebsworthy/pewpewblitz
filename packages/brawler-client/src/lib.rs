@@ -11,6 +11,7 @@ pub use automation::{
 pub use brawler::map::ClientPlayableGate;
 #[cfg(feature = "automation")]
 pub use flow::ShellCaptureRoute;
+pub use flow_executors::{FlowExecutorPolicyPlugin, battery_flow_runs_systems_in_parallel};
 
 /// Repository root that owns `assets/` and `asset_src/`; this package lives two levels below it.
 pub(crate) const REPOSITORY_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
@@ -74,6 +75,7 @@ mod dashboard;
 mod diagnostics_overlay;
 mod evidence_capture;
 mod flow;
+mod flow_executors;
 mod hud;
 mod input;
 pub mod local_attack;
