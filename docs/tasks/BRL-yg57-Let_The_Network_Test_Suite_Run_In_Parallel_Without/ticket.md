@@ -3,9 +3,9 @@ id: BRL-yg57
 
 title: Let the network test suite run in parallel without overlapping late-input capture scopes
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-19T13:51:28Z
+status_changed: 2026-11-19T16:48:44Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-p246]
 
 parent:
 
-rank: 10092544
+rank: 11337728
 ---
 
 # Description
