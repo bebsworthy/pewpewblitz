@@ -3,9 +3,9 @@ id: BRL-gv67
 
 title: Investigate the Play Services overlay that swallows taps in the first seconds after launch
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-16T03:43:54Z
+status_changed: 2026-11-19T20:14:06Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-wr0s]
 
 parent: BRL-q5c4
 
-rank: 926862
+rank: 11403264
 ---
 
 # Description

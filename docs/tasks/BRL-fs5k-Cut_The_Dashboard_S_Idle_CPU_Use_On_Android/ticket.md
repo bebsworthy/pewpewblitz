@@ -3,9 +3,9 @@ id: BRL-fs5k
 
 title: 'Cut the Dashboard''s idle CPU use on Android'
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-18T21:06:20Z
+status_changed: 2026-11-19T20:14:06Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-m4eh]
 
 parent:
 
-rank: 9633792
+rank: 11337728
 ---
 
 # Description
