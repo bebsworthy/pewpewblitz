@@ -3,9 +3,9 @@ id: BRL-5yss
 
 title: Exit a match worker gracefully after a formation failure instead of logging WorkerExitMismatch
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-16T22:21:01Z
+status_changed: 2026-11-19T11:16:24Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-jxfy]
 
 parent:
 
-rank: 617908
+rank: 11534336
 ---
 
 # Description

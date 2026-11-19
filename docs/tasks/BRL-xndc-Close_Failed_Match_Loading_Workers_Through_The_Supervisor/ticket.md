@@ -4,9 +4,9 @@ was: BRL-0121
 
 title: Close failed match-loading workers through the supervisor lifecycle
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-09-09T09:49:07Z
+status_changed: 2026-11-19T11:16:08Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-6vjz]
 
 parent:
 
-rank: 463431
+rank: 11468800
 ---
 
 # Description
