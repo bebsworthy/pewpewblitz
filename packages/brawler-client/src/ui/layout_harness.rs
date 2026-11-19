@@ -230,6 +230,70 @@ pub(crate) fn on_screen(world: &mut World, entity: Entity) -> bool {
     })
 }
 
+/// Visible in-flow content of shell surfaces that reaches into the surface's ring band
+/// (`ContentReserve`: frame, current rim, focus pointer, slanted sides and lip), so no state's
+/// frame or pointer can draw over it. Absolutely positioned overlays (marks, badges) are exempt.
+pub(crate) fn surface_ring_intrusions(world: &mut World) -> Vec<String> {
+    use super::surface::{ContentReserve, Surface, SurfaceStyle};
+    let mut surfaces = world.query::<(
+        Entity,
+        &Surface,
+        Option<&SurfaceStyle>,
+        &ComputedNode,
+        &InheritedVisibility,
+        Option<&Children>,
+        Has<Interaction>,
+    )>();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for (entity, role, style, computed, visible, children, focusable) in surfaces.iter(world) {
+        if !visible.get() || computed.is_empty() {
+            continue;
+        }
+        checked += 1;
+        let Some(rect) = node_rect(world, entity) else {
+            continue;
+        };
+        let scale = 1.0 / computed.inverse_scale_factor();
+        let reserve = ContentReserve::for_surface(*role, style, focusable);
+        let content = Rect::from_corners(
+            rect.min + Vec2::new(reserve.left, reserve.top) * scale,
+            rect.max - Vec2::new(reserve.right, reserve.bottom) * scale,
+        );
+        for child in children.into_iter().flatten() {
+            let in_flow = world.get::<Node>(*child).is_some_and(|node| {
+                node.position_type != PositionType::Absolute && node.display != Display::None
+            });
+            let shown = world
+                .get::<InheritedVisibility>(*child)
+                .is_some_and(|visible| visible.get());
+            let Some(inner) = node_rect(world, *child) else {
+                continue;
+            };
+            if !in_flow || !shown || inner.width() <= 0.0 || inner.height() <= 0.0 {
+                continue;
+            }
+            // Layout rounds each node's edges to physical pixels independently of its parent's
+            // padding, so a percent-width child can sit up to 1.5 px past the unrounded box.
+            let tolerance = 1.5;
+            if inner.min.cmplt(content.min - tolerance).any()
+                || inner.max.cmpgt(content.max + tolerance).any()
+            {
+                let label = world
+                    .get::<AccessibleLabel>(entity)
+                    .map(|label| label.0.clone())
+                    .or_else(|| world.get::<Text>(*child).map(|text| text.0.clone()))
+                    .unwrap_or_else(|| format!("{entity:?}"));
+                failures.push(format!(
+                    "{label:?} ({role:?}): child {inner:?} outside content {content:?}"
+                ));
+            }
+        }
+    }
+    assert!(checked > 0, "no laid-out surfaces to check");
+    failures
+}
+
 /// A finger tap at a logical window position (down, up, and one frame to release), through the
 /// real touch input and UI focus path.
 pub(crate) fn tap(app: &mut App, position: Vec2) {

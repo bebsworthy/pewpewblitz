@@ -1,7 +1,9 @@
 //! Shared shell chrome. Owners supply semantic role and state; geometry, fills, and the
 //! presentation-only press, idle, and entrance motion stay here.
+use super::focus_visibility::{FocusVisibility, track_focus_visibility};
 use super::theme::{ACCENT, INK, PANEL, PANEL_RAISED, PLAY, PLAY_HIGHLIGHT, TEXT};
 use bevy::{
+    input::InputSystems,
     prelude::*,
     reflect::TypePath,
     render::render_resource::AsBindGroup,
@@ -93,8 +95,7 @@ pub(crate) struct SurfaceMaterial {
     fill: Vec4,
     #[uniform(1)]
     ink: Vec4,
-    /// Navigation focus color: frame and pointer, or the review affordance's frame, brackets or
-    /// face highlight.
+    /// Navigation focus frame and pointer.
     #[uniform(2)]
     accent: Vec4,
     #[uniform(3)]
@@ -110,7 +111,7 @@ pub(crate) struct SurfaceMaterial {
     #[uniform(7)]
     current_mark: Vec4,
     /// x: press amount (lip collapse), y: shine sweep position or negative when idle, z: burst
-    /// flash, w: focus pulse.
+    /// flash.
     #[uniform(8)]
     motion: Vec4,
 }
@@ -119,94 +120,6 @@ impl UiMaterial for SurfaceMaterial {
         "brawler/shaders/shell_surface.wgsl".into()
     }
 }
-
-/// Focus and current-choice affordance under owner review (BRL-fe7t phase 1). The player shell
-/// keeps `Current`; automation builds select another with `BRAWLER_SURFACE_AFFORDANCE` (`frame`,
-/// `reticle` or `spotlight`) so the UI gallery and native shell captures can compare them.
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(
-    not(feature = "automation"),
-    allow(
-        dead_code,
-        reason = "review variants are selected only by automation builds"
-    )
-)]
-pub(crate) enum SurfaceAffordance {
-    /// Cyan focus frame with pointer; yellow current rim.
-    #[default]
-    Current,
-    /// White outline with inner glow and a small lift; current: gold trim and check badge.
-    Frame,
-    /// White corner brackets that breathe; current: gold bar along the bottom and check badge.
-    Reticle,
-    /// The focused face lights up under a white bevel; current: gold outline and check badge.
-    Spotlight,
-}
-
-impl SurfaceAffordance {
-    #[cfg(feature = "automation")]
-    pub(crate) const ALL: [Self; 4] = [Self::Current, Self::Frame, Self::Reticle, Self::Spotlight];
-
-    #[cfg(feature = "automation")]
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::Frame => "frame",
-            Self::Reticle => "reticle",
-            Self::Spotlight => "spotlight",
-        }
-    }
-
-    #[cfg(feature = "automation")]
-    fn from_env() -> Self {
-        let value = std::env::var("BRAWLER_SURFACE_AFFORDANCE").unwrap_or_default();
-        Self::ALL
-            .into_iter()
-            .find(|variant| variant.name() == value)
-            .unwrap_or_default()
-    }
-
-    /// Shader selector (`flags.w`).
-    fn index(self) -> f32 {
-        match self {
-            Self::Current => 0.0,
-            Self::Frame => 1.0,
-            Self::Reticle => 2.0,
-            Self::Spotlight => 3.0,
-        }
-    }
-
-    /// Whether `role` may show the current-choice mark. Action buttons (Play, Practice, Back)
-    /// only take focus, so the review candidates never mark them; the `Current` look keeps its
-    /// shipped rim on every role until the chosen candidate replaces it.
-    fn marks_current(self, role: Surface) -> bool {
-        self == Self::Current
-            || !matches!(role, Surface::Primary | Surface::Secondary | Surface::Back)
-    }
-
-    /// Whether a focused surface lifts above its neighbours.
-    fn lifts(self) -> bool {
-        self == Self::Frame
-    }
-
-    /// The focus color the shader receives for `role`.
-    fn focus_color(self, role: Surface) -> Color {
-        match self {
-            Self::Frame | Self::Reticle => TEXT,
-            Self::Spotlight if role == Surface::Primary => PLAY_HIGHLIGHT,
-            Self::Current | Self::Spotlight => ACCENT,
-        }
-    }
-}
-
-/// Gallery review: present this surface as if reduced motion were on, beside surfaces that are
-/// not, so one capture can compare both.
-#[derive(Component, Clone, Copy, Debug, Default)]
-#[cfg_attr(
-    not(feature = "automation"),
-    allow(dead_code, reason = "constructed only by the automation UI gallery")
-)]
-pub(crate) struct ReducedMotionPreview;
 
 /// Opt-in idle motion for the screen's single primary call to action (Dashboard Play).
 #[derive(Component, Clone, Copy, Debug, Default)]
@@ -316,11 +229,6 @@ const BURST_POP: f32 = 0.07;
 const BURST_SHINE_FRACTION: f32 = 0.6;
 const BURST_FLASH: f32 = 0.3;
 const DEFAULT_DETAILS: Vec4 = Vec4::new(8.0, 0.0, 6.0, 0.0);
-/// Review affordances: focus lift scale, its ease time, and the focus pulse period.
-const FOCUS_LIFT: f32 = 0.035;
-const FOCUS_LIFT_SECONDS: f32 = 0.09;
-const FOCUS_PULSE_SECONDS: f32 = 1.2;
-
 /// Per-surface presentation motion. Never read by input, navigation, or networking.
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub(crate) struct SurfaceMotion {
@@ -332,8 +240,6 @@ pub(crate) struct SurfaceMotion {
     shine: Option<f32>,
     /// Burst face flash fed to the shader, 0 at rest.
     flash: f32,
-    /// Focus lift, 0 at rest and 1 fully lifted.
-    lift: f32,
 }
 
 fn ease_out_back(t: f32) -> f32 {
@@ -344,21 +250,6 @@ fn ease_out_back(t: f32) -> f32 {
 }
 
 impl SurfaceMotion {
-    /// Eases the focus lift toward `target` and returns its scale factor; immediate and flat
-    /// under reduced motion.
-    fn ease_lift(&mut self, dt: f32, target: bool, reduced: bool) -> f32 {
-        let goal = f32::from(u8::from(target && !reduced));
-        let step = dt / FOCUS_LIFT_SECONDS;
-        self.lift = if reduced {
-            goal
-        } else if self.lift < goal {
-            (self.lift + step).min(goal)
-        } else {
-            (self.lift - step).max(goal)
-        };
-        1.0 + FOCUS_LIFT * ease_out_back(self.lift)
-    }
-
     fn entering() -> Self {
         Self {
             entrance: Some(0.0),
@@ -431,12 +322,14 @@ impl Plugin for SurfacePlugin {
         ))
         .init_resource::<SurfaceMotionPolicy>()
         .init_resource::<SurfaceEntrance>()
-        .init_resource::<SurfaceAffordance>()
+        .init_resource::<FocusVisibility>()
+        .add_systems(PreUpdate, track_focus_visibility.after(InputSystems))
         .add_systems(
             PostUpdate,
             (
                 refresh_entrance_window,
                 bind,
+                reserve_surface_content,
                 animate,
                 animate_node_bursts,
                 stroke_display_text,
@@ -445,8 +338,6 @@ impl Plugin for SurfacePlugin {
                 .before(UiSystems::Layout),
         )
         .add_systems(PostUpdate, present.after(UiSystems::Layout));
-        #[cfg(feature = "automation")]
-        app.insert_resource(SurfaceAffordance::from_env());
     }
 }
 fn material() -> SurfaceMaterial {
@@ -590,11 +481,10 @@ fn refresh_entrance_window(
 fn animate(
     time: Res<Time>,
     policy: Res<SurfaceMotionPolicy>,
-    affordance: Option<Res<SurfaceAffordance>>,
     mut surfaces: Query<(
         Option<&SurfaceState>,
         Option<&Interaction>,
-        (Has<InteractionDisabled>, Has<ReducedMotionPreview>),
+        Has<InteractionDisabled>,
         Has<PrimaryIdleMotion>,
         &mut SurfaceMotion,
         &mut UiTransform,
@@ -603,19 +493,13 @@ fn animate(
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
-    let lifts = affordance.is_some_and(|affordance| affordance.lifts());
-    for (state, interaction, (disabled, preview), idle, mut motion, mut transform, burst) in
-        &mut surfaces
-    {
+    for (state, interaction, disabled, idle, mut motion, mut transform, burst) in &mut surfaces {
         let state = state.copied().unwrap_or_default();
-        let reduced = policy.reduced || preview;
+        let reduced = policy.reduced;
         let live = !disabled && !state.disabled && !state.inactive;
         let held = live && interaction == Some(&Interaction::Pressed);
         let burst = burst.and_then(|mut burst| burst.advance(dt, reduced));
-        let (mut scale, drop) = motion.step(dt, now, held, idle && live, reduced, burst);
-        if lifts {
-            scale *= motion.ease_lift(dt, live && state.focused, reduced);
-        }
+        let (scale, drop) = motion.step(dt, now, held, idle && live, reduced, burst);
         transform.set_if_neq(UiTransform {
             translation: Val2::new(px(0), px(drop)),
             scale: Vec2::splat(scale),
@@ -711,15 +595,166 @@ fn fill_top(role: Surface, state: SurfaceState, bottom: Color) -> Color {
     }
 }
 
+/// Shader geometry for one surface: the shared defaults per role, or its `SurfaceStyle`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Geometry {
+    slope: f32,
+    border: f32,
+    cut: f32,
+    /// Bottom-lip offset below and right of the face.
+    lip: Vec2,
+}
+
+impl Geometry {
+    fn of(role: Surface, style: Option<&SurfaceStyle>) -> Self {
+        style.map_or_else(
+            || Self {
+                slope: match role {
+                    Surface::Row | Surface::Field => ROW_SLOPE,
+                    Surface::Card | Surface::Panel => PANEL_SLOPE,
+                    _ => ACTION_SLOPE,
+                },
+                border: BORDER_WIDTH,
+                cut: DEFAULT_DETAILS.x,
+                lip: Vec2::new(DEFAULT_DETAILS.y, DEFAULT_DETAILS.z),
+            },
+            |style| Self {
+                slope: style.slope,
+                border: style.border_width,
+                cut: style.cut,
+                lip: Vec2::new(style.shadow_x, style.shadow_y),
+            },
+        )
+    }
+}
+
+/// Depth of the deepest ring the shader draws inside the border (the focus keyline and the
+/// current rim end `border + RING_DEPTH` in), the gap kept between it and the content, the
+/// widest focus pointer, where it starts inside the border, and its gap to the content.
+const RING_DEPTH: f32 = 2.0;
+const RING_GAP: f32 = 1.0;
+const POINTER_MAX: f32 = 8.0;
+const POINTER_INSET: f32 = 3.0;
+const POINTER_GAP: f32 = 2.0;
+
+/// Minimum content padding, in UI pixels from the node edge, that keeps content off everything
+/// the shader draws inside the face in any state. It is a small fixed inset that never depends
+/// on the node's laid-out size, so it cannot feed back into layout:
+/// - every side: the 1 px edge inset, the border and the rings (`border + 2`), plus a 1 px gap;
+/// - left and right, on focusable surfaces only: the focus pointer (`border + 3`, at most 8 px
+///   wide) plus a 2 px gap, mirrored on the right so centered content stays centered;
+/// - bottom and right: the lip, so content centers on the visible face.
+///
+/// Mirrors `shell_surface.wgsl`. The same in every state, so focus and current never shift
+/// content.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ContentReserve {
+    pub(crate) left: f32,
+    pub(crate) right: f32,
+    pub(crate) top: f32,
+    pub(crate) bottom: f32,
+}
+
+impl ContentReserve {
+    fn of(geometry: Geometry, focusable: bool) -> Self {
+        let band = 1.0 + geometry.border + RING_DEPTH + RING_GAP;
+        let pointer = 1.0 + geometry.border + POINTER_INSET + POINTER_MAX + POINTER_GAP;
+        let side = if focusable { band.max(pointer) } else { band };
+        Self {
+            left: side,
+            right: side + geometry.lip.x + 1.0,
+            top: band,
+            bottom: band + geometry.lip.y + 1.0,
+        }
+    }
+
+    /// The reserve for a surface; `focusable` surfaces (buttons) also clear the focus pointer.
+    #[cfg(test)]
+    pub(crate) fn for_surface(
+        role: Surface,
+        style: Option<&SurfaceStyle>,
+        focusable: bool,
+    ) -> Self {
+        Self::of(Geometry::of(role, style), focusable)
+    }
+}
+
+/// The owner's padding and what this module last applied. A padding the owner writes later
+/// becomes the new base.
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct SurfacePadding {
+    base: UiRect,
+    applied: UiRect,
+}
+
+/// The owner's padding moved by `shift` (half the lip, so content centers on the face without
+/// changing the total), and never below the ring reserve `min`.
+fn reserved(base: Val, min: f32, shift: f32) -> Val {
+    match base {
+        Val::Px(value) => px((value + shift).max(min)),
+        Val::Auto => px(min),
+        other => other,
+    }
+}
+
+/// Raises every surface's content padding to its fixed ring reserve before layout.
+#[allow(clippy::type_complexity, reason = "Bevy layout adapter query")]
+pub(crate) fn reserve_surface_content(
+    mut commands: Commands,
+    mut surfaces: Query<(
+        Entity,
+        &Surface,
+        Option<&SurfaceStyle>,
+        Has<Interaction>,
+        &mut Node,
+        Option<&mut SurfacePadding>,
+    )>,
+) {
+    for (entity, role, style, focusable, mut node, padding) in &mut surfaces {
+        let geometry = Geometry::of(*role, style);
+        let reserve = ContentReserve::of(geometry, focusable);
+        let base = match padding.as_deref() {
+            Some(padding) if padding.applied == node.padding => padding.base,
+            _ => node.padding,
+        };
+        let lip = (geometry.lip + Vec2::ONE) * 0.5;
+        let applied = UiRect {
+            left: reserved(base.left, reserve.left, -lip.x),
+            right: reserved(base.right, reserve.right, lip.x),
+            top: reserved(base.top, reserve.top, -lip.y),
+            bottom: reserved(base.bottom, reserve.bottom, lip.y),
+        };
+        if node.padding != applied {
+            node.padding = applied;
+        }
+        match padding {
+            Some(mut padding) => {
+                if padding.base != base || padding.applied != applied {
+                    *padding = SurfacePadding { base, applied };
+                }
+            }
+            None => {
+                commands
+                    .entity(entity)
+                    .insert(SurfacePadding { base, applied });
+            }
+        }
+    }
+}
+
+/// Whether the shader draws the focus frame: focused, live, and focus visible for the input
+/// modality the player last used.
+fn shows_focus(state: SurfaceState, visibility: FocusVisibility) -> bool {
+    state.focused && !state.disabled && !state.inactive && visibility.visible
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
     reason = "Bevy material presentation"
 )]
 fn present(
-    time: Res<Time>,
-    policy: Res<SurfaceMotionPolicy>,
-    affordance: Res<SurfaceAffordance>,
+    visibility: Res<FocusVisibility>,
     mut materials: ResMut<Assets<SurfaceMaterial>>,
     surfaces: Query<(
         &Surface,
@@ -730,11 +765,9 @@ fn present(
         Option<&SurfaceStyle>,
         Option<&SurfaceMotion>,
         Has<InteractionDisabled>,
-        Has<ReducedMotionPreview>,
     )>,
 ) {
-    let phase = time.elapsed_secs() * core::f32::consts::TAU / FOCUS_PULSE_SECONDS;
-    for (role, state, node, handle, interaction, style, motion, disabled, preview) in &surfaces {
+    for (role, state, node, handle, interaction, style, motion, disabled) in &surfaces {
         let mut state = state.copied().unwrap_or_default();
         state.disabled |= disabled;
         let Some(mut mat) = materials.get_mut(&handle.0) else {
@@ -755,40 +788,17 @@ fn present(
         .to_linear()
         .to_vec4();
         let size = node.size() * node.inverse_scale_factor();
-        let default_slope = match role {
-            Surface::Row | Surface::Field => ROW_SLOPE,
-            Surface::Card | Surface::Panel => PANEL_SLOPE,
-            _ => ACTION_SLOPE,
-        };
-        mat.geometry = Vec4::new(
-            size.x,
-            size.y,
-            style.map_or(default_slope, |style| style.slope),
-            style.map_or(BORDER_WIDTH, |style| style.border_width),
-        );
-        mat.accent = affordance.focus_color(*role).to_linear().to_vec4();
-        mat.current_mark = PLAY_HIGHLIGHT.to_linear().to_vec4();
+        let geometry = Geometry::of(*role, style);
+        mat.geometry = Vec4::new(size.x, size.y, geometry.slope, geometry.border);
         mat.flags = Vec4::new(
-            f32::from(state.focused && !state.disabled && !state.inactive),
+            f32::from(shows_focus(state, *visibility)),
             f32::from(*role == Surface::Quiet),
-            f32::from(state.current && !state.disabled && affordance.marks_current(*role)),
-            affordance.index(),
+            f32::from(state.current && !state.disabled),
+            0.0,
         );
-        mat.details = style.map_or(DEFAULT_DETAILS, |style| {
-            Vec4::new(style.cut, style.shadow_x, style.shadow_y, 0.0)
-        });
+        mat.details = Vec4::new(geometry.cut, geometry.lip.x, geometry.lip.y, 0.0);
         let motion = motion.copied().unwrap_or_default();
-        let pulse = if policy.reduced || preview {
-            1.0
-        } else {
-            0.5 + 0.5 * phase.sin()
-        };
-        mat.motion = Vec4::new(
-            motion.lip,
-            motion.shine.unwrap_or(-1.0),
-            motion.flash,
-            pulse,
-        );
+        mat.motion = Vec4::new(motion.lip, motion.shine.unwrap_or(-1.0), motion.flash, 0.0);
     }
 }
 #[cfg(test)]
@@ -1022,43 +1032,167 @@ mod tests {
         assert!(burst_frame(1.0).shine.is_none());
     }
 
-    #[test]
-    fn frame_affordance_lifts_focus_except_under_reduced_motion_or_preview() {
-        let lifted = |reduced: bool, preview: bool, affordance: SurfaceAffordance| {
-            let (mut app, entity) = motion_app(reduced);
-            app.insert_resource(affordance);
-            let mut surface = app.world_mut().entity_mut(entity);
-            surface.insert(SurfaceState {
-                focused: true,
-                ..default()
-            });
-            if preview {
-                surface.insert(ReducedMotionPreview);
-            }
-            for _ in 0..30 {
-                app.update();
-            }
-            transform(&app, entity).scale.x
-        };
-        assert!((lifted(false, false, SurfaceAffordance::Frame) - (1.0 + FOCUS_LIFT)).abs() < 1e-4);
-        assert!((lifted(true, false, SurfaceAffordance::Frame) - 1.0).abs() < f32::EPSILON);
-        assert!((lifted(false, true, SurfaceAffordance::Frame) - 1.0).abs() < f32::EPSILON);
-        assert!((lifted(false, false, SurfaceAffordance::Current) - 1.0).abs() < f32::EPSILON);
+    /// Everything the shader can draw inside the face, per `shell_surface.wgsl`: the deepest ring
+    /// (focus keyline or current rim) and the widest pointer's right tip, from the node edge.
+    fn drawn_extent(geometry: Geometry) -> (f32, f32) {
+        let ring = 1.0 + geometry.border + 2.0;
+        let tip = 1.0 + geometry.border + 3.0 + 8.0;
+        (ring, tip)
     }
 
     #[test]
-    fn review_candidates_never_mark_action_buttons_as_current() {
-        for candidate in [
-            SurfaceAffordance::Frame,
-            SurfaceAffordance::Reticle,
-            SurfaceAffordance::Spotlight,
-        ] {
-            for role in [Surface::Primary, Surface::Secondary, Surface::Back] {
-                assert!(!candidate.marks_current(role), "{candidate:?} {role:?}");
+    fn content_reserve_clears_rings_pointer_and_lip_with_a_small_fixed_inset() {
+        let styles = [
+            None,
+            Some(SurfaceStyle::MAP_TOOL),
+            Some(SurfaceStyle::MAP_ACTION),
+            Some(SurfaceStyle::MAP_ASSET),
+            Some(SurfaceStyle::MAP_TAB),
+        ];
+        let roles = [
+            Surface::Back,
+            Surface::Primary,
+            Surface::Secondary,
+            Surface::Card,
+            Surface::Panel,
+            Surface::Row,
+            Surface::Dark,
+        ];
+        for style in styles {
+            for role in roles {
+                let geometry = Geometry::of(role, style.as_ref());
+                let (ring, tip) = drawn_extent(geometry);
+                let case = format!("{role:?} {style:?}");
+                let plain = ContentReserve::of(geometry, false);
+                let button = ContentReserve::of(geometry, true);
+                assert!(plain.top >= ring + RING_GAP, "{case}: top {plain:?}");
+                assert!(plain.left >= ring + RING_GAP, "{case}: side {plain:?}");
+                assert!(
+                    button.left >= tip + POINTER_GAP,
+                    "{case}: pointer {button:?}"
+                );
+                // Only focusable surfaces pay for the pointer, and only sideways.
+                assert!((button.top - plain.top).abs() < 1e-6, "{case}");
+                // Small: at most 10 px of rings above content, 20 px beside a pointer.
+                assert!(
+                    plain.top <= 10.0 && button.left <= 20.0,
+                    "{case}: {button:?}"
+                );
+                // Mirrored, plus the lip, so content centers on the visible face.
+                assert!((button.right - button.left - geometry.lip.x - 1.0).abs() < 1e-3);
+                assert!((button.bottom - button.top - geometry.lip.y - 1.0).abs() < 1e-3);
             }
-            assert!(candidate.marks_current(Surface::Card));
         }
-        assert!(SurfaceAffordance::Current.marks_current(Surface::Primary));
+    }
+
+    fn padding_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, reserve_surface_content);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Surface::Secondary,
+                SurfaceState::default(),
+                Node {
+                    padding: UiRect::axes(px(8), px(4)),
+                    ..default()
+                },
+            ))
+            .id();
+        app.update();
+        (app, entity)
+    }
+
+    fn padding(app: &App, entity: Entity) -> UiRect {
+        app.world().get::<Node>(entity).unwrap().padding
+    }
+
+    #[test]
+    fn ring_band_padding_is_the_same_in_every_state_and_keeps_the_owner_total() {
+        let (mut app, entity) = padding_app();
+        // Not a button: the band alone, no pointer allowance.
+        let reserve = ContentReserve::for_surface(Surface::Secondary, None, false);
+        let rest = padding(&app, entity);
+        assert_eq!(
+            rest,
+            UiRect {
+                left: px(reserve.left),
+                right: px(reserve.right),
+                top: px(reserve.top),
+                bottom: px(reserve.bottom),
+            },
+            "owner padding below the band is raised to it"
+        );
+        for state in [
+            SurfaceState {
+                focused: true,
+                ..default()
+            },
+            SurfaceState {
+                current: true,
+                ..default()
+            },
+            SurfaceState {
+                focused: true,
+                current: true,
+                ..default()
+            },
+            SurfaceState {
+                disabled: true,
+                ..default()
+            },
+        ] {
+            *app.world_mut().get_mut::<SurfaceState>(entity).unwrap() = state;
+            app.update();
+            assert_eq!(padding(&app, entity), rest, "{state:?} shifts content");
+        }
+
+        // An owner padding already clear of the rings keeps its total size; half the lip moves
+        // from top to bottom so content centers on the visible face.
+        app.world_mut().get_mut::<Node>(entity).unwrap().padding = UiRect::all(px(24));
+        app.update();
+        app.update();
+        let lip = (DEFAULT_DETAILS.z + 1.0) * 0.5;
+        assert_eq!(
+            padding(&app, entity),
+            UiRect {
+                left: px(23.5),
+                right: px(24.5),
+                top: px(24.0 - lip),
+                bottom: px(24.0 + lip),
+            }
+        );
+
+        // A button also clears the focus pointer sideways.
+        app.world_mut().entity_mut(entity).insert(Interaction::None);
+        app.world_mut().get_mut::<Node>(entity).unwrap().padding = UiRect::ZERO;
+        app.update();
+        let button = ContentReserve::for_surface(Surface::Secondary, None, true);
+        assert_eq!(padding(&app, entity).left, px(button.left));
+        assert_eq!(padding(&app, entity).right, px(button.right));
+    }
+
+    #[test]
+    fn hidden_focus_keeps_the_focused_state_and_current_choice() {
+        let state = SurfaceState {
+            focused: true,
+            current: true,
+            ..default()
+        };
+        assert!(shows_focus(state, FocusVisibility { visible: true }));
+        assert!(!shows_focus(state, FocusVisibility { visible: false }));
+        assert!(!shows_focus(
+            SurfaceState {
+                inactive: true,
+                ..state
+            },
+            FocusVisibility { visible: true }
+        ));
+        // Hiding focus is presentation only: the state still says focused, and the current
+        // choice keeps its fill (and its rim, which `present` flags from `current`).
+        assert!(state.focused);
+        assert_eq!(fill(Surface::Card, state, Interaction::None), PANEL_RAISED);
     }
 
     #[test]

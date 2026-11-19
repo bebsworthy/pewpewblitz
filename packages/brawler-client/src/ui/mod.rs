@@ -5,6 +5,7 @@ pub(crate) mod theme;
 
 pub(crate) mod controls;
 pub(crate) mod feedback;
+pub(crate) mod focus_visibility;
 pub(crate) mod fonts;
 #[cfg(feature = "automation")]
 pub(crate) mod gallery;

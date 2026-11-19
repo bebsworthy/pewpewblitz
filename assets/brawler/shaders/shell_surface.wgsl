@@ -2,21 +2,20 @@
 // Gradient bottom; top is `fill_top`.
 @group(1) @binding(0) var<uniform> fill: vec4<f32>;
 @group(1) @binding(1) var<uniform> ink: vec4<f32>;
-// Navigation focus color (frame, pointer, brackets or face highlight, by affordance).
+// Navigation focus frame and pointer.
 @group(1) @binding(2) var<uniform> accent: vec4<f32>;
 // x/y size, z slant, w border width.
 @group(1) @binding(3) var<uniform> geometry: vec4<f32>;
-// x focused, y quiet, z current (the chosen option in a set), w focus/current affordance
-// (BRL-fe7t review: 0 current frame, 1 bright frame, 2 reticle, 3 spotlight).
+// x focused (and focus visible), y quiet, z current (the chosen option in a set).
+// `surface.rs::ContentReserve` mirrors the frame, rim and pointer extents below; change both together.
 @group(1) @binding(4) var<uniform> flags: vec4<f32>;
 // x corner cut, y/z bottom-lip offset.
 @group(1) @binding(5) var<uniform> details: vec4<f32>;
 @group(1) @binding(6) var<uniform> fill_top: vec4<f32>;
-// Persistent "current choice" mark color.
+// Persistent "current choice" rim color.
 @group(1) @binding(7) var<uniform> current_mark: vec4<f32>;
 // x press amount (collapses the lip), y shine sweep 0..1 or negative when idle, z burst flash
-// toward white (0..0.3; colors stay at or below 1.0), w focus pulse 0..1 (constant under reduced
-// motion).
+// toward white (0..0.3; colors stay at or below 1.0).
 @group(1) @binding(8) var<uniform> motion: vec4<f32>;
 fn edge(p: vec2<f32>, extent: vec2<f32>, inset: f32) -> f32 {
     let slope=geometry.z;
@@ -28,49 +27,6 @@ fn edge(p: vec2<f32>, extent: vec2<f32>, inset: f32) -> f32 {
     let top_right=(extent.x-x+p.y-cut)/normal-inset;
     let bottom_left=(x-slope*extent.y+extent.y-p.y-cut)/normal-inset;
     return min(sides,min(top_right,bottom_left));
-}
-// Second-nearest edge distance: small only near a corner of the silhouette (reticle brackets).
-fn corner(p: vec2<f32>, extent: vec2<f32>) -> f32 {
-    let slope=geometry.z;
-    let x=p.x+slope*p.y;
-    let side=sqrt(1.+slope*slope);
-    let cut=min(details.x,extent.y*0.16);
-    let normal=sqrt(1.+(1.-slope)*(1.-slope));
-    let e=array<f32,6>(p.y,extent.y-p.y,(x-slope*extent.y)/side,(extent.x-x)/side,
-        (extent.x-x+p.y-cut)/normal,(x-slope*extent.y+extent.y-p.y-cut)/normal);
-    var a=1e9;
-    var b=1e9;
-    for (var i=0; i<6; i++) {
-        let v=e[i];
-        if v<a { b=a; a=v; } else if v<b { b=v; }
-    }
-    return b;
-}
-fn band(d: f32, start: f32, aa: f32) -> f32 {
-    return smoothstep(start-aa,start+aa,d);
-}
-fn segment(q: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
-    let qa=q-a;
-    let ba=b-a;
-    return length(qa-ba*clamp(dot(qa,ba)/dot(ba,ba),0.,1.));
-}
-// Review candidates' "this is your choice" badge: a gold disc with an ink check in the top-right
-// corner of the face. Faces too short to hold it beside their label (team-size chips, tabs,
-// settings categories) keep only the candidate's trim, bar or outline.
-fn current_badge(p: vec2<f32>, extent: vec2<f32>, base: vec4<f32>) -> vec4<f32> {
-    if extent.y < 56. { return base; }
-    let w=geometry.w;
-    let r=clamp(0.17*extent.y,7.,11.);
-    let cy=w+5.+r;
-    let q=p-vec2<f32>(extent.x-geometry.z*cy-w-7.-r,cy);
-    let disc=length(q);
-    let disc_aa=max(0.5*fwidth(disc),0.0001);
-    let elbow=vec2<f32>(-0.12*r,0.36*r);
-    let check=min(segment(q,vec2<f32>(-0.46*r,0.02*r),elbow),segment(q,elbow,vec2<f32>(0.5*r,-0.36*r)));
-    let check_aa=max(0.5*fwidth(check),0.0001);
-    var color=mix(base,ink,1.-smoothstep(r+1.5-disc_aa,r+1.5+disc_aa,disc));
-    color=mix(color,current_mark,1.-smoothstep(r-disc_aa,r+disc_aa,disc));
-    return mix(color,ink,1.-smoothstep(0.17*r-check_aa,0.17*r+check_aa,check));
 }
 @fragment fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     let size=max(geometry.xy,vec2<f32>(1.));
@@ -86,23 +42,18 @@ fn current_badge(p: vec2<f32>, extent: vec2<f32>, base: vec4<f32>) -> vec4<f32> 
     let lip_aa=max(0.5*fwidth(lip_d),0.0001);
     let lip=smoothstep(-lip_aa,lip_aa,lip_d);
     let mid=extent.y*0.5;
-    let left=geometry.z*(extent.y-p.y)+15.;
+    // Focus pointer: a right-pointing triangle just inside the focus frame, `pointer` wide and
+    // twice as tall, smaller on short faces so it stays inside the frame.
+    let pointer=clamp(mid-geometry.w-4.,4.,8.);
+    let left=geometry.z*(extent.y-p.y)+geometry.w+3.;
     let marker_x=p.x-left;
-    let marker_d=min(marker_x,(12.-marker_x-abs(p.y-mid))/sqrt(2.));
+    let marker_d=min(marker_x,(pointer-marker_x-abs(p.y-mid))/sqrt(2.));
     let marker_aa=max(0.5*fwidth(marker_d),0.0001);
     let marker=smoothstep(-marker_aa,marker_aa,marker_d);
     if flags.y > 0.5 && flags.x < 0.5 { return vec4<f32>(0.); }
     let w=geometry.w;
-    let variant=u32(flags.w+0.5);
-    let focused=flags.x>0.5;
-    let current=flags.z>0.5;
-    let pulse=clamp(motion.w,0.,1.);
     // Pressable face: vertical gradient plus a 2.5 px light band under the top border.
     var face=mix(fill_top,fill,clamp(p.y/max(extent.y,1.),0.,1.));
-    if variant==3u && focused {
-        // Spotlight: the focused face itself lights up toward the focus color.
-        face=mix(face,accent,0.5+0.1*pulse);
-    }
     let band_top=1.+w;
     let top_band=1.-smoothstep(band_top+2.,band_top+3.,p.y);
     face=mix(face,mix(face,vec4<f32>(1.),0.4),top_band);
@@ -116,83 +67,23 @@ fn current_badge(p: vec2<f32>, extent: vec2<f32>, base: vec4<f32>) -> vec4<f32> 
     }
     // Reward/confirmation burst flash (BRL-51zd).
     face=mix(face,vec4<f32>(1.),clamp(motion.z,0.,0.5));
-    var color=vec4<f32>(0.);
-    switch variant {
-        case 1u: {
-            // Bright frame: the outline turns white with a soft inner glow; the current choice is a
-            // gold trim inside it plus the check badge. The surface also lifts (surface.rs).
-            var inner=face;
-            var edge_in=w;
-            if focused {
-                edge_in=w+1.5;
-                // Lighten in hue (scale, not a mix toward white, which greys the navy roles),
-                // then a narrow white glow just inside the frame.
-                let lit=vec4<f32>(min(face.rgb*1.45,vec3<f32>(1.)),face.a);
-                let glow=(1.-smoothstep(edge_in,edge_in+7.,d))*(0.16+0.14*pulse);
-                inner=mix(lit,vec4<f32>(1.),glow);
-            }
-            if current {
-                inner=mix(current_mark,inner,band(d,edge_in+4.,aa));
-                inner=current_badge(p,extent,inner);
-            }
-            color=mix(ink,inner,band(d,edge_in,aa));
-            if focused {
-                color=mix(ink,accent,band(d,1.5,aa));
-                color=mix(color,inner,band(d,edge_in,aa));
-            }
-        }
-        case 2u: {
-            // Reticle: white corner brackets lock onto the silhouette; the current choice is a gold
-            // bar along the bottom of the face plus the check badge.
-            var inner=face;
-            if current {
-                let bottom=extent.y-p.y;
-                let bar=1.-smoothstep(w+6.-aa,w+6.+aa,bottom);
-                let keyline=1.-smoothstep(w+8.-aa,w+8.+aa,bottom);
-                inner=mix(inner,ink,keyline);
-                inner=mix(inner,current_mark,bar);
-                inner=current_badge(p,extent,inner);
-            }
-            color=mix(ink,inner,band(d,w,aa));
-            if focused {
-                let c=corner(p,extent);
-                let c_aa=max(0.5*fwidth(c),0.0001);
-                let reach=clamp(0.3*min(extent.x,extent.y),12.,26.)+6.*pulse;
-                let arm=1.-smoothstep(reach-c_aa,reach+c_aa,c);
-                let thick=w+3.;
-                var bracket=mix(ink,accent,band(d,1.5,aa));
-                bracket=mix(bracket,ink,band(d,thick,aa));
-                color=mix(color,bracket,arm*(1.-band(d,thick+1.5,aa)));
-            }
-        }
-        case 3u: {
-            // Spotlight: the face lights up (above) under a white inner bevel; the current choice
-            // turns the outline gold and carries the check badge.
-            var inner=face;
-            if focused {
-                inner=mix(vec4<f32>(1.),face,band(d,w+2.5,aa));
-            }
-            color=mix(ink,inner,band(d,w,aa));
-            if current {
-                inner=current_badge(p,extent,inner);
-                let rim=mix(ink,current_mark,band(d,1.5,aa));
-                color=mix(rim,inner,band(d,w+1.,aa));
-            }
-        }
-        default: {
-            var inner=face;
-            if current {
-                let rim=select(w+4.,w+9.,focused);
-                inner=mix(current_mark,face,smoothstep(rim-aa,rim+aa,d));
-            }
-            color=mix(ink,inner,smoothstep(w-aa,w+aa,d));
-            if focused {
-                color=mix(ink,accent,smoothstep(w-aa,w+aa,d));
-                color=mix(color,ink,smoothstep(w+4.-aa,w+4.+aa,d));
-                color=mix(color,inner,smoothstep(w+6.-aa,w+6.+aa,d));
-                color=mix(color,accent,marker);
-            }
-        }
+    // Every ring stays within `border + 2` of the edge (`surface.rs::ContentReserve`). Focus
+    // turns the border `accent` behind a thin ink edge, with an ink keyline just inside it. The
+    // current rim is a 3 px gold band straddling the inner edge of the border; it replaces the
+    // keyline when the surface is also focused.
+    let ring=w+2.;
+    var color=mix(ink,face,smoothstep(w-aa,w+aa,d));
+    if flags.x>0.5 {
+        color=mix(ink,accent,smoothstep(1.5-aa,1.5+aa,d));
+        color=mix(color,ink,smoothstep(w+0.5-aa,w+0.5+aa,d));
+        color=mix(color,face,smoothstep(ring-aa,ring+aa,d));
+    }
+    if flags.z>0.5 {
+        let rim=smoothstep(w-1.-aa,w-1.+aa,d)*(1.-smoothstep(ring-aa,ring+aa,d));
+        color=mix(color,current_mark,rim);
+    }
+    if flags.x>0.5 {
+        color=mix(color,accent,marker);
     }
     let a=max(mask,lip);
     return vec4<f32>(mix(ink.rgb,color.rgb,mask),a);

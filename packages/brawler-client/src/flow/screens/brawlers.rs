@@ -427,7 +427,9 @@ fn spawn_brawler_list_row(
             card.spawn(Node {
                 width: percent(100),
                 height: px(art.card_height - 120.0),
-                flex_shrink: 0.0,
+                // A long name that wraps shrinks the preview instead of overflowing the card.
+                min_height: px(0),
+                flex_shrink: 1.0,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 overflow: Overflow::clip(),

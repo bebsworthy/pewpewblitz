@@ -1199,6 +1199,10 @@ mod tests {
         ));
         let mut app = shell_test_app(path);
         crate::ui::layout_harness::add_layout(&mut app, 868, 411);
+        app.add_systems(
+            PostUpdate,
+            crate::ui::surface::reserve_surface_content.before(UiSystems::Layout),
+        );
         app.update();
         request_settings(&mut app);
         for category in [
@@ -1222,6 +1226,12 @@ mod tests {
             assert!(
                 unreachable.is_empty(),
                 "{category:?}: unreachable controls: {unreachable:?}"
+            );
+            // BRL-fe7t: rows, tabs and values stay clear of the focus frame and current rim.
+            let intrusions = crate::ui::layout_harness::surface_ring_intrusions(app.world_mut());
+            assert!(
+                intrusions.is_empty(),
+                "{category:?}: content in the ring band: {intrusions:#?}"
             );
         }
 

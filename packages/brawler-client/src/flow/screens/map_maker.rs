@@ -3224,7 +3224,6 @@ fn palette_arrow_button(
         Surface::Dark,
         SurfaceStyle::MAP_ACTION,
         SurfaceState {
-            current: !disabled,
             disabled,
             ..default()
         },
@@ -3351,9 +3350,12 @@ fn palette_item_button(
             palette_selection_badge(button, mark, visibility);
             button.spawn((
                 preview,
+                // Fits inside the card's ring reserve at the preview's 168:124 aspect, so the card
+                // keeps its 180 px width (BRL-fe7t).
                 Node {
-                    width: px(168),
-                    height: px(124),
+                    width: percent(100),
+                    max_width: px(168),
+                    aspect_ratio: Some(168.0 / 124.0),
                     ..default()
                 },
                 BackgroundColor(PANEL),

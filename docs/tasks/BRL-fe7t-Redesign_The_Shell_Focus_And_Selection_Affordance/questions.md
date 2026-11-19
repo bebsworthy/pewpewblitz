@@ -2,13 +2,13 @@
 
 # Questions · BRL-fe7t
 
-## q-4yrvg6g · open · blocking · edited 2026-11-18 22:01 · by Boyd
+## q-4yrvg6g · answered · blocking · edited 2026-11-18 22:01 · by Boyd
 
 Should the shell hide focus after touch input and show it again after keyboard or gamepad input?
 
 Focus is where your keyboard, gamepad or mouse cursor is. Today `flow/screens/shared.rs` draws focus on whichever control `navigation.focused` points at, whatever the input, so on a phone the last tapped control (or the screen's default one) keeps a focus frame even though nobody is navigating with a cursor. None of the focus looks settles this; each only changes how focus looks. The "TOUCH · after tap, focus hidden" rows on every sheet show the proposed result: after a tap, the press feedback and the current-choice mark stay (for example your chosen brawler keeps its badge), and focus is not drawn.
 
-- [ ] Focus visible by input type *(recommended · default if unanswered)*
+- [x] Focus visible by input type *(recommended · default if unanswered)*
 
   Focus is hidden after a touch press and shown again on the next keyboard or gamepad navigation. Mouse hover and click keep today's behaviour (focus follows the pointer and stays visible). Navigation state doesn't change, so a gamepad picks up exactly where the touch left off. Verified with a small schedule test plus the Pixel 8a check in the acceptance criteria.
 
@@ -20,7 +20,7 @@ Focus is where your keyboard, gamepad or mouse cursor is. Today `flow/screens/sh
 
   No input-type rule; touch users keep seeing the focus look (made less noisy by the chosen look).
 
-## q-rc8skq9 · open · blocking · by Boyd
+## q-rc8skq9 · answered · blocking · by Boyd
 
 Which focus look should the shell use, together with its "current choice" mark?
 
@@ -56,6 +56,8 @@ Each sheet has two board pages, each beside today's look, at desktop size (1280x
 - [ ] Keep the current look
 
   No change: cyan frame with a small pointer arrow for focus, and a yellow rim with a lighter face for the current choice. It's the left column of every sheet.
+
+> **Answer** (2026-11-19 05:10 · by Boyd): Owner (chat 2026-11-19): keep the current cyan frame + pointer and gold rim; fix the spacing so rings never overlap content.
 
 ## Resolved
 

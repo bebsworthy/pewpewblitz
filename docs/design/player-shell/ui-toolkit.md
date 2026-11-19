@@ -79,7 +79,13 @@ antialiased, and it owns the gradient, top band, and lip. Text and hit targets s
 UI; artwork is never stretched to define interaction geometry.
 
 Use internal padding rather than positioning text or trailing controls against the border. Labels
-are vertically centered. Toggle tracks, binding badges, values, and other trailing actions must
+are vertically centered. Focus and current rings sit within `border + 2` px of the edge, and
+`SurfacePlugin` keeps content off them with a small fixed inset (`ContentReserve`, BRL-fe7t) that
+never depends on the laid-out size: the border, the rings and a 1 px gap on every side; on buttons
+also the focus pointer (at most 8 px, mirrored right so centered content stays centered); and the
+lip, with half of it moved from the top padding to the bottom so content centers on the visible
+face without changing the owner's total. Owner padding is kept where it already clears the rings,
+so button and card sizes don't change. Toggle tracks, binding badges, values, and other trailing actions must
 remain fully inside the usable shape even when the focus frame appears.
 Every fill and interaction tint is clipped to the same cut-corner silhouette as its frame; color
 must not bleed into the transparent area outside the border.
@@ -90,7 +96,7 @@ must not bleed into the transparent area outside the border.
 
 | State | Meaning | Required presentation |
 |---|---|---|
-| Focused | Where keyboard, gamepad or pointer navigation is (`FlowNavigation::focused`); every control can take it | `accent` inner frame with an `ink` keyline and an `accent` pointer; always visible on the active scope |
+| Focused | Where keyboard, gamepad or pointer navigation is (`FlowNavigation::focused`); every control can take it | `accent` inner frame with an `ink` keyline and an `accent` pointer on the active scope. Focus visible by modality (`FocusVisibility`): a touch press hides it, the next keyboard arrow/Tab, gamepad button or mouse press shows it; navigation keeps its focused control either way |
 | Current | The option the player has chosen in a set (game type draft, brawler, loadout slot, equipped part, Map Maker tool, settings category); only choice components have it, action buttons never do | `panel-raised` fill with a `play-highlight` rim; the primary action keeps `play` |
 | Inactive | Retained surface behind an overlay or outside the active input scope | No focus treatment or pointer |
 | Disabled | Action cannot currently run | Muted treatment, no false focus emphasis, and factual reason where needed |
@@ -164,12 +170,8 @@ application. Run `just ui-gallery` for the wide state matrix and
 `BRAWLER_UI_GALLERY_CAPTURE=<path>.png` to save the settled top, a scrolled middle
 (`<path>-middle.png`) and the scrolled bottom (`<path>-bottom.png`) and exit, for native evidence without OS screen capture. Its Reduced motion
 demo switch drives the production surface motion policy.
-`BRAWLER_UI_GALLERY_AFFORDANCE_BOARD=1` swaps in the BRL-fe7t focus/selection review board (rest,
-focus, selected, focus + selected, pressed and disabled on Primary, Secondary, Card and Row, plus
-reduced-motion and touch rows); `BRAWLER_UI_GALLERY_SIZE=WIDTHxHEIGHT` sets an exact window and
-V cycles the affordance. Automation builds (gallery and `just shell-capture`) select a review
-affordance with `BRAWLER_SURFACE_AFFORDANCE=frame|reticle|spotlight`; the player shell always
-keeps the current one until the owner chooses. It supplements native
+`BRAWLER_UI_GALLERY_SIZE=WIDTHxHEIGHT` opens the gallery at an exact logical window size. It
+supplements native
 screen review; it does not validate product flow or replace screen-level tests.
 
 ## Extending the toolkit

@@ -1038,7 +1038,12 @@ fn spawn_dashboard_button_contents(
     let mut text = parent.spawn((Text::new(label), font(assets, font_size), TextColor(color)));
     match kind {
         DashboardButtonContentKind::Play => {
-            text.insert(DashboardPlayLabel);
+            // A tight line box: the glyphs keep their size and centre while the button keeps its
+            // height with the surface ring band reserved around the label (BRL-fe7t).
+            text.insert((
+                DashboardPlayLabel,
+                bevy::text::LineHeight::RelativeToFont(1.0),
+            ));
         }
         DashboardButtonContentKind::Practice => {
             text.insert(DashboardPracticeLabel);

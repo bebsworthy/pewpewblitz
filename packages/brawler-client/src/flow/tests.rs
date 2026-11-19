@@ -3684,6 +3684,155 @@ fn player_path_screens_keep_every_control_reachable_on_a_landscape_phone() {
     assert_phone_reachable(&mut app, "Practice maps");
 }
 
+/// The screens the ring-band checks walk, in order, from the Dashboard.
+const RING_BAND_SCREENS: [&str; 5] = [
+    "Dashboard",
+    "Weapon equipment",
+    "Brawlers",
+    "Choose Game",
+    "Practice maps",
+];
+
+/// Lays out the ring-band screens at one viewport, with or without the surface content reserve,
+/// and hands each settled screen to `visit`.
+fn walk_ring_band_screens(
+    width: u32,
+    height: u32,
+    reserve: bool,
+    mut visit: impl FnMut(&mut App, &str),
+) {
+    let membership = lobby_membership_with_brawler();
+    let brawler = membership.profile.brawlers[0].id;
+    let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
+        crate::ui::layout_harness::add_layout(app, width, height);
+        if reserve {
+            app.add_systems(
+                PostUpdate,
+                crate::ui::surface::reserve_surface_content.before(UiSystems::Layout),
+            );
+        }
+    });
+    crate::ui::layout_harness::apply_viewport_fit(&mut app);
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(membership.profile.clone());
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    app.update();
+    enter_dashboard(&mut app);
+    let actions = [
+        vec![],
+        vec![FlowUiAction::OpenWeaponEquipment(brawler)],
+        vec![
+            FlowUiAction::CancelWeaponEquipment,
+            FlowUiAction::OpenBrawlerList,
+        ],
+        vec![
+            FlowUiAction::CloseBrawlerList,
+            FlowUiAction::OpenGameTypeSelect,
+        ],
+        vec![FlowUiAction::CancelGameType, FlowUiAction::OpenPracticeMaps],
+    ];
+    for (screen, actions) in RING_BAND_SCREENS.into_iter().zip(actions) {
+        for action in actions {
+            inject_action(&mut app, action);
+        }
+        assert_phone_reachable(&mut app, screen);
+        visit(&mut app, screen);
+    }
+}
+
+/// Logical outer size of every visible, laid-out flow button, keyed by its action. A Back's
+/// width is left out (zero): in the client, `SurfacePlugin::bind` floors it from the label, wider
+/// than its padded content, and this harness does not run `bind`.
+fn flow_button_sizes(app: &mut App) -> Vec<(String, Vec2)> {
+    let mut buttons = app.world_mut().query::<(
+        &FlowButton,
+        &ComputedNode,
+        &InheritedVisibility,
+        Option<&Surface>,
+    )>();
+    let mut sizes: Vec<_> = buttons
+        .iter(app.world())
+        .filter(|(_, node, visible, _)| visible.get() && !node.is_empty())
+        .map(|(button, node, _, role)| {
+            let mut size = node.size() * node.inverse_scale_factor();
+            if role == Some(&Surface::Back) {
+                size.x = 0.0;
+            }
+            (format!("{:?}", button.action), size)
+        })
+        .collect();
+    sizes.sort_by(|a, b| a.0.cmp(&b.0));
+    sizes
+}
+
+/// BRL-fe7t: on the phone and desktop viewports, no screen content reaches into a surface's
+/// ring band, so the focus frame, current rim and pointer never draw over a label or icon.
+#[test]
+fn shell_surface_content_stays_clear_of_the_ring_band() {
+    for (width, height) in [PHONE_VIEWPORT, (914, 411), (1280, 720)] {
+        walk_ring_band_screens(width, height, true, |app, screen| {
+            let intrusions = crate::ui::layout_harness::surface_ring_intrusions(app.world_mut());
+            assert!(
+                intrusions.is_empty(),
+                "{screen} at {width}x{height}: content in the ring band: {intrusions:#?}"
+            );
+        });
+    }
+}
+
+/// BRL-fe7t: the ring band fits inside the existing button and card sizes. Every flow button
+/// keeps its outer size within 3.5 px of the layout without the reserve (the pre-fe7t sizes),
+/// and the loadout header Back does not move at all.
+#[test]
+fn ring_band_keeps_button_and_card_outer_sizes() {
+    for (width, height) in [PHONE_VIEWPORT, (914, 411), (1280, 720)] {
+        let mut baseline = Vec::new();
+        walk_ring_band_screens(width, height, false, |app, screen| {
+            baseline.push((screen.to_owned(), flow_button_sizes(app)));
+        });
+        let mut baseline = baseline.into_iter();
+        walk_ring_band_screens(width, height, true, |app, screen| {
+            let (expected_screen, before) = baseline.next().expect("same screens");
+            assert_eq!(expected_screen, screen);
+            let after = flow_button_sizes(app);
+            assert_eq!(
+                before.iter().map(|(key, _)| key).collect::<Vec<_>>(),
+                after.iter().map(|(key, _)| key).collect::<Vec<_>>(),
+                "{screen} at {width}x{height}: the same buttons"
+            );
+            let grown: Vec<_> = before
+                .iter()
+                .zip(&after)
+                .filter(|((_, before), (_, after))| (*after - *before).abs().max_element() > 3.5)
+                .map(|((key, before), (_, after))| format!("{key}: {before} -> {after}"))
+                .collect();
+            assert!(
+                grown.is_empty(),
+                "{screen} at {width}x{height}: outer sizes changed: {grown:#?}"
+            );
+            // The loadout header Back is a fixed-height bar: the reserve must not move it at all.
+            if screen == "Weapon equipment" {
+                let back = |sizes: &[(String, Vec2)]| {
+                    sizes
+                        .iter()
+                        .find(|(key, _)| key == "CancelWeaponEquipment")
+                        .expect("loadout Back")
+                        .1
+                };
+                assert!(
+                    (back(&after).y - back(&before).y).abs() < 0.5,
+                    "{width}x{height}: loadout Back {} -> {} px tall",
+                    back(&before).y,
+                    back(&after).y
+                );
+            }
+        });
+    }
+}
+
 /// Settles the layout, then asserts every control stays reachable and is a 48 dp touch target.
 fn assert_phone_touch_targets(app: &mut App, screen: &str) {
     assert_phone_reachable(app, screen);
@@ -4765,6 +4914,77 @@ fn ime_commits_edit_the_server_address_and_name_within_their_bounds() {
     app.world_mut().resource_mut::<ServerSelectModel>().editing = None;
     app.update();
     assert_eq!(published_text_entry(&app), None);
+}
+
+/// BRL-fe7t: a touch hides the focus frame without moving navigation focus, and the next
+/// keyboard or gamepad navigation shows it again and continues from the same control.
+#[test]
+fn touch_hides_focus_and_navigation_resumes_where_it_was() {
+    use crate::ui::focus_visibility::{FocusVisibility, track_focus_visibility};
+    use bevy::input::{
+        ButtonState,
+        gamepad::GamepadButtonStateChangedEvent,
+        keyboard::Key,
+        mouse::MouseButtonInput,
+        touch::{TouchInput, TouchPhase},
+    };
+    let mut app = phone_layout_flow_app();
+    app.add_message::<MouseButtonInput>()
+        .add_message::<GamepadButtonStateChangedEvent>()
+        .init_resource::<FocusVisibility>()
+        .add_systems(PreUpdate, track_focus_visibility);
+    app.world_mut()
+        .resource_mut::<NextState<ClientFlow>>()
+        .set(ClientFlow::ServerSelect);
+    settle_layout(&mut app);
+    app.world_mut().resource_mut::<FlowNavigation>().focused = 1;
+    app.update();
+    let focused_states = |app: &mut App| {
+        let mut buttons = app
+            .world_mut()
+            .query::<(&FlowButton, &crate::ui::surface::SurfaceState)>();
+        buttons
+            .iter(app.world())
+            .filter(|(_, state)| state.focused)
+            .map(|(button, _)| button.index)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(focused_states(&mut app), [1]);
+
+    // A finger on empty space: focus hides, navigation and the focused state stay put.
+    let window = app
+        .world_mut()
+        .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut().write_message(TouchInput {
+        phase: TouchPhase::Started,
+        position: Vec2::new(2.0, 2.0),
+        window,
+        force: None,
+        id: 7,
+    });
+    app.update();
+    assert!(!app.world().resource::<FocusVisibility>().visible);
+    assert_eq!(app.world().resource::<FlowNavigation>().focused, 1);
+    assert_eq!(focused_states(&mut app), [1]);
+
+    // The next keyboard navigation shows focus again and moves on from the same control.
+    app.world_mut().write_message(KeyboardInput {
+        key_code: KeyCode::ArrowDown,
+        logical_key: Key::ArrowDown,
+        state: ButtonState::Pressed,
+        text: None,
+        repeat: false,
+        window,
+    });
+    app.update();
+    assert!(app.world().resource::<FocusVisibility>().visible);
+    assert_eq!(
+        focused_states(&mut app),
+        [2],
+        "navigation continues from the control the touch left focused"
+    );
 }
 
 /// BRL-wr0s: the first tap after launch activates a Server Select control on the phone viewport,
