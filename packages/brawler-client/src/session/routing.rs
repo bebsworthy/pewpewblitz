@@ -106,7 +106,9 @@ pub(super) fn process_match_rejoin_status(
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
-    reason = "Bevy resources are schedule-owned system parameters"
+    clippy::too_many_arguments,
+    reason = "Bevy resources are schedule-owned system parameters; the result copies facts from \
+              replicated match state and the lobby reservation (BRL-1sgj) at one completion point"
 )]
 pub(crate) fn observe_completed_match(
     config: Res<ClientNetworkConfig>,
@@ -124,6 +126,7 @@ pub(crate) fn observe_completed_match(
     statuses: Query<&ClientJoinStatus, With<Client>>,
     fighters: Query<(&PlayerId, &brawler::combat::TeamId), With<Fighter>>,
     selection: Option<Res<SelectedGameType>>,
+    loading: Option<Res<crate::ClientMatchLoadingModel>>,
     result_state: Option<ResMut<ClientMatchResultState>>,
 ) {
     if config.transport != NetworkTransport::RoutedUdp
@@ -210,6 +213,11 @@ pub(crate) fn observe_completed_match(
             wipeout,
             objective,
             local_player,
+            // The reservation that started this match credits its community map (BRL-1sgj).
+            published_map: loading
+                .as_deref()
+                .and_then(crate::ClientMatchLoadingModel::active)
+                .and_then(|active| active.published_map.clone()),
         });
     }
     if lifecycle.request_return_to_lobby() {

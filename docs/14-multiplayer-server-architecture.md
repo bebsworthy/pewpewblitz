@@ -397,6 +397,23 @@ its stored recipe bytes, revision and fingerprint in the allocation request with
 and the worker validates it exactly as for authored Practice. Already formed reservations keep
 their immutable manifest. The supervisor, control IPC and manifest schema are unchanged.
 
+An author reads and withdraws their own submissions over the same lobby session (BRL-s3dh,
+protocol 53). A `PublishedMapsRequest { List | Withdraw { published_map_id } }` is accepted once
+per update and at most one is in flight per lobby session; the lobby always scopes it to the
+session's own `AccountId` and never takes an account from the client. The storage executor runs
+the optional withdrawal and the listing in one transaction: a withdrawal matches only a row with
+that ID *and* that account (another account's row answers `NotFound`, exactly like a missing one),
+accepts only a pending or approved row, and moves it to `removed` with the reason "Withdrawn by
+the author." — the same terminal state an operator `remove` leaves. The `PublishedMapsReply`
+lists the account's newest 64 rows without recipe bytes; the lobby adds `in_rotation` for approved
+rows from its in-memory rotation and leaves out any row whose name or reason could not cross the
+wire. A withdrawn approved map leaves `CommunityMapRotation` at once: the lobby drops it, discards
+a rotation read already in flight (it may predate the withdrawal) and re-reads storage
+immediately, so queue formation never picks it again. Reservations formed before the withdrawal
+keep their manifest. Resubmitting never replaces a pending row: each accepted publish is a new
+row under the per-account pending limit and cooldown, and an author who wants to swap a pending
+map withdraws it and publishes again.
+
 ## Failure and security requirements
 
 - Reject malformed, oversized, unknown-version, expired, revoked, replayed where prohibited, or

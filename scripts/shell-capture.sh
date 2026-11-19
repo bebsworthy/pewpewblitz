@@ -14,6 +14,15 @@
 # (for example hot-zone-3v3 or heist-3v3 Results). Each live route leaves its match afterwards;
 # `results` first plays again from Results to exercise the replay path.
 #
+# Published-map routes (BRL-s3dh, BRL-1sgj) also use the capture catalog, which drops the publish
+# cooldown. Before `map-library-published` headless fixture clients acting as the capture
+# client's own account publish four maps, and the operator CLI and the author's withdraw leave
+# them approved, rejected, withdrawn and pending. Before `results-published` a fixture account
+# publishes one map, the CLI approves it, a fixture 1v1 match uses up the built-in rotation slot,
+# and a fixture opponent joins the capture client's 1v1 queue match on the community map and
+# leaves at Active. Run it with BRAWLER_SHELL_CAPTURE_GAME_TYPE=wipeout-1v1 so the capture client
+# queues the game type that takes community maps.
+#
 # usage: scripts/shell-capture.sh [route|all] [WIDTHxHEIGHT|all]
 # Output: ${BRAWLER_SHELL_CAPTURE_DIR:-target/shell-capture}/<size>/, with server data, client
 # data, and per-route logs in <size>.run/ beside it. Never data/server/ or port 5000.
@@ -33,8 +42,9 @@ all_routes=(
     map-editor-rule map-editor-rule-show map-editor-focus map-editor-saved
     map-library-drafts map-rename map-delete queue
     match-loading match-menu leave-confirmation results
+    map-library-published results-published
 )
-live_routes=" match-loading match-menu leave-confirmation results "
+live_routes=" match-loading match-menu leave-confirmation results map-library-published results-published "
 all_sizes=(1280x720 914x411)
 
 route=${1:-all}
@@ -73,7 +83,7 @@ target_dir=${CARGO_TARGET_DIR:-$project_dir/target}
 commit=$(git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)
 BRAWLER_GIT_COMMIT="$commit" cargo build --locked --release -p brawler-client --bin brawler-client \
     --features automation
-cargo build --locked --bin brawler-server --no-default-features --features server
+cargo build --locked --bin brawler-server --bin brawler-profile-admin --no-default-features --features server
 cargo build --locked -p brawler-routing --bin brawler-supervisor
 
 identity=$("$target_dir"/debug/brawler-server routing-identity)
@@ -90,10 +100,12 @@ client_pid=
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
-    if [[ -n "$client_pid" ]] && kill -0 "$client_pid" 2>/dev/null; then
-        kill -TERM "$client_pid" 2>/dev/null || true
-        wait "$client_pid" 2>/dev/null || true
-    fi
+    for pid in "$client_pid" "${opponent_pid:-}"; do
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
     stop_supervisor
     exit "$status"
 }
@@ -122,6 +134,8 @@ text = pathlib.Path(source).read_text()
 text, count = re.subn(r'match_duration_seconds:\s*\d+', f'match_duration_seconds: {seconds}', text)
 if not count:
     raise SystemExit('capture catalog has no match durations')
+# Published-map fixtures publish several maps back to back.
+text = re.sub(r'submit_cooldown_seconds:\s*\d+', 'submit_cooldown_seconds: 0', text)
 if game_type:
     lines = text.splitlines(keepends=True)
     entries = [line for line in lines if line.lstrip().startswith('(id: "')]
@@ -179,6 +193,89 @@ run_client() {
     return "$status"
 }
 
+# One headless automation client against this size's server; its log is <run_dir>/<label>.log.
+fixture_client() {
+    local label=$1
+    shift
+    run_client "$run_dir/$label.log" "$route_timeout_seconds" "$target_dir"/release/brawler-client \
+        --server "$bind_addr" --transport routed-udp --auto-connect --headless "$@"
+}
+
+maps_admin() {
+    "$target_dir"/debug/brawler-profile-admin maps "$@" --database "$run_dir/server-data/profiles.sqlite3"
+}
+
+# Publishes one copy of the wipeout-1v1 built-in map; prints the server-assigned ID.
+publish_fixture() {
+    local label=$1 name=$2
+    shift 2
+    fixture_client "$label" --product-game-type wipeout-1v1 --product-publish-map-smoke \
+        --publish-map-name "$name" "$@" || return 1
+    awk '/brawler-client published-map id=/ { sub(/.*id=/, ""); print $1; exit }' "$run_dir/$label.log"
+}
+
+fixture_failed() {
+    printf 'brawler shell capture: %s fixture failed; logs in %s\n' "$1" "$run_dir" >&2
+    exit 1
+}
+
+# BRL-s3dh: the capture client's own account publishes four maps that end approved (and in
+# rotation), rejected, withdrawn by the author, and pending, newest last.
+prepare_map_library_published() {
+    if [[ ! -f "$run_dir/client-data/connections.ron" ]]; then
+        # A standalone run has no capture account yet: one Dashboard visit creates it.
+        run_client "$run_dir/fixture-account.log" "$route_timeout_seconds" \
+            env BRAWLER_CLIENT_DATA_DIR="$run_dir/client-data" "$target_dir"/release/brawler-client \
+            --server "$bind_addr" --window-size "$window_size" \
+            --screenshot-dir "$run_dir/fixture-account" --shell-capture dashboard --offscreen \
+            || fixture_failed "capture account"
+    fi
+    local account
+    account=$(sed -n 's/.*account_id: *"\([0-9a-f]\{32\}\)".*/\1/p' "$run_dir/client-data/connections.ron" | head -n 1)
+    [[ -n "$account" ]] || fixture_failed "capture account"
+    local approved rejected withdrawn
+    approved=$(publish_fixture publish-approved "Riverside Rumble" --client-id 7301 --account-id "$account") \
+        || fixture_failed "publish"
+    rejected=$(publish_fixture publish-rejected "Crate Maze" --client-id 7301 --account-id "$account") \
+        || fixture_failed "publish"
+    withdrawn=$(publish_fixture publish-withdrawn "Moonlit Yard" --client-id 7301 --account-id "$account") \
+        || fixture_failed "publish"
+    maps_admin approve "$approved" >/dev/null || fixture_failed "approve"
+    maps_admin reject "$rejected" --reason "Both spawns face a wall; open the north lane." \
+        >/dev/null || fixture_failed "reject"
+    fixture_client withdraw-own --client-id 7301 --account-id "$account" --product-published-maps-smoke \
+        --withdraw-published-map "$withdrawn" || fixture_failed "withdraw"
+    publish_fixture publish-pending "Neon Crossing" --client-id 7301 --account-id "$account" >/dev/null \
+        || fixture_failed "publish"
+    # The lobby re-reads approvals on its 5 s interval.
+    sleep 6
+}
+
+# BRL-1sgj: an approved community map holds the next wipeout-1v1 rotation slot, and a fixture
+# opponent waits in that queue for the capture client.
+prepare_results_published() {
+    local published
+    published=$(publish_fixture publish-community "Riverside Rumble" --client-id 7311) \
+        || fixture_failed "publish"
+    maps_admin approve "$published" >/dev/null || fixture_failed "approve"
+    sleep 6
+    # A built-in 1v1 match takes rotation slot 0; both fixture clients leave at Active.
+    fixture_client burn-a --client-id 7312 --product-game-type wipeout-1v1 \
+        --product-match-smoke-1v1 --weapon-preset 1 &
+    local burn_a=$!
+    sleep 2
+    fixture_client burn-b --client-id 7313 --product-game-type wipeout-1v1 \
+        --product-match-smoke-1v1 --weapon-preset 1 || fixture_failed "built-in slot"
+    wait "$burn_a" || fixture_failed "built-in slot"
+    # The opponent for the community match: it leaves once the match is Active.
+    "$target_dir"/release/brawler-client --server "$bind_addr" --transport routed-udp \
+        --auto-connect --headless --client-id 7314 --product-game-type wipeout-1v1 \
+        --product-match-smoke-1v1 --weapon-preset 1 --expect-published-map \
+        >"$run_dir/opponent.log" 2>&1 &
+    opponent_pid=$!
+}
+
+opponent_pid=
 for window_size in "${sizes[@]}"; do
     capture_dir=$out_root/$window_size
     run_dir=$out_root/$window_size.run
@@ -200,6 +297,10 @@ for window_size in "${sizes[@]}"; do
                 start_supervisor "$live_catalog"
             fi
         fi
+        case "$name" in
+            map-library-published) prepare_map_library_published ;;
+            results-published) prepare_results_published ;;
+        esac
         if ! run_client "$log" "$timeout" env BRAWLER_CLIENT_DATA_DIR="$run_dir/client-data" \
             "$target_dir"/release/brawler-client --server "$bind_addr" \
             --window-size "$window_size" --screenshot-dir "$capture_dir" \
@@ -215,6 +316,12 @@ for window_size in "${sizes[@]}"; do
                 exit 1
             fi
         done
+        if [[ -n "$opponent_pid" ]]; then
+            wait "$opponent_pid" || fixture_failed "community-map opponent"
+            grep -q 'match-loading credit=' "$run_dir/opponent.log" \
+                || fixture_failed "community-map opponent credit"
+            opponent_pid=
+        fi
         printf 'brawler shell capture: %s %s\n' "$window_size" "$name"
     done
     stop_supervisor

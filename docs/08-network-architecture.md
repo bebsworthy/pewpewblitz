@@ -679,3 +679,15 @@ fingerprint, so the global handshake rejects a protocol 51 peer; every role must
 process closeout report moves to schema revision 5 without the checkpoint declaration, digest and
 observed count, and `brawler-server validate-closeout` takes only `<DIRECTORY> <CLIENT-COUNT>`.
 Match-manifest v5, control IPC v7, and the route envelope are unchanged.
+
+Protocol 53 registers the author's published-maps request and reply (BRL-s3dh).
+`PublishedMapsRequest { request_id, action: List | Withdraw { published_map_id } }` goes client to
+lobby on `SessionChannel`; `PublishedMapsReply { request_id, result: Listed(maps) |
+Rejected(NotFound | NotWithdrawable | Busy | Internal) }` comes back. Each listed
+`PublishedMapSummary` carries the server-assigned `PublishedMapId`, the normalized map name, the
+game type ID and a `PublishedMapListing` (`Pending`, `Approved { in_rotation }`, `Rejected {
+reason }`, `Removed { reason }`); decode bounds the list to 64 rows and each reason to 256 bytes
+without control characters. No account, entity, path or recipe crosses the wire, and published
+maps stay outside both the gameplay content fingerprint and the catalog revision. The two
+registrations change the protocol-registry fingerprint, so the global handshake rejects a protocol
+52 peer. Match-manifest v5, control IPC v7, and the route envelope are unchanged.

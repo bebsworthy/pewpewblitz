@@ -1805,6 +1805,94 @@ fn a_completed_snapshot_before_the_join_outcome_waits_for_the_local_player() {
     assert_eq!(context.result, result);
     assert_eq!(context.local_player, Some(PlayerId(4)));
     assert_eq!(context.local_team, Some(brawler::combat::TeamId(0)));
+    assert_eq!(context.published_map, None, "no reservation credited a map");
+}
+
+/// BRL-1sgj: the community map credit the reservation carried stays with the match result, so
+/// Results shows the same "Map — by Author" line Match Loading showed.
+#[test]
+fn a_completed_match_keeps_its_reservation_map_credit_for_results() {
+    let mut config = ClientNetworkConfig::new(1);
+    config.transport = NetworkTransport::RoutedUdp;
+    let mut app = App::new();
+    app.insert_resource(config)
+        .insert_resource(RoutedClientLifecycle {
+            phase: RoutedClientPhase::Match,
+            generation: 4,
+            ..default()
+        })
+        .init_resource::<ClientMatchResultState>()
+        .init_resource::<ClientMatchLoadingModel>()
+        .init_resource::<ClientPracticeModel>()
+        .init_resource::<SelectedGameType>();
+    app.add_systems(Update, observe_completed_match);
+    let credit = brawler::lobby::PublishedMapCredit {
+        published_map_id: brawler::lobby::PublishedMapId::new(6).unwrap(),
+        name: "Yard Remix".to_string(),
+        author_display_name: "Author".to_string(),
+    };
+    let started = brawler::lobby::ReservationStarted {
+        reservation_id: brawler::lobby::MatchReservationId::new(9).unwrap(),
+        ticket_id: None,
+        game_type_id: brawler::lobby::GameTypeId::new("wipeout-1v1").unwrap(),
+        mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+        map_preset_id: None,
+        map_recipe_id: brawler::map::MapRecipeId(brawler::lobby::PUBLISHED_MAP_RECIPE_ID_BASE + 6),
+        map_recipe_revision: 1,
+        map_recipe_fingerprint: brawler::map::MapRecipeFingerprint(1),
+        team_count: 2,
+        players_per_team: 1,
+        accepted_build: brawler::builds::AcceptedBuildSummary {
+            canonical_recipe: brawler::builds::BrawlerBuildRecipe {
+                weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(1)),
+                ultimate: brawler::builds::UltimateDefinitionId(1),
+                passives: [
+                    brawler::builds::PassiveDefinitionId(3),
+                    brawler::builds::PassiveDefinitionId(4),
+                ],
+            },
+            identity: brawler::builds::SelectedBuild {
+                recipe_fingerprint: brawler::builds::BuildRecipeFingerprint(1),
+                revision: brawler::builds::BuildRevision(1),
+            },
+            total_points: 0,
+        },
+        loading_deadline_millis: 30_000,
+        published_map: Some(credit.clone()),
+    };
+    app.world_mut()
+        .resource_scope(|world, mut loading: Mut<ClientMatchLoadingModel>| {
+            world.resource_scope(|world, mut practice: Mut<ClientPracticeModel>| {
+                let mut lifecycle = world.resource_mut::<RoutedClientLifecycle>();
+                loading.observe_phase_for_test(
+                    &mut practice,
+                    &mut lifecycle,
+                    brawler::lobby::MatchmakingServerPhase::ReservationStarted(started),
+                );
+            });
+        });
+    let result = brawler::matchplay::MatchResult::Draw;
+    app.world_mut().spawn((
+        MatchRoot,
+        MatchState {
+            match_id: brawler::matchplay::MatchId(9),
+            mode_definition_id: brawler::map::ZOMBIE_MODE_DEFINITION,
+            phase: MatchPhase::Completed {
+                completed_at_tick: 12,
+                restart_unlocked_at_tick: 72,
+                result,
+            },
+            rules_revision: 1,
+        },
+    ));
+    app.update();
+    let context = app
+        .world()
+        .resource::<ClientMatchResultState>()
+        .context
+        .clone()
+        .expect("the completed match is retained for Results");
+    assert_eq!(context.published_map, Some(credit));
 }
 
 #[test]

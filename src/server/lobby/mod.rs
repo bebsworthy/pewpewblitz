@@ -1265,6 +1265,7 @@ impl Plugin for LobbyPlugin {
             .init_resource::<rejoin::MatchSeatTable>()
             .init_resource::<CommunityMapRotation>()
             .init_resource::<map_publishing::PendingMapPublications>()
+            .init_resource::<map_publishing::PendingPublishedMapQueries>()
             .add_systems(Startup, initialize_lobby_state)
             .configure_sets(
                 Update,
@@ -1295,6 +1296,7 @@ impl Plugin for LobbyPlugin {
                         map_publishing::apply_published_map_completions,
                         collect_profile_commands,
                         map_publishing::apply_map_publish_requests,
+                        map_publishing::apply_published_maps_requests,
                         map_publishing::refresh_community_rotation,
                         ApplyDeferred,
                     )

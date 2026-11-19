@@ -135,6 +135,12 @@ pub(in crate::flow) struct MapMakerRuntime {
     creating: Option<String>,
     /// The library tile the detail actions act on.
     selected_draft: Option<MapDraftId>,
+    /// My Maps shows the maps published to this server instead of local drafts (BRL-s3dh).
+    published_view: bool,
+    selected_published: Option<brawler::lobby::PublishedMapId>,
+    pending_withdraw: Option<brawler::lobby::PublishedMapId>,
+    /// Re-list the published maps as soon as no request is in flight.
+    refresh_published: bool,
     clear_armed: bool,
     grid_visible: bool,
     tool: EditorTool,
@@ -186,6 +192,10 @@ impl Default for MapMakerRuntime {
             renaming: None,
             creating: None,
             selected_draft: None,
+            published_view: false,
+            selected_published: None,
+            pending_withdraw: None,
+            refresh_published: false,
             clear_armed: false,
             grid_visible: true,
             tool: EditorTool::Place,
@@ -384,6 +394,7 @@ pub(in crate::flow) fn resolve_map_maker_action(
     mut selection: ResMut<SelectedGameType>,
     mut practice: ResMut<ClientPracticeModel>,
     mut publish: ResMut<crate::ClientMapPublishModel>,
+    mut published: ResMut<crate::ClientPublishedMapsModel>,
     mut purpose: ResMut<SessionPurpose>,
     mut commit: ResMut<FlowCommit>,
     metrics: widgets::MetricsParam,
@@ -402,6 +413,8 @@ pub(in crate::flow) fn resolve_map_maker_action(
     };
     match action {
         FlowUiAction::OpenMapMaker if *flow.get() == ClientFlow::Dashboard => {
+            // Published states change on the server between visits (BRL-s3dh).
+            runtime.refresh_published = true;
             commit.overlay = Some(OverlayCommit::Clear);
             commit.next_flow = Some(ClientFlow::MapLibrary);
         }
@@ -562,6 +575,14 @@ pub(in crate::flow) fn resolve_map_maker_action(
                 &mut publish,
             ));
             runtime.bump_render();
+        }
+        action @ (FlowUiAction::ShowPublishedMaps(_)
+        | FlowUiAction::SelectPublishedMap(_)
+        | FlowUiAction::WithdrawPublishedMap(_)
+        | FlowUiAction::CancelWithdrawPublishedMap)
+            if *flow.get() == ClientFlow::MapLibrary =>
+        {
+            library::resolve_published_map_action(&action, &mut runtime, &mut published);
         }
         FlowUiAction::BackToMapLibrary if *flow.get() == ClientFlow::MapEditor => {
             if runtime
@@ -833,6 +854,10 @@ fn is_map_maker_action(action: &FlowUiAction) -> bool {
             | FlowUiAction::DuplicateMapDraft(_)
             | FlowUiAction::DeleteMapDraft(_)
             | FlowUiAction::PublishMapDraft(_)
+            | FlowUiAction::ShowPublishedMaps(_)
+            | FlowUiAction::SelectPublishedMap(_)
+            | FlowUiAction::WithdrawPublishedMap(_)
+            | FlowUiAction::CancelWithdrawPublishedMap
             | FlowUiAction::CloseMapMaker
             | FlowUiAction::BackToMapLibrary
             | FlowUiAction::SaveMapDraft
@@ -1052,15 +1077,30 @@ fn publish_draft(
     }
 }
 
-/// Show the server's publish decision on the library status line.
+/// Show the server's publish decision on the library status line, and keep the author's
+/// published-map listing current while My Maps is open (BRL-s3dh).
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
 pub(in crate::flow) fn observe_map_publish_outcome(
+    flow: Res<State<ClientFlow>>,
     mut publish: ResMut<crate::ClientMapPublishModel>,
+    mut published: ResMut<crate::ClientPublishedMapsModel>,
     mut runtime: ResMut<MapMakerRuntime>,
 ) {
     if let Some(decision) = publish.take_outcome() {
+        if matches!(
+            decision,
+            brawler::lobby::MapPublishDecision::Accepted { .. }
+        ) {
+            // The new submission belongs in the Published list; ask once the reply is in.
+            runtime.refresh_published = true;
+        }
         runtime.status = Some(crate::map_publish_decision_text(decision));
         runtime.bump_render();
     }
+    library::observe_published_maps(*flow.get(), &mut published, &mut runtime);
 }
 
 fn supported_mode(mode: brawler::map::ModeDefinitionId) -> bool {
@@ -1200,6 +1240,8 @@ impl MapMakerRuntime {
             FlowUiAction::MapMakerToggleValidation => self.panel == SidePanel::Check,
             FlowUiAction::MapMakerToggleCategoryMenu => self.category_menu_open,
             FlowUiAction::SelectMapDraft(id) => self.selected_draft == Some(*id),
+            FlowUiAction::SelectPublishedMap(id) => self.selected_published == Some(*id),
+            FlowUiAction::ShowPublishedMaps(published) => self.published_view == *published,
             FlowUiAction::MapMakerCycleSymmetry => self
                 .session
                 .as_ref()
@@ -2609,6 +2651,7 @@ mod tests {
         .init_resource::<SelectedGameType>()
         .init_resource::<ClientPracticeModel>()
         .init_resource::<crate::ClientMapPublishModel>()
+        .init_resource::<crate::ClientPublishedMapsModel>()
         .init_resource::<SessionPurpose>()
         .init_resource::<FlowCommit>()
         .insert_resource(MapCatalogResource(catalog))
@@ -3045,6 +3088,7 @@ mod tests {
             .init_resource::<SelectedGameType>()
             .init_resource::<ClientPracticeModel>()
             .init_resource::<crate::ClientMapPublishModel>()
+            .init_resource::<crate::ClientPublishedMapsModel>()
             .init_resource::<SessionPurpose>()
             .init_resource::<FlowCommit>()
             .insert_resource(MapCatalogResource(

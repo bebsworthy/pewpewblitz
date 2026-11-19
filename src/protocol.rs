@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 52;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 53;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -590,6 +590,10 @@ fn register_queue_protocol(app: &mut App) {
         .add_direction(NetworkDirection::ClientToServer);
     app.register_message::<crate::lobby::MapPublishOutcome>()
         .add_direction(NetworkDirection::ServerToClient);
+    app.register_message::<crate::lobby::PublishedMapsRequest>()
+        .add_direction(NetworkDirection::ClientToServer);
+    app.register_message::<crate::lobby::PublishedMapsReply>()
+        .add_direction(NetworkDirection::ServerToClient);
     app.register_message::<crate::lobby::MatchRejoinStatus>()
         .add_direction(NetworkDirection::ServerToClient);
     app.add_channel::<QueueSnapshotChannel>(ChannelSettings {
@@ -885,6 +889,8 @@ mod tests {
         assert!(app.is_message_registered::<crate::lobby::PracticeStartRequest>());
         assert!(app.is_message_registered::<crate::lobby::MapPublishRequest>());
         assert!(app.is_message_registered::<crate::lobby::MapPublishOutcome>());
+        assert!(app.is_message_registered::<crate::lobby::PublishedMapsRequest>());
+        assert!(app.is_message_registered::<crate::lobby::PublishedMapsReply>());
         assert!(app.is_message_registered::<MatchRouteGrant>());
         assert!(app.is_message_registered::<MatchCommandRequest>());
         assert!(app.is_message_registered::<MatchCommandOutcome>());
@@ -1008,12 +1014,19 @@ mod tests {
         assert_eq!(decoded, message);
     }
 
-    /// Protocol 52 (BRL-stws) unregisters the retired server-to-client combat-evidence
-    /// checkpoint message. The registry fingerprint changes, and only the global handshake
-    /// version guards the removal; no per-message version remains.
+    /// Protocol 53 (BRL-s3dh) registers the author's published-maps request and reply (list and
+    /// withdraw); the registry fingerprint changes and only the global handshake guards it.
     #[test]
-    fn combat_evidence_checkpoint_retirement_is_protocol_52() {
-        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 52);
+    fn published_maps_status_and_withdraw_are_protocol_53() {
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 53);
+        let request = crate::lobby::PublishedMapsRequest {
+            request_id: crate::lobby::PublishedMapsRequestId::new(1).unwrap(),
+            action: crate::lobby::PublishedMapsAction::Withdraw {
+                published_map_id: crate::lobby::PublishedMapId::new(2).unwrap(),
+            },
+        };
+        let bytes = postcard::to_allocvec(&request).expect("request serializes");
+        assert_eq!(postcard::from_bytes(&bytes), Ok(request));
     }
 
     /// Protocol 51 (BRL-w9z1) registers the map publish request and outcome and adds the

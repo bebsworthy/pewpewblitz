@@ -1,8 +1,8 @@
 use super::{
-    AccountId, AdvertisedBrawlerCatalog, MatchBuildSnapshotV3, ProfileCommand, ProfileDecision,
-    ProfileOutcome, ProfileSnapshot, ProfileStorageCommand, ProfileStorageError,
-    ProfileStorageExecutor, ProfileStorageReply, PublishedMapLimits, PublishedMapRecord,
-    PublishedMapSubmission, PublishedMapSubmissionOutcome, SavedBrawlerId,
+    AccountId, AccountPublishedMaps, AdvertisedBrawlerCatalog, MatchBuildSnapshotV3,
+    ProfileCommand, ProfileDecision, ProfileOutcome, ProfileSnapshot, ProfileStorageCommand,
+    ProfileStorageError, ProfileStorageExecutor, ProfileStorageReply, PublishedMapLimits,
+    PublishedMapRecord, PublishedMapSubmission, PublishedMapSubmissionOutcome, SavedBrawlerId,
 };
 use bevy::prelude::Resource;
 use std::{collections::BTreeMap, path::PathBuf};
@@ -41,6 +41,11 @@ pub enum PublishedMapStorageCompletion {
     Rotation {
         storage_request_id: u64,
         result: Result<Vec<PublishedMapRecord>, ProfileStorageError>,
+    },
+    /// A "my published maps" list or withdrawal for one account (BRL-s3dh).
+    Account {
+        storage_request_id: u64,
+        result: Result<AccountPublishedMaps, ProfileStorageError>,
     },
 }
 
@@ -340,6 +345,12 @@ impl ProfileAuthority {
                     result,
                 }
             }
+            ProfileStorageReply::AccountPublishedMaps(result) => {
+                PublishedMapStorageCompletion::Account {
+                    storage_request_id,
+                    result,
+                }
+            }
         };
         self.published_map_completions.push(completion);
         None
@@ -371,6 +382,28 @@ impl ProfileAuthority {
         self.storage
             .try_submit(ProfileStorageCommand::LoadPublishedRotation {
                 request_id: storage_request_id,
+            })
+            .map_err(|error| map_submission_error(&error))?;
+        self.pending
+            .insert(storage_request_id, PendingOperation::PublishedMap);
+        Ok(storage_request_id)
+    }
+
+    /// Queue one account's own published-map listing, withdrawing `withdraw` first when given
+    /// (BRL-s3dh). The caller passes the session's own account; storage scopes every query to it.
+    pub fn request_account_published_maps(
+        &mut self,
+        account_id: AccountId,
+        withdraw: Option<crate::lobby::PublishedMapId>,
+        now_unix_ms: u64,
+    ) -> Result<u64, ProfileAuthorityError> {
+        let storage_request_id = self.next_storage_request_id()?;
+        self.storage
+            .try_submit(ProfileStorageCommand::AccountPublishedMaps {
+                request_id: storage_request_id,
+                account_id,
+                withdraw,
+                now_unix_ms,
             })
             .map_err(|error| map_submission_error(&error))?;
         self.pending

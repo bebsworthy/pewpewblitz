@@ -959,3 +959,85 @@ fn sqlite_v2_profiles_migrate_to_the_published_map_schema() {
     drop(storage);
     std::fs::remove_file(database).unwrap();
 }
+
+/// BRL-s3dh: an author lists only their own rows, newest first and without recipe bytes, and
+/// withdraws a pending or approved row into the same removed state an operator `remove` leaves.
+#[cfg(feature = "server")]
+#[test]
+fn authors_list_and_withdraw_only_their_own_published_maps() {
+    use crate::lobby::PublishedMapId;
+    let database = path("published-maps-account");
+    let author = AccountId::new(93).unwrap();
+    let other = AccountId::new(94).unwrap();
+    let mut storage = ProfileStorage::open(&database).unwrap();
+    storage.load_or_create(author).unwrap();
+    storage.load_or_create(other).unwrap();
+    let submit = |storage: &mut ProfileStorage, account, name: &str, now| match storage
+        .submit_published_map(published_submission(account, name, now), PRE_APPROVAL)
+        .unwrap()
+    {
+        PublishedMapSubmissionOutcome::Accepted {
+            published_map_id, ..
+        } => published_map_id,
+        PublishedMapSubmissionOutcome::Rejected(reason) => panic!("{reason:?}"),
+    };
+    let pending = submit(&mut storage, author, "Pending", 0);
+    let approved = submit(&mut storage, author, "Approved", 120_000);
+    let foreign = submit(&mut storage, other, "Foreign", 0);
+    storage
+        .decide_published_map(approved, &PublishedMapAction::Approve, 130_000)
+        .unwrap();
+
+    let listed = storage.account_published_maps(author, None, 0).unwrap();
+    assert_eq!(listed.withdrawal, None);
+    let ids: Vec<PublishedMapId> = listed.maps.iter().map(|map| map.published_map_id).collect();
+    assert_eq!(ids, vec![approved, pending], "newest first, own rows only");
+    assert!(listed.maps.iter().all(|map| map.recipe.is_empty()));
+
+    // Another account's row answers exactly like a missing one and is untouched.
+    for missing in [foreign, PublishedMapId::new(999).unwrap()] {
+        assert_eq!(
+            storage
+                .account_published_maps(author, Some(missing), 1)
+                .unwrap()
+                .withdrawal,
+            Some(PublishedMapWithdrawal::NotFound)
+        );
+    }
+    let withdrawn = storage
+        .account_published_maps(author, Some(approved), 200_000)
+        .unwrap();
+    assert_eq!(
+        withdrawn.withdrawal,
+        Some(PublishedMapWithdrawal::Withdrawn { was_approved: true })
+    );
+    assert_eq!(withdrawn.maps[0].status, PublishedMapStatus::Removed);
+    assert_eq!(
+        withdrawn.maps[0].reason.as_deref(),
+        Some(crate::lobby::WITHDRAWN_BY_AUTHOR_REASON)
+    );
+    assert!(storage.load_published_rotation().unwrap().is_empty());
+    assert_eq!(
+        storage
+            .account_published_maps(author, Some(pending), 210_000)
+            .unwrap()
+            .withdrawal,
+        Some(PublishedMapWithdrawal::Withdrawn {
+            was_approved: false
+        })
+    );
+    assert_eq!(
+        storage
+            .account_published_maps(author, Some(pending), 220_000)
+            .unwrap()
+            .withdrawal,
+        Some(PublishedMapWithdrawal::NotWithdrawable)
+    );
+    let foreign_row = storage
+        .list_published_maps(Some(PublishedMapStatus::Pending))
+        .unwrap();
+    assert_eq!(foreign_row.len(), 1);
+    assert_eq!(foreign_row[0].published_map_id, foreign);
+    drop(storage);
+    std::fs::remove_file(database).unwrap();
+}

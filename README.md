@@ -285,7 +285,11 @@ pause request every input device uses, and leave the match afterwards (`results`
 from Results). For them `scripts/shell-capture.sh` restarts its scratch supervisor on a capture
 catalog whose matches last `BRAWLER_SHELL_CAPTURE_MATCH_SECONDS` (default 30) so Results arrives on
 the authoritative time limit; `BRAWLER_SHELL_CAPTURE_GAME_TYPE=<id>` (for example `heist-3v3`) keeps
-only that game type, which Practice then plays.
+only that game type, which Practice then plays. The published-map routes use the same capture
+catalog (which also drops the publish cooldown) and headless fixture clients:
+`map-library-published` shows My Maps' Published view over the capture account's own maps in every
+state, and `results-published` shows Results credited to an approved community map; run it with
+`BRAWLER_SHELL_CAPTURE_GAME_TYPE=wipeout-1v1` (BRL-s3dh, BRL-1sgj).
 
 Scripted captures render off-screen (BRL-g7ny): `just shell-capture` and
 `scripts/v3-render-evidence.sh` pass the automation client's `--offscreen`, a UI gallery run with

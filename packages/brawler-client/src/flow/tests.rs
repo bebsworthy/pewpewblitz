@@ -463,6 +463,7 @@ fn match_result_context(
         wipeout: None,
         objective: None,
         local_player: None,
+        published_map: None,
     }
 }
 
@@ -1939,6 +1940,7 @@ fn results_replay_uses_the_exact_fresh_lobby_game() {
             wipeout: None,
             objective: None,
             local_player: None,
+            published_map: None,
         });
     }
     *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType::default();
@@ -2137,6 +2139,7 @@ fn results_disable_replay_when_the_exact_game_disappears() {
         wipeout: None,
         objective: None,
         local_player: None,
+        published_map: None,
     });
     app.world_mut()
         .resource_mut::<NextState<ClientFlow>>()
@@ -4276,6 +4279,12 @@ fn results_layout_contexts(
         result,
         local_team: Some(brawler::combat::TeamId(0)),
         local_player: Some(brawler::protocol::PlayerId(1)),
+        // BRL-1sgj: every mode's Results also fits a community map credit.
+        published_map: Some(brawler::lobby::PublishedMapCredit {
+            published_map_id: brawler::lobby::PublishedMapId::new(4).unwrap(),
+            name: "Switchback Crossfire Remix".to_string(),
+            author_display_name: "Brawler-1BBD".to_string(),
+        }),
         ..match_result_context(game_type_id.clone())
     };
     let objective = |totals| {
@@ -4360,6 +4369,7 @@ fn results_fit_a_landscape_phone_without_scrolling() {
             let count = |wanted| roles.iter().filter(|(_, role)| *role == wanted).count();
             assert_eq!(count(ResultsLayoutRole::Trophy), 1, "{screen}");
             assert_eq!(count(ResultsLayoutRole::Headline), 1, "{screen}");
+            assert_eq!(count(ResultsLayoutRole::MapCredit), 1, "{screen}");
             assert_eq!(count(ResultsLayoutRole::TeamCard), 2, "{screen}");
             if height >= 640 {
                 // Desktop keeps the stacked header: the phone row never applies there.
@@ -5837,5 +5847,158 @@ fn shell_capture_route_steps_match_the_reducer() {
                 route.name()
             );
         }
+    }
+}
+
+fn published_summary(
+    id: u64,
+    name: &str,
+    listing: brawler::lobby::PublishedMapListing,
+) -> brawler::lobby::PublishedMapSummary {
+    brawler::lobby::PublishedMapSummary {
+        published_map_id: brawler::lobby::PublishedMapId::new(id).unwrap(),
+        name: name.to_string(),
+        game_type_id: brawler::lobby::GameTypeId::new("wipeout-1v1").unwrap(),
+        listing,
+    }
+}
+
+/// The newest (pending) map is selected; Withdraw first asks for confirmation, and only the
+/// confirmed press queues one withdraw request for the server.
+fn assert_withdraw_needs_confirmation(app: &mut App) {
+    use brawler::lobby::PublishedMapsAction;
+    use screens::map_maker::MapMakerRuntime;
+    // The newest map is selected; Withdraw first asks for confirmation.
+    let pending = brawler::lobby::PublishedMapId::new(4).unwrap();
+    {
+        let world = app.world_mut();
+        let enabled = world
+            .query_filtered::<&FlowButton, Without<InteractionDisabled>>()
+            .iter(world)
+            .any(|button| button.action == FlowUiAction::WithdrawPublishedMap(pending));
+        assert!(enabled, "the pending map offers Withdraw");
+    }
+    inject_action(app, FlowUiAction::WithdrawPublishedMap(pending));
+    settle_layout(app);
+    assert!(visible_text(app).iter().any(|line| line == "WITHDRAW MAP?"));
+    assert!(
+        app.world()
+            .resource::<crate::ClientPublishedMapsModel>()
+            .outbound_for_test()
+            .is_empty()
+    );
+    inject_action(app, FlowUiAction::WithdrawPublishedMap(pending));
+    let outbound = app
+        .world()
+        .resource::<crate::ClientPublishedMapsModel>()
+        .outbound_for_test();
+    assert_eq!(outbound.len(), 1);
+    assert_eq!(
+        outbound[0].action,
+        PublishedMapsAction::Withdraw {
+            published_map_id: pending
+        }
+    );
+    assert_eq!(
+        app.world().resource::<MapMakerRuntime>().editing_map_name(),
+        None
+    );
+}
+
+/// BRL-s3dh: My Maps' Published view shows each of this account's maps with the state chip the
+/// server reported, keeps 48 dp controls on a landscape phone, and withdraws a pending map only
+/// after its confirmation, through one request the server decides.
+#[test]
+fn published_view_shows_server_states_and_confirms_a_withdraw() {
+    use brawler::lobby::PublishedMapListing;
+    let maps = vec![
+        published_summary(4, "Neon Crossing", PublishedMapListing::Pending),
+        published_summary(
+            3,
+            "Moonlit Yard",
+            PublishedMapListing::Removed {
+                reason: Some(brawler::lobby::WITHDRAWN_BY_AUTHOR_REASON.to_string()),
+            },
+        ),
+        published_summary(
+            2,
+            "Crate Maze",
+            PublishedMapListing::Rejected {
+                reason: "Both spawns face a wall.".to_string(),
+            },
+        ),
+        published_summary(
+            1,
+            "Riverside Rumble",
+            PublishedMapListing::Approved { in_rotation: true },
+        ),
+    ];
+    for (width, height) in [(914, 411), (1280, 720)] {
+        let mut app = configured_lobby_flow_app_with(lobby_membership_with_brawler(), |app| {
+            crate::ui::layout_harness::add_layout(app, width, height);
+            app.insert_resource(crate::ui::touch_target::TouchTargetPolicy { enabled: true });
+            app.insert_resource(brawler::map::MapCatalogResource(
+                brawler::map::MapContentCatalog::embedded().unwrap(),
+            ));
+        });
+        crate::ui::layout_harness::apply_viewport_fit(&mut app);
+        app.world_mut()
+            .resource_mut::<NextState<ClientFlow>>()
+            .set(ClientFlow::MapLibrary);
+        app.update();
+        // A lobby session exists (bound by a first listing) when the view opens.
+        app.world_mut()
+            .resource_mut::<crate::ClientPublishedMapsModel>()
+            .listed_for_test(1, Vec::new());
+        inject_action(&mut app, FlowUiAction::ShowPublishedMaps(true));
+        app.update();
+        assert!(
+            app.world()
+                .resource::<crate::ClientPublishedMapsModel>()
+                .pending(),
+            "opening the view asks the server"
+        );
+        // Answer with this account's listing.
+        app.world_mut()
+            .resource_mut::<crate::ClientPublishedMapsModel>()
+            .listed_for_test(1, maps.clone());
+        settle_layout(&mut app);
+        let text = visible_text(&mut app);
+        for expected in [
+            "Published (4)",
+            "PENDING",
+            "REMOVED",
+            "REJECTED",
+            "IN ROTATION",
+            "Rejected: Both spawns face a wall.",
+            brawler::lobby::WITHDRAWN_BY_AUTHOR_REASON,
+        ] {
+            assert!(
+                text.iter().any(|line| line == expected),
+                "{width}x{height}: missing {expected:?} in {text:?}"
+            );
+        }
+        let short = crate::ui::layout_harness::short_buttons(
+            app.world_mut(),
+            crate::ui::touch_target::MIN_TOUCH_TARGET_DP,
+        );
+        assert!(short.is_empty(), "{width}x{height}: under 48 dp: {short:?}");
+
+        assert_withdraw_needs_confirmation(&mut app);
+        // A removed map offers no Withdraw.
+        inject_action(
+            &mut app,
+            FlowUiAction::SelectPublishedMap(brawler::lobby::PublishedMapId::new(3).unwrap()),
+        );
+        settle_layout(&mut app);
+        let world = app.world_mut();
+        let withdraw = world
+            .query::<&FlowButton>()
+            .iter(world)
+            .any(|button| matches!(button.action, FlowUiAction::WithdrawPublishedMap(_)));
+        assert!(
+            !withdraw,
+            "{width}x{height}: a removed map cannot be withdrawn"
+        );
     }
 }

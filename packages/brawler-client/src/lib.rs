@@ -113,9 +113,10 @@ pub use presentation::ClientPresentationPlugin;
 use presentation::{clamp_camera_center, update_client_hud};
 pub use profile::{ClientProfileModel, ClientProfilePlugin};
 pub use queue::{
-    ClientMapPublishModel, ClientMatchLoadingModel, ClientPracticeModel, ClientQueueModel,
-    ClientQueuePlugin, PendingQueueCommand, map_publish_decision_text,
+    ClientMapPublishModel, ClientMatchLoadingModel, ClientPracticeModel, ClientPublishedMapsModel,
+    ClientQueueModel, ClientQueuePlugin, PendingQueueCommand, map_publish_decision_text,
 };
+pub(crate) use queue::{published_map_chip, published_map_detail, published_maps_rejection_text};
 pub use routed_udp::{RoutedUdpIo, RoutedUdpPlugin};
 pub use server_select::{LogicalServerAddress, ServerAddressHost, parse_server_address};
 pub use session::ClientNetworkPlugin;
@@ -327,6 +328,8 @@ pub struct ClientMatchResultContext {
     pub(crate) wipeout: Option<brawler::matchplay::WipeoutState>,
     pub(crate) objective: Option<brawler::matchplay::ObjectiveResult>,
     pub(crate) local_player: Option<PlayerId>,
+    /// The community map credit its reservation carried (BRL-1sgj); `None` for a built-in map.
+    pub published_map: Option<brawler::lobby::PublishedMapCredit>,
 }
 
 #[derive(Resource, Debug, Default, PartialEq, Eq)]

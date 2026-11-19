@@ -14,9 +14,12 @@ mod publishing;
 mod queue;
 
 pub use publishing::{
-    MAX_PUBLISH_COOLDOWN_SECONDS, MapPublishDecision, MapPublishOutcome, MapPublishRejection,
-    MapPublishRequest, MapPublishRequestId, PUBLISHED_MAP_RECIPE_ID_BASE,
-    PUBLISHED_MAP_RECIPE_REVISION, PublishedMapCredit, PublishedMapId, PublishedMapState,
+    MAX_LISTED_PUBLISHED_MAPS, MAX_PUBLISH_COOLDOWN_SECONDS, MAX_PUBLISHED_MAP_REASON_BYTES,
+    MapPublishDecision, MapPublishOutcome, MapPublishRejection, MapPublishRequest,
+    MapPublishRequestId, PUBLISHED_MAP_RECIPE_ID_BASE, PUBLISHED_MAP_RECIPE_REVISION,
+    PublishedMapCredit, PublishedMapId, PublishedMapListing, PublishedMapState,
+    PublishedMapSummary, PublishedMapsAction, PublishedMapsRejection, PublishedMapsReply,
+    PublishedMapsRequest, PublishedMapsRequestId, PublishedMapsResult, WITHDRAWN_BY_AUTHOR_REASON,
 };
 
 pub use queue::{

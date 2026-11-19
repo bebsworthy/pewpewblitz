@@ -1,6 +1,7 @@
 //! Headless queue, Practice, product-match, and requeue automation.
 
 use bevy::prelude::*;
+use std::fmt::Write as _;
 use std::time::Duration;
 
 use crate::{
@@ -72,6 +73,7 @@ pub(super) fn drive_headless_queue_smoke(
 ) {
     if (!config.product_queue_smoke && !config.product_match_smoke)
         || config.product_publish_map_smoke
+        || config.product_published_maps_smoke
         || *stage == HeadlessQueueSmokeStage::Complete
     {
         return;
@@ -260,12 +262,72 @@ pub(super) fn drive_headless_publish_smoke(
     *started = publish.start(
         lobby.catalog_revision,
         game,
-        "E2E Published Yard".to_string(),
+        config
+            .publish_map_name
+            .clone()
+            .unwrap_or_else(|| "E2E Published Yard".to_string()),
         brawler::map::AuthoredMapCandidate {
             draft_id: 1,
             recipe,
         },
     );
+}
+
+/// Headless BRL-s3dh evidence: list (or first withdraw one of) this account's published maps,
+/// print one parseable row per map, and exit once the server answers.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
+pub(super) fn drive_headless_published_maps_smoke(
+    config: Res<crate::ClientAutomationConfig>,
+    memberships: Query<&ClientLobbyMembership, With<Client>>,
+    mut published: ResMut<crate::ClientPublishedMapsModel>,
+    mut started: Local<bool>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if !config.product_published_maps_smoke {
+        return;
+    }
+    if !*started {
+        if memberships.iter().next().is_some() {
+            *started = match config.withdraw_published_map {
+                Some(id) => published.withdraw(id),
+                None => published.request_list(),
+            };
+        }
+        return;
+    }
+    if published.pending() {
+        return;
+    }
+    if let Some(reason) = published.take_rejection() {
+        error!(?reason, "brawler published maps smoke was rejected");
+        exit.write(AppExit::error());
+        return;
+    }
+    let mut report = String::new();
+    for map in published.maps().unwrap_or_default() {
+        let state = match &map.listing {
+            brawler::lobby::PublishedMapListing::Pending => "pending",
+            brawler::lobby::PublishedMapListing::Approved { in_rotation: true } => {
+                "approved-in-rotation"
+            }
+            brawler::lobby::PublishedMapListing::Approved { in_rotation: false } => "approved",
+            brawler::lobby::PublishedMapListing::Rejected { .. } => "rejected",
+            brawler::lobby::PublishedMapListing::Removed { .. } => "removed",
+        };
+        let _ = writeln!(
+            report,
+            "brawler-client published-map-row id={} state={state} game_type={} name=\"{}\" detail=\"{}\"",
+            map.published_map_id.get(),
+            map.game_type_id.as_str(),
+            map.name,
+            crate::published_map_detail(&map.listing),
+        );
+    }
+    let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), report.as_bytes());
+    exit.write(AppExit::Success);
 }
 
 /// Headless BRL-w9z1 evidence: print the Match Loading credit of a published map once.

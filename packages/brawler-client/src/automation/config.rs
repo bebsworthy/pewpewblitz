@@ -52,6 +52,12 @@ pub struct ClientAutomationConfig {
     /// Headless BRL-w9z1 evidence: publish one copy of the game type's first built-in map to the
     /// server's community rotation and exit after the server accepts it.
     pub product_publish_map_smoke: bool,
+    /// Headless BRL-s3dh evidence: list this account's published maps on the server (after
+    /// withdrawing `withdraw_published_map` when given), print one row per map, and exit.
+    pub product_published_maps_smoke: bool,
+    pub withdraw_published_map: Option<brawler::lobby::PublishedMapId>,
+    /// The name `--product-publish-map-smoke` publishes under (default "E2E Published Yard").
+    pub publish_map_name: Option<String>,
     /// Headless BRL-w9z1 evidence: the player-versus-player match this client reaches Active in must be an
     /// approved published map, credited on Match Loading.
     pub expect_published_map: bool,
@@ -93,6 +99,9 @@ impl Default for ClientAutomationConfig {
             leave_match_cue: None,
             cancel_match_start: false,
             product_publish_map_smoke: false,
+            product_published_maps_smoke: false,
+            withdraw_published_map: None,
+            publish_map_name: None,
             expect_published_map: false,
             product_match_players_per_team: 2,
             product_match_game_type: None,
@@ -354,7 +363,32 @@ impl ClientAutomationConfig {
                     .to_string(),
             );
         }
-        if self.expect_published_map && (!pvp_match || self.product_publish_map_smoke) {
+        if self.product_published_maps_smoke
+            && (self.product_publish_map_smoke
+                || self.product_practice_smoke
+                || self.product_requeue_smoke)
+        {
+            return Err(
+                "--product-published-maps-smoke cannot be combined with other match smokes"
+                    .to_string(),
+            );
+        }
+        if self.publish_map_name.is_some() && !self.product_publish_map_smoke {
+            return Err("--publish-map-name requires --product-publish-map-smoke".to_string());
+        }
+        if let Some(name) = &self.publish_map_name
+            && brawler::map::authoring::normalize_map_name(name).as_deref() != Ok(name.as_str())
+        {
+            return Err("--publish-map-name must be a normalized Map Maker name".to_string());
+        }
+        if self.withdraw_published_map.is_some() && !self.product_published_maps_smoke {
+            return Err(
+                "--withdraw-published-map requires --product-published-maps-smoke".to_string(),
+            );
+        }
+        if self.expect_published_map
+            && (!pvp_match || self.product_publish_map_smoke || self.product_published_maps_smoke)
+        {
             return Err("--expect-published-map requires PvP match automation".to_string());
         }
         if self.leave_match_cue.is_some() && !pvp_match {

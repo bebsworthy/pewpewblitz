@@ -91,11 +91,17 @@ pub enum ShellCaptureRoute {
     LeaveConfirmation,
     /// Results after a Practice match reaches its authoritative end; the run then plays again.
     Results,
+    /// My Maps on its Published view, over this account's published maps in every state
+    /// (BRL-s3dh). `scripts/shell-capture.sh` publishes and decides them first.
+    MapLibraryPublished,
+    /// Results of a queue match on an approved community map, with its author credit
+    /// (BRL-1sgj). The script approves the map and supplies the opponent.
+    ResultsPublished,
 }
 
 impl ShellCaptureRoute {
     /// Every route, in the order `scripts/shell-capture.sh` runs them on a fresh profile.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 37] = [
         Self::FirstBrawler,
         Self::Dashboard,
         Self::DashboardMenu,
@@ -131,6 +137,8 @@ impl ShellCaptureRoute {
         Self::MatchMenu,
         Self::LeaveConfirmation,
         Self::Results,
+        Self::MapLibraryPublished,
+        Self::ResultsPublished,
     ];
 
     /// The CLI name, also the capture file stem.
@@ -172,6 +180,8 @@ impl ShellCaptureRoute {
             Self::MatchMenu => "match-menu",
             Self::LeaveConfirmation => "leave-confirmation",
             Self::Results => "results",
+            Self::MapLibraryPublished => "map-library-published",
+            Self::ResultsPublished => "results-published",
         }
     }
 
@@ -180,7 +190,11 @@ impl ShellCaptureRoute {
     pub const fn live(self) -> bool {
         matches!(
             self,
-            Self::MatchLoading | Self::MatchMenu | Self::LeaveConfirmation | Self::Results
+            Self::MatchLoading
+                | Self::MatchMenu
+                | Self::LeaveConfirmation
+                | Self::Results
+                | Self::ResultsPublished
         )
     }
 
@@ -285,9 +299,15 @@ impl ShellCaptureRoute {
             | Self::MapRename
             | Self::MapDelete => self.map_maker_audit_steps(library, &map_editor),
             Self::Queue => vec![screen(Action::JoinQueue, ClientFlow::Queue)],
-            Self::MatchLoading | Self::MatchMenu | Self::LeaveConfirmation | Self::Results => {
-                self.live_steps().0
-            }
+            Self::MapLibraryPublished => vec![
+                library,
+                screen(Action::ShowPublishedMaps(true), ClientFlow::MapLibrary),
+            ],
+            Self::MatchLoading
+            | Self::MatchMenu
+            | Self::LeaveConfirmation
+            | Self::Results
+            | Self::ResultsPublished => self.live_steps().0,
         }
     }
 
@@ -341,6 +361,19 @@ impl ShellCaptureRoute {
                     leave,
                 ]
                 .concat(),
+            ),
+            // The script's opponent joins the same 1v1 queue and leaves at Active, so Results
+            // arrives by forfeit or the capture catalog's time limit.
+            Self::ResultsPublished => (
+                vec![
+                    screen(Action::JoinQueue, ClientFlow::Queue),
+                    live(wait(ClientFlow::Results, ClientOverlay::None)),
+                ],
+                vec![act(
+                    Action::ReturnToDashboard,
+                    ClientFlow::Dashboard,
+                    ClientOverlay::None,
+                )],
             ),
             _ => (Vec::new(), Vec::new()),
         }
@@ -985,7 +1018,19 @@ mod tests {
         let replay = ShellCaptureRoute::Results.live_steps().1;
         assert_eq!(replay[0].action(None), Some(FlowUiAction::QueueAgain));
         let live = ShellCaptureRoute::ALL.iter().filter(|route| route.live());
-        assert_eq!(live.count(), 4);
+        assert_eq!(live.count(), 5);
+        // BRL-1sgj: the community-map Results route queues, captures Results, and returns to
+        // the Dashboard from Results (its opponent already left the match).
+        let script = ShellCaptureRoute::ResultsPublished.script(false).unwrap();
+        let capture = script.iter().position(|step| step.capture).unwrap();
+        assert_eq!(
+            script[capture].step.expected(None),
+            Some((ClientFlow::Results, ClientOverlay::None, false))
+        );
+        assert_eq!(
+            script.last().unwrap().step.action(None),
+            Some(FlowUiAction::ReturnToDashboard)
+        );
     }
 
     #[test]

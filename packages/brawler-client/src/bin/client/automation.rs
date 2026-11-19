@@ -11,7 +11,7 @@ use brawler_client::{
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
 
-pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke | --product-publish-map-smoke] [--expect-published-map] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE> | --cancel-match-start] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen] [--check-config]";
+pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke | --product-publish-map-smoke | --product-published-maps-smoke [--withdraw-published-map <ID>]] [--publish-map-name <NAME>] [--account-id <HEX>] [--expect-published-map] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE> | --cancel-match-start] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen] [--check-config]";
 
 fn parse_value<T: core::str::FromStr>(flag: &str, value: Option<String>) -> Result<T, String> {
     value
@@ -64,6 +64,10 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
     let mut leave_match_cue = None;
     let mut product_requeue_smoke = false;
     let mut product_publish_map_smoke = false;
+    let mut product_published_maps_smoke = false;
+    let mut withdraw_published_map = None;
+    let mut publish_map_name = None;
+    let mut account_id = None;
     let mut expect_published_map = false;
     let mut product_match_players_per_team = 2;
     let mut product_match_game_type = None;
@@ -143,6 +147,34 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
                 product_publish_map_smoke = true;
             }
             "--expect-published-map" => expect_published_map = true,
+            "--product-published-maps-smoke" => {
+                product_match_smoke = true;
+                product_published_maps_smoke = true;
+            }
+            "--publish-map-name" => {
+                publish_map_name = Some(
+                    args.next()
+                        .ok_or_else(|| format!("{flag} requires a map name"))?,
+                );
+            }
+            "--account-id" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("{flag} requires a 32-digit hex account ID"))?;
+                account_id = Some(
+                    u128::from_str_radix(&value, 16)
+                        .ok()
+                        .filter(|id| *id != 0)
+                        .ok_or_else(|| format!("{flag} requires a nonzero hex account ID"))?,
+                );
+            }
+            "--withdraw-published-map" => {
+                let id: u64 = parse_value(flag.as_str(), args.next())?;
+                withdraw_published_map = Some(
+                    brawler::lobby::PublishedMapId::new(id)
+                        .ok_or_else(|| format!("{flag} requires a nonzero published map ID"))?,
+                );
+            }
             "--product-requeue-smoke" => {
                 product_match_smoke = true;
                 product_requeue_smoke = true;
@@ -265,6 +297,12 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
         return Err("the interactive product shell requires --transport routed-udp".to_string());
     }
     config.headless = headless;
+    // `--account-id`: headless automation presents this account instead of one derived from
+    // `--client-id`, so a capture fixture can act as the account an interactive client holds.
+    if account_id.is_some() && !headless {
+        return Err("--account-id requires --headless".to_string());
+    }
+    config.deterministic_account_id = account_id;
     config.auto_connect =
         auto_connect || headless || windowed_combat_demo || windowed_controller_demo;
     if product_match_smoke {
@@ -299,6 +337,9 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
         leave_match_cue,
         cancel_match_start,
         product_publish_map_smoke,
+        product_published_maps_smoke,
+        withdraw_published_map,
+        publish_map_name,
         expect_published_map,
         product_match_players_per_team,
         product_match_game_type,

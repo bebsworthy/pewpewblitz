@@ -123,6 +123,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<super::ClientQueueModel>()
             .init_resource::<super::ClientPracticeModel>()
             .init_resource::<super::ClientMapPublishModel>()
+            .init_resource::<super::ClientPublishedMapsModel>()
             .init_resource::<super::ClientMatchLoadingModel>()
             .init_resource::<brawler::builds::BuildCatalogResource>()
             .init_resource::<brawler::combat::WeaponCatalogResource>()

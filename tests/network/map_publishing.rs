@@ -1,12 +1,17 @@
 //! BRL-w9z1: a player publishes a Map Maker recipe over the routed lobby session, the lobby
 //! re-validates and stores it, an operator decision puts it into a game type's queue rotation,
 //! and a queue match carries the stored recipe to the match worker, which every client loads.
+//! BRL-s3dh: an author lists and withdraws only their own maps; a withdrawn approved map leaves
+//! rotation. BRL-1sgj: the reservation's map credit stays with the client through the handoff.
 
 use super::queue::{
     apply_lobby_control, grant_pending_allocation, start_product_join, wait_for_product_lobby,
 };
 use super::*;
-use brawler::lobby::{MapPublishDecision, MapPublishRejection, PublishedMapState};
+use brawler::lobby::{
+    MapPublishDecision, MapPublishRejection, PublishedMapId, PublishedMapListing,
+    PublishedMapState, PublishedMapSummary, PublishedMapsRejection,
+};
 
 const COMMUNITY_GAME: &str = "wipeout-1v1";
 
@@ -83,6 +88,47 @@ fn publish(
         decision.is_some()
     });
     decision.unwrap()
+}
+
+/// Send one "my published maps" request from a client (list, or withdraw first) and return the
+/// server's listing or refusal.
+fn published_maps(
+    harness: &mut Harness,
+    index: usize,
+    withdraw: Option<PublishedMapId>,
+) -> Result<Vec<PublishedMapSummary>, PublishedMapsRejection> {
+    {
+        let mut model = harness.clients[index]
+            .world_mut()
+            .resource_mut::<brawler_client::ClientPublishedMapsModel>();
+        let started = match withdraw {
+            Some(id) => model.withdraw(id),
+            None => model.request_list(),
+        };
+        assert!(started, "one request at a time");
+    }
+    harness.step_until(|harness| {
+        !harness.clients[index]
+            .world()
+            .resource::<brawler_client::ClientPublishedMapsModel>()
+            .pending()
+    });
+    let mut model = harness.clients[index]
+        .world_mut()
+        .resource_mut::<brawler_client::ClientPublishedMapsModel>();
+    model
+        .take_rejection()
+        .map_or_else(|| Ok(model.maps().unwrap().to_vec()), Err)
+}
+
+fn accepted_id(decision: MapPublishDecision) -> PublishedMapId {
+    let MapPublishDecision::Accepted {
+        published_map_id, ..
+    } = decision
+    else {
+        panic!("a valid recipe is accepted: {decision:?}");
+    };
+    published_map_id
 }
 
 fn profile_storage(harness: &Harness) -> brawler::profiles::ProfileStorage {
@@ -183,7 +229,7 @@ fn publishing_validates_with_the_authoritative_rules_and_stores_a_pending_map() 
 }
 
 /// Publish from client 0, approve as the operator, and wait for the lobby's rotation reload.
-fn publish_and_approve(harness: &mut Harness) -> brawler::lobby::PublishedMapId {
+fn publish_and_approve(harness: &mut Harness) -> PublishedMapId {
     let MapPublishDecision::Accepted {
         published_map_id, ..
     } = publish(
@@ -274,7 +320,7 @@ fn next_allocation_request(harness: &mut Harness) -> brawler_routing::AllocateRe
 /// participant rebuilds exactly the published map from replication.
 fn assert_match_load(
     request: &brawler_routing::AllocateRequestBody,
-    published_map_id: brawler::lobby::PublishedMapId,
+    published_map_id: PublishedMapId,
 ) {
     let participants = [
         brawler::testing::TestRoutedParticipant {
@@ -371,5 +417,127 @@ fn an_approved_map_follows_the_built_in_rotation_and_every_client_loads_it() {
             request.map_recipe_fingerprint
         );
     }
+    // BRL-1sgj: the credit stays with the reservation through the match handoff, where the
+    // completed match copies it into the Results context.
+    grant_pending_allocation(&mut harness, 4);
+    harness.step_until(|harness| {
+        harness.clients[2..].iter().all(|client| {
+            client
+                .world()
+                .resource::<brawler_client::RoutedClientLifecycle>()
+                .accepted_grant
+                .is_some()
+        })
+    });
+    for client in &harness.clients[2..] {
+        let kept = client
+            .world()
+            .resource::<brawler_client::ClientMatchLoadingModel>()
+            .active()
+            .and_then(|active| active.published_map.as_ref())
+            .map(|credit| credit.published_map_id);
+        assert_eq!(kept, Some(published_map_id));
+    }
     assert_match_load(&request, published_map_id);
+}
+
+#[test]
+fn authors_list_and_withdraw_only_their_own_published_maps() {
+    let mut harness = Harness::new_product_lobby(2);
+    wait_for_product_lobby(&mut harness);
+    let yard = || preset_recipe(brawler::map::FEATURE_YARD_WIPEOUT_PRESET);
+    let own = accepted_id(publish(
+        &mut harness,
+        0,
+        COMMUNITY_GAME,
+        "Yard Remix",
+        yard(),
+    ));
+    let foreign = accepted_id(publish(
+        &mut harness,
+        1,
+        COMMUNITY_GAME,
+        "Other Yard",
+        yard(),
+    ));
+
+    let listed = published_maps(&mut harness, 0, None).unwrap();
+    assert_eq!(
+        listed.len(),
+        1,
+        "only the caller's own submissions are listed"
+    );
+    assert_eq!(listed[0].published_map_id, own);
+    assert_eq!(listed[0].name, "Yard Remix");
+    assert_eq!(listed[0].game_type_id.as_str(), COMMUNITY_GAME);
+    assert_eq!(listed[0].listing, PublishedMapListing::Pending);
+
+    // Another account's map answers exactly like a missing one, and stays pending.
+    assert_eq!(
+        published_maps(&mut harness, 0, Some(foreign)),
+        Err(PublishedMapsRejection::NotFound)
+    );
+    let pending = profile_storage(&harness)
+        .list_published_maps(Some(brawler::profiles::PublishedMapStatus::Pending))
+        .unwrap();
+    assert!(pending.iter().any(|row| row.published_map_id == foreign));
+
+    let withdrawn = published_maps(&mut harness, 0, Some(own)).unwrap();
+    assert_eq!(
+        withdrawn[0].listing,
+        PublishedMapListing::Removed {
+            reason: Some(brawler::lobby::WITHDRAWN_BY_AUTHOR_REASON.to_string()),
+        }
+    );
+    assert_eq!(
+        published_maps(&mut harness, 0, Some(own)),
+        Err(PublishedMapsRejection::NotWithdrawable)
+    );
+    assert_eq!(
+        published_maps(&mut harness, 1, None).unwrap()[0].listing,
+        PublishedMapListing::Pending,
+        "the other author's map is untouched"
+    );
+}
+
+#[test]
+fn a_withdrawn_approved_map_leaves_rotation_at_once_and_stays_out() {
+    let mut harness = Harness::new_product_lobby(1);
+    wait_for_product_lobby(&mut harness);
+    let published_map_id = publish_and_approve(&mut harness);
+    let game = advertised_game(&harness, 0, COMMUNITY_GAME);
+    let listed = published_maps(&mut harness, 0, None).unwrap();
+    assert_eq!(
+        listed[0].listing,
+        PublishedMapListing::Approved { in_rotation: true }
+    );
+
+    let withdrawn = published_maps(&mut harness, 0, Some(published_map_id)).unwrap();
+    assert!(matches!(
+        withdrawn[0].listing,
+        PublishedMapListing::Removed { .. }
+    ));
+    let rotation_is_empty = |harness: &Harness| {
+        harness
+            .server
+            .world()
+            .resource::<brawler::server::CommunityMapRotation>()
+            .maps_for(&game.id)
+            .is_empty()
+    };
+    assert!(
+        rotation_is_empty(&harness),
+        "withdrawal leaves rotation now"
+    );
+    // The bounded rotation reload re-reads storage, where the row is removed like an
+    // operator `remove`, so the map never returns.
+    for _ in 0..(8 * 60) {
+        harness.step();
+        assert!(rotation_is_empty(&harness));
+    }
+    let row = profile_storage(&harness)
+        .list_published_maps(Some(brawler::profiles::PublishedMapStatus::Removed))
+        .unwrap();
+    assert_eq!(row.len(), 1);
+    assert_eq!(row[0].published_map_id, published_map_id);
 }

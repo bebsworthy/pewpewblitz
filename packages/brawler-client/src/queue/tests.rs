@@ -483,6 +483,70 @@ fn practice_selection_survives_replay_but_cannot_leak_to_another_game() {
     assert_eq!(model.pending.as_ref().unwrap().map_preset_id, None);
 }
 
+/// BRL-s3dh: one published-maps request in flight per lobby generation; a reply for another
+/// request is ignored; a successful withdraw reports its map once; a new generation forgets the
+/// listing so My Maps asks again.
+#[test]
+fn published_maps_keep_one_request_in_flight_and_the_last_server_listing() {
+    use brawler::lobby::{
+        PublishedMapId, PublishedMapListing, PublishedMapSummary, PublishedMapsRejection,
+        PublishedMapsReply, PublishedMapsRequestId, PublishedMapsResult,
+    };
+    let mut model = ClientPublishedMapsModel::default();
+    assert!(!model.request_list(), "no lobby session yet");
+    model.bind_generation(1);
+    assert!(model.needs_list());
+    assert!(model.request_list());
+    assert!(!model.withdraw(PublishedMapId::new(1).unwrap()));
+    let map = PublishedMapSummary {
+        published_map_id: PublishedMapId::new(1).unwrap(),
+        name: "Yard".to_string(),
+        game_type_id: brawler::lobby::GameTypeId::new("wipeout-1v1").unwrap(),
+        listing: PublishedMapListing::Pending,
+    };
+    let reply = |id: u64, result| PublishedMapsReply {
+        request_id: PublishedMapsRequestId::new(id).unwrap(),
+        result,
+    };
+    model.accept_reply(reply(9, PublishedMapsResult::Listed(Vec::new())));
+    assert!(model.pending(), "a reply to another request is ignored");
+    model.accept_reply(reply(1, PublishedMapsResult::Listed(vec![map.clone()])));
+    assert!(!model.pending() && !model.needs_list());
+    assert!(model.take_changed());
+    assert_eq!(model.maps(), Some(&[map.clone()][..]));
+
+    assert!(model.withdraw(map.published_map_id));
+    assert!(model.withdrawing(map.published_map_id));
+    let removed = PublishedMapSummary {
+        listing: PublishedMapListing::Removed { reason: None },
+        ..map.clone()
+    };
+    model.accept_reply(reply(2, PublishedMapsResult::Listed(vec![removed])));
+    assert_eq!(model.take_withdrawn(), Some(map.published_map_id));
+    assert_eq!(model.take_withdrawn(), None);
+    assert!(model.withdraw(map.published_map_id));
+    model.accept_reply(reply(
+        3,
+        PublishedMapsResult::Rejected(PublishedMapsRejection::NotWithdrawable),
+    ));
+    assert_eq!(
+        model.take_rejection(),
+        Some(PublishedMapsRejection::NotWithdrawable)
+    );
+    assert_eq!(
+        model.take_withdrawn(),
+        None,
+        "a refused withdraw removed nothing"
+    );
+
+    model.bind_generation(2);
+    assert!(model.needs_list(), "a new lobby session lists again");
+    assert_eq!(
+        published_map_chip(&PublishedMapListing::Approved { in_rotation: true }),
+        "IN ROTATION"
+    );
+}
+
 #[test]
 fn map_publish_allows_one_request_per_lobby_generation_and_reports_its_outcome_once() {
     let mut model = ClientMapPublishModel::default();

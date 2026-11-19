@@ -26,11 +26,12 @@ pub use model::{
 };
 #[cfg(feature = "server")]
 pub use storage::{
-    MAX_PENDING_PUBLISHED_MAPS, MAX_PUBLISHED_MAP_REASON_BYTES, MAX_ROTATION_MAPS_PER_GAME_TYPE,
-    MAX_STORED_PUBLISHED_MAPS, ProfileStorage, ProfileStorageCommand, ProfileStorageError,
-    ProfileStorageExecutor, ProfileStorageReply, ProfileStorageResult, PublishedMapAction,
-    PublishedMapLimits, PublishedMapRecord, PublishedMapStatus, PublishedMapSubmission,
-    PublishedMapSubmissionOutcome, backup_database,
+    AccountPublishedMaps, MAX_PENDING_PUBLISHED_MAPS, MAX_PUBLISHED_MAP_REASON_BYTES,
+    MAX_ROTATION_MAPS_PER_GAME_TYPE, MAX_STORED_PUBLISHED_MAPS, ProfileStorage,
+    ProfileStorageCommand, ProfileStorageError, ProfileStorageExecutor, ProfileStorageReply,
+    ProfileStorageResult, PublishedMapAction, PublishedMapLimits, PublishedMapRecord,
+    PublishedMapStatus, PublishedMapSubmission, PublishedMapSubmissionOutcome,
+    PublishedMapWithdrawal, backup_database,
 };
 
 #[cfg(test)]

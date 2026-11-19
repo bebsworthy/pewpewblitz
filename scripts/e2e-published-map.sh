@@ -5,6 +5,8 @@ set -euo pipefail
 # wipeout-1v1 built-in map to a fresh routed server, the operator CLI approves it, and two exact
 # 1v1 queue matches follow: the first plays the built-in map, the second the published map, which
 # both clients must load (and see credited on Match Loading) before the match reaches Active.
+# Then (BRL-s3dh) client B cannot withdraw client A's map, client A lists it as approved and in
+# rotation and withdraws it, and the operator CLI shows it removed.
 
 game_type=wipeout-1v1
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -138,3 +140,22 @@ for side in a b; do
 done
 grep -h 'match-loading credit=' "$log_dir/published-a.log"
 printf 'brawler published-map e2e: published map %s loaded for clients A and B and reached Active\n' "$published_id"
+
+# BRL-s3dh: only the author lists and withdraws the map. Client B's withdraw is refused as
+# not-found; client A sees it approved and in rotation, withdraws it, and the operator store
+# shows it removed with the author's reason.
+if client 7102 withdraw-foreign --product-published-maps-smoke --withdraw-published-map "$published_id"; then
+    fail "client B withdrew client A's map"
+fi
+grep -q 'NotFound' "$log_dir/withdraw-foreign.log" || fail "client B's withdraw was not refused as not found"
+client 7101 list --product-published-maps-smoke || fail "client A could not list its published maps"
+grep -q "published-map-row id=$published_id state=approved-in-rotation" "$log_dir/list.log" \
+    || fail "client A's map is not listed as approved and in rotation"
+client 7101 withdraw --product-published-maps-smoke --withdraw-published-map "$published_id" \
+    || fail "client A could not withdraw its map"
+grep -q "published-map-row id=$published_id state=removed" "$log_dir/withdraw.log" \
+    || fail "client A's withdrawn map is not listed as removed"
+grep -h 'published-map-row' "$log_dir/list.log" "$log_dir/withdraw.log"
+target/debug/brawler-profile-admin maps list --state removed --database "$database" | tee "$log_dir/maps-withdrawn.txt"
+grep -q "^$published_id	removed	.*Withdrawn by the author" "$log_dir/maps-withdrawn.txt" || fail "the operator store does not show the withdrawal"
+printf 'brawler published-map e2e: client A listed and withdrew map %s; client B could not\n' "$published_id"

@@ -6,6 +6,7 @@ mod loading;
 mod matchmaking;
 mod practice;
 mod publish;
+mod published_maps;
 
 #[cfg(test)]
 mod tests;
@@ -19,6 +20,10 @@ pub(super) use matchmaking::observe_queue_messages;
 pub use matchmaking::{ClientQueueModel, PendingQueueCommand};
 pub use practice::ClientPracticeModel;
 pub use publish::{ClientMapPublishModel, map_publish_decision_text};
+pub use published_maps::{
+    ClientPublishedMapsModel, published_map_chip, published_map_detail,
+    published_maps_rejection_text,
+};
 
 pub struct ClientQueuePlugin;
 
@@ -28,6 +33,7 @@ impl Plugin for ClientQueuePlugin {
             .init_resource::<ClientMatchLoadingModel>()
             .init_resource::<ClientPracticeModel>()
             .init_resource::<ClientMapPublishModel>()
+            .init_resource::<ClientPublishedMapsModel>()
             .add_systems(
                 Update,
                 (
@@ -38,6 +44,7 @@ impl Plugin for ClientQueuePlugin {
                     loading::send_matchmaking_messages,
                     practice::send_practice_messages,
                     publish::exchange_map_publish_messages,
+                    published_maps::exchange_published_maps_messages,
                 )
                     .chain(),
             );
@@ -52,6 +59,7 @@ impl Plugin for ClientQueuePlugin {
                     automation::drive_headless_queue_smoke,
                     automation::drive_headless_requeue_smoke,
                     automation::drive_headless_publish_smoke,
+                    automation::drive_headless_published_maps_smoke,
                     automation::report_published_map_credit,
                 )
                     .chain()

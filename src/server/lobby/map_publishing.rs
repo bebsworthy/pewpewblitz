@@ -6,16 +6,23 @@
 //! re-read on a bounded interval, re-validated against the current content and game type, and
 //! appended to that game type's queue rotation after its built-in maps. None of this changes the
 //! gameplay content fingerprint or the advertised catalog revision.
+//!
+//! An author lists their own submissions and withdraws a pending or approved one (BRL-s3dh).
+//! The lobby scopes both to the session's own account; a withdrawn approved map leaves the
+//! in-memory rotation at once, exactly where an operator `remove` takes it on the next reload.
 
 use super::{LobbyClient, LobbyState, catalog};
 use crate::{
     lobby::{
         AdvertisedGameType, GameTypeId, MapPublishDecision, MapPublishOutcome, MapPublishRejection,
         MapPublishRequest, MapPublishRequestId, PublishedMapCredit, PublishedMapId,
+        PublishedMapListing, PublishedMapSummary, PublishedMapsAction, PublishedMapsRejection,
+        PublishedMapsReply, PublishedMapsRequest, PublishedMapsRequestId, PublishedMapsResult,
     },
     profiles::{
-        ProfileAuthority, PublishedMapLimits, PublishedMapRecord, PublishedMapStorageCompletion,
-        PublishedMapSubmission, PublishedMapSubmissionOutcome,
+        AccountPublishedMaps, ProfileAuthority, PublishedMapLimits, PublishedMapRecord,
+        PublishedMapStatus, PublishedMapStorageCompletion, PublishedMapSubmission,
+        PublishedMapSubmissionOutcome, PublishedMapWithdrawal,
     },
     protocol::SessionChannel,
 };
@@ -120,6 +127,23 @@ impl CommunityMapRotation {
         self.maps.get(game_type_id).map_or(&[], Vec::as_slice)
     }
 
+    fn contains(&self, game_type_id: &GameTypeId, published_map_id: PublishedMapId) -> bool {
+        self.maps_for(game_type_id)
+            .iter()
+            .any(|map| map.published_map_id == published_map_id)
+    }
+
+    /// An author withdrew an approved map: it leaves rotation now. A rotation read already in
+    /// flight may predate the withdrawal, so it is discarded and a fresh read follows at once.
+    fn withdraw(&mut self, published_map_id: PublishedMapId) {
+        for maps in self.maps.values_mut() {
+            maps.retain(|map| map.published_map_id != published_map_id);
+        }
+        self.maps.retain(|_, maps| !maps.is_empty());
+        self.refresh_request = None;
+        self.refresh_soon = true;
+    }
+
     /// Replace the rotation from stored approved rows. A row whose game type no longer opts in,
     /// changed its configuration revision, or whose recipe no longer validates against the
     /// current content is left out (it stays stored and recoverable) and logged.
@@ -206,6 +230,20 @@ impl CommunityMapRotation {
 #[derive(Resource, Debug, Default)]
 pub(super) struct PendingMapPublications {
     by_storage_request: BTreeMap<u64, (LobbySessionId, MapPublishRequestId)>,
+    sessions: BTreeSet<LobbySessionId>,
+}
+
+/// "My published maps" requests waiting on the storage owner, at most one per lobby session.
+#[derive(Resource, Debug, Default)]
+pub(super) struct PendingPublishedMapQueries {
+    by_storage_request: BTreeMap<
+        u64,
+        (
+            LobbySessionId,
+            PublishedMapsRequestId,
+            Option<PublishedMapId>,
+        ),
+    >,
     sessions: BTreeSet<LobbySessionId>,
 }
 
@@ -343,19 +381,187 @@ pub(super) fn apply_map_publish_requests(
     }
 }
 
+/// Accept one "my published maps" request per session: list the caller's own submissions, or
+/// withdraw one of them first. The account is always the session's own (BRL-s3dh).
 #[allow(
     clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "one bounded receiver query owns the per-session published-maps transaction"
+)]
+pub(super) fn apply_published_maps_requests(
+    mut authority: ResMut<ProfileAuthority>,
+    mut pending: ResMut<PendingPublishedMapQueries>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageReceiver<PublishedMapsRequest>,
+        &mut MessageSender<PublishedMapsReply>,
+        Has<Connected>,
+        Has<Disconnected>,
+    )>,
+) {
+    for (client, mut receiver, mut sender, connected, disconnected) in &mut clients {
+        // Lightyear's draining iterator discards anything beyond the one request per update.
+        let Some(request) = receiver.receive().next() else {
+            continue;
+        };
+        if !connected || disconnected {
+            continue;
+        }
+        let reject = |sender: &mut MessageSender<PublishedMapsReply>, reason| {
+            sender.send::<SessionChannel>(PublishedMapsReply {
+                request_id: request.request_id,
+                result: PublishedMapsResult::Rejected(reason),
+            });
+        };
+        let Some(account_id) = authority.account_for_client(client.client_id.get()) else {
+            reject(&mut sender, PublishedMapsRejection::Busy);
+            continue;
+        };
+        if pending.sessions.contains(&client.lobby_session_id) {
+            reject(&mut sender, PublishedMapsRejection::Busy);
+            continue;
+        }
+        let withdraw = match request.action {
+            PublishedMapsAction::List => None,
+            PublishedMapsAction::Withdraw { published_map_id } => Some(published_map_id),
+        };
+        match authority.request_account_published_maps(account_id, withdraw, unix_now_millis()) {
+            Ok(storage_request_id) => {
+                pending.sessions.insert(client.lobby_session_id);
+                pending.by_storage_request.insert(
+                    storage_request_id,
+                    (client.lobby_session_id, request.request_id, withdraw),
+                );
+            }
+            Err(error) => {
+                warn!(?error, "published maps storage request failed");
+                reject(&mut sender, PublishedMapsRejection::Busy);
+            }
+        }
+    }
+}
+
+/// The author's view of one stored row. A row that could not cross the wire (a name or reason
+/// outside its bound) is left out rather than failing the whole reply.
+fn published_map_summary(
+    record: PublishedMapRecord,
+    rotation: &CommunityMapRotation,
+) -> Option<PublishedMapSummary> {
+    let listing = match record.status {
+        PublishedMapStatus::Pending => PublishedMapListing::Pending,
+        PublishedMapStatus::Approved => PublishedMapListing::Approved {
+            in_rotation: rotation.contains(&record.game_type_id, record.published_map_id),
+        },
+        PublishedMapStatus::Rejected => PublishedMapListing::Rejected {
+            reason: record.reason.unwrap_or_default(),
+        },
+        PublishedMapStatus::Removed => PublishedMapListing::Removed {
+            reason: record.reason,
+        },
+    };
+    let reason_valid = match &listing {
+        PublishedMapListing::Rejected { reason }
+        | PublishedMapListing::Removed {
+            reason: Some(reason),
+        } => {
+            reason.len() <= crate::lobby::MAX_PUBLISHED_MAP_REASON_BYTES
+                && !reason.chars().any(char::is_control)
+        }
+        _ => true,
+    };
+    let name_valid = crate::map::authoring::normalize_map_name(&record.name).as_deref()
+        == Ok(record.name.as_str());
+    if !(reason_valid && name_valid) {
+        warn!(
+            published_map_id = record.published_map_id.get(),
+            "published map row cannot be listed"
+        );
+        return None;
+    }
+    Some(PublishedMapSummary {
+        published_map_id: record.published_map_id,
+        name: record.name,
+        game_type_id: record.game_type_id,
+        listing,
+    })
+}
+
+fn account_reply(
+    result: Result<AccountPublishedMaps, crate::profiles::ProfileStorageError>,
+    rotation: &mut CommunityMapRotation,
+) -> PublishedMapsResult {
+    let account = match result {
+        Ok(account) => account,
+        Err(error) => {
+            warn!(?error, "published maps storage read failed");
+            return PublishedMapsResult::Rejected(PublishedMapsRejection::Internal);
+        }
+    };
+    match account.withdrawal {
+        Some(PublishedMapWithdrawal::NotFound) => {
+            return PublishedMapsResult::Rejected(PublishedMapsRejection::NotFound);
+        }
+        Some(PublishedMapWithdrawal::NotWithdrawable) => {
+            return PublishedMapsResult::Rejected(PublishedMapsRejection::NotWithdrawable);
+        }
+        Some(PublishedMapWithdrawal::Withdrawn { .. }) | None => {}
+    }
+    PublishedMapsResult::Listed(
+        account
+            .maps
+            .into_iter()
+            .filter_map(|record| published_map_summary(record, rotation))
+            .collect(),
+    )
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
     reason = "Bevy system parameters are runtime-owned"
 )]
 pub(super) fn apply_published_map_completions(
     catalog: Res<catalog::ResolvedLobbyCatalog>,
     mut authority: ResMut<ProfileAuthority>,
     mut pending: ResMut<PendingMapPublications>,
+    mut queries: ResMut<PendingPublishedMapQueries>,
     mut rotation: ResMut<CommunityMapRotation>,
-    mut clients: Query<(&LobbyClient, &mut MessageSender<MapPublishOutcome>)>,
+    mut clients: Query<(
+        &LobbyClient,
+        &mut MessageSender<MapPublishOutcome>,
+        &mut MessageSender<PublishedMapsReply>,
+    )>,
 ) {
     for completion in authority.take_published_map_completions() {
         match completion {
+            PublishedMapStorageCompletion::Account {
+                storage_request_id,
+                result,
+            } => {
+                let Some((session_id, request_id, withdrawn)) =
+                    queries.by_storage_request.remove(&storage_request_id)
+                else {
+                    continue;
+                };
+                queries.sessions.remove(&session_id);
+                if let Ok(AccountPublishedMaps {
+                    withdrawal: Some(PublishedMapWithdrawal::Withdrawn { was_approved }),
+                    ..
+                }) = &result
+                {
+                    info!(was_approved, "author withdrew a published map");
+                    if *was_approved && let Some(id) = withdrawn {
+                        rotation.withdraw(id);
+                    }
+                }
+                let result = account_reply(result, &mut rotation);
+                if let Some((_, _, mut sender)) = clients
+                    .iter_mut()
+                    .find(|(client, ..)| client.lobby_session_id == session_id)
+                {
+                    sender.send::<SessionChannel>(PublishedMapsReply { request_id, result });
+                }
+            }
             PublishedMapStorageCompletion::Submission {
                 storage_request_id,
                 result,
@@ -392,9 +598,9 @@ pub(super) fn apply_published_map_completions(
                         MapPublishDecision::Rejected(MapPublishRejection::Internal)
                     }
                 };
-                if let Some((_, mut sender)) = clients
+                if let Some((_, mut sender, _)) = clients
                     .iter_mut()
-                    .find(|(client, _)| client.lobby_session_id == session_id)
+                    .find(|(client, ..)| client.lobby_session_id == session_id)
                 {
                     sender.send::<SessionChannel>(MapPublishOutcome {
                         request_id,

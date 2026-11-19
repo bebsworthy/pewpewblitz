@@ -16,7 +16,7 @@ pub const MAX_PENDING_PUBLISHED_MAPS: u32 = 64;
 /// Approved maps one game type's queue rotation may hold.
 pub const MAX_ROTATION_MAPS_PER_GAME_TYPE: u32 = 64;
 /// Bound on an operator's rejection or removal reason.
-pub const MAX_PUBLISHED_MAP_REASON_BYTES: usize = 256;
+pub const MAX_PUBLISHED_MAP_REASON_BYTES: usize = crate::lobby::MAX_PUBLISHED_MAP_REASON_BYTES;
 
 pub(super) fn create_schema_v3(transaction: &Transaction<'_>) -> Result<(), ProfileStorageError> {
     transaction.execute_batch(
@@ -129,6 +129,25 @@ pub enum PublishedMapAction {
     Approve,
     Reject { reason: String },
     Remove { reason: Option<String> },
+}
+
+/// The result of an author's withdraw request (BRL-s3dh).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublishedMapWithdrawal {
+    /// The row is now removed; `was_approved` says it was approved (in or waiting for rotation).
+    Withdrawn { was_approved: bool },
+    /// No row with that ID belongs to the account, including another account's row.
+    NotFound,
+    /// The row is already rejected or removed.
+    NotWithdrawable,
+}
+
+/// One account's own rows, newest first, after an optional withdrawal (BRL-s3dh).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountPublishedMaps {
+    pub withdrawal: Option<PublishedMapWithdrawal>,
+    /// At most `MAX_LISTED_PUBLISHED_MAPS` rows. Listing rows carry no recipe bytes.
+    pub maps: Vec<PublishedMapRecord>,
 }
 
 fn count(
@@ -328,6 +347,40 @@ impl ProfileStorage {
         rows.into_iter().map(RawRecord::decode).collect()
     }
 
+    /// The account's own rows, newest first, without recipe bytes, after withdrawing
+    /// `withdraw` when given. Ownership is part of every query: another account's row is
+    /// `NotFound`, exactly like a missing one.
+    pub fn account_published_maps(
+        &mut self,
+        account_id: AccountId,
+        withdraw: Option<PublishedMapId>,
+        now_unix_ms: u64,
+    ) -> Result<AccountPublishedMaps, ProfileStorageError> {
+        let transaction = self.connection.transaction()?;
+        let account = account_id.to_bytes();
+        let withdrawal = withdraw
+            .map(|published_map_id| {
+                withdraw_own_row(&transaction, &account, published_map_id, now_unix_ms)
+            })
+            .transpose()?;
+        // The recipe column is replaced by an empty blob: a listing never needs the map.
+        let columns = RECORD_COLUMNS.replace(",recipe,", ",X'',");
+        let maps = {
+            let mut statement = transaction.prepare(&format!(
+                "SELECT {columns} FROM published_maps WHERE account_id=?1 ORDER BY submitted_at_unix_ms DESC, published_map_id DESC LIMIT ?2"
+            ))?;
+            let limit = i64::try_from(crate::lobby::MAX_LISTED_PUBLISHED_MAPS).unwrap_or(i64::MAX);
+            statement
+                .query_map(params![account.as_slice(), limit], record_from_row)?
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(RawRecord::decode)
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        transaction.commit()?;
+        Ok(AccountPublishedMaps { withdrawal, maps })
+    }
+
     /// Apply one operator decision. Approve and reject act only on a pending row; remove acts on
     /// a pending or approved row. Returns the updated record.
     pub fn decide_published_map(
@@ -406,4 +459,44 @@ impl ProfileStorage {
             ..current
         })
     }
+}
+
+/// Withdraw one of the account's pending or approved rows: the same removed state an operator
+/// `remove` leaves, with the author's reason.
+fn withdraw_own_row(
+    transaction: &Transaction<'_>,
+    account: &[u8],
+    published_map_id: PublishedMapId,
+    now_unix_ms: u64,
+) -> Result<PublishedMapWithdrawal, ProfileStorageError> {
+    let id = to_i64(published_map_id.get())?;
+    let status: Option<i64> = transaction
+        .query_row(
+            "SELECT status FROM published_maps WHERE published_map_id=?1 AND account_id=?2",
+            params![id, account],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(status) = status.map(PublishedMapStatus::from_code).transpose()? else {
+        return Ok(PublishedMapWithdrawal::NotFound);
+    };
+    if !matches!(
+        status,
+        PublishedMapStatus::Pending | PublishedMapStatus::Approved
+    ) {
+        return Ok(PublishedMapWithdrawal::NotWithdrawable);
+    }
+    transaction.execute(
+        "UPDATE published_maps SET status=?1,decided_at_unix_ms=?2,reason=?3 WHERE published_map_id=?4 AND account_id=?5",
+        params![
+            PublishedMapStatus::Removed.code(),
+            to_i64(now_unix_ms)?,
+            crate::lobby::WITHDRAWN_BY_AUTHOR_REASON,
+            id,
+            account,
+        ],
+    )?;
+    Ok(PublishedMapWithdrawal::Withdrawn {
+        was_approved: status == PublishedMapStatus::Approved,
+    })
 }

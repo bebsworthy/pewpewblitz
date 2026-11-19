@@ -49,6 +49,17 @@ nonzero_u64_id!(
     "map publish request ID must be nonzero"
 );
 nonzero_u64_id!(PublishedMapId, "published map ID must be nonzero");
+nonzero_u64_id!(
+    PublishedMapsRequestId,
+    "published maps request ID must be nonzero"
+);
+
+/// The most recent submissions one "my published maps" reply lists (BRL-s3dh).
+pub const MAX_LISTED_PUBLISHED_MAPS: usize = 64;
+/// Bound on an operator's rejection or removal reason, in storage and on the wire.
+pub const MAX_PUBLISHED_MAP_REASON_BYTES: usize = 256;
+/// The removal reason the lobby records when an author withdraws their own map.
+pub const WITHDRAWN_BY_AUTHOR_REASON: &str = "Withdrawn by the author.";
 
 impl PublishedMapId {
     /// The server-unique recipe identity a published map is stored and fingerprinted under.
@@ -162,6 +173,111 @@ pub struct PublishedMapCredit {
     pub author_display_name: String,
 }
 
+fn deserialize_reason<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    super::deserialize_validated_string(deserializer, MAX_PUBLISHED_MAP_REASON_BYTES, |value| {
+        (!value.chars().any(char::is_control)).then(|| value.to_string())
+    })
+}
+
+fn deserialize_optional_reason<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct Reason(#[serde(deserialize_with = "deserialize_reason")] String);
+    Ok(Option::<Reason>::deserialize(deserializer)?.map(|reason| reason.0))
+}
+
+fn deserialize_listed_maps<'de, D>(deserializer: D) -> Result<Vec<PublishedMapSummary>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    super::deserialize_bounded_vec::<D, PublishedMapSummary, MAX_LISTED_PUBLISHED_MAPS>(
+        deserializer,
+    )
+}
+
+/// What a player asks about their own published maps on the connected server (BRL-s3dh). The
+/// lobby answers only for the session's own account; the client never names an account.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublishedMapsAction {
+    List,
+    /// Take one pending or approved map of the caller's out of review or rotation.
+    Withdraw {
+        published_map_id: PublishedMapId,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PublishedMapsRequest {
+    pub request_id: PublishedMapsRequestId,
+    pub action: PublishedMapsAction,
+}
+
+/// One submission's state as its author sees it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum PublishedMapListing {
+    Pending,
+    /// Approved by the operator or by automatic moderation. `in_rotation` is false while the
+    /// lobby leaves it out of rotation: its game type closed or changed, or it no longer
+    /// validates, or the lobby has not re-read it yet.
+    Approved {
+        in_rotation: bool,
+    },
+    Rejected {
+        #[serde(deserialize_with = "deserialize_reason")]
+        reason: String,
+    },
+    /// Removed by the operator, or withdrawn by the author (`WITHDRAWN_BY_AUTHOR_REASON`).
+    Removed {
+        #[serde(deserialize_with = "deserialize_optional_reason")]
+        reason: Option<String>,
+    },
+}
+
+impl PublishedMapListing {
+    /// Whether the author may still withdraw it.
+    #[must_use]
+    pub const fn withdrawable(&self) -> bool {
+        matches!(self, Self::Pending | Self::Approved { .. })
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PublishedMapSummary {
+    pub published_map_id: PublishedMapId,
+    #[serde(deserialize_with = "deserialize_map_name")]
+    pub name: String,
+    pub game_type_id: GameTypeId,
+    pub listing: PublishedMapListing,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublishedMapsRejection {
+    /// No map of the caller's has that ID. Another account's map answers exactly the same.
+    NotFound,
+    /// The map is already rejected or removed.
+    NotWithdrawable,
+    Busy,
+    Internal,
+}
+
+/// The caller's submissions, newest first, after the request was applied; or why it was not.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum PublishedMapsResult {
+    Listed(#[serde(deserialize_with = "deserialize_listed_maps")] Vec<PublishedMapSummary>),
+    Rejected(PublishedMapsRejection),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PublishedMapsReply {
+    pub request_id: PublishedMapsRequestId,
+    pub result: PublishedMapsResult,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,6 +317,39 @@ mod tests {
             let encoded = postcard::to_allocvec(&outcome).unwrap();
             assert!(postcard::from_bytes::<MapPublishOutcome>(&encoded).is_err());
         }
+    }
+
+    #[test]
+    fn listed_maps_and_reasons_are_bounded_on_the_wire() {
+        let row = |reason: &str| PublishedMapSummary {
+            published_map_id: PublishedMapId::new(1).unwrap(),
+            name: "Yard".to_string(),
+            game_type_id: GameTypeId::new("wipeout-1v1").unwrap(),
+            listing: PublishedMapListing::Rejected {
+                reason: reason.to_string(),
+            },
+        };
+        let reply = |maps| PublishedMapsReply {
+            request_id: PublishedMapsRequestId::new(1).unwrap(),
+            result: PublishedMapsResult::Listed(maps),
+        };
+        let decode = |reply: &PublishedMapsReply| {
+            postcard::from_bytes::<PublishedMapsReply>(&postcard::to_allocvec(reply).unwrap())
+        };
+        let full = reply(vec![row("Too dark"); MAX_LISTED_PUBLISHED_MAPS]);
+        assert_eq!(decode(&full), Ok(full.clone()));
+        assert!(decode(&reply(vec![row("Too dark"); MAX_LISTED_PUBLISHED_MAPS + 1])).is_err());
+        let long = "x".repeat(MAX_PUBLISHED_MAP_REASON_BYTES + 1);
+        assert!(decode(&reply(vec![row(&long)])).is_err());
+        assert!(decode(&reply(vec![row("line\nbreak")])).is_err());
+        let removed = reply(vec![PublishedMapSummary {
+            listing: PublishedMapListing::Removed {
+                reason: Some(WITHDRAWN_BY_AUTHOR_REASON.to_string()),
+            },
+            ..row("")
+        }]);
+        assert_eq!(decode(&removed), Ok(removed.clone()));
+        assert!(postcard::from_bytes::<PublishedMapsRequestId>(&[0]).is_err());
     }
 
     #[test]

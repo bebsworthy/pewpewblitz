@@ -35,6 +35,8 @@ pub(in crate::flow) enum ResultsLayoutRole {
     Header,
     Trophy,
     Headline,
+    /// "Map — by Author" for a community map (BRL-1sgj).
+    MapCredit,
     TeamCard,
 }
 #[derive(bevy::ecs::system::SystemParam)]
@@ -334,6 +336,17 @@ impl ResultsPainter<'_> {
         );
         if !title.is_empty() {
             self.text(p, &title, title_size);
+        }
+        // A community map keeps the Match Loading credit on Results (BRL-1sgj).
+        if let Some(credit) = &self.context.published_map {
+            let credit = self.text(
+                p,
+                &super::super::match_loading::published_map_credit_text(credit),
+                title_size * 0.75,
+            );
+            p.commands()
+                .entity(credit)
+                .insert(ResultsLayoutRole::MapCredit);
         }
     }
     fn teams(&self, p: &mut ChildSpawnerCommands, scores: &WipeoutState) {

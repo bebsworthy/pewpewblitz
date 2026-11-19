@@ -1,16 +1,18 @@
 //! My Maps: the lighter-shell library (BRL-2xpc direction D). Shell Back, title and orange
 //! primary actions around flat map tiles; the selected map's actions act on one tile; create and
-//! delete are flat dialogs on their own layer.
+//! delete are flat dialogs on their own layer. A filter switches to the maps this account
+//! published to the connected server, each tile with its server-reported state chip, and a
+//! selected pending or approved one can be withdrawn (BRL-s3dh).
 
 use super::{
     MapMakerRoot, MapMakerRuntime, PaletteCategory,
     check::map_check,
     create_defaults,
     scroll::{MapMakerScroll, MapMakerScrollMemory, ScrollArea},
-    widgets::{ButtonSpec, Kit, MetricsParam, RADIUS, Tone, bar_fill, column, grow, row},
+    widgets::{ButtonSpec, DANGER, Kit, MetricsParam, RADIUS, Tone, bar_fill, column, grow, row},
 };
 use crate::{
-    ClientLobbyMembership, MapDraftDocument, MapDraftLibrary,
+    ClientLobbyMembership, ClientPublishedMapsModel, MapDraftDocument, MapDraftLibrary,
     flow::{
         ClientFlow, SelectedGameType,
         actions::{FlowUiAction, PendingFlowActions},
@@ -30,6 +32,7 @@ use bevy::{
     prelude::*,
     ui::{FocusPolicy, InteractionDisabled},
 };
+use brawler::lobby::{PublishedMapId, PublishedMapListing, PublishedMapSummary};
 use brawler::map::{MapCatalogResource, MapContentCatalog, MapModeAnchorKind, MapRecipe};
 use lightyear::prelude::client::Client;
 
@@ -37,6 +40,8 @@ use lightyear::prelude::client::Client;
 mod index {
     pub(super) const BACK: usize = 0;
     pub(super) const CREATE: usize = 1;
+    pub(super) const SHOW_DEVICE: usize = 2;
+    pub(super) const SHOW_PUBLISHED: usize = 3;
     pub(super) const EDIT: usize = 10;
     pub(super) const RENAME: usize = 11;
     pub(super) const DUPLICATE: usize = 12;
@@ -44,6 +49,7 @@ mod index {
     pub(super) const DELETE: usize = 14;
     pub(super) const RENAME_CANCEL: usize = 15;
     pub(super) const RENAME_SAVE: usize = 16;
+    pub(super) const WITHDRAW: usize = 17;
     pub(super) const DIALOG_CANCEL: usize = 20;
     pub(super) const DIALOG_CONFIRM: usize = 21;
     pub(super) const FIRST_TILE: usize = 100;
@@ -109,6 +115,7 @@ pub(in crate::flow) fn present_map_library(
     scroll: Res<MapMakerScrollMemory>,
     memberships: Query<&ClientLobbyMembership, With<Client>>,
     selection: Res<SelectedGameType>,
+    published: Res<ClientPublishedMapsModel>,
 ) {
     if *flow.get() != ClientFlow::MapLibrary {
         return;
@@ -146,7 +153,7 @@ pub(in crate::flow) fn present_map_library(
         ))
         .with_children(|root| {
             spawn_background(root, Some(&server));
-            header(root, &kit, &library);
+            header(root, &kit, &library, &runtime, published.maps());
             root.spawn((
                 Node {
                     width: percent(100),
@@ -164,7 +171,16 @@ pub(in crate::flow) fn present_map_library(
                 if let Some(status) = runtime.status.as_deref() {
                     status_line(body, &kit, status);
                 }
-                if library.drafts.is_empty() {
+                if runtime.published_view {
+                    published_body(
+                        body,
+                        &kit,
+                        &published,
+                        memberships.iter().next(),
+                        &runtime,
+                        &scroll,
+                    );
+                } else if library.drafts.is_empty() {
                     empty_state(body, &kit);
                 } else {
                     tiles(body, &kit, &library, catalog, &scroll);
@@ -194,10 +210,411 @@ pub(in crate::flow) fn present_map_library(
         dialog(&mut commands, key, &kit, |dialog| {
             delete_dialog(dialog, &kit, document);
         });
+    } else if let Some(map) = runtime.pending_withdraw.and_then(|id| published.map(id)) {
+        dialog(&mut commands, key, &kit, |dialog| {
+            withdraw_dialog(dialog, &kit, map);
+        });
     }
 }
 
-fn header(root: &mut ChildSpawnerCommands, kit: &Kit, library: &MapDraftLibrary) {
+/// The header's two library views: drafts saved on this device, and maps published to this
+/// server.
+fn view_filter(
+    header: &mut ChildSpawnerCommands,
+    kit: &Kit,
+    drafts: usize,
+    published: Option<&[PublishedMapSummary]>,
+) {
+    let device = format!("On this device ({drafts})");
+    let published = published.map_or_else(
+        || "Published".to_string(),
+        |maps| format!("Published ({})", maps.len()),
+    );
+    kit.segmented(
+        header,
+        false,
+        vec![
+            ButtonSpec::new(
+                index::SHOW_DEVICE,
+                FlowUiAction::ShowPublishedMaps(false),
+                Tone::Quiet,
+            )
+            .label(&device)
+            .width(px(kit.pick(200.0, 250.0))),
+            ButtonSpec::new(
+                index::SHOW_PUBLISHED,
+                FlowUiAction::ShowPublishedMaps(true),
+                Tone::Quiet,
+            )
+            .label(&published)
+            .width(px(kit.pick(180.0, 220.0))),
+        ],
+    );
+}
+
+/// The Published view: one tile per submission (newest first) with its state chip, and the
+/// selected map's Withdraw action.
+fn published_body(
+    body: &mut ChildSpawnerCommands,
+    kit: &Kit,
+    published: &ClientPublishedMapsModel,
+    membership: Option<&ClientLobbyMembership>,
+    runtime: &MapMakerRuntime,
+    scroll: &MapMakerScrollMemory,
+) {
+    let maps = match (membership, published.maps()) {
+        (None, _) => {
+            published_note(
+                body,
+                kit,
+                "Connect to a server to see the maps you published to it.",
+            );
+            return;
+        }
+        (Some(_), None) => {
+            published_note(body, kit, "Loading the maps you published to this server…");
+            return;
+        }
+        (Some(_), Some([])) => {
+            published_note(
+                body,
+                kit,
+                "Nothing published to this server yet. Select a map on this device and press Publish.",
+            );
+            return;
+        }
+        (Some(_), Some(maps)) => maps,
+    };
+    let games = membership.map_or(&[][..], |membership| membership.game_types.as_slice());
+    let tile = kit.pick(274.0, 318.0);
+    let gap = 14.0;
+    body.spawn((
+        MapMakerScroll(ScrollArea::Library),
+        scroll.position(ScrollArea::Library),
+        Node {
+            width: percent(100),
+            flex_grow: 1.0,
+            min_height: px(0),
+            flex_wrap: FlexWrap::Wrap,
+            align_content: AlignContent::FlexStart,
+            align_items: AlignItems::FlexStart,
+            row_gap: px(gap),
+            overflow: Overflow::scroll_y(),
+            ..row(gap)
+        },
+    ))
+    .with_children(|tiles| {
+        for (position, map) in maps.iter().enumerate() {
+            published_tile(tiles, kit, position, map, games, tile);
+        }
+    });
+    if let Some(map) = runtime.selected_published.and_then(|id| published.map(id)) {
+        published_action_bar(body, kit, map, published.pending());
+    }
+}
+
+fn published_note(body: &mut ChildSpawnerCommands, kit: &Kit, copy: &str) {
+    body.spawn(Node {
+        width: percent(100),
+        flex_grow: 1.0,
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..column(kit.pick(14.0, 12.0))
+    })
+    .with_children(|note| {
+        kit.icon(note, "arena", kit.pick(64.0, 72.0), 1.0);
+        kit.label(note, copy, kit.pick(17.0, 21.0), TEXT);
+    });
+}
+
+/// The chip colour of a published map's state.
+fn listing_color(listing: &PublishedMapListing) -> Color {
+    match listing {
+        PublishedMapListing::Pending => PLAY_HIGHLIGHT,
+        PublishedMapListing::Approved { in_rotation: true } => ACCENT,
+        PublishedMapListing::Approved { in_rotation: false } => TEXT.with_alpha(0.8),
+        PublishedMapListing::Rejected { .. } => DANGER.lighter(0.15),
+        PublishedMapListing::Removed { .. } => TEXT.with_alpha(0.55),
+    }
+}
+
+/// The game type a map was published for: its mode pennant and display name (which names the
+/// mode already).
+fn published_game(
+    map: &PublishedMapSummary,
+    games: &[brawler::lobby::AdvertisedGameType],
+) -> (&'static str, String) {
+    games
+        .iter()
+        .find(|game| game.id == map.game_type_id)
+        .map_or_else(
+            || ("arena", map.game_type_id.as_str().to_string()),
+            |game| {
+                let (_, pennant) = mode_identity(game.mode_definition_id);
+                (pennant, game.display_name.clone())
+            },
+        )
+}
+
+fn published_tile(
+    tiles: &mut ChildSpawnerCommands,
+    kit: &Kit,
+    position: usize,
+    map: &PublishedMapSummary,
+    games: &[brawler::lobby::AdvertisedGameType],
+    width: f32,
+) {
+    let id = kit.button(
+        tiles,
+        ButtonSpec::new(
+            index::FIRST_TILE + position,
+            FlowUiAction::SelectPublishedMap(map.published_map_id),
+            Tone::Tile,
+        )
+        .named(&map.name)
+        .width(px(width)),
+    );
+    tiles
+        .commands()
+        .entity(id)
+        .entry::<Node>()
+        .and_modify(|mut node| {
+            node.flex_direction = FlexDirection::Column;
+            node.align_self = AlignSelf::FlexStart;
+            node.flex_grow = 0.0;
+            node.align_items = AlignItems::Stretch;
+            node.justify_content = JustifyContent::FlexStart;
+            node.padding = UiRect::all(px(12));
+            node.row_gap = px(8);
+            node.border = UiRect::all(px(3));
+            node.border_radius = BorderRadius::all(px(10));
+        });
+    let (pennant, game) = published_game(map, games);
+    tiles.commands().entity(id).with_children(|card| {
+        status_chip(card, kit, &map.listing);
+        card.spawn((
+            Node {
+                overflow: Overflow::clip_x(),
+                ..default()
+            },
+            children![(
+                Text::new(map.name.clone()),
+                crate::ui::theme::font(kit.assets, kit.pick(22.0, 25.0)),
+                TextColor(TEXT),
+                crate::ui::theme::type_stroke(kit.pick(13.0, 15.0)),
+                super::widgets::no_wrap(),
+            )],
+        ));
+        card.spawn((Node {
+            overflow: Overflow::clip_x(),
+            ..row(6.0)
+        },))
+            .with_children(|line| {
+                pennant_icon(line, kit, pennant, kit.pick(22.0, 26.0));
+                kit.line(line, &game, kit.pick(14.0, 17.0), TEXT.with_alpha(0.85));
+            });
+        kit.label(
+            card,
+            &crate::published_map_detail(&map.listing),
+            kit.pick(14.0, 17.0),
+            listing_color(&map.listing),
+        );
+    });
+}
+
+/// A small filled chip naming the map's state.
+fn status_chip(parent: &mut ChildSpawnerCommands, kit: &Kit, listing: &PublishedMapListing) {
+    let color = listing_color(listing);
+    parent
+        .spawn((
+            Node {
+                align_self: AlignSelf::FlexStart,
+                padding: UiRect::axes(px(10), px(3)),
+                border: UiRect::all(px(2)),
+                border_radius: BorderRadius::all(px(RADIUS)),
+                ..default()
+            },
+            BackgroundColor(color.with_alpha(0.22)),
+            BorderColor::all(color),
+        ))
+        .with_children(|chip| {
+            kit.line(
+                chip,
+                crate::published_map_chip(listing),
+                kit.pick(13.0, 16.0),
+                TEXT,
+            );
+        });
+}
+
+fn published_action_bar(
+    body: &mut ChildSpawnerCommands,
+    kit: &Kit,
+    map: &PublishedMapSummary,
+    request_in_flight: bool,
+) {
+    body.spawn(Node {
+        width: percent(100),
+        flex_shrink: 0.0,
+        min_height: px(kit.ctl()),
+        ..row(kit.pick(10.0, 12.0))
+    })
+    .with_children(|bar| {
+        bar.spawn(Node {
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            min_width: px(0),
+            overflow: Overflow::clip_x(),
+            ..column(2.0)
+        })
+        .with_children(|copy| {
+            kit.label(copy, "SELECTED", kit.pick(12.0, 15.0), ACCENT);
+            copy.spawn((
+                Text::new(map.name.clone()),
+                crate::ui::theme::font(kit.assets, kit.pick(22.0, 24.0)),
+                TextColor(TEXT),
+                crate::ui::theme::type_stroke(kit.pick(13.0, 14.0)),
+                super::widgets::no_wrap(),
+            ));
+        });
+        if map.listing.withdrawable() {
+            kit.button(
+                bar,
+                ButtonSpec::new(
+                    index::WITHDRAW,
+                    FlowUiAction::WithdrawPublishedMap(map.published_map_id),
+                    Tone::Danger,
+                )
+                .icon("trash")
+                .label("Withdraw")
+                .disabled(request_in_flight),
+            );
+        }
+    });
+}
+
+fn withdraw_dialog(dialog: &mut ChildSpawnerCommands, kit: &Kit, map: &PublishedMapSummary) {
+    kit.title(dialog, "WITHDRAW MAP?", kit.pick(32.0, 36.0));
+    kit.label(
+        dialog,
+        &format!(
+            "“{}” leaves review and this server's match rotation. Matches already running keep it. To offer it again, publish it again.",
+            map.name
+        ),
+        kit.pick(16.0, 20.0),
+        TEXT,
+    );
+    dialog_actions(
+        dialog,
+        kit,
+        FlowUiAction::CancelWithdrawPublishedMap,
+        (
+            FlowUiAction::WithdrawPublishedMap(map.published_map_id),
+            "Withdraw",
+            Tone::Danger,
+        ),
+        false,
+    );
+}
+
+/// The Published view's actions (BRL-s3dh). Withdraw opens a confirmation first; pressed again
+/// from it, it asks the server, which alone decides whether the map is the caller's.
+pub(super) fn resolve_published_map_action(
+    action: &FlowUiAction,
+    runtime: &mut MapMakerRuntime,
+    published: &mut ClientPublishedMapsModel,
+) {
+    match action {
+        FlowUiAction::ShowPublishedMaps(show) => {
+            runtime.published_view = *show;
+            runtime.pending_withdraw = None;
+            runtime.pending_delete = None;
+            runtime.renaming = None;
+            runtime.status = None;
+            // Operator decisions arrive between visits; re-list each time the view opens.
+            runtime.refresh_published |= *show;
+        }
+        FlowUiAction::SelectPublishedMap(id) if published.map(*id).is_some() => {
+            runtime.selected_published = Some(*id);
+            runtime.status = None;
+        }
+        FlowUiAction::WithdrawPublishedMap(id)
+            if published
+                .map(*id)
+                .is_some_and(|map| map.listing.withdrawable()) =>
+        {
+            if runtime.pending_withdraw == Some(*id) {
+                runtime.pending_withdraw = None;
+                runtime.status = Some(if published.withdraw(*id) {
+                    "Withdrawing…".to_string()
+                } else {
+                    "Wait for the server to answer, then try again.".to_string()
+                });
+            } else {
+                runtime.selected_published = Some(*id);
+                runtime.pending_withdraw = Some(*id);
+                runtime.status = None;
+            }
+        }
+        FlowUiAction::CancelWithdrawPublishedMap => runtime.pending_withdraw = None,
+        _ => return,
+    }
+    runtime.bump_render();
+}
+
+/// Keeps the Published listing current while My Maps is open and shows the server's answers.
+pub(super) fn observe_published_maps(
+    flow: ClientFlow,
+    published: &mut ClientPublishedMapsModel,
+    runtime: &mut MapMakerRuntime,
+) {
+    if flow == ClientFlow::MapLibrary
+        && (published.needs_list() || runtime.refresh_published)
+        && published.request_list()
+    {
+        runtime.refresh_published = false;
+    }
+    if let Some(reason) = published.take_rejection() {
+        runtime.status = Some(crate::published_maps_rejection_text(reason).to_string());
+        runtime.bump_render();
+    }
+    if let Some(id) = published.take_withdrawn() {
+        let name = published
+            .map(id)
+            .map_or_else(|| "The map".to_string(), |map| format!("“{}”", map.name));
+        runtime.status = Some(format!(
+            "{name} was withdrawn. It is out of review and rotation."
+        ));
+    }
+    if published.take_changed() {
+        let valid = runtime
+            .selected_published
+            .filter(|id| published.map(*id).is_some())
+            .or_else(|| {
+                published
+                    .maps()
+                    .and_then(<[PublishedMapSummary]>::first)
+                    .map(|map| map.published_map_id)
+            });
+        runtime.selected_published = valid;
+        if runtime
+            .pending_withdraw
+            .is_some_and(|id: PublishedMapId| published.map(id).is_none())
+        {
+            runtime.pending_withdraw = None;
+        }
+        runtime.bump_render();
+    }
+}
+
+fn header(
+    root: &mut ChildSpawnerCommands,
+    kit: &Kit,
+    library: &MapDraftLibrary,
+    runtime: &MapMakerRuntime,
+    published: Option<&[PublishedMapSummary]>,
+) {
+    let published_view = runtime.published_view;
     root.spawn(Node {
         width: percent(100),
         ..row(20.0)
@@ -215,6 +632,7 @@ fn header(root: &mut ChildSpawnerCommands, kit: &Kit, library: &MapDraftLibrary)
         header.spawn(column(0.0)).with_children(|copy| {
             kit.title(copy, "MY MAPS", kit.pick(44.0, 46.0));
             let saved = match library.drafts.len() {
+                _ if published_view => "Map Maker · published to this server".to_string(),
                 0 => "Map Maker · saved on this device".to_string(),
                 1 => "Map Maker · 1 map saved on this device".to_string(),
                 count => format!("Map Maker · {count} maps saved on this device"),
@@ -222,7 +640,8 @@ fn header(root: &mut ChildSpawnerCommands, kit: &Kit, library: &MapDraftLibrary)
             kit.label(copy, &saved, kit.pick(15.0, 19.0), ACCENT);
         });
         header.spawn(grow());
-        if !library.drafts.is_empty() {
+        view_filter(header, kit, library.drafts.len(), published);
+        if !library.drafts.is_empty() && !published_view {
             shell_action(
                 header,
                 kit,
@@ -941,7 +1360,9 @@ pub(in crate::flow) fn navigate_map_library(
         // Renaming in place: arrows and Enter belong to the text field.
         return;
     }
-    let dialog_open = runtime.creating.is_some() || runtime.pending_delete.is_some();
+    let dialog_open = runtime.creating.is_some()
+        || runtime.pending_delete.is_some()
+        || runtime.pending_withdraw.is_some();
     let candidates: Vec<_> = buttons
         .iter()
         .filter(|(_, _, computed, _, visible, disabled, in_dialog, _)| {

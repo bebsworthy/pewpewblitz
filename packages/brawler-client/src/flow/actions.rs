@@ -82,6 +82,12 @@ pub(super) enum FlowUiAction {
     DeleteMapDraft(crate::MapDraftId),
     CancelDeleteMapDraft,
     PublishMapDraft(crate::MapDraftId),
+    /// My Maps shows the maps published to this server (true) or the drafts on this device.
+    ShowPublishedMaps(bool),
+    SelectPublishedMap(brawler::lobby::PublishedMapId),
+    /// Opens the withdraw confirmation; pressed again from it, withdraws the map.
+    WithdrawPublishedMap(brawler::lobby::PublishedMapId),
+    CancelWithdrawPublishedMap,
     CloseMapMaker,
     BackToMapLibrary,
     SaveMapDraft,

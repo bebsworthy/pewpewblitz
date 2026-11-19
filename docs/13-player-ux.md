@@ -370,9 +370,27 @@ for that server's community rotation, targeting the draft's intended game type w
 opens it to community maps, otherwise the first opted-in game type of the draft's mode. The library
 status line reports the outcome: held for operator review, already in rotation, or the reason it
 was refused (invalid map, too few spawns, a pending-map limit, or "Publish again in N s"). A
-community map's Match Loading screen credits it under the topology line as "Map — by Author". A
-"your submissions" status screen, a Results credit, and other players' Practice picker are not
-part of this slice.
+community map's Match Loading screen credits it under the topology line as "Map — by Author", and
+Results repeats that credit under the mode title (BRL-1sgj): the client keeps the reservation's
+credit with the completed match result, so the Results line always names the map the server
+reserved. Built-in maps show no credit line.
+
+My Maps has two views, chosen by a segmented filter in its header beside Create Map (BRL-s3dh): **On this device
+(N)** shows the local drafts, and **Published (N)** shows every map this account published to the
+connected server, newest first (at most 64). Each published tile carries a state chip and a
+one-line explanation from the server: **PENDING** (waiting for the operator's review), **IN
+ROTATION** (approved and in this server's match rotation), **APPROVED** (approved but out of
+rotation right now, for example because the game type stopped taking community maps or the map no
+longer validates), **REJECTED** (with the operator's reason), or **REMOVED** (taken out by the
+operator, or withdrawn by the author). Tiles have no map overview: the server listing carries no
+recipe, and a published map need not match any local draft. Selecting a pending or approved tile
+offers **Withdraw**, which opens a confirmation dialog; confirming asks the server, which takes the
+map out of review or rotation and lists it as removed ("Withdrawn by the author."). Matches already
+running keep it. There is no un-withdraw: publish the draft again to offer it again, and a new
+submission never replaces an earlier one. The view re-lists when My Maps opens, when the filter
+switches to Published, and after an accepted publish. Without a server connection it says so. The
+filter, tiles and Withdraw keep the 48 dp touch floor on phones. Other players' Practice picker
+is not part of this slice.
 
 Zombie is co-op only. Ordinary Play requires an exact two- or three-human roster; Practice starts
 with one human and fills the selected two- or three-fighter roster with friendly server-hosted

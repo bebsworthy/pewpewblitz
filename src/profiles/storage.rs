@@ -17,9 +17,10 @@ use std::{
 mod published_maps;
 
 pub use published_maps::{
-    MAX_PENDING_PUBLISHED_MAPS, MAX_PUBLISHED_MAP_REASON_BYTES, MAX_ROTATION_MAPS_PER_GAME_TYPE,
-    MAX_STORED_PUBLISHED_MAPS, PublishedMapAction, PublishedMapLimits, PublishedMapRecord,
-    PublishedMapStatus, PublishedMapSubmission, PublishedMapSubmissionOutcome,
+    AccountPublishedMaps, MAX_PENDING_PUBLISHED_MAPS, MAX_PUBLISHED_MAP_REASON_BYTES,
+    MAX_ROTATION_MAPS_PER_GAME_TYPE, MAX_STORED_PUBLISHED_MAPS, PublishedMapAction,
+    PublishedMapLimits, PublishedMapRecord, PublishedMapStatus, PublishedMapSubmission,
+    PublishedMapSubmissionOutcome, PublishedMapWithdrawal,
 };
 
 const APPLICATION_ID: i32 = 0x4252_574c;
@@ -717,6 +718,13 @@ pub enum ProfileStorageCommand {
     LoadPublishedRotation {
         request_id: u64,
     },
+    /// One account's own rows, after an optional author withdrawal (BRL-s3dh).
+    AccountPublishedMaps {
+        request_id: u64,
+        account_id: AccountId,
+        withdraw: Option<crate::lobby::PublishedMapId>,
+        now_unix_ms: u64,
+    },
     Shutdown,
 }
 
@@ -725,6 +733,7 @@ pub enum ProfileStorageReply {
     Profile(Result<ProfileSnapshot, ProfileStorageError>),
     PublishedMapSubmission(Result<PublishedMapSubmissionOutcome, ProfileStorageError>),
     PublishedRotation(Result<Vec<PublishedMapRecord>, ProfileStorageError>),
+    AccountPublishedMaps(Result<AccountPublishedMaps, ProfileStorageError>),
 }
 
 pub struct ProfileStorageResult {
@@ -860,6 +869,17 @@ impl ProfileStorageExecutor {
                             request_id,
                             ProfileStorageReply::PublishedRotation(
                                 storage.load_published_rotation(),
+                            ),
+                        ),
+                        ProfileStorageCommand::AccountPublishedMaps {
+                            request_id,
+                            account_id,
+                            withdraw,
+                            now_unix_ms,
+                        } => (
+                            request_id,
+                            ProfileStorageReply::AccountPublishedMaps(
+                                storage.account_published_maps(account_id, withdraw, now_unix_ms),
                             ),
                         ),
                         ProfileStorageCommand::Shutdown => break,
