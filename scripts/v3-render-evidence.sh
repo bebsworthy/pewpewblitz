@@ -262,10 +262,13 @@ trap 'exit 143' TERM
     --bind "$bind_addr" &
 supervisor_pid=$!
 
+# Both clients render off-screen (`--offscreen`, BRL-g7ny): no window, no focus change. Their
+# frame interval follows the client's schedule runner (120 Hz for the native profile), not
+# display presentation; the report records `render_target=offscreen`.
 if [[ "$practice_smoke" == 1 ]]; then
     BRAWLER_CLIENT_DATA_DIR="$client_data_dir/1" "$target_dir"/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
         --auto-connect --product-practice-smoke --product-game-type "$game_type" --move-axis "$measured_move_axis" \
-        --window-size "$window_size" \
+        --window-size "$window_size" --offscreen \
         --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
         --screenshot-count "$capture_count" \
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
@@ -276,7 +279,7 @@ if [[ "$practice_smoke" == 1 ]]; then
 else
     BRAWLER_CLIENT_DATA_DIR="$client_data_dir/1" "$target_dir"/release/brawler-client --client-id 1 --server "$bind_addr" --transport routed-udp \
         --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis "$measured_move_axis" \
-        --window-size "$window_size" \
+        --window-size "$window_size" --offscreen \
         --screenshot-dir "$capture_dir" --screenshot-first 300 --screenshot-every 180 \
         --screenshot-count "$capture_count" \
         --render-report "$report_path" --render-warmup-seconds "$warmup_seconds" \
@@ -293,7 +296,7 @@ if [[ "$practice_smoke" == 0 ]]; then
     env BRAWLER_RENDER_PROFILE="$peer_render_profile" BRAWLER_CLIENT_DATA_DIR="$client_data_dir/2" \
         "$target_dir"/release/brawler-client --client-id 2 --server "$bind_addr" --transport routed-udp \
         --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0' \
-        --window-size "$window_size" \
+        --window-size "$window_size" --offscreen \
         --render-report "$peer_report_path" --render-warmup-seconds "$warmup_seconds" \
         --render-measure-seconds "$measure_seconds" ${render_effect_flag:+$render_effect_flag} \
         ${peer_combat_flags:+$peer_combat_flags} \

@@ -227,26 +227,34 @@ pub(crate) fn request_custom_evidence_capture(
             .show("Capturing frame + state…".to_string());
     }
     info!(png = %png_path.display(), state = %json_path.display(), "client evidence capture requested");
-    world
-        .commands()
-        .spawn(Screenshot::primary_window())
-        .observe(
-            move |captured: On<ScreenshotCaptured>, results: Res<EvidenceCaptureResults>| {
-                let image = captured.image.clone();
-                let png_path = png_path.clone();
-                let json_path = json_path.clone();
-                let snapshot_json = snapshot_json.clone();
-                let sender = results.sender.clone();
-                IoTaskPool::get()
-                    .spawn(async move {
-                        let result =
-                            save_capture_pair(&image, &png_path, &json_path, &snapshot_json)
-                                .map(|()| png_path);
-                        let _ = sender.send((feedback, result));
-                    })
-                    .detach();
-            },
-        );
+    let screenshot = capture_target(world);
+    world.commands().spawn(screenshot).observe(
+        move |captured: On<ScreenshotCaptured>, results: Res<EvidenceCaptureResults>| {
+            let image = captured.image.clone();
+            let png_path = png_path.clone();
+            let json_path = json_path.clone();
+            let snapshot_json = snapshot_json.clone();
+            let sender = results.sender.clone();
+            IoTaskPool::get()
+                .spawn(async move {
+                    let result = save_capture_pair(&image, &png_path, &json_path, &snapshot_json)
+                        .map(|()| png_path);
+                    let _ = sender.send((feedback, result));
+                })
+                .detach();
+        },
+    );
+}
+
+/// The rendered frame: the primary window, or the off-screen image of an automation run.
+fn capture_target(world: &World) -> Screenshot {
+    #[cfg(feature = "automation")]
+    if let Some(offscreen) = world.get_resource::<crate::automation::OffscreenRenderTarget>() {
+        return offscreen.screenshot();
+    }
+    #[cfg(not(feature = "automation"))]
+    let _ = world;
+    Screenshot::primary_window()
 }
 
 fn save_capture_pair(

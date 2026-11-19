@@ -4,7 +4,7 @@ use std::{env, process, str::FromStr};
 
 fn usage() {
     eprintln!(
-        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--theme N] [--sample-ticks N] [--accent neutral|cold|fire|poison|restoration] [--relationship neutral|ally|enemy] [--lobbed-impact] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture]\n\
+        "Usage: brawler-vfx-lab [--effect KEY] [--fixture NAME] [--identity N] [--radius WORLD_UNITS] [--theme N] [--sample-ticks N] [--accent neutral|cold|fire|poison|restoration] [--relationship neutral|ally|enemy] [--lobbed-impact] [--ultimate] [--reduced] [--primitive] [--paused] [--window-size WIDTHxHEIGHT] [--capture-dir PATH] [--capture-after UPDATES] [--exit-after-capture] [--offscreen]\n\
          Controls: Left/Right select · Space restart · Enter pause · . step · N identity · C accent · O relationship · U ultimate · R reduced · P primitive · I guide/details · F12 capture · Esc quit"
     );
 }
@@ -52,6 +52,7 @@ fn parse_args() -> Result<VfxLabConfig, String> {
             "--ultimate" => config.ultimate = true,
             "--lobbed-impact" => config.lobbed_impact = true,
             "--exit-after-capture" => config.exit_after_capture = true,
+            "--offscreen" => config.offscreen = true,
             "--identity" => {
                 config.presentation_identity = Some(parse_next(
                     &mut args,

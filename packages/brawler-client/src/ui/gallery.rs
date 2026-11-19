@@ -16,52 +16,61 @@ use bevy::{
 /// Builds the native component review tool without gameplay, networking or settings persistence.
 pub fn build_ui_gallery_app() -> App {
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(AssetPlugin {
-                file_path: format!("{}/assets", crate::REPOSITORY_ROOT),
-                ..default()
-            })
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "PewPew Blitz — UI Gallery".into(),
-                    // BRL-0196: the Pixel 8a landscape logical viewport.
-                    resolution: if let Some(size) = gallery_size_override() {
-                        size.into()
-                    } else if std::env::var_os("BRAWLER_UI_GALLERY_PHONE").is_some() {
-                        (914, 411).into()
-                    } else if std::env::var_os("BRAWLER_UI_GALLERY_COMPACT").is_some() {
-                        (900, 600).into()
-                    } else {
-                        (1440, 900).into()
-                    },
-                    ..default()
-                }),
+    let plugins = DefaultPlugins
+        .set(AssetPlugin {
+            file_path: format!("{}/assets", crate::REPOSITORY_ROOT),
+            ..default()
+        })
+        .set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "PewPew Blitz — UI Gallery".into(),
+                // BRL-0196: the Pixel 8a landscape logical viewport.
+                resolution: if let Some(size) = gallery_size_override() {
+                    size.into()
+                } else if std::env::var_os("BRAWLER_UI_GALLERY_PHONE").is_some() {
+                    (914, 411).into()
+                } else if std::env::var_os("BRAWLER_UI_GALLERY_COMPACT").is_some() {
+                    (900, 600).into()
+                } else {
+                    (1440, 900).into()
+                },
                 ..default()
             }),
-    )
-    .insert_resource(ClearColor(theme::SHELL_BG_BOTTOM))
-    .init_resource::<GalleryFocus>()
-    .add_plugins((
-        controls::UiControlsPlugin,
-        super::surface::SurfacePlugin,
-        super::press::ReleaseActivationPlugin,
-    ))
-    .add_systems(Startup, setup)
-    .add_systems(
-        Update,
-        (
-            fit_gallery_viewport,
-            interact,
-            scroll_gallery,
-            resize_gallery,
-            sync_motion_demo,
-            (replay_burst_demo, hold_burst_peak_demo).after(interact),
-        ),
-    )
-    .add_systems(PreUpdate, hold_press_demo.after(UiSystems::Focus))
-    .add_systems(PostUpdate, reveal_focus.after(UiSystems::Layout));
-    if let Some(path) = std::env::var_os("BRAWLER_UI_GALLERY_CAPTURE") {
+            ..default()
+        });
+    let capture = std::env::var_os("BRAWLER_UI_GALLERY_CAPTURE");
+    // A capture is scripted and exits by itself, so it renders off-screen (BRL-g7ny).
+    if capture.is_some() {
+        crate::automation::add_offscreen_plugins(
+            &mut app,
+            plugins,
+            crate::offscreen_frame_interval(brawler::config::RenderProfile::Native),
+        );
+    } else {
+        app.add_plugins(plugins);
+    }
+    app.insert_resource(ClearColor(theme::SHELL_BG_BOTTOM))
+        .init_resource::<GalleryFocus>()
+        .add_plugins((
+            controls::UiControlsPlugin,
+            super::surface::SurfacePlugin,
+            super::press::ReleaseActivationPlugin,
+        ))
+        .add_systems(Startup, setup)
+        .add_systems(
+            Update,
+            (
+                fit_gallery_viewport,
+                interact,
+                scroll_gallery,
+                resize_gallery,
+                sync_motion_demo,
+                (replay_burst_demo, hold_burst_peak_demo).after(interact),
+            ),
+        )
+        .add_systems(PreUpdate, hold_press_demo.after(UiSystems::Focus))
+        .add_systems(PostUpdate, reveal_focus.after(UiSystems::Layout));
+    if let Some(path) = capture {
         app.insert_resource(GalleryCapture {
             path: path.into(),
             frame: 0,
@@ -100,13 +109,18 @@ struct GalleryCapture {
 
 const GALLERY_CAPTURE_FRAME: u32 = 120;
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are runtime-owned"
+)]
 fn capture_gallery(
     mut commands: Commands,
+    target: Res<crate::automation::OffscreenRenderTarget>,
     mut capture: ResMut<GalleryCapture>,
     mut roots: Query<&mut ScrollPosition, With<GalleryRoot>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+    use bevy::render::view::screenshot::save_to_disk;
     capture.frame += 1;
     let sibling = |suffix: &str| {
         capture.path.with_file_name(format!(
@@ -125,20 +139,20 @@ fn capture_gallery(
     match capture.frame.checked_sub(GALLERY_CAPTURE_FRAME) {
         Some(0) => {
             commands
-                .spawn(Screenshot::primary_window())
+                .spawn(target.screenshot())
                 .observe(save_to_disk(capture.path.clone()));
         }
         // The middle shows the held-press and reward-burst references.
         Some(10) => scroll_to(GALLERY_MIDDLE_SCROLL),
         Some(40) => {
             commands
-                .spawn(Screenshot::primary_window())
+                .spawn(target.screenshot())
                 .observe(save_to_disk(sibling("middle")));
         }
         Some(50) => scroll_to(10_000.0),
         Some(80) => {
             commands
-                .spawn(Screenshot::primary_window())
+                .spawn(target.screenshot())
                 .observe(save_to_disk(sibling("bottom")));
         }
         Some(110) => {

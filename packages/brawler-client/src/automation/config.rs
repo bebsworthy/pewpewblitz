@@ -64,6 +64,9 @@ pub struct ClientAutomationConfig {
     /// screenshot directory instead of following the frame schedule (BRL-pw9k).
     pub shell_capture: Option<crate::ShellCaptureRoute>,
     pub render_measurement: Option<RenderMeasurementConfig>,
+    /// Renders the windowed presentation into an off-screen image with no OS window, so a
+    /// scripted capture never appears on screen or takes keyboard focus (BRL-g7ny).
+    pub offscreen: bool,
 }
 
 impl Default for ClientAutomationConfig {
@@ -94,6 +97,7 @@ impl Default for ClientAutomationConfig {
             screenshot_schedule: None,
             shell_capture: None,
             render_measurement: None,
+            offscreen: false,
         }
     }
 }
@@ -231,6 +235,9 @@ impl ClientAutomationConfig {
         }
         if self.windowed_combat_demo.is_some() && self.windowed_controller_demo.is_some() {
             return Err("--combat-demo and --controller-demo cannot be combined".to_string());
+        }
+        if headless && self.offscreen {
+            return Err("--offscreen requires a windowed client".to_string());
         }
         self.validate_screenshot_schedule(headless)?;
         self.validate_render_measurement(headless)?;

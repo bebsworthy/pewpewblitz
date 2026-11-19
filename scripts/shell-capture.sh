@@ -4,6 +4,7 @@
 # canonical flow actions (`--shell-capture <route>`), saves `<size>/<route>.png|json` once the
 # screen has settled, and exits. Routes run in order against one profile, so `first-brawler`
 # captures the empty-profile creation screen and creates the brawler the later routes show.
+# Clients render off-screen (`--offscreen`, BRL-g7ny): no window appears and focus never moves.
 #
 # usage: scripts/shell-capture.sh [route|all] [WIDTHxHEIGHT|all]
 # Output: ${BRAWLER_SHELL_CAPTURE_DIR:-target/shell-capture}/<size>/, with server data, client
@@ -139,7 +140,7 @@ for window_size in "${sizes[@]}"; do
         if ! run_client "$log" env BRAWLER_CLIENT_DATA_DIR="$run_dir/client-data" \
             "$target_dir"/release/brawler-client --server "$bind_addr" \
             --window-size "$window_size" --screenshot-dir "$capture_dir" \
-            --shell-capture "$name"; then
+            --shell-capture "$name" --offscreen; then
             printf 'brawler shell capture: route %s at %s failed; log=%s\n' \
                 "$name" "$window_size" "$log" >&2
             exit 1

@@ -10,12 +10,14 @@ use super::{
 use bevy::prelude::*;
 
 mod config;
+mod offscreen;
 
 pub use config::{
     ClientAutomationConfig, RenderMeasurementConfig, ScreenshotSchedule, WindowedCombatDemo,
     WindowedControllerDemo,
 };
 pub(crate) use config::{automatic_match_command_enabled, install_automation_state};
+pub(crate) use offscreen::{OffscreenRenderTarget, add_offscreen_plugins};
 
 const HEADLESS_FIRE_DURATION_TICKS: u32 = 6_000;
 

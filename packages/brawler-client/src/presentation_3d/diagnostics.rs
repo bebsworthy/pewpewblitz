@@ -37,6 +37,7 @@ const REPORT_FIELDS: &[&str] = &[
     "window_width",
     "window_height",
     "render_profile",
+    "render_target",
     "measurement_context",
     "left_match_during_measurement",
     "fallback",
@@ -171,6 +172,9 @@ struct RenderMeasurementState {
     gpu: Option<GpuTimeProbe>,
     /// GPU completion samples, taken from the probe when the window closes.
     gpu_samples: GpuTimeSamples,
+    /// `offscreen` when frames render into an image with no OS window (BRL-g7ny): the frame
+    /// interval then follows the schedule runner instead of display presentation.
+    render_target: &'static str,
     written: bool,
 }
 
@@ -377,6 +381,14 @@ pub(super) struct RenderMeasurementPlugin(pub(crate) RenderMeasurementConfig);
 impl Plugin for RenderMeasurementPlugin {
     fn build(&self, app: &mut App) {
         let gpu = GpuTimeProbe::install(app, SAMPLE_CAPACITY);
+        let render_target = if app
+            .world()
+            .contains_resource::<crate::automation::OffscreenRenderTarget>()
+        {
+            "offscreen"
+        } else {
+            "window"
+        };
         app.add_plugins((
             FrameTimeDiagnosticsPlugin::new(SAMPLE_CAPACITY),
             SystemInformationDiagnosticsPlugin,
@@ -394,6 +406,7 @@ impl Plugin for RenderMeasurementPlugin {
             owner_motion: OwnerMotionSamples::default(),
             gpu: Some(gpu),
             gpu_samples: GpuTimeSamples::unavailable(),
+            render_target,
             written: false,
         })
         .add_systems(
@@ -648,13 +661,7 @@ fn compose_report(
     let (width, height) = window.map_or((0, 0), |window| {
         (window.physical_width(), window.physical_height())
     });
-    let adapter_name = adapter.map_or("unknown", |value| value.name.as_str());
-    let backend = adapter.map_or_else(
-        || "unknown".to_string(),
-        |value| format!("{:?}", value.backend),
-    );
-    let cpu = system.map_or("unknown", |value| value.cpu.as_str());
-    let os = system.map_or("unknown", |value| value.os.as_str());
+    let (adapter_name, backend, cpu, os) = platform_fields(adapter, system);
     let measured_map = map.map(measured_map).or(state.measured_map);
     let map_id = measured_map.map_or(0, |value| value.0);
     let recipe_id = measured_map.map_or(0, |value| value.1.0);
@@ -663,7 +670,7 @@ fn compose_report(
     let theme_id = measured_map.map_or(0, |value| value.3.0);
     let context = state.context.unwrap_or_default().name();
     format!(
-        "schema=9\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nmeasurement_context={}\nleft_match_during_measurement={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\ngpu_time_source={}\ngpu_sample_count={}\ngpu_p50_ms={}\ngpu_p95_ms={}\ngpu_p99_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\n{}result={}\nfirst_failure={}\n",
+        "schema=10\nversion={}\ncommit={}\nrelease={}\nos={}\ncpu={}\nadapter={}\nbackend={}\nwindow_width={}\nwindow_height={}\nrender_profile={}\nrender_target={}\nmeasurement_context={}\nleft_match_during_measurement={}\nfallback={}\nreduced_effects={}\nwarmup_seconds={}\nmeasurement_seconds={}\nsample_count={}\nframe_p50_ms={:.3}\nframe_p95_ms={:.3}\nframe_p99_ms={:.3}\nframe_max_ms={:.3}\nframes_over_25_ms={}\nframes_over_50_ms={}\nframes_over_100_ms={}\ngpu_time_source={}\ngpu_sample_count={}\ngpu_p50_ms={}\ngpu_p95_ms={}\ngpu_p99_ms={}\nentity_high_water={}\nentity_terminal={}\nmesh_entity_high_water={}\nmesh_entity_terminal={}\nvisual_root_high_water={}\nvisual_root_terminal={}\neffect_high_water={}\neffect_terminal={}\nmap_member_high_water={}\nmap_member_terminal={}\ndynamic_map_visuals_high_water={}\ndynamic_map_visuals_terminal={}\nfighter_high_water={}\nfighter_terminal={}\nprojectile_high_water={}\nprojectile_terminal={}\nsentry_high_water={}\nsentry_terminal={}\nmesh_asset_high_water={}\nmesh_asset_terminal={}\nmaterial_asset_high_water={}\nmaterial_asset_terminal={}\nimage_asset_high_water={}\nimage_asset_terminal={}\ndashboard_owned_high_water={}\ndashboard_owned_terminal={}\nmap_instance_id={}\nmap_recipe_id={}\nmode_definition_id={}\npresentation_theme_id={}\n{}result={}\nfirst_failure={}\n",
         VERSION,
         option_env!("BRAWLER_GIT_COMMIT").unwrap_or("unknown"),
         !cfg!(debug_assertions),
@@ -674,6 +681,7 @@ fn compose_report(
         width,
         height,
         RenderProfile::from_env().name(),
+        state.render_target,
         context,
         left_match,
         if fallback == ImportedWorldFallbackPolicy::ForcePrimitive {
@@ -730,6 +738,22 @@ fn compose_report(
         state.owner_motion.report_fields(),
         if failed.is_none() { "pass" } else { "fail" },
         failed.unwrap_or("none"),
+    )
+}
+
+/// Adapter name, backend, CPU and OS for the report header; `unknown` when not detected.
+fn platform_fields<'a>(
+    adapter: Option<&'a RenderAdapterInfo>,
+    system: Option<&'a SystemInfo>,
+) -> (&'a str, String, &'a str, &'a str) {
+    (
+        adapter.map_or("unknown", |value| value.name.as_str()),
+        adapter.map_or_else(
+            || "unknown".to_string(),
+            |value| format!("{:?}", value.backend),
+        ),
+        system.map_or("unknown", |value| value.cpu.as_str()),
+        system.map_or("unknown", |value| value.os.as_str()),
     )
 }
 
@@ -922,6 +946,7 @@ mod tests {
             owner_motion: OwnerMotionSamples::default(),
             gpu: None,
             gpu_samples: GpuTimeSamples::unavailable(),
+            render_target: "window",
             written: false,
         }
     }
@@ -974,7 +999,8 @@ mod tests {
         };
         let stayed = compose(&state);
         validate_report(&stayed).unwrap();
-        assert_eq!(report_value(&stayed, "schema"), Some("9"));
+        assert_eq!(report_value(&stayed, "schema"), Some("10"));
+        assert_eq!(report_value(&stayed, "render_target"), Some("window"));
         assert_eq!(
             report_value(&stayed, "left_match_during_measurement"),
             Some("false")

@@ -165,6 +165,9 @@ pub struct VfxLabConfig {
     pub capture_dir: Option<PathBuf>,
     pub capture_after_updates: Option<u32>,
     pub exit_after_capture: bool,
+    /// Scripted capture without an OS window (BRL-g7ny); needs `--capture-after` and
+    /// `--exit-after-capture`, since nobody can see or close the Lab.
+    pub offscreen: bool,
 }
 
 impl VfxLabConfig {
@@ -201,6 +204,11 @@ impl VfxLabConfig {
         }
         if self.capture_after_updates == Some(0) {
             return Err("VfxLab capture update count must be positive".to_string());
+        }
+        if self.offscreen && (self.capture_after_updates.is_none() || !self.exit_after_capture) {
+            return Err(
+                "VfxLab --offscreen requires --capture-after and --exit-after-capture".to_string(),
+            );
         }
         if let Some(theme) = self.theme {
             let catalog = brawler::map::MapContentCatalog::embedded()?;
@@ -733,34 +741,41 @@ pub fn build_vfx_lab_app(config: VfxLabConfig) -> App {
     let initially_paused = config.paused;
     let (width, height) = config.window_size.unwrap_or((1280, 720));
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(AssetPlugin {
-                file_path: format!("{}/assets", crate::REPOSITORY_ROOT),
-                ..default()
-            })
-            .set(ImagePlugin::default_nearest())
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Brawler VfxLab — read-only production viewer".to_string(),
-                    resolution: WindowResolution::new(u32::from(width), u32::from(height)),
-                    ..default()
-                }),
+    let plugins = DefaultPlugins
+        .set(AssetPlugin {
+            file_path: format!("{}/assets", crate::REPOSITORY_ROOT),
+            ..default()
+        })
+        .set(ImagePlugin::default_nearest())
+        .set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Brawler VfxLab — read-only production viewer".to_string(),
+                resolution: WindowResolution::new(u32::from(width), u32::from(height)),
                 ..default()
             }),
-    )
-    .add_plugins(brawler::content::GameplayContentPlugin)
-    .add_message::<brawler::combat::client::DeduplicatedCombatCue>()
-    .add_message::<brawler::matchplay::ReceivedHeistObjectiveCue>()
-    .insert_resource(ClientHeistReadiness::default())
-    .add_plugins(ProductionVfxPlugin)
-    .add_plugins(VfxParticleAdapterPlugin)
-    .add_plugins(VfxLabLifecyclePresentationPlugin)
-    .add_plugins(ClientEvidenceCapturePlugin)
-    .add_plugins(VfxLabPlugin { config })
-    // Hanabi itself is installed in `finish` only on a compute-capable GPU (BRL-0161); the lab's
-    // particle clock exists either way so pausing works before and without it.
-    .init_resource::<Time<EffectSimulation>>();
+            ..default()
+        });
+    if config.offscreen {
+        crate::automation::add_offscreen_plugins(
+            &mut app,
+            plugins,
+            crate::offscreen_frame_interval(brawler::config::RenderProfile::Native),
+        );
+    } else {
+        app.add_plugins(plugins);
+    }
+    app.add_plugins(brawler::content::GameplayContentPlugin)
+        .add_message::<brawler::combat::client::DeduplicatedCombatCue>()
+        .add_message::<brawler::matchplay::ReceivedHeistObjectiveCue>()
+        .insert_resource(ClientHeistReadiness::default())
+        .add_plugins(ProductionVfxPlugin)
+        .add_plugins(VfxParticleAdapterPlugin)
+        .add_plugins(VfxLabLifecyclePresentationPlugin)
+        .add_plugins(ClientEvidenceCapturePlugin)
+        .add_plugins(VfxLabPlugin { config })
+        // Hanabi itself is installed in `finish` only on a compute-capable GPU (BRL-0161); the lab's
+        // particle clock exists either way so pausing works before and without it.
+        .init_resource::<Time<EffectSimulation>>();
     if initially_paused {
         app.world_mut()
             .resource_mut::<Time<EffectSimulation>>()

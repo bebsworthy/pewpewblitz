@@ -118,7 +118,8 @@ client map presentation theme (default 1; unknown IDs are rejected), and the tec
 and JSON evidence record it. Native
 automation may add `--identity N --radius WORLD_UNITS` and
 `--sample-ticks N --accent neutral|cold|fire|poison|restoration --relationship neutral|ally|enemy --ultimate --capture-dir PATH --capture-after UPDATES
---exit-after-capture`; `--paused` captures a stable sample, with `--sample-ticks` advancing the
+--exit-after-capture`, plus `--offscreen` (requires `--capture-after` and `--exit-after-capture`) to
+render without opening a window; `--paused` captures a stable sample, with `--sample-ticks` advancing the
 retained production timeline before it freezes. Allow about 12 updates before an automated paused
 capture so native mesh and particle pipelines are ready. A running transient must be captured inside
 its authored lifetime. The current viewer is intentionally read-only; BRL-0096 owns the later
@@ -276,6 +277,15 @@ instead opens one named screen through the ordinary flow actions (creating the f
 empty profile), saves `<route>.png|json` there once the screen has settled, and exits; the JSON
 `client.flow`/`client.overlay` fields name the presented screen. Live-match routes (Results, match
 menu) are not covered yet (BRL-wqst).
+
+Scripted captures render off-screen (BRL-g7ny): `just shell-capture` and
+`scripts/v3-render-evidence.sh` pass the automation client's `--offscreen`, a UI gallery run with
+`BRAWLER_UI_GALLERY_CAPTURE=<png>` always does, and VFX Lab accepts `--offscreen`. Such a run opens no
+OS window and never takes keyboard focus: winit is not started, cameras render into an image of the
+requested logical size at a fixed 2x scale (914x411 saves 1828x822 on any machine), and frames are
+paced by a schedule runner (120 Hz for the native render profile; the 30/60 Hz profiles keep their
+rates, high-refresh is uncapped). Interactive `just client`, `just run` and `just ui-gallery` stay
+windowed.
 
 Recovery is authored per fighter profile and weapon. The Default fighter recovers `100` health per
 second; Lightweight and Reinforced recover `10`, all after `3.0` seconds without a server-accepted

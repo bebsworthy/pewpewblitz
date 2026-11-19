@@ -654,13 +654,14 @@ fn compose_client_app(mut app: App, config: ClientNetworkConfig) -> App {
     let render_profile = config.render_profile;
     let window_size = config.window_size;
     #[cfg(feature = "automation")]
-    let (screenshot_schedule, shell_capture) = app
+    let (screenshot_schedule, shell_capture, offscreen) = app
         .world()
         .get_resource::<ClientAutomationConfig>()
-        .map_or((None, None), |automation| {
+        .map_or((None, None, false), |automation| {
             (
                 automation.screenshot_schedule.clone(),
                 automation.shell_capture,
+                automation.offscreen,
             )
         });
     app.insert_resource(config);
@@ -672,24 +673,33 @@ fn compose_client_app(mut app: App, config: ClientNetworkConfig) -> App {
         brawler::logging::add_log_plugin_once(&mut app);
     } else {
         let (present_mode, winit_settings) = render_profile_settings(render_profile);
-        app.add_plugins(
-            DefaultPlugins
-                .set(AssetPlugin {
-                    file_path: format!("{REPOSITORY_ROOT}/assets"),
-                    ..default()
-                })
-                .set(ImagePlugin::default_nearest())
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "PewPew Blitz".to_string(),
-                        present_mode,
-                        resolution: gameplay_window_resolution(window_size),
-                        ..default()
-                    }),
+        let plugins = DefaultPlugins
+            .set(AssetPlugin {
+                file_path: format!("{REPOSITORY_ROOT}/assets"),
+                ..default()
+            })
+            .set(ImagePlugin::default_nearest())
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "PewPew Blitz".to_string(),
+                    present_mode,
+                    resolution: gameplay_window_resolution(window_size),
                     ..default()
                 }),
-        )
-        .insert_resource(winit_settings);
+                ..default()
+            });
+        #[cfg(feature = "automation")]
+        if offscreen {
+            automation::add_offscreen_plugins(
+                &mut app,
+                plugins,
+                offscreen_frame_interval(render_profile),
+            );
+        } else {
+            app.add_plugins(plugins).insert_resource(winit_settings);
+        }
+        #[cfg(not(feature = "automation"))]
+        app.add_plugins(plugins).insert_resource(winit_settings);
         info!(
             profile = render_profile.name(),
             "windowed render profile selected"
@@ -761,6 +771,23 @@ fn gameplay_window_resolution(window_size: Option<(u16, u16)>) -> WindowResoluti
 
 const RENDER_30_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 30);
 const RENDER_60_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 60);
+/// The vsync interval of the 120 Hz development displays the windowed captures were made on.
+#[cfg(feature = "automation")]
+const RENDER_120_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 120);
+
+/// Frame pacing of an off-screen automation run (BRL-g7ny), which has no display to wait for.
+/// The explicit profiles keep their rates; `native` keeps the 120 Hz the windowed captures and
+/// render reports ran at on the development Macs, so frame-count capture schedules show the same
+/// moments; `high-refresh` is uncapped.
+#[cfg(feature = "automation")]
+const fn offscreen_frame_interval(profile: RenderProfile) -> Duration {
+    match profile {
+        RenderProfile::Native => RENDER_120_INTERVAL,
+        RenderProfile::ThirtyFps => RENDER_30_INTERVAL,
+        RenderProfile::SixtyFps => RENDER_60_INTERVAL,
+        RenderProfile::HighRefresh => Duration::ZERO,
+    }
+}
 
 fn render_profile_settings(profile: RenderProfile) -> (PresentMode, WinitSettings) {
     match profile {
