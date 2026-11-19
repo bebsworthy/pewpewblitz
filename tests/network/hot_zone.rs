@@ -272,8 +272,9 @@ fn hot_zone_contested_control_advances_neither_team() {
 
 #[test]
 fn hot_zone_timeout_leader_tie_and_recovered_threshold_use_precedence() {
-    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_hot_zone_match(2);
+    let diagnostics =
+        brawler::testing::capture_expected_late_input_diagnostics(&mut harness.server);
     select_ready_and_activate(&mut harness, 10);
 
     // Injected leader progress resolves the timeout comparison.
@@ -320,8 +321,9 @@ fn hot_zone_timeout_leader_tie_and_recovered_threshold_use_precedence() {
 
 #[test]
 fn hot_zone_restart_resets_state_in_place_and_converges() {
-    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_hot_zone_match(2);
+    let diagnostics =
+        brawler::testing::capture_expected_late_input_diagnostics(&mut harness.server);
     select_ready_and_activate(&mut harness, 10);
     let player = stage_outside_zone(&mut harness, 0);
     release_into_zone(&mut harness, 0, player);

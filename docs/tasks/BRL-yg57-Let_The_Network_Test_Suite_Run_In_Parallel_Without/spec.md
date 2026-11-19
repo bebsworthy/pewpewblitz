@@ -3,3 +3,10 @@ Plain `cargo test -p brawler-client --features network-test --test network` (par
 
 # Acceptance
 - The parallel command passes (prefer a per-test capture scope over a global lock), or the documented focused command and AGENTS.md state `--test-threads=1` explicitly.
+
+
+# Fix (2026-11-19, commit cc21750c)
+- Cause: `capture_expected_late_input_diagnostics` used a process-global `AtomicBool` plus counter, so any two tests that opened a scope at once tripped the overlap assert. Lightyear emits `server_late_input_mismatch` from `receive_input_message` in `PreUpdate`, and under Bevy's multi-threaded executor that system can run on any shared compute-pool thread. Spans don't propagate there, and the event's fields don't identify the test, so a plain thread-local scope wasn't enough on its own.
+- Decision: a per-test scope instead of a lock. The counter is now `thread_local!` (`Cell<Option<usize>>`), and the guard is `!Send`. `capture_expected_late_input_diagnostics(&mut harness.server)` now takes the server App and pins its `PreUpdate` schedule to `SingleThreadedExecutor`. `App::update` runs `Main`'s exclusive `run_main` on the calling thread (`spawn_on_scope`), so the receiver, and the formatter that counts its event, run on the test thread. Events from other tests' threads print normally. The seven call sites now open the scope right after building the harness. Production logging and the non-`network-test` build are unchanged.
+- Verification: `cargo test -p brawler-client --features network-test --test network` (parallel) ran 3 times, 134 passed / 0 failed each time (74.6s, 64.2s, 107.1s). `just lint` passed. `just test` passed every suite except `_test-performance`, where 5 wall-clock fixed-tick gates failed under machine load. Rerunning `cargo test --locked -p brawler-client --features network-test --test performance -- --nocapture --test-threads=1` passed 12/12. The network suite inside `just test` passed 134/134.
+- Follow-up not done: `just test` still passes `--test-threads=1` to `_test-network`, which is no longer needed for correctness. Left as is to keep this change narrow.

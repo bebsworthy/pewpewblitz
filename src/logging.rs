@@ -21,7 +21,7 @@ fn network_aware_log_plugin() -> LogPlugin {
 
 #[cfg(feature = "network-test")]
 mod network_test {
-    use super::{App, AtomicBool, LogPlugin, Ordering, add_log_plugin_once};
+    use super::{App, LogPlugin, add_log_plugin_once};
     use bevy::log::{
         BoxedFmtLayer, Level,
         tracing::{self, Subscriber, field::Visit},
@@ -30,14 +30,17 @@ mod network_test {
             registry::LookupSpan,
         },
     };
-    use core::fmt;
-    use std::sync::atomic::AtomicUsize;
+    use bevy::{app::PreUpdate, ecs::schedule::SingleThreadedExecutor};
+    use core::{cell::Cell, fmt, marker::PhantomData};
 
     const LATE_INPUT_TARGET: &str = "lightyear_debug::input";
     const LATE_INPUT_KIND: &str = "server_late_input_mismatch";
 
-    static CAPTURE_LATE_INPUTS: AtomicBool = AtomicBool::new(false);
-    static CAPTURED_LATE_INPUTS: AtomicUsize = AtomicUsize::new(0);
+    std::thread_local! {
+        /// Count of captured expected diagnostics for the scope active on this thread, if any.
+        /// Thread-local so parallel tests in one process each own their capture scope.
+        static CAPTURED_LATE_INPUTS: Cell<Option<usize>> = const { Cell::new(None) };
+    }
 
     #[allow(
         clippy::unnecessary_wraps,
@@ -91,14 +94,14 @@ mod network_test {
             event: &tracing::Event<'_>,
         ) -> fmt::Result {
             let metadata = event.metadata();
-            if CAPTURE_LATE_INPUTS.load(Ordering::Acquire)
-                && metadata.target() == LATE_INPUT_TARGET
+            if metadata.target() == LATE_INPUT_TARGET
                 && *metadata.level() == Level::ERROR
+                && let Some(captured) = CAPTURED_LATE_INPUTS.get()
             {
                 let mut visitor = EventKindVisitor::default();
                 event.record(&mut visitor);
                 if visitor.is_late_input_mismatch {
-                    CAPTURED_LATE_INPUTS.fetch_add(1, Ordering::Relaxed);
+                    CAPTURED_LATE_INPUTS.set(Some(captured + 1));
                     return Ok(());
                 }
             }
@@ -107,9 +110,12 @@ mod network_test {
     }
 
     /// Scoped counter for the exact late-input diagnostic expected by bounded network soaks.
+    ///
+    /// The scope belongs to the thread that opened it, so it is neither `Send` nor `Sync`.
     #[must_use]
     pub struct ExpectedLateInputDiagnostics {
         active: bool,
+        thread_bound: PhantomData<*const ()>,
     }
 
     impl ExpectedLateInputDiagnostics {
@@ -117,30 +123,39 @@ mod network_test {
         #[must_use]
         pub fn finish(mut self) -> usize {
             self.active = false;
-            CAPTURE_LATE_INPUTS.store(false, Ordering::Release);
-            CAPTURED_LATE_INPUTS.swap(0, Ordering::AcqRel)
+            CAPTURED_LATE_INPUTS.take().unwrap_or(0)
         }
     }
 
     impl Drop for ExpectedLateInputDiagnostics {
         fn drop(&mut self) {
             if self.active {
-                CAPTURE_LATE_INPUTS.store(false, Ordering::Release);
-                CAPTURED_LATE_INPUTS.store(0, Ordering::Release);
+                CAPTURED_LATE_INPUTS.set(None);
             }
         }
     }
 
-    /// Start one exclusive expected-late-input diagnostic capture scope.
-    pub fn capture_expected_late_input_diagnostics() -> ExpectedLateInputDiagnostics {
+    /// Start one expected-late-input diagnostic capture scope for `server`, owned by the calling
+    /// test thread.
+    ///
+    /// Lightyear emits the diagnostic from its `PreUpdate` input receiver, so this pins the
+    /// server App's `PreUpdate` schedule to the single-threaded executor: `App::update` then runs
+    /// that receiver on this thread, and parallel tests cannot observe each other's diagnostics.
+    pub fn capture_expected_late_input_diagnostics(
+        server: &mut App,
+    ) -> ExpectedLateInputDiagnostics {
         assert!(
-            CAPTURE_LATE_INPUTS
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok(),
-            "expected late-input diagnostic capture scopes must not overlap"
+            CAPTURED_LATE_INPUTS.get().is_none(),
+            "expected late-input diagnostic capture scopes must not overlap on one thread"
         );
-        CAPTURED_LATE_INPUTS.store(0, Ordering::Release);
-        ExpectedLateInputDiagnostics { active: true }
+        server.edit_schedule(PreUpdate, |schedule| {
+            schedule.set_executor(SingleThreadedExecutor::new());
+        });
+        CAPTURED_LATE_INPUTS.set(Some(0));
+        ExpectedLateInputDiagnostics {
+            active: true,
+            thread_bound: PhantomData,
+        }
     }
 
     /// Install the network-test process logger before constructing any of its multiple Apps.

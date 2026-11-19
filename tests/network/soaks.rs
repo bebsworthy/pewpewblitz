@@ -211,8 +211,9 @@ fn run_match_soak(harness: &mut Harness, clients: usize, hot_zone: bool) {
 
 #[test]
 fn wipeout_twenty_five_match_restart_soak_retains_bounded_state() {
-    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_match(2);
+    let diagnostics =
+        brawler::testing::capture_expected_late_input_diagnostics(&mut harness.server);
     run_match_soak(&mut harness, 2, false);
     assert!(
         diagnostics.finish() > 0,
@@ -222,8 +223,9 @@ fn wipeout_twenty_five_match_restart_soak_retains_bounded_state() {
 
 #[test]
 fn hot_zone_twenty_five_match_restart_soak_retains_bounded_state() {
-    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_hot_zone_match(2);
+    let diagnostics =
+        brawler::testing::capture_expected_late_input_diagnostics(&mut harness.server);
     run_match_soak(&mut harness, 2, true);
     assert!(
         diagnostics.finish() > 0,
@@ -233,8 +235,9 @@ fn hot_zone_twenty_five_match_restart_soak_retains_bounded_state() {
 
 #[test]
 fn reconnect_soak_alternates_disconnect_and_clean_new_sessions() {
-    let diagnostics = brawler::testing::capture_expected_late_input_diagnostics();
     let mut harness = Harness::new_match(2);
+    let diagnostics =
+        brawler::testing::capture_expected_late_input_diagnostics(&mut harness.server);
     let mut sequence = 10_u64;
     step_until_labelled(&mut harness, "initial join", |harness| {
         (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
