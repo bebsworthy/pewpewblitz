@@ -335,3 +335,5 @@ fn exit_match_input(mut context: ResMut<super::ClientInputContext>) {
 mod tests;
 
 pub(crate) use screens::equipment::WeaponPreviewHost;
+#[cfg(feature = "automation")]
+pub(crate) use screens::map_maker_mockups::add_map_maker_mockups;

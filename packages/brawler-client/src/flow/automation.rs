@@ -47,12 +47,28 @@ pub enum ShellCaptureRoute {
     MapEditor,
     /// The new-map editor after cycling the palette selection to the next card on the page.
     MapEditorPalette,
+    /// The library with the create-map panel open (BRL-2xpc audit).
+    MapCreate,
+    /// A painted wall line marquee-selected with the Select tool (BRL-2xpc audit).
+    MapEditorSelect,
+    /// A painted draft with the map-check popover open (BRL-2xpc audit).
+    MapEditorIssues,
+    /// A painted draft after Test Map is refused by local validation (BRL-2xpc audit).
+    MapEditorTest,
+    /// A painted draft right after Save (BRL-2xpc audit).
+    MapEditorSaved,
+    /// The library after saving one painted draft (BRL-2xpc audit).
+    MapLibraryDrafts,
+    /// The library renaming the first saved draft (BRL-2xpc audit).
+    MapRename,
+    /// The library asking to confirm deleting the first saved draft (BRL-2xpc audit).
+    MapDelete,
     Queue,
 }
 
 impl ShellCaptureRoute {
     /// Every route, in the order `scripts/shell-capture.sh` runs them on a fresh profile.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 28] = [
         Self::FirstBrawler,
         Self::Dashboard,
         Self::DashboardMenu,
@@ -72,6 +88,14 @@ impl ShellCaptureRoute {
         Self::MapLibrary,
         Self::MapEditor,
         Self::MapEditorPalette,
+        Self::MapCreate,
+        Self::MapEditorSelect,
+        Self::MapEditorIssues,
+        Self::MapEditorTest,
+        Self::MapEditorSaved,
+        Self::MapLibraryDrafts,
+        Self::MapRename,
+        Self::MapDelete,
         Self::Queue,
     ];
 
@@ -98,6 +122,14 @@ impl ShellCaptureRoute {
             Self::MapLibrary => "map-library",
             Self::MapEditor => "map-editor",
             Self::MapEditorPalette => "map-editor-palette",
+            Self::MapCreate => "map-create",
+            Self::MapEditorSelect => "map-editor-select",
+            Self::MapEditorIssues => "map-editor-issues",
+            Self::MapEditorTest => "map-editor-test",
+            Self::MapEditorSaved => "map-editor-saved",
+            Self::MapLibraryDrafts => "map-library-drafts",
+            Self::MapRename => "map-rename",
+            Self::MapDelete => "map-delete",
             Self::Queue => "queue",
         }
     }
@@ -186,7 +218,73 @@ impl ShellCaptureRoute {
                 steps.push(screen(Action::MapMakerCycleAsset(1), ClientFlow::MapEditor));
                 steps
             }
+            Self::MapCreate
+            | Self::MapEditorSelect
+            | Self::MapEditorIssues
+            | Self::MapEditorTest
+            | Self::MapEditorSaved
+            | Self::MapLibraryDrafts
+            | Self::MapRename
+            | Self::MapDelete => self.map_maker_audit_steps(library, &map_editor),
             Self::Queue => vec![screen(Action::JoinQueue, ClientFlow::Queue)],
+        }
+    }
+
+    /// BRL-2xpc audit routes: Map Maker library and editor states past the first screen.
+    fn map_maker_audit_steps(self, library: RouteStep, map_editor: &[RouteStep]) -> Vec<RouteStep> {
+        use FlowUiAction as Action;
+        // A short wall line from the default Cover selection, so the editor is not empty.
+        let painted = || {
+            let mut steps = map_editor.to_vec();
+            let line = (6..14).map(|x| brawler::map::MapCell::new(x, 6)).collect();
+            steps.push(in_editor(Action::MapMakerPaintStroke(line)));
+            steps
+        };
+        let saved_library = || {
+            let mut steps = painted();
+            steps.push(in_editor(Action::SaveMapDraft));
+            steps.push(screen(Action::BackToMapLibrary, ClientFlow::MapLibrary));
+            steps
+        };
+        let with = |mut steps: Vec<RouteStep>, more: Vec<RouteStep>| {
+            steps.extend(more);
+            steps
+        };
+        let first_draft = crate::MapDraftId(1);
+        match self {
+            Self::MapCreate => vec![library, screen(Action::CreateMap, ClientFlow::MapLibrary)],
+            Self::MapEditorSelect => with(
+                painted(),
+                vec![
+                    in_editor(Action::MapMakerUseMoveTool),
+                    in_editor(Action::MapMakerSelectRect(
+                        brawler::map::MapCell::new(5, 5),
+                        brawler::map::MapCell::new(14, 7),
+                        false,
+                    )),
+                ],
+            ),
+            Self::MapEditorIssues => {
+                with(painted(), vec![in_editor(Action::MapMakerToggleValidation)])
+            }
+            Self::MapEditorTest => with(painted(), vec![in_editor(Action::TestAuthoredMap)]),
+            Self::MapEditorSaved => with(painted(), vec![in_editor(Action::SaveMapDraft)]),
+            Self::MapLibraryDrafts => saved_library(),
+            Self::MapRename => with(
+                saved_library(),
+                vec![screen(
+                    Action::BeginRenameMapDraft(first_draft),
+                    ClientFlow::MapLibrary,
+                )],
+            ),
+            Self::MapDelete => with(
+                saved_library(),
+                vec![screen(
+                    Action::DeleteMapDraft(first_draft),
+                    ClientFlow::MapLibrary,
+                )],
+            ),
+            _ => Vec::new(),
         }
     }
 
@@ -305,6 +403,11 @@ fn dashboard(action: FlowUiAction, overlay: ClientOverlay) -> RouteStep {
 /// An action that opens a full-screen flow with no overlay.
 fn screen(action: FlowUiAction, flow: ClientFlow) -> RouteStep {
     act(action, flow, ClientOverlay::None)
+}
+
+/// A Map Maker editor action that keeps the editor open.
+fn in_editor(action: FlowUiAction) -> RouteStep {
+    screen(action, ClientFlow::MapEditor)
 }
 
 /// A Dashboard overlay action and overlay that both name the selected saved brawler.

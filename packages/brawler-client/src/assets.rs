@@ -41,8 +41,8 @@ pub(crate) struct ClientAssetHandles {
 
 impl ClientAssetHandles {
     /// Placeholder handles with a caller-chosen shell font, so headless flow tests can tell the
-    /// shell typography from Bevy's default font.
-    #[cfg(test)]
+    /// shell typography from Bevy's default font. The UI gallery's design boards use it too.
+    #[cfg(any(test, feature = "automation"))]
     pub(crate) fn with_font_for_test(dashboard_font: Handle<Font>) -> Self {
         Self {
             audio: BTreeMap::new(),
