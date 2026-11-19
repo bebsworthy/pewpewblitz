@@ -10,3 +10,19 @@ This is a Play Services game overlay (Pixel Game Dashboard / Play Games entry) a
 
 # Acceptance
 - The cause is identified with evidence. If the category is dropped, a cold-launch tap at 1.8–2.2 s reaches the app (Pixel 8a).
+
+# Device check 2026-11-19 (Pixel 8a, Android 17, BRL-fs5k experiment build of main caee2a43)
+Method: two APKs that differ only in the manifest. `game` is the shipped manifest; `nogame` removes `android:appCategory="game"` (checked with `aapt2 dump xmltree`). Both carry a temporary `<profileable android:shell="true"/>` and the same native library. For each run: `am force-stop`, then one device-side shell `am start …; sleep D; input tap 1045 833` (the first saved-server row on Select Server), `dumpsys input` FocusedWindows 0.4 s after the tap, then the full logcat. "Reached the app" means the app kept window focus and started connecting (`socket bound` / `connecting to server` from the app's pid).
+
+| tap at | `game` (2 runs each) | `nogame` (2 runs each) |
+|---|---|---|
+| 1.8 s | 2/2 swallowed: app gets `WindowFocusChanged -- 0`, focused window `Embedded{}` | 2/2 app keeps focus; run 2 connected, run 1 tapped before the row existed (no connect, focus kept) |
+| 2.0 s | 2/2 swallowed (same signature) | 2/2 connected |
+| 2.2 s | 2/2 swallowed (same signature) | 2/2 connected |
+| 2.6 s | 1/1 connected | 2/2 connected |
+
+What the category switches on (logcat, `game` launch only; none of these lines appear for `nogame`):
+- Play Services `GameService` (com.google.android.gms): `onGameStarted … requesting createGameSession` about 0.3 s after launch. That game session is the `Embedded{}` TRUSTED_OVERLAY window that takes focus on the first tap in its first ~2.4 s.
+- `GameManagerService: setDefaultFrameRateOverride : <uid>, 60.0` and `Game power mode ON (only games in foreground)`.
+
+**Cause confirmed:** the overlay is the Play Services game session (Game Dashboard entry) that Android attaches because the manifest declares `android:appCategory="game"`. Without the category, cold-launch taps at 1.8–2.2 s reach the app. The shipped manifest is unchanged; keep vs drop is an owner decision (Ticket question on this ticket). Evidence: session scratchpad `gv67/` (`results.txt`, per-run `*-input.txt`, `*-logcat.txt`, screenshots).
