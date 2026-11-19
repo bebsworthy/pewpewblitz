@@ -12,7 +12,7 @@ struct ThirdPartyCredit {
     license: &'static str,
 }
 
-const THIRD_PARTY: [ThirdPartyCredit; 7] = [
+const THIRD_PARTY: [ThirdPartyCredit; 8] = [
     ThirdPartyCredit {
         pack: "Mini Characters",
         used_for: "zombie NPC",
@@ -47,6 +47,12 @@ const THIRD_PARTY: [ThirdPartyCredit; 7] = [
         pack: "Fira Mono (subset)",
         used_for: "Bevy default font",
         author: "Mozilla Foundation / Telefonica",
+        license: "OFL-1.1",
+    },
+    ThirdPartyCredit {
+        pack: "Fira Sans (Bold)",
+        used_for: "Map Maker body text",
+        author: "Mozilla Foundation / Telefonica S.A.",
         license: "OFL-1.1",
     },
     ThirdPartyCredit {

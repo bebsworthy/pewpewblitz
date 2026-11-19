@@ -17,6 +17,7 @@ builder and the `pewpew-blitz-original-*.txt` notes in this directory.
 | Interface Sounds | 1.0 | Kenney | CC0-1.0 | https://kenney.nl/assets/interface-sounds | `kenney-interface-sounds.txt` |
 | Lilita One | Google Fonts release | Juan Montoreano | OFL-1.1 | https://fonts.google.com/specimen/Lilita+One | `LilitaOne-OFL-1.1.txt` |
 | Fira Mono (subset) | as embedded by `bevy_text` 0.19.1 | Mozilla Foundation / Telefonica | OFL-1.1 | Bevy `default_font` feature | `FiraMono-LICENSE` |
+| Fira Sans (Bold) | as bundled in Bevy's `bevy_feathers` assets | Mozilla Foundation / Telefonica S.A. | OFL-1.1 | https://github.com/mozilla/Fira | `FiraSans-OFL-1.1.txt` |
 | Twemoji Mozilla | 0.7.0 | Twitter, Inc and other contributors / Mozilla | CC-BY-4.0 | https://github.com/mozilla/twemoji-colr/releases/tag/v0.7.0 | `twemoji-mozilla-CC-BY-4.0.txt` |
 
 ## Files used
@@ -34,6 +35,7 @@ Paths are relative to `assets/`; originals are relative to the unpacked pack.
 | `brawler/audio/error.ogg` | Interface Sounds | `Audio/error_001.ogg` | Error cue |
 | `brawler/ui/fonts/lilita-one-regular.ttf` | Lilita One | `LilitaOne-Regular.ttf` | UI display font |
 | none (compiled into the client binary) | Fira Mono | `bevy_text/src/FiraMono-subset.ttf` | Bevy fallback font |
+| `brawler/ui/fonts/fira-sans-bold.ttf` | Fira Sans | `FiraSans-Bold.ttf` (unmodified) | Map Maker body text (BRL-2xpc) |
 | `brawler/ui/fonts/twemoji-mozilla.ttf` | Twemoji Mozilla | `Twemoji.Mozilla.ttf` (release asset, unmodified) | Colour emoji fallback, loaded on Android only |
 
 ## Retired or never shipped
