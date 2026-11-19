@@ -278,8 +278,14 @@ automation build's `--screenshot-dir` scheduled visual-verification path writes 
 capture format into its explicit directory. With `--shell-capture <route>` the interactive shell
 instead opens one named screen through the ordinary flow actions (creating the first brawler on an
 empty profile), saves `<route>.png|json` there once the screen has settled, and exits; the JSON
-`client.flow`/`client.overlay` fields name the presented screen. Live-match routes (Results, match
-menu) are not covered yet (BRL-wqst).
+`client.flow`/`client.overlay` fields name the presented screen. The live-match routes
+`match-loading`, `match-menu`, `leave-confirmation` and `results` (BRL-wqst) start a real
+server-authoritative Practice match from the Dashboard, open the match menu through the same local
+pause request every input device uses, and leave the match afterwards (`results` first plays again
+from Results). For them `scripts/shell-capture.sh` restarts its scratch supervisor on a capture
+catalog whose matches last `BRAWLER_SHELL_CAPTURE_MATCH_SECONDS` (default 30) so Results arrives on
+the authoritative time limit; `BRAWLER_SHELL_CAPTURE_GAME_TYPE=<id>` (for example `heist-3v3`) keeps
+only that game type, which Practice then plays.
 
 Scripted captures render off-screen (BRL-g7ny): `just shell-capture` and
 `scripts/v3-render-evidence.sh` pass the automation client's `--offscreen`, a UI gallery run with

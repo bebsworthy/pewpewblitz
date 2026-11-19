@@ -12,6 +12,36 @@ pub(super) struct MatchMenuState {
     focused: usize,
     scoreboard_latched: bool,
     was_open: bool,
+    /// A row activation requested by automation (BRL-wqst); the menu consumes it exactly like a
+    /// keyed activation of that row the next time it is open.
+    #[cfg(feature = "automation")]
+    requested_row: Option<usize>,
+}
+
+impl MatchMenuState {
+    /// The LEAVE MATCH row, which opens the leave-match confirmation.
+    #[cfg(feature = "automation")]
+    pub(super) const LEAVE_ROW: usize = 3;
+
+    /// Activates `row` through the menu's own activation path the next frame it is open.
+    #[cfg(feature = "automation")]
+    pub(super) fn request_row_activation(&mut self, row: usize) {
+        self.requested_row = Some(row);
+    }
+
+    #[cfg(feature = "automation")]
+    fn take_requested_row(&mut self) -> Option<usize> {
+        self.requested_row.take()
+    }
+
+    #[cfg(not(feature = "automation"))]
+    #[allow(
+        clippy::unused_self,
+        reason = "player builds have no automation row requests"
+    )]
+    const fn take_requested_row(&mut self) -> Option<usize> {
+        None
+    }
 }
 
 mod match_menu;
@@ -148,8 +178,17 @@ fn handle_match_menu_input(
             clicked = true;
         }
     }
+    let requested = if clicked {
+        None
+    } else {
+        menu.take_requested_row()
+    };
+    if let Some(row) = requested {
+        menu.focused = row;
+    }
     let keyed = !clicked
-        && (keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
+        && (requested.is_some()
+            || keyboard.any_just_pressed([KeyCode::Enter, KeyCode::Space])
             || pad_pressed(GamepadButton::South));
     if keyed {
         // Pointer releases already sound through the shared press model.

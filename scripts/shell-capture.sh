@@ -6,6 +6,14 @@
 # captures the empty-profile creation screen and creates the brawler the later routes show.
 # Clients render off-screen (`--offscreen`, BRL-g7ny): no window appears and focus never moves.
 #
+# Live-match routes (BRL-wqst: match-loading, match-menu, leave-confirmation, results) play a real
+# server-authoritative Practice match. Before the first of them the supervisor restarts on the same
+# data with a capture catalog: a copy of config/server/game-types.ron whose matches last
+# ${BRAWLER_SHELL_CAPTURE_MATCH_SECONDS:-30} s, so Results arrives on the authoritative time limit.
+# BRAWLER_SHELL_CAPTURE_GAME_TYPE=<id> keeps only that game type, which Practice then selects
+# (for example hot-zone-3v3 or heist-3v3 Results). Each live route leaves its match afterwards;
+# `results` first plays again from Results to exercise the replay path.
+#
 # usage: scripts/shell-capture.sh [route|all] [WIDTHxHEIGHT|all]
 # Output: ${BRAWLER_SHELL_CAPTURE_DIR:-target/shell-capture}/<size>/, with server data, client
 # data, and per-route logs in <size>.run/ beside it. Never data/server/ or port 5000.
@@ -23,7 +31,9 @@ all_routes=(
     game-select practice-maps map-library map-editor map-editor-palette
     map-create map-editor-select map-editor-issues map-editor-test map-editor-saved
     map-library-drafts map-rename map-delete queue
+    match-loading match-menu leave-confirmation results
 )
+live_routes=" match-loading match-menu leave-confirmation results "
 all_sizes=(1280x720 914x411)
 
 route=${1:-all}
@@ -31,6 +41,13 @@ size=${2:-all}
 out_root=${BRAWLER_SHELL_CAPTURE_DIR:-target/shell-capture}
 bind_addr=${BRAWLER_SHELL_CAPTURE_BIND:-127.0.0.1:5031}
 route_timeout_seconds=${BRAWLER_SHELL_CAPTURE_ROUTE_TIMEOUT_SECONDS:-90}
+live_route_timeout_seconds=${BRAWLER_SHELL_CAPTURE_LIVE_ROUTE_TIMEOUT_SECONDS:-300}
+match_seconds=${BRAWLER_SHELL_CAPTURE_MATCH_SECONDS:-30}
+capture_game_type=${BRAWLER_SHELL_CAPTURE_GAME_TYPE:-}
+if [[ ! "$match_seconds" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' 'brawler shell capture: match seconds must be a positive integer' >&2
+    exit 2
+fi
 case "$bind_addr" in
     *:5000)
         printf '%s\n' 'brawler shell capture: refusing to bind port 5000, the developer server port' >&2
@@ -90,10 +107,52 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Runs one client to completion within the route timeout; returns its exit status.
+# Writes the live-route capture catalog: production game types with bounded match durations,
+# optionally only the requested game type. The server validates it like any operator catalog.
+write_capture_catalog() {
+    python3 - "$project_dir/config/server/game-types.ron" "$1" "$match_seconds" \
+        "$capture_game_type" <<'PY'
+import pathlib
+import re
+import sys
+
+source, target, seconds, game_type = sys.argv[1:5]
+text = pathlib.Path(source).read_text()
+text, count = re.subn(r'match_duration_seconds:\s*\d+', f'match_duration_seconds: {seconds}', text)
+if not count:
+    raise SystemExit('capture catalog has no match durations')
+if game_type:
+    lines = text.splitlines(keepends=True)
+    entries = [line for line in lines if line.lstrip().startswith('(id: "')]
+    kept = [line for line in entries if line.lstrip().startswith(f'(id: "{game_type}"')]
+    if len(kept) != 1:
+        raise SystemExit(f'capture catalog has no game type {game_type}')
+    text = ''.join(line for line in lines if line not in entries or line in kept)
+pathlib.Path(target).write_text(text)
+PY
+}
+
+# Starts this size's scratch supervisor on the given game-type catalog.
+start_supervisor() {
+    "$target_dir"/debug/brawler-supervisor \
+        --network-protocol "$network_protocol" \
+        --protocol-registry-fingerprint "$registry_fingerprint" \
+        --content-fingerprint "$content_fingerprint" \
+        --worker-executable "$target_dir/debug/brawler-server" \
+        --game-types "$1" \
+        --data-directory "$run_dir/server-data" \
+        --mode wipeout \
+        --match-rules production \
+        --bind "$bind_addr" >>"$run_dir/supervisor.log" 2>&1 &
+    supervisor_pid=$!
+    sleep 1
+}
+
+# Runs one client to completion within the given timeout; returns its exit status.
 run_client() {
     local log=$1
-    shift
+    local route_timeout_seconds=$2
+    shift 2
     "$@" >"$log" 2>&1 &
     client_pid=$!
     local waited=0
@@ -125,21 +184,22 @@ for window_size in "${sizes[@]}"; do
     # Each size starts from a fresh scratch server and client profile owned by this script.
     rm -rf "$capture_dir" "$run_dir"
     mkdir -p "$capture_dir" "$run_dir"
-    "$target_dir"/debug/brawler-supervisor \
-        --network-protocol "$network_protocol" \
-        --protocol-registry-fingerprint "$registry_fingerprint" \
-        --content-fingerprint "$content_fingerprint" \
-        --worker-executable "$target_dir/debug/brawler-server" \
-        --game-types "$project_dir/config/server/game-types.ron" \
-        --data-directory "$run_dir/server-data" \
-        --mode wipeout \
-        --match-rules production \
-        --bind "$bind_addr" >"$run_dir/supervisor.log" 2>&1 &
-    supervisor_pid=$!
-    sleep 1
+    start_supervisor "$project_dir/config/server/game-types.ron"
+    live_catalog=
     for name in "${routes[@]}"; do
         log=$run_dir/$name.log
-        if ! run_client "$log" env BRAWLER_CLIENT_DATA_DIR="$run_dir/client-data" \
+        timeout=$route_timeout_seconds
+        if [[ "$live_routes" == *" $name "* ]]; then
+            timeout=$live_route_timeout_seconds
+            if [[ -z "$live_catalog" ]]; then
+                # Same server data, so the profile the earlier routes created carries over.
+                live_catalog=$run_dir/capture-game-types.ron
+                write_capture_catalog "$live_catalog"
+                stop_supervisor
+                start_supervisor "$live_catalog"
+            fi
+        fi
+        if ! run_client "$log" "$timeout" env BRAWLER_CLIENT_DATA_DIR="$run_dir/client-data" \
             "$target_dir"/release/brawler-client --server "$bind_addr" \
             --window-size "$window_size" --screenshot-dir "$capture_dir" \
             --shell-capture "$name" --offscreen; then

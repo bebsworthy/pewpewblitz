@@ -5343,7 +5343,12 @@ fn shell_overlays_fit_phone_and_desktop_viewports() {
 fn shell_capture_route_steps_match_the_reducer() {
     let membership = lobby_membership_with_brawler();
     let brawler = membership.profile.selected_brawler_id;
-    for route in ShellCaptureRoute::ALL {
+    // Live-match routes wait on the match server; `live_shell_capture_routes_leave_the_match`
+    // covers their tables.
+    for route in ShellCaptureRoute::ALL
+        .into_iter()
+        .filter(|route| !route.live())
+    {
         // The Map Maker editor loads palette images, so this harness carries an asset server.
         let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
             app.add_plugins(AssetPlugin::default())
@@ -5368,7 +5373,7 @@ fn shell_capture_route_steps_match_the_reducer() {
             app.update();
             if step
                 .expected(brawler)
-                .is_some_and(|(flow, _)| flow == ClientFlow::Queue)
+                .is_some_and(|(flow, _, _)| flow == ClientFlow::Queue)
             {
                 // The Queue screen opens on the server's join acceptance, not on the request.
                 assert!(
@@ -5390,8 +5395,9 @@ fn shell_capture_route_steps_match_the_reducer() {
                 );
                 app.update();
             }
+            let (flow, overlay) = shell_position(&app);
             assert_eq!(
-                Some(shell_position(&app)),
+                Some((flow, overlay, false)),
                 step.expected(brawler),
                 "{} step {index}",
                 route.name()

@@ -1,1 +1,2 @@
 {"v":1,"eid":"6b84c8cf41184428","at":"2026-09-10T09:08:51Z","n":0,"op":"comment.add","id":"c-zw7wfzj","by":null,"target":"spec","rev":"341c727a3beea2b3","from":"L1-C1","to":"L1-C1","src":"","text":"Committed at user request as 03c5454: Present Hot Zone and Heist objective results. Unrelated changes excluded. Recorded compact native and replay verification limitations remain pending.","was":"c-000008"}
+{"v":2,"eid":"a59a92ea3e678609","at":"2026-11-19T15:19:18Z","n":0,"op":"comment.close","id":"c-zw7wfzj","by":"Boyd"}
