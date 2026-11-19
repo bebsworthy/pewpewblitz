@@ -2,22 +2,6 @@
 
 # Questions · BRL-ptaq
 
-## q-mncb6fv · open · by Boyd
+## Resolved
 
-Have target players hit networks that block the game's UDP traffic (school, corporate or hotel Wi-Fi, some carriers)?
-
-No field data exists. Every recorded "no reply" failure so far (BRL-g57a device test, BRL-2nsg, BRL-sh10, BRL-d3hb) happened on the owner's own LAN, where UDP to port 5000 worked minutes earlier or later: Wi-Fi just reconnected, the Mac hibernated, the phone was on another subnet, or the still-unexplained handoff timeout. None was a UDP-blocking network. The client already shows "Some networks block the UDP traffic the game uses; if so, try another network." (`NO_REPLY_HINT`, packages/brawler-client/src/flow/reducer.rs).
-
-A WebSocket-over-TLS fallback is roughly 3-5 weeks of work across the supervisor, a stream envelope, capability/rebind/rejoin semantics, client fallback selection, TLS certificates and Android, and it plays worse under loss (head-of-line stalls). WebTransport does not help: it runs over QUIC, which is UDP.
-
-- [ ] Defer until there is evidence *(recommended · default if unanswered)*
-
-  Keep UDP-only and the actionable hint. Revisit when a real player (not the owner's LAN) reports the hint persisting on one network while another network works, or before a public launch targeting schools/workplaces. docs/14 records this trigger.
-
-- [ ] Build a WebSocket/TLS fallback now
-
-  File the follow-up as `todo`: supervisor TCP/TLS listener, stream envelope, client fallback after a UDP no-reply, certificate setup for public servers. Costs about 3-5 weeks and a second transport to test for every network change.
-
-- [ ] Reject permanently
-
-  UDP-only is the contract; the hint is the whole answer. docs/14 states a fallback will not be built.
+- q-mncb6fv

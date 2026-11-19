@@ -2,12 +2,21 @@
 
 # Questions · BRL-tkmh
 
-## q-m6n2sj1 · open · by Boyd
+## q-m6n2sj1 · open · blocking · edited 2026-11-19 13:26 · by Boyd
 
-Where should a brawler's character choice live?
+How should a player pick which 3D character model their brawler uses?
 
-- [ ] Saved profile field (SavedBrawler.character_id), cosmetic, outside the gameplay fingerprint (recommended)
-- [ ] Derived from the build or weapon family, presentation-only
+**What this ticket is.** Today every fighter in every match is Riff, the only production character model. Once a second character exists (BRL-qfaj, which you approved: an original character made like Riff), each brawler should be able to look like one or the other. This question is only about *what decides* which model a brawler shows. It changes nothing about stats or gameplay.
+
+**What exists now.** A saved brawler (`SavedBrawler`, `src/profiles/model.rs:168`) stores its name, weapon parts, abilities and a gameplay stat profile (`fighter_profile_id`: default / lightweight / reinforced). It has no "looks" field. The stat profile must not double as the look, because it changes gameplay balance.
+
+- [ ] Player picks it: a saved "character" field on each brawler *(recommended · default if unanswered)*
+
+  The Brawlers screen gets a character picker (Riff / the new character). The choice is saved with the brawler on the server, sent to other players in the match so they see the same model, and is purely cosmetic: it is kept out of the gameplay content fingerprint, so adding characters later never splits compatible clients. Existing brawlers default to Riff. Cost: one profile field and a small database migration, one picker on the Brawlers screen, one small ID added to the replicated fighter identity.
+
+- [ ] Automatic: the look follows the build
+
+  No picker. The model is chosen from the brawler's weapon family or build (for example heavy weapons use the bigger character). Simpler to build and no stored data, but players can't choose, two brawlers with the same weapon always look the same, and changing a weapon silently changes how your brawler looks.
 
 ## q-wr6gc13 · answered · by Boyd
 
