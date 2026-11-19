@@ -4,9 +4,9 @@ was: BRL-0134
 
 title: Restore strict test-target Clippy after UI and Zombie additions
 
-status: backlog
-closed:
-status_changed: 2026-09-09T23:46:51Z
+status: done
+closed: 2026-11-19T13:09:34Z
+status_changed: 2026-11-19T13:09:34Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-gjz8]
 
 parent:
 
-rank: 2008201
+rank:
 ---
 
 # Description

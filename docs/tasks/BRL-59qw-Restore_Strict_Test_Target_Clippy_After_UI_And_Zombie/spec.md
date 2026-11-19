@@ -8,3 +8,7 @@ No runtime behavior changes. Preserve other working-tree edits. Follow-up to com
 
 ## Acceptance
 Strict canonical test-target lint passes; affected tests pass. Do not suppress warnings globally.
+
+# Verification (2026-11-19)
+
+Already resolved by later work: the strict test-target Clippy this ticket asked for is now part of `just lint` (`justfile:164`, `cargo clippy --locked -p brawler -p brawler-client --no-default-features --features brawler/network-test,brawler-client/network-test --tests -- -D warnings`, plus `justfile:170` for network-test + balance-lab). `just lint` passed on main at d60f2f64. The file paths listed in Scope (`src/client/...`) no longer exist after the client crate move. No code change needed.
