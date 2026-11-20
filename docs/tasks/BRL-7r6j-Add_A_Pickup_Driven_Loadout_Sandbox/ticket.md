@@ -4,9 +4,9 @@ was: BRL-0045
 
 title: Add a pickup-driven loadout sandbox
 
-status: backlog
+status: idea
 closed:
-status_changed: 2026-08-28T18:55:55Z
+status_changed: 2026-11-19T17:08:58Z
 
 theme: core
 
@@ -16,11 +16,11 @@ created: 2026-08-28T18:51:01Z
 
 blocks: []
 
-related: [BRL-abys, BRL-k66v]
+related: [BRL-7sqn, BRL-abys, BRL-k66v]
 
 parent:
 
-rank: 3014656
+rank: 262144
 ---
 
 # Description

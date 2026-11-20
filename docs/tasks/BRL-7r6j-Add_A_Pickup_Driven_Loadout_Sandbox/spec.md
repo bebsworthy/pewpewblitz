@@ -157,3 +157,7 @@ The estimate is larger than an editor overlay because the pickup concept adds a 
 # Dependencies and coordination
 
 BRL-k66v changes elemental parts/ultimate fields and Balance Lab schemas; coordinate or implement after it so Sandbox exposes the accepted inventory and avoids duplicate compatibility migration. BRL-abys may later teach bots to test or collect these builds, but it is not required for the first human-only loop.
+
+# Back to idea (2026-11-19)
+
+The roster direction (BRL-7sqn) removes player-facing weapon parts and saved-brawler loadouts, so a pickup-driven loadout sandbox no longer matches the player model. Parts survive only as authoring primitives. This could return as a developer/Balance Lab tool for trying recipes in-arena; that needs owner direction first.

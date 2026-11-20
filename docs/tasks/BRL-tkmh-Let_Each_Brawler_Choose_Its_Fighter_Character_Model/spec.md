@@ -29,3 +29,7 @@ Reviewed 2026-11-15 against HEAD 3437c0d8: valid but not implementable yet: stil
 # Parked (2026-11-19)
 
 Owner answer to q-m6n2sj1: the current per-brawler customization (weapon parts, passives, ultimate, stat profile) is probably overkill to expose to players; a roster of characters, each with its own weapon style and stats, may fit better. Park this ticket for deeper reflection and design. The second character it needed now exists (BRL-qfaj, Bumper). The product question is tracked in BRL-7sqn.
+
+# Canceled (2026-11-19)
+
+Superseded by the BRL-7sqn roster direction. The character is now the player's pick, not a cosmetic field on a saved brawler. The character catalog, the replicated `CharacterId` and client rendering are implemented in BRL-egn6.

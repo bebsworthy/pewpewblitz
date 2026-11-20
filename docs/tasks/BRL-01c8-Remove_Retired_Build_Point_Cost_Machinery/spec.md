@@ -69,3 +69,11 @@ Saved brawlers have one obvious authoritative resolution model with no point cos
 ## 2026-08-28 immediate presentation correction
 
 Playtest exposed live Queue and Match Loading point-cost copy. BRL-k66v removes that misleading copy immediately because it obscures loading diagnosis. This ticket still owns full deletion of `total_points`, the 12-point budget, over-budget outcomes, catalog costs, and related protocol and fingerprint machinery.
+
+# Scope note (2026-11-19)
+
+BRL-egn6 removes saved brawlers and the player part inventory. The point-cost fields, the budget and total-point reporting in `content/catalogs/builds.ron` and the build model are still internal machinery, so this ticket stays valid. Do it after BRL-egn6, or fold it in, and drop any acceptance item about preserving saved-brawler choices.
+
+# Note from BRL-egn6 (2026-11-20)
+
+BRL-egn6 replaced saved brawlers with roster character picks and removed the parts of this machinery its change made unreachable: `resolve_build_recipe`, `BrawlerBuildRecipe`, the custom Pulse `WeaponChoice`, `build_point_total`, `BuildResolutionError::OverBudget` and `MAX_BUILD_CANDIDATE_BYTES`. Still here for this ticket: `BUILD_POINT_BUDGET`, every catalog `point_cost` field, `ResolvedMatchLoadout.total_points` (now always 0) and the unreachable protocol variant `QueueRejection::OverBudget` (removing it is a protocol change; follow docs/08). The description's references to saved brawlers are stale: the product loadout is now a character pick.

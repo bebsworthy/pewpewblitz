@@ -391,3 +391,7 @@ Verification:
 - Production-build browser audit against a schema-12 mock server — one shared row with the expected editable cells for ultimate maximum range (8), primary radius (7), active duration (7), projectile speed (2), damage per hit (3), and passive elemental resistance (3); no browser warnings or errors.
 
 The required native `just balance-lab` operator playtest remains pending, so the ticket stays in `doing`.
+
+# Roster note (2026-11-19)
+
+With the roster direction (BRL-7sqn), roster characters become the main comparison subject: characters as columns, stats and kit as rows. Coordinate with BRL-5v3c (the Characters category in Balance Lab) so there is one layout, not two.

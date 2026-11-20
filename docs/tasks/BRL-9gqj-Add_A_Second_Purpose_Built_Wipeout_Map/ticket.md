@@ -6,7 +6,7 @@ title: Add a second purpose-built Wipeout map
 
 status: backlog
 closed:
-status_changed: 2026-08-31T04:32:20Z
+status_changed: 2026-11-20T00:40:07Z
 
 theme: core
 

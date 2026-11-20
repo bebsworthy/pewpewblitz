@@ -23,3 +23,7 @@ Start Practice creates a deterministic varied opponent roster that exercises the
 - Bots use preferred range, delivery geometry, ammo, charge, concealment, fields, and mode objectives coherently without bypassing gameplay systems.
 - Pure policy traces, lifecycle/restart, 1v1/2v2/3v3 routed scenarios, performance ceilings, and native matchup playtests pass.
 - Documentation names the supported bot content matrix and explicitly defers future feature support.
+
+# Reshaped by the roster direction (BRL-7sqn, 2026-11-19)
+
+Bots pick roster characters and their ultimate/passive options instead of saved-brawler recipes. The coverage matrix becomes the 9 launch characters, which together cover all 7 weapon bases and all 11 ultimates (this replaces the earlier 4 bases and 5 ultimates). The per-capability behavior work still applies, because bots read only the resolved loadout. BRL-egn6 adds basic deterministic character picks; this ticket owns the varied matchup roster and behavior quality. Blocked by BRL-egn6. Rewrite the Outcome and Scope wording above when this ticket is picked up.

@@ -4,9 +4,9 @@ was: BRL-0185
 
 title: Let each brawler choose its fighter character model
 
-status: backlog
-closed:
-status_changed: 2026-11-13T06:40:17Z
+status: canceled
+closed: 2026-11-19T17:08:58Z
+status_changed: 2026-11-19T17:08:58Z
 
 theme: core
 
@@ -16,11 +16,11 @@ created: 2026-11-13T06:40:17Z
 
 blocks: []
 
-related: [BRL-57hs, BRL-7sqn, BRL-qfaj]
+related: [BRL-57hs, BRL-7sqn, BRL-egn6, BRL-qfaj]
 
 parent: BRL-q5c4
 
-rank: 2241876
+rank:
 ---
 
 # Description

@@ -4,9 +4,9 @@ was: BRL-0038
 
 title: Add a speed-burst active item
 
-status: backlog
+status: idea
 closed:
-status_changed: 2026-08-28T09:41:01Z
+status_changed: 2026-11-19T17:08:58Z
 
 theme: core
 
@@ -16,11 +16,11 @@ created: 2026-08-28T09:40:59Z
 
 blocks: []
 
-related: []
+related: [BRL-7sqn]
 
 parent:
 
-rank: 2555904
+rank: 196608
 ---
 
 # Description

@@ -22,3 +22,7 @@ Players can equip and activate one short Speed Burst item as an additional bound
 - Dash, slows, effect tiles, Freeze, and ordinary speed modifiers have an explicit deterministic composition rule.
 - HUD and native playtests make readiness, activation, expiry, and rejection readable without crowding existing actions.
 - Server role isolation, performance, documentation, and feedback gates pass.
+
+# Back to idea (2026-11-19)
+
+The roster direction (BRL-7sqn) retires saved brawlers, so there is no player loadout slot to add an active item to. If a speed-burst item comes back, it should be a character's kit element or per-character option on top of BRL-egn6, and needs owner direction first.

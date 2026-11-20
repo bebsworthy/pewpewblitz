@@ -3,9 +3,9 @@ id: BRL-7sqn
 
 title: 'Review player customization: a character roster with signature weapons and stats vs per-brawler builds'
 
-status: idea
-closed:
-status_changed: 2026-11-19T16:47:48Z
+status: done
+closed: 2026-11-19T17:08:58Z
+status_changed: 2026-11-19T17:08:58Z
 
 theme:
 
@@ -15,11 +15,11 @@ created: 2026-11-19T16:47:45Z
 
 blocks: []
 
-related: [BRL-qfaj, BRL-tkmh]
+related: [BRL-2x8j, BRL-7r6j, BRL-abys, BRL-egn6, BRL-m6an, BRL-nwhr, BRL-pjdb, BRL-qfaj, BRL-qqch, BRL-tkmh, BRL-w07m, BRL-xb9x, BRL-zkb3]
 
 parent:
 
-rank: 131072
+rank:
 ---
 
 # Description
