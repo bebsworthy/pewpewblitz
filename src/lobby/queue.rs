@@ -1,7 +1,7 @@
 //! Shared, bounded queue wire contract.
 
 use crate::{
-    builds::{AcceptedBuildSummary, BUILD_POINT_BUDGET},
+    builds::AcceptedBuildSummary,
     lobby::{CatalogRevision, GameTypeId, MAX_GAME_TYPES},
 };
 use serde::{Deserialize, Deserializer, Serialize, de::SeqAccess, de::Visitor};
@@ -237,13 +237,6 @@ impl<'de> Deserialize<'de> for QueueCommandOutcome {
                     "cancelled queue revision must be nonzero",
                 ));
             }
-            QueueDecision::Rejected(QueueRejection::OverBudget { used, budget })
-                if *budget != BUILD_POINT_BUDGET || *used <= *budget =>
-            {
-                return Err(serde::de::Error::custom(
-                    "over-budget outcome must carry the canonical exceeded budget",
-                ));
-            }
             QueueDecision::Rejected(QueueRejection::RateLimited { retry_after_millis })
                 if !(1..=MAX_QUEUE_RETRY_AFTER_MILLIS).contains(retry_after_millis) =>
             {
@@ -317,7 +310,6 @@ impl<'de> Deserialize<'de> for QueueMembership {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum QueueRejection {
     IncompatiblePassives,
-    OverBudget { used: u8, budget: u8 },
     StaleCatalog,
     StaleGameConfiguration,
     UnknownGameType,
@@ -551,14 +543,6 @@ mod tests {
             }),
             QueueDecision::Rejected(QueueRejection::RateLimited {
                 retry_after_millis: MAX_QUEUE_RETRY_AFTER_MILLIS + 1,
-            }),
-            QueueDecision::Rejected(QueueRejection::OverBudget {
-                used: BUILD_POINT_BUDGET,
-                budget: BUILD_POINT_BUDGET,
-            }),
-            QueueDecision::Rejected(QueueRejection::OverBudget {
-                used: BUILD_POINT_BUDGET + 1,
-                budget: BUILD_POINT_BUDGET - 1,
             }),
         ] {
             let outcome = QueueCommandOutcome {

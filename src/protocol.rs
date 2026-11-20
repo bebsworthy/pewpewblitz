@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 54;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 55;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -1025,13 +1025,30 @@ mod tests {
             )
     }
 
+    /// Protocol 55 (BRL-01c8) drops the inert build point costs: `ResolvedMatchLoadout` loses
+    /// `total_points`, its ultimate and passive lose `point_cost`, and `QueueRejection` loses
+    /// `OverBudget`. Only the global handshake guards the new encoding.
+    #[test]
+    fn point_free_loadouts_are_protocol_55() {
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 55);
+        let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+        let profile = welcome_profile();
+        let loadout = catalogs.view().resolve(profile.selection()).unwrap();
+        let bytes = postcard::to_allocvec(&loadout).expect("loadout serializes");
+        assert_eq!(postcard::from_bytes(&bytes), Ok(loadout));
+        let rejection = crate::lobby::QueueRejection::RateLimited {
+            retry_after_millis: 1,
+        };
+        let bytes = postcard::to_allocvec(&rejection).expect("rejection serializes");
+        assert_eq!(postcard::from_bytes(&bytes), Ok(rejection));
+    }
+
     /// Protocol 54 (BRL-egn6) replaces saved brawlers with roster character picks: the profile
     /// command and snapshot, the advertised character catalog, the queue and Practice requests
     /// (profile revision instead of a brawler), and `ResolvedMatchLoadout.character_id`. Only
     /// the global handshake guards them.
     #[test]
-    fn character_picks_are_protocol_54() {
-        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 54);
+    fn character_picks_round_trip() {
         let catalog = crate::profiles::AdvertisedCharacterCatalog::embedded().unwrap();
         let command = crate::profiles::ProfileCommand {
             request_id: 1,

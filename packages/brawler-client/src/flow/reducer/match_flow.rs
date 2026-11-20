@@ -217,14 +217,6 @@ fn resolve_queue_rejection(
                 actions: [Some(FlowErrorAction::Back), None],
             });
         }
-        brawler::lobby::QueueRejection::OverBudget { used, budget } => {
-            commit.error = Some(FlowError {
-                kind: FlowErrorKind::Queue,
-                message: format!("The selected build uses {used} of {budget} points"),
-                return_flow: flow,
-                actions: [Some(FlowErrorAction::Back), None],
-            });
-        }
         brawler::lobby::QueueRejection::StaleCatalog
         | brawler::lobby::QueueRejection::StaleGameConfiguration
         | brawler::lobby::QueueRejection::UnknownGameType

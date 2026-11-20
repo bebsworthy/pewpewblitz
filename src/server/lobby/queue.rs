@@ -1485,21 +1485,6 @@ mod tests {
     }
 
     #[test]
-    fn saved_brawler_admission_does_not_apply_the_legacy_point_budget() {
-        let catalog = catalog();
-        let mut queue = QueueState::with_id_source(&catalog, SequentialTicketIds(10));
-        submit(&mut queue, session(1), 1, join(&catalog, 1), 0);
-        assert!(matches!(
-            queue
-                .pending_outcome(session(1).lobby_session_id)
-                .unwrap()
-                .decision,
-            QueueDecision::Joined(_)
-        ));
-        assert_eq!(queue.ticket_count(), 1);
-    }
-
-    #[test]
     fn outcome_and_snapshot_wire_shapes_stay_bounded_and_private() {
         let catalog = catalog();
         let mut queue = QueueState::with_id_source(&catalog, SequentialTicketIds(10));
