@@ -32,13 +32,18 @@ const COBBLE_ASSET_PATH: &str = "brawler/models/original/characters/cobble/chr_c
 /// `asset_src/characters/plunk/build_plunk.py` on the same contract (plus a belly scale channel);
 /// the catalog draws Plunk with it, untinted.
 const PLUNK_ASSET_PATH: &str = "brawler/models/original/characters/plunk/chr_plunk.glb";
+/// Pollen (BRL-2x8j), the moth-like forest traveler, built by
+/// `asset_src/characters/pollen/build_pollen.py` on the same contract; the catalog draws Pollen
+/// with it, untinted.
+const POLLEN_ASSET_PATH: &str = "brawler/models/original/characters/pollen/chr_pollen.glb";
 /// Every shipped fighter character GLB the runtime contract covers.
-const SHIPPED_CHARACTER_ASSETS: [&str; 5] = [
+const SHIPPED_CHARACTER_ASSETS: [&str; 6] = [
     RIFF_ASSET_PATH,
     BUMPER_ASSET_PATH,
     TORQUE_ASSET_PATH,
     COBBLE_ASSET_PATH,
     PLUNK_ASSET_PATH,
+    POLLEN_ASSET_PATH,
 ];
 
 fn inputs() -> MotionInputs {
@@ -172,6 +177,7 @@ fn roster_characters_with_their_own_model_are_drawn_with_it_untinted() {
         ("torque", TORQUE_ASSET_PATH),
         ("cobble", COBBLE_ASSET_PATH),
         ("plunk", PLUNK_ASSET_PATH),
+        ("pollen", POLLEN_ASSET_PATH),
     ] {
         let character = roster
             .characters

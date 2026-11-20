@@ -73,10 +73,21 @@ tickets tune them through native review but do not change the direction.
   side and rests two-handed weapons on the front of his belly. At the Heavy draw scale 1.08 he
   stands about 1.06 cells to his crown and 1.33 to the antenna ball, and his widest bind-pose
   reach (the mittens) is 13.9 world units, inside the 14-unit body radius.
+- Pollen (`asset_src/characters/pollen/`, `just pollen-asset`, BRL-2x8j), a tiny moth-like forest
+  traveler (Helper / Light), is the sixth production character, on the same pipeline and contract
+  and on Riff's core skeleton (same Light size class and arm chain, so his weapon holds carry over).
+  Her silhouette is a big leaf-green hood with two giant fluffy antennae (a slim stalk and a curled
+  plume frond, two bones each), cream moth wings with orange eyespots on their own wing bones,
+  oversized bell sleeves, a satchel of glowing spores at the hip and small boots. Her walking staff
+  is a character prop stowed diagonally across her back under the wings (its glowing orb at the
+  left shoulder); the gameplay weapon still attaches to `socket_weapon_r` in her hands. She holds
+  her signature Splash (`throwable`) low on the weapon side so her face stays clear above it. At
+  the Light draw scale 0.96 her widest bind-pose reach (the wing tips) is 13.4 world units, inside
+  the 14-unit body radius.
 - Roster presentation (BRL-egn6): the replicated loadout names each fighter's stable `CharacterId`,
   and the client-only catalog `assets/catalogs/fighter_characters.ron` maps it to a model, a tint,
-  a scale (times Riff's source-to-world scale) and the weapon socket. Riff, Bumper, Torque, Cobble
-  and Plunk draw untinted; every other launch character is a tinted placeholder (Light on Riff,
+  a scale (times Riff's source-to-world scale) and the weapon socket. Riff, Bumper, Torque, Cobble,
+  Plunk and Pollen draw untinted; every other launch character is a tinted placeholder (Light on Riff,
   Normal and Heavy on Bumper) until its art ticket adds a `models` entry and repoints only that
   character. An unknown ID draws the fallback model untinted. The tint multiplies into the base
   colours when the scene converts to the toon material, cached per source material and tint. Every
@@ -1024,7 +1035,7 @@ Every redistributed third-party file must have exact provenance in the manifest 
 license text where required. Original replacements should also preserve their source masters and
 document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
-its README (for Riff, Bumper, Torque, Cobble and Plunk, `asset_src/characters/<name>/README.md`; for the
+its README (for Riff, Bumper, Torque, Cobble, Plunk and Pollen, `asset_src/characters/<name>/README.md`; for the
 held weapons, `asset_src/weapons/README.md`; for environment kits,
 `asset_src/environment/<kit>/README.md`), not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt`,
 `pewpew-blitz-original-weapons.txt` and `pewpew-blitz-original-characters.txt` point at the
