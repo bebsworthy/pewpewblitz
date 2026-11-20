@@ -3,9 +3,9 @@ id: BRL-qfv2
 
 title: Keep wide signature weapons inside the Brawlers screen character preview
 
-status: backlog
-closed:
-status_changed: 2026-11-20T02:01:37Z
+status: done
+closed: 2026-11-20T19:42:55Z
+status_changed: 2026-11-20T19:42:55Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-egn6]
 
 parent:
 
-rank: 1772592
+rank:
 ---
 
 # Description

@@ -17,6 +17,13 @@ use bevy::{
 use core::time::Duration;
 
 const DASHBOARD_RENDER_LAYER: usize = 29;
+/// The preview camera's vertical field of view on a host at least `PREVIEW_FRAMED_ASPECT` wide.
+const PREVIEW_FOV: f32 = 0.42;
+/// The narrowest host aspect (width / height) at which `PREVIEW_FOV` still shows the widest
+/// roster character with its signature weapon (Bumper's Impact Blade). Narrower hosts, such as the
+/// Brawlers screen portrait column, widen the field of view to keep this horizontal coverage
+/// (BRL-qfv2).
+const PREVIEW_FRAMED_ASPECT: f32 = 1.25;
 
 #[derive(Resource)]
 struct DashboardPreviewTarget {
@@ -98,6 +105,7 @@ impl Plugin for ClientDashboardPlugin {
                 (
                     spawn_dashboard_preview,
                     bind_dashboard_preview_host,
+                    frame_dashboard_preview_to_host,
                     upgrade_dashboard_preview,
                     sync_dashboard_preview_weapon,
                 )
@@ -268,7 +276,7 @@ fn spawn_dashboard_preview(
             },
             RenderTarget::Image(target.clone().into()),
             Projection::Perspective(PerspectiveProjection {
-                fov: 0.42,
+                fov: PREVIEW_FOV,
                 ..default()
             }),
             look.preview_camera_look(),
@@ -349,6 +357,45 @@ fn bind_dashboard_preview_host(
         .entity(desired_host)
         .insert(ViewportNode::new(target.camera));
     target.host = desired_host;
+}
+
+/// The vertical field of view that keeps the preview's horizontal coverage on a host of `aspect`:
+/// `PREVIEW_FOV` on hosts at least `PREVIEW_FRAMED_ASPECT` wide, wider on narrower hosts.
+fn preview_fov_for_aspect(aspect: f32) -> f32 {
+    if !aspect.is_finite() || aspect <= 0.0 || aspect >= PREVIEW_FRAMED_ASPECT {
+        return PREVIEW_FOV;
+    }
+    2.0 * ((PREVIEW_FOV * 0.5).tan() * PREVIEW_FRAMED_ASPECT / aspect).atan()
+}
+
+/// Fits the preview camera to its current host's shape, so the whole character stays in view on
+/// the Brawlers screen's tall portrait column as well as the Dashboard's wider host.
+fn frame_dashboard_preview_to_host(
+    target: Option<Res<DashboardPreviewTarget>>,
+    hosts: Query<&ComputedNode>,
+    mut cameras: Query<&mut Projection, With<DashboardPreviewCamera>>,
+) {
+    let Some(target) = target else {
+        return;
+    };
+    let Ok(node) = hosts.get(target.host) else {
+        return;
+    };
+    let size = node.size();
+    if size.y <= 0.0 {
+        return;
+    }
+    let fov = preview_fov_for_aspect(size.x / size.y);
+    let Ok(mut projection) = cameras.get_mut(target.camera) else {
+        return;
+    };
+    // Only a real change marks the projection changed (and re-runs the camera system).
+    if let Projection::Perspective(perspective) = projection.bypass_change_detection()
+        && (perspective.fov - fov).abs() > f32::EPSILON
+    {
+        perspective.fov = fov;
+        projection.set_changed();
+    }
 }
 
 /// The toon material bands directional light and ambient only (BRL-0179), so the preview rig is
@@ -589,6 +636,24 @@ fn release_dashboard_background_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_widens_its_field_of_view_only_on_hosts_narrower_than_the_framed_aspect() {
+        for unchanged in [1.4, PREVIEW_FRAMED_ASPECT, 0.0, f32::NAN] {
+            assert_eq!(
+                preview_fov_for_aspect(unchanged).to_bits(),
+                PREVIEW_FOV.to_bits()
+            );
+        }
+        let narrow = 0.8;
+        let fov = preview_fov_for_aspect(narrow);
+        assert!(fov > PREVIEW_FOV);
+        // Horizontal half-extent at unit distance matches the framed aspect's.
+        let horizontal = |fov: f32, aspect: f32| (fov * 0.5).tan() * aspect;
+        assert!(
+            (horizontal(fov, narrow) - horizontal(PREVIEW_FOV, PREVIEW_FRAMED_ASPECT)).abs() < 1e-5
+        );
+    }
 
     #[test]
     fn reduced_motion_or_effects_freezes_the_dashboard_shader() {
