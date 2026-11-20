@@ -297,17 +297,56 @@ pub(crate) fn player_preview_toon_scene() -> (ToonScene, ToonSceneRim) {
     (ToonScene, ToonSceneRim::PLAYER)
 }
 
-/// Toon materials converted from imported scene materials, keyed by source material.
+/// A colour multiplied into every base colour of a [`ToonScene`] when it converts: a roster
+/// character's placeholder tint (BRL-egn6). Presentation only.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ToonSceneTint(pub(crate) Color);
+
+impl ToonSceneTint {
+    /// Exact cache key of the tint (linear RGB bits).
+    fn key(self) -> [u32; 3] {
+        let linear = self.0.to_linear();
+        [
+            linear.red.to_bits(),
+            linear.green.to_bits(),
+            linear.blue.to_bits(),
+        ]
+    }
+
+    fn apply(self, color: Color) -> Color {
+        let tint = self.0.to_linear();
+        let base = color.to_linear();
+        Color::LinearRgba(LinearRgba::new(
+            base.red * tint.red,
+            base.green * tint.green,
+            base.blue * tint.blue,
+            base.alpha,
+        ))
+    }
+}
+
+/// A converted material's cache key: its source material and the tint's exact bits.
+type ToonSceneMaterialKey = (AssetId<StandardMaterial>, Option<[u32; 3]>);
+
+/// Toon materials converted from imported scene materials, keyed by source material and tint.
 #[derive(Resource, Default)]
 pub(in crate::presentation_3d) struct ToonSceneMaterials {
-    handles: HashMap<AssetId<StandardMaterial>, Handle<ToonMaterial>>,
+    handles: HashMap<ToonSceneMaterialKey, Handle<ToonMaterial>>,
 }
 
 /// Everything the scene conversion reads and writes.
 #[derive(SystemParam)]
 pub(in crate::presentation_3d) struct ToonSceneConversion<'w, 's> {
     commands: Commands<'w, 's>,
-    roots: Query<'w, 's, Option<&'static ToonSceneRim>, With<ToonScene>>,
+    roots: Query<
+        'w,
+        's,
+        (
+            Option<&'static ToonSceneRim>,
+            Option<&'static ToonSceneTint>,
+        ),
+        With<ToonScene>,
+    >,
     children: Query<'w, 's, &'static Children>,
     meshes: Query<'w, 's, &'static MeshMaterial3d<StandardMaterial>>,
     standard: Res<'w, Assets<StandardMaterial>>,
@@ -319,26 +358,30 @@ pub(in crate::presentation_3d) struct ToonSceneConversion<'w, 's> {
 impl ToonSceneConversion<'_, '_> {
     /// Converts every `StandardMaterial` mesh under a [`ToonScene`] root to the toon material and,
     /// for a root with a [`ToonSceneRim`], tags each converted mesh with that rim. Other roots are
-    /// left untouched.
+    /// left untouched. A [`ToonSceneTint`] multiplies into each converted base colour.
     fn convert(&mut self, root: Entity) {
-        let Ok(rim) = self.roots.get(root) else {
+        let Ok((rim, tint)) = self.roots.get(root) else {
             return;
         };
         let rim = rim.copied();
+        let tint = tint.copied();
         for entity in self.children.iter_descendants(root) {
             let Ok(source) = self.meshes.get(entity) else {
                 continue;
             };
-            let key = source.0.id();
+            let key = (source.0.id(), tint.map(ToonSceneTint::key));
             let handle = if let Some(handle) = self.converted.handles.get(&key) {
                 handle.clone()
             } else {
                 if self.converted.handles.len() >= MAX_TOON_SCENE_MATERIALS {
                     continue;
                 }
-                let Some(base) = self.standard.get(&source.0).cloned() else {
+                let Some(mut base) = self.standard.get(&source.0).cloned() else {
                     continue;
                 };
+                if let Some(tint) = tint {
+                    base.base_color = tint.apply(base.base_color);
+                }
                 let handle = self.toon.add(self.shading.material(base));
                 self.converted.handles.insert(key, handle.clone());
                 handle

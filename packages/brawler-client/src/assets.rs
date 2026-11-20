@@ -25,7 +25,8 @@ pub(crate) const LOADING_LOGO_PATH: &str = "brawler/ui/branding/pewpew-blitz-loc
 #[derive(Resource, Clone)]
 pub(crate) struct ClientAssetHandles {
     audio: BTreeMap<String, Handle<AudioSource>>,
-    pub character: Handle<Gltf>,
+    /// One GLB per character model, in `FighterCharacterCatalog::models` order (BRL-egn6).
+    pub characters: Vec<Handle<Gltf>>,
     pub zombie_character: Handle<Gltf>,
     /// One held weapon per weapon family, in `WeaponFamily::index` order (BRL-q29d).
     pub weapons: [Handle<Gltf>; 4],
@@ -46,7 +47,7 @@ impl ClientAssetHandles {
     pub(crate) fn with_font_for_test(dashboard_font: Handle<Font>) -> Self {
         Self {
             audio: BTreeMap::new(),
-            character: Handle::default(),
+            characters: Vec::new(),
             zombie_character: Handle::default(),
             weapons: std::array::from_fn(|_| Handle::default()),
             loading_logo: Handle::default(),
@@ -68,7 +69,12 @@ impl ClientAssetHandles {
             .collect();
         Self {
             audio,
-            character: asset_server.load(presentation_3d::RIFF_ASSET_PATH),
+            characters: presentation_3d::FighterCharacterCatalog::embedded()
+                .expect("embedded fighter character catalog is valid")
+                .models()
+                .iter()
+                .map(|model| asset_server.load(model.model.clone()))
+                .collect(),
             zombie_character: asset_server
                 .load("brawler/models/kenney/mini-characters/character-male-d.glb"),
             weapons: {
@@ -103,12 +109,14 @@ impl ClientAssetHandles {
             .into_iter()
             .map(|id| self.audio_state(asset_server, id))
             .collect();
-        states.extend([
+        states.extend(self.characters.iter().map(|handle| {
             (
-                "model.riff",
+                "model.character",
                 false,
-                dependency_aware_state(asset_server, &self.character),
-            ),
+                dependency_aware_state(asset_server, handle),
+            )
+        }));
+        states.extend([
             (
                 "model.character_male_d",
                 false,

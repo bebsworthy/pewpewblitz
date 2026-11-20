@@ -1,5 +1,7 @@
-//! Riff, the production fighter model (BRL-0154).
+//! Imported fighter characters on Riff's contract (BRL-0154).
 //!
+//! Every character model shares Riff's clip, socket and source-unit contract; the roster catalog
+//! (`fighter_characters.rs`) picks the model, tint, scale and socket per character (BRL-egn6).
 //! Owns the imported character's asset contract (scale, facing, weapon socket, clip names), the
 //! weapon-family hold/attack clips and held weapon model (`fighter_weapons.rs`), the pure priority that maps replicated state and cues to one
 //! motion, and a presentation-only squash-and-stretch layer. Nothing here feeds simulation: the
@@ -19,7 +21,6 @@ use bevy::prelude::*;
 use brawler::combat::client::DeduplicatedCombatCue;
 use brawler::combat::{CombatCue, DeliveryMethod};
 
-pub(crate) const RIFF_ASSET_PATH: &str = "brawler/models/original/characters/riff/chr_riff.glb";
 /// Riff faces glTF +Z, while Brawler fighter roots face local +X.
 pub(crate) const RIFF_FORWARD_CORRECTION: f32 = core::f32::consts::FRAC_PI_2;
 /// Reviewed export bounds (build report): sole bottom and ear tip in source units.
@@ -30,8 +31,6 @@ pub(crate) const RIFF_VISUAL_HEIGHT_WORLD: f32 = brawler::map::MAP_CELL_SIZE_WOR
 const RIFF_GAMEPLAY_SCALE: f32 = RIFF_VISUAL_HEIGHT_WORLD / (RIFF_SOURCE_TOP - RIFF_SOURCE_GROUND);
 /// Dashboard and brawler-screen preview scale: the same framing height the Kenney preview had.
 pub(crate) const DASHBOARD_RIFF_SCALE: f32 = 32.0;
-/// The held weapon's `weapon_root` attaches to this non-deforming socket node.
-const RIFF_WEAPON_SOCKET: &str = "socket_weapon_r";
 /// The exported socket's rest frame is a half turn about (0, 1, 1)/√2 from the scene frame; the
 /// same half turn maps a weapon's +Z forward and +Y up onto Riff's forward and up. Weapons are
 /// authored in Riff's source units, so they attach at unit scale (BRL-q29d).
@@ -205,17 +204,23 @@ impl FighterClips {
     }
 }
 
-/// Root transform of an imported Riff scene: facing correction, uniform scale, grounded soles.
-pub(crate) fn riff_scene_transform(yaw_offset: f32, scale: f32) -> Transform {
+/// Root transform of an imported character scene: facing correction, uniform scale, and the
+/// model's soles (`source_ground`, source units) on the ground.
+pub(crate) fn character_scene_transform(
+    source_ground: f32,
+    yaw_offset: f32,
+    scale: f32,
+) -> Transform {
     Transform {
-        translation: Vec3::Y * -RIFF_SOURCE_GROUND * scale,
+        translation: Vec3::Y * -source_ground * scale,
         rotation: Quat::from_rotation_y(RIFF_FORWARD_CORRECTION + yaw_offset),
         scale: Vec3::splat(scale),
     }
 }
 
-pub(super) fn gameplay_riff_transform() -> Transform {
-    riff_scene_transform(0.0, RIFF_GAMEPLAY_SCALE)
+/// Arena transform of a character model: Riff's source-to-world scale times the character's scale.
+pub(super) fn gameplay_character_transform(source_ground: f32, character_scale: f32) -> Transform {
+    character_scene_transform(source_ground, 0.0, RIFF_GAMEPLAY_SCALE * character_scale)
 }
 
 /// One family's weapon model, posed for a child of Riff's weapon socket.
@@ -227,16 +232,17 @@ pub(crate) fn weapon_attachment(imported: &Imported3dAssets, family: WeaponFamil
     )
 }
 
-/// Finds the weapon socket and the animation player inside a ready Riff scene.
+/// Finds the named weapon socket and the animation player inside a ready character scene.
 pub(crate) fn find_socket_and_player(
     descendants: &[Entity],
+    socket_name: &str,
     names: &Query<&Name>,
     players: &Query<&mut AnimationPlayer>,
 ) -> Option<(Entity, Entity)> {
     let socket = descendants.iter().copied().find(|entity| {
         names
             .get(*entity)
-            .is_ok_and(|name| name.as_str() == RIFF_WEAPON_SOCKET)
+            .is_ok_and(|name| name.as_str() == socket_name)
     })?;
     let player = descendants
         .iter()
@@ -376,6 +382,8 @@ fn squash_scale(squash: f32) -> Vec3 {
 #[derive(Component)]
 pub(super) struct V3CharacterRuntime {
     owner: Entity,
+    /// Index into `Imported3dAssets::characters`: the clip set this runtime plays.
+    model: usize,
     visual_root: Entity,
     player: Entity,
     current: CharacterMotion,
@@ -390,10 +398,13 @@ pub(super) struct V3CharacterRuntime {
     impulse: SquashImpulse,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub(super) struct V3CharacterScene {
     pub(super) owner: Entity,
     pub(super) visual_root: Entity,
+    /// Index into `Imported3dAssets::characters`.
+    pub(super) model: usize,
+    pub(super) socket: String,
 }
 
 #[allow(
@@ -416,7 +427,12 @@ pub(super) fn setup_imported_character(
         return;
     };
     let descendants = children.iter_descendants(ready.entity).collect::<Vec<_>>();
-    let Some((socket, player)) = find_socket_and_player(&descendants, &names, &players) else {
+    let Some(model) = imported.characters.get(scene.model) else {
+        return;
+    };
+    let Some((socket, player)) =
+        find_socket_and_player(&descendants, &scene.socket, &names, &players)
+    else {
         warn!(owner = ?scene.owner, "imported fighter hierarchy misses its weapon socket or AnimationPlayer; retaining fallback");
         return;
     };
@@ -432,11 +448,11 @@ pub(super) fn setup_imported_character(
     if let Ok(mut animation_player) = players.get_mut(player) {
         let mut transitions = AnimationTransitions::new();
         transitions
-            .play(&mut animation_player, imported.clips.idle, Duration::ZERO)
+            .play(&mut animation_player, model.clips.idle, Duration::ZERO)
             .repeat();
         commands
             .entity(player)
-            .insert(AnimationGraphHandle(imported.animation_graph.clone()))
+            .insert(AnimationGraphHandle(model.animation_graph.clone()))
             .insert(transitions);
     }
     let base_scale = transforms
@@ -447,6 +463,7 @@ pub(super) fn setup_imported_character(
         .insert(HeldWeapon::new(socket));
     commands.entity(ready.entity).insert(V3CharacterRuntime {
         owner: scene.owner,
+        model: scene.model,
         visual_root: scene.visual_root,
         player,
         current: CharacterMotion::Idle,
@@ -657,13 +674,19 @@ pub(super) fn update_character_animation(
         cues.clear();
         return;
     };
-    let clips = imported.clips;
     let delta = time.delta_secs();
     let phase = matches.iter().next().map(|state| state.phase);
     let reduced_motion = settings.is_some_and(|value| value.reduced_motion);
     let damaged = damaged_fighters(&mut cues, &network_ids);
     for (mut runtime, mut root_transform) in &mut runtimes {
         let Ok((health, defeated, team, loadout, ability)) = owners.get(runtime.owner) else {
+            continue;
+        };
+        let Some(clips) = imported
+            .characters
+            .get(runtime.model)
+            .map(|model| model.clips)
+        else {
             continue;
         };
         let Ok(mut visual) = visuals.get_mut(runtime.visual_root) else {

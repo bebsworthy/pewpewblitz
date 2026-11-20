@@ -61,17 +61,22 @@ struct DashboardPreviewCamera;
 #[derive(Component)]
 struct DashboardPreviewFallback;
 
-#[derive(Component)]
-struct DashboardImportedSpawned;
+/// The roster character the preview root's imported scene shows; a different selection respawns
+/// it (BRL-egn6).
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+struct DashboardImportedSpawned(Option<brawler::characters::CharacterId>);
 
-/// The animation player inside the Dashboard's imported brawler, so a weapon-family swap also
-/// switches its preview clip (BRL-v8x4).
+/// The animation player inside the Dashboard's imported brawler and its model's clip set, so a
+/// weapon-family swap also switches its preview clip (BRL-v8x4).
 #[derive(Component, Clone, Copy)]
-struct DashboardPreviewPlayer(Entity);
+struct DashboardPreviewPlayer {
+    player: Entity,
+    model: usize,
+}
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone)]
 enum DashboardImportedScene {
-    Character,
+    Character { model: usize, socket: String },
     Weapon,
 }
 
@@ -231,6 +236,7 @@ fn spawn_dashboard_preview(
     imported: Option<Res<super::presentation_3d::Imported3dAssets>>,
     existing: Option<Res<DashboardPreviewTarget>>,
     look: Res<super::presentation_3d::WorldLookCatalog>,
+    memberships: Query<&super::ClientLobbyMembership>,
 ) {
     if existing.is_some() {
         return;
@@ -309,7 +315,11 @@ fn spawn_dashboard_preview(
         })
         .id();
     if let Some(imported) = imported {
-        spawn_imported_character(&mut commands, root, &imported, layer);
+        let character = memberships
+            .iter()
+            .next()
+            .map(|membership| membership.profile.selected_character_id);
+        spawn_imported_character(&mut commands, root, &imported, layer, character);
     }
 }
 
@@ -359,49 +369,84 @@ fn spawn_dashboard_preview_light(
     ));
 }
 
+/// Spawns the selected character's model (look, tint and scale from the presentation catalog)
+/// under the preview root.
 fn spawn_imported_character(
     commands: &mut Commands,
     root: Entity,
     imported: &super::presentation_3d::Imported3dAssets,
     layer: RenderLayers,
+    character: Option<brawler::characters::CharacterId>,
 ) {
+    let (look, model) = imported.character(character);
     commands.entity(root).with_children(|parent| {
-        parent.spawn((
-            DashboardImportedScene::Character,
+        let mut scene = parent.spawn((
+            DashboardImportedScene::Character {
+                model: look.model,
+                socket: look.socket.clone(),
+            },
             super::presentation_3d::player_preview_toon_scene(),
             super::presentation_3d::PreviewOutline,
-            WorldAssetRoot(imported.character_scene.clone()),
-            super::presentation_3d::riff_scene_transform(
+            WorldAssetRoot(model.scene.clone()),
+            super::presentation_3d::character_scene_transform(
+                model.source_ground,
                 -0.12,
-                super::presentation_3d::DASHBOARD_RIFF_SCALE,
+                super::presentation_3d::DASHBOARD_RIFF_SCALE * look.scale,
             ),
             layer,
             Name::new("Dashboard imported brawler"),
         ));
+        if let Some(tint) = look.tint {
+            scene.insert(super::presentation_3d::ToonSceneTint(tint));
+        }
     });
-    commands.entity(root).insert(DashboardImportedSpawned);
+    commands
+        .entity(root)
+        .insert(DashboardImportedSpawned(character));
 }
 
+/// Spawns the imported preview once assets are ready, and respawns it when the profile's
+/// selected character changes.
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::type_complexity,
+    reason = "Bevy system parameters are passed by value; the query names the preview hierarchy"
+)]
 fn upgrade_dashboard_preview(
     mut commands: Commands,
     imported: Option<Res<super::presentation_3d::Imported3dAssets>>,
+    memberships: Query<&super::ClientLobbyMembership>,
     roots: Query<
-        Entity,
-        (
-            With<DashboardPreviewRoot>,
-            Without<DashboardImportedSpawned>,
-        ),
+        (Entity, Option<&DashboardImportedSpawned>, Option<&Children>),
+        With<DashboardPreviewRoot>,
     >,
+    scenes: Query<&DashboardImportedScene>,
 ) {
     let Some(imported) = imported else {
         return;
     };
-    for root in &roots {
+    let character = memberships
+        .iter()
+        .next()
+        .map(|membership| membership.profile.selected_character_id);
+    for (root, spawned, children) in &roots {
+        if spawned == Some(&DashboardImportedSpawned(character)) {
+            continue;
+        }
+        for child in children.into_iter().flatten() {
+            if matches!(
+                scenes.get(*child),
+                Ok(DashboardImportedScene::Character { .. })
+            ) {
+                commands.entity(*child).despawn();
+            }
+        }
         spawn_imported_character(
             &mut commands,
             root,
             &imported,
             RenderLayers::layer(DASHBOARD_RENDER_LAYER),
+            character,
         );
     }
 }
@@ -430,14 +475,21 @@ fn setup_dashboard_imported_scene(
     for descendant in &descendants {
         commands.entity(*descendant).insert(layer.clone());
     }
-    if matches!(scene, DashboardImportedScene::Weapon) {
+    let DashboardImportedScene::Character {
+        model: model_index,
+        socket: socket_name,
+    } = scene
+    else {
         return;
-    }
-    let Some(imported) = imported else {
+    };
+    let Some(model) = imported
+        .as_ref()
+        .and_then(|imported| imported.characters.get(*model_index))
+    else {
         return;
     };
     let Some((socket, player)) =
-        super::presentation_3d::find_socket_and_player(&descendants, &names, &players)
+        super::presentation_3d::find_socket_and_player(&descendants, socket_name, &names, &players)
     else {
         return;
     };
@@ -445,16 +497,19 @@ fn setup_dashboard_imported_scene(
     // preview clip.
     commands.entity(ready.entity).insert((
         super::presentation_3d::HeldWeapon::new(socket),
-        DashboardPreviewPlayer(player),
+        DashboardPreviewPlayer {
+            player,
+            model: *model_index,
+        },
     ));
     if let Ok(mut animation_player) = players.get_mut(player) {
         let mut transitions = AnimationTransitions::new();
         transitions
-            .play(&mut animation_player, imported.clips.idle, Duration::ZERO)
+            .play(&mut animation_player, model.clips.idle, Duration::ZERO)
             .repeat();
         commands
             .entity(player)
-            .insert(AnimationGraphHandle(imported.animation_graph.clone()))
+            .insert(AnimationGraphHandle(model.animation_graph.clone()))
             .insert(transitions);
     }
     for mut visibility in &mut fallbacks {
@@ -490,9 +545,12 @@ fn sync_dashboard_preview_weapon(
     );
     for (mut held, preview_player) in &mut held_weapons {
         if let Some(socket) = held.begin_swap(&mut commands, family) {
-            if let Ok((mut player, mut transitions)) = players.get_mut(preview_player.0) {
+            if let (Ok((mut player, mut transitions)), Some(model)) = (
+                players.get_mut(preview_player.player),
+                imported.characters.get(preview_player.model),
+            ) {
                 transitions
-                    .play(&mut player, imported.clips.preview(family), Duration::ZERO)
+                    .play(&mut player, model.clips.preview(family), Duration::ZERO)
                     .repeat();
             }
             let weapon = commands

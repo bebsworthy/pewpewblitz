@@ -14,9 +14,11 @@ const RIFF_SOCKET_REST: Quat = Quat::from_xyzw(
 const RIFF_SOURCE_BODY_PLANAR_RADIUS: f32 = 0.6088;
 /// Size budget for the mobile pass (BRL-0161); the builders enforce the same ceiling.
 const CHARACTER_GLB_BYTE_BUDGET: usize = 700_000;
+const RIFF_ASSET_PATH: &str = "brawler/models/original/characters/riff/chr_riff.glb";
+const RIFF_WEAPON_SOCKET: &str = super::super::fighter_characters::DEFAULT_WEAPON_SOCKET;
 /// Bumper (BRL-qfaj), the second production character, built by
-/// `asset_src/characters/bumper/build_bumper.py` on Riff's clip and socket contract. Per-brawler
-/// character selection (BRL-tkmh) does not load it yet, so only the contract check names it.
+/// `asset_src/characters/bumper/build_bumper.py` on Riff's clip and socket contract; the roster
+/// presentation catalog loads it for Bumper and the Normal and Heavy placeholders (BRL-egn6).
 const BUMPER_ASSET_PATH: &str = "brawler/models/original/characters/bumper/chr_bumper.glb";
 /// Every shipped fighter character GLB the runtime contract covers.
 const SHIPPED_CHARACTER_ASSETS: [&str; 2] = [RIFF_ASSET_PATH, BUMPER_ASSET_PATH];
@@ -56,7 +58,7 @@ fn riff_visual_height_is_one_point_six_cells_and_independent_of_collision() {
     assert!((visual_height - brawler::map::MAP_CELL_SIZE_WORLD * 1.6).abs() < 1e-3);
     // The scale comes from the visual height alone; the authoritative radius only bounds it.
     assert!(RIFF_SOURCE_BODY_PLANAR_RADIUS * RIFF_GAMEPLAY_SCALE <= fighter_radius);
-    let transform = gameplay_riff_transform();
+    let transform = gameplay_character_transform(RIFF_SOURCE_GROUND, 1.0);
     assert!(
         transform
             .scale
@@ -318,4 +320,100 @@ fn restored_health_is_a_recovery_signal_if_marker_removal_arrives_late() {
     assert!(character_is_visually_defeated(0, true));
     assert!(!character_is_visually_defeated(100, true));
     assert!(!character_is_visually_defeated(0, false));
+}
+
+#[test]
+fn the_presentation_catalog_loads_exactly_the_contract_checked_models() {
+    let catalog = super::super::FighterCharacterCatalog::embedded().unwrap();
+    let models: BTreeSet<_> = catalog
+        .models()
+        .iter()
+        .map(|model| model.model.as_str())
+        .collect();
+    assert_eq!(models, SHIPPED_CHARACTER_ASSETS.into_iter().collect());
+    let riff = catalog
+        .models()
+        .iter()
+        .find(|model| model.model == RIFF_ASSET_PATH)
+        .unwrap();
+    assert!((riff.source_ground - RIFF_SOURCE_GROUND).abs() < f32::EPSILON);
+}
+
+fn imported_for_test() -> Imported3dAssets {
+    let looks = super::super::FighterCharacterCatalog::embedded().unwrap();
+    let nodes: Vec<_> = (0..CLIP_NAMES.len()).map(AnimationNodeIndex::new).collect();
+    let durations = vec![1.0; CLIP_NAMES.len()];
+    let characters = looks
+        .models()
+        .iter()
+        .map(|model| super::super::ImportedCharacterModel {
+            scene: Handle::default(),
+            animation_graph: Handle::default(),
+            clips: FighterClips::from_nodes(&nodes, &durations),
+            source_ground: model.source_ground,
+        })
+        .collect();
+    Imported3dAssets {
+        characters,
+        looks,
+        weapon_scenes: std::array::from_fn(|_| Handle::default()),
+    }
+}
+
+#[test]
+fn arena_fighters_wait_for_their_character_and_wear_its_model_tint_and_scale() {
+    let mut app = App::new();
+    app.insert_resource(imported_for_test())
+        .add_systems(Update, super::super::upgrade_fighters_to_imported_models);
+    let catalogs = brawler::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+    let plunk = catalogs
+        .characters
+        .character(brawler::characters::CharacterId(4))
+        .unwrap();
+    let loadout = catalogs
+        .view()
+        .resolve(brawler::characters::CharacterChoice::default_for(plunk))
+        .unwrap();
+    let owner = app.world_mut().spawn_empty().id();
+    let visual_root = app
+        .world_mut()
+        .spawn((
+            super::super::CombatVisualOwner(owner),
+            V3FighterVisual {
+                last_position: Vec2::ZERO,
+                moving: false,
+                shoot_seconds: 0.0,
+                recoil_seconds: 0.0,
+            },
+        ))
+        .id();
+
+    app.update();
+    assert!(
+        app.world().get::<V3CharacterScene>(visual_root).is_none(),
+        "no model before the replicated loadout names the character"
+    );
+
+    app.world_mut().entity_mut(owner).insert(loadout);
+    app.update();
+    let marker = app.world().get::<V3CharacterScene>(visual_root).unwrap();
+    let imported = app.world().resource::<Imported3dAssets>();
+    let (look, model) = imported.character(Some(brawler::characters::CharacterId(4)));
+    assert_eq!(marker.model, look.model);
+    assert_eq!(
+        imported.looks.models()[marker.model].model,
+        BUMPER_ASSET_PATH,
+        "Plunk (Heavy) is a Bumper placeholder"
+    );
+    let children = app.world().get::<Children>(visual_root).unwrap();
+    let scene = children
+        .iter()
+        .find(|child| app.world().get::<V3CharacterScene>(*child).is_some())
+        .unwrap();
+    assert_eq!(
+        app.world().get::<super::super::ToonSceneTint>(scene),
+        look.tint.map(super::super::ToonSceneTint).as_ref()
+    );
+    let expected = gameplay_character_transform(model.source_ground, look.scale);
+    assert_eq!(app.world().get::<Transform>(scene), Some(&expected));
 }

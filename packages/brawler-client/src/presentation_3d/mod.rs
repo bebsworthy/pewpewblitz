@@ -41,6 +41,7 @@ pub(crate) mod coordinates;
 mod diagnostics;
 pub(crate) mod environment_assets;
 mod fighter_character;
+mod fighter_characters;
 mod fighter_weapons;
 mod floor_decals;
 mod floor_tiles;
@@ -73,10 +74,11 @@ pub(crate) use combat::{
 };
 use coordinates::{ground_point, ground_position, ground_rotation};
 pub(crate) use fighter_character::{
-    DASHBOARD_RIFF_SCALE, RIFF_ASSET_PATH, WeaponFamily, find_socket_and_player,
-    riff_scene_transform, weapon_attachment,
+    DASHBOARD_RIFF_SCALE, WeaponFamily, character_scene_transform, find_socket_and_player,
+    weapon_attachment,
 };
 use fighter_character::{V3CharacterScene, character_is_visually_defeated};
+pub(crate) use fighter_characters::{CharacterLook, FighterCharacterCatalog};
 pub(crate) use fighter_weapons::{FighterWeaponCatalog, HeldWeapon, selected_weapon_family};
 use map::{GeneratedMapMesh, Presented3dMap};
 pub(crate) use map_editor::{
@@ -86,7 +88,7 @@ use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_hea
 #[cfg(feature = "automation")]
 pub(crate) use toon::install as install_toon_shading;
 use toon::{RimRelation, ShadedMaterial, ToonMaterial, ToonShading};
-pub(crate) use toon::{ToonScene, ToonSceneRim, player_preview_toon_scene};
+pub(crate) use toon::{ToonScene, ToonSceneRim, ToonSceneTint, player_preview_toon_scene};
 pub(crate) use world_look::WorldLookCatalog;
 #[cfg(feature = "automation")]
 pub(crate) use world_look::install as install_world_look;
@@ -292,13 +294,34 @@ struct V3FallbackVisual {
     owner: Entity,
 }
 
-#[derive(Resource)]
-pub(crate) struct Imported3dAssets {
-    pub(crate) character_scene: Handle<WorldAsset>,
-    /// One held weapon scene per [`WeaponFamily`], in `WeaponFamily::index` order.
-    pub(crate) weapon_scenes: [Handle<WorldAsset>; 4],
+/// One loaded character model: its scene, its own animation graph and clip nodes, and the
+/// grounding offset from the presentation catalog.
+pub(crate) struct ImportedCharacterModel {
+    pub(crate) scene: Handle<WorldAsset>,
     pub(crate) animation_graph: Handle<AnimationGraph>,
     pub(crate) clips: fighter_character::FighterClips,
+    pub(crate) source_ground: f32,
+}
+
+#[derive(Resource)]
+pub(crate) struct Imported3dAssets {
+    /// Character models in `FighterCharacterCatalog::models` order.
+    pub(crate) characters: Vec<ImportedCharacterModel>,
+    /// How each roster character maps onto `characters` (BRL-egn6).
+    pub(crate) looks: FighterCharacterCatalog,
+    /// One held weapon scene per [`WeaponFamily`], in `WeaponFamily::index` order.
+    pub(crate) weapon_scenes: [Handle<WorldAsset>; 4],
+}
+
+impl Imported3dAssets {
+    /// The look of `character` and its loaded model (the fallback look for an unknown character).
+    pub(crate) fn character(
+        &self,
+        character: Option<brawler::characters::CharacterId>,
+    ) -> (&CharacterLook, &ImportedCharacterModel) {
+        let look = self.looks.look(character);
+        (look, &self.characters[look.model])
+    }
 }
 
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -2516,9 +2539,12 @@ fn prepare_imported_assets(
         return;
     };
     let load_report = format!(
-        "character={:?}/{:?} weapons={:?}",
-        asset_server.load_state(&handles.character),
-        asset_server.recursive_dependency_load_state(&handles.character),
+        "characters={:?} weapons={:?}",
+        handles
+            .characters
+            .iter()
+            .map(|character| asset_server.recursive_dependency_load_state(character))
+            .collect::<Vec<_>>(),
         handles
             .weapons
             .iter()
@@ -2530,23 +2556,38 @@ fn prepare_imported_assets(
         *last_load_report = load_report;
     }
     if prepared.is_some()
-        || !asset_server.is_loaded_with_dependencies(&handles.character)
         || !handles
-            .weapons
+            .characters
             .iter()
-            .all(|weapon| asset_server.is_loaded_with_dependencies(weapon))
+            .chain(&handles.weapons)
+            .all(|handle| asset_server.is_loaded_with_dependencies(handle))
     {
         return;
     }
-    let Some(character) = gltfs.get(&handles.character) else {
-        return;
-    };
-    let Some((graph, clips)) =
-        fighter_character::FighterClips::from_gltf(character, &animation_clips)
-    else {
-        warn!("Riff GLB is missing the BRL-0154 named clip contract; using fallback");
-        return;
-    };
+    let looks =
+        FighterCharacterCatalog::embedded().expect("embedded fighter character catalog is valid");
+    let mut characters = Vec::with_capacity(handles.characters.len());
+    for (model, handle) in looks.models().iter().zip(&handles.characters) {
+        let Some(gltf) = gltfs.get(handle) else {
+            return;
+        };
+        let Some((graph, clips)) =
+            fighter_character::FighterClips::from_gltf(gltf, &animation_clips)
+        else {
+            warn!(model = %model.key, "character GLB is missing the BRL-0154 named clip contract; using fallback");
+            return;
+        };
+        let Some(scene) = gltf.default_scene.clone() else {
+            warn!(model = %model.key, "character GLB lacks a default scene; using fallback");
+            return;
+        };
+        characters.push(ImportedCharacterModel {
+            scene,
+            animation_graph: graphs.add(graph),
+            clips,
+            source_ground: model.source_ground,
+        });
+    }
     let weapon_scenes = handles
         .weapons
         .iter()
@@ -2557,17 +2598,14 @@ fn prepare_imported_assets(
         })
         .collect::<Option<Vec<_>>>()
         .and_then(|scenes| <[Handle<WorldAsset>; 4]>::try_from(scenes).ok());
-    let (Some(character_scene), Some(weapon_scenes)) =
-        (character.default_scene.clone(), weapon_scenes)
-    else {
-        warn!("Riff or a held weapon GLB lacks a default scene; using primitive fallbacks");
+    let Some(weapon_scenes) = weapon_scenes else {
+        warn!("a held weapon GLB lacks a default scene; using primitive fallbacks");
         return;
     };
     commands.insert_resource(Imported3dAssets {
-        character_scene,
+        characters,
+        looks,
         weapon_scenes,
-        animation_graph: graphs.add(graph),
-        clips,
     });
     commands.remove_resource::<Presented3dMap>();
     info!("curated V3 GLB dependencies and named clips are ready");
@@ -2585,27 +2623,37 @@ fn upgrade_fighters_to_imported_models(
         (Entity, &CombatVisualOwner),
         (With<V3FighterVisual>, Without<V3CharacterScene>),
     >,
+    loadouts: Query<&brawler::builds::ResolvedMatchLoadout>,
 ) {
     let Some(imported) = imported else {
         return;
     };
     for (visual_root, owner) in &fighters {
-        commands.entity(visual_root).with_children(|parent| {
-            parent.spawn((
-                V3CharacterScene {
-                    owner: owner.0,
-                    visual_root,
-                },
-                ToonScene,
-                WorldAssetRoot(imported.character_scene.clone()),
-                fighter_character::gameplay_riff_transform(),
-                Name::new("V3 imported Riff fighter"),
-            ));
-        });
-        commands.entity(visual_root).insert(V3CharacterScene {
+        // The replicated loadout names the character; wait for it rather than drawing the
+        // fallback model and swapping.
+        let Ok(loadout) = loadouts.get(owner.0) else {
+            continue;
+        };
+        let (look, model) = imported.character(Some(loadout.character_id));
+        let scene = V3CharacterScene {
             owner: owner.0,
             visual_root,
+            model: look.model,
+            socket: look.socket.clone(),
+        };
+        commands.entity(visual_root).with_children(|parent| {
+            let mut child = parent.spawn((
+                scene.clone(),
+                ToonScene,
+                WorldAssetRoot(model.scene.clone()),
+                fighter_character::gameplay_character_transform(model.source_ground, look.scale),
+                Name::new(format!("V3 imported fighter {:?}", loadout.character_id)),
+            ));
+            if let Some(tint) = look.tint {
+                child.insert(ToonSceneTint(tint));
+            }
         });
+        commands.entity(visual_root).insert(scene);
     }
 }
 

@@ -1,0 +1,41 @@
+// Client-only roster character presentation (BRL-egn6). The replicated loadout names a fighter's
+// stable CharacterId; this file maps it to a model, tint, scale and weapon socket. Presentation
+// only: nothing here feeds simulation, the protocol, or the gameplay content fingerprint.
+// Validation bounds live in `packages/brawler-client/src/presentation_3d/fighter_characters.rs`.
+//
+// Models are original GLBs on Riff's clip, socket and source-unit contract
+// (asset_src/03-characters_modeling_spec.md). `source_ground` is the sole height in source units.
+// Every model draws at Riff's source-to-world scale times the character's `scale`.
+//
+// A character without its own model is a placeholder: Light bodies on Riff, Normal and Heavy
+// bodies on Bumper, each with a tint (multiplied into the model's base colours). When a
+// character's art ticket ships its model, add a `models` entry and point only that character at
+// it, without a tint.
+(
+    schema_version: 1,
+    fallback_model: "riff",
+    models: [
+        (key: "riff", model: "brawler/models/original/characters/riff/chr_riff.glb", source_ground: 0.04),
+        (key: "bumper", model: "brawler/models/original/characters/bumper/chr_bumper.glb", source_ground: 0.03),
+    ],
+    characters: [
+        // Production models.
+        (character: 1, model: "riff", tint: None, scale: 1.0, socket: "socket_weapon_r"),
+        (character: 9, model: "bumper", tint: None, scale: 1.0, socket: "socket_weapon_r"),
+        // Placeholders until each character's art ticket lands.
+        // Torque (Damage, Heavy): BRL-nwhr.
+        (character: 2, model: "bumper", tint: Some((1.0, 0.58, 0.42)), scale: 1.08, socket: "socket_weapon_r"),
+        // Cobble (Tank, Heavy): BRL-zkb3.
+        (character: 3, model: "bumper", tint: Some((0.70, 0.72, 0.80)), scale: 1.08, socket: "socket_weapon_r"),
+        // Plunk (Tank, Heavy): BRL-qqch.
+        (character: 4, model: "bumper", tint: Some((0.50, 0.92, 0.84)), scale: 1.08, socket: "socket_weapon_r"),
+        // Pollen (Helper, Light): BRL-2x8j.
+        (character: 5, model: "riff", tint: Some((1.0, 0.90, 0.40)), scale: 0.96, socket: "socket_weapon_r"),
+        // Orbit (Helper, Light): BRL-m6an.
+        (character: 6, model: "riff", tint: Some((0.72, 0.62, 1.0)), scale: 0.96, socket: "socket_weapon_r"),
+        // Sumi (Controller, Normal): BRL-pjdb.
+        (character: 7, model: "bumper", tint: Some((0.52, 0.62, 1.0)), scale: 1.0, socket: "socket_weapon_r"),
+        // Prism (Controller, Light): BRL-xb9x.
+        (character: 8, model: "riff", tint: Some((1.0, 0.60, 0.88)), scale: 0.96, socket: "socket_weapon_r"),
+    ],
+)
