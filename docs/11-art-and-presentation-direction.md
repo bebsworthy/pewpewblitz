@@ -63,10 +63,20 @@ tickets tune them through native review but do not change the direction.
   and tiny legs. He holds the Impact Blade in his own rigid low guard at the hip, blade out and
   down, below his face. At the Heavy draw scale 1.08 he stands about 1.15 cells to his head top
   and his widest bind-pose reach (the fists) is 14.3 world units.
+- Plunk (`asset_src/characters/plunk/`, `just plunk-asset`, BRL-qqch), a squishy space blob
+  (Tank / Heavy), is the fifth production character, on the same pipeline and contract. His
+  silhouette is a pear-shaped blue body that is head and torso in one, with a tiny happy face high
+  on top, an antenna with a pink ball, stubby nub arms, an orange harness and tiny sneakers. The
+  body is one smoothly weighted volume, and his belly squashes and rebounds through one extra
+  animated channel, the `belly` bone's scale (every other fighter animates rotations and the pelvis
+  translation only). He holds his signature Scatter Cannon (`1h`) at belly height on the weapon
+  side and rests two-handed weapons on the front of his belly. At the Heavy draw scale 1.08 he
+  stands about 1.06 cells to his crown and 1.33 to the antenna ball, and his widest bind-pose
+  reach (the mittens) is 13.9 world units, inside the 14-unit body radius.
 - Roster presentation (BRL-egn6): the replicated loadout names each fighter's stable `CharacterId`,
   and the client-only catalog `assets/catalogs/fighter_characters.ron` maps it to a model, a tint,
-  a scale (times Riff's source-to-world scale) and the weapon socket. Riff, Bumper, Torque and
-  Cobble draw untinted; every other launch character is a tinted placeholder (Light on Riff,
+  a scale (times Riff's source-to-world scale) and the weapon socket. Riff, Bumper, Torque, Cobble
+  and Plunk draw untinted; every other launch character is a tinted placeholder (Light on Riff,
   Normal and Heavy on Bumper) until its art ticket adds a `models` entry and repoints only that
   character. An unknown ID draws the fallback model untinted. The tint multiplies into the base
   colours when the scene converts to the toon material, cached per source material and tint. Every
@@ -1014,7 +1024,7 @@ Every redistributed third-party file must have exact provenance in the manifest 
 license text where required. Original replacements should also preserve their source masters and
 document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
-its README (for Riff, Bumper, Torque and Cobble, `asset_src/characters/<name>/README.md`; for the
+its README (for Riff, Bumper, Torque, Cobble and Plunk, `asset_src/characters/<name>/README.md`; for the
 held weapons, `asset_src/weapons/README.md`; for environment kits,
 `asset_src/environment/<kit>/README.md`), not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt`,
 `pewpew-blitz-original-weapons.txt` and `pewpew-blitz-original-characters.txt` point at the

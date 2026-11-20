@@ -115,6 +115,10 @@ torque-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
 cobble-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/characters/cobble/build_cobble.py
 
+# Rebuild Plunk's runtime GLB, source master, and review renders (headless).
+plunk-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
+    {{blender}} -b --factory-startup -P asset_src/characters/plunk/build_plunk.py
+
 # Rebuild the Crossroads Facility environment kit GLBs, source master, and review sheet (headless).
 facility-kit blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/environment/crossroads-facility/build_kit.py

@@ -28,12 +28,17 @@ const TORQUE_ASSET_PATH: &str = "brawler/models/original/characters/torque/chr_t
 /// `asset_src/characters/cobble/build_cobble.py` on the same contract; the catalog draws Cobble
 /// with it, untinted.
 const COBBLE_ASSET_PATH: &str = "brawler/models/original/characters/cobble/chr_cobble.glb";
+/// Plunk (BRL-qqch), the squishy space blob, built by
+/// `asset_src/characters/plunk/build_plunk.py` on the same contract (plus a belly scale channel);
+/// the catalog draws Plunk with it, untinted.
+const PLUNK_ASSET_PATH: &str = "brawler/models/original/characters/plunk/chr_plunk.glb";
 /// Every shipped fighter character GLB the runtime contract covers.
-const SHIPPED_CHARACTER_ASSETS: [&str; 4] = [
+const SHIPPED_CHARACTER_ASSETS: [&str; 5] = [
     RIFF_ASSET_PATH,
     BUMPER_ASSET_PATH,
     TORQUE_ASSET_PATH,
     COBBLE_ASSET_PATH,
+    PLUNK_ASSET_PATH,
 ];
 
 fn inputs() -> MotionInputs {
@@ -163,7 +168,11 @@ fn shipped_character_glbs_match_the_runtime_contract() {
 fn roster_characters_with_their_own_model_are_drawn_with_it_untinted() {
     let catalog = super::super::FighterCharacterCatalog::embedded().unwrap();
     let roster = brawler::characters::EmbeddedLoadoutCatalogs::load().unwrap();
-    for (key, asset) in [("torque", TORQUE_ASSET_PATH), ("cobble", COBBLE_ASSET_PATH)] {
+    for (key, asset) in [
+        ("torque", TORQUE_ASSET_PATH),
+        ("cobble", COBBLE_ASSET_PATH),
+        ("plunk", PLUNK_ASSET_PATH),
+    ] {
         let character = roster
             .characters
             .characters

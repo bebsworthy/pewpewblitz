@@ -29,3 +29,10 @@ asset_src/characters/cobble/build_cobble.py (which reuses the Riff builder's pip
 brief in asset_src/characters/cobble/spec.md. It writes the source master cobble.blend and review
 renders beside the script and contains no third-party, purchased, commissioned or hand-edited
 model data.
+
+The Plunk fighter (brawler/models/original/characters/plunk/chr_plunk.glb, BRL-qqch) is
+original work of the PewPew Blitz project, built the same way by
+asset_src/characters/plunk/build_plunk.py (which reuses the Riff builder's pipeline) from the
+brief in asset_src/characters/plunk/spec.md. It writes the source master plunk.blend and review
+renders beside the script and contains no third-party, purchased, commissioned or hand-edited
+model data.
