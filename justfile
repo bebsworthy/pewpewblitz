@@ -107,6 +107,10 @@ riff-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
 bumper-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/characters/bumper/build_bumper.py
 
+# Rebuild Torque's runtime GLB, source master, and review renders (headless).
+torque-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
+    {{blender}} -b --factory-startup -P asset_src/characters/torque/build_torque.py
+
 # Rebuild the Crossroads Facility environment kit GLBs, source master, and review sheet (headless).
 facility-kit blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/environment/crossroads-facility/build_kit.py

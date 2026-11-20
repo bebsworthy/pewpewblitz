@@ -3,9 +3,9 @@ id: BRL-zkb3
 
 title: 'Make Cobble, an original production roster character with Riff''s clip contract'
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-19T17:08:37Z
+status_changed: 2026-11-20T04:27:31Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-7sqn, BRL-egn6, BRL-qfaj]
 
 parent:
 
-rank: 10289152
+rank: 11337728
 ---
 
 # Description

@@ -20,8 +20,12 @@ const RIFF_WEAPON_SOCKET: &str = super::super::fighter_characters::DEFAULT_WEAPO
 /// `asset_src/characters/bumper/build_bumper.py` on Riff's clip and socket contract; the roster
 /// presentation catalog loads it for Bumper and the Normal and Heavy placeholders (BRL-egn6).
 const BUMPER_ASSET_PATH: &str = "brawler/models/original/characters/bumper/chr_bumper.glb";
+/// Torque (BRL-nwhr), the cheerful alien beetle, built by
+/// `asset_src/characters/torque/build_torque.py` on the same contract; the catalog draws Torque
+/// with it, untinted.
+const TORQUE_ASSET_PATH: &str = "brawler/models/original/characters/torque/chr_torque.glb";
 /// Every shipped fighter character GLB the runtime contract covers.
-const SHIPPED_CHARACTER_ASSETS: [&str; 2] = [RIFF_ASSET_PATH, BUMPER_ASSET_PATH];
+const SHIPPED_CHARACTER_ASSETS: [&str; 3] = [RIFF_ASSET_PATH, BUMPER_ASSET_PATH, TORQUE_ASSET_PATH];
 
 fn inputs() -> MotionInputs {
     MotionInputs {
@@ -46,6 +50,26 @@ fn shipped_glb_json(asset: &str) -> (serde_json::Value, usize) {
     assert_eq!(&bytes[16..20], b"JSON");
     let json = serde_json::from_slice(&bytes[20..20 + json_length]).unwrap();
     (json, bytes.len())
+}
+
+/// Rest rotation of a named node in the GLB scene frame (the product of its ancestors' rotations).
+fn node_scene_rotation(json: &serde_json::Value, name: &str) -> Quat {
+    let nodes = json["nodes"].as_array().unwrap();
+    let mut parents = vec![None; nodes.len()];
+    for (index, node) in nodes.iter().enumerate() {
+        for child in node["children"].as_array().into_iter().flatten() {
+            parents[serde_json::from_value::<usize>(child.clone()).unwrap()] = Some(index);
+        }
+    }
+    let mut current = nodes.iter().position(|node| node["name"] == name);
+    let mut rotation = Quat::IDENTITY;
+    while let Some(index) = current {
+        let local = serde_json::from_value::<[f32; 4]>(nodes[index]["rotation"].clone())
+            .map_or(Quat::IDENTITY, Quat::from_array);
+        rotation = local * rotation;
+        current = parents[index];
+    }
+    rotation
 }
 
 #[test]
@@ -117,7 +141,32 @@ fn shipped_character_glbs_match_the_runtime_contract() {
             .iter()
             .find(|node| node["name"] == RIFF_WEAPON_SOCKET);
         assert!(socket.is_some(), "{asset}: weapon socket node is exported");
+        // Every weapon attaches with Riff's grip rotation, so each socket rests in Riff's frame.
+        let rest = node_scene_rotation(&json, RIFF_WEAPON_SOCKET);
+        assert!(
+            rest.dot(RIFF_SOCKET_REST).abs() > 0.9999,
+            "{asset}: weapon socket rests at {rest:?}, not in Riff's grip frame"
+        );
     }
+}
+
+#[test]
+fn torque_is_drawn_with_his_own_model_untinted() {
+    let catalog = super::super::FighterCharacterCatalog::embedded().unwrap();
+    let roster = brawler::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+    let torque = roster
+        .characters
+        .characters
+        .iter()
+        .find(|character| character.key == "torque")
+        .unwrap();
+    let look = catalog.look(Some(torque.id));
+    assert_eq!(catalog.models()[look.model].model, TORQUE_ASSET_PATH);
+    assert_eq!(
+        look.tint, None,
+        "Torque is a production model, not a placeholder"
+    );
+    assert_eq!(look.socket, RIFF_WEAPON_SOCKET);
 }
 
 #[test]
