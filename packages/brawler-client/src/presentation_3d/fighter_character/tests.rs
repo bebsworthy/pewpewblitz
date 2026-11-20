@@ -491,7 +491,10 @@ fn arena_fighters_wait_for_their_character_and_wear_its_model_tint_and_scale() {
         RIFF_ASSET_PATH,
         "Prism (Light) is a Riff placeholder"
     );
-    assert!(look.tint.is_some(), "a placeholder wears its character's tint");
+    assert!(
+        look.tint.is_some(),
+        "a placeholder wears its character's tint"
+    );
     assert!(
         (look.scale - 0.96).abs() < f32::EPSILON,
         "Prism keeps the Light draw scale"
