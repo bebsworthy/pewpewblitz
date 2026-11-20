@@ -4,9 +4,9 @@ was: BRL-0171
 
 title: PewPew Blitz improvement plan from the 2026-10-23 review
 
-status: doing
-closed:
-status_changed: 2026-11-12T20:20:38Z
+status: done
+closed: 2026-11-20T17:51:53Z
+status_changed: 2026-11-20T17:51:53Z
 
 theme: core
 
@@ -16,11 +16,11 @@ created: 2026-11-12T20:20:38Z
 
 blocks: []
 
-related: []
+related: [BRL-3mqg]
 
 parent:
 
-rank: 11272192
+rank:
 ---
 
 # Description

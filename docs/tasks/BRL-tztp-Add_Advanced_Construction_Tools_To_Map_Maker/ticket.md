@@ -20,7 +20,7 @@ related: [BRL-2xpc, BRL-q5sm]
 
 parent:
 
-rank: 10701090
+rank: 10739709
 ---
 
 # Description
