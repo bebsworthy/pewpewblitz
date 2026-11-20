@@ -12,7 +12,7 @@ BRL-wg28 (owner decision, 2026-11-20) renames Showdown to **Last Stand** everywh
 - Add a focused mode plugin under `src/modes/` and `src/matchplay/`, with distributed spawn requirements, elimination ranking, winner, draw, and forfeit rules, timeout, results, restart, and recovery.
 - Add a deterministic closing-boundary schedule, safe-zone state, outside-zone damage, world and HUD telegraphs, and one compatible map.
 - Eliminated humans enter a small observer state that cannot influence gameplay: a camera that follows a surviving fighter, then results. There is no public spectator service.
-- Practice bots get survival, engagement, retreat, boundary, and (if pickups are approved) pickup goals, using only permitted facts and acting through their ordinary controller path.
+- Practice bots get survival, engagement, retreat, boundary, and chest/pickup goals, using only permitted facts and acting through their ordinary controller path.
 - Adding the `GameMode` variant is the global protocol compatibility bump (`docs/08-network-architecture.md`).
 
 # Research findings (2026-11-20)
@@ -29,7 +29,7 @@ Generalising team count is therefore core scope, not a side effect. Keep it boun
 Existing pieces to reuse:
 
 - Outside-zone damage goes through the existing environmental damage path (`src/combat/environment.rs`), so combat remains the only module that commits health and defeats.
-- Pickups, if approved, reuse `src/map/pickups.rs` and Zombie's `BoostPickup` patterns. No loot system.
+- Chest pickups reuse Zombie's chest-to-boost path (see Decisions). No loot system.
 - `docs/04-maps-and-game-modes.md:299` mentions twelve solo fighters. That exceeds the routed ceiling. Correct it to the chosen N.
 
 # Build order (one ticket, reviewable steps)
@@ -76,4 +76,8 @@ This is not a gate for done. The agent fills in the run path and controls when t
 # Decisions
 
 - 2026-11-20, owner (q-9xg5t3j): **6 fighters** (six teams of one). The game-type ID is `last-stand-6p`, and the `<N>` in the verification commands is 6. The performance gate runs at the existing 6-active-fighter budget. Raising the count later needs new evidence and a new ticket.
-- Pickups: pending q-1sqcp61.
+- 2026-11-20, owner (q-1sqcp61): pickups come from **destructible chests**. The map places neutral `treasure-chest` assets (`MapAssetId(26)`). Destroying one drops a public boost pickup that any fighter can collect. Collecting it grants a bounded boost stack for the rest of that life.
+  - Reuse Zombie's existing chest-to-boost path: `ProcessedZombieChests`, `BoostPickup`, `BoostPickupSource::Chest`, and `BoostGrantScope::Individual` in `src/matchplay/zombie.rs`. Do not write a parallel implementation. Extract the shared part into a helper, owned beside the map chest terminal path, only where both modes behave identically, and record which part was shared.
+  - Agent default, not asked: carried stacks are **not** dropped on defeat. This keeps the round free of snowball drop-scatter rules, and can be revisited from playtest feedback.
+  - Stack value, cap, chest count, and chest health are authored per game type, starting from Zombie's +5% health and +5% damage per stack. Chest placements are mirrored or rotationally fair across the six spawns.
+  - Bots get a destroy-chest and collect goal (the pickup goal in Scope).

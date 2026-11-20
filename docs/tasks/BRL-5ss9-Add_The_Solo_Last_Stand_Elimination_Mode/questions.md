@@ -2,7 +2,23 @@
 
 # Questions · BRL-5ss9
 
-## q-1sqcp61 · open · blocking · by Boyd
+## q-9xg5t3j · answered · blocking · by Boyd
+
+How many fighters should a Last Stand match hold?
+
+The routed ceiling is 8 participants (`MAX_PARTICIPANTS`). The current gates only cover 6 active fighters (3v3). The count sets the map size, the boundary pacing, and the performance gate, and Practice fills empty slots with bots.
+
+- [ ] 6 fighters *(recommended · default if unanswered)*
+
+  The same load as 3v3, so the existing performance budget already covers it, and the map stays compact. The risk is lowest, and it can be raised later once the evidence supports it.
+
+- [ ] 8 fighters
+
+  Uses the full routed ceiling for a more chaotic free-for-all. It needs a new 8-fighter performance and bot-load gate, plus a larger map. No current test runs 8 fighters with 8 bot controllers.
+
+> **Answer** (2026-11-20 18:28 · by Boyd): 6 fighters (owner, 2026-11-20).
+
+## q-1sqcp61 · answered · blocking · by Boyd
 
 Should Last Stand have pickups?
 
@@ -20,18 +36,4 @@ The old spec left pickups as "only if proven necessary". Pickups give early expl
 
   Pure combat plus the boundary. This is the simplest option, but the early game may be empty until the zone forces contact.
 
-## q-9xg5t3j · answered · blocking · by Boyd
-
-How many fighters should a Last Stand match hold?
-
-The routed ceiling is 8 participants (`MAX_PARTICIPANTS`). The current gates only cover 6 active fighters (3v3). The count sets the map size, the boundary pacing, and the performance gate, and Practice fills empty slots with bots.
-
-- [ ] 6 fighters *(recommended · default if unanswered)*
-
-  The same load as 3v3, so the existing performance budget already covers it, and the map stays compact. The risk is lowest, and it can be raised later once the evidence supports it.
-
-- [ ] 8 fighters
-
-  Uses the full routed ceiling for a more chaotic free-for-all. It needs a new 8-fighter performance and bot-load gate, plus a larger map. No current test runs 8 fighters with 8 bot controllers.
-
-> **Answer** (2026-11-20 18:28 · by Boyd): 6 fighters (owner, 2026-11-20).
+> **Answer** (2026-11-20 18:30 · by Boyd): Pickups come from destructible chests (owner, 2026-11-20).
