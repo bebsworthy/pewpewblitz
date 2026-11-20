@@ -795,6 +795,16 @@ fn exit_frame_report_observes_terminal_counts_after_the_shutdown_chain() {
                 .chain()
                 .before(TerminalObservationSet),
         );
+    // Drive time explicitly: each update advances exactly one fixed timestep, so frame one
+    // (zero first-frame delta) runs no fixed step and frame two runs exactly one, however
+    // loaded the host is. Real time let a stalled frame run a fixed step whose server
+    // `observe_common_window_fixed` needs the `SimulationTick` that `GameplayPlugin`
+    // always provides in production, so the fixture provides it too.
+    let fixed_timestep = app.world().resource::<Time<Fixed>>().timestep();
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        fixed_timestep,
+    ))
+    .init_resource::<crate::timing::SimulationTick>();
     let _ = app
         .world_mut()
         .spawn_batch((0..4).map(|_| ShutdownCleanup))
@@ -825,6 +835,11 @@ fn exit_frame_report_observes_terminal_counts_after_the_shutdown_chain() {
         parse_report_field(&pairs, "error_count"),
         Some("1"),
         "the re-emitted terminal exit must be counted on the exit frame"
+    );
+    assert_eq!(
+        parse_report_field(&pairs, "fixed_ticks"),
+        Some("1"),
+        "the driven clock runs exactly one fixed step before the exit frame's report"
     );
     assert_eq!(
         parse_report_field(&pairs, "terminal_entities"),

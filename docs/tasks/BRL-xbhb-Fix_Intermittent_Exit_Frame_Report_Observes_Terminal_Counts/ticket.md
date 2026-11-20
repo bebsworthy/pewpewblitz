@@ -3,9 +3,9 @@ id: BRL-xbhb
 
 title: Fix intermittent exit_frame_report_observes_terminal_counts_after_the_shutdown_chain panic under load
 
-status: backlog
-closed:
-status_changed: 2026-11-19T18:19:08Z
+status: done
+closed: 2026-11-20T00:30:31Z
+status_changed: 2026-11-20T00:30:31Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-stws]
 
 parent:
 
-rank: 5046272
+rank:
 ---
 
 # Description
