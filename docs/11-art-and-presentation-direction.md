@@ -96,10 +96,22 @@ tickets tune them through native review but do not change the direction.
   through the lean, the bob and the jet flaring or cutting out. It holds its signature Pulse Sidearm
   (`1h`) in Riff's one-handed hold. At the Light draw scale 0.96 its widest bind-pose reach (the
   claws) is 13.0 world units, inside the 14-unit body radius.
+- Sumi (`asset_src/characters/sumi/`, `just sumi-asset`, BRL-pjdb), an ink-squid street artist
+  (Controller / Normal), is the eighth production character, on the same pipeline and contract and
+  on Riff's core skeleton. Her silhouette is a tall violet squid mantle tipped back over a big
+  lilac chibi head (arrowhead fins near its point), four fat curling tentacle locks with pink
+  suckers hanging from the back of the head, an asymmetric charcoal jacket with mint trim (long
+  left tail, popped left collar, right sleeve pushed up) over a white tee, and two magenta ink
+  ribbons orbiting her body. The mantle's upper half, the locks (two bones each) and the ribbons
+  (bones on the body axis, so a yaw orbits them) are accessory bones: the locks drift
+  independently and the ribbons make a slow orbit in idle, sway round her back in the ready loops,
+  and sweep in tight behind her in the run and dash. She holds her signature Spray (`heavy`) low at
+  the hip so the face stays clear above it. At the Normal draw scale 1.0 her widest bind-pose
+  reach (the left lock's curl and the ribbons) is 13.5 world units, inside the 14-unit body radius.
 - Roster presentation (BRL-egn6): the replicated loadout names each fighter's stable `CharacterId`,
   and the client-only catalog `assets/catalogs/fighter_characters.ron` maps it to a model, a tint,
   a scale (times Riff's source-to-world scale) and the weapon socket. Riff, Bumper, Torque, Cobble,
-  Plunk, Pollen and Orbit draw untinted; every other launch character is a tinted placeholder (Light on Riff,
+  Plunk, Pollen, Orbit and Sumi draw untinted; every other launch character is a tinted placeholder (Light on Riff,
   Normal and Heavy on Bumper) until its art ticket adds a `models` entry and repoints only that
   character. An unknown ID draws the fallback model untinted. The tint multiplies into the base
   colours when the scene converts to the toon material, cached per source material and tint. Every
@@ -1047,7 +1059,7 @@ Every redistributed third-party file must have exact provenance in the manifest 
 license text where required. Original replacements should also preserve their source masters and
 document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
-its README (for Riff, Bumper, Torque, Cobble, Plunk, Pollen and Orbit, `asset_src/characters/<name>/README.md`; for the
+its README (for Riff, Bumper, Torque, Cobble, Plunk, Pollen, Orbit and Sumi, `asset_src/characters/<name>/README.md`; for the
 held weapons, `asset_src/weapons/README.md`; for environment kits,
 `asset_src/environment/<kit>/README.md`), not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt`,
 `pewpew-blitz-original-weapons.txt` and `pewpew-blitz-original-characters.txt` point at the

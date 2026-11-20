@@ -127,6 +127,10 @@ pollen-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
 orbit-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/characters/orbit/build_orbit.py
 
+# Rebuild Sumi's runtime GLB, source master, and review renders (headless).
+sumi-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
+    {{blender}} -b --factory-startup -P asset_src/characters/sumi/build_sumi.py
+
 # Rebuild the Crossroads Facility environment kit GLBs, source master, and review sheet (headless).
 facility-kit blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/environment/crossroads-facility/build_kit.py

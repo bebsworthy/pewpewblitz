@@ -40,8 +40,11 @@ const POLLEN_ASSET_PATH: &str = "brawler/models/original/characters/pollen/chr_p
 /// `asset_src/characters/orbit/build_orbit.py` on the same contract (plus a thruster jet scale
 /// channel); the catalog draws Orbit with it, untinted.
 const ORBIT_ASSET_PATH: &str = "brawler/models/original/characters/orbit/chr_orbit.glb";
+/// Sumi (BRL-pjdb), the ink-squid street artist, built by `asset_src/characters/sumi/build_sumi.py`
+/// on the same contract; the catalog draws Sumi with it, untinted.
+const SUMI_ASSET_PATH: &str = "brawler/models/original/characters/sumi/chr_sumi.glb";
 /// Every shipped fighter character GLB the runtime contract covers.
-const SHIPPED_CHARACTER_ASSETS: [&str; 7] = [
+const SHIPPED_CHARACTER_ASSETS: [&str; 8] = [
     RIFF_ASSET_PATH,
     BUMPER_ASSET_PATH,
     TORQUE_ASSET_PATH,
@@ -49,6 +52,7 @@ const SHIPPED_CHARACTER_ASSETS: [&str; 7] = [
     PLUNK_ASSET_PATH,
     POLLEN_ASSET_PATH,
     ORBIT_ASSET_PATH,
+    SUMI_ASSET_PATH,
 ];
 
 fn inputs() -> MotionInputs {
@@ -184,6 +188,7 @@ fn roster_characters_with_their_own_model_are_drawn_with_it_untinted() {
         ("plunk", PLUNK_ASSET_PATH),
         ("pollen", POLLEN_ASSET_PATH),
         ("orbit", ORBIT_ASSET_PATH),
+        ("sumi", SUMI_ASSET_PATH),
     ] {
         let character = roster
             .characters
@@ -447,13 +452,13 @@ fn arena_fighters_wait_for_their_character_and_wear_its_model_tint_and_scale() {
     app.insert_resource(imported_for_test())
         .add_systems(Update, super::super::upgrade_fighters_to_imported_models);
     let catalogs = brawler::characters::EmbeddedLoadoutCatalogs::load().unwrap();
-    let sumi = catalogs
+    let prism = catalogs
         .characters
-        .character(brawler::characters::CharacterId(7))
+        .character(brawler::characters::CharacterId(8))
         .unwrap();
     let loadout = catalogs
         .view()
-        .resolve(brawler::characters::CharacterChoice::default_for(sumi))
+        .resolve(brawler::characters::CharacterChoice::default_for(prism))
         .unwrap();
     let owner = app.world_mut().spawn_empty().id();
     let visual_root = app
@@ -479,12 +484,17 @@ fn arena_fighters_wait_for_their_character_and_wear_its_model_tint_and_scale() {
     app.update();
     let marker = app.world().get::<V3CharacterScene>(visual_root).unwrap();
     let imported = app.world().resource::<Imported3dAssets>();
-    let (look, model) = imported.character(Some(brawler::characters::CharacterId(7)));
+    let (look, model) = imported.character(Some(brawler::characters::CharacterId(8)));
     assert_eq!(marker.model, look.model);
     assert_eq!(
         imported.looks.models()[marker.model].model,
-        BUMPER_ASSET_PATH,
-        "Sumi (Normal) is a Bumper placeholder"
+        RIFF_ASSET_PATH,
+        "Prism (Light) is a Riff placeholder"
+    );
+    assert!(look.tint.is_some(), "a placeholder wears its character's tint");
+    assert!(
+        (look.scale - 0.96).abs() < f32::EPSILON,
+        "Prism keeps the Light draw scale"
     );
     let children = app.world().get::<Children>(visual_root).unwrap();
     let scene = children

@@ -22,6 +22,7 @@
         (key: "plunk", model: "brawler/models/original/characters/plunk/chr_plunk.glb", source_ground: 0.02),
         (key: "pollen", model: "brawler/models/original/characters/pollen/chr_pollen.glb", source_ground: 0.02),
         (key: "orbit", model: "brawler/models/original/characters/orbit/chr_orbit.glb", source_ground: 0.02),
+        (key: "sumi", model: "brawler/models/original/characters/sumi/chr_sumi.glb", source_ground: 0.02),
     ],
     characters: [
         // Production models.
@@ -37,9 +38,9 @@
         (character: 5, model: "pollen", tint: None, scale: 0.96, socket: "socket_weapon_r"),
         // Orbit (Helper, Light, BRL-m6an) keeps the Light draw scale.
         (character: 6, model: "orbit", tint: None, scale: 0.96, socket: "socket_weapon_r"),
+        // Sumi (Controller, Normal, BRL-pjdb) keeps the Normal draw scale.
+        (character: 7, model: "sumi", tint: None, scale: 1.0, socket: "socket_weapon_r"),
         // Placeholders until each character's art ticket lands.
-        // Sumi (Controller, Normal): BRL-pjdb.
-        (character: 7, model: "bumper", tint: Some((0.52, 0.62, 1.0)), scale: 1.0, socket: "socket_weapon_r"),
         // Prism (Controller, Light): BRL-xb9x.
         (character: 8, model: "riff", tint: Some((1.0, 0.60, 0.88)), scale: 0.96, socket: "socket_weapon_r"),
     ],
