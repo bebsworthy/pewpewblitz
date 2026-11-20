@@ -25,4 +25,4 @@ rank: 10682366
 
 # Description
 
-Add a complete server-authoritative Gem Grab mode in which teams contest spawned gems, carriers drop them on defeat, and holding the target count for a visible countdown wins on a dedicated compatible map.
+Add a complete server-authoritative team resource mode (working name Shard Rush; the original name is pending). Teams contest spawned resources, carriers drop them on defeat, and holding the target count for a visible countdown wins on a dedicated compatible 3v3 map.
