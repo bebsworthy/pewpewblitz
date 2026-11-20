@@ -36,7 +36,7 @@ grip frame, budgets, source units), so the roster presentation catalog
     and the attack frames;
   - `orbit-lineup.png`: Orbit beside Riff, Bumper, Torque, Cobble, Plunk and Pollen (re-imported
     from their shipped GLBs in their one-handed ready pose, each at its catalog scale relative to
-    Orbit's 0.96) from the gameplay camera (top) and the front (bottom);
+    Orbit's 0.96) from the front (top) and the gameplay camera (bottom);
   - `orbit-dashboard-native.png`, `orbit-brawlers-native.png`: native shell captures with Orbit
     picked (see the BRL-m6an spec for how they were taken).
 - Runtime derivative (not in this directory):

@@ -3,9 +3,9 @@ id: BRL-m6an
 
 title: 'Make Orbit, an original production roster character with Riff''s clip contract'
 
-status: doing
-closed:
-status_changed: 2026-11-20T08:34:42Z
+status: done
+closed: 2026-11-20T09:14:13Z
+status_changed: 2026-11-20T09:14:13Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-7sqn, BRL-egn6, BRL-qfaj]
 
 parent:
 
-rank: 11337728
+rank:
 ---
 
 # Description
