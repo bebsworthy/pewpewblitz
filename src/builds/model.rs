@@ -431,7 +431,7 @@ impl ResolvedPassives {
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ResolvedMatchLoadout {
     pub identity: SelectedBuild,
-    /// The stable roster identity every client maps to its presentation (model and tint).
+    /// The stable roster identity every client maps to its presentation (model and scale).
     pub character_id: crate::characters::CharacterId,
     pub fighter_stats: ResolvedFighterStats,
     pub primary_weapon: ResolvedWeapon,

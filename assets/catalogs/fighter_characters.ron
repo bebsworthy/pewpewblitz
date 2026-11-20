@@ -1,16 +1,15 @@
 // Client-only roster character presentation (BRL-egn6). The replicated loadout names a fighter's
-// stable CharacterId; this file maps it to a model, tint, scale and weapon socket. Presentation
-// only: nothing here feeds simulation, the protocol, or the gameplay content fingerprint.
+// stable CharacterId; this file maps it to a model, scale and weapon socket. Presentation only:
+// nothing here feeds simulation, the protocol, or the gameplay content fingerprint.
 // Validation bounds live in `packages/brawler-client/src/presentation_3d/fighter_characters.rs`.
 //
 // Models are original GLBs on Riff's clip, socket and source-unit contract
 // (asset_src/03-characters_modeling_spec.md). `source_ground` is the sole height in source units.
 // Every model draws at Riff's source-to-world scale times the character's `scale`.
 //
-// A character without its own model is a placeholder: Light bodies on Riff, Normal and Heavy
-// bodies on Bumper, each with a tint (multiplied into the model's base colours). When a
-// character's art ticket ships its model, add a `models` entry and point only that character at
-// it, without a tint.
+// Every launch character draws its own production model (the last tinted placeholder, Prism's,
+// was replaced by BRL-xb9x, which also removed the tint). A new character adds a `models` entry
+// and its own `characters` entry; an unknown ID draws the fallback model at scale 1.
 (
     schema_version: 1,
     fallback_model: "riff",
@@ -23,25 +22,24 @@
         (key: "pollen", model: "brawler/models/original/characters/pollen/chr_pollen.glb", source_ground: 0.02),
         (key: "orbit", model: "brawler/models/original/characters/orbit/chr_orbit.glb", source_ground: 0.02),
         (key: "sumi", model: "brawler/models/original/characters/sumi/chr_sumi.glb", source_ground: 0.02),
+        (key: "prism", model: "brawler/models/original/characters/prism/chr_prism.glb", source_ground: 0.02),
     ],
     characters: [
-        // Production models.
-        (character: 1, model: "riff", tint: None, scale: 1.0, socket: "socket_weapon_r"),
-        (character: 9, model: "bumper", tint: None, scale: 1.0, socket: "socket_weapon_r"),
+        (character: 1, model: "riff", scale: 1.0, socket: "socket_weapon_r"),
+        (character: 9, model: "bumper", scale: 1.0, socket: "socket_weapon_r"),
         // Torque (Damage, Heavy, BRL-nwhr) keeps the Heavy draw scale.
-        (character: 2, model: "torque", tint: None, scale: 1.08, socket: "socket_weapon_r"),
+        (character: 2, model: "torque", scale: 1.08, socket: "socket_weapon_r"),
         // Cobble (Tank, Heavy, BRL-zkb3) keeps the Heavy draw scale.
-        (character: 3, model: "cobble", tint: None, scale: 1.08, socket: "socket_weapon_r"),
+        (character: 3, model: "cobble", scale: 1.08, socket: "socket_weapon_r"),
         // Plunk (Tank, Heavy, BRL-qqch) keeps the Heavy draw scale.
-        (character: 4, model: "plunk", tint: None, scale: 1.08, socket: "socket_weapon_r"),
+        (character: 4, model: "plunk", scale: 1.08, socket: "socket_weapon_r"),
         // Pollen (Helper, Light, BRL-2x8j) keeps the Light draw scale.
-        (character: 5, model: "pollen", tint: None, scale: 0.96, socket: "socket_weapon_r"),
+        (character: 5, model: "pollen", scale: 0.96, socket: "socket_weapon_r"),
         // Orbit (Helper, Light, BRL-m6an) keeps the Light draw scale.
-        (character: 6, model: "orbit", tint: None, scale: 0.96, socket: "socket_weapon_r"),
+        (character: 6, model: "orbit", scale: 0.96, socket: "socket_weapon_r"),
         // Sumi (Controller, Normal, BRL-pjdb) keeps the Normal draw scale.
-        (character: 7, model: "sumi", tint: None, scale: 1.0, socket: "socket_weapon_r"),
-        // Placeholders until each character's art ticket lands.
-        // Prism (Controller, Light): BRL-xb9x.
-        (character: 8, model: "riff", tint: Some((1.0, 0.60, 0.88)), scale: 0.96, socket: "socket_weapon_r"),
+        (character: 7, model: "sumi", scale: 1.0, socket: "socket_weapon_r"),
+        // Prism (Controller, Light, BRL-xb9x) keeps the Light draw scale.
+        (character: 8, model: "prism", scale: 0.96, socket: "socket_weapon_r"),
     ],
 )

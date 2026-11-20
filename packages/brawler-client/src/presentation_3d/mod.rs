@@ -88,7 +88,7 @@ use object_health::{DamageableObjectHealthUiIndex, project_damageable_object_hea
 #[cfg(feature = "automation")]
 pub(crate) use toon::install as install_toon_shading;
 use toon::{RimRelation, ShadedMaterial, ToonMaterial, ToonShading};
-pub(crate) use toon::{ToonScene, ToonSceneRim, ToonSceneTint, player_preview_toon_scene};
+pub(crate) use toon::{ToonScene, ToonSceneRim, player_preview_toon_scene};
 pub(crate) use world_look::WorldLookCatalog;
 #[cfg(feature = "automation")]
 pub(crate) use world_look::install as install_world_look;
@@ -2642,16 +2642,13 @@ fn upgrade_fighters_to_imported_models(
             socket: look.socket.clone(),
         };
         commands.entity(visual_root).with_children(|parent| {
-            let mut child = parent.spawn((
+            parent.spawn((
                 scene.clone(),
                 ToonScene,
                 WorldAssetRoot(model.scene.clone()),
                 fighter_character::gameplay_character_transform(model.source_ground, look.scale),
                 Name::new(format!("V3 imported fighter {:?}", loadout.character_id)),
             ));
-            if let Some(tint) = look.tint {
-                child.insert(ToonSceneTint(tint));
-            }
         });
         commands.entity(visual_root).insert(scene);
     }

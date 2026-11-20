@@ -369,7 +369,7 @@ fn spawn_dashboard_preview_light(
     ));
 }
 
-/// Spawns the selected character's model (look, tint and scale from the presentation catalog)
+/// Spawns the selected character's model (look and scale from the presentation catalog)
 /// under the preview root.
 fn spawn_imported_character(
     commands: &mut Commands,
@@ -380,7 +380,7 @@ fn spawn_imported_character(
 ) {
     let (look, model) = imported.character(character);
     commands.entity(root).with_children(|parent| {
-        let mut scene = parent.spawn((
+        parent.spawn((
             DashboardImportedScene::Character {
                 model: look.model,
                 socket: look.socket.clone(),
@@ -396,9 +396,6 @@ fn spawn_imported_character(
             layer,
             Name::new("Dashboard imported brawler"),
         ));
-        if let Some(tint) = look.tint {
-            scene.insert(super::presentation_3d::ToonSceneTint(tint));
-        }
     });
     commands
         .entity(root)

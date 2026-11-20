@@ -108,14 +108,24 @@ tickets tune them through native review but do not change the direction.
   and sweep in tight behind her in the run and dash. She holds her signature Spray (`heavy`) low at
   the hip so the face stays clear above it. At the Normal draw scale 1.0 her widest bind-pose
   reach (the left lock's curl and the ribbons) is 13.5 world units, inside the 14-unit body radius.
+- Prism (`asset_src/characters/prism/`, `just prism-asset`, BRL-xb9x), a curious crystalline alien
+  (Controller / Light), is the ninth production character, on the same pipeline and contract and
+  on Riff's core skeleton. Its silhouette is a big faceted aqua diamond for a head (dark glinting
+  eyes and brow chips on the flat front facet, no mouth, one smaller crystal growing from its upper
+  left) over a pearl robe with a gold-trimmed shoulder cape, a violet gem and a crystal fringe
+  under the hem, with floating crystal hands and feet (the arm and leg bones carry no geometry, as
+  Orbit's arms). Two pairs of crystal fragments orbit the body and a halo of two small shards
+  circles the head, on accessory bones whose heads stand on the body and head axes, so a yaw orbits
+  them. The facets carry a per-face palette (light, mid and deep aqua) in the one `COLOR_0` layer.
+  It holds its signature Sticky Blomb (`1h`) in Riff's one-handed hold. At the Light draw scale
+  0.96 its widest bind-pose reach (the crystal hands) is 12.6 world units, inside the
+  14-unit body radius.
 - Roster presentation (BRL-egn6): the replicated loadout names each fighter's stable `CharacterId`,
-  and the client-only catalog `assets/catalogs/fighter_characters.ron` maps it to a model, a tint,
-  a scale (times Riff's source-to-world scale) and the weapon socket. Riff, Bumper, Torque, Cobble,
-  Plunk, Pollen, Orbit and Sumi draw untinted; every other launch character is a tinted placeholder (Light on Riff,
-  Normal and Heavy on Bumper) until its art ticket adds a `models` entry and repoints only that
-  character. An unknown ID draws the fallback model untinted. The tint multiplies into the base
-  colours when the scene converts to the toon material, cached per source material and tint. Every
-  catalog model loads at startup.
+  and the client-only catalog `assets/catalogs/fighter_characters.ron` maps it to a model, a scale
+  (times Riff's source-to-world scale) and the weapon socket. Every launch character draws its own
+  production model; a new character adds a `models` entry and its own entry. An unknown ID draws
+  the fallback model (Riff) at scale 1. The per-character placeholder tint was removed with the
+  last placeholder (BRL-xb9x). Every catalog model loads at startup.
 - Each primary-weapon animation family has its own original held weapon (BRL-q29d): a one-handed
   blaster (`1h`), a two-handed heavy sprayer (`heavy`), a two-handed lobber (`throwable`), and a
   two-handed impact blade (`melee`), built by `asset_src/weapons/build_weapons.py`
@@ -507,7 +517,7 @@ shadowless key light plus a per-camera ambient, both from `preview_light` in
 presented map theme. There are no point lights or preview shadow maps; the toon rim takes the place
 of the former coloured rim light. The Dashboard brawler preview, which the Brawlers select screen reuses, draws the fighter outline
 too, held weapon included, on the preview's own render layer (BRL-y3hb). It shows the selected
-character's model and tint. The preview fighter is scaled about 1.8x an arena fighter and
+character's model. The preview fighter is scaled about 1.8x an arena fighter and
 framed close, so it uses `preview_width_world` from `assets/catalogs/fighter_outline.ron` and a
 deeper hull depth push in code, which keeps face details and pockets from picking up their own dark
 rings.
@@ -1059,7 +1069,7 @@ Every redistributed third-party file must have exact provenance in the manifest 
 license text where required. Original replacements should also preserve their source masters and
 document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
-its README (for Riff, Bumper, Torque, Cobble, Plunk, Pollen, Orbit and Sumi, `asset_src/characters/<name>/README.md`; for the
+its README (for Riff, Bumper, Torque, Cobble, Plunk, Pollen, Orbit, Sumi and Prism, `asset_src/characters/<name>/README.md`; for the
 held weapons, `asset_src/weapons/README.md`; for environment kits,
 `asset_src/environment/<kit>/README.md`), not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt`,
 `pewpew-blitz-original-weapons.txt` and `pewpew-blitz-original-characters.txt` point at the

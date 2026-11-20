@@ -2,9 +2,8 @@
 //!
 //! The replicated loadout names a fighter's stable [`CharacterId`]; the authored client catalog
 //! `assets/catalogs/fighter_characters.ron` maps it to one character model (a GLB on Riff's clip,
-//! socket and source-unit contract), a tint, a scale, and the weapon socket. A character without
-//! its own model yet is a tinted placeholder on Riff (Light) or Bumper (Normal and Heavy); its
-//! art ticket replaces only its entry. An unknown ID falls back to the fallback model untinted.
+//! socket and source-unit contract), a scale, and the weapon socket. Every launch character draws
+//! its own production model; an unknown ID falls back to the fallback model at scale 1.
 //! Presentation only: nothing here feeds simulation, the protocol, or the gameplay fingerprint.
 
 use bevy::prelude::*;
@@ -50,7 +49,6 @@ struct CharacterModelSource {
 struct CharacterLookSource {
     character: u16,
     model: String,
-    tint: Option<(f32, f32, f32)>,
     scale: f32,
     socket: String,
 }
@@ -63,12 +61,10 @@ pub(crate) struct CharacterModel {
     pub(crate) source_ground: f32,
 }
 
-/// How one roster character is drawn: its model index, tint, scale and weapon socket.
+/// How one roster character is drawn: its model index, scale and weapon socket.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CharacterLook {
     pub(crate) model: usize,
-    /// Multiplied into every base colour of the imported scene; `None` keeps the authored look.
-    pub(crate) tint: Option<Color>,
     pub(crate) scale: f32,
     pub(crate) socket: String,
 }
@@ -119,7 +115,6 @@ impl FighterCharacterCatalog {
         };
         let fallback = CharacterLook {
             model: model_index(&source.fallback_model)?,
-            tint: None,
             scale: 1.0,
             socket: DEFAULT_WEAPON_SOCKET.to_string(),
         };
@@ -144,7 +139,7 @@ impl FighterCharacterCatalog {
         &self.models
     }
 
-    /// The look of `character`, or the untinted fallback model for an unknown character.
+    /// The look of `character`, or the fallback model for an unknown character.
     pub(crate) fn look(&self, character: Option<CharacterId>) -> &CharacterLook {
         character
             .and_then(|id| {
@@ -192,22 +187,11 @@ fn validated_look(entry: CharacterLookSource, model: usize) -> Result<CharacterL
             entry.character, entry.scale
         ));
     }
-    let tint = entry
-        .tint
-        .map(|(red, green, blue)| {
-            [red, green, blue]
-                .iter()
-                .all(|channel| channel.is_finite() && (0.0..=1.0).contains(channel))
-                .then(|| Color::srgb(red, green, blue))
-                .ok_or_else(|| format!("character {} tint is outside 0..=1", entry.character))
-        })
-        .transpose()?;
     if entry.socket.is_empty() {
         return Err(format!("character {} names no socket", entry.character));
     }
     Ok(CharacterLook {
         model,
-        tint,
         scale: entry.scale,
         socket: entry.socket,
     })
@@ -218,7 +202,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_launch_character_has_a_look_on_a_shipped_model() {
+    fn every_launch_character_draws_its_own_shipped_model() {
         let catalog = FighterCharacterCatalog::embedded().unwrap();
         let roster = brawler::characters::CharacterCatalog::embedded().unwrap();
         for character in &roster.characters {
@@ -229,6 +213,11 @@ mod tests {
             );
             let look = catalog.look(Some(character.id));
             let model = &catalog.models()[look.model];
+            assert_eq!(
+                model.key, character.key,
+                "{} draws its own model",
+                character.key
+            );
             let path = std::path::Path::new(crate::REPOSITORY_ROOT)
                 .join("assets")
                 .join(&model.model);
@@ -239,72 +228,33 @@ mod tests {
                 model.model
             );
         }
-        let riff = catalog.look(Some(CharacterId(1)));
-        let bumper = catalog.look(Some(CharacterId(9)));
-        assert_eq!(catalog.models()[riff.model].key, "riff");
-        assert_eq!(catalog.models()[bumper.model].key, "bumper");
-        assert_eq!(
-            riff.tint, None,
-            "production models keep their authored look"
-        );
-        assert_eq!(
-            bumper.tint, None,
-            "production models keep their authored look"
-        );
     }
 
     #[test]
-    fn placeholders_follow_body_and_unknown_characters_fall_back_to_riff() {
+    fn unknown_characters_fall_back_to_riff_at_scale_one() {
         let catalog = FighterCharacterCatalog::embedded().unwrap();
-        let roster = brawler::characters::CharacterCatalog::embedded().unwrap();
-        for character in &roster.characters {
-            let look = catalog.look(Some(character.id));
-            let key = catalog.models()[look.model].key.as_str();
-            if !matches!(key, "riff" | "bumper") {
-                continue;
-            }
-            let expected = match character.body {
-                brawler::characters::CharacterBody::Light => "riff",
-                brawler::characters::CharacterBody::Normal
-                | brawler::characters::CharacterBody::Heavy => "bumper",
-            };
-            assert_eq!(key, expected, "{} placeholder model", character.key);
-            if !matches!(character.key.as_str(), "riff" | "bumper") {
-                assert!(
-                    look.tint.is_some(),
-                    "{} placeholder is tinted",
-                    character.key
-                );
-            }
-        }
         let unknown = catalog.look(Some(CharacterId(999)));
         assert_eq!(catalog.models()[unknown.model].key, "riff");
-        assert_eq!(unknown.tint, None);
+        assert!((unknown.scale - 1.0).abs() < f32::EPSILON);
         assert_eq!(catalog.look(None), unknown);
     }
 
     #[test]
-    fn catalog_rejects_unknown_models_bad_tints_and_out_of_tree_paths() {
+    fn catalog_rejects_unknown_models_bad_scales_and_out_of_tree_paths() {
         let source = |models: &str, characters: &str| {
             format!(
                 "(schema_version: 1, fallback_model: \"riff\", models: [{models}], characters: [{characters}])"
             )
         };
         let riff = "(key: \"riff\", model: \"brawler/models/original/characters/riff/chr_riff.glb\", source_ground: 0.04)";
-        let look = |model: &str, tint: &str| {
+        let look = |model: &str, scale: &str| {
             format!(
-                "(character: 1, model: \"{model}\", tint: {tint}, scale: 1.0, socket: \"socket_weapon_r\")"
+                "(character: 1, model: \"{model}\", scale: {scale}, socket: \"socket_weapon_r\")"
             )
         };
-        assert!(FighterCharacterCatalog::from_ron(&source(riff, &look("riff", "None"))).is_ok());
-        assert!(FighterCharacterCatalog::from_ron(&source(riff, &look("bumper", "None"))).is_err());
-        assert!(
-            FighterCharacterCatalog::from_ron(&source(
-                riff,
-                &look("riff", "Some((1.5, 1.0, 1.0))")
-            ))
-            .is_err()
-        );
+        assert!(FighterCharacterCatalog::from_ron(&source(riff, &look("riff", "1.0"))).is_ok());
+        assert!(FighterCharacterCatalog::from_ron(&source(riff, &look("bumper", "1.0"))).is_err());
+        assert!(FighterCharacterCatalog::from_ron(&source(riff, &look("riff", "1.5"))).is_err());
         let outside =
             "(key: \"riff\", model: \"brawler/models/kenney/x.glb\", source_ground: 0.04)";
         assert!(FighterCharacterCatalog::from_ron(&source(outside, "")).is_err());

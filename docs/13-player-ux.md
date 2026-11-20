@@ -223,8 +223,7 @@ rejection keeps the last accepted pick with an inline reason. Selecting the curr
 write. Every tile and option is an ordinary focus target at least 48 dp, so touch, pointer,
 keyboard, and controller reach the same actions; arrow keys move across the grid and option rows.
 Wide windows place the preview, grid and options side by side; compact windows keep the grid and
-options and drop the preview. Placeholder characters render as tinted Riff or Bumper models until
-their art lands.
+options and drop the preview. Every character renders its own production model.
 
 Leave Match and Change Server share the same fullscreen confirmation composition,
 white display type with an `ink` stroke and slanted cut-corner actions. Safe actions use `panel`;

@@ -18,33 +18,37 @@ const RIFF_ASSET_PATH: &str = "brawler/models/original/characters/riff/chr_riff.
 const RIFF_WEAPON_SOCKET: &str = super::super::fighter_characters::DEFAULT_WEAPON_SOCKET;
 /// Bumper (BRL-qfaj), the second production character, built by
 /// `asset_src/characters/bumper/build_bumper.py` on Riff's clip and socket contract; the roster
-/// presentation catalog loads it for Bumper and the Normal and Heavy placeholders (BRL-egn6).
+/// presentation catalog loads it for Bumper (BRL-egn6).
 const BUMPER_ASSET_PATH: &str = "brawler/models/original/characters/bumper/chr_bumper.glb";
 /// Torque (BRL-nwhr), the cheerful alien beetle, built by
 /// `asset_src/characters/torque/build_torque.py` on the same contract; the catalog draws Torque
-/// with it, untinted.
+/// with it.
 const TORQUE_ASSET_PATH: &str = "brawler/models/original/characters/torque/chr_torque.glb";
 /// Cobble (BRL-zkb3), the little stone guardian, built by
 /// `asset_src/characters/cobble/build_cobble.py` on the same contract; the catalog draws Cobble
-/// with it, untinted.
+/// with it.
 const COBBLE_ASSET_PATH: &str = "brawler/models/original/characters/cobble/chr_cobble.glb";
 /// Plunk (BRL-qqch), the squishy space blob, built by
 /// `asset_src/characters/plunk/build_plunk.py` on the same contract (plus a belly scale channel);
-/// the catalog draws Plunk with it, untinted.
+/// the catalog draws Plunk with it.
 const PLUNK_ASSET_PATH: &str = "brawler/models/original/characters/plunk/chr_plunk.glb";
 /// Pollen (BRL-2x8j), the moth-like forest traveler, built by
 /// `asset_src/characters/pollen/build_pollen.py` on the same contract; the catalog draws Pollen
-/// with it, untinted.
+/// with it.
 const POLLEN_ASSET_PATH: &str = "brawler/models/original/characters/pollen/chr_pollen.glb";
 /// Orbit (BRL-m6an), the little helper robot with floating hands, built by
 /// `asset_src/characters/orbit/build_orbit.py` on the same contract (plus a thruster jet scale
-/// channel); the catalog draws Orbit with it, untinted.
+/// channel); the catalog draws Orbit with it.
 const ORBIT_ASSET_PATH: &str = "brawler/models/original/characters/orbit/chr_orbit.glb";
 /// Sumi (BRL-pjdb), the ink-squid street artist, built by `asset_src/characters/sumi/build_sumi.py`
-/// on the same contract; the catalog draws Sumi with it, untinted.
+/// on the same contract; the catalog draws Sumi with it.
 const SUMI_ASSET_PATH: &str = "brawler/models/original/characters/sumi/chr_sumi.glb";
+/// Prism (BRL-xb9x), the curious crystalline alien with floating crystal hands and fragments,
+/// built by `asset_src/characters/prism/build_prism.py` on the same contract; the catalog draws
+/// Prism with it. With Prism every launch character ships its own model.
+const PRISM_ASSET_PATH: &str = "brawler/models/original/characters/prism/chr_prism.glb";
 /// Every shipped fighter character GLB the runtime contract covers.
-const SHIPPED_CHARACTER_ASSETS: [&str; 8] = [
+const SHIPPED_CHARACTER_ASSETS: [&str; 9] = [
     RIFF_ASSET_PATH,
     BUMPER_ASSET_PATH,
     TORQUE_ASSET_PATH,
@@ -53,6 +57,7 @@ const SHIPPED_CHARACTER_ASSETS: [&str; 8] = [
     POLLEN_ASSET_PATH,
     ORBIT_ASSET_PATH,
     SUMI_ASSET_PATH,
+    PRISM_ASSET_PATH,
 ];
 
 fn inputs() -> MotionInputs {
@@ -179,16 +184,19 @@ fn shipped_character_glbs_match_the_runtime_contract() {
 }
 
 #[test]
-fn roster_characters_with_their_own_model_are_drawn_with_it_untinted() {
+fn every_roster_character_is_drawn_with_its_own_model() {
     let catalog = super::super::FighterCharacterCatalog::embedded().unwrap();
     let roster = brawler::characters::EmbeddedLoadoutCatalogs::load().unwrap();
     for (key, asset) in [
+        ("riff", RIFF_ASSET_PATH),
+        ("bumper", BUMPER_ASSET_PATH),
         ("torque", TORQUE_ASSET_PATH),
         ("cobble", COBBLE_ASSET_PATH),
         ("plunk", PLUNK_ASSET_PATH),
         ("pollen", POLLEN_ASSET_PATH),
         ("orbit", ORBIT_ASSET_PATH),
         ("sumi", SUMI_ASSET_PATH),
+        ("prism", PRISM_ASSET_PATH),
     ] {
         let character = roster
             .characters
@@ -198,10 +206,6 @@ fn roster_characters_with_their_own_model_are_drawn_with_it_untinted() {
             .unwrap();
         let look = catalog.look(Some(character.id));
         assert_eq!(catalog.models()[look.model].model, asset, "{key}");
-        assert_eq!(
-            look.tint, None,
-            "{key} is a production model, not a placeholder"
-        );
         assert_eq!(look.socket, RIFF_WEAPON_SOCKET, "{key}");
     }
 }
@@ -447,7 +451,7 @@ fn imported_for_test() -> Imported3dAssets {
 }
 
 #[test]
-fn arena_fighters_wait_for_their_character_and_wear_its_model_tint_and_scale() {
+fn arena_fighters_wait_for_their_character_and_wear_its_model_and_scale() {
     let mut app = App::new();
     app.insert_resource(imported_for_test())
         .add_systems(Update, super::super::upgrade_fighters_to_imported_models);
@@ -488,12 +492,8 @@ fn arena_fighters_wait_for_their_character_and_wear_its_model_tint_and_scale() {
     assert_eq!(marker.model, look.model);
     assert_eq!(
         imported.looks.models()[marker.model].model,
-        RIFF_ASSET_PATH,
-        "Prism (Light) is a Riff placeholder"
-    );
-    assert!(
-        look.tint.is_some(),
-        "a placeholder wears its character's tint"
+        PRISM_ASSET_PATH,
+        "Prism draws its own model"
     );
     assert!(
         (look.scale - 0.96).abs() < f32::EPSILON,
@@ -504,10 +504,6 @@ fn arena_fighters_wait_for_their_character_and_wear_its_model_tint_and_scale() {
         .iter()
         .find(|child| app.world().get::<V3CharacterScene>(*child).is_some())
         .unwrap();
-    assert_eq!(
-        app.world().get::<super::super::ToonSceneTint>(scene),
-        look.tint.map(super::super::ToonSceneTint).as_ref()
-    );
     let expected = gameplay_character_transform(model.source_ground, look.scale);
     assert_eq!(app.world().get::<Transform>(scene), Some(&expected));
 }
