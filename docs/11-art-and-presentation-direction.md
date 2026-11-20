@@ -56,14 +56,21 @@ tickets tune them through native review but do not change the direction.
   antennae over a tiny smiling face, and four fists (a lower arm pair that never holds a weapon).
   The catalog keeps the Heavy draw scale 1.08, so he stands about 1.33 cells to his antenna tips
   and his widest bind-pose reach (the shoulder domes) is 15 world units, as his placeholder's was.
+- Cobble (`asset_src/characters/cobble/`, `just cobble-asset`, BRL-zkb3), an ancient little stone
+  guardian (Tank / Heavy), is the fourth production character, on the same pipeline and contract.
+  His silhouette is square everywhere: an enormous block head with a tiny happy face and a moss tuft
+  with a leaf sprout, giant block fists on steeper-hanging arms (so they stay near the body radius),
+  and tiny legs. He holds the Impact Blade in his own rigid low guard at the hip, blade out and
+  down, below his face. At the Heavy draw scale 1.08 he stands about 1.15 cells to his head top
+  and his widest bind-pose reach (the fists) is 14.3 world units.
 - Roster presentation (BRL-egn6): the replicated loadout names each fighter's stable `CharacterId`,
   and the client-only catalog `assets/catalogs/fighter_characters.ron` maps it to a model, a tint,
-  a scale (times Riff's source-to-world scale) and the weapon socket. Riff, Bumper and Torque draw
-  untinted; every other launch character is a tinted placeholder (Light on Riff, Normal and Heavy
-  on Bumper) until its art ticket adds a `models` entry and repoints only that character. An
-  unknown ID draws the fallback model untinted. The tint multiplies into the base colours when the
-  scene converts to the toon material, cached per source material and tint. Every catalog model
-  loads at startup.
+  a scale (times Riff's source-to-world scale) and the weapon socket. Riff, Bumper, Torque and
+  Cobble draw untinted; every other launch character is a tinted placeholder (Light on Riff,
+  Normal and Heavy on Bumper) until its art ticket adds a `models` entry and repoints only that
+  character. An unknown ID draws the fallback model untinted. The tint multiplies into the base
+  colours when the scene converts to the toon material, cached per source material and tint. Every
+  catalog model loads at startup.
 - Each primary-weapon animation family has its own original held weapon (BRL-q29d): a one-handed
   blaster (`1h`), a two-handed heavy sprayer (`heavy`), a two-handed lobber (`throwable`), and a
   two-handed impact blade (`melee`), built by `asset_src/weapons/build_weapons.py`
@@ -1007,9 +1014,9 @@ Every redistributed third-party file must have exact provenance in the manifest 
 license text where required. Original replacements should also preserve their source masters and
 document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
-its README (for Riff, Bumper and Torque, `asset_src/characters/<name>/README.md`; for the held weapons,
-`asset_src/weapons/README.md`; for environment kits, `asset_src/environment/<kit>/README.md`),
-not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt`,
+its README (for Riff, Bumper, Torque and Cobble, `asset_src/characters/<name>/README.md`; for the
+held weapons, `asset_src/weapons/README.md`; for environment kits,
+`asset_src/environment/<kit>/README.md`), not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt`,
 `pewpew-blitz-original-weapons.txt` and `pewpew-blitz-original-characters.txt` point at the
 environment kit, weapon and fighter character sources. `pewpew-blitz-original-shell-art.txt`
 records per-file provenance for the branding and shell menu artwork (`assets/brawler/ui/branding/`,

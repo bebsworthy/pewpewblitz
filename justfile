@@ -111,6 +111,10 @@ bumper-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
 torque-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/characters/torque/build_torque.py
 
+# Rebuild Cobble's runtime GLB, source master, and review renders (headless).
+cobble-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
+    {{blender}} -b --factory-startup -P asset_src/characters/cobble/build_cobble.py
+
 # Rebuild the Crossroads Facility environment kit GLBs, source master, and review sheet (headless).
 facility-kit blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/environment/crossroads-facility/build_kit.py

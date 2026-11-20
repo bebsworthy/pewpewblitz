@@ -24,8 +24,17 @@ const BUMPER_ASSET_PATH: &str = "brawler/models/original/characters/bumper/chr_b
 /// `asset_src/characters/torque/build_torque.py` on the same contract; the catalog draws Torque
 /// with it, untinted.
 const TORQUE_ASSET_PATH: &str = "brawler/models/original/characters/torque/chr_torque.glb";
+/// Cobble (BRL-zkb3), the little stone guardian, built by
+/// `asset_src/characters/cobble/build_cobble.py` on the same contract; the catalog draws Cobble
+/// with it, untinted.
+const COBBLE_ASSET_PATH: &str = "brawler/models/original/characters/cobble/chr_cobble.glb";
 /// Every shipped fighter character GLB the runtime contract covers.
-const SHIPPED_CHARACTER_ASSETS: [&str; 3] = [RIFF_ASSET_PATH, BUMPER_ASSET_PATH, TORQUE_ASSET_PATH];
+const SHIPPED_CHARACTER_ASSETS: [&str; 4] = [
+    RIFF_ASSET_PATH,
+    BUMPER_ASSET_PATH,
+    TORQUE_ASSET_PATH,
+    COBBLE_ASSET_PATH,
+];
 
 fn inputs() -> MotionInputs {
     MotionInputs {
@@ -151,22 +160,24 @@ fn shipped_character_glbs_match_the_runtime_contract() {
 }
 
 #[test]
-fn torque_is_drawn_with_his_own_model_untinted() {
+fn roster_characters_with_their_own_model_are_drawn_with_it_untinted() {
     let catalog = super::super::FighterCharacterCatalog::embedded().unwrap();
     let roster = brawler::characters::EmbeddedLoadoutCatalogs::load().unwrap();
-    let torque = roster
-        .characters
-        .characters
-        .iter()
-        .find(|character| character.key == "torque")
-        .unwrap();
-    let look = catalog.look(Some(torque.id));
-    assert_eq!(catalog.models()[look.model].model, TORQUE_ASSET_PATH);
-    assert_eq!(
-        look.tint, None,
-        "Torque is a production model, not a placeholder"
-    );
-    assert_eq!(look.socket, RIFF_WEAPON_SOCKET);
+    for (key, asset) in [("torque", TORQUE_ASSET_PATH), ("cobble", COBBLE_ASSET_PATH)] {
+        let character = roster
+            .characters
+            .characters
+            .iter()
+            .find(|character| character.key == key)
+            .unwrap();
+        let look = catalog.look(Some(character.id));
+        assert_eq!(catalog.models()[look.model].model, asset, "{key}");
+        assert_eq!(
+            look.tint, None,
+            "{key} is a production model, not a placeholder"
+        );
+        assert_eq!(look.socket, RIFF_WEAPON_SOCKET, "{key}");
+    }
 }
 
 #[test]

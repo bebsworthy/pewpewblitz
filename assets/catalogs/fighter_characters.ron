@@ -18,6 +18,7 @@
         (key: "riff", model: "brawler/models/original/characters/riff/chr_riff.glb", source_ground: 0.04),
         (key: "bumper", model: "brawler/models/original/characters/bumper/chr_bumper.glb", source_ground: 0.03),
         (key: "torque", model: "brawler/models/original/characters/torque/chr_torque.glb", source_ground: 0.02),
+        (key: "cobble", model: "brawler/models/original/characters/cobble/chr_cobble.glb", source_ground: 0.02),
     ],
     characters: [
         // Production models.
@@ -25,9 +26,9 @@
         (character: 9, model: "bumper", tint: None, scale: 1.0, socket: "socket_weapon_r"),
         // Torque (Damage, Heavy, BRL-nwhr) keeps the Heavy draw scale.
         (character: 2, model: "torque", tint: None, scale: 1.08, socket: "socket_weapon_r"),
+        // Cobble (Tank, Heavy, BRL-zkb3) keeps the Heavy draw scale.
+        (character: 3, model: "cobble", tint: None, scale: 1.08, socket: "socket_weapon_r"),
         // Placeholders until each character's art ticket lands.
-        // Cobble (Tank, Heavy): BRL-zkb3.
-        (character: 3, model: "bumper", tint: Some((0.70, 0.72, 0.80)), scale: 1.08, socket: "socket_weapon_r"),
         // Plunk (Tank, Heavy): BRL-qqch.
         (character: 4, model: "bumper", tint: Some((0.50, 0.92, 0.84)), scale: 1.08, socket: "socket_weapon_r"),
         // Pollen (Helper, Light): BRL-2x8j.
