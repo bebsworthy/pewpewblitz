@@ -5,7 +5,7 @@ use super::*;
 static PRODUCT_LOBBY_DATABASE_SEQUENCE: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
-/// One product lobby's SQLite profile database, fresh for this harness and removed with it.
+/// One product lobby's `SQLite` profile database, fresh for this harness and removed with it.
 ///
 /// The path is keyed by process ID and a per-process sequence, and macOS recycles process IDs.
 /// A file left by an earlier run (an older schema, or another test's accounts and maps) would
@@ -20,7 +20,7 @@ impl ProfileDatabaseFile {
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => panic!("remove stale profile database {path:?}: {error}"),
+                Err(error) => panic!("remove stale profile database {}: {error}", path.display()),
             }
         }
         file
@@ -31,11 +31,11 @@ impl ProfileDatabaseFile {
     }
 
     /// The database and its WAL-mode side files.
-    fn files(&self) -> impl Iterator<Item = std::ffi::OsString> + '_ {
+    fn files(&self) -> impl Iterator<Item = std::path::PathBuf> + '_ {
         ["", "-wal", "-shm"].into_iter().map(|suffix| {
             let mut path = self.0.clone().into_os_string();
             path.push(suffix);
-            path
+            std::path::PathBuf::from(path)
         })
     }
 }
@@ -373,6 +373,27 @@ impl Harness {
         harness
     }
 
+    /// A harness around a built server app, before any client connects.
+    fn from_server(
+        server: App,
+        server_entity: Entity,
+        client_count: usize,
+        profile_database: Option<ProfileDatabaseFile>,
+    ) -> Self {
+        Self {
+            server,
+            server_entity,
+            server_links: Vec::with_capacity(client_count),
+            clients: Vec::with_capacity(client_count),
+            client_entities: Vec::with_capacity(client_count),
+            client_cues: Vec::with_capacity(client_count),
+            client_heist_cues: Vec::with_capacity(client_count),
+            suspended_clients: Vec::with_capacity(client_count),
+            now: Instant::now(),
+            _profile_database: profile_database,
+        }
+    }
+
     pub(super) fn new_product_lobby(client_count: usize) -> Self {
         brawler::testing::install_network_test_logger();
         let database_sequence =
@@ -423,18 +444,8 @@ impl Harness {
         server.finish();
         server.cleanup();
         let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);
-        let mut harness = Self {
-            server,
-            server_entity,
-            server_links: Vec::with_capacity(client_count),
-            clients: Vec::with_capacity(client_count),
-            client_entities: Vec::with_capacity(client_count),
-            client_cues: Vec::with_capacity(client_count),
-            client_heist_cues: Vec::with_capacity(client_count),
-            suspended_clients: Vec::with_capacity(client_count),
-            now: Instant::now(),
-            _profile_database: Some(profile_database),
-        };
+        let mut harness =
+            Self::from_server(server, server_entity, client_count, Some(profile_database));
         for client_index in 0..client_count {
             let client_id = u64::try_from(client_index + 1).expect("test client count fits u64");
             harness.add_product_lobby_client(client_id, None);
@@ -472,18 +483,7 @@ impl Harness {
         server.finish();
         server.cleanup();
         let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);
-        Self {
-            server,
-            server_entity,
-            server_links: Vec::new(),
-            clients: Vec::new(),
-            client_entities: Vec::new(),
-            client_cues: Vec::new(),
-            client_heist_cues: Vec::new(),
-            suspended_clients: Vec::new(),
-            now: Instant::now(),
-            _profile_database: None,
-        }
+        Self::from_server(server, server_entity, 0, None)
     }
 
     /// Connect one client to a routed match worker under the given Netcode client and routed
@@ -679,18 +679,7 @@ impl Harness {
         server.cleanup();
         let server_entity = spawn_crossbeam_server(server.world_mut(), &server_config);
 
-        let mut harness = Self {
-            server,
-            server_entity,
-            server_links: Vec::with_capacity(client_count),
-            clients: Vec::with_capacity(client_count),
-            client_entities: Vec::with_capacity(client_count),
-            client_cues: Vec::with_capacity(client_count),
-            client_heist_cues: Vec::with_capacity(client_count),
-            suspended_clients: Vec::with_capacity(client_count),
-            now: Instant::now(),
-            _profile_database: None,
-        };
+        let mut harness = Self::from_server(server, server_entity, client_count, None);
         for client_id in 1..=client_count as u64 {
             harness.add_client_with_options(
                 client_id,
