@@ -7,6 +7,7 @@
 pub mod abilities;
 mod bots;
 pub mod builds;
+pub mod characters;
 pub mod combat;
 pub mod concealment;
 pub mod config;

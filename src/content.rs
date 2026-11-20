@@ -4,21 +4,23 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 27;
+pub const GAMEPLAY_CONTENT_ENVELOPE_VERSION: u16 = 28;
 
 const MAX_GAMEPLAY_FINGERPRINT_CONTRIBUTORS: usize = 16;
 
 pub(crate) const BOTS_FINGERPRINT_DOMAIN: &str = "bots.practice";
 pub(crate) const BUILDS_FINGERPRINT_DOMAIN: &str = "builds.catalog";
+pub(crate) const CHARACTERS_FINGERPRINT_DOMAIN: &str = "characters.catalog";
 pub(crate) const COMBAT_CONDITIONS_FINGERPRINT_DOMAIN: &str = "combat.conditions";
 pub(crate) const COMBAT_WEAPONS_FINGERPRINT_DOMAIN: &str = "combat.weapons";
 pub(crate) const CONCEALMENT_FINGERPRINT_DOMAIN: &str = "concealment.rules";
 pub(crate) const MAP_FINGERPRINT_DOMAIN: &str = "map.catalog";
 pub(crate) const WEAPON_PARTS_FINGERPRINT_DOMAIN: &str = "weapon-parts.catalog";
 
-const REQUIRED_GAMEPLAY_FINGERPRINT_DOMAINS: [&str; 7] = [
+const REQUIRED_GAMEPLAY_FINGERPRINT_DOMAINS: [&str; 8] = [
     BOTS_FINGERPRINT_DOMAIN,
     BUILDS_FINGERPRINT_DOMAIN,
+    CHARACTERS_FINGERPRINT_DOMAIN,
     COMBAT_CONDITIONS_FINGERPRINT_DOMAIN,
     COMBAT_WEAPONS_FINGERPRINT_DOMAIN,
     CONCEALMENT_FINGERPRINT_DOMAIN,
@@ -79,6 +81,7 @@ impl Plugin for GameplayContentPlugin {
             .add_plugins(crate::bots::BotContentPlugin)
             .add_plugins(crate::builds::BuildContentPlugin)
             .add_plugins(crate::weapon_parts::WeaponPartContentPlugin)
+            .add_plugins(crate::characters::CharacterContentPlugin)
             .add_plugins(crate::map::MapContentPlugin)
             .add_systems(Startup, initialize_content_fingerprint);
     }
@@ -235,7 +238,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, GameplayContentPlugin));
 
-        assert_eq!(GAMEPLAY_CONTENT_ENVELOPE_VERSION, 27);
+        assert_eq!(GAMEPLAY_CONTENT_ENVELOPE_VERSION, 28);
         assert!(
             app.world()
                 .contains_resource::<crate::combat::WeaponCatalogResource>()

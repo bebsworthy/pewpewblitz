@@ -281,25 +281,7 @@ impl BuildCatalog {
             ("lightweight", self.fighter_profiles.lightweight),
             ("reinforced", self.fighter_profiles.reinforced),
         ] {
-            if profile.maximum_health == 0
-                || !profile.movement_speed.is_finite()
-                || profile.movement_speed <= 0.0
-                || profile.movement_speed > MAX_FIGHTER_MOVEMENT_SPEED
-                || profile.health_recovery_rate == 0
-                || profile.idle_attack_delay_ticks == 0
-                || profile.cold_capacity == 0
-                || profile.cold_capacity > MAX_COLD_CAPACITY
-                || profile.cold_resistance_basis_points > 6_000
-                || profile.poison_resistance_basis_points > 6_000
-                || profile.fire_resistance_basis_points > 6_000
-                || !profile.reveal_proximity_radius.is_finite()
-                || !(MIN_REVEAL_PROXIMITY_RADIUS..=MAX_REVEAL_PROXIMITY_RADIUS)
-                    .contains(&profile.reveal_proximity_radius)
-            {
-                return Err(format!(
-                    "invalid {name} fighter stat profile: health, movement speed, or reveal proximity is outside engine bounds"
-                ));
-            }
+            validate_fighter_stats(&profile).map_err(|error| format!("{name} {error}"))?;
         }
         for power in [
             self.custom_pulse.light,
@@ -342,6 +324,11 @@ impl BuildCatalog {
     #[must_use]
     pub fn ultimate(&self, id: UltimateDefinitionId) -> Option<&UltimateDefinition> {
         self.ultimates.iter().find(|definition| definition.id == id)
+    }
+
+    #[must_use]
+    pub fn passive(&self, id: PassiveDefinitionId) -> Option<&PassiveDefinition> {
+        self.passives.iter().find(|definition| definition.id == id)
     }
 
     pub fn canonical_fingerprint_material(&self) -> Result<Vec<u8>, String> {
@@ -703,6 +690,30 @@ pub fn resolve_reveal_proximity_radius(
     )]
     let rounded = rounded as f32;
     Ok(rounded)
+}
+
+/// Engine bounds for one fighter's resolved stats, shared by every authored stat owner.
+pub(crate) fn validate_fighter_stats(stats: &ResolvedFighterStats) -> Result<(), &'static str> {
+    if stats.maximum_health == 0
+        || !stats.movement_speed.is_finite()
+        || stats.movement_speed <= 0.0
+        || stats.movement_speed > MAX_FIGHTER_MOVEMENT_SPEED
+        || stats.health_recovery_rate == 0
+        || stats.idle_attack_delay_ticks == 0
+        || stats.cold_capacity == 0
+        || stats.cold_capacity > MAX_COLD_CAPACITY
+        || stats.cold_resistance_basis_points > 6_000
+        || stats.poison_resistance_basis_points > 6_000
+        || stats.fire_resistance_basis_points > 6_000
+        || !stats.reveal_proximity_radius.is_finite()
+        || !(MIN_REVEAL_PROXIMITY_RADIUS..=MAX_REVEAL_PROXIMITY_RADIUS)
+            .contains(&stats.reveal_proximity_radius)
+    {
+        return Err(
+            "fighter stats: health, movement speed, resistances, or reveal proximity is outside engine bounds",
+        );
+    }
+    Ok(())
 }
 
 fn validate_metadata<T>(

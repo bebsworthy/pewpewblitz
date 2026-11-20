@@ -5,7 +5,9 @@ mod model;
 
 #[cfg(feature = "server")]
 pub(crate) use definitions::resolve_direct_diagnostic_loadout;
-pub(crate) use definitions::{MAX_PASSIVE_DEFINITIONS, MAX_ULTIMATE_DEFINITIONS};
+pub(crate) use definitions::{
+    MAX_PASSIVE_DEFINITIONS, MAX_ULTIMATE_DEFINITIONS, validate_fighter_stats,
+};
 pub(crate) use model::{
     PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS, PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS,
     PASSIVE_ADRENAL_REARM_TICKS_BOUNDS, PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS,
