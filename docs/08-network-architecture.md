@@ -704,3 +704,13 @@ decisions are removed. `LobbyJoinOutcome::Accepted` carries an `AdvertisedCharac
 `character_id` and holds one passive. The global handshake rejects a protocol 53 peer; every role
 must be rebuilt. Match-manifest v5, control IPC v7, and the route envelope are unchanged; the opaque
 match character snapshot inside the manifest moves to schema 8.
+
+Protocol 55 removes the inert build point costs (BRL-01c8). `ResolvedMatchLoadout` loses
+`total_points`, `ResolvedUltimate` and `ResolvedPassive` lose `point_cost`, and the unreachable
+`QueueRejection::OverBudget { used, budget }` variant is gone, so later rejection variants encode
+with new indices. The registered types are unchanged, so the protocol-registry fingerprint is
+unchanged and only `SUPPORTED_PROTOCOL_VERSION` guards the new encoding. Build catalog schema 19
+drops the `weapon_costs` table and every ultimate and passive `point_cost`, which changes the
+gameplay content fingerprint. The recipe fingerprint, match character snapshot schema 8,
+match-manifest v5, control IPC v7, the route envelope, and the Balance Lab snapshot and persistence
+schemas are unchanged. Every role must be rebuilt.

@@ -4,9 +4,9 @@ was: BRL-0043
 
 title: Remove retired build point-cost machinery
 
-status: backlog
-closed:
-status_changed: 2026-08-28T19:44:02Z
+status: done
+closed: 2026-11-20T02:55:38Z
+status_changed: 2026-11-20T02:55:38Z
 
 theme: quality
 
@@ -20,9 +20,9 @@ related: [BRL-1t80, BRL-4ms7, BRL-5pxn, BRL-egn6, BRL-k66v]
 
 parent:
 
-rank: 10158080
+rank:
 ---
 
 # Description
 
-Remove the private legacy point costs, 12-point budget, over-budget outcomes, and total-point reporting left behind after saved brawlers became the sole product loadout workflow, while preserving stable saved-brawler choices, authoritative resolution, fingerprints, routed admission, Balance Lab behavior, and gameplay.
+Remove the inert build point-cost machinery left behind after roster character picks (BRL-egn6) became the sole product loadout: the 12-point budget constant, every authored `point_cost` and the weapon cost table, `total_points` on the resolved loadout and match telemetry, the unreachable over-budget queue rejection, and the matching evidence key, copy, tests and docs. Character resolution (`builds::resolve_loadout`), stable IDs, slot/conflict rules, parameter bounds, byte ceilings, server authority and gameplay are unchanged.

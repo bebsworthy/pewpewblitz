@@ -146,7 +146,7 @@ them:
    sizes are safe, and every selected primitive has an implemented authoritative execution path.
 2. **Balance and compatibility validation:** the configuration obeys current catalog policy,
    fighter compatibility, mutual exclusions, and required tradeoffs. Character resolution has no
-   point budget; the retired point-cost fields are BRL-01c8.
+   point budget, and catalog definitions carry no point costs.
 3. **Entitlement validation:** every roster character is available today. Unlocks would belong to
    a future account boundary, not to combat execution.
 
@@ -580,7 +580,7 @@ For each weapon or active combat capability, answer:
 - What map geometry strengthens or weakens it?
 - What are its burst and recovery windows?
 - How much aim or movement precision does it demand?
-- What build budget and slot opportunity does it consume?
+- Which character or slot opportunity does it take, and what does it displace?
 - Can its damage, control, ownership, and expiry be understood from feedback?
 - Does it create a reason to move or make a decision rather than hold one position?
 - Does it remain bounded under many participants, deliveries, or persistent objects?
