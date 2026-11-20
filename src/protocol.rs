@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 53;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 54;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -234,7 +234,7 @@ pub enum LobbyJoinOutcome {
         catalog_revision: crate::lobby::CatalogRevision,
         #[serde(deserialize_with = "crate::lobby::deserialize_game_types")]
         game_types: Vec<crate::lobby::AdvertisedGameType>,
-        brawler_catalog: Box<crate::profiles::AdvertisedBrawlerCatalog>,
+        character_catalog: Box<crate::profiles::AdvertisedCharacterCatalog>,
         profile: Box<crate::profiles::ProfileSnapshot>,
     },
     Rejected {
@@ -1014,11 +1014,43 @@ mod tests {
         assert_eq!(decoded, message);
     }
 
-    /// Protocol 53 (BRL-s3dh) registers the author's published-maps request and reply (list and
-    /// withdraw); the registry fingerprint changes and only the global handshake guards it.
+    fn welcome_profile() -> crate::profiles::ProfileSnapshot {
+        crate::profiles::AdvertisedCharacterCatalog::embedded()
+            .unwrap()
+            .profile_from_stored(
+                crate::profiles::AccountId::new(1).unwrap(),
+                crate::profiles::ProfileRevision::INITIAL,
+                None,
+                [],
+            )
+    }
+
+    /// Protocol 54 (BRL-egn6) replaces saved brawlers with roster character picks: the profile
+    /// command and snapshot, the advertised character catalog, the queue and Practice requests
+    /// (profile revision instead of a brawler), and `ResolvedMatchLoadout.character_id`. Only
+    /// the global handshake guards them.
     #[test]
-    fn published_maps_status_and_withdraw_are_protocol_53() {
-        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 53);
+    fn character_picks_are_protocol_54() {
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 54);
+        let catalog = crate::profiles::AdvertisedCharacterCatalog::embedded().unwrap();
+        let command = crate::profiles::ProfileCommand {
+            request_id: 1,
+            expected_profile_revision: crate::profiles::ProfileRevision::INITIAL,
+            choice: crate::profiles::AdvertisedCharacterCatalog::default_choice_for(
+                &catalog.characters[8],
+            ),
+        };
+        let bytes = postcard::to_allocvec(&command).expect("command serializes");
+        assert_eq!(postcard::from_bytes(&bytes), Ok(command));
+        let profile = welcome_profile();
+        let bytes = postcard::to_allocvec(&profile).expect("profile serializes");
+        assert_eq!(postcard::from_bytes(&bytes), Ok(profile));
+    }
+
+    /// Protocol 53 (BRL-s3dh) registers the author's published-maps request and reply (list and
+    /// withdraw).
+    #[test]
+    fn published_maps_status_and_withdraw_round_trip() {
         let request = crate::lobby::PublishedMapsRequest {
             request_id: crate::lobby::PublishedMapsRequestId::new(1).unwrap(),
             action: crate::lobby::PublishedMapsAction::Withdraw {
@@ -1102,31 +1134,21 @@ mod tests {
             server_name: "Local Brawler".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game_type.clone(); crate::lobby::MAX_GAME_TYPES + 1],
-            brawler_catalog: Box::new(
-                crate::profiles::AdvertisedBrawlerCatalog::from_content(
-                    &crate::builds::BuildCatalog::embedded().unwrap(),
-                    &crate::combat::WeaponCatalog::embedded().unwrap(),
-                )
-                .unwrap(),
+            character_catalog: Box::new(
+                crate::profiles::AdvertisedCharacterCatalog::embedded().unwrap(),
             ),
-            profile: Box::new(crate::profiles::ProfileSnapshot::empty(
-                crate::profiles::AccountId::new(1).unwrap(),
-            )),
+            profile: Box::new(welcome_profile()),
         };
         let bytes = postcard::to_allocvec(&oversized).unwrap();
         assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());
 
-        let mut oversized_brawler_catalog =
-            crate::profiles::AdvertisedBrawlerCatalog::from_content(
-                &crate::builds::BuildCatalog::embedded().unwrap(),
-                &crate::combat::WeaponCatalog::embedded().unwrap(),
-            )
-            .unwrap();
-        oversized_brawler_catalog.fighter_profiles =
-            vec![
-                oversized_brawler_catalog.fighter_profiles[0].clone();
-                crate::profiles::MAX_ADVERTISED_FIGHTER_PROFILES + 1
-            ];
+        let mut oversized_character_catalog =
+            crate::profiles::AdvertisedCharacterCatalog::embedded().unwrap();
+        oversized_character_catalog.characters = vec![
+            oversized_character_catalog.characters[0]
+                .clone();
+            crate::profiles::MAX_ADVERTISED_CHARACTERS + 1
+        ];
         let oversized_brawler = LobbyJoinOutcome::Accepted {
             logical_server_id: 1,
             player_id: PlayerId(1),
@@ -1134,10 +1156,8 @@ mod tests {
             server_name: "Local Brawler".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game_type.clone()],
-            brawler_catalog: Box::new(oversized_brawler_catalog),
-            profile: Box::new(crate::profiles::ProfileSnapshot::empty(
-                crate::profiles::AccountId::new(1).unwrap(),
-            )),
+            character_catalog: Box::new(oversized_character_catalog),
+            profile: Box::new(welcome_profile()),
         };
         let bytes = postcard::to_allocvec(&oversized_brawler).unwrap();
         assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());
@@ -1149,16 +1169,10 @@ mod tests {
             server_name: "Local Brawler".to_string(),
             catalog_revision: crate::lobby::CatalogRevision([1; 32]),
             game_types: vec![game_type],
-            brawler_catalog: Box::new(
-                crate::profiles::AdvertisedBrawlerCatalog::from_content(
-                    &crate::builds::BuildCatalog::embedded().unwrap(),
-                    &crate::combat::WeaponCatalog::embedded().unwrap(),
-                )
-                .unwrap(),
+            character_catalog: Box::new(
+                crate::profiles::AdvertisedCharacterCatalog::embedded().unwrap(),
             ),
-            profile: Box::new(crate::profiles::ProfileSnapshot::empty(
-                crate::profiles::AccountId::new(1).unwrap(),
-            )),
+            profile: Box::new(welcome_profile()),
         };
         let bytes = postcard::to_allocvec(&invalid_name).unwrap();
         assert!(postcard::from_bytes::<LobbyJoinOutcome>(&bytes).is_err());

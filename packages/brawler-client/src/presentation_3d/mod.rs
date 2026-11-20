@@ -77,9 +77,7 @@ pub(crate) use fighter_character::{
     riff_scene_transform, weapon_attachment,
 };
 use fighter_character::{V3CharacterScene, character_is_visually_defeated};
-pub(crate) use fighter_weapons::{
-    FighterWeaponCatalog, HeldWeapon, advertised_weapon_family, selected_weapon_family,
-};
+pub(crate) use fighter_weapons::{FighterWeaponCatalog, HeldWeapon, selected_weapon_family};
 use map::{GeneratedMapMesh, Presented3dMap};
 pub(crate) use map_editor::{
     MapEditorArenaInsets, MapEditorPointerMode, MapEditorPreview, MapEditorPreviewOptions,

@@ -218,17 +218,14 @@ fn loadout() -> ResolvedMatchLoadout {
 fn loadout_with_ultimate(ultimate: u16) -> ResolvedMatchLoadout {
     let builds = brawler::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = brawler::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
-    brawler::builds::resolve_build_recipe(
+    brawler::builds::resolve_loadout(
         &builds,
         &weapons,
-        brawler::builds::BrawlerBuildRecipe {
-            weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(1)),
-            ultimate: brawler::builds::UltimateDefinitionId(ultimate),
-            passives: [
-                brawler::builds::PassiveDefinitionId(1),
-                brawler::builds::PassiveDefinitionId(6),
-            ],
-        },
+        brawler::builds::LoadoutRecipe::test_default(
+            brawler::combat::WeaponPresetId(1),
+            brawler::builds::UltimateDefinitionId(ultimate),
+            brawler::builds::PassiveDefinitionId(6),
+        ),
     )
     .expect("preset loadout resolves")
 }

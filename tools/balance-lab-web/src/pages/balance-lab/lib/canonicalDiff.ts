@@ -18,7 +18,6 @@ export interface CanonicalDifference {
 
 const sectionLabels: Record<EditorSection, string> = {
   global: "Global",
-  fighters: "Fighters",
   weapons: "Weapons",
   ultimates: "Ultimates",
   passives: "Passives",

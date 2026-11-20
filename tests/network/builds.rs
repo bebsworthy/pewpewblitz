@@ -2,26 +2,15 @@ use super::*;
 #[cfg(feature = "balance-lab")]
 #[test]
 fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_values() {
-    let canonical_builds = brawler::builds::BuildCatalog::embedded().unwrap();
-    let canonical_weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
-    let canonical = brawler::builds::resolve_saved_brawler_recipe(
-        &canonical_builds,
-        &canonical_weapons,
-        brawler::profiles::FighterProfileId(1),
-        brawler::profiles::WeaponBaseId(1),
-        brawler::builds::UltimateDefinitionId(1),
-        [
-            brawler::builds::PassiveDefinitionId(3),
-            brawler::builds::PassiveDefinitionId(4),
-        ],
-    )
-    .unwrap();
+    let canonical_catalogs = brawler::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+    let pick = canonical_catalogs.characters.default_choice();
+    let canonical = canonical_catalogs.view().resolve(pick).unwrap();
 
     let mut harness = Harness::new(1);
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(1);
+        .character = Some(1);
     harness.step_until(|harness| harness.client_is_active(0) && harness.loadout_is_ready(0));
     let server_entity = {
         let world = harness.server.world_mut();
@@ -30,45 +19,33 @@ fn revised_catalog_loadout_keeps_build_identity_and_replicates_authoritative_val
     };
     {
         let world = harness.server.world_mut();
-        let mut builds = world.resource_mut::<brawler::builds::BuildCatalogResource>();
-        builds.0.fighter_profiles.default.maximum_health = 222;
-        builds.0.fighter_profiles.default.movement_speed = 444.0;
-        builds.0.fighter_profiles.default.cold_capacity = 750;
-        builds
-            .0
-            .fighter_profiles
-            .default
-            .cold_resistance_basis_points = 1_000;
-        builds.0.fighter_profiles.lightweight.maximum_health = 222;
-        builds.0.fighter_profiles.lightweight.movement_speed = 444.0;
-        builds.0.fighter_profiles.reinforced.maximum_health = 222;
-        builds.0.fighter_profiles.reinforced.movement_speed = 444.0;
+        let mut characters = world.resource_mut::<brawler::characters::CharacterCatalogResource>();
+        let stats = &mut characters.0.characters[0].stats;
+        stats.maximum_health = 222;
+        stats.movement_speed = 444.0;
+        stats.cold_capacity = 750;
+        stats.cold_resistance_basis_points = 1_000;
         let mut weapons = world.resource_mut::<brawler::combat::WeaponCatalogResource>();
         weapons.0.presets[0]
             .configuration
             .recipe
             .fire_cooldown_ticks += 1;
     }
-    let server_loadout = brawler::builds::resolve_saved_brawler_recipe(
-        &harness
-            .server
-            .world()
-            .resource::<brawler::builds::BuildCatalogResource>()
-            .0,
-        &harness
-            .server
-            .world()
-            .resource::<brawler::combat::WeaponCatalogResource>()
-            .0,
-        brawler::profiles::FighterProfileId(1),
-        brawler::profiles::WeaponBaseId(1),
-        brawler::builds::UltimateDefinitionId(1),
-        [
-            brawler::builds::PassiveDefinitionId(3),
-            brawler::builds::PassiveDefinitionId(4),
-        ],
-    )
-    .unwrap();
+    let server_loadout = {
+        let world = harness.server.world();
+        brawler::characters::LoadoutCatalogs {
+            characters: &world
+                .resource::<brawler::characters::CharacterCatalogResource>()
+                .0,
+            builds: &world.resource::<brawler::builds::BuildCatalogResource>().0,
+            weapons: &world.resource::<brawler::combat::WeaponCatalogResource>().0,
+            parts: &world
+                .resource::<brawler::weapon_parts::WeaponPartCatalogResource>()
+                .0,
+        }
+        .resolve(pick)
+        .unwrap()
+    };
     let projection = brawler::builds::MatchLoadoutProjection::new(
         &server_loadout,
         harness
@@ -110,15 +87,15 @@ fn active_sentry_fixture() -> (Harness, Entity, brawler::abilities::SentryIdenti
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(3);
+        .character = Some(2);
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(1);
+        .character = Some(1);
     harness.step_until(|harness| {
         (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
-    harness.install_saved_brawler_loadout(0, 3, 2, [5, 6]);
+    harness.install_test_loadout(0, 3, 2, 5);
     let match_id = {
         let world = harness.server.world_mut();
         let mut roots = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
@@ -304,15 +281,15 @@ fn dash_and_sentry_activation_are_server_owned_and_replicate_durable_state() {
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(1);
+        .character = Some(1);
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(3);
+        .character = Some(2);
     harness.step_until(|harness| {
         (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
-    harness.install_saved_brawler_loadout(1, 3, 2, [5, 6]);
+    harness.install_test_loadout(1, 3, 2, 5);
     let match_id = {
         let world = harness.server.world_mut();
         let mut query = world.query_filtered::<&MatchState, With<MatchRootMarker>>();
@@ -808,7 +785,7 @@ fn dash_shape_cast_truncates_before_map_collision_and_blocks_primary_fire() {
         client
             .world_mut()
             .resource_mut::<ClientAutomationConfig>()
-            .weapon_preset = Some(1);
+            .character = Some(1);
     }
     harness.step_until(|harness| {
         (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))

@@ -1356,6 +1356,10 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
     harness.step_until(|harness| {
         (0..2).all(|index| harness.client_is_active(index) && harness.loadout_is_ready(index))
     });
+    // Both fighters carry Adrenal Response, the passive whose trigger the defeat exercises.
+    for index in 0..2 {
+        harness.install_test_loadout(index, 1, 1, 3);
+    }
     let waiting = server_match(&mut harness);
     for index in 0..2 {
         harness.send_match_command(

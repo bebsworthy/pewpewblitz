@@ -168,26 +168,19 @@ fn start_headless_product_request(
         game_type_id: Some(game.id.clone()),
         configuration_revision: Some(game.configuration_revision),
     };
-    let brawler = lobby.profile.selected_brawler_id.and_then(|id| {
-        lobby
-            .profile
-            .brawlers
-            .iter()
-            .find(|brawler| brawler.id == id)
-    })?;
-    // `--weapon-preset` waits until profile automation has selected a matching saved brawler,
-    // so the server resolves the requested primary weapon for the match.
-    if !crate::profile::automation_brawler_ready(config, brawler) {
+    // `--character` waits until profile automation has selected the requested character, so the
+    // server resolves that character's kit for the match.
+    if !crate::profile::automation_character_ready(config, &lobby.profile) {
         return None;
     }
-    if config.product_practice_smoke && practice.start(&selection, brawler.id, brawler.revision) {
+    let profile_revision = lobby.profile.revision;
+    if config.product_practice_smoke && practice.start(&selection, profile_revision) {
         debug!(
             game_type = game.id.as_str(),
             "product Practice automation requested match"
         );
         Some(HeadlessQueueSmokeStage::AwaitingJoinedSnapshot)
-    } else if !config.product_practice_smoke
-        && queue.start_join(&selection, brawler.id, brawler.revision, now)
+    } else if !config.product_practice_smoke && queue.start_join(&selection, profile_revision, now)
     {
         debug!(
             game_type = game.id.as_str(),

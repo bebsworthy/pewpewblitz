@@ -92,17 +92,14 @@ fn fire_economy_boundaries_are_integer_and_deterministic() {
 #[cfg(feature = "server")]
 #[test]
 fn fighter_runtime_reads_health_and_ammo_from_selected_definitions() {
-    let mut loadout = crate::builds::resolve_build_recipe(
+    let mut loadout = crate::builds::resolve_loadout(
         &crate::builds::BuildCatalog::embedded().unwrap(),
         &WeaponCatalog::embedded().unwrap(),
-        crate::builds::BrawlerBuildRecipe {
-            weapon: crate::builds::WeaponChoice::Preset(WeaponPresetId(1)),
-            ultimate: crate::builds::UltimateDefinitionId(1),
-            passives: [
-                crate::builds::PassiveDefinitionId(3),
-                crate::builds::PassiveDefinitionId(4),
-            ],
-        },
+        crate::builds::LoadoutRecipe::test_default(
+            WeaponPresetId(1),
+            crate::builds::UltimateDefinitionId(1),
+            crate::builds::PassiveDefinitionId(3),
+        ),
     )
     .unwrap();
     loadout.fighter_stats.maximum_health = 77;

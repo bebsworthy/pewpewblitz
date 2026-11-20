@@ -54,22 +54,21 @@ pub(super) fn spawn_test_dummy(
     mut commands: Commands,
     catalog: Res<WeaponCatalogResource>,
     builds: Res<crate::builds::BuildCatalogResource>,
+    characters: Res<crate::characters::CharacterCatalogResource>,
+    parts: Res<crate::weapon_parts::WeaponPartCatalogResource>,
     map_spawn: Res<TestDummyFixture>,
 ) {
     let position = map_spawn.position;
     let spawn_facing = map_spawn.facing;
-    let mut loadout = crate::builds::resolve_saved_brawler_recipe(
-        &builds.0,
-        &catalog.0,
-        crate::profiles::FighterProfileId(1),
-        crate::profiles::WeaponBaseId(1),
-        crate::builds::UltimateDefinitionId(1),
-        [
-            crate::builds::PassiveDefinitionId(3),
-            crate::builds::PassiveDefinitionId(4),
-        ],
-    )
-    .expect("dummy saved-brawler loadout resolves");
+    let mut loadout = characters
+        .0
+        .resolve(
+            characters.0.default_choice(),
+            &builds.0,
+            &catalog.0,
+            &parts.0,
+        )
+        .expect("dummy default-character loadout resolves");
     loadout.fighter_stats.maximum_health = map_spawn.maximum_health;
     let body = builds.0.fighter_body;
     let projection = crate::builds::MatchLoadoutProjection::new(&loadout, body);

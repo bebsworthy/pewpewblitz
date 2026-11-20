@@ -554,7 +554,7 @@ mod tests {
         );
 
         let mut invalid = baseline.clone();
-        invalid.fighter_profiles.default.maximum_health = 0;
+        invalid.heist.safe_maximum_health = 99;
         let body = serde_json::to_vec(&serde_json::json!({
             "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
             "expectedRevision": 0,

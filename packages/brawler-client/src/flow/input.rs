@@ -9,7 +9,6 @@ use crate::{
         model::{ClientFlow, ClientOverlay},
         persistence::ConnectionPersistence,
         screens::{
-            brawlers::{BrawlerCreationDraft, BrawlerEditDraft},
             dashboard::{
                 DASHBOARD_BUILD_INDEX, DASHBOARD_GAME_INDEX, DASHBOARD_MENU_INDEX,
                 DASHBOARD_PLAY_INDEX, DASHBOARD_PRACTICE_INDEX, DashboardLayoutClass,
@@ -144,12 +143,7 @@ pub(super) fn overlay_allows_button(overlay: &ClientOverlay, button: &FlowButton
     match overlay {
         ClientOverlay::Error(_)
         | ClientOverlay::Confirmation(_)
-        | ClientOverlay::BrawlerCreation
-        | ClientOverlay::BrawlerEditor
-        | ClientOverlay::BrawlerList
-        | ClientOverlay::BrawlerDetails(_)
-        | ClientOverlay::WeaponEquipment
-        | ClientOverlay::DeleteBrawlerConfirmation(_)
+        | ClientOverlay::Brawlers
         | ClientOverlay::DashboardMenu
         | ClientOverlay::ChangeServerConfirmation
         | ClientOverlay::LeaveConfirmation => button.error_action,
@@ -177,8 +171,6 @@ pub(super) fn publish_text_entry(
     flow: Res<State<ClientFlow>>,
     overlay: Res<ClientOverlay>,
     model: Option<Res<ServerSelectModel>>,
-    brawler_edit: Res<BrawlerEditDraft>,
-    creation: Res<BrawlerCreationDraft>,
     map_maker: Res<MapMakerRuntime>,
     mut focus: ResMut<TextEntryFocus>,
 ) {
@@ -196,22 +188,6 @@ pub(super) fn publish_text_entry(
                 .map(|query| TextEntry::new(TextEntryField::AssetSearch, query, query.len())),
             _ => None,
         }
-    } else if matches!(
-        *overlay,
-        ClientOverlay::BrawlerEditor | ClientOverlay::BrawlerDetails(_)
-    ) && brawler_edit.editing_name
-    {
-        Some(TextEntry::new(
-            TextEntryField::BrawlerName,
-            &brawler_edit.name,
-            brawler_edit.name_caret,
-        ))
-    } else if matches!(*overlay, ClientOverlay::BrawlerCreation) && creation.editing_name {
-        Some(TextEntry::new(
-            TextEntryField::BrawlerName,
-            &creation.name,
-            creation.name_caret,
-        ))
     } else {
         let model = model.as_deref();
         model
@@ -284,8 +260,6 @@ pub(super) fn collect_flow_input(
     // Paired to stay within Bevy's system parameter limit: the queued action and its
     // presentation-only keyboard/gamepad feedback (BRL-ek8p).
     (mut actions, mut feedback): (ResMut<PendingFlowActions>, MessageWriter<UiFeedback>),
-    mut brawler_edit: ResMut<BrawlerEditDraft>,
-    mut creation: ResMut<BrawlerCreationDraft>,
 ) {
     if matches!(
         *flow.get(),
@@ -310,51 +284,6 @@ pub(super) fn collect_flow_input(
     let pad_pressed = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
     // Controller East and the platform Back request share every Escape cancel below.
     let cancel_pressed = pad_pressed(GamepadButton::East) || back.just_pressed();
-    if matches!(
-        overlay.as_ref(),
-        ClientOverlay::BrawlerEditor | ClientOverlay::BrawlerDetails(_)
-    ) && brawler_edit.editing_name
-    {
-        let edit = &mut *brawler_edit;
-        if let Some(outcome) = edit_name_input(
-            &mut edit.name,
-            Some(&edit.stored_name),
-            &mut edit.name_caret,
-            &mut edit.editing_name,
-            &mut edit.inline_error,
-            &keyboard,
-            &typed.edits(),
-            pad_pressed(GamepadButton::South),
-            cancel_pressed,
-        ) {
-            feedback.write(outcome);
-        }
-        if !edit.editing_name && edit.inline_rename {
-            if keyboard.just_pressed(KeyCode::Escape) || cancel_pressed {
-                edit.inline_rename = false;
-            } else {
-                queue_ui_action(&mut actions, FlowUiAction::ConfirmBrawlerEdit);
-            }
-        }
-        return;
-    }
-    if matches!(*overlay, ClientOverlay::BrawlerCreation) && creation.editing_name {
-        let edit = &mut *creation;
-        if let Some(outcome) = edit_name_input(
-            &mut edit.name,
-            None,
-            &mut edit.name_caret,
-            &mut edit.editing_name,
-            &mut edit.inline_error,
-            &keyboard,
-            &typed.edits(),
-            pad_pressed(GamepadButton::South),
-            cancel_pressed,
-        ) {
-            feedback.write(outcome);
-        }
-        return;
-    }
     if let Some(field) = model.editing {
         if keyboard.just_pressed(KeyCode::Home) {
             model.caret = 0;
@@ -441,9 +370,6 @@ pub(super) fn collect_flow_input(
         .collect::<Vec<_>>();
     available.sort_unstable();
     available.dedup();
-    if matches!(*overlay, ClientOverlay::BrawlerDetails(_)) {
-        available.sort_by_key(|index| [4, 5, 3, 2, 1, 0].iter().position(|entry| entry == index));
-    }
     if !available.is_empty() {
         if *flow.get() == ClientFlow::Dashboard && matches!(*overlay, ClientOverlay::None) {
             navigation.focused = repair_dashboard_focus(navigation.focused, &available);
@@ -474,13 +400,7 @@ pub(super) fn collect_flow_input(
             }
         } else if (*flow.get() == ClientFlow::GameTypeSelect
             && matches!(*overlay, ClientOverlay::None))
-            || matches!(
-                *overlay,
-                ClientOverlay::WeaponEquipment
-                    | ClientOverlay::BrawlerList
-                    | ClientOverlay::BrawlerCreation
-                    | ClientOverlay::BrawlerEditor
-            )
+            || matches!(*overlay, ClientOverlay::Brawlers)
         {
             if !available.contains(&navigation.focused) {
                 navigation.focused = available[0];
@@ -506,14 +426,8 @@ pub(super) fn collect_flow_input(
             };
             if let Some(direction) = direction {
                 let columns = game_columns.iter().next().map_or(4, |c| c.0);
-                let next = if matches!(
-                    *overlay,
-                    ClientOverlay::WeaponEquipment
-                        | ClientOverlay::BrawlerList
-                        | ClientOverlay::BrawlerCreation
-                        | ClientOverlay::BrawlerEditor
-                ) {
-                    equipment_neighbor(navigation.focused, direction, &available, columns)
+                let next = if matches!(*overlay, ClientOverlay::Brawlers) {
+                    grid_neighbor(navigation.focused, direction, &available, columns)
                 } else {
                     game_selection_neighbor(navigation.focused, direction, &available, columns)
                 };
@@ -527,9 +441,7 @@ pub(super) fn collect_flow_input(
             let confirmation = *flow.get() == ClientFlow::Results
                 || matches!(
                     *overlay,
-                    ClientOverlay::DeleteBrawlerConfirmation(_)
-                        | ClientOverlay::LeaveConfirmation
-                        | ClientOverlay::ChangeServerConfirmation
+                    ClientOverlay::LeaveConfirmation | ClientOverlay::ChangeServerConfirmation
                 );
             if keyboard.any_just_pressed([KeyCode::ArrowDown, KeyCode::KeyS])
                 || pad_pressed(GamepadButton::DPadDown)
@@ -570,21 +482,8 @@ pub(super) fn collect_flow_input(
             FlowUiAction::KeepServer
         } else if matches!(overlay.as_ref(), ClientOverlay::DashboardMenu) {
             FlowUiAction::CloseDashboardMenu
-        } else if matches!(overlay.as_ref(), ClientOverlay::BrawlerList) {
-            FlowUiAction::CloseBrawlerList
-        } else if matches!(overlay.as_ref(), ClientOverlay::BrawlerDetails(_)) {
-            FlowUiAction::BackToBrawlerList
-        } else if matches!(overlay.as_ref(), ClientOverlay::BrawlerCreation) {
-            FlowUiAction::CancelCreateBrawler
-        } else if matches!(overlay.as_ref(), ClientOverlay::BrawlerEditor) {
-            FlowUiAction::CancelBrawlerEdit
-        } else if matches!(overlay.as_ref(), ClientOverlay::WeaponEquipment) {
-            FlowUiAction::CancelWeaponEquipment
-        } else if matches!(
-            overlay.as_ref(),
-            ClientOverlay::DeleteBrawlerConfirmation(_)
-        ) {
-            FlowUiAction::CancelDeleteBrawler
+        } else if matches!(overlay.as_ref(), ClientOverlay::Brawlers) {
+            FlowUiAction::CloseBrawlers
         } else if matches!(overlay.as_ref(), ClientOverlay::Confirmation(_)) {
             FlowUiAction::KeepLoading
         } else {
@@ -700,21 +599,9 @@ pub(super) fn insert_editor_text(model: &mut ServerSelectModel, field: EditingFi
     model.inline_error = None;
 }
 
-fn insert_name_text(name: &mut String, caret: &mut usize, error: &mut Option<String>, text: &str) {
-    if text
-        .chars()
-        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
-        || name.len().saturating_add(text.len()) > 64
-    {
-        *error = Some("Name exceeds this field's bounds".into());
-        return;
-    }
-    name.insert_str(*caret, text);
-    *caret += text.len();
-    *error = None;
-}
-
-fn equipment_neighbor(
+/// Grid focus for screens laid out in `columns` columns with a Back control at index 1000 above
+/// the first row: the Brawlers roster and its option column.
+fn grid_neighbor(
     current: usize,
     direction: DashboardNavigationDirection,
     available: &[usize],
@@ -758,88 +645,24 @@ fn equipment_neighbor(
     }
 }
 
-/// Bounded name-field editing; returns the commit or cancel feedback when the edit ended this
-/// frame.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Shared bounded name-field input, borrowed by creation and editing"
-)]
-fn edit_name_input(
-    name: &mut String,
-    stored: Option<&str>,
-    caret: &mut usize,
-    editing: &mut bool,
-    error: &mut Option<String>,
-    keyboard: &ButtonInput<KeyCode>,
-    edits: &[TextEdit],
-    confirm: bool,
-    cancel: bool,
-) -> Option<UiFeedback> {
-    if keyboard.just_pressed(KeyCode::Home) {
-        *caret = 0;
-    } else if keyboard.just_pressed(KeyCode::End) {
-        *caret = name.len();
-    } else if keyboard.just_pressed(KeyCode::ArrowLeft) {
-        *caret = previous_caret(&*name, *caret, EditingField::Name);
-    } else if keyboard.just_pressed(KeyCode::ArrowRight) {
-        *caret = next_caret(&*name, *caret, EditingField::Name);
-    }
-    for edit in edits {
-        match edit {
-            TextEdit::Backspace => {
-                let previous = previous_caret(&*name, *caret, EditingField::Name);
-                let current_caret = *caret;
-                name.replace_range(previous..current_caret, "");
-                *caret = previous;
-            }
-            TextEdit::Delete => {
-                let next = next_caret(&*name, *caret, EditingField::Name);
-                let current_caret = *caret;
-                name.replace_range(current_caret..next, "");
-            }
-            TextEdit::Insert(text) => insert_name_text(name, caret, error, text),
-        }
-    }
-    if keyboard.just_pressed(KeyCode::Enter) || confirm {
-        let normalized = match stored {
-            Some(stored) => brawler::lobby::normalize_renamed_display_name(name, stored),
-            None => brawler::lobby::normalize_new_display_name(name),
-        };
-        match normalized {
-            Ok(normalized) => {
-                *name = normalized;
-                *editing = false;
-                *error = None;
-                return Some(UiFeedback::Activated(Some(Surface::Primary)));
-            }
-            // A rejected name keeps the field open with its inline error and plays nothing.
-            Err(reason) => *error = Some(format!("{reason}.")),
-        }
-    } else if keyboard.just_pressed(KeyCode::Escape) || cancel {
-        *editing = false;
-        return Some(UiFeedback::Back);
-    }
-    None
-}
-
 #[cfg(test)]
-mod equipment_navigation_tests {
-    use super::{DashboardNavigationDirection as D, equipment_neighbor};
+mod grid_navigation_tests {
+    use super::{DashboardNavigationDirection as D, grid_neighbor};
     #[test]
     fn grid_columns_reach_back_and_inventory_beyond_one_hundred() {
         let mut available = (0..129).collect::<Vec<_>>();
         available.push(1000);
-        assert_eq!(equipment_neighbor(0, D::Down, &available, 3), 3);
-        assert_eq!(equipment_neighbor(1, D::Up, &available, 3), 1000);
-        assert_eq!(equipment_neighbor(1000, D::Down, &available, 3), 0);
-        assert_eq!(equipment_neighbor(99, D::Down, &available, 3), 102);
-        assert_eq!(equipment_neighbor(128, D::Right, &available, 3), 128);
-        assert_eq!(equipment_neighbor(128, D::Up, &available, 3), 125);
-        assert_eq!(equipment_neighbor(6, D::Down, &available, 6), 12);
-        assert_eq!(equipment_neighbor(9, D::Down, &available, 5), 14);
-        assert_eq!(equipment_neighbor(5, D::Up, &available, 6), 1000);
+        assert_eq!(grid_neighbor(0, D::Down, &available, 3), 3);
+        assert_eq!(grid_neighbor(1, D::Up, &available, 3), 1000);
+        assert_eq!(grid_neighbor(1000, D::Down, &available, 3), 0);
+        assert_eq!(grid_neighbor(99, D::Down, &available, 3), 102);
+        assert_eq!(grid_neighbor(128, D::Right, &available, 3), 128);
+        assert_eq!(grid_neighbor(128, D::Up, &available, 3), 125);
+        assert_eq!(grid_neighbor(6, D::Down, &available, 6), 12);
+        assert_eq!(grid_neighbor(9, D::Down, &available, 5), 14);
+        assert_eq!(grid_neighbor(5, D::Up, &available, 6), 1000);
         assert_eq!(
-            equipment_neighbor(11, D::Down, &(0..13).collect::<Vec<_>>(), 6),
+            grid_neighbor(11, D::Down, &(0..13).collect::<Vec<_>>(), 6),
             12
         );
     }

@@ -151,7 +151,7 @@ pub(super) fn verify_process_match(
         .participants
         .iter()
         .filter_map(|participant| participant.passive_ids)
-        .map(|passives| format!("{}+{}", passives[0].0, passives[1].0))
+        .map(|passives| passives[0].0.to_string())
         .collect::<Vec<_>>()
         .join(",");
     let ultimate_ids = summary

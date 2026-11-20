@@ -28,8 +28,6 @@ use profile_transactions::{
 use super::{LobbyControlInbox, LobbyControlOutbox, RoutedPeer, ServerRoleResource};
 use crate::{
     VERSION,
-    builds::BuildCatalog,
-    combat::WeaponCatalog,
     config::GameMode,
     content::GameplayContentFingerprint,
     lobby::{duplicate_display_name, normalize_proposed_display_name},
@@ -78,27 +76,19 @@ pub struct LobbyBuildIdentity {
     pub snapshot: brawler_routing::MatchBuildSnapshot,
 }
 
-/// Resolve the embedded default build without installing any gameplay authority.
+/// Resolve the embedded default character pick without installing any gameplay authority.
 pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
-    let builds = BuildCatalog::embedded()?;
-    let weapons = WeaponCatalog::embedded()?;
-    let brawler = crate::profiles::SavedBrawler {
-        id: crate::profiles::SavedBrawlerId::new(1)
-            .map_err(|error| format!("invalid built-in brawler id: {error}"))?,
-        creation_ordinal: 1,
-        name: "Default Brawler".to_string(),
-        fighter_profile_id: crate::profiles::FighterProfileId(1),
-        weapon_base_id: crate::profiles::WeaponBaseId(1),
-        ultimate_id: crate::builds::UltimateDefinitionId(1),
-        passive_ids: [
-            crate::builds::PassiveDefinitionId(3),
-            crate::builds::PassiveDefinitionId(4),
-        ],
-        equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-        revision: crate::profiles::ProfileRevision::INITIAL,
-    };
-    let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
-        .map_err(|error| format!("built-in brawler resolution failed: {error:?}"))?;
+    let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load()?;
+    build_identity(catalogs.characters.default_choice(), catalogs.view())
+}
+
+/// Resolve one character pick into the identity and snapshot routing carries.
+fn build_identity(
+    choice: crate::characters::CharacterChoice,
+    catalogs: crate::characters::LoadoutCatalogs<'_>,
+) -> Result<LobbyBuildIdentity, String> {
+    let snapshot = crate::profiles::MatchCharacterSnapshot::from_choice(choice, catalogs)
+        .map_err(|error| format!("character pick resolution failed: {error:?}"))?;
     let accepted_identity = snapshot.accepted_identity;
     Ok(LobbyBuildIdentity {
         recipe_fingerprint: accepted_identity.recipe_fingerprint.0,
@@ -107,47 +97,26 @@ pub fn default_build_identity() -> Result<LobbyBuildIdentity, String> {
     })
 }
 
-/// Resolve the code-owned V11 Practice bot recipe through the ordinary saved-brawler path.
-fn practice_bot_build_identity() -> Result<LobbyBuildIdentity, String> {
-    let builds = BuildCatalog::embedded()?;
-    let weapons = WeaponCatalog::embedded()?;
-    let brawler = crate::profiles::SavedBrawler {
-        id: crate::profiles::SavedBrawlerId::new(u128::MAX)
-            .map_err(|error| format!("invalid canonical bot brawler id: {error}"))?,
-        creation_ordinal: u64::MAX,
-        name: "Practice Bot".to_string(),
-        fighter_profile_id: crate::profiles::FighterProfileId(1),
-        weapon_base_id: crate::profiles::WeaponBaseId(1),
-        ultimate_id: crate::builds::UltimateDefinitionId(1),
-        passive_ids: [
-            crate::builds::PassiveDefinitionId(3),
-            crate::builds::PassiveDefinitionId(4),
-        ],
-        equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-        revision: crate::profiles::ProfileRevision::INITIAL,
-    };
-    let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
-        .map_err(|error| format!("canonical bot brawler resolution failed: {error:?}"))?;
-    let accepted_identity = snapshot.accepted_identity;
-    Ok(LobbyBuildIdentity {
-        recipe_fingerprint: accepted_identity.recipe_fingerprint.0,
-        build_revision: accepted_identity.revision.0,
-        snapshot: snapshot.encode()?,
-    })
-}
-
+/// Practice bots take the roster in catalog order through the ordinary character path
+/// (`CharacterCatalog::practice_bot_choice`).
 fn practice_bot_rows(
     team_count: u8,
     players_per_team: u8,
 ) -> Result<Vec<brawler_routing::AllocateBot>, crate::lobby::PracticeStartRejection> {
     use crate::lobby::PracticeStartRejection as Rejection;
+    let catalogs =
+        crate::characters::EmbeddedLoadoutCatalogs::load().map_err(|_| Rejection::Internal)?;
     let roster_size = usize::from(team_count) * usize::from(players_per_team);
     let mut bots = Vec::with_capacity(roster_size.saturating_sub(1));
     for ordinal in 0..roster_size.saturating_sub(1) {
         let roster_index = ordinal + 1;
         let team = u8::try_from(roster_index / usize::from(players_per_team))
             .map_err(|_| Rejection::Internal)?;
-        let build = practice_bot_build_identity().map_err(|_| Rejection::Internal)?;
+        let build = build_identity(
+            catalogs.characters.practice_bot_choice(ordinal),
+            catalogs.view(),
+        )
+        .map_err(|_| Rejection::Internal)?;
         bots.push(brawler_routing::AllocateBot {
             player_id: PlayerId::new(
                 u64::MAX
@@ -802,7 +771,7 @@ impl LobbyState {
         session: &LobbySession,
         command: &crate::lobby::PracticeStartRequest,
         catalog: &catalog::ResolvedLobbyCatalog,
-        human_snapshot: crate::profiles::MatchBuildSnapshotV3,
+        human_snapshot: crate::profiles::MatchCharacterSnapshot,
         accepted_build: crate::builds::AcceptedBuildSummary,
     ) -> Result<crate::lobby::ReservationStarted, crate::lobby::PracticeStartRejection> {
         use crate::lobby::PracticeStartRejection as Rejection;
@@ -825,11 +794,6 @@ impl LobbyState {
         }
         let maps = crate::map::MapContentCatalog::embedded().map_err(|_| Rejection::Internal)?;
         let accepted_map = resolve_practice_map(command, game, &maps, catalog)?;
-        if human_snapshot.brawler_id != command.brawler_id
-            || human_snapshot.brawler_revision != command.brawler_revision
-        {
-            return Err(Rejection::InvalidBuild);
-        }
         let accepted_identity = human_snapshot.accepted_identity;
         let human_snapshot = human_snapshot.encode().map_err(|_| Rejection::Internal)?;
         let request_id = RequestId::new(self.next_request_id).ok_or(Rejection::Internal)?;
@@ -1467,7 +1431,7 @@ fn initialize_lobby_state(
     let profile_database_path = std::path::PathBuf::from(&manifest.profile_database_path);
     let profile_authority = crate::profiles::ProfileAuthority::start_with_catalog(
         profile_database_path,
-        catalog.brawler_catalog.clone(),
+        catalog.character_catalog.clone(),
     )
     .unwrap_or_else(|error| panic!("profile storage failed to start: {error}"));
     commands.insert_resource(profile_authority);
@@ -1616,8 +1580,7 @@ fn apply_queue_transactions(
     mut commands: Commands,
     mut state: ResMut<LobbyState>,
     mut queue: ResMut<QueueState>,
-    builds: Res<crate::builds::BuildCatalogResource>,
-    weapons: Res<crate::combat::WeaponCatalogResource>,
+    catalogs: crate::characters::LoadoutCatalogResources,
     authority: Res<crate::profiles::ProfileAuthority>,
     mut frame: ResMut<LobbyQueueFrame>,
     mut exit: MessageWriter<AppExit>,
@@ -1661,10 +1624,8 @@ fn apply_queue_transactions(
                         crate::lobby::QueueCommand::Join(join) => authority
                             .admitted_snapshot(
                                 session.netcode_client_id.get(),
-                                join.brawler_id,
-                                join.brawler_revision,
-                                &builds.0,
-                                &weapons.0,
+                                join.profile_revision,
+                                catalogs.view(),
                             )
                             .ok(),
                         crate::lobby::QueueCommand::Cancel(_) => None,
@@ -1675,8 +1636,7 @@ fn apply_queue_transactions(
                         command,
                         monotonic_millis(),
                         admitted,
-                        &builds.0,
-                        &weapons.0,
+                        catalogs.view(),
                     )
                 }
             };
@@ -1827,8 +1787,7 @@ fn apply_practice_start_requests(
     mut state: ResMut<LobbyState>,
     queue: Res<QueueState>,
     catalog: Res<catalog::ResolvedLobbyCatalog>,
-    builds: Res<crate::builds::BuildCatalogResource>,
-    weapons: Res<crate::combat::WeaponCatalogResource>,
+    catalogs: crate::characters::LoadoutCatalogResources,
     authority: Res<crate::profiles::ProfileAuthority>,
     mut formation: ResMut<ProductFormationState>,
     mut clients: Query<(
@@ -1881,10 +1840,8 @@ fn apply_practice_start_requests(
                     let snapshot = authority
                         .admitted_snapshot(
                             session.netcode_client_id.get(),
-                            command.brawler_id,
-                            command.brawler_revision,
-                            &builds.0,
-                            &weapons.0,
+                            command.profile_revision,
+                            catalogs.view(),
                         )
                         .map_err(|error| {
                             let rejection = match error {
@@ -1907,35 +1864,26 @@ fn apply_practice_start_requests(
                             warn!(
                                 client_id = session.netcode_client_id.get(),
                                 request_id = command.request_id.get(),
-                                brawler_id = ?command.brawler_id,
-                                brawler_revision = command.brawler_revision.get(),
+                                profile_revision = command.profile_revision.get(),
                                 cause = ?error,
                                 ?rejection,
                                 "practice build admission rejected"
                             );
                             rejection
                         })?;
-                    let resolved = snapshot.resolve(&builds.0, &weapons.0).map_err(|error| {
+                    let resolved = snapshot.resolve(catalogs.view()).map_err(|error| {
                         warn!(
                             client_id = session.netcode_client_id.get(),
                             request_id = command.request_id.get(),
-                            brawler_id = ?command.brawler_id,
-                            brawler_revision = command.brawler_revision.get(),
+                            profile_revision = command.profile_revision.get(),
                             cause = ?error,
                             "admitted practice build failed repeat resolution"
                         );
                         crate::lobby::PracticeStartRejection::IncompatibleBuild
                     })?;
                     let accepted = crate::builds::AcceptedBuildSummary {
-                        canonical_recipe: crate::builds::BrawlerBuildRecipe {
-                            weapon: crate::builds::WeaponChoice::Preset(
-                                crate::combat::WeaponPresetId(snapshot.weapon_base_id.0),
-                            ),
-                            ultimate: snapshot.ultimate_id,
-                            passives: snapshot.passive_ids,
-                        },
+                        character: snapshot.choice,
                         identity: resolved.identity,
-                        total_points: resolved.total_points,
                     };
                     state.create_practice_request(&session, &command, &catalog, snapshot, accepted)
                 },
@@ -2604,7 +2552,7 @@ mod tests {
         session: &LobbySession,
         command: &crate::lobby::PracticeStartRequest,
         catalog: &catalog::ResolvedLobbyCatalog,
-        snapshot: crate::profiles::MatchBuildSnapshotV3,
+        snapshot: crate::profiles::MatchCharacterSnapshot,
         accepted: crate::builds::AcceptedBuildSummary,
     ) {
         // Unknown, wrong-mode and unadvertised maps cannot allocate server capacity.
@@ -2668,8 +2616,7 @@ mod tests {
             .iter()
             .find(|game| game.id.as_str() == "hot-zone-3v3")
             .unwrap();
-        let builds = BuildCatalog::embedded().unwrap();
-        let weapons = WeaponCatalog::embedded().unwrap();
+        let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
         let command = crate::lobby::PracticeStartRequest {
             authored_map: None,
             map_preset_id: None,
@@ -2677,35 +2624,17 @@ mod tests {
             catalog_revision: catalog.revision,
             game_type_id: game.id.clone(),
             game_type_configuration_revision: game.configuration_revision,
-            brawler_id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
-            brawler_revision: crate::profiles::ProfileRevision::INITIAL,
+            profile_revision: crate::profiles::ProfileRevision::INITIAL,
         };
-        let brawler = crate::profiles::SavedBrawler {
-            id: command.brawler_id,
-            creation_ordinal: 1,
-            name: "Practice".into(),
-            fighter_profile_id: crate::profiles::FighterProfileId(1),
-            weapon_base_id: crate::profiles::WeaponBaseId(1),
-            ultimate_id: crate::builds::UltimateDefinitionId(1),
-            passive_ids: [
-                crate::builds::PassiveDefinitionId(3),
-                crate::builds::PassiveDefinitionId(4),
-            ],
-            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-            revision: command.brawler_revision,
-        };
-        let snapshot =
-            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
-                .unwrap();
-        let resolved = snapshot.resolve(&builds, &weapons).unwrap();
+        let snapshot = crate::profiles::MatchCharacterSnapshot::from_choice(
+            catalogs.characters.default_choice(),
+            catalogs.view(),
+        )
+        .unwrap();
+        let resolved = snapshot.resolve(catalogs.view()).unwrap();
         let accepted = crate::builds::AcceptedBuildSummary {
-            canonical_recipe: crate::builds::BrawlerBuildRecipe {
-                weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
-                ultimate: brawler.ultimate_id,
-                passives: brawler.passive_ids,
-            },
+            character: snapshot.choice,
             identity: resolved.identity,
-            total_points: resolved.total_points,
         };
 
         assert_practice_map_admission(&mut lobby, &session, &command, &catalog, snapshot, accepted);
@@ -2732,12 +2661,34 @@ mod tests {
         );
         assert_eq!(request.bots.iter().filter(|bot| bot.team == 0).count(), 2);
         assert_eq!(request.bots.iter().filter(|bot| bot.team == 1).count(), 3);
-        let canonical = practice_bot_build_identity().unwrap();
-        assert!(request.bots.iter().all(|bot| {
-            bot.recipe_fingerprint == canonical.recipe_fingerprint
-                && bot.build_revision == canonical.build_revision
-                && bot.build_snapshot == canonical.snapshot
-        }));
+        for (ordinal, bot) in request.bots.iter().enumerate() {
+            let expected = build_identity(
+                catalogs.characters.practice_bot_choice(ordinal),
+                catalogs.view(),
+            )
+            .unwrap();
+            assert_eq!(bot.recipe_fingerprint, expected.recipe_fingerprint);
+            assert_eq!(bot.build_revision, expected.build_revision);
+            assert_eq!(bot.build_snapshot, expected.snapshot);
+        }
+        let bot_characters: Vec<_> = request
+            .bots
+            .iter()
+            .map(|bot| {
+                crate::profiles::MatchCharacterSnapshot::decode(&bot.build_snapshot)
+                    .unwrap()
+                    .choice
+                    .character_id
+            })
+            .collect();
+        assert_eq!(
+            bot_characters,
+            catalogs.characters.characters[..5]
+                .iter()
+                .map(|character| character.id)
+                .collect::<Vec<_>>(),
+            "Practice bots take the roster in catalog order"
+        );
 
         lobby.pending = None;
         let mut authored_recipe = crate::map::MapContentCatalog::embedded()

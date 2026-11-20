@@ -252,7 +252,7 @@ fn server_rejected_fire_is_rejected_locally_and_authority_is_unchanged() {
 /// Client 0 casts Self Cloak (ultimate 3), whose activation sound is a launch.
 fn cloak_harness(delay: usize) -> Harness {
     let mut harness = active_harness_with(delay, |harness| {
-        harness.install_saved_brawler_loadout(0, 1, 3, [4, 6]);
+        harness.install_test_loadout(0, 1, 3, 4);
     });
     set_server_ability(&mut harness, |maximum| AbilityState {
         charge: maximum,
@@ -438,7 +438,7 @@ fn server_rejected_ultimate_is_rejected_locally_and_authority_is_unchanged() {
 /// Client 0 casts Dash (ultimate 1) with full charge.
 fn dash_harness(delay: usize) -> Harness {
     let mut harness = active_harness_with(delay, |harness| {
-        harness.install_saved_brawler_loadout(0, 1, 1, [4, 6]);
+        harness.install_test_loadout(0, 1, 1, 4);
     });
     set_server_ability_of(&mut harness, UltimateKind::Dash, |maximum| AbilityState {
         charge: maximum,

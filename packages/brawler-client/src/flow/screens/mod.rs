@@ -5,7 +5,6 @@ pub(super) mod confirmations;
 pub(super) mod connecting;
 pub(super) mod connection_shell;
 pub(super) mod dashboard;
-pub(super) mod equipment;
 pub(super) mod game_select;
 pub(super) mod map_maker;
 pub(super) mod match_loading;

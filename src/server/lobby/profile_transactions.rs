@@ -234,7 +234,7 @@ pub(super) fn process_profile_storage_results(
                 server_name: catalog.server_name.clone(),
                 catalog_revision: catalog.revision,
                 game_types: catalog.game_types.clone(),
-                brawler_catalog: Box::new(catalog.brawler_catalog.clone()),
+                character_catalog: Box::new(catalog.character_catalog.clone()),
                 profile: Box::new(profile),
             });
             publications.initial_pending = true;
@@ -281,23 +281,13 @@ pub(super) fn collect_profile_commands(
                     panic!("profile storage executor stopped")
                 }
                 Err(error) => sender.send::<ProfileChannel>(crate::profiles::ProfileOutcome {
-                    request_id: profile_command_request_id(&command),
+                    request_id: command.request_id,
                     decision: profile_command_error_decision(&error)
                         .expect("StorageStopped is handled as the fatal system boundary"),
                     snapshot: None,
                 }),
             }
         }
-    }
-}
-
-fn profile_command_request_id(command: &crate::profiles::ProfileCommand) -> u64 {
-    match command {
-        crate::profiles::ProfileCommand::CreateBrawler { request_id, .. }
-        | crate::profiles::ProfileCommand::EditBrawler { request_id, .. }
-        | crate::profiles::ProfileCommand::SelectBrawler { request_id, .. }
-        | crate::profiles::ProfileCommand::DeleteBrawler { request_id, .. }
-        | crate::profiles::ProfileCommand::EquipWeaponParts { request_id, .. } => *request_id,
     }
 }
 
@@ -340,75 +330,6 @@ pub(super) fn profile_authority_join_rejection(
 mod tests {
     use super::*;
 
-    fn brawler_id() -> crate::profiles::SavedBrawlerId {
-        crate::profiles::SavedBrawlerId::new(1).unwrap()
-    }
-
-    fn draft() -> crate::profiles::BrawlerDraft {
-        crate::profiles::BrawlerDraft {
-            name: "Test".into(),
-            fighter_profile_id: crate::profiles::FighterProfileId(1),
-            weapon_base_id: crate::profiles::WeaponBaseId(1),
-            ultimate_id: crate::builds::UltimateDefinitionId(1),
-            passive_ids: [
-                crate::builds::PassiveDefinitionId(3),
-                crate::builds::PassiveDefinitionId(4),
-            ],
-        }
-    }
-
-    #[test]
-    fn profile_command_request_ids_cover_every_variant() {
-        let revision = crate::profiles::ProfileRevision::INITIAL;
-        let commands = [
-            crate::profiles::ProfileCommand::CreateBrawler {
-                request_id: 1,
-                expected_profile_revision: revision,
-                draft: draft(),
-            },
-            crate::profiles::ProfileCommand::EditBrawler {
-                request_id: 2,
-                expected_profile_revision: revision,
-                brawler_id: brawler_id(),
-                expected_brawler_revision: revision,
-                edit: crate::profiles::BrawlerEdit {
-                    name: "Edited".into(),
-                    ultimate_id: crate::builds::UltimateDefinitionId(1),
-                    passive_ids: [
-                        crate::builds::PassiveDefinitionId(3),
-                        crate::builds::PassiveDefinitionId(4),
-                    ],
-                },
-            },
-            crate::profiles::ProfileCommand::SelectBrawler {
-                request_id: 3,
-                expected_profile_revision: revision,
-                brawler_id: brawler_id(),
-            },
-            crate::profiles::ProfileCommand::DeleteBrawler {
-                request_id: 4,
-                expected_profile_revision: revision,
-                brawler_id: brawler_id(),
-                expected_brawler_revision: revision,
-            },
-            crate::profiles::ProfileCommand::EquipWeaponParts {
-                request_id: 5,
-                expected_profile_revision: revision,
-                brawler_id: brawler_id(),
-                expected_brawler_revision: revision,
-                equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-            },
-        ];
-
-        assert_eq!(
-            commands
-                .iter()
-                .map(profile_command_request_id)
-                .collect::<Vec<_>>(),
-            vec![1, 2, 3, 4, 5]
-        );
-    }
-
     #[test]
     fn profile_load_and_authority_errors_keep_exact_wire_mappings() {
         use crate::profiles::{ProfileAuthorityError as Error, ProfileDecision as Decision};
@@ -417,14 +338,8 @@ mod tests {
             Decision::Accepted,
             Decision::InvalidRequest,
             Decision::StaleRevision,
-            Decision::MissingBrawler,
-            Decision::CapacityReached,
             Decision::QueueLocked,
             Decision::TemporarilyUnavailable,
-            Decision::MissingPart,
-            Decision::PartAlreadyEquipped,
-            Decision::IncompatibleWeapon,
-            Decision::IncompatibleBuild,
         ] {
             assert_eq!(
                 profile_load_rejection(&decision),

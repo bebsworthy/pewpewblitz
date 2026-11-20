@@ -1,9 +1,6 @@
 //! Authenticated dashboard snapshot and product-action presentation.
 use super::scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible};
-use super::{
-    brawlers::ultimate_name,
-    shared::{FlowButton, FlowNavigation, FlowRoot},
-};
+use super::shared::{FlowButton, FlowNavigation, FlowRoot};
 use crate::ui::theme::{ACCENT, INK, PANEL, PANEL_RAISED, TEXT, font};
 use crate::{
     ClientLobbyMembership, RuntimeLobbyTarget,
@@ -162,19 +159,7 @@ pub(in crate::flow) fn spawn_dashboard(
         .take()
         .filter(|message| message != "Profile saved.");
     let admission_pending = queue.pending().is_some() || practice.pending() || profile.pending();
-    let selected_brawler = membership.profile.selected_brawler_id.and_then(|id| {
-        membership
-            .profile
-            .brawlers
-            .iter()
-            .find(|brawler| brawler.id == id)
-    });
-    let build_name =
-        selected_brawler.map_or("CREATE YOUR FIRST BRAWLER", |brawler| brawler.name.as_str());
-    let build_summary = selected_brawler.map_or_else(
-        || "Choose a permanent fighter profile and weapon base".to_string(),
-        |brawler| dashboard_build_summary(brawler, &membership.brawler_catalog),
-    );
+    let (build_name, build_summary) = dashboard_character_copy(membership);
     let game_summary = dashboard_team_summary(game);
     let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
         snapshot.formation_availability
@@ -323,11 +308,7 @@ pub(in crate::flow) fn spawn_dashboard(
                     Button,
                     FlowButton {
                         index: DASHBOARD_BUILD_INDEX,
-                        action: if selected_brawler.is_some() {
-                            FlowUiAction::OpenBrawlerList
-                        } else {
-                            FlowUiAction::CreateBrawler
-                        },
+                        action: FlowUiAction::OpenBrawlers,
                         error_action: false,
                     },
                     Node {
@@ -390,11 +371,7 @@ pub(in crate::flow) fn spawn_dashboard(
                             AccessibleLabel::new(build_accessible.clone()),
                             FlowButton {
                                 index: DASHBOARD_BUILD_INDEX,
-                                action: if selected_brawler.is_some() {
-                                    FlowUiAction::OpenBrawlerList
-                                } else {
-                                    FlowUiAction::CreateBrawler
-                                },
+                                action: FlowUiAction::OpenBrawlers,
                                 error_action: false,
                             },
                             Node {
@@ -419,11 +396,7 @@ pub(in crate::flow) fn spawn_dashboard(
                             shell_icon(button, assets.as_deref(), 5, 38.0, TEXT);
                             button.spawn((
                                 DashboardBrawlerActionLabel,
-                                Text::new(if selected_brawler.is_some() {
-                                    "VIEW BRAWLERS"
-                                } else {
-                                    "CREATE BRAWLER"
-                                }),
+                                Text::new("VIEW BRAWLERS"),
                                 font(assets.as_deref(), 24.0),
                                 TextColor(TEXT),
                             ));
@@ -542,9 +515,7 @@ pub(in crate::flow) fn spawn_dashboard(
                         },
                         width: percent(33),
                         primary: true,
-                        disabled: capacity_occupied
-                            || admission_pending
-                            || selected_brawler.is_none(),
+                        disabled: capacity_occupied || admission_pending,
                         assets: assets.as_deref(),
                         icon: assets
                             .as_deref()
@@ -563,7 +534,7 @@ pub(in crate::flow) fn spawn_dashboard(
                         },
                         width: percent(21),
                         primary: false,
-                        disabled: admission_pending || selected_brawler.is_none(),
+                        disabled: admission_pending,
                         assets: assets.as_deref(),
                         icon: assets
                             .as_deref()
@@ -640,12 +611,7 @@ pub(in crate::flow) fn update_dashboard_live_facts(
         Has<DashboardBrawlerSummaryLabel>,
         Has<DashboardBrawlerActionLabel>,
     )>,
-    mut action_buttons: Query<(
-        Entity,
-        &DashboardButtonStyle,
-        &mut FlowButton,
-        Option<&AccessibleLabel>,
-    )>,
+    mut action_buttons: Query<(Entity, &DashboardButtonStyle, Option<&AccessibleLabel>)>,
 ) {
     if *flow.get() != ClientFlow::Dashboard {
         return;
@@ -662,45 +628,19 @@ pub(in crate::flow) fn update_dashboard_live_facts(
         return;
     };
     let copy = dashboard_team_summary(game);
-    let selected_brawler = membership.profile.selected_brawler_id.and_then(|id| {
-        membership
-            .profile
-            .brawlers
-            .iter()
-            .find(|brawler| brawler.id == id)
-    });
-    let brawler_accessible = selected_brawler.map_or_else(
-        || "Create your first brawler".to_string(),
-        |brawler| {
-            format!(
-                "View brawlers: {}, {}",
-                brawler.name,
-                dashboard_build_summary(brawler, &membership.brawler_catalog)
-            )
-        },
-    );
+    let (character_name, character_summary) = dashboard_character_copy(membership);
+    let brawler_accessible = format!("View brawlers: {character_name}, {character_summary}");
     for (mut text, _, is_summary, _, _, is_brawler_name, is_brawler_summary, is_brawler_action) in
         &mut texts
     {
         if is_brawler_action {
-            text.0 = if selected_brawler.is_some() {
-                "VIEW BRAWLERS"
-            } else {
-                "CREATE BRAWLER"
-            }
-            .to_string();
+            "VIEW BRAWLERS".clone_into(&mut text.0);
         } else if is_summary {
             text.0.clone_from(&copy);
         } else if is_brawler_name {
-            text.0 = selected_brawler.map_or_else(
-                || "CREATE YOUR FIRST BRAWLER".to_string(),
-                |brawler| brawler.name.to_uppercase(),
-            );
+            text.0 = character_name.to_uppercase();
         } else if is_brawler_summary {
-            text.0 = selected_brawler.map_or_else(
-                || "Choose a permanent fighter profile and weapon base".to_string(),
-                |brawler| dashboard_build_summary(brawler, &membership.brawler_catalog),
-            );
+            text.0.clone_from(&character_summary);
         }
     }
     let capacity_occupied = queue.snapshot().is_some_and(|snapshot| {
@@ -708,7 +648,6 @@ pub(in crate::flow) fn update_dashboard_live_facts(
             == brawler::lobby::FormationAvailability::ProductMatchOccupied
     });
     let admission_pending = queue.pending().is_some() || practice.pending() || profile.pending();
-    let profile_empty = selected_brawler.is_none();
     let play_copy = if queue.pending().is_some() {
         "Joining match; Play unavailable"
     } else if capacity_occupied {
@@ -722,13 +661,13 @@ pub(in crate::flow) fn update_dashboard_live_facts(
         "Practice"
     };
     let busy_suffix = "; unavailable while admission is pending";
-    for (entity, style, mut button, current_label) in &mut action_buttons {
+    for (entity, style, current_label) in &mut action_buttons {
         let disabled = match style {
             DashboardButtonStyle::Preview
             | DashboardButtonStyle::Build
-            | DashboardButtonStyle::Mode => admission_pending,
-            DashboardButtonStyle::Practice => admission_pending || profile_empty,
-            DashboardButtonStyle::Play => capacity_occupied || admission_pending || profile_empty,
+            | DashboardButtonStyle::Mode
+            | DashboardButtonStyle::Practice => admission_pending,
+            DashboardButtonStyle::Play => capacity_occupied || admission_pending,
             DashboardButtonStyle::Header => false,
         };
         if disabled {
@@ -744,11 +683,6 @@ pub(in crate::flow) fn update_dashboard_live_facts(
                 if admission_pending { busy_suffix } else { "" }
             ),
             DashboardButtonStyle::Preview | DashboardButtonStyle::Build => {
-                button.action = if profile_empty {
-                    FlowUiAction::CreateBrawler
-                } else {
-                    FlowUiAction::OpenBrawlerList
-                };
                 format!(
                     "{brawler_accessible}{}",
                     if admission_pending { busy_suffix } else { "" }
@@ -1258,18 +1192,29 @@ fn shell_icon(
     }
 }
 
-fn dashboard_build_summary(
-    brawler: &brawler::profiles::SavedBrawler,
-    catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
-) -> String {
+/// The selected character's name and its kit summary: role and body, then weapon, ultimate and
+/// passive.
+fn dashboard_character_copy(membership: &ClientLobbyMembership) -> (String, String) {
+    let catalog = &membership.character_catalog;
+    let selection = membership.profile.selection();
+    let Some(character) = catalog.character(selection.character_id) else {
+        return ("Brawler".to_string(), String::new());
+    };
     let weapon = catalog
-        .weapon(brawler.weapon_base_id)
+        .weapon(character.weapon_base)
         .map_or("Weapon", |weapon| weapon.display_name.as_str());
-    format!(
-        "{} · {}\n{} passives · {} part slots",
-        weapon,
-        ultimate_name(catalog, brawler.ultimate_id),
-        brawler.passive_ids.len(),
-        catalog.limits.weapon_part_slot_count
+    let ultimate = catalog
+        .ultimate(selection.ultimate_id)
+        .map_or("Ultimate", |ultimate| ultimate.display_name.as_str());
+    let passive = catalog
+        .passive(selection.passive_id)
+        .map_or("Passive", |passive| passive.display_name.as_str());
+    (
+        character.display_name.clone(),
+        format!(
+            "{} · {}\n{weapon} · {ultimate} · {passive}",
+            character.role.label(),
+            character.body.label()
+        ),
     )
 }

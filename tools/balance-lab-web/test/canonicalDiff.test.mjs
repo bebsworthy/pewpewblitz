@@ -6,11 +6,11 @@ import {
 } from "../src/pages/balance-lab/lib/canonicalDiff.ts";
 
 const field = {
-  path: ["fighterProfiles", "default", "maximum_health"],
-  section: "fighters",
-  subjectKey: "default",
-  subjectLabel: "Default",
-  group: "Core stats",
+  path: ["heist", "safe_maximum_health"],
+  section: "world-objects",
+  subjectKey: "safe",
+  subjectLabel: "Safe",
+  group: "Durability",
   label: "Maximum health",
   storageKind: "integer",
   storageScale: 1,
@@ -23,22 +23,22 @@ const field = {
 };
 
 const baseline = {
-  fighterProfiles: { default: { maximum_health: 100 } },
+  heist: { safe_maximum_health: 100 },
 };
 
 test("canonical differences include only values that differ from server defaults", () => {
   assert.deepEqual(canonicalDifferences([field], baseline, baseline), []);
-  const draft = { fighterProfiles: { default: { maximum_health: 125 } } };
+  const draft = { heist: { safe_maximum_health: 125 } };
   assert.deepEqual(canonicalDifferences([field], draft, baseline), [
     { field, serverDefault: 100, value: 125 },
   ]);
 });
 
 test("copied canonical differences are readable and retain their exact paths", () => {
-  const draft = { fighterProfiles: { default: { maximum_health: 125 } } };
+  const draft = { heist: { safe_maximum_health: 125 } };
   const text = formatCanonicalDifferences(canonicalDifferences([field], draft, baseline));
   assert.match(text, /^Balance Lab changes from server defaults/);
-  assert.match(text, /Fighters \/ Default \/ Core stats \/ Maximum health/);
-  assert.match(text, /\/fighterProfiles\/default\/maximum_health/);
+  assert.match(text, /World objects \/ Safe \/ Durability \/ Maximum health/);
+  assert.match(text, /\/heist\/safe_maximum_health/);
   assert.match(text, /100 -> 125 health/);
 });

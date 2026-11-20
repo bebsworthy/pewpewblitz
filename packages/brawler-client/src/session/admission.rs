@@ -465,9 +465,9 @@ fn validate_lobby_welcome(
                 || value.account_id != accepted.profile.account_id
         }),
         profile_invalid: accepted.profile.validate_bounded().is_err()
-            || accepted.brawler_catalog.validate().is_err()
+            || accepted.character_catalog.validate().is_err()
             || accepted
-                .brawler_catalog
+                .character_catalog
                 .validate_profile(&accepted.profile)
                 .is_err(),
     }
@@ -497,7 +497,7 @@ fn process_lobby_join_outcomes(
                 server_name,
                 catalog_revision,
                 game_types,
-                brawler_catalog,
+                character_catalog,
                 profile,
             } => {
                 let accepted = ClientLobbyMembership {
@@ -507,7 +507,7 @@ fn process_lobby_join_outcomes(
                     server_name,
                     catalog_revision,
                     game_types,
-                    brawler_catalog: *brawler_catalog,
+                    character_catalog: *character_catalog,
                     profile: *profile,
                 };
                 let validation = validate_lobby_welcome(

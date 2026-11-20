@@ -5,8 +5,6 @@
 
 use super::ServerRoleResource;
 use crate::{
-    builds::BuildCatalogResource,
-    combat::WeaponCatalogResource,
     map::{MapStartupSet, ResolvedMap, SpawnPointCatalog},
     matchplay::{MatchRoot, MatchState, SpawnCandidate, select_spawn},
     movement::MovementTuning,
@@ -39,9 +37,8 @@ fn install_manifest_bots(
     spawn_points: Res<SpawnPointCatalog>,
     resolved_map: Res<ResolvedMap>,
     movement_tuning: Res<MovementTuning>,
-    definitions: (Res<BuildCatalogResource>, Res<WeaponCatalogResource>),
+    catalogs: crate::characters::LoadoutCatalogResources,
 ) {
-    let (builds, weapon_catalog) = definitions;
     let Some(manifest) = role.manifest() else {
         return;
     };
@@ -50,15 +47,15 @@ fn install_manifest_bots(
     };
     let mut occupied = Vec::with_capacity(manifest.bots.len());
     for bot in &manifest.bots {
-        let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(&bot.build_snapshot)
+        let snapshot = crate::profiles::MatchCharacterSnapshot::decode(&bot.build_snapshot)
             .expect("validated bot build snapshot");
         #[cfg(feature = "balance-lab")]
         let loadout = snapshot
-            .resolve_revised_balance_lab_catalogs(&builds.0, &weapon_catalog.0)
+            .resolve_revised_balance_lab_catalogs(catalogs.view())
             .expect("validated Balance Lab bot build resolution");
         #[cfg(not(feature = "balance-lab"))]
         let loadout = snapshot
-            .resolve(&builds.0, &weapon_catalog.0)
+            .resolve(catalogs.view())
             .expect("validated bot build resolution");
         let player_id = PlayerId(bot.player_id.get());
         let network_entity_id = NetworkEntityId(bot.player_id.get());
@@ -78,7 +75,7 @@ fn install_manifest_bots(
             candidates,
             &occupied,
             team,
-            builds.0.fighter_body.radius * 2.0 + movement_tuning.skin_width,
+            catalogs.view().builds.fighter_body.radius * 2.0 + movement_tuning.skin_width,
             match_state.match_id,
             player_id,
             0,
@@ -87,7 +84,7 @@ fn install_manifest_bots(
         occupied.push((team, spawn_point.position));
         let entity = spawn_authoritative_fighter(
             &mut commands,
-            builds.0.fighter_body,
+            catalogs.view().builds.fighter_body,
             AuthoritativeFighterSpawnSpec {
                 player_id,
                 network_entity_id,

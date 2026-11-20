@@ -1,9 +1,8 @@
 //! Read-only projection of the admitted Practice roster for the operator UI.
 
 use crate::{
-    builds::BuildCatalog,
-    combat::WeaponCatalog,
-    profiles::{AdvertisedBrawlerCatalog, MatchBuildSnapshotV3},
+    characters::LoadoutCatalogs,
+    profiles::MatchCharacterSnapshot,
     weapon_parts::{
         CanonicalDamageOverTimeModifier, CanonicalScalarModifier, CanonicalSlowModifier,
         CanonicalWeaponModifiers,
@@ -115,10 +114,10 @@ pub(super) struct PlayerLoadoutView {
     display_name: String,
     team: u8,
     participant_type: ParticipantTypeView,
-    fighter_profile: LoadoutChoiceView,
+    character: LoadoutChoiceView,
     weapon_base: LoadoutChoiceView,
     ultimate: LoadoutChoiceView,
-    passives: [LoadoutChoiceView; 2],
+    passives: Vec<LoadoutChoiceView>,
     weapon_modifiers: WeaponModifiersView,
     cold_capacity: u16,
     cold_resistance_baseline_basis_points: u16,
@@ -131,10 +130,8 @@ pub(super) struct PlayerLoadoutView {
 
 pub(super) fn from_manifest(
     manifest: &brawler_routing::MatchManifestV1,
-    builds: &BuildCatalog,
-    weapons: &WeaponCatalog,
+    catalogs: LoadoutCatalogs<'_>,
 ) -> Result<Vec<PlayerLoadoutView>, String> {
-    let catalog = AdvertisedBrawlerCatalog::from_content(builds, weapons)?;
     let mut players = Vec::with_capacity(manifest.participants.len() + manifest.bots.len());
     for participant in &manifest.participants {
         players.push((
@@ -145,7 +142,7 @@ pub(super) fn from_manifest(
                 participant.team,
                 ParticipantTypeView::Human,
                 &participant.build_snapshot,
-                &catalog,
+                catalogs,
             )?,
         ));
     }
@@ -158,7 +155,7 @@ pub(super) fn from_manifest(
                 bot.team,
                 ParticipantTypeView::Bot,
                 &bot.build_snapshot,
-                &catalog,
+                catalogs,
             )?,
         ));
     }
@@ -172,93 +169,55 @@ fn player_view(
     team: u8,
     participant_type: ParticipantTypeView,
     encoded: &brawler_routing::MatchBuildSnapshot,
-    catalog: &AdvertisedBrawlerCatalog,
+    catalogs: LoadoutCatalogs<'_>,
 ) -> Result<PlayerLoadoutView, String> {
-    let snapshot = MatchBuildSnapshotV3::decode(encoded)?;
-    let fighter_profile = catalog
-        .fighter_profiles
-        .iter()
-        .find(|entry| entry.id == snapshot.fighter_profile_id)
-        .ok_or_else(|| "admitted player references an unknown fighter profile".to_string())?;
-    let weapon_base = catalog
-        .weapon_bases
-        .iter()
-        .find(|entry| entry.id == snapshot.weapon_base_id)
+    let snapshot = MatchCharacterSnapshot::decode(encoded)?;
+    let character = catalogs
+        .characters
+        .character(snapshot.choice.character_id)
+        .ok_or_else(|| "admitted player references an unknown character".to_string())?;
+    let recipe = catalogs
+        .characters
+        .loadout_recipe(snapshot.choice, catalogs.parts)
+        .map_err(|error| format!("admitted player pick is invalid: {error:?}"))?;
+    let resolved = catalogs
+        .resolve(snapshot.choice)
+        .map_err(|error| format!("admitted player pick does not resolve: {error:?}"))?;
+    let weapon_base = catalogs
+        .weapons
+        .preset(character.weapon.base)
         .ok_or_else(|| "admitted player references an unknown weapon base".to_string())?;
-    let ultimate = catalog
-        .ultimates
-        .iter()
-        .find(|entry| entry.id == snapshot.ultimate_id)
+    let ultimate = catalogs
+        .builds
+        .ultimate(snapshot.choice.ultimate_id)
         .ok_or_else(|| "admitted player references an unknown ultimate".to_string())?;
-    let passives = snapshot
-        .passive_ids
-        .map(|id| {
-            catalog
-                .passives
-                .iter()
-                .find(|entry| entry.id == id)
-                .map(|entry| choice(entry.id.0, &entry.key, &entry.display_name))
-                .ok_or_else(|| "admitted player references an unknown passive".to_string())
-        })
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?
-        .try_into()
-        .map_err(|_| "admitted player does not have exactly two passives".to_string())?;
-    let resistance_bonus = |kind| {
-        if snapshot.passive_ids.iter().any(|id| {
-            catalog
-                .passives
-                .iter()
-                .any(|entry| entry.id == *id && entry.kind == kind)
-        }) {
-            3_000
-        } else {
-            0
-        }
-    };
+    let passive = catalogs
+        .builds
+        .passive(snapshot.choice.passive_id)
+        .ok_or_else(|| "admitted player references an unknown passive".to_string())?;
+    let baseline = character.stats;
+    let stats = resolved.fighter_stats;
     Ok(PlayerLoadoutView {
         player_id: player_id.to_string(),
         display_name: display_name.to_string(),
         team,
         participant_type,
-        fighter_profile: choice(
-            fighter_profile.id.0,
-            &fighter_profile.key,
-            &fighter_profile.display_name,
-        ),
+        character: choice(character.id.0, &character.key, &character.display_name),
         weapon_base: choice(
             weapon_base.id.0,
             &weapon_base.key,
             &weapon_base.display_name,
         ),
         ultimate: choice(ultimate.id.0, &ultimate.key, &ultimate.display_name),
-        passives,
-        weapon_modifiers: snapshot.weapon_modifiers.into(),
-        cold_capacity: fighter_profile.stats.cold_capacity,
-        cold_resistance_baseline_basis_points: fighter_profile.stats.cold_resistance_basis_points,
-        poison_resistance_baseline_basis_points: fighter_profile
-            .stats
-            .poison_resistance_basis_points,
-        fire_resistance_baseline_basis_points: fighter_profile.stats.fire_resistance_basis_points,
-        cold_resistance_basis_points: fighter_profile
-            .stats
-            .cold_resistance_basis_points
-            .saturating_add(resistance_bonus(
-                crate::builds::PassiveKind::CryogenicInsulation,
-            ))
-            .min(6_000),
-        poison_resistance_basis_points: fighter_profile
-            .stats
-            .poison_resistance_basis_points
-            .saturating_add(resistance_bonus(
-                crate::builds::PassiveKind::FilteredCirculation,
-            ))
-            .min(6_000),
-        fire_resistance_basis_points: fighter_profile
-            .stats
-            .fire_resistance_basis_points
-            .saturating_add(resistance_bonus(crate::builds::PassiveKind::HeatShielding))
-            .min(6_000),
+        passives: vec![choice(passive.id.0, &passive.key, &passive.display_name)],
+        weapon_modifiers: recipe.weapon_modifiers.into(),
+        cold_capacity: stats.cold_capacity,
+        cold_resistance_baseline_basis_points: baseline.cold_resistance_basis_points,
+        poison_resistance_baseline_basis_points: baseline.poison_resistance_basis_points,
+        fire_resistance_baseline_basis_points: baseline.fire_resistance_basis_points,
+        cold_resistance_basis_points: stats.cold_resistance_basis_points,
+        poison_resistance_basis_points: stats.poison_resistance_basis_points,
+        fire_resistance_basis_points: stats.fire_resistance_basis_points,
     })
 }
 

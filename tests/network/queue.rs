@@ -72,8 +72,7 @@ fn queue_command_before_lobby_welcome_cannot_create_membership() {
             catalog_revision: brawler::lobby::CatalogRevision([1; 32]),
             game_type_id: brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
             game_type_configuration_revision: 1,
-            brawler_id: brawler::profiles::SavedBrawlerId::new(1).unwrap(),
-            brawler_revision: brawler::profiles::ProfileRevision::INITIAL,
+            profile_revision: brawler::profiles::ProfileRevision::INITIAL,
         }),
     });
 
@@ -117,18 +116,17 @@ pub(super) fn wait_for_product_lobby(harness: &mut Harness) {
                         .world()
                         .resource::<brawler_client::ClientProfileModel>()
                         .snapshot()
-                        .is_some_and(|profile| {
-                            profile.selected_brawler_id.is_some() && !profile.brawlers.is_empty()
-                        })
+                        .is_some()
             })
     });
 }
 
-pub(super) fn selected_brawler(
+/// The selected character pick and the profile revision a queue or Practice request names.
+pub(super) fn selected_pick(
     harness: &Harness,
     client_index: usize,
 ) -> (
-    brawler::profiles::SavedBrawlerId,
+    brawler::characters::CharacterChoice,
     brawler::profiles::ProfileRevision,
 ) {
     let profile = harness.clients[client_index]
@@ -136,15 +134,7 @@ pub(super) fn selected_brawler(
         .resource::<brawler_client::ClientProfileModel>()
         .snapshot()
         .expect("product lobby has delivered the authoritative profile");
-    let selected_id = profile
-        .selected_brawler_id
-        .expect("headless product client has created and selected a default brawler");
-    let selected = profile
-        .brawlers
-        .iter()
-        .find(|brawler| brawler.id == selected_id)
-        .expect("selected brawler belongs to the profile");
-    (selected.id, selected.revision)
+    (profile.selection(), profile.revision)
 }
 
 pub(super) fn start_product_join(harness: &mut Harness, client_index: usize, game_index: usize) {
@@ -160,17 +150,12 @@ pub(super) fn start_product_join(harness: &mut Harness, client_index: usize, gam
         game_type_id: Some(game.id),
         configuration_revision: Some(game.configuration_revision),
     };
-    let (brawler_id, brawler_revision) = selected_brawler(harness, client_index);
+    let (_, profile_revision) = selected_pick(harness, client_index);
     assert!(
         harness.clients[client_index]
             .world_mut()
             .resource_mut::<brawler_client::ClientQueueModel>()
-            .start_join(
-                &selection,
-                brawler_id,
-                brawler_revision,
-                std::time::Duration::ZERO,
-            )
+            .start_join(&selection, profile_revision, std::time::Duration::ZERO)
     );
 }
 
@@ -209,12 +194,12 @@ fn practice_request_bypasses_queue_and_starts_one_human_three_v_three_reservatio
         game_type_id: Some(game.id.clone()),
         configuration_revision: Some(game.configuration_revision),
     };
-    let (brawler_id, brawler_revision) = selected_brawler(&harness, 0);
+    let (_, profile_revision) = selected_pick(&harness, 0);
     assert!(
         harness.clients[0]
             .world_mut()
             .resource_mut::<brawler_client::ClientPracticeModel>()
-            .start(&selected, brawler_id, brawler_revision,)
+            .start(&selected, profile_revision)
     );
 
     harness.step_until(|harness| {

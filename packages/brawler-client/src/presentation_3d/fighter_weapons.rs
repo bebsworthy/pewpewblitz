@@ -2,7 +2,7 @@
 //!
 //! The primary weapon's replicated delivery picks a [`WeaponFamily`]; the authored client catalog
 //! `assets/catalogs/fighter_weapons.ron` maps each family to one original weapon GLB (built by
-//! `asset_src/weapons/build_weapons.py`) and its shell-preview framing. A [`HeldWeapon`] on an
+//! `asset_src/weapons/build_weapons.py`). A [`HeldWeapon`] on an
 //! imported Riff scene keeps exactly one weapon instance on the weapon socket and swaps it when the
 //! family changes, so a late or changed loadout never leaves a stale model in the hand. Riff's
 //! two-handed clips already bake the support hand onto each model's `grip_secondary` anchor, so no
@@ -17,10 +17,6 @@ const FIGHTER_WEAPON_CATALOG: &str =
 const FIGHTER_WEAPON_SCHEMA_VERSION: u16 = 1;
 /// Held weapons are original builds; a model outside this directory is refused.
 const WEAPON_MODEL_ROOT: &str = "brawler/models/original/weapons/";
-const MIN_PREVIEW_SCALE: f32 = 0.2;
-const MAX_PREVIEW_SCALE: f32 = 3.0;
-/// The preview centre is in the model's source units; weapons are under two units long.
-const MAX_PREVIEW_CENTER: f32 = 2.0;
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -34,16 +30,12 @@ struct FighterWeaponCatalogSource {
 struct FighterWeaponSource {
     family: WeaponFamily,
     model: String,
-    preview_scale: f32,
-    preview_center: (f32, f32, f32),
 }
 
-/// The held-weapon model and shell-preview framing of one family.
+/// The held-weapon model of one family.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FighterWeaponModel {
     pub(crate) model: String,
-    preview_scale: f32,
-    preview_center: Vec3,
 }
 
 /// Validated per-family held weapons, embedded from `assets/catalogs/fighter_weapons.ron`.
@@ -92,16 +84,6 @@ impl FighterWeaponCatalog {
     pub(crate) fn model(&self, family: WeaponFamily) -> &FighterWeaponModel {
         &self.weapons[family.index()]
     }
-
-    /// Centres and scales the family's model for the shell weapon preview camera.
-    pub(crate) fn preview_transform(&self, family: WeaponFamily) -> Transform {
-        let model = self.model(family);
-        Transform {
-            translation: -model.preview_center * model.preview_scale,
-            scale: Vec3::splat(model.preview_scale),
-            ..default()
-        }
-    }
 }
 
 fn validated(entry: FighterWeaponSource) -> Result<FighterWeaponModel, String> {
@@ -117,25 +99,7 @@ fn validated(entry: FighterWeaponSource) -> Result<FighterWeaponModel, String> {
             "fighter weapon {family:?} model {model:?} must be a GLB under {WEAPON_MODEL_ROOT}"
         ));
     }
-    if !entry.preview_scale.is_finite()
-        || !(MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE).contains(&entry.preview_scale)
-    {
-        return Err(format!(
-            "fighter weapon {family:?} preview_scale {} is outside {MIN_PREVIEW_SCALE}..={MAX_PREVIEW_SCALE}",
-            entry.preview_scale
-        ));
-    }
-    let center = Vec3::from(entry.preview_center);
-    if !center.is_finite() || center.abs().max_element() > MAX_PREVIEW_CENTER {
-        return Err(format!(
-            "fighter weapon {family:?} preview_center {center} is outside +-{MAX_PREVIEW_CENTER}"
-        ));
-    }
-    Ok(FighterWeaponModel {
-        model,
-        preview_scale: entry.preview_scale,
-        preview_center: center,
-    })
+    Ok(FighterWeaponModel { model })
 }
 
 /// The one weapon model attached to an imported fighter's weapon socket.
@@ -181,8 +145,8 @@ impl HeldWeapon {
 
 /// The family of an advertised weapon base; an unknown ID keeps the one-handed default.
 pub(crate) fn advertised_weapon_family(
-    catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
-    id: brawler::profiles::WeaponBaseId,
+    catalog: &brawler::profiles::AdvertisedCharacterCatalog,
+    id: brawler::combat::WeaponPresetId,
 ) -> WeaponFamily {
     catalog
         .weapon(id)
@@ -191,14 +155,14 @@ pub(crate) fn advertised_weapon_family(
         })
 }
 
-/// The family of the lobby profile's selected saved brawler (one-handed when none is selected).
+/// The family of the lobby profile's selected character's signature weapon (one-handed when the
+/// character is not advertised).
 pub(crate) fn selected_weapon_family(membership: &crate::ClientLobbyMembership) -> WeaponFamily {
-    let profile = &membership.profile;
-    profile
-        .selected_brawler_id
-        .and_then(|id| profile.brawlers.iter().find(|brawler| brawler.id == id))
-        .map_or(WeaponFamily::OneHanded, |brawler| {
-            advertised_weapon_family(&membership.brawler_catalog, brawler.weapon_base_id)
+    membership
+        .character_catalog
+        .character(membership.profile.selected_character_id)
+        .map_or(WeaponFamily::OneHanded, |character| {
+            advertised_weapon_family(&membership.character_catalog, character.weapon_base)
         })
 }
 

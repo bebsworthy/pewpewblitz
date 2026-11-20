@@ -1520,19 +1520,13 @@ fn lab_style_loadout(
     accent: VfxLabAccent,
     fingerprint: u64,
 ) -> brawler::builds::ResolvedMatchLoadout {
-    let mut loadout = brawler::builds::resolve_build_recipe(
-        &brawler::builds::BuildCatalog::embedded().expect("embedded build catalog is valid"),
-        &brawler::combat::WeaponCatalog::embedded().expect("embedded weapon catalog is valid"),
-        brawler::builds::BrawlerBuildRecipe {
-            weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(1)),
-            ultimate: brawler::builds::UltimateDefinitionId(1),
-            passives: [
-                brawler::builds::PassiveDefinitionId(1),
-                brawler::builds::PassiveDefinitionId(6),
-            ],
-        },
-    )
-    .expect("built-in VfxLab loadout resolves");
+    // The default roster pick (Riff: Pulse Sidearm) through the ordinary character path.
+    let catalogs =
+        brawler::characters::EmbeddedLoadoutCatalogs::load().expect("embedded catalogs are valid");
+    let mut loadout = catalogs
+        .view()
+        .resolve(catalogs.characters.default_choice())
+        .expect("built-in VfxLab loadout resolves");
     loadout.primary_weapon.recipe_fingerprint =
         brawler::combat::WeaponRecipeFingerprint(fingerprint);
     loadout.primary_weapon.recipe.payload_bundles[0].effects = vec![match accent {

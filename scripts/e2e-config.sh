@@ -1,7 +1,7 @@
 # Sourced by the routed product smokes and `scripts/check-e2e-config.sh`; not executable.
 #
 # Reads the authored values those smokes depend on instead of repeating them as literals:
-# diagnostic weapons from `content/catalogs/builds.ron` (BRL-xbq8) and game-type timing from
+# diagnostic character picks from `content/catalogs/builds.ron` (BRL-xbq8, BRL-egn6) and game-type timing from
 # `config/server/game-types.ron` (BRL-cb3x). Every reader fails closed: an empty answer means the
 # authored file changed shape, and the caller must stop rather than guess.
 
@@ -9,36 +9,35 @@
 # worker result and reap, the fresh lobby session, and the second queue Join (BRL-cb3x).
 e2e_requeue_margin_seconds=60
 
-# The authored diagnostic weapon rotation, `direct_diagnostic.weapon_base_ids`, space-separated.
-e2e_diagnostic_weapon_ids() {
+# The authored diagnostic character rotation, `direct_diagnostic.picks`, space-separated.
+e2e_diagnostic_character_ids() {
     awk '
         /direct_diagnostic:/ { in_policy = 1 }
-        in_policy && /weapon_base_ids:/ {
-            line = $0
-            while (match(line, /WeaponBaseId\([0-9]+\)/)) {
-                printf "%s%s", separator, substr(line, RSTART + 13, RLENGTH - 14)
-                separator = " "
-                line = substr(line, RSTART + RLENGTH)
-            }
-            exit
-        }
-    ' "$1/content/catalogs/builds.ron"
-}
-
-# The costed (saved-brawler selectable) weapon IDs in `weapon_costs`, space-separated.
-e2e_costed_weapon_ids() {
-    awk '
-        match($0, /weapon_id: WeaponPresetId\([0-9]+\)/) {
+        in_policy && /\]/ && !/CharacterId/ { exit }
+        in_policy && match($0, /character_id: CharacterId\([0-9]+\)/) {
             printf "%s%s", separator, substr($0, RSTART + 26, RLENGTH - 27)
             separator = " "
         }
     ' "$1/content/catalogs/builds.ron"
 }
 
-# The `--weapon-preset` for one 1-based client index: the authored diagnostic rotation, wrapped.
-e2e_diagnostic_weapon_for_client() {
+# Every roster character ID in `content/catalogs/characters.ron`, space-separated.
+e2e_roster_character_ids() {
+    awk '
+        match($0, /^ *id: CharacterId\([0-9]+\)/) {
+            line = substr($0, RSTART, RLENGTH)
+            sub(/^ *id: CharacterId\(/, "", line)
+            sub(/\)/, "", line)
+            printf "%s%s", separator, line
+            separator = " "
+        }
+    ' "$1/content/catalogs/characters.ron"
+}
+
+# The `--character` for one 1-based client index: the authored diagnostic rotation, wrapped.
+e2e_diagnostic_character_for_client() {
     # shellcheck disable=SC2086 # Word splitting the space-separated ID list is intended.
-    set -- "$2" $(e2e_diagnostic_weapon_ids "$1")
+    set -- "$2" $(e2e_diagnostic_character_ids "$1")
     e2e_client_index=$1
     shift
     [ "$#" -gt 0 ] || return 1

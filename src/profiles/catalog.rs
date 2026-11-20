@@ -1,15 +1,18 @@
-//! Server-authored, connection-scoped saved-brawler selection catalog.
+//! Server-authored, connection-scoped character-select catalog (BRL-egn6).
 
-use super::{
-    BrawlerDraft, BrawlerEdit, FighterProfileId, ProfileModelError, ProfileSnapshot, SavedBrawler,
-    WeaponBaseId,
-};
+use super::{AccountId, ProfileModelError, ProfileRevision, ProfileSnapshot};
 use crate::{
     builds::{
         BuildCatalog, PassiveDefinitionId, PassiveKind, ResolvedFighterStats,
         ULTIMATE_PARAMETER_BOUNDS, UltimateDefinitionId, UltimateKind, UltimateParameters,
     },
-    combat::{EngineWeaponLimits, WeaponCatalog, WeaponConfiguration, WeaponRecipePolicy},
+    characters::{
+        CHARACTER_OPTION_COUNT, CharacterBody, CharacterCatalog, CharacterChoice, CharacterId,
+        CharacterRole, MAX_CHARACTERS,
+    },
+    combat::{
+        EngineWeaponLimits, WeaponCatalog, WeaponConfiguration, WeaponPresetId, WeaponRecipePolicy,
+    },
     content::fnv1a64,
 };
 use serde::{
@@ -18,36 +21,35 @@ use serde::{
 };
 use std::collections::HashSet;
 
-pub const MAX_ADVERTISED_FIGHTER_PROFILES: usize = 16;
+pub const MAX_ADVERTISED_CHARACTERS: usize = MAX_CHARACTERS;
 pub const MAX_ADVERTISED_WEAPON_BASES: usize = crate::combat::MAX_WEAPON_PRESETS;
 pub const MAX_ADVERTISED_ULTIMATES: usize = crate::builds::MAX_ULTIMATE_DEFINITIONS;
 pub const MAX_ADVERTISED_PASSIVES: usize = crate::builds::MAX_PASSIVE_DEFINITIONS;
-pub const MAX_ADVERTISED_BRAWLER_CATALOG_BYTES: usize = 16 * 1024;
+pub const MAX_ADVERTISED_CHARACTER_CATALOG_BYTES: usize = 16 * 1024;
 
-const ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION: u16 = 5;
+const ADVERTISED_CHARACTER_CATALOG_FORMAT_VERSION: u16 = 6;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BrawlerCatalogRevision(pub u64);
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AdvertisedBrawlerLimits {
-    pub maximum_saved_brawlers: u8,
-    pub weapon_part_slot_count: u8,
-}
+pub struct CharacterCatalogRevision(pub u64);
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct AdvertisedFighterProfile {
-    pub id: FighterProfileId,
+pub struct AdvertisedCharacter {
+    pub id: CharacterId,
     #[serde(deserialize_with = "deserialize_catalog_key")]
     pub key: String,
     #[serde(deserialize_with = "crate::lobby::deserialize_presentation_name")]
     pub display_name: String,
+    pub role: CharacterRole,
+    pub body: CharacterBody,
     pub stats: ResolvedFighterStats,
+    pub weapon_base: WeaponPresetId,
+    pub ultimate_options: [UltimateDefinitionId; CHARACTER_OPTION_COUNT],
+    pub passive_options: [PassiveDefinitionId; CHARACTER_OPTION_COUNT],
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct AdvertisedWeaponBase {
-    pub id: WeaponBaseId,
+    pub id: WeaponPresetId,
     #[serde(deserialize_with = "deserialize_catalog_key")]
     pub key: String,
     #[serde(deserialize_with = "crate::lobby::deserialize_presentation_name")]
@@ -74,17 +76,17 @@ pub struct AdvertisedPassive {
     #[serde(deserialize_with = "crate::lobby::deserialize_presentation_name")]
     pub display_name: String,
     pub kind: PassiveKind,
-    pub saved_brawler_selectable: bool,
 }
 
+/// The roster a lobby offers: every character with its stats, signature weapon base, and option
+/// IDs, plus the display metadata of the weapons, ultimates, and passives those reference.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct AdvertisedBrawlerCatalog {
-    pub revision: BrawlerCatalogRevision,
-    pub limits: AdvertisedBrawlerLimits,
+pub struct AdvertisedCharacterCatalog {
+    pub revision: CharacterCatalogRevision,
     pub fighter_body: crate::builds::FighterBody,
     pub weapon_policy: WeaponRecipePolicy,
-    #[serde(deserialize_with = "deserialize_fighter_profiles")]
-    pub fighter_profiles: Vec<AdvertisedFighterProfile>,
+    #[serde(deserialize_with = "deserialize_characters")]
+    pub characters: Vec<AdvertisedCharacter>,
     #[serde(deserialize_with = "deserialize_weapon_bases")]
     pub weapon_bases: Vec<AdvertisedWeaponBase>,
     #[serde(deserialize_with = "deserialize_ultimates")]
@@ -93,46 +95,38 @@ pub struct AdvertisedBrawlerCatalog {
     pub passives: Vec<AdvertisedPassive>,
 }
 
-impl AdvertisedBrawlerCatalog {
-    pub fn from_content(builds: &BuildCatalog, weapons: &WeaponCatalog) -> Result<Self, String> {
+impl AdvertisedCharacterCatalog {
+    pub fn from_content(
+        characters: &CharacterCatalog,
+        builds: &BuildCatalog,
+        weapons: &WeaponCatalog,
+    ) -> Result<Self, String> {
         builds.validate_weapon_references(weapons)?;
+        characters.validate()?;
         let mut catalog = Self {
-            revision: BrawlerCatalogRevision(0),
-            limits: AdvertisedBrawlerLimits {
-                maximum_saved_brawlers: u8::try_from(super::MAX_BRAWLERS_PER_PROFILE)
-                    .map_err(|_| "saved-brawler limit does not fit wire metadata")?,
-                weapon_part_slot_count: u8::try_from(crate::weapon_parts::WEAPON_PART_SLOT_COUNT)
-                    .map_err(
-                    |_| "weapon-part slot count does not fit wire metadata",
-                )?,
-            },
+            revision: CharacterCatalogRevision(0),
             fighter_body: builds.fighter_body,
             weapon_policy: weapons.recipe_policy.clone(),
-            fighter_profiles: vec![
-                AdvertisedFighterProfile {
-                    id: FighterProfileId(1),
-                    key: "default".into(),
-                    display_name: "Default".into(),
-                    stats: builds.fighter_profiles.default,
-                },
-                AdvertisedFighterProfile {
-                    id: FighterProfileId(2),
-                    key: "lightweight".into(),
-                    display_name: "Lightweight".into(),
-                    stats: builds.fighter_profiles.lightweight,
-                },
-                AdvertisedFighterProfile {
-                    id: FighterProfileId(3),
-                    key: "reinforced".into(),
-                    display_name: "Reinforced".into(),
-                    stats: builds.fighter_profiles.reinforced,
-                },
-            ],
+            characters: characters
+                .characters
+                .iter()
+                .map(|definition| AdvertisedCharacter {
+                    id: definition.id,
+                    key: definition.key.clone(),
+                    display_name: definition.display_name.clone(),
+                    role: definition.role,
+                    body: definition.body,
+                    stats: definition.stats,
+                    weapon_base: definition.weapon.base,
+                    ultimate_options: definition.ultimate_options,
+                    passive_options: definition.passive_options,
+                })
+                .collect(),
             weapon_bases: weapons
                 .presets
                 .iter()
                 .map(|definition| AdvertisedWeaponBase {
-                    id: WeaponBaseId(definition.id.0),
+                    id: definition.id,
                     key: definition.key.clone(),
                     display_name: definition.display_name.clone(),
                     configuration: definition.configuration.clone(),
@@ -157,10 +151,6 @@ impl AdvertisedBrawlerCatalog {
                     key: definition.key.clone(),
                     display_name: definition.display_name.clone(),
                     kind: definition.kind,
-                    saved_brawler_selectable: !matches!(
-                        definition.kind,
-                        PassiveKind::LightweightFrame | PassiveKind::ReinforcedFrame
-                    ),
                 })
                 .collect(),
         };
@@ -169,21 +159,26 @@ impl AdvertisedBrawlerCatalog {
         Ok(catalog)
     }
 
+    /// The embedded catalogs as one lobby would advertise them.
+    pub fn embedded() -> Result<Self, String> {
+        Self::from_content(
+            &CharacterCatalog::embedded()?,
+            &BuildCatalog::embedded()?,
+            &WeaponCatalog::embedded()?,
+        )
+    }
+
     pub fn validate(&self) -> Result<(), String> {
-        if self.limits.maximum_saved_brawlers == 0
-            || usize::from(self.limits.maximum_saved_brawlers) > super::MAX_BRAWLERS_PER_PROFILE
-            || usize::from(self.limits.weapon_part_slot_count)
-                != crate::weapon_parts::WEAPON_PART_SLOT_COUNT
-            || self.fighter_profiles.is_empty()
-            || self.fighter_profiles.len() > MAX_ADVERTISED_FIGHTER_PROFILES
+        if self.characters.is_empty()
+            || self.characters.len() > MAX_ADVERTISED_CHARACTERS
             || self.weapon_bases.is_empty()
             || self.weapon_bases.len() > MAX_ADVERTISED_WEAPON_BASES
             || self.ultimates.is_empty()
             || self.ultimates.len() > MAX_ADVERTISED_ULTIMATES
-            || self.passives.len() < 2
+            || self.passives.is_empty()
             || self.passives.len() > MAX_ADVERTISED_PASSIVES
         {
-            return Err("invalid advertised brawler catalog envelope".into());
+            return Err("invalid advertised character catalog envelope".into());
         }
         if !self.fighter_body.radius.is_finite()
             || !(crate::builds::MIN_FIGHTER_BODY_RADIUS..=crate::builds::MAX_FIGHTER_BODY_RADIUS)
@@ -192,7 +187,7 @@ impl AdvertisedBrawlerCatalog {
             return Err("invalid advertised fighter body".into());
         }
         validate_ordered_metadata(
-            self.fighter_profiles
+            self.characters
                 .iter()
                 .map(|definition| (definition.id.0, &definition.key, &definition.display_name)),
         )?;
@@ -211,22 +206,23 @@ impl AdvertisedBrawlerCatalog {
                 .iter()
                 .map(|definition| (definition.id.0, &definition.key, &definition.display_name)),
         )?;
-        if self.fighter_profiles.iter().any(|definition| {
-            definition.stats.maximum_health == 0
-                || !definition.stats.movement_speed.is_finite()
-                || definition.stats.movement_speed <= 0.0
-                || !definition.stats.reveal_proximity_radius.is_finite()
-                || definition.stats.reveal_proximity_radius
-                    < crate::builds::MIN_REVEAL_PROXIMITY_RADIUS
-                || definition.stats.reveal_proximity_radius
-                    > crate::builds::MAX_REVEAL_PROXIMITY_RADIUS
-                || definition.stats.cold_capacity == 0
-                || definition.stats.cold_capacity > crate::builds::MAX_COLD_CAPACITY
-                || definition.stats.cold_resistance_basis_points > 6_000
-                || definition.stats.poison_resistance_basis_points > 6_000
-                || definition.stats.fire_resistance_basis_points > 6_000
-        }) {
-            return Err("invalid advertised fighter profile".into());
+        for character in &self.characters {
+            crate::builds::validate_fighter_stats(&character.stats)
+                .map_err(|_| "invalid advertised character stats")?;
+            if self.weapon(character.weapon_base).is_none()
+                || character.ultimate_options[0] == character.ultimate_options[1]
+                || character.passive_options[0] == character.passive_options[1]
+                || character
+                    .ultimate_options
+                    .iter()
+                    .any(|id| self.ultimate(*id).is_none())
+                || character
+                    .passive_options
+                    .iter()
+                    .any(|id| self.passive(*id).is_none())
+            {
+                return Err("invalid advertised character kit".into());
+            }
         }
         for definition in &self.weapon_bases {
             definition.configuration.validate(
@@ -236,41 +232,25 @@ impl AdvertisedBrawlerCatalog {
             )?;
         }
         validate_ultimate_parameters(&self.ultimates)?;
-        let selectable_passives = self
-            .passives
-            .iter()
-            .filter(|definition| definition.saved_brawler_selectable)
-            .count();
-        if selectable_passives < 2
-            || self.passives.iter().any(|definition| {
-                definition.saved_brawler_selectable
-                    && matches!(
-                        definition.kind,
-                        PassiveKind::LightweightFrame | PassiveKind::ReinforcedFrame
-                    )
-            })
-        {
-            return Err("invalid saved-brawler passive eligibility".into());
-        }
         if self.revision != self.expected_revision()? {
-            return Err("advertised brawler catalog revision mismatch".into());
+            return Err("advertised character catalog revision mismatch".into());
         }
         let bytes = postcard::to_allocvec(self).map_err(|error| error.to_string())?;
-        if bytes.len() > MAX_ADVERTISED_BRAWLER_CATALOG_BYTES {
-            return Err("advertised brawler catalog exceeds its wire bound".into());
+        if bytes.len() > MAX_ADVERTISED_CHARACTER_CATALOG_BYTES {
+            return Err("advertised character catalog exceeds its wire bound".into());
         }
         Ok(())
     }
 
     #[must_use]
-    pub fn fighter(&self, id: FighterProfileId) -> Option<&AdvertisedFighterProfile> {
-        self.fighter_profiles
+    pub fn character(&self, id: CharacterId) -> Option<&AdvertisedCharacter> {
+        self.characters
             .iter()
             .find(|definition| definition.id == id)
     }
 
     #[must_use]
-    pub fn weapon(&self, id: WeaponBaseId) -> Option<&AdvertisedWeaponBase> {
+    pub fn weapon(&self, id: WeaponPresetId) -> Option<&AdvertisedWeaponBase> {
         self.weapon_bases
             .iter()
             .find(|definition| definition.id == id)
@@ -286,95 +266,99 @@ impl AdvertisedBrawlerCatalog {
         self.passives.iter().find(|definition| definition.id == id)
     }
 
-    pub fn selectable_passives(&self) -> impl Iterator<Item = &AdvertisedPassive> {
-        self.passives
-            .iter()
-            .filter(|definition| definition.saved_brawler_selectable)
+    /// Whether `choice` names an advertised character and one of each of its options.
+    #[must_use]
+    pub fn accepts(&self, choice: CharacterChoice) -> bool {
+        self.character(choice.character_id)
+            .is_some_and(|character| {
+                character.ultimate_options.contains(&choice.ultimate_id)
+                    && character.passive_options.contains(&choice.passive_id)
+            })
     }
 
-    pub fn validate_draft(&self, draft: &BrawlerDraft) -> Result<(), ProfileModelError> {
-        self.validate_recipe(
-            draft.fighter_profile_id,
-            draft.weapon_base_id,
-            draft.ultimate_id,
-            draft.passive_ids,
+    /// A character's first ultimate and first passive.
+    #[must_use]
+    pub const fn default_choice_for(character: &AdvertisedCharacter) -> CharacterChoice {
+        CharacterChoice {
+            character_id: character.id,
+            ultimate_id: character.ultimate_options[0],
+            passive_id: character.passive_options[0],
+        }
+    }
+
+    /// The pick a press on `character_id` selects: the profile's remembered options for it, or
+    /// its defaults.
+    #[must_use]
+    pub fn choice_for(
+        &self,
+        profile: &ProfileSnapshot,
+        character_id: CharacterId,
+    ) -> Option<CharacterChoice> {
+        let character = self.character(character_id)?;
+        Some(
+            profile
+                .choice(character_id)
+                .filter(|choice| self.accepts(*choice))
+                .unwrap_or_else(|| Self::default_choice_for(character)),
         )
     }
 
-    pub fn validate_edit(&self, edit: &BrawlerEdit) -> Result<(), ProfileModelError> {
-        self.validate_mutable_recipe(edit.ultimate_id, edit.passive_ids)
+    /// Builds the wire profile from stored rows: drops picks this catalog no longer offers and
+    /// falls back to the first character with its defaults when the selection is gone.
+    pub fn profile_from_stored(
+        &self,
+        account_id: AccountId,
+        revision: ProfileRevision,
+        selected: Option<CharacterId>,
+        stored: impl IntoIterator<Item = CharacterChoice>,
+    ) -> ProfileSnapshot {
+        let mut choices: Vec<_> = stored
+            .into_iter()
+            .filter(|choice| self.accepts(*choice))
+            .collect();
+        choices.sort_by_key(|choice| choice.character_id);
+        choices.dedup_by_key(|choice| choice.character_id);
+        choices.truncate(MAX_CHARACTERS);
+        let selected_character_id = selected
+            .filter(|id| self.character(*id).is_some())
+            .unwrap_or(self.characters[0].id);
+        if !choices
+            .iter()
+            .any(|choice| choice.character_id == selected_character_id)
+            && let Some(character) = self.character(selected_character_id)
+        {
+            choices.push(Self::default_choice_for(character));
+            choices.sort_by_key(|choice| choice.character_id);
+        }
+        ProfileSnapshot {
+            account_id,
+            revision,
+            selected_character_id,
+            choices,
+        }
     }
 
     pub fn validate_profile(&self, profile: &ProfileSnapshot) -> Result<(), ProfileModelError> {
-        profile.validate_structure()?;
-        if profile.brawlers.len() > usize::from(self.limits.maximum_saved_brawlers) {
-            return Err(ProfileModelError::TooManyBrawlers);
+        profile.validate()?;
+        if profile.choices.iter().all(|choice| self.accepts(*choice)) {
+            Ok(())
+        } else {
+            Err(ProfileModelError::InvalidChoice)
         }
-        for brawler in &profile.brawlers {
-            self.validate_brawler(brawler)?;
-        }
-        Ok(())
     }
 
-    pub fn validate_brawler(&self, brawler: &SavedBrawler) -> Result<(), ProfileModelError> {
-        brawler.validate_structure()?;
-        self.validate_recipe(
-            brawler.fighter_profile_id,
-            brawler.weapon_base_id,
-            brawler.ultimate_id,
-            brawler.passive_ids,
-        )
-    }
-
-    fn validate_recipe(
-        &self,
-        fighter: FighterProfileId,
-        weapon: WeaponBaseId,
-        ultimate: UltimateDefinitionId,
-        passives: [PassiveDefinitionId; 2],
-    ) -> Result<(), ProfileModelError> {
-        if self.fighter(fighter).is_none() {
-            return Err(ProfileModelError::UnknownFighterProfile);
-        }
-        if self.weapon(weapon).is_none() {
-            return Err(ProfileModelError::UnknownWeaponBase);
-        }
-        self.validate_mutable_recipe(ultimate, passives)
-    }
-
-    fn validate_mutable_recipe(
-        &self,
-        ultimate: UltimateDefinitionId,
-        passives: [PassiveDefinitionId; 2],
-    ) -> Result<(), ProfileModelError> {
-        if self.ultimate(ultimate).is_none() {
-            return Err(ProfileModelError::UnknownUltimate);
-        }
-        if passives.iter().any(|id| {
-            self.passive(*id)
-                .is_none_or(|definition| !definition.saved_brawler_selectable)
-        }) {
-            return Err(ProfileModelError::UnknownPassive);
-        }
-        if passives[0] == passives[1] {
-            return Err(ProfileModelError::DuplicatePassive);
-        }
-        Ok(())
-    }
-
-    fn expected_revision(&self) -> Result<BrawlerCatalogRevision, String> {
+    fn expected_revision(&self) -> Result<CharacterCatalogRevision, String> {
         let bytes = postcard::to_allocvec(&(
-            ADVERTISED_BRAWLER_CATALOG_FORMAT_VERSION,
-            self.limits,
+            ADVERTISED_CHARACTER_CATALOG_FORMAT_VERSION,
             self.fighter_body,
             &self.weapon_policy,
-            &self.fighter_profiles,
+            &self.characters,
             &self.weapon_bases,
             &self.ultimates,
             &self.passives,
         ))
         .map_err(|error| error.to_string())?;
-        Ok(BrawlerCatalogRevision(fnv1a64(&bytes)))
+        Ok(CharacterCatalogRevision(fnv1a64(&bytes)))
     }
 }
 
@@ -520,7 +504,7 @@ fn validate_ordered_metadata<'a>(
             || crate::lobby::validate_presentation_name(display_name).is_err()
             || !keys.insert(key)
         {
-            return Err("invalid advertised brawler metadata".into());
+            return Err("invalid advertised character metadata".into());
         }
         previous = Some(id);
     }
@@ -555,7 +539,7 @@ where
             if valid_key(value) {
                 Ok(value.to_owned())
             } else {
-                Err(E::custom("invalid advertised brawler catalog key"))
+                Err(E::custom("invalid advertised character catalog key"))
             }
         }
     }
@@ -606,13 +590,11 @@ where
     deserializer.deserialize_seq(BoundedVecVisitor::<T, MAXIMUM>(core::marker::PhantomData))
 }
 
-fn deserialize_fighter_profiles<'de, D>(
-    deserializer: D,
-) -> Result<Vec<AdvertisedFighterProfile>, D::Error>
+fn deserialize_characters<'de, D>(deserializer: D) -> Result<Vec<AdvertisedCharacter>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    deserialize_bounded_vec::<D, _, MAX_ADVERTISED_FIGHTER_PROFILES>(deserializer)
+    deserialize_bounded_vec::<D, _, MAX_ADVERTISED_CHARACTERS>(deserializer)
 }
 
 fn deserialize_weapon_bases<'de, D>(deserializer: D) -> Result<Vec<AdvertisedWeaponBase>, D::Error>
@@ -641,12 +623,8 @@ mod tests {
     use super::*;
     use crate::builds::ElementalFieldEffect;
 
-    fn embedded() -> AdvertisedBrawlerCatalog {
-        AdvertisedBrawlerCatalog::from_content(
-            &BuildCatalog::embedded().unwrap(),
-            &WeaponCatalog::embedded().unwrap(),
-        )
-        .unwrap()
+    fn embedded() -> AdvertisedCharacterCatalog {
+        AdvertisedCharacterCatalog::embedded().unwrap()
     }
 
     fn advertised(kind: UltimateKind) -> AdvertisedUltimate {
@@ -781,37 +759,71 @@ mod tests {
             Some("Demolition Strike")
         );
         assert!(
-            postcard::to_allocvec(&catalog).unwrap().len() <= MAX_ADVERTISED_BRAWLER_CATALOG_BYTES
+            postcard::to_allocvec(&catalog).unwrap().len()
+                <= MAX_ADVERTISED_CHARACTER_CATALOG_BYTES
         );
         catalog.validate().unwrap();
     }
 
     #[test]
-    fn catalog_validation_and_selection_do_not_assume_contiguous_ids() {
-        let mut catalog = embedded();
-        catalog.fighter_profiles[0].id = FighterProfileId(10);
-        catalog.fighter_profiles[1].id = FighterProfileId(20);
-        catalog.fighter_profiles[2].id = FighterProfileId(30);
-        catalog.weapon_bases[0].id = WeaponBaseId(10);
-        catalog.weapon_bases[1].id = WeaponBaseId(20);
-        catalog.weapon_bases[2].id = WeaponBaseId(30);
-        catalog.weapon_bases[3].id = WeaponBaseId(40);
-        catalog.weapon_bases[4].id = WeaponBaseId(50);
-        catalog.weapon_bases[5].id = WeaponBaseId(60);
-        catalog.weapon_bases[6].id = WeaponBaseId(70);
-        catalog.revision = catalog.expected_revision().unwrap();
-        catalog.validate().unwrap();
-        let draft = BrawlerDraft {
-            name: "Sparse IDs".into(),
-            fighter_profile_id: FighterProfileId(20),
-            weapon_base_id: WeaponBaseId(30),
-            ultimate_id: catalog.ultimates[0].id,
-            passive_ids: [
-                catalog.selectable_passives().next().unwrap().id,
-                catalog.selectable_passives().nth(1).unwrap().id,
-            ],
+    fn choices_are_accepted_only_from_the_characters_own_options() {
+        let catalog = embedded();
+        let riff = catalog.character(CharacterId(1)).unwrap().clone();
+        let default = AdvertisedCharacterCatalog::default_choice_for(&riff);
+        assert!(catalog.accepts(default));
+        let mut foreign_ultimate = default;
+        foreign_ultimate.ultimate_id = UltimateDefinitionId(2);
+        assert!(!catalog.accepts(foreign_ultimate));
+        let mut foreign_passive = default;
+        foreign_passive.passive_id = PassiveDefinitionId(1);
+        assert!(!catalog.accepts(foreign_passive));
+        let mut unknown = default;
+        unknown.character_id = CharacterId(999);
+        assert!(!catalog.accepts(unknown));
+    }
+
+    #[test]
+    fn stored_profiles_are_normalized_against_the_catalog() {
+        let catalog = embedded();
+        let account = AccountId::new(7).unwrap();
+        let fresh = catalog.profile_from_stored(account, ProfileRevision::INITIAL, None, []);
+        assert_eq!(fresh.selected_character_id, CharacterId(1));
+        assert_eq!(
+            fresh.selection(),
+            AdvertisedCharacterCatalog::default_choice_for(&catalog.characters[0])
+        );
+        let sumi = CharacterChoice {
+            character_id: CharacterId(7),
+            ultimate_id: UltimateDefinitionId(7),
+            passive_id: PassiveDefinitionId(7),
         };
-        catalog.validate_draft(&draft).unwrap();
+        let stale = CharacterChoice {
+            character_id: CharacterId(2),
+            ultimate_id: UltimateDefinitionId(1),
+            passive_id: PassiveDefinitionId(9),
+        };
+        let stored = catalog.profile_from_stored(
+            account,
+            ProfileRevision::INITIAL,
+            Some(CharacterId(7)),
+            [stale, sumi],
+        );
+        assert_eq!(stored.selection(), sumi);
+        assert_eq!(stored.choices, [sumi]);
+        catalog.validate_profile(&stored).unwrap();
+        let gone = catalog.profile_from_stored(
+            account,
+            ProfileRevision::INITIAL,
+            Some(CharacterId(200)),
+            [sumi],
+        );
+        assert_eq!(gone.selected_character_id, CharacterId(1));
+        assert_eq!(gone.choices.len(), 2);
+        assert_eq!(
+            catalog.choice_for(&gone, CharacterId(7)),
+            Some(sumi),
+            "a remembered pick survives a lost selection"
+        );
     }
 
     #[test]
@@ -819,13 +831,13 @@ mod tests {
         let catalog = embedded();
         let mut variants = Vec::new();
         let mut changed = catalog.clone();
-        changed.limits.maximum_saved_brawlers -= 1;
-        variants.push(changed);
-        let mut changed = catalog.clone();
         changed.weapon_policy.max_capacity -= 1;
         variants.push(changed);
         let mut changed = catalog.clone();
-        changed.fighter_profiles[0].display_name.push('!');
+        changed.characters[0].display_name.push('!');
+        variants.push(changed);
+        let mut changed = catalog.clone();
+        changed.characters[0].stats.maximum_health += 1;
         variants.push(changed);
         let mut changed = catalog.clone();
         changed.weapon_bases[0].display_name.push('!');

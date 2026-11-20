@@ -4,7 +4,7 @@ import { buildEditorMatrix } from "../src/pages/balance-lab/lib/editorMatrix.ts"
 
 const field = (overrides = {}) => ({
   path: ["fighterProfiles", "default", "maximum_health"],
-  section: "fighters",
+  section: "passives",
   comparisonKey: "maximum_health",
   subjectKey: "default",
   subjectLabel: "Default",
@@ -44,7 +44,7 @@ test("builds stable subject columns and aligned rows in manifest order", () => {
       unit: "world units/s",
     }),
   ];
-  const matrix = buildEditorMatrix(fields, "fighters");
+  const matrix = buildEditorMatrix(fields, "passives");
   assert.deepEqual(matrix.subjects.map(({ key }) => key), ["default", "lightweight"]);
   assert.deepEqual(matrix.groups[0].rows.map(({ key }) => key), [
     "maximum_health",
@@ -75,7 +75,7 @@ test("preserves sparse subject and row intersections", () => {
 
 test("rejects duplicate subject and comparison row cells", () => {
   assert.throws(
-    () => buildEditorMatrix([field(), field({ path: ["duplicate"] })], "fighters"),
+    () => buildEditorMatrix([field(), field({ path: ["duplicate"] })], "passives"),
     /Duplicate comparison cell/,
   );
 });
@@ -89,7 +89,7 @@ test("rejects incompatible fields sharing a comparison row", () => {
         subjectLabel: "Lightweight",
         unit: "seconds",
       }),
-    ], "fighters"),
+    ], "passives"),
     /Incompatible comparison row/,
   );
 });

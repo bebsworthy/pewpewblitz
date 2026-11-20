@@ -933,17 +933,14 @@ fn ecs_framing_writes_the_aspect_fair_field_of_view() {
 fn preset_loadout(preset: u16) -> ResolvedMatchLoadout {
     let builds = brawler::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = brawler::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
-    brawler::builds::resolve_build_recipe(
+    brawler::builds::resolve_loadout(
         &builds,
         &weapons,
-        brawler::builds::BrawlerBuildRecipe {
-            weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(preset)),
-            ultimate: brawler::builds::UltimateDefinitionId(1),
-            passives: [
-                brawler::builds::PassiveDefinitionId(1),
-                brawler::builds::PassiveDefinitionId(6),
-            ],
-        },
+        brawler::builds::LoadoutRecipe::test_default(
+            brawler::combat::WeaponPresetId(preset),
+            brawler::builds::UltimateDefinitionId(1),
+            brawler::builds::PassiveDefinitionId(6),
+        ),
     )
     .expect("preset loadout resolves")
 }

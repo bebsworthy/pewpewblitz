@@ -19,150 +19,6 @@ fn rand_nonce() -> u128 {
     u128::from_be_bytes(bytes)
 }
 
-#[cfg(feature = "server")]
-fn draft(name: &str, fighter: u16, weapon: u16) -> BrawlerDraft {
-    BrawlerDraft {
-        name: name.into(),
-        fighter_profile_id: FighterProfileId(fighter),
-        weapon_base_id: WeaponBaseId(weapon),
-        ultimate_id: UltimateDefinitionId(1),
-        passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
-    }
-}
-
-#[test]
-fn saved_brawler_resolution_uses_explicit_permanent_profile_and_base() {
-    let builds = crate::builds::BuildCatalog::embedded().unwrap();
-    let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let brawler = SavedBrawler {
-        id: SavedBrawlerId::new(9).unwrap(),
-        creation_ordinal: 1,
-        name: "Fast Brawler".into(),
-        fighter_profile_id: FighterProfileId(2),
-        weapon_base_id: WeaponBaseId(4),
-        ultimate_id: UltimateDefinitionId(4),
-        passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
-        equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-        revision: ProfileRevision::INITIAL,
-    };
-    let resolved = brawler.resolve_loadout(&builds, &weapons).unwrap();
-    assert_eq!(resolved.fighter_stats, builds.fighter_profiles.lightweight);
-    assert_eq!(
-        resolved.primary_weapon.source_preset_id,
-        Some(crate::combat::WeaponPresetId(4))
-    );
-    assert_eq!(resolved.total_points, 0);
-    assert_eq!(
-        resolved.ultimate.kind,
-        crate::builds::UltimateKind::RevealScan
-    );
-    let snapshot = MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons).unwrap();
-    let decoded = MatchBuildSnapshotV3::decode(&snapshot.encode().unwrap()).unwrap();
-    assert_eq!(decoded, snapshot);
-    assert_eq!(decoded.resolve(&builds, &weapons).unwrap(), resolved);
-}
-
-#[test]
-fn concealment_field_is_valid_for_saved_brawler_creation_and_editing() {
-    let draft = BrawlerDraft {
-        name: "Field Keeper".into(),
-        fighter_profile_id: FighterProfileId(1),
-        weapon_base_id: WeaponBaseId(1),
-        ultimate_id: UltimateDefinitionId(5),
-        passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
-    };
-    assert_eq!(draft.clone().normalized().unwrap(), draft);
-
-    let edit = BrawlerEdit {
-        name: "Field Keeper Edited".into(),
-        ultimate_id: UltimateDefinitionId(5),
-        passive_ids: [PassiveDefinitionId(4), PassiveDefinitionId(5)],
-    };
-    assert_eq!(edit.clone().normalized().unwrap(), edit);
-}
-
-#[test]
-fn demolition_strike_is_valid_for_saved_brawler_creation_and_editing() {
-    let draft = BrawlerDraft {
-        name: "Demolitionist".into(),
-        fighter_profile_id: FighterProfileId(1),
-        weapon_base_id: WeaponBaseId(3),
-        ultimate_id: UltimateDefinitionId(6),
-        passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
-    };
-    assert_eq!(draft.clone().normalized().unwrap(), draft);
-
-    let edit = BrawlerEdit {
-        name: "Demolitionist Edited".into(),
-        ultimate_id: UltimateDefinitionId(6),
-        passive_ids: [PassiveDefinitionId(4), PassiveDefinitionId(5)],
-    };
-    assert_eq!(edit.clone().normalized().unwrap(), edit);
-}
-
-#[test]
-fn v3_part_snapshot_stays_inside_the_routing_bound() {
-    let builds = crate::builds::BuildCatalog::embedded().unwrap();
-    let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let brawler = SavedBrawler {
-        id: SavedBrawlerId::new(91).unwrap(),
-        creation_ordinal: 1,
-        name: "Bounded".into(),
-        fighter_profile_id: FighterProfileId(1),
-        weapon_base_id: WeaponBaseId(1),
-        ultimate_id: UltimateDefinitionId(1),
-        passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
-        equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-        revision: ProfileRevision::INITIAL,
-    };
-    let catalog = crate::weapon_parts::WeaponPartCatalog::embedded().unwrap();
-    let modifiers = crate::weapon_parts::aggregate_weapon_part_effects(
-        catalog
-            .definitions
-            .iter()
-            .take(4)
-            .flat_map(|definition| definition.effects.iter().copied()),
-    )
-    .unwrap();
-    let snapshot =
-        MatchBuildSnapshotV3::from_brawler_and_modifiers(&brawler, modifiers, &builds, &weapons)
-            .unwrap();
-    assert!(snapshot.encode().is_ok());
-}
-
-#[test]
-fn maximum_profile_inventory_stays_inside_snapshot_bound() {
-    let account = AccountId::new(92).unwrap();
-    let mut profile = ProfileSnapshot::empty(account);
-    profile.inventory = (1_u128..=128)
-        .map(|id| crate::weapon_parts::WeaponPartInstance {
-            id: crate::weapon_parts::WeaponPartInstanceId::new(id).unwrap(),
-            inventory_ordinal: u64::try_from(id).unwrap(),
-            definition_id: crate::weapon_parts::WeaponPartDefinitionId(1),
-            display_name: "x".repeat(64),
-            effects: vec![
-                crate::weapon_parts::WeaponPartEffect::Capacity {
-                    flat: 1,
-                    percent_basis_points: 1,
-                },
-                crate::weapon_parts::WeaponPartEffect::Damage {
-                    flat: 1,
-                    percent_basis_points: 1,
-                },
-                crate::weapon_parts::WeaponPartEffect::FireInterval {
-                    flat_ticks: 1,
-                    percent_basis_points: 1,
-                },
-                crate::weapon_parts::WeaponPartEffect::RefillInterval {
-                    flat_ticks: 1,
-                    percent_basis_points: 1,
-                },
-            ],
-        })
-        .collect();
-    profile.validate_bounded().unwrap();
-}
-
 #[test]
 fn opaque_ids_have_one_canonical_text_form() {
     let id = AccountId::new(0x1234).unwrap();
@@ -181,216 +37,100 @@ fn opaque_ids_have_one_canonical_text_form() {
     );
 }
 
+fn catalog() -> AdvertisedCharacterCatalog {
+    AdvertisedCharacterCatalog::embedded().unwrap()
+}
+
+fn pick(character: u16, ultimate: u16, passive: u16) -> crate::characters::CharacterChoice {
+    crate::characters::CharacterChoice {
+        character_id: crate::characters::CharacterId(character),
+        ultimate_id: UltimateDefinitionId(ultimate),
+        passive_id: PassiveDefinitionId(passive),
+    }
+}
+
+#[test]
+fn match_snapshot_round_trips_inside_the_routing_bound_and_checks_identity() {
+    let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+    for character in &catalogs.characters.characters {
+        for ultimate in character.ultimate_options {
+            for passive in character.passive_options {
+                let choice = crate::characters::CharacterChoice {
+                    character_id: character.id,
+                    ultimate_id: ultimate,
+                    passive_id: passive,
+                };
+                let snapshot =
+                    MatchCharacterSnapshot::from_choice(choice, catalogs.view()).unwrap();
+                let decoded = MatchCharacterSnapshot::decode(&snapshot.encode().unwrap()).unwrap();
+                assert_eq!(decoded, snapshot);
+                let loadout = decoded.resolve(catalogs.view()).unwrap();
+                assert_eq!(loadout.character_id, character.id);
+                assert_eq!(
+                    loadout.primary_weapon.source_preset_id,
+                    Some(character.weapon.base)
+                );
+            }
+        }
+    }
+    let mut forged = MatchCharacterSnapshot::from_choice(pick(1, 1, 3), catalogs.view()).unwrap();
+    forged.choice = pick(1, 3, 3);
+    assert_eq!(
+        forged.resolve(catalogs.view()),
+        Err(crate::builds::BuildResolutionError::InvalidCombination)
+    );
+    assert!(
+        MatchCharacterSnapshot::from_choice(pick(1, 2, 3), catalogs.view()).is_err(),
+        "an ultimate the character does not offer is rejected"
+    );
+}
+
+#[test]
+fn maximum_profile_stays_inside_the_snapshot_bound() {
+    let catalog = catalog();
+    let profile = catalog.profile_from_stored(
+        AccountId::new(1).unwrap(),
+        ProfileRevision::INITIAL,
+        Some(crate::characters::CharacterId(9)),
+        catalog
+            .characters
+            .iter()
+            .map(AdvertisedCharacterCatalog::default_choice_for),
+    );
+    assert_eq!(profile.choices.len(), catalog.characters.len());
+    profile.validate_bounded().unwrap();
+}
+
 #[cfg(feature = "server")]
 #[test]
-fn sqlite_profile_crud_is_transactional_and_recovers() {
-    let database = path("crud");
+fn sqlite_remembers_one_pick_per_character_and_recovers() {
+    let database = path("picks");
     let account = AccountId::new(1).unwrap();
-    let first_id = SavedBrawlerId::new(10).unwrap();
-    let second_id = SavedBrawlerId::new(11).unwrap();
     let mut store = ProfileStorage::open(&database).unwrap();
     let empty = store.load_or_create(account).unwrap();
-    assert!(empty.brawlers.is_empty());
-    let first = store
-        .create_brawler(account, empty.revision, first_id, draft("Same Name", 1, 1))
+    assert_eq!(empty.selected_character_id, None);
+    assert!(empty.choices.is_empty());
+    let sumi = store
+        .select_character(account, empty.revision, pick(7, 7, 7))
         .unwrap();
-    assert_eq!(first.selected_brawler_id, Some(first_id));
-    let second = store
-        .create_brawler(account, first.revision, second_id, draft("Same Name", 3, 4))
+    assert_eq!(
+        sumi.selected_character_id,
+        Some(crate::characters::CharacterId(7))
+    );
+    let bumper = store
+        .select_character(account, sumi.revision, pick(9, 10, 3))
         .unwrap();
-    assert_eq!(second.brawlers.len(), 2);
-    assert_eq!(second.inventory.len(), 12);
-    let part_id = second.inventory[0].id;
-    let equipped = store
-        .equip_weapon_parts(
-            account,
-            second.revision,
-            first_id,
-            ProfileRevision::INITIAL,
-            [Some(part_id), None, None, None],
-        )
+    let sumi_again = store
+        .select_character(account, bumper.revision, pick(7, 5, 4))
         .unwrap();
-    assert_eq!(equipped.brawlers[0].equipped_part_ids[0], Some(part_id));
-    let selected = store
-        .select_brawler(account, equipped.revision, second_id)
-        .unwrap();
-    let deleted = store
-        .delete_brawler(
-            account,
-            selected.revision,
-            second_id,
-            ProfileRevision::INITIAL,
-        )
-        .unwrap();
-    assert_eq!(deleted.selected_brawler_id, Some(first_id));
+    assert_eq!(sumi_again.choices, [pick(7, 5, 4), pick(9, 10, 3)]);
+    assert!(matches!(
+        store.select_character(account, bumper.revision, pick(1, 1, 3)),
+        Err(ProfileStorageError::StaleRevision)
+    ));
     drop(store);
     let mut reopened = ProfileStorage::open(&database).unwrap();
-    assert_eq!(reopened.load_or_create(account).unwrap(), deleted);
-    std::fs::remove_file(database).unwrap();
-}
-
-#[cfg(feature = "server")]
-#[test]
-fn sqlite_persists_concealment_field_on_create_and_edit() {
-    let database = path("concealment-field");
-    let account = AccountId::new(102).unwrap();
-    let first_id = SavedBrawlerId::new(201).unwrap();
-    let second_id = SavedBrawlerId::new(202).unwrap();
-    let mut store = ProfileStorage::open(&database).unwrap();
-    let empty = store.load_or_create(account).unwrap();
-    let mut field_draft = draft("Created Field", 1, 1);
-    field_draft.ultimate_id = UltimateDefinitionId(5);
-    let created = store
-        .create_brawler(account, empty.revision, first_id, field_draft)
-        .unwrap();
-    assert_eq!(created.brawlers[0].ultimate_id, UltimateDefinitionId(5));
-
-    let with_second = store
-        .create_brawler(
-            account,
-            created.revision,
-            second_id,
-            draft("Editable", 2, 2),
-        )
-        .unwrap();
-    let editable = with_second
-        .brawlers
-        .iter()
-        .find(|brawler| brawler.id == second_id)
-        .unwrap();
-    let edited = store
-        .edit_brawler(
-            account,
-            with_second.revision,
-            second_id,
-            editable.revision,
-            BrawlerEdit {
-                name: editable.name.clone(),
-                ultimate_id: UltimateDefinitionId(5),
-                passive_ids: editable.passive_ids,
-            },
-        )
-        .unwrap();
-    assert_eq!(
-        edited
-            .brawlers
-            .iter()
-            .find(|brawler| brawler.id == second_id)
-            .unwrap()
-            .ultimate_id,
-        UltimateDefinitionId(5)
-    );
-    drop(store);
-    std::fs::remove_file(database).unwrap();
-}
-
-#[cfg(feature = "server")]
-#[test]
-fn stored_private_use_names_still_load_while_new_names_take_the_strict_rule() {
-    const STORED: &str = "Old\u{E000}Name";
-    let database = path("stored-pua-name");
-    let account = AccountId::new(103).unwrap();
-    let brawler_id = SavedBrawlerId::new(203).unwrap();
-    let mut store = ProfileStorage::open(&database).unwrap();
-    let empty = store.load_or_create(account).unwrap();
-    assert!(matches!(
-        store.create_brawler(account, empty.revision, brawler_id, draft(STORED, 1, 1)),
-        Err(ProfileStorageError::InvalidData(
-            ProfileModelError::InvalidName
-        ))
-    ));
-    store
-        .create_brawler(
-            account,
-            empty.revision,
-            brawler_id,
-            draft("Plain Name", 1, 1),
-        )
-        .unwrap();
-    drop(store);
-    // A name saved before BRL-aj2q tightened new input.
-    rusqlite::Connection::open(&database)
-        .unwrap()
-        .execute("UPDATE brawlers SET name=?1", [STORED])
-        .unwrap();
-
-    let mut store = ProfileStorage::open(&database).unwrap();
-    let loaded = store.load_or_create(account).unwrap();
-    assert_eq!(
-        loaded.brawlers[0].name, STORED,
-        "the stored name still loads"
-    );
-    loaded.brawlers[0].validate_structure().unwrap();
-    let stored = &loaded.brawlers[0];
-    let edit = |name: &str| BrawlerEdit {
-        name: name.into(),
-        ultimate_id: stored.ultimate_id,
-        passive_ids: stored.passive_ids,
-    };
-    assert!(matches!(
-        store.edit_brawler(
-            account,
-            loaded.revision,
-            brawler_id,
-            stored.revision,
-            edit("New\u{E000}Name"),
-        ),
-        Err(ProfileStorageError::InvalidData(
-            ProfileModelError::InvalidName
-        ))
-    ));
-    let kept = store
-        .edit_brawler(
-            account,
-            loaded.revision,
-            brawler_id,
-            stored.revision,
-            edit(STORED),
-        )
-        .unwrap();
-    assert_eq!(
-        kept.brawlers[0].name, STORED,
-        "keeping the stored name stays editable"
-    );
-    drop(store);
-    std::fs::remove_file(database).unwrap();
-}
-
-#[cfg(feature = "server")]
-#[test]
-fn deleting_selected_brawler_selects_next_creation_ordinal_and_wraps() {
-    let database = path("delete-successor");
-    let account = AccountId::new(101).unwrap();
-    let ids = [
-        SavedBrawlerId::new(101).unwrap(),
-        SavedBrawlerId::new(102).unwrap(),
-        SavedBrawlerId::new(103).unwrap(),
-    ];
-    let mut store = ProfileStorage::open(&database).unwrap();
-    let mut snapshot = store.load_or_create(account).unwrap();
-    for (index, id) in ids.into_iter().enumerate() {
-        snapshot = store
-            .create_brawler(
-                account,
-                snapshot.revision,
-                id,
-                draft(&format!("Brawler {}", index + 1), 1, 1),
-            )
-            .unwrap();
-    }
-    snapshot = store
-        .select_brawler(account, snapshot.revision, ids[1])
-        .unwrap();
-    snapshot = store
-        .delete_brawler(account, snapshot.revision, ids[1], ProfileRevision::INITIAL)
-        .unwrap();
-    assert_eq!(snapshot.selected_brawler_id, Some(ids[2]));
-
-    snapshot = store
-        .delete_brawler(account, snapshot.revision, ids[2], ProfileRevision::INITIAL)
-        .unwrap();
-    assert_eq!(snapshot.selected_brawler_id, Some(ids[0]));
-    drop(store);
+    assert_eq!(reopened.load_or_create(account).unwrap(), sumi_again);
     std::fs::remove_file(database).unwrap();
 }
 
@@ -403,12 +143,7 @@ fn sqlite_backup_restores_exact_profile() {
     let mut store = ProfileStorage::open(&database).unwrap();
     let empty = store.load_or_create(account).unwrap();
     let expected = store
-        .create_brawler(
-            account,
-            empty.revision,
-            SavedBrawlerId::new(20).unwrap(),
-            draft("Backup Brawler", 2, 3),
-        )
+        .select_character(account, empty.revision, pick(4, 10, 2))
         .unwrap();
     backup_database(&database, &backup).unwrap();
     drop(store);
@@ -418,105 +153,162 @@ fn sqlite_backup_restores_exact_profile() {
     std::fs::remove_file(backup).unwrap();
 }
 
+/// Schema 3 (saved brawlers and parts) is retired without migration: its brawler and part tables
+/// go, every account starts at the default pick, and published maps stay.
 #[cfg(feature = "server")]
 #[test]
-fn sqlite_v1_profile_migrates_and_receives_starter_parts_once() {
-    let database = path("v1-migration");
+fn schema_3_retires_saved_brawlers_and_keeps_accounts_and_published_maps() {
+    let database = path("schema-3");
     let account = AccountId::new(77).unwrap();
     {
+        ProfileStorage::open(&database).unwrap();
         let connection = rusqlite::Connection::open(&database).unwrap();
         connection
             .execute_batch(
-                "CREATE TABLE profiles(account_id BLOB PRIMARY KEY CHECK(length(account_id)=16),revision INTEGER NOT NULL CHECK(revision>0),next_brawler_ordinal INTEGER NOT NULL CHECK(next_brawler_ordinal>0));
+                "DROP TABLE character_choices;
+                 ALTER TABLE profiles DROP COLUMN selected_character_id;
+                 ALTER TABLE profiles ADD COLUMN next_brawler_ordinal INTEGER NOT NULL DEFAULT 1 CHECK(next_brawler_ordinal>0);
+                 ALTER TABLE profiles ADD COLUMN starter_part_set INTEGER NOT NULL DEFAULT 0 CHECK(starter_part_set>=0);
                  CREATE TABLE brawlers(account_id BLOB NOT NULL CHECK(length(account_id)=16),brawler_id BLOB NOT NULL CHECK(length(brawler_id)=16),creation_ordinal INTEGER NOT NULL CHECK(creation_ordinal>0),name TEXT NOT NULL CHECK(length(name)<=96),fighter_profile_id INTEGER NOT NULL,weapon_base_id INTEGER NOT NULL,ultimate_id INTEGER NOT NULL,passive_1_id INTEGER NOT NULL,passive_2_id INTEGER NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),PRIMARY KEY(account_id,brawler_id),UNIQUE(account_id,creation_ordinal),FOREIGN KEY(account_id) REFERENCES profiles(account_id) ON DELETE CASCADE);
                  CREATE TABLE profile_selection(account_id BLOB PRIMARY KEY CHECK(length(account_id)=16),brawler_id BLOB NOT NULL CHECK(length(brawler_id)=16),FOREIGN KEY(account_id,brawler_id) REFERENCES brawlers(account_id,brawler_id) ON DELETE CASCADE);
-                 PRAGMA application_id=1112692556;
-                 PRAGMA user_version=1;",
+                 CREATE TABLE weapon_part_instances(account_id BLOB NOT NULL CHECK(length(account_id)=16),part_instance_id BLOB NOT NULL CHECK(length(part_instance_id)=16),inventory_ordinal INTEGER NOT NULL CHECK(inventory_ordinal>0),definition_id INTEGER NOT NULL CHECK(definition_id>0),display_name TEXT NOT NULL CHECK(length(display_name)<=64),effects BLOB NOT NULL CHECK(length(effects)<=128),PRIMARY KEY(account_id,part_instance_id),UNIQUE(account_id,inventory_ordinal),FOREIGN KEY(account_id) REFERENCES profiles(account_id) ON DELETE CASCADE);
+                 CREATE TABLE brawler_part_slots(account_id BLOB NOT NULL CHECK(length(account_id)=16),brawler_id BLOB NOT NULL CHECK(length(brawler_id)=16),slot_index INTEGER NOT NULL CHECK(slot_index BETWEEN 0 AND 3),part_instance_id BLOB NOT NULL CHECK(length(part_instance_id)=16),PRIMARY KEY(account_id,brawler_id,slot_index),UNIQUE(account_id,part_instance_id),FOREIGN KEY(account_id,brawler_id) REFERENCES brawlers(account_id,brawler_id) ON DELETE CASCADE,FOREIGN KEY(account_id,part_instance_id) REFERENCES weapon_part_instances(account_id,part_instance_id) ON DELETE RESTRICT);
+                 PRAGMA user_version=3;",
             )
             .unwrap();
         connection
             .execute(
-                "INSERT INTO profiles(account_id,revision,next_brawler_ordinal) VALUES(?1,1,1)",
+                "INSERT INTO profiles(account_id,revision,next_brawler_ordinal,starter_part_set) VALUES(?1,5,2,2)",
                 [account.to_bytes().as_slice()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO brawlers(account_id,brawler_id,creation_ordinal,name,fighter_profile_id,weapon_base_id,ultimate_id,passive_1_id,passive_2_id,revision) VALUES(?1,?2,1,'Old',1,1,1,3,4,1)",
+                [account.to_bytes().as_slice(), [7_u8; 16].as_slice()],
             )
             .unwrap();
     }
     let mut storage = ProfileStorage::open(&database).unwrap();
-    let migrated = storage.load_or_create(account).unwrap();
-    assert_eq!(migrated.revision.get(), 2);
-    assert_eq!(migrated.inventory.len(), 12);
-    assert_eq!(storage.load_or_create(account).unwrap(), migrated);
+    assert!(matches!(
+        storage
+            .submit_published_map(published_submission(account, "Kept", 0), PRE_APPROVAL)
+            .unwrap(),
+        PublishedMapSubmissionOutcome::Accepted { .. }
+    ));
+    let profile = storage.load_or_create(account).unwrap();
+    assert_eq!(profile.revision.get(), 5);
+    assert_eq!(profile.selected_character_id, None);
+    assert!(profile.choices.is_empty());
     drop(storage);
-    std::fs::remove_file(database).unwrap();
+    let mut reopened = ProfileStorage::open(&database).unwrap();
+    assert_eq!(reopened.list_published_maps(None).unwrap().len(), 1);
+    drop(reopened);
+
+    let ancient = path("schema-2");
+    {
+        let connection = rusqlite::Connection::open(&ancient).unwrap();
+        connection
+            .execute_batch("PRAGMA application_id=1112692556; PRAGMA user_version=2;")
+            .unwrap();
+    }
+    assert!(ProfileStorage::open(&ancient).is_err());
+    for file in [database, ancient] {
+        std::fs::remove_file(file).unwrap();
+    }
 }
 
 #[cfg(feature = "server")]
 #[test]
-fn existing_starter_inventory_receives_only_new_catalog_parts_once() {
-    let database = path("starter-set-revision");
-    let account = AccountId::new(78).unwrap();
-    let original_ids = {
-        let mut storage = ProfileStorage::open(&database).unwrap();
-        let snapshot = storage.load_or_create(account).unwrap();
-        snapshot
-            .inventory
-            .iter()
-            .take(8)
-            .map(|part| part.id)
-            .collect::<Vec<_>>()
+fn profile_authority_normalizes_picks_serializes_mutations_and_respects_the_queue_lock() {
+    let database = path("authority");
+    let account = AccountId::new(42).unwrap();
+    let mut authority = ProfileAuthority::start(database.clone()).unwrap();
+    authority.begin_load(7, account).unwrap();
+    assert_eq!(
+        authority.begin_load(8, account),
+        Err(ProfileAuthorityError::AccountInUse)
+    );
+    let (loads, _) = poll_authority(&mut authority);
+    let loaded = loads[0].result.as_ref().unwrap();
+    assert_eq!(loaded.account_id, account);
+    assert_eq!(
+        loaded.selection(),
+        pick(1, 1, 3),
+        "a new profile takes the default pick"
+    );
+
+    let foreign_option = ProfileCommand {
+        request_id: 1,
+        expected_profile_revision: loaded.revision,
+        choice: pick(1, 2, 3),
     };
-    {
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute(
-                "DELETE FROM weapon_part_instances WHERE account_id=?1 AND definition_id>=9",
-                [account.to_bytes().as_slice()],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "UPDATE profiles SET starter_part_set=1 WHERE account_id=?1",
-                [account.to_bytes().as_slice()],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "UPDATE weapon_part_instances SET display_name='Frosting Module' WHERE account_id=?1 AND definition_id=7",
-                [account.to_bytes().as_slice()],
-            )
-            .unwrap();
-    }
-    let mut storage = ProfileStorage::open(&database).unwrap();
-    let migrated = storage.load_or_create(account).unwrap();
-    assert_eq!(migrated.inventory.len(), 12);
     assert_eq!(
-        migrated
-            .inventory
-            .iter()
-            .take(8)
-            .map(|part| part.id)
-            .collect::<Vec<_>>(),
-        original_ids
+        authority.submit_command(7, foreign_option, false).unwrap(),
+        ProfileMutationSubmission::Immediate(ProfileOutcome {
+            request_id: 1,
+            decision: ProfileDecision::InvalidRequest,
+            snapshot: None,
+        })
+    );
+    let select = ProfileCommand {
+        request_id: 1,
+        expected_profile_revision: loaded.revision,
+        choice: pick(9, 10, 6),
+    };
+    assert_eq!(
+        authority.submit_command(7, select.clone(), false).unwrap(),
+        ProfileMutationSubmission::Pending
     );
     assert_eq!(
-        migrated
-            .inventory
-            .iter()
-            .skip(8)
-            .map(|part| part.definition_id.0)
-            .collect::<Vec<_>>(),
-        vec![9, 10, 11, 12]
+        authority.submit_command(7, select.clone(), false).unwrap(),
+        ProfileMutationSubmission::Immediate(ProfileOutcome {
+            request_id: 1,
+            decision: ProfileDecision::TemporarilyUnavailable,
+            snapshot: None,
+        })
     );
+    let (_, outcomes) = poll_authority(&mut authority);
+    assert_eq!(outcomes[0].1.decision, ProfileDecision::Accepted);
+    let snapshot = authority.snapshot(7).unwrap().clone();
+    assert_eq!(snapshot.selection(), pick(9, 10, 6));
+    assert!(matches!(
+        authority.submit_command(7, select, false).unwrap(),
+        ProfileMutationSubmission::Immediate(ProfileOutcome {
+            decision: ProfileDecision::Accepted,
+            ..
+        })
+    ));
+    let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+    let admitted = authority
+        .admitted_snapshot(7, snapshot.revision, catalogs.view())
+        .unwrap();
+    assert_eq!(admitted.choice, pick(9, 10, 6));
     assert_eq!(
-        migrated
-            .inventory
-            .iter()
-            .find(|part| part.definition_id.0 == 7)
-            .map(|part| part.display_name.as_str()),
-        Some("Kinetic Dampener")
+        authority.admitted_snapshot(7, ProfileRevision::INITIAL, catalogs.view()),
+        Err(ProfileAuthorityError::InvalidRequest),
+        "a queue request for a stale profile revision is rejected"
     );
-    assert_eq!(storage.load_or_create(account).unwrap(), migrated);
-    drop(storage);
+
+    let locked = ProfileCommand {
+        request_id: 2,
+        expected_profile_revision: snapshot.revision,
+        choice: pick(2, 8, 9),
+    };
+    assert!(matches!(
+        authority.submit_command(7, locked, true).unwrap(),
+        ProfileMutationSubmission::Immediate(ProfileOutcome {
+            decision: ProfileDecision::QueueLocked,
+            ..
+        })
+    ));
+
+    authority.remove_client(7);
+    assert_eq!(authority.account_holder(account), None);
+    authority.begin_load(8, account).unwrap();
+    let (loads, _) = poll_authority(&mut authority);
+    assert_eq!(loads[0].result.as_ref().unwrap(), &snapshot);
+    drop(authority);
     std::fs::remove_file(database).unwrap();
 }
 
@@ -548,7 +340,7 @@ fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
             .pragma_update(None, "application_id", 0x4252_574c_i32)
             .unwrap();
         connection
-            .pragma_update(None, "user_version", 4_i32)
+            .pragma_update(None, "user_version", 5_i32)
             .unwrap();
     }
     assert!(ProfileStorage::open(&newer).is_err());
@@ -556,7 +348,7 @@ fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
     let version: i32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     drop(connection);
 
     let corrupt = path("corrupt");
@@ -583,170 +375,6 @@ fn poll_authority(
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     panic!("profile storage did not complete bounded test work");
-}
-
-#[cfg(feature = "server")]
-#[test]
-fn profile_authority_serializes_sessions_mutations_and_queue_lock() {
-    let database = path("authority");
-    let account = AccountId::new(42).unwrap();
-    let mut authority = ProfileAuthority::start(database.clone()).unwrap();
-    authority.begin_load(7, account).unwrap();
-    assert_eq!(
-        authority.begin_load(8, account),
-        Err(ProfileAuthorityError::AccountInUse)
-    );
-    assert_eq!(authority.account_holder(account), Some(7));
-    let (loads, _) = poll_authority(&mut authority);
-    assert_eq!(authority.account_holder(account), Some(7));
-    let loaded = loads[0].result.as_ref().unwrap();
-    assert_eq!(loaded.account_id, account);
-    assert!(loaded.brawlers.is_empty());
-    assert_eq!(loaded.inventory.len(), 12);
-
-    let unadvertised = ProfileCommand::CreateBrawler {
-        request_id: 1,
-        expected_profile_revision: ProfileRevision::INITIAL,
-        draft: draft("Tampered", 99, 3),
-    };
-    assert_eq!(
-        authority.submit_command(7, unadvertised, false).unwrap(),
-        ProfileMutationSubmission::Immediate(ProfileOutcome {
-            request_id: 1,
-            decision: ProfileDecision::InvalidRequest,
-            snapshot: None,
-        })
-    );
-    assert!(authority.snapshot(7).unwrap().brawlers.is_empty());
-
-    let create = ProfileCommand::CreateBrawler {
-        request_id: 1,
-        expected_profile_revision: ProfileRevision::INITIAL,
-        draft: draft("Authority", 2, 3),
-    };
-    assert_eq!(
-        authority.submit_command(7, create.clone(), false).unwrap(),
-        ProfileMutationSubmission::Pending
-    );
-    assert_eq!(
-        authority.submit_command(7, create.clone(), false).unwrap(),
-        ProfileMutationSubmission::Immediate(ProfileOutcome {
-            request_id: 1,
-            decision: ProfileDecision::TemporarilyUnavailable,
-            snapshot: None,
-        })
-    );
-    let (_, outcomes) = poll_authority(&mut authority);
-    assert_eq!(outcomes[0].1.decision, ProfileDecision::Accepted);
-    let snapshot = authority.snapshot(7).unwrap().clone();
-    assert_eq!(snapshot.brawlers.len(), 1);
-    let brawler = snapshot.brawlers[0].clone();
-
-    let replay = authority.submit_command(7, create, false).unwrap();
-    assert!(matches!(
-        replay,
-        ProfileMutationSubmission::Immediate(ProfileOutcome {
-            decision: ProfileDecision::Accepted,
-            ..
-        })
-    ));
-    let edit = ProfileCommand::EditBrawler {
-        request_id: 2,
-        expected_profile_revision: snapshot.revision,
-        brawler_id: brawler.id,
-        expected_brawler_revision: brawler.revision,
-        edit: BrawlerEdit {
-            name: "Queued edit".into(),
-            ultimate_id: brawler.ultimate_id,
-            passive_ids: brawler.passive_ids,
-        },
-    };
-    assert!(matches!(
-        authority.submit_command(7, edit, true).unwrap(),
-        ProfileMutationSubmission::Immediate(ProfileOutcome {
-            decision: ProfileDecision::QueueLocked,
-            ..
-        })
-    ));
-    assert_eq!(authority.snapshot(7).unwrap().brawlers[0], brawler);
-
-    authority.remove_client(7);
-    assert_eq!(authority.account_holder(account), None);
-    authority.begin_load(8, account).unwrap();
-    assert_eq!(authority.account_holder(account), Some(8));
-    let (loads, _) = poll_authority(&mut authority);
-    assert_eq!(loads[0].result.as_ref().unwrap().brawlers[0], brawler);
-    drop(authority);
-    std::fs::remove_file(database).unwrap();
-}
-
-#[cfg(feature = "server")]
-#[test]
-fn persisted_incompatible_resistances_load_for_repair_but_fail_admission_explicitly() {
-    let database = path("incompatible-resistance-repair");
-    let account = AccountId::new(43).unwrap();
-    let brawler_id = SavedBrawlerId::new(430).unwrap();
-    {
-        let mut storage = ProfileStorage::open(&database).unwrap();
-        let empty = storage.load_or_create(account).unwrap();
-        storage
-            .create_brawler(
-                account,
-                empty.revision,
-                brawler_id,
-                draft("Repair Me", 1, 1),
-            )
-            .unwrap();
-    }
-    {
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute(
-                "UPDATE brawlers SET passive_1_id=7,passive_2_id=8 WHERE account_id=?1 AND brawler_id=?2",
-                rusqlite::params![
-                    account.to_bytes().as_slice(),
-                    brawler_id.to_bytes().as_slice()
-                ],
-            )
-            .unwrap();
-    }
-    let mut authority = ProfileAuthority::start(database.clone()).unwrap();
-    authority.begin_load(9, account).unwrap();
-    let (loads, _) = poll_authority(&mut authority);
-    let loaded = loads[0].result.as_ref().unwrap();
-    let brawler = loaded
-        .brawlers
-        .iter()
-        .find(|item| item.id == brawler_id)
-        .unwrap();
-    let incompatible_edit = ProfileCommand::EditBrawler {
-        request_id: 1,
-        expected_profile_revision: loaded.revision,
-        brawler_id,
-        expected_brawler_revision: brawler.revision,
-        edit: BrawlerEdit {
-            name: brawler.name.clone(),
-            ultimate_id: brawler.ultimate_id,
-            passive_ids: [PassiveDefinitionId(7), PassiveDefinitionId(8)],
-        },
-    };
-    assert!(matches!(
-        authority
-            .submit_command(9, incompatible_edit, false)
-            .unwrap(),
-        ProfileMutationSubmission::Immediate(ProfileOutcome {
-            decision: ProfileDecision::IncompatibleBuild,
-            ..
-        })
-    ));
-    let builds = crate::builds::BuildCatalog::embedded().unwrap();
-    let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    assert_eq!(
-        authority.admitted_snapshot(9, brawler_id, brawler.revision, &builds, &weapons,),
-        Err(ProfileAuthorityError::IncompatibleBuild)
-    );
-    drop(authority);
-    std::fs::remove_file(database).unwrap();
 }
 
 #[cfg(feature = "server")]
@@ -929,33 +557,6 @@ fn automatic_moderation_stores_a_valid_submission_as_approved() {
     let rotation = storage.load_published_rotation().unwrap();
     assert_eq!(rotation.len(), 1);
     assert_eq!(rotation[0].published_map_id, published_map_id);
-    drop(storage);
-    std::fs::remove_file(database).unwrap();
-}
-
-#[cfg(feature = "server")]
-#[test]
-fn sqlite_v2_profiles_migrate_to_the_published_map_schema() {
-    let database = path("v2-migration");
-    let account = AccountId::new(92).unwrap();
-    {
-        let mut storage = ProfileStorage::open(&database).unwrap();
-        storage.load_or_create(account).unwrap();
-    }
-    {
-        let connection = rusqlite::Connection::open(&database).unwrap();
-        connection
-            .execute_batch("DROP TABLE published_maps; PRAGMA user_version=2;")
-            .unwrap();
-    }
-    let mut storage = ProfileStorage::open(&database).unwrap();
-    assert!(storage.list_published_maps(None).unwrap().is_empty());
-    assert!(matches!(
-        storage
-            .submit_published_map(published_submission(account, "Migrated", 0), PRE_APPROVAL)
-            .unwrap(),
-        PublishedMapSubmissionOutcome::Accepted { .. }
-    ));
     drop(storage);
     std::fs::remove_file(database).unwrap();
 }

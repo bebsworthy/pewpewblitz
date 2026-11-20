@@ -384,11 +384,11 @@ contract. Important ownership rules are:
 - `--auto-connect`, headless clients, and demo automation require an explicit `--client-id`;
 - `--server` prefills the interactive connection target and selects the automation endpoint;
 - `--window-size WIDTHxHEIGHT` reproduces supported visual-check layouts;
-- `--weapon-preset <ID>` (any costed weapon ID in `content/catalogs/builds.ron`), movement/aim/fire
+- `--character <ID>` (any roster character ID in `content/catalogs/characters.ron`), movement/aim/fire
   flags, demos, screenshots, and render reports are development or automation inputs rather than
-  alternate product flows. A routed automation client with `--weapon-preset` selects, or creates and
-  then selects, a saved brawler using that weapon through the ordinary profile commands before it
-  queues; `just v3-render-evidence` passes `BRAWLER_RENDER_WEAPON` to it. They exist only in a
+  alternate product flows. A routed automation client with `--character` selects that character
+  (with its remembered or default options) through the ordinary profile command before it queues;
+  `just v3-render-evidence` passes `BRAWLER_RENDER_CHARACTER` to it. They exist only in a
   `-p brawler-client --features automation` build; the player build (`-p brawler-client` without
   features, used by `just client` and `just run`) accepts only `--server`, `--transport routed-udp`, and
   `--window-size`;

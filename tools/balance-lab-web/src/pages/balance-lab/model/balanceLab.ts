@@ -4,7 +4,6 @@ export type EditorPath = (string | number)[];
 
 export type EditorSection =
   | "global"
-  | "fighters"
   | "weapons"
   | "ultimates"
   | "passives"
@@ -33,24 +32,6 @@ export interface EditorFieldDescriptor {
 export interface BalanceLabEditorManifest {
   schemaVersion: number;
   fields: EditorFieldDescriptor[];
-}
-
-export interface FighterStats extends JsonObject {
-  maximum_health: number;
-  movement_speed: number;
-  health_recovery_rate: number;
-  idle_attack_delay_ticks: number;
-  reveal_proximity_radius: number;
-  cold_capacity: number;
-  cold_resistance_basis_points: number;
-  poison_resistance_basis_points: number;
-  fire_resistance_basis_points: number;
-}
-
-export interface FighterProfiles extends JsonObject {
-  default: FighterStats;
-  lightweight: FighterStats;
-  reinforced: FighterStats;
 }
 
 export interface CombatConditionRules extends JsonObject {
@@ -125,7 +106,6 @@ export interface EffectTileParameter extends JsonObject {
 export interface BalanceLabSnapshot extends JsonObject {
   schemaVersion: number;
   conditionRules: CombatConditionRules;
-  fighterProfiles: FighterProfiles;
   weapons: WeaponTuning[];
   ultimates: UltimateTuning[];
   barrel: BarrelTuning;
@@ -180,10 +160,10 @@ export interface PlayerLoadout {
   displayName: string;
   team: number;
   participantType: "human" | "bot";
-  fighterProfile: LoadoutChoice;
+  character: LoadoutChoice;
   weaponBase: LoadoutChoice;
   ultimate: LoadoutChoice;
-  passives: [LoadoutChoice, LoadoutChoice];
+  passives: LoadoutChoice[];
   weaponModifiers: WeaponModifiers;
   coldCapacity: number;
   coldResistanceBaselineBasisPoints: number;

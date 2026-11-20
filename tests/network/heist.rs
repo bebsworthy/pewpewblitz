@@ -24,21 +24,17 @@ fn step_until_budget(
 }
 
 fn select_ready_and_activate(harness: &mut Harness, request_base: u64) {
-    select_ready_and_activate_with_loadouts(
-        harness,
-        request_base,
-        [(1, 1, [3, 4]), (2, 1, [3, 4])],
-    );
+    select_ready_and_activate_with_loadouts(harness, request_base, [(1, 1, 3), (2, 1, 3)]);
 }
 
 fn select_ready_and_activate_with_loadouts(
     harness: &mut Harness,
     request_base: u64,
-    loadouts: [(u16, u16, [u16; 2]); 2],
+    loadouts: [(u16, u16, u16); 2],
 ) {
     harness.step_until(|harness| (0..2).all(|index| harness.client_is_active(index)));
-    for (index, (weapon, ultimate, passives)) in loadouts.into_iter().enumerate() {
-        harness.install_saved_brawler_loadout(index, weapon, ultimate, passives);
+    for (index, (weapon, ultimate, passive)) in loadouts.into_iter().enumerate() {
+        harness.install_test_loadout(index, weapon, ultimate, passive);
     }
     harness.step_until(|harness| (0..2).all(|index| harness.loadout_is_ready(index)));
     let waiting = server_match(harness);
@@ -522,7 +518,7 @@ fn heist_objective_buffer_deduplicates_and_caps_authoritative_requests() {
 #[test]
 fn heist_sentry_uses_enemy_safe_only_when_no_hostile_fighter_qualifies() {
     let mut harness = Harness::new_heist_match(2);
-    select_ready_and_activate_with_loadouts(&mut harness, 90, [(3, 2, [5, 6]), (1, 1, [3, 4])]);
+    select_ready_and_activate_with_loadouts(&mut harness, 90, [(3, 2, 5), (1, 1, 3)]);
     let owner_player = harness.controlled_player_id(0);
     let (enemy_safe, enemy_safe_position) = {
         let world = harness.server.world_mut();

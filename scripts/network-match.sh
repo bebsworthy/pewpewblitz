@@ -83,10 +83,10 @@ for client_id in 1 2 3 4; do
     if ((client_id % 2 == 0)); then
         move_axis="-1,0"
     fi
-    weapon_preset="$client_id"
+    character="$client_id"
     client_args=(
         --server "$network_addr" --client-id "$client_id" --headless
-        --exit-after-roster 4 --simulation-ticks "$simulation_ticks" --weapon-preset "$weapon_preset"
+        --exit-after-roster 4 --simulation-ticks "$simulation_ticks" --character "$character"
         --move-axis "$move_axis" --aim-dummy --fire --ultimate
     )
     (trap '' INT; exec "$target_dir/debug/brawler-client" "${client_args[@]}") &

@@ -8,13 +8,13 @@ fn impact_blade_emits_without_a_projectile_and_damages_the_target() {
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(4);
+        .character = Some(3);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
             && harness.loadout_is_ready(0)
     });
-    harness.install_saved_brawler_loadout(0, 4, 2, [5, 6]);
+    harness.install_test_loadout(0, 4, 2, 5);
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();
 

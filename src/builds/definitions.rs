@@ -1,30 +1,26 @@
 use super::{
-    BrawlerBuildRecipe, BuildRecipeFingerprint, BuildRevision, ElementalFieldEffect, FighterBody,
+    BuildRecipeFingerprint, BuildRevision, ElementalFieldEffect, FighterBody, LoadoutRecipe,
     PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS, PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS,
     PASSIVE_ADRENAL_REARM_TICKS_BOUNDS, PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS,
     PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS,
-    PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS,
-    PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS, PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS,
-    PassiveDefinitionId, PassiveKind, PassiveParameters, PulseMagazine, PulsePower, PulseReach,
+    PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS, PASSIVE_FRAME_HEALTH_BASIS_POINTS_BOUNDS,
+    PASSIVE_FRAME_SPEED_BASIS_POINTS_BOUNDS, PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS,
+    PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS, PassiveDefinitionId, PassiveKind, PassiveParameters,
     ResolvedFighterStats, ResolvedMatchLoadout, ResolvedPassive, ResolvedUltimate,
     RevealProximityModifier, SelectedBuild, ULTIMATE_PARAMETER_BOUNDS, UltimateChargePolicy,
-    UltimateDefinitionId, UltimateKind, UltimateParameters, WeaponChoice,
+    UltimateDefinitionId, UltimateKind, UltimateParameters,
 };
-use crate::combat::{
-    DamageOverTimeKind, DeliveryMethod, EngineWeaponLimits, PayloadEffectDefinition, WeaponCatalog,
-    WeaponConfiguration, WeaponEconomy, WeaponPresetId, resolve_configuration_with_policy,
-};
+use crate::combat::{DamageOverTimeKind, WeaponCatalog, WeaponPresetId};
 use crate::content::{GameplayContentFingerprint, fnv1a64};
 use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 17;
-pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 16;
-const BUILD_RECIPE_SCHEMA_VERSION: u16 = 16;
-pub const MAX_BUILD_CANDIDATE_BYTES: usize = 128;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 18;
+pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 17;
+const BUILD_RECIPE_SCHEMA_VERSION: u16 = 17;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
-pub(crate) const MAX_DIRECT_DIAGNOSTIC_WEAPONS: usize = 8;
+pub(crate) const MAX_DIRECT_DIAGNOSTIC_PICKS: usize = 8;
 pub(crate) const MAX_ULTIMATE_DEFINITIONS: usize = 32;
 pub(crate) const MAX_PASSIVE_DEFINITIONS: usize = 32;
 pub const BUILD_POINT_BUDGET: u8 = 12;
@@ -44,8 +40,6 @@ pub struct BuildCatalog {
     pub schema_version: u16,
     pub balance_revision: BuildRevision,
     pub fighter_body: FighterBody,
-    pub fighter_profiles: FighterStatProfiles,
-    pub custom_pulse: CustomPulseTuning,
     pub ultimate_charge: UltimateChargePolicy,
     pub(crate) direct_diagnostic: DirectDiagnosticLoadoutPolicy,
     pub weapon_costs: Vec<WeaponPointCost>,
@@ -53,50 +47,11 @@ pub struct BuildCatalog {
     pub passives: Vec<PassiveDefinition>,
 }
 
+/// The ordered character picks a direct (non-routed) diagnostic session rotates through by
+/// player ID. The character catalog validates and resolves them.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DirectDiagnosticLoadoutPolicy {
-    pub(crate) fighter_profile_id: crate::profiles::FighterProfileId,
-    pub(crate) weapon_base_ids: Vec<crate::profiles::WeaponBaseId>,
-    pub(crate) ultimate_id: UltimateDefinitionId,
-    pub(crate) passive_ids: [PassiveDefinitionId; 2],
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-pub struct FighterStatProfiles {
-    pub default: ResolvedFighterStats,
-    pub lightweight: ResolvedFighterStats,
-    pub reinforced: ResolvedFighterStats,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PulsePowerTuning {
-    pub damage: u16,
-    pub fire_cooldown_ticks: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-pub struct PulseReachTuning {
-    pub speed: f32,
-    pub range: f32,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PulseMagazineTuning {
-    pub capacity: u8,
-    pub refill_ticks: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-pub struct CustomPulseTuning {
-    pub light: PulsePowerTuning,
-    pub balanced: PulsePowerTuning,
-    pub heavy: PulsePowerTuning,
-    pub compact: PulseReachTuning,
-    pub standard: PulseReachTuning,
-    pub long: PulseReachTuning,
-    pub quick: PulseMagazineTuning,
-    pub standard_magazine: PulseMagazineTuning,
-    pub expanded: PulseMagazineTuning,
+    pub(crate) picks: Vec<crate::characters::CharacterChoice>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -129,8 +84,6 @@ pub struct PassiveDefinition {
 pub enum BuildResolutionError {
     UnknownId,
     InvalidCombination,
-    OverBudget,
-    CandidateTooLarge,
     ResolutionFailed,
 }
 
@@ -209,53 +162,26 @@ impl BuildCatalog {
         for preset in &weapons.presets {
             weapons.resolve_preset(preset.id, self.fighter_body)?;
         }
-        for weapon_base_id in &self.direct_diagnostic.weapon_base_ids {
-            resolve_saved_brawler_recipe(
-                self,
-                weapons,
-                self.direct_diagnostic.fighter_profile_id,
-                *weapon_base_id,
-                self.direct_diagnostic.ultimate_id,
-                self.direct_diagnostic.passive_ids,
-            )
-            .map_err(|error| format!("direct diagnostic loadout does not resolve: {error:?}"))?;
-        }
         Ok(())
     }
 
+    /// The bounded, authored direct-diagnostic picks; the character catalog resolves them.
+    #[must_use]
+    pub(crate) fn direct_diagnostic_picks(&self) -> &[crate::characters::CharacterChoice] {
+        &self.direct_diagnostic.picks
+    }
+
     fn validate_direct_diagnostic_policy(&self) -> Result<(), String> {
-        let policy = &self.direct_diagnostic;
-        if !matches!(policy.fighter_profile_id.0, 1..=3) {
-            return Err("direct diagnostic fighter profile is unsupported".into());
-        }
-        if policy.weapon_base_ids.is_empty()
-            || policy.weapon_base_ids.len() > MAX_DIRECT_DIAGNOSTIC_WEAPONS
-            || policy.weapon_base_ids.iter().any(|id| id.0 == 0)
-            || policy
-                .weapon_base_ids
-                .iter()
-                .enumerate()
-                .any(|(index, id)| policy.weapon_base_ids[index + 1..].contains(id))
-        {
-            return Err("direct diagnostic weapon rotation is invalid".into());
-        }
-        if self.ultimate(policy.ultimate_id).is_none() {
-            return Err("direct diagnostic ultimate is unknown".into());
-        }
-        if policy.passive_ids[0] == policy.passive_ids[1]
-            || policy.passive_ids.iter().any(|id| {
-                self.passives
-                    .iter()
-                    .find(|definition| definition.id == *id)
-                    .is_none_or(|definition| {
-                        matches!(
-                            definition.kind,
-                            PassiveKind::LightweightFrame | PassiveKind::ReinforcedFrame
-                        )
-                    })
+        let picks = &self.direct_diagnostic.picks;
+        if picks.is_empty()
+            || picks.len() > MAX_DIRECT_DIAGNOSTIC_PICKS
+            || picks.iter().any(|pick| {
+                pick.character_id.0 == 0
+                    || self.ultimate(pick.ultimate_id).is_none()
+                    || self.passive(pick.passive_id).is_none()
             })
         {
-            return Err("direct diagnostic passives are invalid".into());
+            return Err("direct diagnostic picks are invalid".into());
         }
         Ok(())
     }
@@ -275,48 +201,6 @@ impl BuildCatalog {
             || self.ultimate_charge.received_damage_multiplier > 100
         {
             return Err("invalid ultimate charge policy".into());
-        }
-        for (name, profile) in [
-            ("default", self.fighter_profiles.default),
-            ("lightweight", self.fighter_profiles.lightweight),
-            ("reinforced", self.fighter_profiles.reinforced),
-        ] {
-            validate_fighter_stats(&profile).map_err(|error| format!("{name} {error}"))?;
-        }
-        for power in [
-            self.custom_pulse.light,
-            self.custom_pulse.balanced,
-            self.custom_pulse.heavy,
-        ] {
-            if power.damage == 0
-                || power.damage > 1_000
-                || power.fire_cooldown_ticks == 0
-                || power.fire_cooldown_ticks > 3_600
-            {
-                return Err("invalid custom Pulse power tuning".into());
-            }
-        }
-        for reach in [
-            self.custom_pulse.compact,
-            self.custom_pulse.standard,
-            self.custom_pulse.long,
-        ] {
-            if !reach.speed.is_finite()
-                || !reach.range.is_finite()
-                || !(1.0..=4_096.0).contains(&reach.speed)
-                || !(1.0..=4_096.0).contains(&reach.range)
-            {
-                return Err("invalid custom Pulse reach tuning".into());
-            }
-        }
-        for magazine in [
-            self.custom_pulse.quick,
-            self.custom_pulse.standard_magazine,
-            self.custom_pulse.expanded,
-        ] {
-            if magazine.capacity == 0 || magazine.capacity > 32 || magazine.refill_ticks == 0 {
-                return Err("invalid custom Pulse magazine tuning".into());
-            }
         }
         Ok(())
     }
@@ -546,8 +430,24 @@ fn validate_passive_definitions(definitions: &[PassiveDefinition]) -> Result<(),
     let valid =
         definitions.iter().all(
             |definition| match (definition.kind, definition.parameters) {
-                (PassiveKind::LightweightFrame, PassiveParameters::LightweightFrame)
-                | (PassiveKind::ReinforcedFrame, PassiveParameters::ReinforcedFrame) => true,
+                (
+                    PassiveKind::LightweightFrame,
+                    PassiveParameters::LightweightFrame {
+                        maximum_health_basis_points,
+                        movement_speed_basis_points,
+                    },
+                )
+                | (
+                    PassiveKind::ReinforcedFrame,
+                    PassiveParameters::ReinforcedFrame {
+                        maximum_health_basis_points,
+                        movement_speed_basis_points,
+                    },
+                ) => {
+                    PASSIVE_FRAME_HEALTH_BASIS_POINTS_BOUNDS.contains(&maximum_health_basis_points)
+                        && PASSIVE_FRAME_SPEED_BASIS_POINTS_BOUNDS
+                            .contains(&movement_speed_basis_points)
+                }
                 (
                     PassiveKind::AdrenalResponse,
                     PassiveParameters::AdrenalResponse {
@@ -748,146 +648,29 @@ fn validate_metadata<T>(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
-pub fn resolve_build_recipe(
+/// Resolve one character recipe into the immutable match loadout.
+///
+/// This is the single authority path: character picks, Practice bots, diagnostics, and Balance Lab
+/// re-resolution all reach combat through it. The fighter stats come from the character; the one
+/// passive may scale or extend them.
+pub fn resolve_loadout(
     catalog: &BuildCatalog,
     weapons: &WeaponCatalog,
-    recipe: BrawlerBuildRecipe,
+    recipe: LoadoutRecipe,
 ) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
-    resolve_build_recipe_inner(catalog, weapons, recipe, None)
-}
-
-/// Resolve V7's authored saved-brawler recipe without the retired point-budget or frame-passive
-/// stat inference. The fighter profile is an explicit immutable creation choice.
-pub fn resolve_saved_brawler_recipe(
-    catalog: &BuildCatalog,
-    weapons: &WeaponCatalog,
-    fighter_profile_id: crate::profiles::FighterProfileId,
-    weapon_base_id: crate::profiles::WeaponBaseId,
-    ultimate: UltimateDefinitionId,
-    passives: [PassiveDefinitionId; 2],
-) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
-    let fighter_stats = match fighter_profile_id.0 {
-        1 => catalog.fighter_profiles.default,
-        2 => catalog.fighter_profiles.lightweight,
-        3 => catalog.fighter_profiles.reinforced,
-        _ => return Err(BuildResolutionError::UnknownId),
-    };
-    if passives.iter().any(|id| {
-        catalog
-            .passives
-            .iter()
-            .find(|definition| definition.id == *id)
-            .is_none_or(|definition| {
-                matches!(
-                    definition.kind,
-                    PassiveKind::LightweightFrame | PassiveKind::ReinforcedFrame
-                )
-            })
-    }) {
-        return Err(BuildResolutionError::UnknownId);
-    }
-    resolve_build_recipe_inner(
-        catalog,
-        weapons,
-        BrawlerBuildRecipe {
-            weapon: WeaponChoice::Preset(WeaponPresetId(weapon_base_id.0)),
-            ultimate,
-            passives,
-        },
-        Some((fighter_profile_id.0, fighter_stats)),
-    )
-}
-
-/// Resolve the authored direct-diagnostic fallback through the ordinary saved-brawler path.
-#[cfg(feature = "server")]
-pub(crate) fn resolve_direct_diagnostic_loadout(
-    catalog: &BuildCatalog,
-    weapons: &WeaponCatalog,
-    player_id: u64,
-) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
-    if player_id == 0 {
-        return Err(BuildResolutionError::InvalidCombination);
-    }
-    let rotation_len = u64::try_from(catalog.direct_diagnostic.weapon_base_ids.len())
-        .map_err(|_| BuildResolutionError::ResolutionFailed)?;
-    if rotation_len == 0 {
-        return Err(BuildResolutionError::ResolutionFailed);
-    }
-    let index = usize::try_from((player_id - 1) % rotation_len)
-        .map_err(|_| BuildResolutionError::ResolutionFailed)?;
-    let weapon_base_id = catalog
-        .direct_diagnostic
-        .weapon_base_ids
-        .get(index)
-        .copied()
-        .ok_or(BuildResolutionError::ResolutionFailed)?;
-    resolve_saved_brawler_recipe(
-        catalog,
-        weapons,
-        catalog.direct_diagnostic.fighter_profile_id,
-        weapon_base_id,
-        catalog.direct_diagnostic.ultimate_id,
-        catalog.direct_diagnostic.passive_ids,
-    )
-}
-
-#[allow(clippy::too_many_lines)]
-fn resolve_build_recipe_inner(
-    catalog: &BuildCatalog,
-    weapons: &WeaponCatalog,
-    recipe: BrawlerBuildRecipe,
-    explicit_fighter_profile: Option<(u16, ResolvedFighterStats)>,
-) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
-    if postcard::to_allocvec(&recipe).map_or(true, |bytes| bytes.len() > MAX_BUILD_CANDIDATE_BYTES)
-    {
-        return Err(BuildResolutionError::CandidateTooLarge);
-    }
-    if recipe.passives[0] == recipe.passives[1] {
-        return Err(BuildResolutionError::InvalidCombination);
-    }
-    let passives = recipe.passives.map(|id| {
-        catalog
-            .passives
-            .iter()
-            .find(|definition| definition.id == id)
-            .map(|definition| ResolvedPassive {
-                id,
-                kind: definition.kind,
-                point_cost: definition.point_cost,
-                parameters: definition.parameters,
-            })
-            .ok_or(BuildResolutionError::UnknownId)
-    });
-    let mut passives = [passives[0].clone()?, passives[1].clone()?];
-    passives.sort_by_key(|passive| passive.id);
-    let has_lightweight = passives
-        .iter()
-        .any(|p| p.kind == PassiveKind::LightweightFrame);
-    let has_reinforced = passives
-        .iter()
-        .any(|p| p.kind == PassiveKind::ReinforcedFrame);
-    if has_lightweight && has_reinforced {
-        return Err(BuildResolutionError::InvalidCombination);
-    }
-    let resistance_passive_count = passives
-        .iter()
-        .filter(|passive| {
-            matches!(
-                passive.kind,
-                PassiveKind::CryogenicInsulation
-                    | PassiveKind::FilteredCirculation
-                    | PassiveKind::HeatShielding
-            )
+    validate_fighter_stats(&recipe.fighter_stats)
+        .map_err(|_| BuildResolutionError::InvalidCombination)?;
+    let passive = catalog
+        .passive(recipe.passive)
+        .map(|definition| ResolvedPassive {
+            id: definition.id,
+            kind: definition.kind,
+            point_cost: definition.point_cost,
+            parameters: definition.parameters,
         })
-        .count();
-    if resistance_passive_count > 1 {
-        return Err(BuildResolutionError::InvalidCombination);
-    }
+        .ok_or(BuildResolutionError::UnknownId)?;
     let ultimate_definition = catalog
-        .ultimates
-        .iter()
-        .find(|definition| definition.id == recipe.ultimate)
+        .ultimate(recipe.ultimate)
         .ok_or(BuildResolutionError::UnknownId)?;
     let ultimate = ResolvedUltimate {
         id: ultimate_definition.id,
@@ -896,105 +679,38 @@ fn resolve_build_recipe_inner(
         parameters: ultimate_definition.parameters,
         charge_policy: catalog.ultimate_charge,
     };
-    let (primary_weapon, _weapon_points) =
-        resolve_weapon_choice(catalog, weapons, catalog.fighter_body, recipe.weapon)?;
-    let total_points = build_point_total(catalog, recipe)?;
-    if explicit_fighter_profile.is_none() && total_points > BUILD_POINT_BUDGET {
-        return Err(BuildResolutionError::OverBudget);
-    }
-    let mut fighter_stats = if let Some((_, stats)) = explicit_fighter_profile {
-        stats
-    } else if has_lightweight {
-        catalog.fighter_profiles.lightweight
-    } else if has_reinforced {
-        catalog.fighter_profiles.reinforced
-    } else {
-        catalog.fighter_profiles.default
-    };
-    for passive in &passives {
-        match passive.kind {
-            PassiveKind::CryogenicInsulation => {
-                let PassiveParameters::CryogenicInsulation {
-                    resistance_basis_points,
-                } = passive.parameters
-                else {
-                    return Err(BuildResolutionError::ResolutionFailed);
-                };
-                fighter_stats.cold_resistance_basis_points = fighter_stats
-                    .cold_resistance_basis_points
-                    .saturating_add(resistance_basis_points)
-                    .min(6_000);
-            }
-            PassiveKind::FilteredCirculation => {
-                let PassiveParameters::FilteredCirculation {
-                    resistance_basis_points,
-                } = passive.parameters
-                else {
-                    return Err(BuildResolutionError::ResolutionFailed);
-                };
-                fighter_stats.poison_resistance_basis_points = fighter_stats
-                    .poison_resistance_basis_points
-                    .saturating_add(resistance_basis_points)
-                    .min(6_000);
-            }
-            PassiveKind::HeatShielding => {
-                let PassiveParameters::HeatShielding {
-                    resistance_basis_points,
-                } = passive.parameters
-                else {
-                    return Err(BuildResolutionError::ResolutionFailed);
-                };
-                fighter_stats.fire_resistance_basis_points = fighter_stats
-                    .fire_resistance_basis_points
-                    .saturating_add(resistance_basis_points)
-                    .min(6_000);
-            }
-            PassiveKind::LightweightFrame
-            | PassiveKind::ReinforcedFrame
-            | PassiveKind::AdrenalResponse
-            | PassiveKind::CloseQuarters
-            | PassiveKind::QuickCycle
-            | PassiveKind::Tenacity => {}
-        }
-    }
-    let mut canonical_passives = recipe.passives;
-    canonical_passives.sort();
-    let fingerprint_bytes = if let Some((fighter_profile_id, _)) = explicit_fighter_profile {
-        postcard::to_allocvec(&(
-            BUILD_FINGERPRINT_FORMAT_VERSION,
-            BUILD_RECIPE_SCHEMA_VERSION,
-            catalog.balance_revision,
-            fighter_profile_id,
-            recipe.weapon,
-            recipe.ultimate,
-            canonical_passives,
-        ))
-    } else {
-        postcard::to_allocvec(&(
-            BUILD_FINGERPRINT_FORMAT_VERSION,
-            BUILD_RECIPE_SCHEMA_VERSION,
-            catalog.balance_revision,
-            recipe.weapon,
-            recipe.ultimate,
-            canonical_passives,
-        ))
-    }
+    let primary_weapon = crate::weapon_parts::resolve_weapon_parts(
+        weapons,
+        catalog.fighter_body,
+        recipe.weapon_base,
+        recipe.weapon_modifiers,
+    )
+    .map_err(|_| BuildResolutionError::InvalidCombination)?;
+    let fighter_stats = apply_passive_to_stats(recipe.fighter_stats, &passive)?;
+    // The identity names the pick, not its tuned values: stat and parameter changes are caught
+    // by the gameplay content fingerprint, as before characters owned stats.
+    let fingerprint_bytes = postcard::to_allocvec(&(
+        BUILD_FINGERPRINT_FORMAT_VERSION,
+        BUILD_RECIPE_SCHEMA_VERSION,
+        catalog.balance_revision,
+        recipe.character_id,
+        recipe.weapon_base,
+        recipe.weapon_modifiers,
+        recipe.ultimate,
+        recipe.passive,
+    ))
     .map_err(|_| BuildResolutionError::ResolutionFailed)?;
-    let identity = SelectedBuild {
-        recipe_fingerprint: BuildRecipeFingerprint(fnv1a64(&fingerprint_bytes)),
-        revision: catalog.balance_revision,
-    };
     let resolved = ResolvedMatchLoadout {
-        identity,
-        total_points: if explicit_fighter_profile.is_some() {
-            0
-        } else {
-            total_points
+        identity: SelectedBuild {
+            recipe_fingerprint: BuildRecipeFingerprint(fnv1a64(&fingerprint_bytes)),
+            revision: catalog.balance_revision,
         },
+        character_id: recipe.character_id,
+        total_points: 0,
         fighter_stats,
         primary_weapon,
         ultimate,
-        passives,
+        passives: [passive],
     };
     if postcard::to_allocvec(&resolved)
         .map_or(true, |bytes| bytes.len() > MAX_RESOLVED_LOADOUT_BYTES)
@@ -1004,154 +720,61 @@ fn resolve_build_recipe_inner(
     Ok(resolved)
 }
 
-/// Return the exact authored point total without requiring a complete runtime loadout resolution.
-/// This keeps editor budget feedback and authoritative rejection copy on the same pure rule.
-pub fn build_point_total(
-    catalog: &BuildCatalog,
-    recipe: BrawlerBuildRecipe,
-) -> Result<u8, BuildResolutionError> {
-    let weapon = match recipe.weapon {
-        WeaponChoice::Preset(id) => weapon_point_cost(catalog, id)?,
-        WeaponChoice::CustomPulse {
-            power,
-            reach,
-            magazine,
-        } => weapon_point_cost(catalog, WeaponPresetId(1))?
-            .checked_add(u8::from(matches!(power, PulsePower::Heavy)))
-            .and_then(|points| points.checked_add(u8::from(matches!(reach, PulseReach::Long))))
-            .and_then(|points| {
-                points.checked_add(u8::from(matches!(magazine, PulseMagazine::Expanded)))
-            })
-            .ok_or(BuildResolutionError::OverBudget)?,
-    };
-    let ultimate = catalog
-        .ultimates
-        .iter()
-        .find(|definition| definition.id == recipe.ultimate)
-        .map(|definition| definition.point_cost)
-        .ok_or(BuildResolutionError::UnknownId)?;
-    recipe.passives.iter().try_fold(
-        weapon
-            .checked_add(ultimate)
-            .ok_or(BuildResolutionError::OverBudget)?,
-        |total, passive| {
-            let cost = catalog
-                .passives
-                .iter()
-                .find(|definition| definition.id == *passive)
-                .map(|definition| definition.point_cost)
-                .ok_or(BuildResolutionError::UnknownId)?;
-            total
-                .checked_add(cost)
-                .ok_or(BuildResolutionError::OverBudget)
-        },
-    )
-}
-
-fn resolve_weapon_choice(
-    catalog: &BuildCatalog,
-    weapons: &WeaponCatalog,
-    fighter_body: FighterBody,
-    choice: WeaponChoice,
-) -> Result<(crate::combat::ResolvedWeapon, u8), BuildResolutionError> {
-    match choice {
-        WeaponChoice::Preset(id) => {
-            let cost = weapon_point_cost(catalog, id)?;
-            weapons
-                .resolve_preset(id, fighter_body)
-                .map(|weapon| (weapon, cost))
-                .map_err(|_| BuildResolutionError::ResolutionFailed)
+/// The passive's effect on the character's own stats: frames scale health and speed, resistance
+/// passives add their resistance. Other passives act at runtime and leave the stats unchanged.
+fn apply_passive_to_stats(
+    mut stats: ResolvedFighterStats,
+    passive: &ResolvedPassive,
+) -> Result<ResolvedFighterStats, BuildResolutionError> {
+    match passive.parameters {
+        PassiveParameters::LightweightFrame {
+            maximum_health_basis_points,
+            movement_speed_basis_points,
         }
-        WeaponChoice::CustomPulse {
-            power,
-            reach,
-            magazine,
+        | PassiveParameters::ReinforcedFrame {
+            maximum_health_basis_points,
+            movement_speed_basis_points,
         } => {
-            let mut configuration: WeaponConfiguration = weapons
-                .preset(WeaponPresetId(1))
-                .ok_or(BuildResolutionError::ResolutionFailed)?
-                .configuration
-                .clone();
-            let (power_tuning, power_cost) = match power {
-                PulsePower::Light => (catalog.custom_pulse.light, 0),
-                PulsePower::Balanced => (catalog.custom_pulse.balanced, 0),
-                PulsePower::Heavy => (catalog.custom_pulse.heavy, 1),
-            };
-            let (reach_tuning, reach_cost) = match reach {
-                PulseReach::Compact => (catalog.custom_pulse.compact, 0),
-                PulseReach::Standard => (catalog.custom_pulse.standard, 0),
-                PulseReach::Long => (catalog.custom_pulse.long, 1),
-            };
-            let lifetime = projectile_lifetime_ticks(reach_tuning.range, reach_tuning.speed)?;
-            let (magazine_tuning, magazine_cost) = match magazine {
-                PulseMagazine::Quick => (catalog.custom_pulse.quick, 0),
-                PulseMagazine::Standard => (catalog.custom_pulse.standard_magazine, 0),
-                PulseMagazine::Expanded => (catalog.custom_pulse.expanded, 1),
-            };
-            configuration.recipe.fire_cooldown_ticks = power_tuning.fire_cooldown_ticks;
-            configuration.recipe.economy = WeaponEconomy::Magazine {
-                capacity: magazine_tuning.capacity,
-                refill_ticks: magazine_tuning.refill_ticks,
-            };
-            if let DeliveryMethod::Straight {
-                speed: value_speed,
-                range: value_range,
-                lifetime_ticks: value_lifetime,
-                ..
-            } = &mut configuration.recipe.delivery
-            {
-                *value_speed = reach_tuning.speed;
-                *value_range = reach_tuning.range;
-                *value_lifetime = lifetime;
-            }
-            for bundle in &mut configuration.recipe.payload_bundles {
-                for effect in &mut bundle.effects {
-                    if let PayloadEffectDefinition::Damage { amount, .. } = effect {
-                        *amount = power_tuning.damage;
-                    }
-                }
-            }
-            let points = weapon_point_cost(catalog, WeaponPresetId(1))?
-                .checked_add(power_cost)
-                .and_then(|points| points.checked_add(reach_cost))
-                .and_then(|points| points.checked_add(magazine_cost))
+            let health =
+                u32::from(stats.maximum_health) * u32::from(maximum_health_basis_points) / 10_000;
+            stats.maximum_health = u16::try_from(health)
+                .ok()
+                .filter(|health| *health > 0)
                 .ok_or(BuildResolutionError::ResolutionFailed)?;
-            resolve_configuration_with_policy(
-                None,
-                configuration,
-                fighter_body,
-                weapons.recipe_policy.clone(),
-                EngineWeaponLimits::default(),
-            )
-            .map(|weapon| (weapon, points))
-            .map_err(|_| BuildResolutionError::ResolutionFailed)
+            stats.movement_speed =
+                stats.movement_speed * f32::from(movement_speed_basis_points) / 10_000.0;
         }
+        PassiveParameters::CryogenicInsulation {
+            resistance_basis_points,
+        } => {
+            stats.cold_resistance_basis_points = stats
+                .cold_resistance_basis_points
+                .saturating_add(resistance_basis_points)
+                .min(6_000);
+        }
+        PassiveParameters::FilteredCirculation {
+            resistance_basis_points,
+        } => {
+            stats.poison_resistance_basis_points = stats
+                .poison_resistance_basis_points
+                .saturating_add(resistance_basis_points)
+                .min(6_000);
+        }
+        PassiveParameters::HeatShielding {
+            resistance_basis_points,
+        } => {
+            stats.fire_resistance_basis_points = stats
+                .fire_resistance_basis_points
+                .saturating_add(resistance_basis_points)
+                .min(6_000);
+        }
+        PassiveParameters::AdrenalResponse { .. }
+        | PassiveParameters::CloseQuarters { .. }
+        | PassiveParameters::QuickCycle { .. }
+        | PassiveParameters::Tenacity { .. } => {}
     }
-}
-
-fn weapon_point_cost(
-    catalog: &BuildCatalog,
-    id: WeaponPresetId,
-) -> Result<u8, BuildResolutionError> {
-    catalog
-        .weapon_costs
-        .iter()
-        .find(|definition| definition.weapon_id == id)
-        .map(|definition| definition.point_cost)
-        .ok_or(BuildResolutionError::UnknownId)
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss
-)]
-fn projectile_lifetime_ticks(range: f32, speed: f32) -> Result<u64, BuildResolutionError> {
-    let ticks = (range * crate::timing::SIMULATION_TICK_HZ as f32 / speed).ceil();
-    if !ticks.is_finite() || ticks <= 0.0 || ticks > u64::MAX as f32 {
-        return Err(BuildResolutionError::ResolutionFailed);
-    }
-    Ok(ticks as u64)
+    validate_fighter_stats(&stats).map_err(|_| BuildResolutionError::ResolutionFailed)?;
+    Ok(stats)
 }
 
 #[derive(Resource, Clone, Debug, PartialEq)]

@@ -11,7 +11,6 @@ import { EditorMatrix } from "./EditorMatrix";
 
 const sections: { key: EditorSection; label: string }[] = [
   { key: "global", label: "Global" },
-  { key: "fighters", label: "Fighters" },
   { key: "weapons", label: "Weapons" },
   { key: "ultimates", label: "Ultimates" },
   { key: "passives", label: "Passives" },
@@ -21,10 +20,9 @@ const sections: { key: EditorSection; label: string }[] = [
 
 const sectionHelp: Record<EditorSection, string> = {
   global: "Match-wide authoritative gameplay rules shared by every fighter.",
-  fighters: "Compare the creation profiles available to saved brawlers.",
   weapons: "Compare authoritative weapon economy, delivery, payload, and world effects.",
   ultimates: "Compare targeting, timing, deployables, and area rules.",
-  passives: "Compare the tunable effects and timings of equipped passive abilities.",
+  passives: "Compare the tunable effects and timings of the roster passives.",
   "world-objects": "Compare map effects, durability, explosions, and restoration pickups.",
   modes: "Compare mode-owned objective rules.",
 };
@@ -41,7 +39,7 @@ interface Props {
 }
 
 export function EditorWorkspace(props: Props) {
-  const [section, setSection] = useState<EditorSection>("fighters");
+  const [section, setSection] = useState<EditorSection>("global");
   const [focusedFields, setFocusedFields] = useState<Partial<Record<EditorSection, string>>>({});
   const matrix = useMemo(
     () => buildEditorMatrix(props.fields, section),

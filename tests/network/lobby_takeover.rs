@@ -1,6 +1,6 @@
 //! A fresh lobby login replacing the silent session of the same account (BRL-0208).
 
-use super::queue::{selected_brawler, start_product_join, wait_for_product_lobby};
+use super::queue::{selected_pick, start_product_join, wait_for_product_lobby};
 use super::*;
 
 const SHARED_ACCOUNT: u128 = 77;
@@ -54,7 +54,7 @@ fn relaunch_with_the_same_account_replaces_a_killed_session_and_its_queue_ticket
     let mut harness = Harness::new_product_lobby(0);
     harness.add_product_lobby_client(1, Some(SHARED_ACCOUNT));
     wait_for_product_lobby(&mut harness);
-    let (killed_brawler, _) = selected_brawler(&harness, 0);
+    let (killed_pick, _) = selected_pick(&harness, 0);
     start_product_join(&mut harness, 0, 0);
     harness.step_until(|harness| {
         harness
@@ -114,7 +114,7 @@ fn relaunch_with_the_same_account_replaces_a_killed_session_and_its_queue_ticket
             .snapshot()
             .is_some()
     });
-    assert_eq!(selected_brawler(&harness, 1).0, killed_brawler);
+    assert_eq!(selected_pick(&harness, 1).0, killed_pick);
 }
 
 #[test]

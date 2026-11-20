@@ -218,7 +218,7 @@ fn input_type(field: TextEntryField) -> InputType {
     let text = InputType::TYPE_CLASS_TEXT | InputType::TYPE_TEXT_FLAG_NO_SUGGESTIONS;
     match field {
         TextEntryField::ServerAddress => text | InputType::TYPE_TEXT_VARIATION_URI,
-        TextEntryField::PlayerName | TextEntryField::BrawlerName => {
+        TextEntryField::PlayerName => {
             text | InputType::TYPE_TEXT_VARIATION_PERSON_NAME | InputType::TYPE_TEXT_FLAG_CAP_WORDS
         }
         TextEntryField::MapName => text | InputType::TYPE_TEXT_FLAG_CAP_WORDS,

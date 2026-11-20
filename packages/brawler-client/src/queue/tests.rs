@@ -46,6 +46,7 @@ fn automation_can_target_an_exact_game_instead_of_the_first_matching_roster() {
 }
 
 fn membership() -> ClientLobbyMembership {
+    let catalog = brawler::profiles::AdvertisedCharacterCatalog::embedded().unwrap();
     ClientLobbyMembership {
         logical_server_id: 1,
         player_id: brawler::protocol::PlayerId(1),
@@ -53,14 +54,13 @@ fn membership() -> ClientLobbyMembership {
         server_name: "Server".to_string(),
         catalog_revision: brawler::lobby::CatalogRevision([1; 32]),
         game_types: vec![game()],
-        brawler_catalog: brawler::profiles::AdvertisedBrawlerCatalog::from_content(
-            &brawler::builds::BuildCatalog::embedded().unwrap(),
-            &brawler::combat::WeaponCatalog::embedded().unwrap(),
-        )
-        .unwrap(),
-        profile: brawler::profiles::ProfileSnapshot::empty(
+        profile: catalog.profile_from_stored(
             brawler::profiles::AccountId::new(1).unwrap(),
+            brawler::profiles::ProfileRevision::INITIAL,
+            None,
+            [],
         ),
+        character_catalog: catalog,
     }
 }
 
@@ -79,41 +79,18 @@ fn snapshot(revision: u64, queued: u16) -> brawler::lobby::QueuePoolSnapshot {
 }
 
 fn joined_membership(game_type_id: &str, ticket_id: u128) -> brawler::lobby::QueueMembership {
-    let builds = brawler::builds::BuildCatalog::embedded().unwrap();
-    let weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
-    let brawler = brawler::profiles::SavedBrawler {
-        id: brawler::profiles::SavedBrawlerId::new(1).unwrap(),
-        creation_ordinal: 1,
-        name: "Queue Brawler".into(),
-        fighter_profile_id: brawler::profiles::FighterProfileId(1),
-        weapon_base_id: brawler::profiles::WeaponBaseId(1),
-        ultimate_id: brawler::builds::UltimateDefinitionId(1),
-        passive_ids: [
-            brawler::builds::PassiveDefinitionId(3),
-            brawler::builds::PassiveDefinitionId(4),
-        ],
-        equipped_part_ids: [None; brawler::weapon_parts::WEAPON_PART_SLOT_COUNT],
-        revision: brawler::profiles::ProfileRevision::INITIAL,
-    };
-    let resolved = brawler.resolve_loadout(&builds, &weapons).unwrap();
+    let catalogs = brawler::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+    let choice = catalogs.characters.default_choice();
+    let resolved = catalogs.view().resolve(choice).unwrap();
     brawler::lobby::QueueMembership {
         ticket_id: brawler::lobby::QueueTicketId::new(ticket_id).unwrap(),
         catalog_revision: brawler::lobby::CatalogRevision([1; 32]),
         game_type_id: brawler::lobby::GameTypeId::new(game_type_id).unwrap(),
         game_type_configuration_revision: 1,
-        brawler_id: brawler::profiles::SavedBrawlerId::new(1).unwrap(),
-        brawler_revision: brawler::profiles::ProfileRevision::INITIAL,
+        profile_revision: brawler::profiles::ProfileRevision::INITIAL,
         accepted_build: brawler::builds::AcceptedBuildSummary {
-            canonical_recipe: brawler::builds::BrawlerBuildRecipe {
-                weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(1)),
-                ultimate: brawler::builds::UltimateDefinitionId(1),
-                passives: [
-                    brawler::builds::PassiveDefinitionId(3),
-                    brawler::builds::PassiveDefinitionId(4),
-                ],
-            },
+            character: choice,
             identity: resolved.identity,
-            total_points: 0,
         },
         admitted_at_pool_state_revision: 2,
     }
@@ -128,11 +105,10 @@ fn practice_request_is_single_flight_and_rejection_clears_it() {
         game_type_id: Some(brawler::lobby::GameTypeId::new("hot-zone-3v3").unwrap()),
         configuration_revision: Some(1),
     };
-    let brawler_id = brawler::profiles::SavedBrawlerId::new(1).unwrap();
     let revision = brawler::profiles::ProfileRevision::INITIAL;
-    assert!(model.start(&selected, brawler_id, revision));
+    assert!(model.start(&selected, revision));
     assert!(model.pending());
-    assert!(!model.start(&selected, brawler_id, revision));
+    assert!(!model.start(&selected, revision));
     let request = model.outbound.pop_front().unwrap();
     assert_eq!(request.game_type_id.as_str(), "hot-zone-3v3");
     model.accept_rejection(
@@ -260,7 +236,6 @@ fn pending_timeout_retry_keeps_request_and_rate_limit_try_again_changes_it() {
     };
     assert!(model.start_join(
         &selected,
-        brawler::profiles::SavedBrawlerId::new(1).unwrap(),
         brawler::profiles::ProfileRevision::INITIAL,
         Duration::ZERO,
     ));
@@ -298,24 +273,13 @@ fn cancellation_revision_hides_an_older_fresh_snapshot_until_replacement_arrives
             catalog_revision: lobby.catalog_revision,
             game_type_id: lobby.game_types[0].id.clone(),
             game_type_configuration_revision: 1,
-            brawler_id: brawler::profiles::SavedBrawlerId::new(1).unwrap(),
-            brawler_revision: brawler::profiles::ProfileRevision::INITIAL,
+            profile_revision: brawler::profiles::ProfileRevision::INITIAL,
             accepted_build: brawler::builds::AcceptedBuildSummary {
-                canonical_recipe: brawler::builds::BrawlerBuildRecipe {
-                    weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(
-                        1,
-                    )),
-                    ultimate: brawler::builds::UltimateDefinitionId(1),
-                    passives: [
-                        brawler::builds::PassiveDefinitionId(3),
-                        brawler::builds::PassiveDefinitionId(4),
-                    ],
-                },
+                character: lobby.profile.selection(),
                 identity: brawler::builds::SelectedBuild {
                     recipe_fingerprint: brawler::builds::BuildRecipeFingerprint(1),
                     revision: brawler::builds::BuildRevision(1),
                 },
-                total_points: 10,
             },
             admitted_at_pool_state_revision: 2,
         }),
@@ -354,7 +318,6 @@ fn late_outcome_remains_authoritative_after_timeout_notice() {
     };
     assert!(model.start_join(
         &selected,
-        brawler::profiles::SavedBrawlerId::new(1).unwrap(),
         brawler::profiles::ProfileRevision::INITIAL,
         Duration::ZERO,
     ));
@@ -389,7 +352,6 @@ fn joined_outcome_must_match_the_frozen_join_target() {
     };
     assert!(model.start_join(
         &selected,
-        brawler::profiles::SavedBrawlerId::new(1).unwrap(),
         brawler::profiles::ProfileRevision::INITIAL,
         Duration::ZERO,
     ));
@@ -448,38 +410,21 @@ fn practice_selection_survives_replay_but_cannot_leak_to_another_game() {
         game_type_id: Some(game),
         configuration_revision: Some(1),
     };
-    let brawler = brawler::profiles::SavedBrawlerId::new(1).unwrap();
-    assert!(model.start(
-        &selected,
-        brawler,
-        brawler::profiles::ProfileRevision::INITIAL
-    ));
+    assert!(model.start(&selected, brawler::profiles::ProfileRevision::INITIAL));
     assert_eq!(
         model.pending.as_ref().unwrap().map_preset_id,
         Some(brawler::map::MapPresetId(10))
     );
-    assert!(!model.start(
-        &selected,
-        brawler,
-        brawler::profiles::ProfileRevision::INITIAL
-    ));
+    assert!(!model.start(&selected, brawler::profiles::ProfileRevision::INITIAL));
     model.bind_generation(2);
-    assert!(model.start(
-        &selected,
-        brawler,
-        brawler::profiles::ProfileRevision::INITIAL
-    ));
+    assert!(model.start(&selected, brawler::profiles::ProfileRevision::INITIAL));
     assert_eq!(
         model.pending.as_ref().unwrap().map_preset_id,
         Some(brawler::map::MapPresetId(10))
     );
     model.bind_generation(3);
     selected.game_type_id = Some(brawler::lobby::GameTypeId::new("heist-2v2").unwrap());
-    assert!(model.start(
-        &selected,
-        brawler,
-        brawler::profiles::ProfileRevision::INITIAL
-    ));
+    assert!(model.start(&selected, brawler::profiles::ProfileRevision::INITIAL));
     assert_eq!(model.pending.as_ref().unwrap().map_preset_id, None);
 }
 

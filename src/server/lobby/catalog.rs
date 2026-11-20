@@ -28,7 +28,7 @@ pub(crate) struct ResolvedLobbyCatalog {
     pub map_dimension_limits: MapDimensionLimits,
     pub revision: CatalogRevision,
     pub game_types: Vec<AdvertisedGameType>,
-    pub brawler_catalog: crate::profiles::AdvertisedBrawlerCatalog,
+    pub character_catalog: crate::profiles::AdvertisedCharacterCatalog,
     formation_timing: MatchFormationTiming,
     policy_revision: CatalogRevision,
     game_rules: BTreeMap<GameTypeId, ResolvedGameRules>,
@@ -508,10 +508,17 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     ))
     .map_err(|error| format!("catalog policy revision failed: {error}"))?;
     let policy_revision = CatalogRevision(Sha256::digest(policy_material).into());
-    let brawler_catalog = crate::profiles::AdvertisedBrawlerCatalog::from_content(
-        &crate::builds::BuildCatalog::embedded()?,
-        &crate::combat::WeaponCatalog::embedded()?,
-    )?;
+    let character_catalog = crate::profiles::AdvertisedCharacterCatalog::embedded()?;
+    // The largest profile: a remembered pick for every character.
+    let profile = character_catalog.profile_from_stored(
+        crate::profiles::AccountId::new(1).expect("constant account ID is nonzero"),
+        crate::profiles::ProfileRevision::INITIAL,
+        None,
+        character_catalog
+            .characters
+            .iter()
+            .map(crate::profiles::AdvertisedCharacterCatalog::default_choice_for),
+    );
     let welcome = crate::protocol::LobbyJoinOutcome::Accepted {
         logical_server_id: 1,
         player_id: crate::protocol::PlayerId(1),
@@ -519,10 +526,8 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         server_name: server_name.clone(),
         catalog_revision: revision,
         game_types: advertised.clone(),
-        brawler_catalog: Box::new(brawler_catalog.clone()),
-        profile: Box::new(crate::profiles::ProfileSnapshot::empty(
-            crate::profiles::AccountId::new(1).expect("constant account ID is nonzero"),
-        )),
+        character_catalog: Box::new(character_catalog.clone()),
+        profile: Box::new(profile),
     };
     let welcome_bytes = postcard::to_allocvec(&welcome)
         .map_err(|error| format!("lobby welcome encoding failed: {error}"))?;
@@ -534,7 +539,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         map_dimension_limits,
         revision,
         game_types: advertised,
-        brawler_catalog,
+        character_catalog,
         formation_timing,
         policy_revision,
         game_rules,

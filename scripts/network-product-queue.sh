@@ -8,7 +8,7 @@ set -eu
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bind_addr=${BRAWLER_ROUTED_BIND:-127.0.0.1:5000}
 timeout_seconds=${BRAWLER_ROUTED_TIMEOUT_SECONDS:-30}
-weapon_preset=${BRAWLER_QUEUE_WEAPON_PRESET:-1}
+character=${BRAWLER_QUEUE_CHARACTER:-1}
 supervisor_pid=
 client_pid=
 watchdog_pid=
@@ -61,7 +61,7 @@ target/debug/brawler-client \
     --auto-connect \
     --headless \
     --product-queue-smoke \
-    --weapon-preset "$weapon_preset" &
+    --character "$character" &
 client_pid=$!
 
 parent_pid=$$

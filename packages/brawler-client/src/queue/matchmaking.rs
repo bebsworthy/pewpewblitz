@@ -65,15 +65,6 @@ impl ClientQueueModel {
         else {
             return false;
         };
-        let Some(brawler) = lobby.profile.selected_brawler_id.and_then(|id| {
-            lobby
-                .profile
-                .brawlers
-                .iter()
-                .find(|brawler| brawler.id == id)
-        }) else {
-            return false;
-        };
         self.bind_lobby_generation(generation);
         self.start_join(
             &crate::flow::SelectedGameType {
@@ -81,8 +72,7 @@ impl ClientQueueModel {
                 game_type_id: Some(game.id.clone()),
                 configuration_revision: Some(game.configuration_revision),
             },
-            brawler.id,
-            brawler.revision,
+            lobby.profile.revision,
             now,
         )
     }
@@ -137,8 +127,7 @@ impl ClientQueueModel {
     pub fn start_join(
         &mut self,
         selected: &crate::flow::SelectedGameType,
-        brawler_id: brawler::profiles::SavedBrawlerId,
-        brawler_revision: brawler::profiles::ProfileRevision,
+        profile_revision: brawler::profiles::ProfileRevision,
         now: Duration,
     ) -> bool {
         let (Some(catalog_revision), Some(game_type_id), Some(configuration_revision)) = (
@@ -153,8 +142,7 @@ impl ClientQueueModel {
                 catalog_revision,
                 game_type_id,
                 game_type_configuration_revision: configuration_revision,
-                brawler_id,
-                brawler_revision,
+                profile_revision,
             }),
             now,
         )
@@ -397,8 +385,7 @@ fn outcome_matches_pending(
                 && membership.game_type_id == command.game_type_id
                 && membership.game_type_configuration_revision
                     == command.game_type_configuration_revision
-                && membership.brawler_id == command.brawler_id
-                && membership.brawler_revision == command.brawler_revision
+                && membership.profile_revision == command.profile_revision
                 && membership.accepted_build.identity.recipe_fingerprint.0 != 0
         }
         (

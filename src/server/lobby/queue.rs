@@ -2,8 +2,7 @@
 
 use super::{LobbySession, MAX_AUTHENTICATED_LOBBY_SESSIONS, catalog::ResolvedLobbyCatalog};
 use crate::{
-    builds::{AcceptedBuildSummary, BuildCatalog, ResolvedMatchLoadout},
-    combat::WeaponCatalog,
+    builds::{AcceptedBuildSummary, ResolvedMatchLoadout},
     lobby::{
         GameTypeId, QueueCancelCommand, QueueCommand, QueueCommandOutcome, QueueDecision,
         QueueJoinCommand, QueueMembership, QueuePoolRow, QueuePoolSnapshot, QueueRejection,
@@ -51,9 +50,10 @@ pub struct QueueTicket {
     pub catalog_revision: crate::lobby::CatalogRevision,
     pub game_type_id: GameTypeId,
     pub game_type_configuration_revision: u32,
+    pub profile_revision: crate::profiles::ProfileRevision,
     pub accepted_build: AcceptedBuildSummary,
     pub resolved_loadout: ResolvedMatchLoadout,
-    pub build_snapshot: crate::profiles::MatchBuildSnapshotV3,
+    pub build_snapshot: crate::profiles::MatchCharacterSnapshot,
     pub admission_order: u64,
     pub admitted_at_pool_state_revision: u64,
     pub formation_eligible: bool,
@@ -479,16 +479,14 @@ impl QueueState {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn command(
         &mut self,
         session: &LobbySession,
         request_id: QueueRequestId,
         command: QueueCommand,
         now_millis: u64,
-        admitted_build: Option<crate::profiles::MatchBuildSnapshotV3>,
-        builds: &BuildCatalog,
-        weapons: &WeaponCatalog,
+        admitted_build: Option<crate::profiles::MatchCharacterSnapshot>,
+        catalogs: crate::characters::LoadoutCatalogs<'_>,
     ) -> QueueCommandResult {
         let session_id = session.lobby_session_id;
         self.memories
@@ -545,7 +543,7 @@ impl QueueState {
         }
 
         let (decision, changed) = match &command {
-            QueueCommand::Join(join) => self.join(session, join, admitted_build, builds, weapons),
+            QueueCommand::Join(join) => self.join(session, join, admitted_build, catalogs),
             QueueCommand::Cancel(cancel) => self.cancel(session, *cancel),
         };
         self.store_outcome(
@@ -621,9 +619,8 @@ impl QueueState {
         &mut self,
         session: &LobbySession,
         command: &QueueJoinCommand,
-        admitted_build: Option<crate::profiles::MatchBuildSnapshotV3>,
-        builds: &BuildCatalog,
-        weapons: &WeaponCatalog,
+        admitted_build: Option<crate::profiles::MatchCharacterSnapshot>,
+        catalogs: crate::characters::LoadoutCatalogs<'_>,
     ) -> (QueueDecision, bool) {
         if let Err(rejection) = self.validate_join_target(command) {
             QueueTelemetry::increment(&mut self.telemetry.game_rejections);
@@ -635,8 +632,7 @@ impl QueueState {
                 && ticket.game_type_id == command.game_type_id
                 && ticket.game_type_configuration_revision
                     == command.game_type_configuration_revision
-                && ticket.build_snapshot.brawler_id == command.brawler_id
-                && ticket.build_snapshot.brawler_revision == command.brawler_revision
+                && ticket.profile_revision == command.profile_revision
             {
                 return (QueueDecision::Joined(membership_from_ticket(ticket)), false);
             }
@@ -653,17 +649,15 @@ impl QueueState {
                 false,
             );
         }
-        let Some(build_snapshot) = admitted_build.filter(|snapshot| {
-            snapshot.brawler_id == command.brawler_id
-                && snapshot.brawler_revision == command.brawler_revision
-        }) else {
+        // The profile authority admits a snapshot only at the revision the command names.
+        let Some(build_snapshot) = admitted_build else {
             QueueTelemetry::increment(&mut self.telemetry.build_rejections);
             return (
                 QueueDecision::Rejected(QueueRejection::InternalBuildResolution),
                 false,
             );
         };
-        let Ok(resolved) = build_snapshot.resolve(builds, weapons) else {
+        let Ok(resolved) = build_snapshot.resolve(catalogs) else {
             QueueTelemetry::increment(&mut self.telemetry.build_rejections);
             return (
                 QueueDecision::Rejected(QueueRejection::InternalBuildResolution),
@@ -693,15 +687,8 @@ impl QueueState {
             );
         };
         let accepted_build = AcceptedBuildSummary {
-            canonical_recipe: crate::builds::BrawlerBuildRecipe {
-                weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(
-                    build_snapshot.weapon_base_id.0,
-                )),
-                ultimate: build_snapshot.ultimate_id,
-                passives: build_snapshot.passive_ids,
-            },
+            character: build_snapshot.choice,
             identity: resolved.identity,
-            total_points: resolved.total_points,
         };
         let ticket = QueueTicket {
             ticket_id,
@@ -711,6 +698,7 @@ impl QueueState {
             catalog_revision: command.catalog_revision,
             game_type_id: command.game_type_id.clone(),
             game_type_configuration_revision: command.game_type_configuration_revision,
+            profile_revision: command.profile_revision,
             accepted_build,
             resolved_loadout: resolved,
             build_snapshot,
@@ -1078,8 +1066,7 @@ fn membership_from_ticket(ticket: &QueueTicket) -> QueueMembership {
         catalog_revision: ticket.catalog_revision,
         game_type_id: ticket.game_type_id.clone(),
         game_type_configuration_revision: ticket.game_type_configuration_revision,
-        brawler_id: ticket.build_snapshot.brawler_id,
-        brawler_revision: ticket.build_snapshot.brawler_revision,
+        profile_revision: ticket.profile_revision,
         accepted_build: ticket.accepted_build,
         admitted_at_pool_state_revision: ticket.admitted_at_pool_state_revision,
     }
@@ -1142,16 +1129,12 @@ mod tests {
             catalog_revision: catalog.revision,
             game_type_id: game.id.clone(),
             game_type_configuration_revision: game.configuration_revision,
-            brawler_id: crate::profiles::SavedBrawlerId::new(u128::from(preset)).unwrap(),
-            brawler_revision: crate::profiles::ProfileRevision::INITIAL,
+            profile_revision: crate::profiles::ProfileRevision::new(u64::from(preset)).unwrap(),
         })
     }
 
-    fn content() -> (BuildCatalog, WeaponCatalog) {
-        (
-            BuildCatalog::embedded().unwrap(),
-            WeaponCatalog::embedded().unwrap(),
-        )
+    fn content() -> crate::characters::EmbeddedLoadoutCatalogs {
+        crate::characters::EmbeddedLoadoutCatalogs::load().unwrap()
     }
 
     #[allow(clippy::large_types_passed_by_value)]
@@ -1162,10 +1145,11 @@ mod tests {
         command: QueueCommand,
         now: u64,
     ) -> QueueCommandResult {
-        let (builds, weapons) = content();
+        let catalogs = content();
         let admitted = match &command {
             QueueCommand::Join(join) => {
-                let preset = u16::try_from(join.brawler_id.get()).unwrap_or(0);
+                // The test profile revision names which roster character the profile selects.
+                let preset = usize::try_from(join.profile_revision.get()).unwrap_or(0);
                 if !(1..=6).contains(&preset) {
                     return queue.command(
                         &session,
@@ -1173,31 +1157,15 @@ mod tests {
                         command,
                         now,
                         None,
-                        &builds,
-                        &weapons,
+                        catalogs.view(),
                     );
                 }
-                let weapon_base_id = crate::profiles::WeaponBaseId(preset);
-                let brawler = crate::profiles::SavedBrawler {
-                    id: join.brawler_id,
-                    creation_ordinal: 1,
-                    name: "Test Brawler".into(),
-                    fighter_profile_id: crate::profiles::FighterProfileId(1),
-                    weapon_base_id,
-                    ultimate_id: crate::builds::UltimateDefinitionId(if preset == 3 {
-                        2
-                    } else {
-                        1
-                    }),
-                    passive_ids: [
-                        crate::builds::PassiveDefinitionId(3),
-                        crate::builds::PassiveDefinitionId(4),
-                    ],
-                    equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-                    revision: join.brawler_revision,
-                };
-                crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
-                    .ok()
+                let character = &catalogs.characters.characters[preset - 1];
+                crate::profiles::MatchCharacterSnapshot::from_choice(
+                    crate::characters::CharacterChoice::default_for(character),
+                    catalogs.view(),
+                )
+                .ok()
             }
             QueueCommand::Cancel(_) => None,
         };
@@ -1207,8 +1175,7 @@ mod tests {
             command,
             now,
             admitted,
-            &builds,
-            &weapons,
+            catalogs.view(),
         )
     }
 

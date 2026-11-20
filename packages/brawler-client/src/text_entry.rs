@@ -27,8 +27,6 @@ pub enum TextEntryField {
     ServerAddress,
     /// Server Select display name (Backspace removes one grapheme).
     PlayerName,
-    /// Brawler creation or rename (Backspace removes one grapheme).
-    BrawlerName,
     /// Map Maker new or renamed map (Backspace removes one character).
     MapName,
     /// Map Maker asset search (Backspace removes one character).
@@ -101,7 +99,7 @@ impl TextEntry {
                 |((index, _), _)| index,
             );
         let removed_start = match self.field {
-            TextEntryField::PlayerName | TextEntryField::BrawlerName => before
+            TextEntryField::PlayerName => before
                 .grapheme_indices(true)
                 .map(|(index, _)| index)
                 .chain(std::iter::once(before.len()))
@@ -114,9 +112,7 @@ impl TextEntry {
         };
         let removed = &before[removed_start..];
         let backspaces = match self.field {
-            TextEntryField::PlayerName | TextEntryField::BrawlerName => {
-                removed.graphemes(true).count()
-            }
+            TextEntryField::PlayerName => removed.graphemes(true).count(),
             TextEntryField::ServerAddress
             | TextEntryField::MapName
             | TextEntryField::AssetSearch => removed.chars().count(),
@@ -173,7 +169,6 @@ fn strip_label(entry: &TextEntry) -> String {
     let label = match entry.field {
         TextEntryField::ServerAddress => "Server address",
         TextEntryField::PlayerName => "Your name",
-        TextEntryField::BrawlerName => "Brawler name",
         TextEntryField::MapName => "Map name",
         TextEntryField::AssetSearch => "Search assets",
     };
@@ -326,7 +321,7 @@ mod tests {
         assert_eq!((deleted.backspaces, deleted.insert.as_str()), (1, ""));
         // Removing one code point of the cluster deletes the cluster and re-inserts the rest.
         let partial = "A👨‍👩‍";
-        let trimmed = edit(TextEntryField::BrawlerName, family, family.len(), partial);
+        let trimmed = edit(TextEntryField::PlayerName, family, family.len(), partial);
         assert_eq!((trimmed.backspaces, trimmed.insert.as_str()), (1, "👨‍👩‍"));
         let submitted = edit(TextEntryField::PlayerName, "Ace", 3, "Aces\n");
         assert_eq!(

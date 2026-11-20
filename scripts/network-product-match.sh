@@ -151,9 +151,9 @@ if [ "$requeue_smoke" = 1 ]; then
     fi
 fi
 timeout_seconds=${timeout_seconds:-60}
-# Weapons come from the authored diagnostic rotation, never from a literal range (BRL-xbq8).
-first_preset=$(e2e_diagnostic_weapon_for_client "$project_dir" 1) || {
-    echo "brawler product match: content/catalogs/builds.ron has no direct_diagnostic weapons" >&2
+# Characters come from the authored diagnostic rotation, never from a literal range (BRL-xbq8).
+first_character=$(e2e_diagnostic_character_for_client "$project_dir" 1) || {
+    echo "brawler product match: content/catalogs/builds.ron has no direct_diagnostic picks" >&2
     exit 2
 }
 
@@ -251,7 +251,7 @@ exec 3>&-
 
 index=1
 while [ "$index" -le "$client_count" ]; do
-    preset=$(e2e_diagnostic_weapon_for_client "$project_dir" "$index")
+    character=$(e2e_diagnostic_character_for_client "$project_dir" "$index")
     if [ "$headless" = 1 ]; then
         if [ "$practice_smoke" = 1 ]; then
             target/debug/brawler-client \
@@ -262,7 +262,7 @@ while [ "$index" -le "$client_count" ]; do
                 --headless \
                 "$practice_flag" \
                 --product-game-type "$game_type" \
-                --weapon-preset "$first_preset" &
+                --character "$first_character" &
         elif [ "$rejoin_smoke" = completed ]; then
             if [ "$index" -eq 1 ]; then
                 role_flag=--product-completed-rejoin-smoke
@@ -283,7 +283,7 @@ while [ "$index" -le "$client_count" ]; do
                     "$match_flag" \
                     --product-game-type "${game_type:-wipeout-1v1}" \
                     "$role_flag" "$cue_dir/leave" \
-                    --weapon-preset "$first_preset" &
+                    --character "$first_character" &
             else
                 target/debug/brawler-client \
                     --client-id $((5000 + index)) \
@@ -295,7 +295,7 @@ while [ "$index" -le "$client_count" ]; do
                     --product-game-type "${game_type:-wipeout-1v1}" \
                     "$role_flag" "$cue_dir/leave" \
                     --exit-after-lobby-return \
-                    --weapon-preset "$first_preset" &
+                    --character "$first_character" &
             fi
         elif [ "$requeue_smoke" = 1 ]; then
             if [ "$index" -eq 1 ]; then aim_axis=1,0; else aim_axis=-1,0; fi
@@ -310,7 +310,7 @@ while [ "$index" -le "$client_count" ]; do
                 --aim-axis "$aim_axis" \
                 --fire \
                 --simulation-ticks 4000 \
-                --weapon-preset "$first_preset" >"$requeue_log_dir/client-$index.log" 2>&1 &
+                --character "$first_character" >"$requeue_log_dir/client-$index.log" 2>&1 &
         else
             if [ -n "$game_type" ]; then
                 target/debug/brawler-client \
@@ -321,7 +321,7 @@ while [ "$index" -le "$client_count" ]; do
                     --headless \
                     "$match_flag" \
                     --product-game-type "$game_type" \
-                    --weapon-preset "$preset" &
+                    --character "$character" &
             else
                 target/debug/brawler-client \
                     --client-id $((5000 + index)) \
@@ -330,7 +330,7 @@ while [ "$index" -le "$client_count" ]; do
                     --auto-connect \
                     --headless \
                     "$match_flag" \
-                    --weapon-preset "$preset" &
+                    --character "$character" &
             fi
         fi
     else

@@ -18,12 +18,13 @@ pub const MAX_ROTATION_MAPS_PER_GAME_TYPE: u32 = 64;
 /// Bound on an operator's rejection or removal reason.
 pub const MAX_PUBLISHED_MAP_REASON_BYTES: usize = crate::lobby::MAX_PUBLISHED_MAP_REASON_BYTES;
 
-pub(super) fn create_schema_v3(transaction: &Transaction<'_>) -> Result<(), ProfileStorageError> {
+pub(super) fn create_published_map_schema(
+    transaction: &Transaction<'_>,
+) -> Result<(), ProfileStorageError> {
     transaction.execute_batch(
         "CREATE TABLE published_maps(published_map_id INTEGER PRIMARY KEY AUTOINCREMENT CHECK(published_map_id>0),account_id BLOB NOT NULL CHECK(length(account_id)=16),author_display_name TEXT NOT NULL CHECK(length(author_display_name)<=64),name TEXT NOT NULL CHECK(length(name)<=96),game_type_id TEXT NOT NULL CHECK(length(game_type_id)<=32),game_type_revision INTEGER NOT NULL CHECK(game_type_revision>0),status INTEGER NOT NULL CHECK(status BETWEEN 0 AND 3),recipe BLOB NOT NULL CHECK(length(recipe)<=262144),submitted_at_unix_ms INTEGER NOT NULL CHECK(submitted_at_unix_ms>=0),decided_at_unix_ms INTEGER CHECK(decided_at_unix_ms IS NULL OR decided_at_unix_ms>=0),reason TEXT CHECK(reason IS NULL OR length(reason)<=256),FOREIGN KEY(account_id) REFERENCES profiles(account_id) ON DELETE CASCADE);
          CREATE INDEX published_maps_by_account ON published_maps(account_id,status);
-         CREATE INDEX published_maps_by_status ON published_maps(status,decided_at_unix_ms,published_map_id);
-         PRAGMA user_version=3;",
+         CREATE INDEX published_maps_by_status ON published_maps(status,decided_at_unix_ms,published_map_id);",
     )?;
     Ok(())
 }

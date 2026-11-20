@@ -1202,21 +1202,10 @@ fn test_open_document(
             recipe: session.document.recipe.clone(),
         },
     );
-    let selected_brawler = membership.profile.selected_brawler_id.and_then(|id| {
-        membership
-            .profile
-            .brawlers
-            .iter()
-            .find(|brawler| brawler.id == id)
-    });
-    if let Some(brawler) = selected_brawler {
-        *purpose = SessionPurpose::Practice;
-        if practice.start(selection, brawler.id, brawler.revision) {
-            runtime.return_to_editor = true;
-            runtime.status = Some("Submitting this saved revision to the server…".to_string());
-        }
-    } else {
-        runtime.status = Some("Select or create a brawler before testing.".to_string());
+    *purpose = SessionPurpose::Practice;
+    if practice.start(selection, membership.profile.revision) {
+        runtime.return_to_editor = true;
+        runtime.status = Some("Submitting this saved revision to the server…".to_string());
     }
     runtime.bump_render();
 }

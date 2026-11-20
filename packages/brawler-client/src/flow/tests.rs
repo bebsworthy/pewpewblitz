@@ -23,11 +23,7 @@ use lightyear::prelude::client::Client;
 use persistence::{local_load_error, startup_server_address};
 use reducer::{accept_game_type_draft, favorite_focus_after_removal, rejection_flow_error};
 use screens::{
-    brawlers::{
-        BrawlerCreationRoot, BrawlerDetailsRoot, BrawlerEditorRoot, BrawlerListRoot,
-        DeleteBrawlerConfirmationRoot, WeaponEquipmentRoot, WeaponEquipmentScrollArea,
-        ultimate_name,
-    },
+    brawlers::{BRAWLERS_BACK_INDEX, BrawlersNotice, BrawlersRoot},
     connecting::ConnectingProgressSegment,
     dashboard::{
         DASHBOARD_BUILD_INDEX, DASHBOARD_GAME_INDEX, DASHBOARD_MENU_INDEX, DASHBOARD_PLAY_INDEX,
@@ -142,21 +138,6 @@ fn inject_session_observation(app: &mut App, observation: SessionObservation) {
         ..PendingFlowActions::default()
     });
     app.update();
-}
-
-#[test]
-fn brawler_editor_uses_catalog_name_for_concealment_field() {
-    let _app = flow_test_app();
-    let catalog = brawler::profiles::AdvertisedBrawlerCatalog::from_content(
-        &brawler::builds::BuildCatalog::embedded().unwrap(),
-        &brawler::combat::WeaponCatalog::embedded().unwrap(),
-    )
-    .unwrap();
-
-    assert_eq!(
-        ultimate_name(&catalog, brawler::builds::UltimateDefinitionId(5)),
-        "Concealment Field"
-    );
 }
 
 #[test]
@@ -301,6 +282,7 @@ fn press_flow_button(app: &mut App, action: &FlowUiAction) {
 
 fn lobby_membership() -> ClientLobbyMembership {
     let account_id = brawler::profiles::AccountId::new(1).unwrap();
+    let catalog = brawler::profiles::AdvertisedCharacterCatalog::embedded().unwrap();
     ClientLobbyMembership {
         logical_server_id: 1,
         player_id: brawler::protocol::PlayerId(1),
@@ -323,57 +305,20 @@ fn lobby_membership() -> ClientLobbyMembership {
                 active_limit_ticks: 3_600,
             },
         }],
-        brawler_catalog: brawler::profiles::AdvertisedBrawlerCatalog::from_content(
-            &brawler::builds::BuildCatalog::embedded().unwrap(),
-            &brawler::combat::WeaponCatalog::embedded().unwrap(),
-        )
-        .unwrap(),
-        profile: brawler::profiles::ProfileSnapshot::empty(account_id),
+        profile: catalog.profile_from_stored(
+            account_id,
+            brawler::profiles::ProfileRevision::INITIAL,
+            None,
+            [],
+        ),
+        character_catalog: catalog,
     }
-}
-
-fn lobby_membership_with_brawler() -> ClientLobbyMembership {
-    let mut membership = lobby_membership();
-    let brawler_id = brawler::profiles::SavedBrawlerId::new(2).unwrap();
-    membership
-        .profile
-        .brawlers
-        .push(brawler::profiles::SavedBrawler {
-            id: brawler_id,
-            creation_ordinal: 1,
-            name: "Test Brawler".into(),
-            fighter_profile_id: brawler::profiles::FighterProfileId(1),
-            weapon_base_id: brawler::profiles::WeaponBaseId(1),
-            ultimate_id: brawler::builds::UltimateDefinitionId(1),
-            passive_ids: [
-                brawler::builds::PassiveDefinitionId(3),
-                brawler::builds::PassiveDefinitionId(4),
-            ],
-            equipped_part_ids: [None; brawler::weapon_parts::WEAPON_PART_SLOT_COUNT],
-            revision: brawler::profiles::ProfileRevision::INITIAL,
-        });
-    membership.profile.selected_brawler_id = Some(brawler_id);
-    membership.profile.next_brawler_ordinal = 2;
-    membership
-}
-
-fn lobby_membership_with_two_brawlers() -> ClientLobbyMembership {
-    let mut membership = lobby_membership_with_brawler();
-    let mut second = membership.profile.brawlers[0].clone();
-    second.id = brawler::profiles::SavedBrawlerId::new(3).unwrap();
-    second.creation_ordinal = 2;
-    second.name = "Second Brawler".into();
-    second.revision = brawler::profiles::ProfileRevision::INITIAL;
-    membership.profile.brawlers.push(second);
-    membership.profile.next_brawler_ordinal = 3;
-    membership
 }
 
 #[test]
 fn explicit_action_preempts_session_and_ordinary_while_profile_decision_still_applies() {
     let mut app = flow_action_test_app();
-    let membership = lobby_membership_with_brawler();
-    let brawler_id = membership.profile.selected_brawler_id.unwrap();
+    let membership = lobby_membership();
     let session = app
         .world_mut()
         .spawn((
@@ -391,7 +336,7 @@ fn explicit_action_preempts_session_and_ordinary_while_profile_decision_still_ap
     app.world_mut()
         .resource_mut::<super::super::ClientProfileModel>()
         .set_decision_for_test(brawler::profiles::ProfileDecision::InvalidRequest);
-    app.world_mut().resource_mut::<PendingEditedBrawler>().0 = Some(brawler_id);
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Brawlers;
     app.world_mut().resource_mut::<InjectedFlowActions>().0 = Some(PendingFlowActions {
         session: Some(SessionObservation::ReservationStarted),
         explicit: Some(FlowUiAction::Cancel),
@@ -403,10 +348,10 @@ fn explicit_action_preempts_session_and_ordinary_while_profile_decision_still_ap
     assert!(app.world().get_entity(session).is_err());
     assert!(
         app.world()
-            .resource::<BrawlerEditDraft>()
-            .inline_error
+            .resource::<BrawlersNotice>()
+            .0
             .as_deref()
-            .is_some_and(|error| error.contains("not valid")),
+            .is_some_and(|error| error.contains("does not offer")),
         "the profile decision is processed before action precedence"
     );
     assert_eq!(
@@ -468,28 +413,20 @@ fn match_result_context(
 }
 
 fn queue_membership(membership: &ClientLobbyMembership) -> brawler::lobby::QueueMembership {
-    let brawler = &membership.profile.brawlers[0];
-    let recipe = brawler::builds::BrawlerBuildRecipe {
-        weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(1)),
-        ultimate: brawler.ultimate_id,
-        passives: brawler.passive_ids,
-    };
     brawler::lobby::QueueMembership {
         ticket_id: brawler::lobby::QueueTicketId::new(1).unwrap(),
         catalog_revision: membership.catalog_revision,
         game_type_id: membership.game_types[0].id.clone(),
         game_type_configuration_revision: membership.game_types[0].configuration_revision,
-        brawler_id: brawler.id,
-        brawler_revision: brawler.revision,
+        profile_revision: membership.profile.revision,
         accepted_build: brawler::builds::AcceptedBuildSummary {
-            canonical_recipe: recipe,
+            character: membership.profile.selection(),
             identity: brawler::builds::SelectedBuild {
                 recipe_fingerprint: brawler::builds::BuildRecipeFingerprint(1),
                 revision: brawler::builds::BuildCatalog::embedded()
                     .unwrap()
                     .balance_revision,
             },
-            total_points: 10,
         },
         admitted_at_pool_state_revision: 1,
     }
@@ -497,7 +434,7 @@ fn queue_membership(membership: &ClientLobbyMembership) -> brawler::lobby::Queue
 
 #[test]
 fn match_transition_observations_preserve_loading_match_and_overlay_commits() {
-    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+    let mut app = configured_lobby_flow_app(lobby_membership());
 
     inject_session_observation(&mut app, SessionObservation::ReservationStarted);
     let commit = app.world().resource::<FlowCommit>();
@@ -534,7 +471,7 @@ fn observe_matchmaking_phase(app: &mut App, phase: brawler::lobby::MatchmakingSe
 /// closed first). Before the fix the stale removal committed the Dashboard under the match.
 #[test]
 fn a_queue_handoff_reaches_the_match_even_after_a_late_reservation_removal() {
-    let membership = lobby_membership_with_brawler();
+    let membership = lobby_membership();
     let joined = queue_membership(&membership);
     let mut app = configured_lobby_flow_app_with(membership, |app| {
         app.insert_resource(super::super::ClientInputContext::Shell);
@@ -639,7 +576,7 @@ fn a_queue_handoff_reaches_the_match_even_after_a_late_reservation_removal() {
 
 #[test]
 fn queue_outcomes_preserve_join_cancel_and_stale_content_policies() {
-    let membership = lobby_membership_with_brawler();
+    let membership = lobby_membership();
     let joined = queue_membership(&membership);
     let mut app = configured_lobby_flow_app(membership);
     app.world_mut()
@@ -711,7 +648,7 @@ fn queue_outcomes_preserve_join_cancel_and_stale_content_policies() {
 
 #[test]
 fn practice_rejections_distinguish_stale_content_from_ordinary_failures() {
-    let mut stale = configured_lobby_flow_app(lobby_membership_with_brawler());
+    let mut stale = configured_lobby_flow_app(lobby_membership());
     inject_session_observation(
         &mut stale,
         SessionObservation::PracticeRejected(brawler::lobby::PracticeStartRejection::StaleCatalog),
@@ -724,7 +661,7 @@ fn practice_rejections_distinguish_stale_content_from_ordinary_failures() {
         ClientFlow::ServerSelect
     );
 
-    let mut ordinary = configured_lobby_flow_app(lobby_membership_with_brawler());
+    let mut ordinary = configured_lobby_flow_app(lobby_membership());
     inject_session_observation(
         &mut ordinary,
         SessionObservation::PracticeRejected(brawler::lobby::PracticeStartRejection::Busy),
@@ -739,7 +676,7 @@ fn practice_rejections_distinguish_stale_content_from_ordinary_failures() {
 
 #[test]
 fn match_failure_and_fresh_lobby_return_preserve_result_and_one_shot_error_paths() {
-    let membership = lobby_membership_with_brawler();
+    let membership = lobby_membership();
     let game_type_id = membership.game_types[0].id.clone();
     let mut failed = configured_lobby_flow_app(membership.clone());
     failed
@@ -831,7 +768,7 @@ fn match_failure_and_fresh_lobby_return_preserve_result_and_one_shot_error_paths
 /// accepted rejoin, before the flow observes it.
 #[test]
 fn a_rejoin_into_a_completed_match_reaches_results_without_the_lost_match_message() {
-    let membership = lobby_membership_with_brawler();
+    let membership = lobby_membership();
     let game_type_id = membership.game_types[0].id.clone();
     for snapshot_with_rejoin in [false, true] {
         let mut app = configured_lobby_flow_app(membership.clone());
@@ -873,52 +810,6 @@ fn a_rejoin_into_a_completed_match_reaches_results_without_the_lost_match_messag
     }
 }
 
-#[test]
-fn practice_queue_again_uses_fresh_generation_game_and_selected_brawler() {
-    let membership = lobby_membership_with_brawler();
-    let game_type_id = membership.game_types[0].id.clone();
-    let selected_brawler = membership.profile.brawlers[0].clone();
-    let mut app = configured_lobby_flow_app(membership);
-    let mut stale_membership = lobby_membership_with_brawler();
-    stale_membership.game_types[0].id = brawler::lobby::GameTypeId::new("stale-wipeout").unwrap();
-    stale_membership.profile.brawlers[0].id = brawler::profiles::SavedBrawlerId::new(77).unwrap();
-    stale_membership.profile.brawlers[0].revision =
-        brawler::profiles::ProfileRevision::new(9).unwrap();
-    stale_membership.profile.selected_brawler_id = Some(stale_membership.profile.brawlers[0].id);
-    app.world_mut().spawn((
-        Client,
-        stale_membership,
-        RoutedClientSession {
-            generation: 2,
-            kind: super::super::RoutedClientSessionKind::Lobby,
-        },
-    ));
-    app.world_mut()
-        .resource_mut::<RoutedClientLifecycle>()
-        .generation = 1;
-    *app.world_mut().resource_mut::<SessionPurpose>() = SessionPurpose::Practice;
-    *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType::default();
-    app.world_mut()
-        .resource_mut::<super::super::ClientMatchResultState>()
-        .context = Some(match_result_context(game_type_id.clone()));
-
-    inject_action(&mut app, FlowUiAction::QueueAgain);
-
-    let request = app
-        .world()
-        .resource::<super::super::ClientPracticeModel>()
-        .pending_request_for_test()
-        .expect("fresh-generation Practice replay should emit one request");
-    assert_eq!(request.game_type_id, game_type_id);
-    assert_eq!(request.brawler_id, selected_brawler.id);
-    assert_eq!(request.brawler_revision, selected_brawler.revision);
-    let selection = app.world().resource::<SelectedGameType>();
-    assert_eq!(selection.game_type_id.as_ref(), Some(&request.game_type_id));
-    assert!(selection.catalog_revision.is_some());
-    assert!(selection.configuration_revision.is_some());
-    assert!(app.world().resource::<FlowCommit>().error.is_none());
-}
-
 fn configured_customization_app(membership: &ClientLobbyMembership) -> App {
     let mut app = configured_lobby_flow_app(membership.clone());
     app.world_mut()
@@ -928,30 +819,8 @@ fn configured_customization_app(membership: &ClientLobbyMembership) -> App {
 }
 
 #[test]
-fn queue_and_practice_require_a_selected_brawler() {
-    let empty_membership = lobby_membership();
-    let mut missing = configured_lobby_flow_app(empty_membership);
-
-    inject_action(&mut missing, FlowUiAction::JoinQueue);
-    assert!(
-        missing
-            .world()
-            .resource::<super::super::ClientQueueModel>()
-            .pending()
-            .is_none()
-    );
-    inject_action(&mut missing, FlowUiAction::StartPractice);
-    assert!(
-        !missing
-            .world()
-            .resource::<super::super::ClientPracticeModel>()
-            .pending()
-    );
-}
-
-#[test]
 fn pending_practice_rejects_queue_join() {
-    let mut practice_first = configured_lobby_flow_app(lobby_membership_with_brawler());
+    let mut practice_first = configured_lobby_flow_app(lobby_membership());
 
     inject_action(&mut practice_first, FlowUiAction::StartPractice);
     assert!(
@@ -972,7 +841,7 @@ fn pending_practice_rejects_queue_join() {
 
 #[test]
 fn pending_queue_rejects_practice_start() {
-    let mut queue_first = configured_lobby_flow_app(lobby_membership_with_brawler());
+    let mut queue_first = configured_lobby_flow_app(lobby_membership());
 
     inject_action(&mut queue_first, FlowUiAction::JoinQueue);
     assert!(
@@ -988,259 +857,6 @@ fn pending_queue_rejects_practice_start() {
             .world()
             .resource::<super::super::ClientPracticeModel>()
             .pending()
-    );
-}
-
-fn assert_customization_entry_actions_are_blocked(
-    app: &mut App,
-    brawler_id: brawler::profiles::SavedBrawlerId,
-    profile_pending: bool,
-) {
-    for action in [
-        FlowUiAction::CreateBrawler,
-        FlowUiAction::SelectBrawler(brawler_id),
-        FlowUiAction::OpenBrawlerEditor(brawler_id),
-        FlowUiAction::OpenWeaponEquipment(brawler_id),
-        FlowUiAction::DeleteBrawler(brawler_id),
-    ] {
-        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Settings;
-        inject_action(app, action);
-        assert_eq!(
-            *app.world().resource::<ClientOverlay>(),
-            ClientOverlay::Settings
-        );
-        assert_eq!(
-            app.world()
-                .resource::<super::super::ClientProfileModel>()
-                .pending(),
-            profile_pending
-        );
-    }
-}
-
-#[test]
-fn customization_entry_actions_preserve_queue_practice_and_profile_locks() {
-    let membership = lobby_membership_with_brawler();
-    let brawler = membership.profile.brawlers[0].clone();
-
-    let mut queue_locked = configured_customization_app(&membership);
-    inject_action(&mut queue_locked, FlowUiAction::JoinQueue);
-    assert!(
-        queue_locked
-            .world()
-            .resource::<super::super::ClientQueueModel>()
-            .pending()
-            .is_some()
-    );
-    assert_customization_entry_actions_are_blocked(&mut queue_locked, brawler.id, false);
-
-    let mut practice_locked = configured_customization_app(&membership);
-    inject_action(&mut practice_locked, FlowUiAction::StartPractice);
-    assert!(
-        practice_locked
-            .world()
-            .resource::<super::super::ClientPracticeModel>()
-            .pending()
-    );
-    assert_customization_entry_actions_are_blocked(&mut practice_locked, brawler.id, false);
-
-    let mut profile_locked = configured_customization_app(&membership);
-    assert!(
-        profile_locked
-            .world_mut()
-            .resource_mut::<super::super::ClientProfileModel>()
-            .edit(
-                brawler.id,
-                brawler::profiles::BrawlerEdit {
-                    name: brawler.name,
-                    ultimate_id: brawler.ultimate_id,
-                    passive_ids: brawler.passive_ids,
-                },
-            )
-    );
-    assert_customization_entry_actions_are_blocked(&mut profile_locked, brawler.id, true);
-}
-
-#[test]
-fn equipment_actions_preserve_slot_conflict_draft_and_overlay_contracts() {
-    let mut membership = lobby_membership_with_two_brawlers();
-    let target = membership.profile.brawlers[0].id;
-    let occupied_part = brawler::weapon_parts::WeaponPartInstanceId::new(41).unwrap();
-    membership.profile.brawlers[1].equipped_part_ids[2] = Some(occupied_part);
-    let mut app = configured_customization_app(&membership);
-
-    inject_action(&mut app, FlowUiAction::OpenWeaponEquipment(target));
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::WeaponEquipment
-    );
-    {
-        let mut draft = app.world_mut().resource_mut::<WeaponEquipmentDraft>();
-        draft.selected_slot = 1;
-        draft.inline_error = Some("keep this error".into());
-    }
-    inject_action(
-        &mut app,
-        FlowUiAction::SelectEquipmentSlot(brawler::weapon_parts::WEAPON_PART_SLOT_COUNT),
-    );
-    let draft = app.world().resource::<WeaponEquipmentDraft>();
-    assert_eq!(draft.selected_slot, 1);
-    assert_eq!(draft.inline_error.as_deref(), Some("keep this error"));
-
-    inject_action(&mut app, FlowUiAction::EquipWeaponPart(occupied_part));
-    let draft = app.world().resource::<WeaponEquipmentDraft>();
-    assert_eq!(
-        draft.inline_error.as_deref(),
-        Some("That physical part is equipped on another brawler.")
-    );
-    assert_eq!(draft.equipped_part_ids, [None; 4]);
-    assert!(
-        !app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .pending()
-    );
-
-    let free_part = brawler::weapon_parts::WeaponPartInstanceId::new(42).unwrap();
-    inject_action(&mut app, FlowUiAction::EquipWeaponPart(free_part));
-    assert_eq!(
-        app.world()
-            .resource::<WeaponEquipmentDraft>()
-            .equipped_part_ids[1],
-        Some(free_part)
-    );
-    assert!(
-        app.world()
-            .resource::<WeaponEquipmentDraft>()
-            .inline_error
-            .is_none()
-    );
-    // A second choice and Back cannot outrun the in-flight server mutation.
-    inject_action(&mut app, FlowUiAction::UnequipWeaponPart);
-    inject_action(&mut app, FlowUiAction::CancelWeaponEquipment);
-    assert_eq!(
-        app.world()
-            .resource::<WeaponEquipmentDraft>()
-            .equipped_part_ids[1],
-        Some(free_part)
-    );
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::WeaponEquipment
-    );
-    assert!(app.world().resource::<WeaponEquipmentDraft>().awaiting_save);
-    membership.profile.brawlers[0].equipped_part_ids[1] = Some(free_part);
-    {
-        let mut profile = app
-            .world_mut()
-            .resource_mut::<super::super::ClientProfileModel>();
-        profile.set_snapshot_for_test(membership.profile.clone());
-        profile.set_decision_for_test(brawler::profiles::ProfileDecision::Accepted);
-    }
-    app.update();
-    assert!(!app.world().resource::<WeaponEquipmentDraft>().picker_open);
-    assert!(!app.world().resource::<WeaponEquipmentDraft>().awaiting_save);
-    assert!(app.world().resource::<DashboardNotice>().0.is_none());
-    let burst = app.world().resource::<screens::shared::FlowBurst>();
-    assert_eq!(burst.requested(), Some(1), "the accepted slot bursts");
-    inject_action(&mut app, FlowUiAction::SelectEquipmentSlot(1));
-    inject_action(&mut app, FlowUiAction::UnequipWeaponPart);
-    assert!(app.world().resource::<WeaponEquipmentDraft>().awaiting_save);
-    {
-        let mut profile = app
-            .world_mut()
-            .resource_mut::<super::super::ClientProfileModel>();
-        profile.set_snapshot_for_test(membership.profile.clone());
-        profile.set_decision_for_test(brawler::profiles::ProfileDecision::StorageFault);
-    }
-    app.update();
-    let draft = app.world().resource::<WeaponEquipmentDraft>();
-    assert!(draft.picker_open);
-    assert!(draft.inline_error.is_some());
-    assert_eq!(draft.equipped_part_ids[1], Some(free_part));
-    inject_action(&mut app, FlowUiAction::CancelWeaponEquipment);
-    assert!(!app.world().resource::<WeaponEquipmentDraft>().picker_open);
-    inject_action(&mut app, FlowUiAction::CancelWeaponEquipment);
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(target)
-    );
-}
-
-#[test]
-fn profile_decisions_preserve_exact_notices_overlays_focus_and_draft_errors() {
-    let mut app = flow_action_test_app();
-    let membership = lobby_membership_with_brawler();
-    let created = membership.profile.brawlers[0].clone();
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_snapshot_for_test(membership.profile);
-    app.world_mut().resource_mut::<PendingCreatedBrawler>().0 = Some(created.creation_ordinal);
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_decision_for_test(brawler::profiles::ProfileDecision::Accepted);
-
-    app.update();
-
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(created.id)
-    );
-    assert_eq!(
-        app.world().resource::<DashboardNotice>().0.as_deref(),
-        Some("Created Test Brawler.")
-    );
-    assert_eq!(app.world().resource::<FlowNavigation>().focused, 0);
-
-    app.world_mut().resource_mut::<PendingEditedBrawler>().0 = Some(created.id);
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_decision_for_test(brawler::profiles::ProfileDecision::Accepted);
-    app.update();
-
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(created.id)
-    );
-    assert_eq!(
-        app.world().resource::<DashboardNotice>().0.as_deref(),
-        Some("Profile saved.")
-    );
-    assert_eq!(app.world().resource::<FlowNavigation>().focused, 1);
-
-    app.world_mut().resource_mut::<PendingCreatedBrawler>().0 = Some(created.creation_ordinal);
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_decision_for_test(brawler::profiles::ProfileDecision::InvalidRequest);
-    app.update();
-
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerCreation
-    );
-    assert_eq!(
-        app.world()
-            .resource::<BrawlerCreationDraft>()
-            .inline_error
-            .as_deref(),
-        Some("That brawler change is not valid.")
-    );
-
-    app.world_mut().resource_mut::<PendingEditedBrawler>().0 = Some(created.id);
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_decision_for_test(brawler::profiles::ProfileDecision::StaleRevision);
-    app.update();
-
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerEditor
-    );
-    assert!(
-        app.world()
-            .resource::<BrawlerEditDraft>()
-            .inline_error
-            .as_deref()
-            .is_some_and(|error| error.contains("changed"))
     );
 }
 
@@ -1314,328 +930,6 @@ fn rendered_dashboard_menu_buttons_dispatch_their_actions() {
         *app.world().resource::<ClientOverlay>(),
         ClientOverlay::Credits
     );
-}
-
-#[test]
-fn empty_profile_creation_is_an_opaque_full_screen_destination() {
-    let mut app = flow_test_app();
-    let membership = lobby_membership();
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_snapshot_for_test(membership.profile.clone());
-    app.world_mut().spawn((Client, membership));
-    app.world_mut()
-        .resource_mut::<NextState<ClientFlow>>()
-        .set(ClientFlow::Dashboard);
-    app.update();
-    app.update();
-
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerCreation
-    );
-    let world = app.world_mut();
-    let mut roots = world.query_filtered::<(&Node, &BackgroundColor), With<BrawlerCreationRoot>>();
-    let (node, background) = roots.single(world).unwrap();
-    assert_eq!(
-        (node.left, node.right, node.top, node.bottom),
-        (px(0), px(0), px(0), px(0))
-    );
-    assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
-}
-
-#[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one end-to-end UI regression follows the approved Dashboard-to-list-to-detail-to-customization path"
-)]
-fn selected_brawler_cards_open_list_details_and_reach_equipment() {
-    let mut app = flow_test_app();
-    let membership = lobby_membership_with_brawler();
-    let brawler_id = membership.profile.selected_brawler_id.unwrap();
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_snapshot_for_test(membership.profile.clone());
-    app.world_mut().spawn((Client, membership));
-    app.world_mut()
-        .resource_mut::<NextState<ClientFlow>>()
-        .set(ClientFlow::Dashboard);
-    app.update();
-    let dashboard_copy = visible_text(&mut app);
-    assert!(
-        dashboard_copy
-            .iter()
-            .any(|text| text.contains("Pulse Sidearm · Dash"))
-    );
-    assert!(
-        dashboard_copy
-            .iter()
-            .any(|text| text.contains("2 passives · 4 part slots"))
-    );
-    assert!(
-        !dashboard_copy
-            .iter()
-            .any(|text| text.contains("Weapon base 1"))
-    );
-    assert!(dashboard_copy.iter().any(|text| text == "VIEW BRAWLERS"));
-    assert!(
-        !dashboard_copy
-            .iter()
-            .any(|text| text.contains("SELECTED FOR PLAY"))
-    );
-
-    let preview = {
-        let world = app.world_mut();
-        let mut query = world.query::<(Entity, &DashboardButtonStyle, &FlowButton)>();
-        let mut selected = None;
-        for (entity, style, button) in query.iter(world) {
-            if matches!(
-                style,
-                DashboardButtonStyle::Preview | DashboardButtonStyle::Build
-            ) {
-                assert_eq!(button.action, FlowUiAction::OpenBrawlerList);
-                if matches!(style, DashboardButtonStyle::Preview) {
-                    selected = Some(entity);
-                }
-            }
-        }
-        selected.expect("Dashboard renders its selected-brawler preview")
-    };
-    app.world_mut()
-        .entity_mut(preview)
-        .insert(Interaction::Pressed);
-    app.update();
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::None,
-        "pressing only focuses; navigation waits for release"
-    );
-    app.world_mut()
-        .entity_mut(preview)
-        .insert(Interaction::Hovered);
-    app.update();
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerList
-    );
-    app.update();
-    {
-        let world = app.world_mut();
-        let mut roots = world.query_filtered::<(&Node, &BackgroundColor), With<BrawlerListRoot>>();
-        let (node, background) = roots.single(world).unwrap();
-        assert_eq!(node.left, px(0));
-        assert_eq!(node.right, px(0));
-        assert_eq!(node.top, px(0));
-        assert_eq!(node.bottom, px(0));
-        assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
-    }
-    assert!(
-        !visible_text(&mut app)
-            .iter()
-            .any(|text| text.contains("SELECTED FOR PLAY"))
-    );
-    assert!(
-        visible_text(&mut app)
-            .iter()
-            .any(|text| text.to_lowercase().contains("pulse sidearm"))
-    );
-
-    press_flow_button(&mut app, &FlowUiAction::OpenBrawlerDetails(brawler_id));
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(brawler_id)
-    );
-    app.update();
-    {
-        let world = app.world_mut();
-        let mut roots =
-            world.query_filtered::<(&Node, &BackgroundColor), With<BrawlerDetailsRoot>>();
-        let (node, background) = roots.single(world).unwrap();
-        assert_eq!(node.left, px(0));
-        assert_eq!(node.right, px(0));
-        assert_eq!(node.top, px(0));
-        assert_eq!(node.bottom, px(0));
-        assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
-        let mut previews = world.query_filtered::<Entity, With<BrawlerCardPreview>>();
-        assert_eq!(previews.iter(world).count(), 1);
-    }
-    assert!(
-        visible_text(&mut app)
-            .iter()
-            .any(|text| text.to_lowercase().contains("pulse sidearm"))
-    );
-
-    let select_disabled = {
-        let world = app.world_mut();
-        let mut buttons = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
-        buttons
-            .iter(world)
-            .find(|(button, _)| button.action == FlowUiAction::SelectBrawler(brawler_id))
-            .map(|(_, disabled)| disabled)
-            .expect("selected brawler retains its primary action")
-    };
-    assert!(!select_disabled);
-    press_flow_button(&mut app, &FlowUiAction::SelectBrawler(brawler_id));
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::None
-    );
-    assert!(
-        !app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .pending(),
-        "returning with the selected brawler must not send a profile mutation"
-    );
-    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BrawlerDetails(brawler_id);
-    app.update();
-
-    press_flow_button(&mut app, &FlowUiAction::DeleteBrawler(brawler_id));
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::DeleteBrawlerConfirmation(brawler_id)
-    );
-    app.update();
-    {
-        let world = app.world_mut();
-        let mut details = world.query::<&BrawlerDetailsRoot>();
-        assert!(details.single(world).unwrap().contextual_confirmation);
-        let mut confirmations =
-            world.query_filtered::<Entity, With<DeleteBrawlerConfirmationRoot>>();
-        assert_eq!(confirmations.iter(world).count(), 1);
-        let mut background_actions = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
-        assert!(
-            background_actions
-                .iter(world)
-                .filter(|(button, _)| {
-                    matches!(
-                        button.action,
-                        FlowUiAction::SelectBrawler(_)
-                            | FlowUiAction::OpenBrawlerEditor(_)
-                            | FlowUiAction::OpenWeaponEquipment(_)
-                            | FlowUiAction::DeleteBrawler(_)
-                    )
-                })
-                .all(|(_, disabled)| disabled)
-        );
-    }
-    press_flow_button(&mut app, &FlowUiAction::CancelDeleteBrawler);
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(brawler_id)
-    );
-    app.update();
-
-    press_flow_button(&mut app, &FlowUiAction::OpenBrawlerEditor(brawler_id));
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerEditor
-    );
-    app.update();
-    {
-        let world = app.world_mut();
-        let mut roots =
-            world.query_filtered::<(&Node, &BackgroundColor), With<BrawlerEditorRoot>>();
-        let (node, background) = roots.single(world).unwrap();
-        assert_eq!(
-            (node.left, node.right, node.top, node.bottom),
-            (px(0), px(0), px(0), px(0))
-        );
-        assert!((background.0.to_srgba().alpha - 1.0).abs() <= f32::EPSILON);
-    }
-    press_flow_button(&mut app, &FlowUiAction::CancelBrawlerEdit);
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(brawler_id)
-    );
-    app.update();
-    press_flow_button(&mut app, &FlowUiAction::OpenWeaponEquipment(brawler_id));
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::WeaponEquipment
-    );
-    app.update();
-    {
-        let world = app.world_mut();
-        let mut roots = world.query_filtered::<&Node, With<WeaponEquipmentRoot>>();
-        let node = roots.single(world).unwrap();
-        assert_eq!(
-            (node.left, node.right, node.top, node.bottom),
-            (px(0), px(0), px(0), px(0))
-        );
-    }
-    press_flow_button(&mut app, &FlowUiAction::SelectEquipmentSlot(0));
-    app.update();
-    {
-        let world = app.world_mut();
-        let mut areas = world.query_filtered::<&Node, With<WeaponEquipmentScrollArea>>();
-        let node = areas.single(world).unwrap();
-        assert_eq!(node.overflow, Overflow::scroll_y());
-        let mut buttons = world.query::<&FlowButton>();
-        assert!(
-            buttons
-                .iter(world)
-                .any(|b| b.index == 0 && b.action == FlowUiAction::UnequipWeaponPart)
-        );
-    }
-    press_flow_button(&mut app, &FlowUiAction::UnequipWeaponPart);
-    assert!(!app.world().resource::<WeaponEquipmentDraft>().picker_open);
-    assert!(
-        !app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .pending()
-    );
-}
-
-#[test]
-fn brawler_details_refreshes_when_selection_request_finishes() {
-    let mut app = flow_test_app();
-    let mut membership = lobby_membership_with_brawler();
-    let selected_id = membership.profile.selected_brawler_id.unwrap();
-    let mut candidate = membership.profile.brawlers[0].clone();
-    candidate.id = brawler::profiles::SavedBrawlerId::new(3).unwrap();
-    candidate.creation_ordinal = 2;
-    candidate.name = "Candidate Brawler".into();
-    membership.profile.brawlers.push(candidate.clone());
-    membership.profile.next_brawler_ordinal = 3;
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_snapshot_for_test(membership.profile.clone());
-    app.world_mut().spawn((Client, membership.clone()));
-    app.world_mut()
-        .resource_mut::<NextState<ClientFlow>>()
-        .set(ClientFlow::Dashboard);
-    app.update();
-
-    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BrawlerDetails(candidate.id);
-    app.update();
-    assert!(
-        app.world_mut()
-            .resource_mut::<super::super::ClientProfileModel>()
-            .select(candidate.id)
-    );
-    app.update();
-    assert!(
-        visible_text(&mut app)
-            .iter()
-            .any(|text| text == "SELECTING...")
-    );
-
-    membership.profile.selected_brawler_id = Some(selected_id);
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_snapshot_for_test(membership.profile);
-    app.update();
-
-    let copy = visible_text(&mut app);
-    assert!(copy.iter().any(|text| text == "SELECT FOR PLAY"));
-    assert!(!copy.iter().any(|text| text == "SELECTING..."));
-    let world = app.world_mut();
-    let mut buttons = world.query::<(&FlowButton, Has<InteractionDisabled>)>();
-    let (_, disabled) = buttons
-        .iter(world)
-        .find(|(button, _)| button.action == FlowUiAction::SelectBrawler(candidate.id))
-        .expect("selection button remains rendered after the outcome");
-    assert!(!disabled);
 }
 
 #[test]
@@ -1739,7 +1033,7 @@ fn dashboard_actions_have_explicit_fact_based_accessible_labels() {
     assert_eq!(labels.len(), 6);
     assert!(labels.iter().all(|(_, label)| !label.trim().is_empty()));
     assert!(labels.iter().any(|(style, label)| {
-        matches!(style, DashboardButtonStyle::Preview) && label == "Create your first brawler"
+        matches!(style, DashboardButtonStyle::Preview) && label.starts_with("View brawlers: Riff")
     }));
     assert!(labels.iter().any(|(style, label)| {
         matches!(style, DashboardButtonStyle::Mode)
@@ -1874,27 +1168,7 @@ fn results_replay_uses_the_exact_fresh_lobby_game() {
     let mut app = flow_test_app();
     app.world_mut()
         .insert_resource(super::super::ClientInputContext::Shell);
-    let mut lobby = lobby_membership();
-    let brawler_id = brawler::profiles::SavedBrawlerId::new(2).unwrap();
-    lobby
-        .profile
-        .brawlers
-        .push(brawler::profiles::SavedBrawler {
-            id: brawler_id,
-            creation_ordinal: 1,
-            name: "Replay Brawler".into(),
-            fighter_profile_id: brawler::profiles::FighterProfileId(1),
-            weapon_base_id: brawler::profiles::WeaponBaseId(1),
-            ultimate_id: brawler::builds::UltimateDefinitionId(1),
-            passive_ids: [
-                brawler::builds::PassiveDefinitionId(3),
-                brawler::builds::PassiveDefinitionId(4),
-            ],
-            equipped_part_ids: [None; brawler::weapon_parts::WEAPON_PART_SLOT_COUNT],
-            revision: brawler::profiles::ProfileRevision::INITIAL,
-        });
-    lobby.profile.selected_brawler_id = Some(brawler_id);
-    lobby.profile.next_brawler_ordinal = 2;
+    let lobby = lobby_membership();
     let game_type_id = lobby.game_types[0].id.clone();
     app.world_mut().spawn((
         Client,
@@ -2181,30 +1455,20 @@ fn results_disable_replay_when_the_exact_game_disappears() {
 }
 
 #[test]
-fn queue_copy_uses_advertised_game_and_saved_brawler_recipe() {
+fn queue_copy_uses_advertised_game_and_the_accepted_character_pick() {
     let builds = brawler::builds::BuildCatalog::embedded().unwrap();
-    let recipe = brawler::builds::BrawlerBuildRecipe {
-        weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(1)),
-        ultimate: brawler::builds::UltimateDefinitionId(1),
-        passives: [
-            brawler::builds::PassiveDefinitionId(3),
-            brawler::builds::PassiveDefinitionId(4),
-        ],
-    };
     let membership = brawler::lobby::QueueMembership {
         ticket_id: brawler::lobby::QueueTicketId::new(1).unwrap(),
         catalog_revision: brawler::lobby::CatalogRevision([1; 32]),
         game_type_id: brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
         game_type_configuration_revision: 1,
-        brawler_id: brawler::profiles::SavedBrawlerId::new(1).unwrap(),
-        brawler_revision: brawler::profiles::ProfileRevision::INITIAL,
+        profile_revision: brawler::profiles::ProfileRevision::INITIAL,
         accepted_build: brawler::builds::AcceptedBuildSummary {
-            canonical_recipe: recipe,
+            character: character_choice(9, 10, 3),
             identity: brawler::builds::SelectedBuild {
                 recipe_fingerprint: brawler::builds::BuildRecipeFingerprint(1),
                 revision: builds.balance_revision,
             },
-            total_points: 10,
         },
         admitted_at_pool_state_revision: 2,
     };
@@ -2216,23 +1480,18 @@ fn queue_copy_uses_advertised_game_and_saved_brawler_recipe() {
     );
     assert_eq!(copy.mode, "WIPEOUT");
     assert_eq!(copy.game, "Wipeout 2v2");
-    assert_eq!(copy.brawler, "Saved brawler");
+    assert_eq!(copy.brawler, "Bumper");
     assert_eq!(copy.population, "Updating queue");
-    assert!(copy.build.contains(" · "));
-    assert!(!copy.build.contains("points"));
-    let queued_saved_brawler = brawler::lobby::QueueMembership {
-        brawler_id: brawler::profiles::SavedBrawlerId::new(2).unwrap(),
-        ..membership.clone()
-    };
+    assert_eq!(copy.build, "Restoration Field · Adrenal Response");
     assert_eq!(
         queue_copy(
             &super::super::ClientQueueModel::default(),
-            &queued_saved_brawler,
-            Some(&lobby_membership_with_brawler()),
+            &membership,
+            None,
             &builds,
         )
         .brawler,
-        "Test Brawler"
+        "Brawler"
     );
 
     let loading_copy = match_loading_text(
@@ -2943,7 +2202,7 @@ fn game_selection_navigation_moves_between_cards_sizes_and_confirmation() {
 
 #[test]
 fn practice_picker_defers_start_and_passes_only_confirmed_map() {
-    let mut membership = lobby_membership_with_brawler();
+    let mut membership = lobby_membership();
     membership.game_types[0]
         .practice_map_preset_ids
         .push(brawler::map::MapPresetId(7));
@@ -3005,7 +2264,7 @@ fn practice_picker_defers_start_and_passes_only_confirmed_map() {
 
 #[test]
 fn practice_picker_cancel_returns_home_without_request() {
-    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+    let mut app = configured_lobby_flow_app(lobby_membership());
     inject_action(&mut app, FlowUiAction::OpenPracticeMaps);
     app.update();
     inject_action(&mut app, FlowUiAction::CancelPracticeMaps);
@@ -3023,7 +2282,7 @@ fn practice_picker_cancel_returns_home_without_request() {
 
 #[test]
 fn practice_picker_gamepad_focus_does_not_select_and_overlay_blocks_activation() {
-    let mut membership = lobby_membership_with_brawler();
+    let mut membership = lobby_membership();
     membership.game_types[0]
         .practice_map_preset_ids
         .push(brawler::map::MapPresetId(7));
@@ -3107,7 +2366,7 @@ fn connection_retry_and_saved_target_clear_obsolete_error_overlay() {
 
 #[test]
 fn accepted_connection_retires_old_error_and_dashboard_accepts_input() {
-    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+    let mut app = configured_lobby_flow_app(lobby_membership());
     app.world_mut()
         .resource_mut::<NextState<ClientFlow>>()
         .set(ClientFlow::Connecting);
@@ -3133,7 +2392,7 @@ fn accepted_connection_retires_old_error_and_dashboard_accepts_input() {
 
 #[test]
 fn accepted_connection_preserves_new_persistence_failure() {
-    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+    let mut app = configured_lobby_flow_app(lobby_membership());
     app.world_mut().resource_mut::<ClientConnectionsPath>().0 = std::env::temp_dir();
     inject_session_observation(&mut app, SessionObservation::Accepted);
     assert!(matches!(
@@ -3146,73 +2405,12 @@ fn accepted_connection_preserves_new_persistence_failure() {
 }
 
 #[test]
-fn inline_rename_preserves_rejected_text_and_returns_to_details_on_acceptance() {
-    let mut app = flow_action_test_app();
-    let snapshot = lobby_membership_with_brawler().profile;
-    let id = snapshot.brawlers[0].id;
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_snapshot_for_test(snapshot.clone());
-    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BrawlerDetails(id);
-    inject_action(&mut app, FlowUiAction::BeginBrawlerNameEdit);
-    {
-        let mut draft = app.world_mut().resource_mut::<BrawlerEditDraft>();
-        assert!(draft.editing_name && draft.inline_rename);
-        draft.name = "Renamed build".into();
-    }
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(id)
-    );
-    inject_action(&mut app, FlowUiAction::ConfirmBrawlerEdit);
-    assert!(
-        app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .pending()
-    );
-    {
-        let mut profile = app
-            .world_mut()
-            .resource_mut::<super::super::ClientProfileModel>();
-        profile.set_snapshot_for_test(snapshot.clone());
-        profile.set_decision_for_test(brawler::profiles::ProfileDecision::StorageFault);
-    }
-    app.update();
-    let draft = app.world().resource::<BrawlerEditDraft>();
-    assert_eq!(draft.name, "Renamed build");
-    assert!(draft.editing_name && draft.inline_error.is_some());
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(id)
-    );
-    inject_action(&mut app, FlowUiAction::ConfirmBrawlerEdit);
-    let mut accepted = snapshot;
-    accepted.brawlers[0].name = "Renamed build".into();
-    {
-        let mut profile = app
-            .world_mut()
-            .resource_mut::<super::super::ClientProfileModel>();
-        profile.set_snapshot_for_test(accepted);
-        profile.set_decision_for_test(brawler::profiles::ProfileDecision::Accepted);
-    }
-    app.update();
-    assert!(!app.world().resource::<BrawlerEditDraft>().inline_rename);
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(id)
-    );
-}
-
-#[test]
 fn shell_back_actions_share_the_same_role_and_preview_has_no_chrome() {
     use crate::ui::surface::Surface;
     for action in [
         FlowUiAction::Back,
-        FlowUiAction::CloseBrawlerList,
-        FlowUiAction::BackToBrawlerList,
-        FlowUiAction::CancelWeaponEquipment,
-        FlowUiAction::CancelBrawlerEdit,
-        FlowUiAction::CancelCreateBrawler,
+        FlowUiAction::CloseBrawlers,
+        FlowUiAction::CancelGameType,
     ] {
         assert_eq!(screens::shared::surface_role(&action), Surface::Back);
     }
@@ -3226,7 +2424,7 @@ fn shell_back_actions_share_the_same_role_and_preview_has_no_chrome() {
         .spawn((
             FlowButton {
                 index: 0,
-                action: FlowUiAction::OpenBrawlerList,
+                action: FlowUiAction::OpenBrawlers,
                 error_action: false,
             },
             DashboardButtonStyle::Preview,
@@ -3237,313 +2435,10 @@ fn shell_back_actions_share_the_same_role_and_preview_has_no_chrome() {
 }
 
 #[test]
-fn creation_pickers_preserve_named_draft_and_only_submit_from_overview() {
-    use super::screens::brawlers::CreationPicker;
-    let membership = lobby_membership_with_brawler();
-    let mut app = configured_customization_app(&membership);
-    inject_action(&mut app, FlowUiAction::CreateBrawler);
-    app.world_mut().resource_mut::<BrawlerCreationDraft>().name = "New Spark".into();
-    inject_action(&mut app, FlowUiAction::OpenCreationUltimate);
-    assert_eq!(
-        app.world().resource::<BrawlerCreationDraft>().picker,
-        Some(CreationPicker::Ultimate)
-    );
-    inject_action(&mut app, FlowUiAction::CancelCreateBrawler);
-    assert_eq!(
-        app.world().resource::<BrawlerCreationDraft>().name,
-        "New Spark"
-    );
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerCreation
-    );
-    inject_action(&mut app, FlowUiAction::OpenCreationWeapon);
-    let id = app
-        .world()
-        .resource::<super::super::ClientProfileModel>()
-        .catalog()
-        .unwrap()
-        .weapon_bases
-        .last()
-        .unwrap()
-        .id;
-    inject_action(&mut app, FlowUiAction::ChooseCreationWeapon(id));
-    let draft = app.world().resource::<BrawlerCreationDraft>();
-    assert_eq!(draft.weapon_base_id, id);
-    assert!(draft.picker.is_none());
-    assert!(
-        !app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .pending()
-    );
-    app.world_mut().resource_mut::<BrawlerCreationDraft>().name = String::new();
-    inject_action(&mut app, FlowUiAction::ConfirmCreateBrawler);
-    assert!(
-        app.world()
-            .resource::<BrawlerCreationDraft>()
-            .inline_error
-            .is_some()
-    );
-    assert!(
-        !app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .pending()
-    );
-    app.world_mut().resource_mut::<BrawlerCreationDraft>().name = "New Spark".into();
-    inject_action(&mut app, FlowUiAction::ConfirmCreateBrawler);
-    assert!(
-        app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .pending()
-    );
-    let commands = app
-        .world()
-        .resource::<super::super::ClientProfileModel>()
-        .queued_commands_for_test();
-    assert_eq!(commands.len(), 1);
-    let brawler::profiles::ProfileCommand::CreateBrawler { draft, .. } = commands.front().unwrap()
-    else {
-        panic!("expected one atomic creation");
-    };
-    assert_eq!(draft.name, "New Spark");
-    assert_eq!(draft.weapon_base_id, id);
-    inject_action(&mut app, FlowUiAction::OpenCreationFighter);
-    assert!(
-        app.world()
-            .resource::<BrawlerCreationDraft>()
-            .picker
-            .is_none()
-    );
-}
-
-#[test]
-fn ability_picker_waits_for_acceptance_and_keeps_loadout_on_rejection() {
-    use super::screens::brawlers::AbilityPicker;
-    let mut membership = lobby_membership_with_brawler();
-    let saved = membership.profile.brawlers[0].clone();
-    let mut app = configured_customization_app(&membership);
-    inject_action(&mut app, FlowUiAction::OpenBrawlerEditor(saved.id));
-    inject_action(&mut app, FlowUiAction::OpenBrawlerUltimate);
-    let replacement = app
-        .world()
-        .resource::<super::super::ClientProfileModel>()
-        .catalog()
-        .unwrap()
-        .ultimates
-        .iter()
-        .find(|u| u.id != saved.ultimate_id)
-        .unwrap()
-        .id;
-    inject_action(&mut app, FlowUiAction::ChooseBrawlerUltimate(replacement));
-    assert_eq!(
-        app.world().resource::<BrawlerEditDraft>().ultimate_id,
-        saved.ultimate_id
-    );
-    let profile = app.world().resource::<super::super::ClientProfileModel>();
-    assert!(profile.pending());
-    let brawler::profiles::ProfileCommand::EditBrawler { edit, .. } =
-        profile.queued_commands_for_test().front().unwrap()
-    else {
-        panic!("expected edit")
-    };
-    assert_eq!(edit.name, saved.name);
-    assert_eq!(edit.passive_ids, saved.passive_ids);
-    assert_eq!(edit.ultimate_id, replacement);
-    inject_action(&mut app, FlowUiAction::CancelBrawlerEdit);
-    inject_action(
-        &mut app,
-        FlowUiAction::ChooseBrawlerUltimate(saved.ultimate_id),
-    );
-    assert_eq!(
-        app.world().resource::<BrawlerEditDraft>().picker,
-        Some(AbilityPicker::Ultimate)
-    );
-    assert_eq!(
-        app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .queued_commands_for_test()
-            .len(),
-        1
-    );
-    membership.profile.brawlers[0].ultimate_id = replacement;
-    {
-        let mut p = app
-            .world_mut()
-            .resource_mut::<super::super::ClientProfileModel>();
-        p.set_snapshot_for_test(membership.profile.clone());
-        p.set_decision_for_test(brawler::profiles::ProfileDecision::Accepted);
-    }
-    app.update();
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerEditor
-    );
-    assert!(app.world().resource::<BrawlerEditDraft>().picker.is_none());
-    assert_eq!(
-        app.world().resource::<BrawlerEditDraft>().ultimate_id,
-        replacement
-    );
-    inject_action(&mut app, FlowUiAction::OpenBrawlerUltimate);
-    inject_action(
-        &mut app,
-        FlowUiAction::ChooseBrawlerUltimate(saved.ultimate_id),
-    );
-    {
-        let mut p = app
-            .world_mut()
-            .resource_mut::<super::super::ClientProfileModel>();
-        p.set_snapshot_for_test(membership.profile.clone());
-        p.set_decision_for_test(brawler::profiles::ProfileDecision::StorageFault);
-    }
-    app.update();
-    let draft = app.world().resource::<BrawlerEditDraft>();
-    assert_eq!(draft.ultimate_id, replacement);
-    assert_eq!(draft.picker, Some(AbilityPicker::Ultimate));
-    assert!(draft.inline_error.is_some());
-}
-
-#[test]
-fn passive_picker_rejects_duplicates_and_fixed_frames_without_changing_other_slot() {
-    let membership = lobby_membership_with_brawler();
-    let saved = membership.profile.brawlers[0].clone();
-    let mut app = configured_customization_app(&membership);
-    inject_action(&mut app, FlowUiAction::OpenBrawlerEditor(saved.id));
-    inject_action(&mut app, FlowUiAction::OpenBrawlerPassive(0));
-    let catalog = app
-        .world()
-        .resource::<super::super::ClientProfileModel>()
-        .catalog()
-        .unwrap();
-    let fixed = catalog
-        .passives
-        .iter()
-        .find(|p| !p.saved_brawler_selectable)
-        .unwrap()
-        .id;
-    let replacement = catalog
-        .selectable_passives()
-        .find(|p| !saved.passive_ids.contains(&p.id))
-        .unwrap()
-        .id;
-    for invalid in [fixed, saved.passive_ids[1]] {
-        inject_action(&mut app, FlowUiAction::ChooseBrawlerPassive(invalid));
-        assert!(
-            !app.world()
-                .resource::<super::super::ClientProfileModel>()
-                .pending()
-        );
-        assert!(
-            app.world()
-                .resource::<BrawlerEditDraft>()
-                .inline_error
-                .is_some()
-        );
-        assert_eq!(
-            app.world().resource::<BrawlerEditDraft>().passive_ids,
-            saved.passive_ids
-        );
-    }
-    inject_action(&mut app, FlowUiAction::ChooseBrawlerPassive(replacement));
-    let profile = app.world().resource::<super::super::ClientProfileModel>();
-    let brawler::profiles::ProfileCommand::EditBrawler { edit, .. } =
-        profile.queued_commands_for_test().front().unwrap()
-    else {
-        panic!("expected edit")
-    };
-    assert_eq!(edit.passive_ids, [replacement, saved.passive_ids[1]]);
-    assert_eq!(edit.ultimate_id, saved.ultimate_id);
-    assert_eq!(edit.name, saved.name);
-}
-
-#[test]
-fn delete_confirmation_waits_for_authority_and_retains_rejected_brawler() {
-    let mut membership = lobby_membership_with_brawler();
-    let id = membership.profile.brawlers[0].id;
-    let mut app = configured_customization_app(&membership);
-    inject_action(&mut app, FlowUiAction::DeleteBrawler(id));
-    assert_eq!(
-        app.world()
-            .resource::<screens::shared::FlowBurst>()
-            .requested(),
-        None
-    );
-    inject_action(&mut app, FlowUiAction::ConfirmDeleteBrawler);
-    assert_eq!(
-        app.world()
-            .resource::<screens::shared::FlowBurst>()
-            .requested(),
-        Some(1),
-        "the confirmed Delete bursts while authority decides"
-    );
-    inject_action(&mut app, FlowUiAction::ConfirmDeleteBrawler);
-    inject_action(&mut app, FlowUiAction::CancelDeleteBrawler);
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::DeleteBrawlerConfirmation(id)
-    );
-    assert_eq!(
-        app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .queued_commands_for_test()
-            .len(),
-        1
-    );
-    {
-        let mut p = app
-            .world_mut()
-            .resource_mut::<super::super::ClientProfileModel>();
-        p.set_snapshot_for_test(membership.profile.clone());
-        p.set_decision_for_test(brawler::profiles::ProfileDecision::StorageFault);
-    }
-    app.update();
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::DeleteBrawlerConfirmation(id)
-    );
-    assert!(
-        app.world()
-            .resource::<PendingDeletedBrawler>()
-            .error
-            .is_some()
-    );
-    assert_eq!(
-        app.world()
-            .resource::<super::super::ClientProfileModel>()
-            .snapshot()
-            .unwrap()
-            .brawlers[0]
-            .id,
-        id
-    );
-    inject_action(&mut app, FlowUiAction::ConfirmDeleteBrawler);
-    membership.profile.brawlers.clear();
-    membership.profile.selected_brawler_id = None;
-    {
-        let mut p = app
-            .world_mut()
-            .resource_mut::<super::super::ClientProfileModel>();
-        p.set_snapshot_for_test(membership.profile);
-        p.set_decision_for_test(brawler::profiles::ProfileDecision::Accepted);
-    }
-    app.update();
-    assert_eq!(
-        *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerList
-    );
-    assert!(
-        app.world()
-            .resource::<PendingDeletedBrawler>()
-            .error
-            .is_none()
-    );
-}
-
-#[test]
 fn confirmation_navigation_starts_safe_and_supports_both_axes() {
-    let membership = lobby_membership_with_brawler();
-    let id = membership.profile.brawlers[0].id;
+    let membership = lobby_membership();
     let mut app = configured_customization_app(&membership);
-    inject_action(&mut app, FlowUiAction::DeleteBrawler(id));
+    inject_action(&mut app, FlowUiAction::RequestChangeServer);
     app.update();
     assert_eq!(app.world().resource::<FlowNavigation>().focused, 0);
     for (key, expected) in [
@@ -3572,7 +2467,7 @@ fn confirmation_navigation_starts_safe_and_supports_both_axes() {
     app.update();
     assert_eq!(
         *app.world().resource::<ClientOverlay>(),
-        ClientOverlay::BrawlerDetails(id)
+        ClientOverlay::None
     );
 }
 
@@ -3665,8 +2560,7 @@ fn assert_phone_reachable(app: &mut App, screen: &str) {
 
 #[test]
 fn player_path_screens_keep_every_control_reachable_on_a_landscape_phone() {
-    let membership = lobby_membership_with_brawler();
-    let brawler = membership.profile.brawlers[0].id;
+    let membership = lobby_membership();
     let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
         crate::ui::layout_harness::add_layout(app, PHONE_VIEWPORT.0, PHONE_VIEWPORT.1);
     });
@@ -3688,15 +2582,9 @@ fn player_path_screens_keep_every_control_reachable_on_a_landscape_phone() {
         "the viewport fit keeps the phone on the wide Dashboard"
     );
 
-    inject_action(&mut app, FlowUiAction::OpenBrawlerList);
+    inject_action(&mut app, FlowUiAction::OpenBrawlers);
     assert_phone_reachable(&mut app, "Brawlers");
-    inject_action(&mut app, FlowUiAction::OpenBrawlerDetails(brawler));
-    assert_phone_reachable(&mut app, "Brawler details");
-    inject_action(&mut app, FlowUiAction::BackToBrawlerList);
-    inject_action(&mut app, FlowUiAction::CreateBrawler);
-    assert_phone_reachable(&mut app, "Create Brawler");
-    inject_action(&mut app, FlowUiAction::CancelCreateBrawler);
-    inject_action(&mut app, FlowUiAction::CloseBrawlerList);
+    inject_action(&mut app, FlowUiAction::CloseBrawlers);
     assert_phone_reachable(&mut app, "Dashboard after Brawlers");
 
     inject_action(&mut app, FlowUiAction::OpenGameTypeSelect);
@@ -3707,13 +2595,7 @@ fn player_path_screens_keep_every_control_reachable_on_a_landscape_phone() {
 }
 
 /// The screens the ring-band checks walk, in order, from the Dashboard.
-const RING_BAND_SCREENS: [&str; 5] = [
-    "Dashboard",
-    "Weapon equipment",
-    "Brawlers",
-    "Choose Game",
-    "Practice maps",
-];
+const RING_BAND_SCREENS: [&str; 4] = ["Dashboard", "Brawlers", "Choose Game", "Practice maps"];
 
 /// Lays out the ring-band screens at one viewport, with or without the surface content reserve,
 /// and hands each settled screen to `visit`.
@@ -3723,8 +2605,7 @@ fn walk_ring_band_screens(
     reserve: bool,
     mut visit: impl FnMut(&mut App, &str),
 ) {
-    let membership = lobby_membership_with_brawler();
-    let brawler = membership.profile.brawlers[0].id;
+    let membership = lobby_membership();
     let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
         crate::ui::layout_harness::add_layout(app, width, height);
         if reserve {
@@ -3745,13 +2626,9 @@ fn walk_ring_band_screens(
     enter_dashboard(&mut app);
     let actions = [
         vec![],
-        vec![FlowUiAction::OpenWeaponEquipment(brawler)],
+        vec![FlowUiAction::OpenBrawlers],
         vec![
-            FlowUiAction::CancelWeaponEquipment,
-            FlowUiAction::OpenBrawlerList,
-        ],
-        vec![
-            FlowUiAction::CloseBrawlerList,
+            FlowUiAction::CloseBrawlers,
             FlowUiAction::OpenGameTypeSelect,
         ],
         vec![FlowUiAction::CancelGameType, FlowUiAction::OpenPracticeMaps],
@@ -3841,22 +2718,6 @@ fn ring_band_keeps_button_and_card_outer_sizes() {
                 grown.is_empty(),
                 "{screen} at {width}x{height}: outer sizes changed: {grown:#?}"
             );
-            // The loadout header Back is a fixed-height bar: the reserve must not move it at all.
-            if screen == "Weapon equipment" {
-                let back = |sizes: &[(String, Vec2)]| {
-                    sizes
-                        .iter()
-                        .find(|(key, _)| key == "CancelWeaponEquipment")
-                        .expect("loadout Back")
-                        .1
-                };
-                assert!(
-                    (back(&after).y - back(&before).y).abs() < 0.5,
-                    "{width}x{height}: loadout Back {} -> {} px tall",
-                    back(&before).y,
-                    back(&after).y
-                );
-            }
         });
     }
 }
@@ -3907,7 +2768,7 @@ fn shell_controls_are_48_dp_touch_targets_on_a_landscape_phone() {
         app
     };
     for ui_scale in [1.0, MIN_UI_SCALE] {
-        let membership = lobby_membership_with_brawler();
+        let membership = lobby_membership();
         let at = |screen: &str| format!("{screen} at {:.0}%", ui_scale * 100.0);
 
         let mut app = touch_phone_app(&membership, ui_scale);
@@ -3963,16 +2824,9 @@ fn shell_controls_are_48_dp_touch_targets_on_a_landscape_phone() {
         inject_action(&mut app, FlowUiAction::OpenPracticeMaps);
         assert_phone_touch_targets(&mut app, &at("Practice maps"));
         inject_action(&mut app, FlowUiAction::CancelPracticeMaps);
-        let brawler = membership.profile.brawlers[0].id;
-        inject_action(&mut app, FlowUiAction::OpenBrawlerList);
+        inject_action(&mut app, FlowUiAction::OpenBrawlers);
         assert_phone_touch_targets(&mut app, &at("Brawlers"));
-        inject_action(&mut app, FlowUiAction::OpenBrawlerDetails(brawler));
-        assert_phone_touch_targets(&mut app, &at("Brawler details"));
-        inject_action(&mut app, FlowUiAction::BackToBrawlerList);
-        inject_action(&mut app, FlowUiAction::CreateBrawler);
-        assert_phone_touch_targets(&mut app, &at("Create Brawler"));
-        inject_action(&mut app, FlowUiAction::CancelCreateBrawler);
-        inject_action(&mut app, FlowUiAction::CloseBrawlerList);
+        inject_action(&mut app, FlowUiAction::CloseBrawlers);
 
         app.world_mut()
             .resource_mut::<NextState<ClientFlow>>()
@@ -4051,7 +2905,7 @@ fn sample_map_drafts(count: u64) -> super::super::MapDraftLibrary {
 fn map_editor_controls_leave_the_arena_most_of_a_landscape_phone() {
     use screens::map_maker::{CurrentAssetChip, EditorSidePanel, EditorTopBar};
     for (width, height, limit) in [(914, 411, 22.0), (1280, 720, 13.0)] {
-        let membership = lobby_membership_with_brawler();
+        let membership = lobby_membership();
         let mut app = configured_lobby_flow_app_with(membership, |app| {
             crate::ui::layout_harness::add_layout(app, width, height);
             app.insert_resource(brawler::map::MapCatalogResource(
@@ -4105,7 +2959,7 @@ fn map_editor_controls_leave_the_arena_most_of_a_landscape_phone() {
 
 /// A new draft open in the editor at 1280x720, laid out.
 fn laid_out_map_editor_app() -> App {
-    let membership = lobby_membership_with_brawler();
+    let membership = lobby_membership();
     let mut app = configured_lobby_flow_app_with(membership, |app| {
         crate::ui::layout_harness::add_layout(app, 1280, 720);
         app.insert_resource(brawler::map::MapCatalogResource(
@@ -4340,7 +3194,7 @@ fn results_fit_a_landscape_phone_without_scrolling() {
         (914, 411, MIN_UI_SCALE),
         (1280, 720, 1.0),
     ] {
-        let membership = lobby_membership_with_brawler();
+        let membership = lobby_membership();
         let game_type_id = membership.game_types[0].id.clone();
         for (mode, context) in results_layout_contexts(&game_type_id) {
             let screen = format!(
@@ -4666,7 +3520,7 @@ struct BackCase {
     open: Vec<FlowUiAction>,
 }
 
-fn shell_back_cases(brawler: brawler::profiles::SavedBrawlerId) -> Vec<BackCase> {
+fn shell_back_cases() -> Vec<BackCase> {
     let case = |screen, open| BackCase { screen, open };
     vec![
         case("Choose Game", vec![FlowUiAction::OpenGameTypeSelect]),
@@ -4679,34 +3533,7 @@ fn shell_back_cases(brawler: brawler::profiles::SavedBrawlerId) -> Vec<BackCase>
                 FlowUiAction::RequestChangeServer,
             ],
         ),
-        case("Brawlers", vec![FlowUiAction::OpenBrawlerList]),
-        case(
-            "Brawler details",
-            vec![
-                FlowUiAction::OpenBrawlerList,
-                FlowUiAction::OpenBrawlerDetails(brawler),
-            ],
-        ),
-        case(
-            "Create Brawler",
-            vec![FlowUiAction::OpenBrawlerList, FlowUiAction::CreateBrawler],
-        ),
-        case(
-            "Customize Weapon",
-            vec![
-                FlowUiAction::OpenBrawlerList,
-                FlowUiAction::OpenBrawlerDetails(brawler),
-                FlowUiAction::OpenWeaponEquipment(brawler),
-            ],
-        ),
-        case(
-            "Delete Brawler confirmation",
-            vec![
-                FlowUiAction::OpenBrawlerList,
-                FlowUiAction::OpenBrawlerDetails(brawler),
-                FlowUiAction::DeleteBrawler(brawler),
-            ],
-        ),
+        case("Brawlers", vec![FlowUiAction::OpenBrawlers]),
     ]
 }
 
@@ -4745,9 +3572,8 @@ fn opened_shell_screen(case: &BackCase, membership: &ClientLobbyMembership) -> A
 
 #[test]
 fn platform_back_steps_back_from_every_shell_screen_exactly_like_escape() {
-    let membership = lobby_membership_with_brawler();
-    let brawler = membership.profile.brawlers[0].id;
-    for case in shell_back_cases(brawler) {
+    let membership = lobby_membership();
+    for case in shell_back_cases() {
         let mut back = opened_shell_screen(&case, &membership);
         let opened = shell_position(&back);
         assert_ne!(
@@ -4778,7 +3604,7 @@ fn platform_back_steps_back_from_every_shell_screen_exactly_like_escape() {
 
 #[test]
 fn platform_back_on_root_screens_leaves_the_app_to_the_platform() {
-    let mut app = configured_customization_app(&lobby_membership_with_brawler());
+    let mut app = configured_customization_app(&lobby_membership());
     app.update();
     assert!(app.world().resource::<crate::BackInput>().leaves_app());
     press_platform_back(&mut app);
@@ -4859,7 +3685,7 @@ fn choose_game_and_practice_map_back_controls_are_on_screen_and_go_back() {
             FlowUiAction::OpenGameTypeSelect,
             FlowUiAction::OpenPracticeMaps,
         ] {
-            let membership = lobby_membership_with_brawler();
+            let membership = lobby_membership();
             let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
                 crate::ui::layout_harness::add_layout(app, width, height);
             });
@@ -4912,7 +3738,7 @@ fn flow_burst_targets_the_active_action_and_expires() {
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             Duration::from_millis(100),
         ))
-        .insert_resource(ClientOverlay::WeaponEquipment)
+        .insert_resource(ClientOverlay::Brawlers)
         .init_resource::<screens::shared::FlowBurst>()
         .add_systems(Update, screens::shared::apply_flow_burst);
     let button = |index, error_action| {
@@ -4920,7 +3746,9 @@ fn flow_burst_targets_the_active_action_and_expires() {
             Surface::Card,
             FlowButton {
                 index,
-                action: FlowUiAction::SelectEquipmentSlot(index),
+                action: FlowUiAction::PickCharacter(brawler::characters::CharacterId(
+                    u16::try_from(index).unwrap() + 1,
+                )),
                 error_action,
             },
         )
@@ -4993,9 +3821,8 @@ fn press_key(app: &mut App, key: KeyCode) {
 #[test]
 fn escape_and_platform_back_publish_one_back_feedback_on_every_shell_screen() {
     use crate::ui::feedback::UiFeedback;
-    let membership = lobby_membership_with_brawler();
-    let brawler = membership.profile.brawlers[0].id;
-    for case in shell_back_cases(brawler) {
+    let membership = lobby_membership();
+    for case in shell_back_cases() {
         for platform in [false, true] {
             let mut app = opened_shell_screen(&case, &membership);
             record_feedback_in(&mut app);
@@ -5025,7 +3852,7 @@ fn escape_and_platform_back_publish_one_back_feedback_on_every_shell_screen() {
 #[test]
 fn dashboard_keyboard_moves_and_activation_publish_feedback_with_the_surface_role() {
     use crate::ui::{feedback::UiFeedback, surface::Surface};
-    let mut app = configured_customization_app(&lobby_membership_with_brawler());
+    let mut app = configured_customization_app(&lobby_membership());
     record_feedback_in(&mut app);
     // The test Dashboard was entered before the lobby membership existed; re-enter it so its
     // controls are spawned.
@@ -5142,49 +3969,6 @@ fn server_select_editor_commit_and_cancel_publish_feedback_and_a_rejected_name_i
     assert_eq!(take_ui_feedback(&mut app), Vec::new());
 }
 
-#[test]
-fn brawler_name_editor_commit_and_cancel_publish_feedback_and_a_rejected_name_is_silent() {
-    use crate::ui::{feedback::UiFeedback, surface::Surface};
-    let mut app = flow_action_test_app();
-    record_feedback_in(&mut app);
-    let snapshot = lobby_membership_with_brawler().profile;
-    let id = snapshot.brawlers[0].id;
-    app.world_mut()
-        .resource_mut::<super::super::ClientProfileModel>()
-        .set_snapshot_for_test(snapshot);
-    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::BrawlerDetails(id);
-    let begin = |app: &mut App, name: &str| {
-        inject_action(app, FlowUiAction::BeginBrawlerNameEdit);
-        let mut draft = app.world_mut().resource_mut::<BrawlerEditDraft>();
-        assert!(draft.editing_name);
-        draft.name = name.into();
-        draft.name_caret = draft.name.len();
-    };
-
-    begin(&mut app, "Ab\u{E000}cd");
-    take_ui_feedback(&mut app);
-    press_key(&mut app, KeyCode::Enter);
-    assert!(app.world().resource::<BrawlerEditDraft>().editing_name);
-    assert_eq!(
-        take_ui_feedback(&mut app),
-        Vec::new(),
-        "a rejected name plays nothing"
-    );
-
-    press_escape(&mut app);
-    assert!(!app.world().resource::<BrawlerEditDraft>().editing_name);
-    assert_eq!(take_ui_feedback(&mut app), vec![UiFeedback::Back]);
-
-    begin(&mut app, "Renamed build");
-    take_ui_feedback(&mut app);
-    press_key(&mut app, KeyCode::Enter);
-    assert!(!app.world().resource::<BrawlerEditDraft>().editing_name);
-    assert_eq!(
-        take_ui_feedback(&mut app),
-        vec![UiFeedback::Activated(Some(Surface::Primary))]
-    );
-}
-
 /// BRL-nqnm: a lobby app with the real shell, in a match, with Settings opened from the
 /// match menu.
 fn match_settings_app(membership: &ClientLobbyMembership, name: &str) -> App {
@@ -5245,7 +4029,7 @@ fn assert_match_settings_closed(app: &mut App) {
 
 #[test]
 fn match_completion_closes_settings_opened_from_the_match_menu() {
-    let membership = lobby_membership_with_brawler();
+    let membership = lobby_membership();
     let game_type_id = membership.game_types[0].id.clone();
     let mut app = match_settings_app(&membership, "results");
     app.world_mut()
@@ -5274,7 +4058,7 @@ fn match_completion_closes_settings_opened_from_the_match_menu() {
 
 #[test]
 fn connection_lost_over_match_settings_leaves_only_the_error_interactive() {
-    let membership = lobby_membership_with_brawler();
+    let membership = lobby_membership();
     let mut app = match_settings_app(&membership, "error");
     app.world_mut()
         .resource_mut::<RoutedClientLifecycle>()
@@ -5663,7 +4447,7 @@ fn assert_shell_overlay(app: &mut App, root: Entity, screen: &str) {
 #[test]
 fn dashboard_error_and_cancel_confirmation_use_the_shell_panel_font_and_surfaces() {
     let font = bevy::asset::uuid_handle!("6f1f5c7e-2d6b-4a4e-9a51-0f4d3f6f9b21");
-    let mut app = configured_lobby_flow_app(lobby_membership_with_brawler());
+    let mut app = configured_lobby_flow_app(lobby_membership());
     app.insert_resource(crate::ClientAssetHandles::with_font_for_test(font));
 
     *app.world_mut().resource_mut::<ClientOverlay>() = lost_match_dashboard_error();
@@ -5725,7 +4509,7 @@ fn dashboard_error_and_cancel_confirmation_use_the_shell_panel_font_and_surfaces
 #[test]
 fn shell_overlays_fit_phone_and_desktop_viewports() {
     for (width, height) in [(868, 411), (914, 411), (1280, 720)] {
-        let membership = lobby_membership_with_brawler();
+        let membership = lobby_membership();
         let mut app = configured_lobby_flow_app_with(membership.clone(), |app| {
             crate::ui::layout_harness::add_layout(app, width, height);
         });
@@ -5779,12 +4563,12 @@ fn shell_overlays_fit_phone_and_desktop_viewports() {
 }
 
 /// BRL-pw9k: every shell-capture route step names exactly the screen the reducer commits for
-/// its action, from an idle connected Dashboard with one saved brawler.
+/// its action, from an idle connected Dashboard. A character pick settles as the server would
+/// accept it.
 #[cfg(feature = "automation")]
 #[test]
 fn shell_capture_route_steps_match_the_reducer() {
-    let membership = lobby_membership_with_brawler();
-    let brawler = membership.profile.selected_brawler_id;
+    let membership = lobby_membership();
     // Live-match routes wait on the match server; `live_shell_capture_routes_leave_the_match`
     // covers their tables.
     for route in ShellCaptureRoute::ALL
@@ -5811,14 +4595,12 @@ fn shell_capture_route_steps_match_the_reducer() {
         );
         for (index, step) in route.steps().iter().enumerate() {
             let action = step
-                .action(brawler)
+                .action()
                 .unwrap_or_else(|| panic!("{} step {index}: no action", route.name()));
             inject_action(&mut app, action);
             app.update();
-            if step
-                .expected(brawler)
-                .is_some_and(|(flow, _, _)| flow == ClientFlow::Queue)
-            {
+            accept_pending_pick(&mut app, &membership);
+            if step.expected().0 == ClientFlow::Queue {
                 // The Queue screen opens on the server's join acceptance, not on the request.
                 assert!(
                     app.world()
@@ -5841,8 +4623,8 @@ fn shell_capture_route_steps_match_the_reducer() {
             }
             let (flow, overlay) = shell_position(&app);
             assert_eq!(
-                Some((flow, overlay, false)),
-                step.expected(brawler),
+                (flow, overlay, false),
+                step.expected(),
                 "{} step {index}",
                 route.name()
             );
@@ -5934,7 +4716,7 @@ fn published_view_shows_server_states_and_confirms_a_withdraw() {
         ),
     ];
     for (width, height) in [(914, 411), (1280, 720)] {
-        let mut app = configured_lobby_flow_app_with(lobby_membership_with_brawler(), |app| {
+        let mut app = configured_lobby_flow_app_with(lobby_membership(), |app| {
             crate::ui::layout_harness::add_layout(app, width, height);
             app.insert_resource(crate::ui::touch_target::TouchTargetPolicy { enabled: true });
             app.insert_resource(brawler::map::MapCatalogResource(
@@ -6001,4 +4783,265 @@ fn published_view_shows_server_states_and_confirms_a_withdraw() {
             "{width}x{height}: a removed map cannot be withdrawn"
         );
     }
+}
+
+fn character_choice(
+    character: u16,
+    ultimate: u16,
+    passive: u16,
+) -> brawler::characters::CharacterChoice {
+    brawler::characters::CharacterChoice {
+        character_id: brawler::characters::CharacterId(character),
+        ultimate_id: brawler::builds::UltimateDefinitionId(ultimate),
+        passive_id: brawler::builds::PassiveDefinitionId(passive),
+    }
+}
+
+fn sent_picks(app: &App) -> Vec<brawler::characters::CharacterChoice> {
+    app.world()
+        .resource::<super::super::ClientProfileModel>()
+        .queued_commands_for_test()
+        .iter()
+        .map(|command| command.choice)
+        .collect()
+}
+
+#[test]
+fn practice_queue_again_uses_fresh_generation_game_and_profile_revision() {
+    let membership = lobby_membership();
+    let game_type_id = membership.game_types[0].id.clone();
+    let mut app = configured_lobby_flow_app(membership);
+    let mut fresh_membership = lobby_membership();
+    fresh_membership.game_types[0].id = brawler::lobby::GameTypeId::new("stale-wipeout").unwrap();
+    fresh_membership.profile.revision = brawler::profiles::ProfileRevision::new(9).unwrap();
+    app.world_mut().spawn((
+        Client,
+        fresh_membership,
+        RoutedClientSession {
+            generation: 2,
+            kind: super::super::RoutedClientSessionKind::Lobby,
+        },
+    ));
+    app.world_mut()
+        .resource_mut::<RoutedClientLifecycle>()
+        .generation = 1;
+    *app.world_mut().resource_mut::<SessionPurpose>() = SessionPurpose::Practice;
+    *app.world_mut().resource_mut::<SelectedGameType>() = SelectedGameType::default();
+    app.world_mut()
+        .resource_mut::<super::super::ClientMatchResultState>()
+        .context = Some(match_result_context(game_type_id.clone()));
+
+    inject_action(&mut app, FlowUiAction::QueueAgain);
+
+    let request = app
+        .world()
+        .resource::<super::super::ClientPracticeModel>()
+        .pending_request_for_test()
+        .expect("fresh-generation Practice replay should emit one request");
+    assert_eq!(request.game_type_id, game_type_id);
+    assert_eq!(
+        request.profile_revision,
+        brawler::profiles::ProfileRevision::INITIAL,
+        "the request names the profile revision of the lobby whose game it replays"
+    );
+    let selection = app.world().resource::<SelectedGameType>();
+    assert_eq!(selection.game_type_id.as_ref(), Some(&request.game_type_id));
+    assert!(app.world().resource::<FlowCommit>().error.is_none());
+}
+
+/// BRL-egn6: a tile picks its character with the remembered (or default) options, an option
+/// picks it for the current character, and a pick that changes nothing sends nothing.
+#[test]
+fn brawler_picks_send_one_character_choice_with_remembered_options() {
+    let mut membership = lobby_membership();
+    let sumi = character_choice(7, 7, 7);
+    membership.profile = membership.character_catalog.profile_from_stored(
+        membership.profile.account_id,
+        membership.profile.revision,
+        None,
+        [sumi],
+    );
+    let mut app = configured_customization_app(&membership);
+    inject_action(&mut app, FlowUiAction::OpenBrawlers);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::Brawlers
+    );
+
+    inject_action(
+        &mut app,
+        FlowUiAction::PickCharacter(brawler::characters::CharacterId(1)),
+    );
+    assert!(
+        sent_picks(&app).is_empty(),
+        "the selected character is a no-op"
+    );
+    inject_action(
+        &mut app,
+        FlowUiAction::PickCharacter(brawler::characters::CharacterId(7)),
+    );
+    assert_eq!(
+        sent_picks(&app),
+        [sumi],
+        "Sumi keeps her remembered options"
+    );
+
+    let mut app = configured_customization_app(&membership);
+    inject_action(&mut app, FlowUiAction::OpenBrawlers);
+    inject_action(
+        &mut app,
+        FlowUiAction::PickPassive(brawler::builds::PassiveDefinitionId(5)),
+    );
+    assert_eq!(sent_picks(&app), [character_choice(1, 1, 5)]);
+
+    let mut app = configured_customization_app(&membership);
+    inject_action(&mut app, FlowUiAction::OpenBrawlers);
+    inject_action(
+        &mut app,
+        FlowUiAction::PickUltimate(brawler::builds::UltimateDefinitionId(2)),
+    );
+    assert!(sent_picks(&app).is_empty(), "Riff does not offer Sentry");
+}
+
+#[test]
+fn brawler_picks_preserve_queue_practice_and_profile_locks() {
+    let membership = lobby_membership();
+    let bumper = FlowUiAction::PickCharacter(brawler::characters::CharacterId(9));
+    let open_and_pick = |app: &mut App| {
+        *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Brawlers;
+        inject_action(app, bumper.clone());
+    };
+
+    let mut queue_locked = configured_customization_app(&membership);
+    inject_action(&mut queue_locked, FlowUiAction::JoinQueue);
+    open_and_pick(&mut queue_locked);
+    assert!(sent_picks(&queue_locked).is_empty());
+
+    let mut practice_locked = configured_customization_app(&membership);
+    inject_action(&mut practice_locked, FlowUiAction::StartPractice);
+    open_and_pick(&mut practice_locked);
+    assert!(sent_picks(&practice_locked).is_empty());
+
+    let mut profile_locked = configured_customization_app(&membership);
+    open_and_pick(&mut profile_locked);
+    assert_eq!(sent_picks(&profile_locked).len(), 1);
+    inject_action(
+        &mut profile_locked,
+        FlowUiAction::PickCharacter(brawler::characters::CharacterId(2)),
+    );
+    assert_eq!(
+        sent_picks(&profile_locked).len(),
+        1,
+        "a second pick waits for the first decision"
+    );
+}
+
+#[test]
+fn refused_pick_is_shown_on_the_brawlers_screen_and_cleared_by_the_next_pick() {
+    let membership = lobby_membership();
+    let mut app = configured_customization_app(&membership);
+    inject_action(&mut app, FlowUiAction::OpenBrawlers);
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_decision_for_test(brawler::profiles::ProfileDecision::QueueLocked);
+    app.update();
+    assert!(
+        app.world()
+            .resource::<BrawlersNotice>()
+            .0
+            .as_deref()
+            .is_some_and(|notice| notice.contains("Leave the queue"))
+    );
+    assert!(app.world().resource::<DashboardNotice>().0.is_none());
+    inject_action(
+        &mut app,
+        FlowUiAction::PickCharacter(brawler::characters::CharacterId(4)),
+    );
+    assert!(app.world().resource::<BrawlersNotice>().0.is_none());
+    inject_action(&mut app, FlowUiAction::CloseBrawlers);
+    assert_eq!(
+        *app.world().resource::<ClientOverlay>(),
+        ClientOverlay::None
+    );
+}
+
+/// The rendered screen offers every roster character and the selected character's two
+/// ultimates and two passives as focusable controls, plus Back.
+#[test]
+fn brawlers_screen_renders_the_roster_and_the_current_options() {
+    let membership = lobby_membership();
+    let mut app = flow_test_app();
+    enter_dashboard(&mut app);
+    app.world_mut().spawn((Client, membership.clone()));
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(membership.profile.clone());
+    *app.world_mut().resource_mut::<ClientOverlay>() = ClientOverlay::Brawlers;
+    app.update();
+    app.update();
+    let mut roots = app.world_mut().query::<&BrawlersRoot>();
+    assert_eq!(roots.iter(app.world()).count(), 1);
+    let mut buttons = app.world_mut().query::<&FlowButton>();
+    let actions: Vec<_> = buttons
+        .iter(app.world())
+        .map(|button| (button.index, button.action.clone()))
+        .collect();
+    let tiles = actions
+        .iter()
+        .filter(|(_, action)| matches!(action, FlowUiAction::PickCharacter(_)))
+        .count();
+    assert_eq!(tiles, membership.character_catalog.characters.len());
+    for action in [
+        FlowUiAction::PickUltimate(brawler::builds::UltimateDefinitionId(1)),
+        FlowUiAction::PickUltimate(brawler::builds::UltimateDefinitionId(3)),
+        FlowUiAction::PickPassive(brawler::builds::PassiveDefinitionId(3)),
+        FlowUiAction::PickPassive(brawler::builds::PassiveDefinitionId(5)),
+    ] {
+        assert!(
+            actions.iter().any(|(_, offered)| *offered == action),
+            "{action:?}"
+        );
+    }
+    assert!(
+        actions
+            .iter()
+            .any(|(index, action)| *index == BRAWLERS_BACK_INDEX
+                && *action == FlowUiAction::CloseBrawlers)
+    );
+    let text = visible_text(&mut app).join(" ");
+    for name in [
+        "RIFF",
+        "BUMPER",
+        "SUMI",
+        "DASH",
+        "SELF CLOAK",
+        "ADRENAL RESPONSE",
+    ] {
+        assert!(text.contains(name), "{name} is on screen");
+    }
+}
+
+/// Settles an in-flight character pick the way the server accepts it: the next profile revision
+/// selects and remembers the pick.
+#[cfg(feature = "automation")]
+fn accept_pending_pick(app: &mut App, membership: &ClientLobbyMembership) {
+    let profile = app.world().resource::<super::super::ClientProfileModel>();
+    let (Some(choice), Some(current)) = (profile.pending_choice(), profile.snapshot()) else {
+        return;
+    };
+    let accepted = membership.character_catalog.profile_from_stored(
+        current.account_id,
+        current.revision.next().unwrap(),
+        Some(choice.character_id),
+        current
+            .choices
+            .iter()
+            .copied()
+            .filter(|stored| stored.character_id != choice.character_id)
+            .chain([choice]),
+    );
+    app.world_mut()
+        .resource_mut::<super::super::ClientProfileModel>()
+        .set_snapshot_for_test(accepted);
+    app.update();
 }

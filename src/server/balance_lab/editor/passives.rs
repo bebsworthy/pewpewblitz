@@ -3,9 +3,9 @@ use crate::builds::{
     PASSIVE_ADRENAL_DURATION_TICKS_BOUNDS, PASSIVE_ADRENAL_MOVEMENT_BONUS_BASIS_POINTS_BOUNDS,
     PASSIVE_ADRENAL_REARM_TICKS_BOUNDS, PASSIVE_CLOSE_QUARTERS_DAMAGE_BASIS_POINTS_BOUNDS,
     PASSIVE_CLOSE_QUARTERS_DISTANCE_MILLIUNITS_BOUNDS,
-    PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS,
-    PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS, PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS,
-    PassiveParameters,
+    PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS, PASSIVE_FRAME_HEALTH_BASIS_POINTS_BOUNDS,
+    PASSIVE_FRAME_SPEED_BASIS_POINTS_BOUNDS, PASSIVE_QUICK_CYCLE_REFILL_BASIS_POINTS_BOUNDS,
+    PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS, PassiveParameters,
 };
 
 type FieldDescriptor = (&'static str, &'static str, &'static str, NumberSpec);
@@ -28,8 +28,29 @@ pub(super) fn add_fields(
                 u32::from(PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS.maximum),
             ),
         )];
+        let frame_descriptors = [
+            (
+                "maximum_health_basis_points",
+                "Effect",
+                "Health scale",
+                NumberSpec::basis_points(
+                    u32::from(PASSIVE_FRAME_HEALTH_BASIS_POINTS_BOUNDS.minimum),
+                    u32::from(PASSIVE_FRAME_HEALTH_BASIS_POINTS_BOUNDS.maximum),
+                ),
+            ),
+            (
+                "movement_speed_basis_points",
+                "Effect",
+                "Movement speed scale",
+                NumberSpec::basis_points(
+                    u32::from(PASSIVE_FRAME_SPEED_BASIS_POINTS_BOUNDS.minimum),
+                    u32::from(PASSIVE_FRAME_SPEED_BASIS_POINTS_BOUNDS.maximum),
+                ),
+            ),
+        ];
         let (variant, descriptors): (&str, &[FieldDescriptor]) = match passive.parameters {
-            PassiveParameters::LightweightFrame | PassiveParameters::ReinforcedFrame => continue,
+            PassiveParameters::LightweightFrame { .. } => ("LightweightFrame", &frame_descriptors),
+            PassiveParameters::ReinforcedFrame { .. } => ("ReinforcedFrame", &frame_descriptors),
             PassiveParameters::AdrenalResponse {
                 duration_ticks: _,
                 rearm_ticks: _,

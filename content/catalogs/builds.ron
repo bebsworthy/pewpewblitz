@@ -1,29 +1,17 @@
 (
-    schema_version: 17,
-    balance_revision: BuildRevision(12),
+    schema_version: 18,
+    balance_revision: BuildRevision(13),
     fighter_body: (radius: 14.0),
-    fighter_profiles: (
-        default: (maximum_health: 1000, movement_speed: 70.0, health_recovery_rate: 100, idle_attack_delay_ticks: 180, reveal_proximity_radius: 160.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
-        lightweight: (maximum_health: 85, movement_speed: 110.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 192.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
-        reinforced: (maximum_health: 120, movement_speed: 90.0, health_recovery_rate: 10, idle_attack_delay_ticks: 180, reveal_proximity_radius: 128.0, cold_capacity: 1000, cold_resistance_basis_points: 0, poison_resistance_basis_points: 0, fire_resistance_basis_points: 0),
-    ),
-    custom_pulse: (
-        light: (damage: 20, fire_cooldown_ticks: 9),
-        balanced: (damage: 25, fire_cooldown_ticks: 12),
-        heavy: (damage: 30, fire_cooldown_ticks: 15),
-        compact: (speed: 1020.0, range: 750.0),
-        standard: (speed: 900.0, range: 900.0),
-        long: (speed: 780.0, range: 1050.0),
-        quick: (capacity: 4, refill_ticks: 78),
-        standard_magazine: (capacity: 6, refill_ticks: 78),
-        expanded: (capacity: 8, refill_ticks: 78),
-    ),
     ultimate_charge: (maximum: 1000, dealt_damage_multiplier: 5, received_damage_multiplier: 3),
+    // Character picks a direct diagnostic session rotates through by player ID: Riff, Plunk,
+    // Torque, Cobble (Pulse, Scatter, Arc, Blade). Resolved against content/catalogs/characters.ron.
     direct_diagnostic: (
-        fighter_profile_id: FighterProfileId(1),
-        weapon_base_ids: [WeaponBaseId(1), WeaponBaseId(2), WeaponBaseId(3), WeaponBaseId(4)],
-        ultimate_id: UltimateDefinitionId(1),
-        passive_ids: (PassiveDefinitionId(3), PassiveDefinitionId(4)),
+        picks: [
+            (character_id: CharacterId(1), ultimate_id: UltimateDefinitionId(1), passive_id: PassiveDefinitionId(3)),
+            (character_id: CharacterId(4), ultimate_id: UltimateDefinitionId(1), passive_id: PassiveDefinitionId(4)),
+            (character_id: CharacterId(2), ultimate_id: UltimateDefinitionId(11), passive_id: PassiveDefinitionId(5)),
+            (character_id: CharacterId(3), ultimate_id: UltimateDefinitionId(1), passive_id: PassiveDefinitionId(6)),
+        ],
     ),
     weapon_costs: [
         (weapon_id: WeaponPresetId(1), point_cost: 4),
@@ -48,8 +36,8 @@
         (id: UltimateDefinitionId(11), key: "big-blob", display_name: "Big Blob", kind: BigBlob, point_cost: 4, parameters: BigBlob(maximum_range_milliunits: 520000, flight_ticks: 45, visual_arc_height_milliunits: 140000, landing_clearance_milliunits: 10000, child_speed_milliunits: 520000, child_radius_milliunits: 6000, child_range_milliunits: 213440, child_lifetime_ticks: 60, child_fuse_ticks: 69, child_explosion_radius_milliunits: 42560, child_damage: 140, max_active_per_owner: 12)),
     ],
     passives: [
-        (id: PassiveDefinitionId(1), key: "lightweight-frame", display_name: "Lightweight Frame", kind: LightweightFrame, point_cost: 2, parameters: LightweightFrame),
-        (id: PassiveDefinitionId(2), key: "reinforced-frame", display_name: "Reinforced Frame", kind: ReinforcedFrame, point_cost: 2, parameters: ReinforcedFrame),
+        (id: PassiveDefinitionId(1), key: "lightweight-frame", display_name: "Lightweight Frame", kind: LightweightFrame, point_cost: 2, parameters: LightweightFrame(maximum_health_basis_points: 8500, movement_speed_basis_points: 11000)),
+        (id: PassiveDefinitionId(2), key: "reinforced-frame", display_name: "Reinforced Frame", kind: ReinforcedFrame, point_cost: 2, parameters: ReinforcedFrame(maximum_health_basis_points: 12000, movement_speed_basis_points: 9000)),
         (id: PassiveDefinitionId(3), key: "adrenal-response", display_name: "Adrenal Response", kind: AdrenalResponse, point_cost: 2, parameters: AdrenalResponse(duration_ticks: 90, rearm_ticks: 240, movement_bonus_basis_points: 1500)),
         (id: PassiveDefinitionId(4), key: "close-quarters", display_name: "Close Quarters", kind: CloseQuarters, point_cost: 2, parameters: CloseQuarters(near_distance_milliunits: 240000, far_distance_milliunits: 480000, near_damage_basis_points: 11500, far_damage_basis_points: 8500)),
         (id: PassiveDefinitionId(5), key: "quick-cycle", display_name: "Quick Cycle", kind: QuickCycle, point_cost: 2, parameters: QuickCycle(refill_duration_basis_points: 6000)),

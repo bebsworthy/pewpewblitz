@@ -97,10 +97,10 @@ client() {
 queue_match() {
     local label=$1
     shift
-    client 7101 "$label-a" --product-match-smoke-1v1 --weapon-preset 1 "$@" &
+    client 7101 "$label-a" --product-match-smoke-1v1 --character 1 "$@" &
     client_pids=($!)
     sleep 2
-    client 7102 "$label-b" --product-match-smoke-1v1 --weapon-preset 1 "$@" &
+    client 7102 "$label-b" --product-match-smoke-1v1 --character 1 "$@" &
     client_pids+=($!)
     local status=0
     for pid in "${client_pids[@]}"; do

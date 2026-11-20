@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 14;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 15;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -69,14 +69,6 @@ pub(super) fn load(
         && value["snapshot"]["schemaVersion"].as_u64() == Some(8)
     {
         value["snapshot"]["schemaVersion"] = serde_json::json!(9);
-        let canonical_profiles = serde_json::to_value(validator.baseline.fighter_profiles)
-            .map_err(|error| format!("canonical fighter recovery migration failed: {error}"))?;
-        for profile in ["default", "lightweight", "reinforced"] {
-            for field in ["health_recovery_rate", "idle_attack_delay_ticks"] {
-                value["snapshot"]["fighterProfiles"][profile][field] =
-                    canonical_profiles[profile][field].clone();
-            }
-        }
     }
     if value
         .get("schemaVersion")
@@ -122,18 +114,6 @@ pub(super) fn load(
     {
         value["schemaVersion"] = serde_json::json!(6);
         value["snapshot"]["schemaVersion"] = serde_json::json!(11);
-        let canonical_profiles = serde_json::to_value(validator.baseline.fighter_profiles)
-            .map_err(|error| format!("canonical resistance migration failed: {error}"))?;
-        for profile in ["default", "lightweight", "reinforced"] {
-            for field in [
-                "cold_resistance_basis_points",
-                "poison_resistance_basis_points",
-                "fire_resistance_basis_points",
-            ] {
-                value["snapshot"]["fighterProfiles"][profile][field] =
-                    canonical_profiles[profile][field].clone();
-            }
-        }
         let ultimates = value["snapshot"]["ultimates"]
             .as_array_mut()
             .ok_or_else(|| "persisted ultimate tuning is not an array".to_string())?;
@@ -165,12 +145,6 @@ pub(super) fn load(
     {
         value["schemaVersion"] = serde_json::json!(7);
         value["snapshot"]["schemaVersion"] = serde_json::json!(12);
-        let canonical_profiles = serde_json::to_value(validator.baseline.fighter_profiles)
-            .map_err(|error| format!("canonical Cold capacity migration failed: {error}"))?;
-        for profile in ["default", "lightweight", "reinforced"] {
-            value["snapshot"]["fighterProfiles"][profile]["cold_capacity"] =
-                canonical_profiles[profile]["cold_capacity"].clone();
-        }
     }
     if value
         .get("schemaVersion")
@@ -294,8 +268,8 @@ pub(super) fn load(
         == Some(12)
         && value["snapshot"]["schemaVersion"].as_u64() == Some(17)
     {
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(14);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(20);
         let canonical = serde_json::to_value(&validator.baseline).map_err(|error| {
             format!("canonical authored build tuning migration failed: {error}")
         })?;
@@ -341,10 +315,38 @@ pub(super) fn load(
         migrated.set_parameter(2, "multiplier-milli", read("slowMultiplierMilli")?);
         migrated.set_parameter(3, "damage", read("damagePerPulse")?);
         migrated.set_parameter(3, "interval-ticks", read("intervalTicks")?);
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(14);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(20);
         value["snapshot"]["effectTiles"] = serde_json::to_value(migrated)
             .map_err(|error| format!("effect-tile definition migration failed: {error}"))?;
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(14)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(20)
+    {
+        // BRL-egn6: stats moved to the character catalog, and the frame passives gained
+        // parameters. Shared fighter profiles are dropped; frame passives take canonical values.
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        if let Some(snapshot) = value["snapshot"].as_object_mut() {
+            snapshot.remove("fighterProfiles");
+        }
+        let canonical = serde_json::to_value(&validator.baseline.passives)
+            .map_err(|error| format!("canonical frame passive migration failed: {error}"))?;
+        let passives = value["snapshot"]["passives"]
+            .as_array_mut()
+            .ok_or_else(|| "persisted passives must be an array".to_string())?;
+        for passive in passives.iter_mut() {
+            if passive["parameters"].is_string()
+                && let Some(entry) = canonical
+                    .as_array()
+                    .and_then(|entries| entries.iter().find(|entry| entry["id"] == passive["id"]))
+            {
+                *passive = entry.clone();
+            }
+        }
     }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
@@ -455,7 +457,6 @@ mod tests {
         let root = TestPath::create();
         let path = root.0.join("session-v1.json");
         let (validator, mut snapshot) = fixture();
-        snapshot.fighter_profiles.default.maximum_health += 7;
         snapshot.heist.safe_maximum_health = 2_750;
         snapshot.effect_tiles.set_parameter(3, "damage", 17);
         snapshot.ultimate_charge.dealt_damage_multiplier += 1;
@@ -478,10 +479,6 @@ mod tests {
         let loaded = load(&path, &validator).unwrap().unwrap();
         assert_eq!(loaded.revision, BalanceLabRevision(9));
         assert_eq!(loaded.snapshot, snapshot);
-        assert_eq!(
-            loaded.builds.fighter_profiles.default.maximum_health,
-            snapshot.fighter_profiles.default.maximum_health
-        );
         assert_eq!(loaded.snapshot.effect_tiles.parameter(3, "damage"), 17);
         assert_eq!(
             super::super::EffectTileTuning::from_catalog(&loaded.maps).unwrap(),
@@ -498,15 +495,13 @@ mod tests {
         let root = TestPath::create();
         let path = root.0.join("session-v1.json");
         let (validator, mut first_snapshot) = fixture();
-        first_snapshot.fighter_profiles.default.movement_speed = 240.0;
-        first_snapshot.fighter_profiles.lightweight.movement_speed = 220.0;
-        first_snapshot.fighter_profiles.reinforced.movement_speed = 210.0;
+        first_snapshot.weapons[0].recipe.fire_cooldown_ticks += 2;
         save(&path, &first_snapshot, BalanceLabRevision(1)).unwrap();
 
         let loaded = load(&path, &validator).unwrap().unwrap();
         let mut follow_up = loaded.snapshot;
-        follow_up.fighter_profiles.lightweight.maximum_health += 1;
-        let (builds, _, _) = validate_snapshot(
+        follow_up.weapons[1].recipe.fire_cooldown_ticks += 1;
+        let (_, weapons, _) = validate_snapshot(
             &follow_up,
             &validator.baseline,
             &loaded.builds,
@@ -515,16 +510,30 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(builds.fighter_profiles.lightweight.maximum_health, 86);
-        assert!((builds.fighter_profiles.lightweight.movement_speed - 220.0).abs() < f32::EPSILON);
+        assert_eq!(
+            weapons.presets[0].configuration.recipe.fire_cooldown_ticks,
+            validator.weapons.presets[0]
+                .configuration
+                .recipe
+                .fire_cooldown_ticks
+                + 2
+        );
+        assert_eq!(
+            weapons.presets[1].configuration.recipe.fire_cooldown_ticks,
+            validator.weapons.presets[1]
+                .configuration
+                .recipe
+                .fire_cooldown_ticks
+                + 1
+        );
     }
 
     #[test]
-    fn older_snapshot_gains_canonical_fighter_and_elemental_fields_without_losing_tuning() {
+    fn older_snapshot_gains_canonical_fields_and_drops_fighter_profiles_without_losing_tuning() {
         let root = TestPath::create();
         let path = root.0.join("session-v1.json");
         let (validator, mut snapshot) = fixture();
-        snapshot.fighter_profiles.lightweight.movement_speed = 217.0;
+        snapshot.weapons[0].recipe.fire_cooldown_ticks += 3;
         save(&path, &snapshot, BalanceLabRevision(5)).unwrap();
 
         let mut value: serde_json::Value =
@@ -541,20 +550,8 @@ mod tests {
             .retain(|weapon| !matches!(weapon["id"].as_u64(), Some(5..=7)));
         value["snapshot"]["weapons"][2]["recipe"]["worldEffects"] =
             serde_json::json!([{ "DestroyMap": { "radius": 48.0 } }]);
-        for profile in ["default", "lightweight", "reinforced"] {
-            value["snapshot"]["fighterProfiles"][profile]
-                .as_object_mut()
-                .unwrap()
-                .remove("health_recovery_rate");
-            value["snapshot"]["fighterProfiles"][profile]
-                .as_object_mut()
-                .unwrap()
-                .remove("idle_attack_delay_ticks");
-            value["snapshot"]["fighterProfiles"][profile]
-                .as_object_mut()
-                .unwrap()
-                .remove("cold_capacity");
-        }
+        value["snapshot"]["fighterProfiles"] =
+            serde_json::json!({ "default": { "maximum_health": 100, "movement_speed": 110.0 } });
         fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
 
         let loaded = load(&path, &validator).unwrap().unwrap();
@@ -579,13 +576,9 @@ mod tests {
             loaded.snapshot.condition_rules,
             validator.baseline.condition_rules
         );
-        assert!(
-            (loaded.snapshot.fighter_profiles.lightweight.movement_speed - 217.0).abs()
-                < f32::EPSILON
-        );
         assert_eq!(
-            loaded.snapshot.fighter_profiles,
-            loaded.builds.fighter_profiles
+            loaded.snapshot.weapons[0].recipe.fire_cooldown_ticks,
+            snapshot.weapons[0].recipe.fire_cooldown_ticks
         );
     }
 
@@ -594,7 +587,7 @@ mod tests {
         let root = TestPath::create();
         let path = root.0.join("session-v12.json");
         let (validator, mut snapshot) = fixture();
-        snapshot.fighter_profiles.lightweight.movement_speed = 219.0;
+        snapshot.weapons[0].recipe.fire_cooldown_ticks += 4;
         save(&path, &snapshot, BalanceLabRevision(12)).unwrap();
 
         let mut value: serde_json::Value =
@@ -633,9 +626,9 @@ mod tests {
             validator.baseline.ultimate_charge
         );
         assert_eq!(loaded.snapshot.passives, validator.baseline.passives);
-        assert!(
-            (loaded.snapshot.fighter_profiles.lightweight.movement_speed - 219.0).abs()
-                < f32::EPSILON
+        assert_eq!(
+            loaded.snapshot.weapons[0].recipe.fire_cooldown_ticks,
+            snapshot.weapons[0].recipe.fire_cooldown_ticks
         );
     }
 
@@ -677,6 +670,34 @@ mod tests {
         assert_eq!(
             loaded.snapshot.effect_tiles.parameter(3, "interval-ticks"),
             75
+        );
+    }
+
+    #[test]
+    fn version_fourteen_drops_fighter_profiles_and_gains_frame_parameters() {
+        let root = TestPath::create();
+        let path = root.0.join("session-v14.json");
+        let (validator, mut snapshot) = fixture();
+        snapshot.weapons[0].recipe.fire_cooldown_ticks += 5;
+        save(&path, &snapshot, BalanceLabRevision(14)).unwrap();
+
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["schemaVersion"] = serde_json::json!(14);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(20);
+        value["snapshot"]["fighterProfiles"] =
+            serde_json::json!({ "default": { "maximum_health": 100, "movement_speed": 110.0 } });
+        value["snapshot"]["passives"][0]["parameters"] = serde_json::json!("LightweightFrame");
+        value["snapshot"]["passives"][1]["parameters"] = serde_json::json!("ReinforcedFrame");
+        fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let loaded = load(&path, &validator).unwrap().unwrap();
+        assert_eq!(loaded.revision, BalanceLabRevision(14));
+        assert_eq!(loaded.snapshot.schema_version, SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(loaded.snapshot.passives, validator.baseline.passives);
+        assert_eq!(
+            loaded.snapshot.weapons[0].recipe.fire_cooldown_ticks,
+            snapshot.weapons[0].recipe.fire_cooldown_ticks
         );
     }
 

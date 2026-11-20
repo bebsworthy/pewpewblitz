@@ -364,7 +364,7 @@ pub struct ClientLobbyMembership {
     pub server_name: String,
     pub catalog_revision: brawler::lobby::CatalogRevision,
     pub game_types: Vec<brawler::lobby::AdvertisedGameType>,
-    pub brawler_catalog: brawler::profiles::AdvertisedBrawlerCatalog,
+    pub character_catalog: brawler::profiles::AdvertisedCharacterCatalog,
     pub profile: brawler::profiles::ProfileSnapshot,
 }
 

@@ -535,10 +535,12 @@ mod tests {
     }
 
     fn spawn_fighter(world: &mut World, network_id: u64, health: u16, position: Vec2) -> Entity {
-        let mut fighter_stats = crate::builds::BuildCatalog::embedded()
-            .unwrap()
-            .fighter_profiles
-            .default;
+        let mut fighter_stats = crate::builds::LoadoutRecipe::test_default(
+            crate::combat::WeaponPresetId(1),
+            crate::builds::UltimateDefinitionId(1),
+            crate::builds::PassiveDefinitionId(3),
+        )
+        .fighter_stats;
         fighter_stats.maximum_health = 100;
         world
             .spawn((

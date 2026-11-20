@@ -1,4 +1,4 @@
-//! Client mirror and command lifecycle for the server-owned saved-brawler profile.
+//! Client mirror and command lifecycle for the server-owned character pick.
 
 use super::{Client, ClientLobbyMembership};
 use bevy::prelude::*;
@@ -8,14 +8,14 @@ use std::collections::VecDeque;
 #[cfg(feature = "automation")]
 mod automation;
 #[cfg(feature = "automation")]
-pub(crate) use automation::automation_brawler_ready;
+pub(crate) use automation::automation_character_ready;
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ClientProfileModel {
     snapshot: Option<brawler::profiles::ProfileSnapshot>,
-    catalog: Option<brawler::profiles::AdvertisedBrawlerCatalog>,
+    catalog: Option<brawler::profiles::AdvertisedCharacterCatalog>,
     pending_request_id: Option<u64>,
-    pending_selection_id: Option<brawler::profiles::SavedBrawlerId>,
+    pending_choice: Option<brawler::characters::CharacterChoice>,
     next_request_id: u64,
     outbound: VecDeque<brawler::profiles::ProfileCommand>,
     last_decision: Option<brawler::profiles::ProfileDecision>,
@@ -28,7 +28,7 @@ impl ClientProfileModel {
     }
 
     #[must_use]
-    pub fn catalog(&self) -> Option<&brawler::profiles::AdvertisedBrawlerCatalog> {
+    pub fn catalog(&self) -> Option<&brawler::profiles::AdvertisedCharacterCatalog> {
         self.catalog.as_ref()
     }
 
@@ -37,9 +37,10 @@ impl ClientProfileModel {
         self.pending_request_id.is_some()
     }
 
+    /// The pick a sent selection is waiting on.
     #[must_use]
-    pub fn selection_pending(&self, brawler_id: brawler::profiles::SavedBrawlerId) -> bool {
-        matches!(self.pending_selection_id, Some(pending_id) if pending_id == brawler_id)
+    pub const fn pending_choice(&self) -> Option<brawler::characters::CharacterChoice> {
+        self.pending_choice
     }
 
     pub fn take_decision(&mut self) -> Option<brawler::profiles::ProfileDecision> {
@@ -50,13 +51,10 @@ impl ClientProfileModel {
     pub(crate) fn set_snapshot_for_test(&mut self, snapshot: brawler::profiles::ProfileSnapshot) {
         self.snapshot = Some(snapshot);
         self.pending_request_id = None;
-        self.pending_selection_id = None;
+        self.pending_choice = None;
         self.catalog = Some(
-            brawler::profiles::AdvertisedBrawlerCatalog::from_content(
-                &brawler::builds::BuildCatalog::embedded().expect("embedded build catalog"),
-                &brawler::combat::WeaponCatalog::embedded().expect("embedded weapon catalog"),
-            )
-            .expect("embedded brawler advertisement"),
+            brawler::profiles::AdvertisedCharacterCatalog::embedded()
+                .expect("embedded character advertisement"),
         );
     }
 
@@ -70,125 +68,28 @@ impl ClientProfileModel {
         &self.outbound
     }
 
-    pub fn create(&mut self, draft: brawler::profiles::BrawlerDraft) -> bool {
+    /// Select `choice` (a character with one of its ultimates and one of its passives). The
+    /// server remembers the pick for that character.
+    pub fn select(&mut self, choice: brawler::characters::CharacterChoice) -> bool {
         let Some(revision) = self.snapshot.as_ref().map(|snapshot| snapshot.revision) else {
             return false;
         };
+        if self
+            .catalog
+            .as_ref()
+            .is_none_or(|catalog| !catalog.accepts(choice))
+        {
+            return false;
+        }
         let Some(request_id) = self.begin_request() else {
             return false;
         };
-        self.outbound
-            .push_back(brawler::profiles::ProfileCommand::CreateBrawler {
-                request_id,
-                expected_profile_revision: revision,
-                draft,
-            });
-        true
-    }
-
-    pub fn edit(
-        &mut self,
-        brawler_id: brawler::profiles::SavedBrawlerId,
-        edit: brawler::profiles::BrawlerEdit,
-    ) -> bool {
-        let Some(snapshot) = self.snapshot.as_ref() else {
-            return false;
-        };
-        let Some(brawler_revision) = snapshot
-            .brawlers
-            .iter()
-            .find(|brawler| brawler.id == brawler_id)
-            .map(|brawler| brawler.revision)
-        else {
-            return false;
-        };
-        let profile_revision = snapshot.revision;
-        let Some(request_id) = self.begin_request() else {
-            return false;
-        };
-        self.outbound
-            .push_back(brawler::profiles::ProfileCommand::EditBrawler {
-                request_id,
-                expected_profile_revision: profile_revision,
-                brawler_id,
-                expected_brawler_revision: brawler_revision,
-                edit,
-            });
-        true
-    }
-
-    pub fn select(&mut self, brawler_id: brawler::profiles::SavedBrawlerId) -> bool {
-        let Some(revision) = self.snapshot.as_ref().map(|snapshot| snapshot.revision) else {
-            return false;
-        };
-        let Some(request_id) = self.begin_request() else {
-            return false;
-        };
-        self.pending_selection_id = Some(brawler_id);
-        self.outbound
-            .push_back(brawler::profiles::ProfileCommand::SelectBrawler {
-                request_id,
-                expected_profile_revision: revision,
-                brawler_id,
-            });
-        true
-    }
-
-    pub fn delete(&mut self, brawler_id: brawler::profiles::SavedBrawlerId) -> bool {
-        let Some(snapshot) = self.snapshot.as_ref() else {
-            return false;
-        };
-        let Some(brawler_revision) = snapshot
-            .brawlers
-            .iter()
-            .find(|brawler| brawler.id == brawler_id)
-            .map(|brawler| brawler.revision)
-        else {
-            return false;
-        };
-        let profile_revision = snapshot.revision;
-        let Some(request_id) = self.begin_request() else {
-            return false;
-        };
-        self.outbound
-            .push_back(brawler::profiles::ProfileCommand::DeleteBrawler {
-                request_id,
-                expected_profile_revision: profile_revision,
-                brawler_id,
-                expected_brawler_revision: brawler_revision,
-            });
-        true
-    }
-
-    pub fn equip_weapon_parts(
-        &mut self,
-        brawler_id: brawler::profiles::SavedBrawlerId,
-        equipped_part_ids: [Option<brawler::weapon_parts::WeaponPartInstanceId>;
-            brawler::weapon_parts::WEAPON_PART_SLOT_COUNT],
-    ) -> bool {
-        let Some(snapshot) = self.snapshot.as_ref() else {
-            return false;
-        };
-        let Some(brawler_revision) = snapshot
-            .brawlers
-            .iter()
-            .find(|brawler| brawler.id == brawler_id)
-            .map(|brawler| brawler.revision)
-        else {
-            return false;
-        };
-        let profile_revision = snapshot.revision;
-        let Some(request_id) = self.begin_request() else {
-            return false;
-        };
-        self.outbound
-            .push_back(brawler::profiles::ProfileCommand::EquipWeaponParts {
-                request_id,
-                expected_profile_revision: profile_revision,
-                brawler_id,
-                expected_brawler_revision: brawler_revision,
-                equipped_part_ids,
-            });
+        self.pending_choice = Some(choice);
+        self.outbound.push_back(brawler::profiles::ProfileCommand {
+            request_id,
+            expected_profile_revision: revision,
+            choice,
+        });
         true
     }
 
@@ -199,7 +100,7 @@ impl ClientProfileModel {
         let request_id = self.next_request_id.checked_add(1)?;
         self.next_request_id = request_id;
         self.pending_request_id = Some(request_id);
-        self.pending_selection_id = None;
+        self.pending_choice = None;
         self.last_decision = None;
         Some(request_id)
     }
@@ -219,14 +120,13 @@ impl Plugin for ClientProfilePlugin {
             )
                 .chain(),
         );
-        // Automation-only: headless and render-evidence clients create one default brawler, or
-        // select/create one carrying `--weapon-preset`, so they can queue without the
-        // interactive editor. Queued after outbound drain so the command leaves on the following
+        // Automation-only: headless and render-evidence clients select the `--character` pick
+        // so they can queue without the interactive screen. Queued after outbound drain so the command leaves on the following
         // frame, as it did inside the former chain tail.
         #[cfg(feature = "automation")]
         app.add_systems(
             Update,
-            automation::prepare_automation_brawler.after(send_profile_commands),
+            automation::prepare_automation_character.after(send_profile_commands),
         );
     }
 }
@@ -246,7 +146,7 @@ fn bind_profile_snapshot(
 ) {
     for membership in &memberships {
         model.snapshot = Some(membership.profile.clone());
-        model.catalog = Some(membership.brawler_catalog.clone());
+        model.catalog = Some(membership.character_catalog.clone());
     }
 }
 
@@ -266,7 +166,7 @@ fn receive_profile_outcomes(
                 continue;
             }
             model.pending_request_id = None;
-            model.pending_selection_id = None;
+            model.pending_choice = None;
             model.last_decision = Some(outcome.decision.clone());
             if let Some(snapshot) = outcome.snapshot {
                 let snapshot_valid = snapshot.validate_bounded().is_ok()

@@ -681,17 +681,14 @@ fn calibrated_arc_target_suppresses_rest_drift_and_preserves_near_range() {
 pub(super) fn resolved_arc_launcher_loadout() -> brawler::builds::ResolvedMatchLoadout {
     let build_catalog = brawler::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = brawler::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
-    brawler::builds::resolve_build_recipe(
+    brawler::builds::resolve_loadout(
         &build_catalog,
         &weapons,
-        brawler::builds::BrawlerBuildRecipe {
-            weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(3)),
-            ultimate: brawler::builds::UltimateDefinitionId(1),
-            passives: [
-                brawler::builds::PassiveDefinitionId(1),
-                brawler::builds::PassiveDefinitionId(6),
-            ],
-        },
+        brawler::builds::LoadoutRecipe::test_default(
+            brawler::combat::WeaponPresetId(3),
+            brawler::builds::UltimateDefinitionId(1),
+            brawler::builds::PassiveDefinitionId(6),
+        ),
     )
     .expect("arc launcher loadout resolves")
 }
@@ -699,17 +696,14 @@ pub(super) fn resolved_arc_launcher_loadout() -> brawler::builds::ResolvedMatchL
 pub(super) fn resolved_reveal_scan_loadout() -> brawler::builds::ResolvedMatchLoadout {
     let build_catalog = brawler::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = brawler::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
-    brawler::builds::resolve_build_recipe(
+    brawler::builds::resolve_loadout(
         &build_catalog,
         &weapons,
-        brawler::builds::BrawlerBuildRecipe {
-            weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(3)),
-            ultimate: brawler::builds::UltimateDefinitionId(4),
-            passives: [
-                brawler::builds::PassiveDefinitionId(1),
-                brawler::builds::PassiveDefinitionId(6),
-            ],
-        },
+        brawler::builds::LoadoutRecipe::test_default(
+            brawler::combat::WeaponPresetId(3),
+            brawler::builds::UltimateDefinitionId(4),
+            brawler::builds::PassiveDefinitionId(6),
+        ),
     )
     .expect("reveal scan loadout resolves")
 }
@@ -717,17 +711,14 @@ pub(super) fn resolved_reveal_scan_loadout() -> brawler::builds::ResolvedMatchLo
 fn resolved_fire_field_loadout() -> brawler::builds::ResolvedMatchLoadout {
     let build_catalog = brawler::builds::BuildCatalog::embedded().expect("embedded build catalog");
     let weapons = brawler::combat::WeaponCatalog::embedded().expect("embedded weapon catalog");
-    brawler::builds::resolve_build_recipe(
+    brawler::builds::resolve_loadout(
         &build_catalog,
         &weapons,
-        brawler::builds::BrawlerBuildRecipe {
-            weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(1)),
-            ultimate: brawler::builds::UltimateDefinitionId(8),
-            passives: [
-                brawler::builds::PassiveDefinitionId(1),
-                brawler::builds::PassiveDefinitionId(6),
-            ],
-        },
+        brawler::builds::LoadoutRecipe::test_default(
+            brawler::combat::WeaponPresetId(1),
+            brawler::builds::UltimateDefinitionId(8),
+            brawler::builds::PassiveDefinitionId(6),
+        ),
     )
     .expect("fire field loadout resolves")
 }
@@ -1843,19 +1834,13 @@ fn a_completed_match_keeps_its_reservation_map_credit_for_results() {
         team_count: 2,
         players_per_team: 1,
         accepted_build: brawler::builds::AcceptedBuildSummary {
-            canonical_recipe: brawler::builds::BrawlerBuildRecipe {
-                weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(1)),
-                ultimate: brawler::builds::UltimateDefinitionId(1),
-                passives: [
-                    brawler::builds::PassiveDefinitionId(3),
-                    brawler::builds::PassiveDefinitionId(4),
-                ],
-            },
+            character: brawler::characters::CharacterCatalog::embedded()
+                .unwrap()
+                .default_choice(),
             identity: brawler::builds::SelectedBuild {
                 recipe_fingerprint: brawler::builds::BuildRecipeFingerprint(1),
                 revision: brawler::builds::BuildRevision(1),
             },
-            total_points: 0,
         },
         loading_deadline_millis: 30_000,
         published_map: Some(credit.clone()),

@@ -41,8 +41,7 @@ impl ClientPracticeModel {
     pub fn start(
         &mut self,
         selected: &crate::flow::SelectedGameType,
-        brawler_id: brawler::profiles::SavedBrawlerId,
-        brawler_revision: brawler::profiles::ProfileRevision,
+        profile_revision: brawler::profiles::ProfileRevision,
     ) -> bool {
         let (Some(catalog_revision), Some(game_type_id), Some(configuration_revision)) = (
             selected.catalog_revision,
@@ -82,8 +81,7 @@ impl ClientPracticeModel {
             catalog_revision,
             game_type_id,
             game_type_configuration_revision: configuration_revision,
-            brawler_id,
-            brawler_revision,
+            profile_revision,
         };
         self.pending = Some(request.clone());
         self.outbound.push_back(request);

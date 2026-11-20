@@ -15,14 +15,14 @@ use super::{
     input::collect_flow_input,
 };
 use bevy::prelude::*;
-use brawler::profiles::SavedBrawlerId;
 use std::path::PathBuf;
 
 /// Frames a reached screen must stay unchanged before it is captured. It covers the 0.25 s
 /// surface entrance, focus scrolling, and the first preview frames at 60 Hz with margin.
 const SETTLE_FRAMES: u32 = 90;
-/// Frames one step may take to reach its expected screen. Profile commands round-trip through
-/// the server, so this is generous; the initial connection has its own longer bound.
+/// Frames one step may take to reach its expected screen with no profile command in flight.
+/// Character picks round-trip through the server, so this is generous; the initial connection
+/// has its own longer bound.
 const STEP_TIMEOUT_FRAMES: u32 = 900;
 const CONNECT_TIMEOUT_FRAMES: u32 = 3_600;
 /// Frames to wait for the asynchronous PNG/JSON save before the process exits.
@@ -39,21 +39,17 @@ const LOADING_SETTLE_SECONDS: f32 = 0.3;
 /// One named shell screen the `--shell-capture` automation flag can open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellCaptureRoute {
-    /// The opaque first-brawler creation screen of an empty profile; the run then creates it.
-    FirstBrawler,
     Dashboard,
     DashboardMenu,
     Settings,
     Credits,
     ChangeServer,
-    BrawlerList,
-    BrawlerDetails,
-    BrawlerCreate,
-    BrawlerEditor,
-    UltimatePicker,
-    WeaponEquipment,
-    WeaponParts,
-    DeleteBrawler,
+    /// The character select on the default pick (BRL-egn6).
+    Brawlers,
+    /// The character select after picking Bumper with Restoration Field and Adrenal Response.
+    BrawlersPicked,
+    /// The Dashboard after that pick: its preview shows the picked character.
+    DashboardPicked,
     GameSelect,
     PracticeMaps,
     MapLibrary,
@@ -101,21 +97,15 @@ pub enum ShellCaptureRoute {
 
 impl ShellCaptureRoute {
     /// Every route, in the order `scripts/shell-capture.sh` runs them on a fresh profile.
-    pub const ALL: [Self; 37] = [
-        Self::FirstBrawler,
+    pub const ALL: [Self; 31] = [
         Self::Dashboard,
         Self::DashboardMenu,
         Self::Settings,
         Self::Credits,
         Self::ChangeServer,
-        Self::BrawlerList,
-        Self::BrawlerDetails,
-        Self::BrawlerCreate,
-        Self::BrawlerEditor,
-        Self::UltimatePicker,
-        Self::WeaponEquipment,
-        Self::WeaponParts,
-        Self::DeleteBrawler,
+        Self::Brawlers,
+        Self::BrawlersPicked,
+        Self::DashboardPicked,
         Self::GameSelect,
         Self::PracticeMaps,
         Self::MapLibrary,
@@ -145,20 +135,14 @@ impl ShellCaptureRoute {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
-            Self::FirstBrawler => "first-brawler",
             Self::Dashboard => "dashboard",
             Self::DashboardMenu => "dashboard-menu",
             Self::Settings => "settings",
             Self::Credits => "credits",
             Self::ChangeServer => "change-server",
-            Self::BrawlerList => "brawler-list",
-            Self::BrawlerDetails => "brawler-details",
-            Self::BrawlerCreate => "brawler-create",
-            Self::BrawlerEditor => "brawler-editor",
-            Self::UltimatePicker => "ultimate-picker",
-            Self::WeaponEquipment => "weapon-equipment",
-            Self::WeaponParts => "weapon-parts",
-            Self::DeleteBrawler => "delete-brawler",
+            Self::Brawlers => "brawlers",
+            Self::BrawlersPicked => "brawlers-picked",
+            Self::DashboardPicked => "dashboard-picked",
             Self::GameSelect => "game-select",
             Self::PracticeMaps => "practice-maps",
             Self::MapLibrary => "map-library",
@@ -209,21 +193,28 @@ impl ShellCaptureRoute {
             })
     }
 
-    /// The steps from an idle Dashboard with a saved brawler to this route's screen.
+    /// The steps from an idle Dashboard to this route's screen.
     pub(super) fn steps(self) -> Vec<RouteStep> {
         use ClientOverlay as Overlay;
         use FlowUiAction as Action;
         let menu = dashboard(Action::OpenDashboardMenu, Overlay::DashboardMenu);
-        let list = dashboard(Action::OpenBrawlerList, Overlay::BrawlerList);
-        let details = for_brawler(Action::OpenBrawlerDetails, Overlay::BrawlerDetails);
-        let editor = RouteStep {
-            action: StepAction::Brawler(Action::OpenBrawlerEditor),
-            ..wait(ClientFlow::Dashboard, Overlay::BrawlerEditor)
-        };
-        let equipment = RouteStep {
-            action: StepAction::Brawler(Action::OpenWeaponEquipment),
-            ..wait(ClientFlow::Dashboard, Overlay::WeaponEquipment)
-        };
+        let brawlers = dashboard(Action::OpenBrawlers, Overlay::Brawlers);
+        // Bumper (a Normal-body placeholder kit) with his second ultimate and second passive.
+        let picked = vec![
+            brawlers.clone(),
+            dashboard(
+                Action::PickCharacter(brawler::characters::CharacterId(9)),
+                Overlay::Brawlers,
+            ),
+            dashboard(
+                Action::PickUltimate(brawler::builds::UltimateDefinitionId(10)),
+                Overlay::Brawlers,
+            ),
+            dashboard(
+                Action::PickPassive(brawler::builds::PassiveDefinitionId(3)),
+                Overlay::Brawlers,
+            ),
+        ];
         let library = screen(Action::OpenMapMaker, ClientFlow::MapLibrary);
         let map_editor = vec![
             library.clone(),
@@ -231,7 +222,7 @@ impl ShellCaptureRoute {
             screen(Action::ConfirmCreateMap, ClientFlow::MapEditor),
         ];
         match self {
-            Self::FirstBrawler | Self::Dashboard => Vec::new(),
+            Self::Dashboard => Vec::new(),
             Self::DashboardMenu => vec![menu],
             Self::Settings => vec![menu, dashboard(Action::OpenSettings, Overlay::Settings)],
             Self::Credits => vec![menu, dashboard(Action::OpenCredits, Overlay::Credits)],
@@ -242,31 +233,13 @@ impl ShellCaptureRoute {
                     Overlay::ChangeServerConfirmation,
                 ),
             ],
-            Self::BrawlerList => vec![list],
-            Self::BrawlerDetails => vec![list, details],
-            Self::BrawlerCreate => vec![
-                list,
-                dashboard(Action::CreateBrawler, Overlay::BrawlerCreation),
-            ],
-            Self::BrawlerEditor => vec![list, details, editor],
-            Self::UltimatePicker => vec![
-                list,
-                details,
-                editor,
-                dashboard(Action::OpenBrawlerUltimate, Overlay::BrawlerEditor),
-            ],
-            Self::WeaponEquipment => vec![list, details, equipment],
-            Self::WeaponParts => vec![
-                list,
-                details,
-                equipment,
-                dashboard(Action::SelectEquipmentSlot(0), Overlay::WeaponEquipment),
-            ],
-            Self::DeleteBrawler => vec![
-                list,
-                details,
-                for_brawler(Action::DeleteBrawler, Overlay::DeleteBrawlerConfirmation),
-            ],
+            Self::Brawlers => vec![brawlers],
+            Self::BrawlersPicked => picked,
+            Self::DashboardPicked => [
+                picked,
+                vec![dashboard(Action::CloseBrawlers, Overlay::None)],
+            ]
+            .concat(),
             Self::GameSelect => vec![screen(
                 Action::OpenGameTypeSelect,
                 ClientFlow::GameTypeSelect,
@@ -466,28 +439,13 @@ impl ShellCaptureRoute {
         }
     }
 
-    /// The complete script for this run: reach an idle Dashboard (creating the first brawler on
-    /// an empty profile), follow the route, and capture its last screen.
-    fn script(self, profile_empty: bool) -> Result<Vec<ScriptStep>, String> {
-        let creation = wait(ClientFlow::Dashboard, ClientOverlay::BrawlerCreation);
-        let mut script = Vec::new();
-        if self == Self::FirstBrawler {
-            if !profile_empty {
-                return Err("first-brawler needs an empty profile".to_string());
-            }
-            script.push(ScriptStep::capture(creation));
-            script.extend(seed_steps().into_iter().map(ScriptStep::step));
-            return Ok(script);
-        }
-        if profile_empty {
-            script.push(ScriptStep::step(creation));
-            script.extend(seed_steps().into_iter().map(ScriptStep::step));
-        } else {
-            script.push(ScriptStep::step(wait(
-                ClientFlow::Dashboard,
-                ClientOverlay::None,
-            )));
-        }
+    /// The complete script for this run: reach an idle Dashboard, follow the route, and capture
+    /// its last screen.
+    fn script(self) -> Vec<ScriptStep> {
+        let mut script = vec![ScriptStep::step(wait(
+            ClientFlow::Dashboard,
+            ClientOverlay::None,
+        ))];
         script.extend(self.steps().into_iter().map(ScriptStep::step));
         if let Some(last) = script.last_mut() {
             last.capture = true;
@@ -495,32 +453,8 @@ impl ShellCaptureRoute {
         if self.live() {
             script.extend(self.live_steps().1.into_iter().map(ScriptStep::step));
         }
-        Ok(script)
+        script
     }
-}
-
-/// Creates the default first brawler from the empty-profile creation screen and returns to an
-/// idle Dashboard through the same actions a player would use.
-fn seed_steps() -> Vec<RouteStep> {
-    vec![
-        RouteStep {
-            action: StepAction::Fixed(FlowUiAction::ConfirmCreateBrawler),
-            ..for_brawler(
-                FlowUiAction::OpenBrawlerDetails,
-                ClientOverlay::BrawlerDetails,
-            )
-        },
-        act(
-            FlowUiAction::BackToBrawlerList,
-            ClientFlow::Dashboard,
-            ClientOverlay::BrawlerList,
-        ),
-        act(
-            FlowUiAction::CloseBrawlerList,
-            ClientFlow::Dashboard,
-            ClientOverlay::None,
-        ),
-    ]
 }
 
 #[derive(Clone, Debug)]
@@ -528,18 +462,10 @@ enum StepAction {
     /// Send nothing; only wait for the expected screen.
     Wait,
     Fixed(FlowUiAction),
-    /// An action for the selected saved brawler.
-    Brawler(fn(SavedBrawlerId) -> FlowUiAction),
     /// The shared local pause request that opens the match menu.
     PauseMatch,
     /// Activates one match menu row through the menu's own activation path.
     MatchMenuRow(usize),
-}
-
-#[derive(Clone, Debug)]
-enum StepOverlay {
-    Fixed(ClientOverlay),
-    Brawler(fn(SavedBrawlerId) -> ClientOverlay),
 }
 
 /// One action and the screen it must produce.
@@ -547,7 +473,7 @@ enum StepOverlay {
 pub(super) struct RouteStep {
     action: StepAction,
     flow: ClientFlow,
-    overlay: StepOverlay,
+    overlay: ClientOverlay,
     /// Whether the match menu is open (`ClientInputContext::Menu`) on the expected screen.
     match_menu: bool,
     timeout_frames: u32,
@@ -557,22 +483,18 @@ pub(super) struct RouteStep {
 pub(super) type ShellScreen = (ClientFlow, ClientOverlay, bool);
 
 impl RouteStep {
-    /// The flow action to send, or `None` when there is nothing to send, no brawler to send it
-    /// for, or the step drives the match menu instead.
-    pub(super) fn action(&self, brawler: Option<SavedBrawlerId>) -> Option<FlowUiAction> {
+    /// The flow action to send, or `None` when there is nothing to send or the step drives the
+    /// match menu instead.
+    #[cfg(test)]
+    pub(super) fn action(&self) -> Option<FlowUiAction> {
         match &self.action {
             StepAction::Wait | StepAction::PauseMatch | StepAction::MatchMenuRow(_) => None,
             StepAction::Fixed(action) => Some(action.clone()),
-            StepAction::Brawler(action) => brawler.map(action),
         }
     }
 
-    pub(super) fn expected(&self, brawler: Option<SavedBrawlerId>) -> Option<ShellScreen> {
-        let overlay = match &self.overlay {
-            StepOverlay::Fixed(overlay) => overlay.clone(),
-            StepOverlay::Brawler(overlay) => overlay(brawler?),
-        };
-        Some((self.flow, overlay, self.match_menu))
+    pub(super) fn expected(&self) -> ShellScreen {
+        (self.flow, self.overlay.clone(), self.match_menu)
     }
 }
 
@@ -614,23 +536,11 @@ fn in_editor(action: FlowUiAction) -> RouteStep {
     screen(action, ClientFlow::MapEditor)
 }
 
-/// A Dashboard overlay action and overlay that both name the selected saved brawler.
-fn for_brawler(
-    action: fn(SavedBrawlerId) -> FlowUiAction,
-    overlay: fn(SavedBrawlerId) -> ClientOverlay,
-) -> RouteStep {
-    RouteStep {
-        action: StepAction::Brawler(action),
-        overlay: StepOverlay::Brawler(overlay),
-        ..wait(ClientFlow::Dashboard, ClientOverlay::None)
-    }
-}
-
 fn wait(flow: ClientFlow, overlay: ClientOverlay) -> RouteStep {
     RouteStep {
         action: StepAction::Wait,
         flow,
-        overlay: StepOverlay::Fixed(overlay),
+        overlay,
         match_menu: false,
         timeout_frames: STEP_TIMEOUT_FRAMES,
     }
@@ -647,13 +557,6 @@ impl ScriptStep {
         Self {
             step,
             capture: false,
-        }
-    }
-
-    const fn capture(step: RouteStep) -> Self {
-        Self {
-            step,
-            capture: true,
         }
     }
 }
@@ -706,13 +609,6 @@ pub(crate) fn install_shell_capture(app: &mut App, route: ShellCaptureRoute, dir
     );
 }
 
-fn selected_brawler(profile: &crate::ClientProfileModel) -> Option<SavedBrawlerId> {
-    let snapshot = profile.snapshot()?;
-    snapshot
-        .selected_brawler_id
-        .or_else(|| snapshot.brawlers.first().map(|brawler| brawler.id))
-}
-
 /// What the driver asks the system to do this frame.
 #[derive(Debug, PartialEq, Eq)]
 enum DriverOutput {
@@ -728,20 +624,20 @@ enum DriverOutput {
 }
 
 impl ShellCaptureDriver {
-    /// Advances the script by one frame from the presented screen. `profile_empty` is `Some` once
-    /// a profile snapshot exists; `saved` reports whether this route's capture files exist.
+    /// Advances the script by one frame from the presented screen. `profile` is `Some(pending)`
+    /// once a profile snapshot exists, `pending` while a character pick is in flight (a step is
+    /// reached only once its pick settled); `saved` reports whether the capture files exist.
     fn advance(
         &mut self,
         current: &ShellScreen,
-        brawler: Option<SavedBrawlerId>,
-        profile_empty: Option<bool>,
+        profile: Option<bool>,
         saved: bool,
     ) -> Result<DriverOutput, String> {
         self.frames = self.frames.saturating_add(1);
         let (phase, output) = match self.phase {
-            DriverPhase::Connecting => match (current.0, profile_empty) {
-                (ClientFlow::Dashboard, Some(empty)) => {
-                    self.script = self.route.script(empty)?;
+            DriverPhase::Connecting => match (current.0, profile) {
+                (ClientFlow::Dashboard, Some(_)) => {
+                    self.script = self.route.script();
                     (step_phase(0), DriverOutput::Idle)
                 }
                 _ if self.frames > CONNECT_TIMEOUT_FRAMES => {
@@ -751,18 +647,17 @@ impl ShellCaptureDriver {
             },
             DriverPhase::Step { index, sent: false } => {
                 let step = &self.script[index].step;
-                let output = match (&step.action, step.action(brawler)) {
-                    (StepAction::Wait, _) => DriverOutput::Idle,
-                    (StepAction::PauseMatch, _) => DriverOutput::PauseMatch,
-                    (StepAction::MatchMenuRow(row), _) => DriverOutput::ActivateMenuRow(*row),
-                    (_, Some(action)) => DriverOutput::Send(action),
-                    (_, None) => return Err(format!("step {index} needs a saved brawler")),
+                let output = match &step.action {
+                    StepAction::Wait => DriverOutput::Idle,
+                    StepAction::PauseMatch => DriverOutput::PauseMatch,
+                    StepAction::MatchMenuRow(row) => DriverOutput::ActivateMenuRow(*row),
+                    StepAction::Fixed(action) => DriverOutput::Send(action.clone()),
                 };
                 (DriverPhase::Step { index, sent: true }, output)
             }
             DriverPhase::Step { index, sent: true } => {
-                let expected = self.script[index].step.expected(brawler);
-                if expected.as_ref() == Some(current) {
+                let expected = self.script[index].step.expected();
+                if expected == *current && profile != Some(true) {
                     let phase = if self.script[index].capture {
                         DriverPhase::Settling { index }
                     } else {
@@ -776,7 +671,7 @@ impl ShellCaptureDriver {
                 }
             }
             DriverPhase::Settling { index } => {
-                if self.script[index].step.expected(brawler).as_ref() != Some(current) {
+                if self.script[index].step.expected() != *current {
                     return Err(format!("step {index} left its screen while settling"));
                 }
                 let settled = if current.0 == ClientFlow::MatchLoading {
@@ -845,14 +740,12 @@ fn drive_shell_capture(
     let menu_open = *input.context == crate::ClientInputContext::Menu;
     let current = (*screen.flow.get(), screen.overlay.clone(), menu_open);
     let route = driver.route.name();
-    let profile_empty = profile
-        .snapshot()
-        .map(|snapshot| snapshot.brawlers.is_empty());
+    let profile_state = profile.snapshot().map(|_| profile.pending());
     let saved = matches!(driver.phase, DriverPhase::Saving { .. })
         && ["png", "json"]
             .iter()
             .all(|extension| driver.dir.join(format!("{route}.{extension}")).is_file());
-    match driver.advance(&current, selected_brawler(&profile), profile_empty, saved) {
+    match driver.advance(&current, profile_state, saved) {
         Ok(DriverOutput::Idle) => {}
         Ok(DriverOutput::Send(action)) => {
             info!(route, ?action, "shell capture sends a flow action");
@@ -915,14 +808,11 @@ mod tests {
 
     #[test]
     fn driver_sends_each_action_once_settles_captures_and_finishes() {
-        let brawler = Some(SavedBrawlerId::new(2).unwrap());
         let home = (ClientFlow::Dashboard, ClientOverlay::None, false);
         let menu = (ClientFlow::Dashboard, ClientOverlay::DashboardMenu, false);
         let mut driver = driver(ShellCaptureRoute::DashboardMenu);
         let advance = |driver: &mut ShellCaptureDriver, current, saved| {
-            driver
-                .advance(current, brawler, Some(false), saved)
-                .unwrap()
+            driver.advance(current, Some(false), saved).unwrap()
         };
 
         assert_eq!(advance(&mut driver, &home, false), DriverOutput::Idle);
@@ -946,31 +836,19 @@ mod tests {
 
     #[test]
     fn driver_fails_when_a_screen_changes_while_settling_or_never_arrives() {
-        let brawler = Some(SavedBrawlerId::new(2).unwrap());
         let home = (ClientFlow::Dashboard, ClientOverlay::None, false);
         let mut settling = driver(ShellCaptureRoute::Dashboard);
         for _ in 0..3 {
-            settling
-                .advance(&home, brawler, Some(false), false)
-                .unwrap();
+            settling.advance(&home, Some(false), false).unwrap();
         }
         assert_eq!(settling.phase, DriverPhase::Settling { index: 0 });
         let moved = (ClientFlow::Dashboard, ClientOverlay::Settings, false);
-        assert!(
-            settling
-                .advance(&moved, brawler, Some(false), false)
-                .is_err()
-        );
+        assert!(settling.advance(&moved, Some(false), false).is_err());
 
         let mut stuck = driver(ShellCaptureRoute::Settings);
         let error = (0..=STEP_TIMEOUT_FRAMES + 4)
-            .find_map(|_| stuck.advance(&home, brawler, Some(false), false).err());
+            .find_map(|_| stuck.advance(&home, Some(false), false).err());
         assert!(error.is_some_and(|error| error.contains("never reached")));
-        assert!(
-            driver(ShellCaptureRoute::FirstBrawler)
-                .advance(&home, brawler, Some(false), false)
-                .is_err_and(|error| error.contains("empty profile"))
-        );
     }
 
     /// BRL-wqst: each live route captures its own screen, then leaves the match through the
@@ -979,13 +857,13 @@ mod tests {
     fn live_shell_capture_routes_leave_the_match() {
         let menu = crate::presentation::MatchMenuState::LEAVE_ROW;
         let captured = |route: ShellCaptureRoute| {
-            let script = route.script(false).unwrap();
+            let script = route.script();
             let capture = script.iter().position(|step| step.capture).unwrap();
             assert_eq!(script.iter().filter(|step| step.capture).count(), 1);
-            let last = script.last().unwrap().step.expected(None);
+            let last = script.last().unwrap().step.expected();
             assert_eq!(
                 last,
-                Some((ClientFlow::Dashboard, ClientOverlay::None, false)),
+                (ClientFlow::Dashboard, ClientOverlay::None, false),
                 "{} ends on the Dashboard",
                 route.name()
             );
@@ -994,9 +872,9 @@ mod tests {
             assert!(
                 script[capture..]
                     .iter()
-                    .any(|step| step.step.action(None) == Some(FlowUiAction::ConfirmLeaveMatch))
+                    .any(|step| step.step.action() == Some(FlowUiAction::ConfirmLeaveMatch))
             );
-            script[capture].step.expected(None).unwrap()
+            script[capture].step.expected()
         };
         let in_match = |overlay, menu| (ClientFlow::Match, overlay, menu);
         assert_eq!(
@@ -1016,19 +894,19 @@ mod tests {
             (ClientFlow::Results, ClientOverlay::None, false)
         );
         let replay = ShellCaptureRoute::Results.live_steps().1;
-        assert_eq!(replay[0].action(None), Some(FlowUiAction::QueueAgain));
+        assert_eq!(replay[0].action(), Some(FlowUiAction::QueueAgain));
         let live = ShellCaptureRoute::ALL.iter().filter(|route| route.live());
         assert_eq!(live.count(), 5);
         // BRL-1sgj: the community-map Results route queues, captures Results, and returns to
         // the Dashboard from Results (its opponent already left the match).
-        let script = ShellCaptureRoute::ResultsPublished.script(false).unwrap();
+        let script = ShellCaptureRoute::ResultsPublished.script();
         let capture = script.iter().position(|step| step.capture).unwrap();
         assert_eq!(
-            script[capture].step.expected(None),
-            Some((ClientFlow::Results, ClientOverlay::None, false))
+            script[capture].step.expected(),
+            (ClientFlow::Results, ClientOverlay::None, false)
         );
         assert_eq!(
-            script.last().unwrap().step.action(None),
+            script.last().unwrap().step.action(),
             Some(FlowUiAction::ReturnToDashboard)
         );
     }
@@ -1042,17 +920,17 @@ mod tests {
             index: 3,
             sent: false,
         };
-        driver.script = ShellCaptureRoute::LeaveConfirmation.script(false).unwrap();
+        driver.script = ShellCaptureRoute::LeaveConfirmation.script();
         assert_eq!(
-            driver.advance(&playing, None, Some(false), false),
+            driver.advance(&playing, Some(false), false),
             Ok(DriverOutput::PauseMatch)
         );
         assert_eq!(
-            driver.advance(&open, None, Some(false), false),
+            driver.advance(&open, Some(false), false),
             Ok(DriverOutput::Reached(3))
         );
         assert_eq!(
-            driver.advance(&open, None, Some(false), false),
+            driver.advance(&open, Some(false), false),
             Ok(DriverOutput::ActivateMenuRow(
                 crate::presentation::MatchMenuState::LEAVE_ROW
             ))

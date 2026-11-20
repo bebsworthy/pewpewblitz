@@ -76,7 +76,7 @@ markers=(
     "brawler product queue smoke"
     "headless movement automation enabled"
     "windowed synthetic controller demo enabled"
-    "Automation Brawler"
+    "automation selecting the requested character"
     "frame_p95_ms"
     "capturing scheduled frame + client state"
     "--product-practice-smoke requires product match automation"

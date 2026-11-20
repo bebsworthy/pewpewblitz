@@ -30,8 +30,7 @@ just riff-asset
 Built and verified with Blender 5.2.3 LTS. Pass `-- --no-renders` after the script to skip the
 review sheet. The run prints a `WEAPON_BUILD_REPORT` JSON line (bytes, triangles, bounds, anchors)
 and fails if an export breaks the contract below. Two consecutive builds produce byte-identical
-GLBs. Never hand-edit a GLB: change the builder and rebuild, then update the matching
-`preview_center` in `assets/catalogs/fighter_weapons.ron` if a bound changed.
+GLBs. Never hand-edit a GLB: change the builder and rebuild.
 
 ## Weapon contract
 

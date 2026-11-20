@@ -940,24 +940,56 @@ impl Harness {
         query.iter(world).next().is_some()
     }
 
-    pub(super) fn install_saved_brawler_loadout(
+    /// Installs a loadout on the Normal-body test baseline (1000 health, 70 speed) with any weapon,
+    /// ultimate and passive, for capability tests that need a combination no character offers.
+    pub(super) fn install_test_loadout(
         &mut self,
         index: usize,
         weapon_base: u16,
         ultimate: u16,
-        passives: [u16; 2],
+        passive: u16,
     ) {
-        self.install_saved_brawler_recipe(index, 1, weapon_base, ultimate, passives);
+        let builds = brawler::builds::BuildCatalog::embedded().unwrap();
+        let weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
+        let loadout = brawler::builds::resolve_loadout(
+            &builds,
+            &weapons,
+            brawler::builds::LoadoutRecipe::test_default(
+                WeaponPresetId(weapon_base),
+                brawler::builds::UltimateDefinitionId(ultimate),
+                brawler::builds::PassiveDefinitionId(passive),
+            ),
+        )
+        .unwrap();
+        self.install_resolved_loadout(index, &loadout, builds.fighter_body);
     }
 
-    pub(super) fn install_saved_brawler_recipe(
+    /// Installs Pulse Sidearm, Dash and Adrenal Response on the compact test stats (85 health,
+    /// 110 speed, 10 health per second): the small, fast fighter the movement, projectile and
+    /// recovery scenarios measure against (the former lightweight profile).
+    pub(super) fn install_compact_test_loadout(&mut self, index: usize) {
+        let builds = brawler::builds::BuildCatalog::embedded().unwrap();
+        let weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
+        let mut recipe = brawler::builds::LoadoutRecipe::test_default(
+            WeaponPresetId(1),
+            brawler::builds::UltimateDefinitionId(1),
+            brawler::builds::PassiveDefinitionId(3),
+        );
+        recipe.fighter_stats.maximum_health = 85;
+        recipe.fighter_stats.movement_speed = 110.0;
+        recipe.fighter_stats.health_recovery_rate = 10;
+        recipe.fighter_stats.reveal_proximity_radius = 192.0;
+        let loadout = brawler::builds::resolve_loadout(&builds, &weapons, recipe).unwrap();
+        self.install_resolved_loadout(index, &loadout, builds.fighter_body);
+    }
+
+    fn install_resolved_loadout(
         &mut self,
         index: usize,
-        fighter_profile: u16,
-        weapon_base: u16,
-        ultimate: u16,
-        passives: [u16; 2],
+        loadout: &brawler::builds::ResolvedMatchLoadout,
+        fighter_body: brawler::builds::FighterBody,
     ) {
+        let loadout = loadout.clone();
         let owner = self.server_links[index];
         let fighter_entity = {
             let world = self.server.world_mut();
@@ -971,20 +1003,8 @@ impl Harness {
                 .map(|(entity, _)| entity)
                 .expect("client owns one authoritative fighter")
         };
-        let builds = brawler::builds::BuildCatalog::embedded().unwrap();
-        let weapons = brawler::combat::WeaponCatalog::embedded().unwrap();
-        let loadout = brawler::builds::resolve_saved_brawler_recipe(
-            &builds,
-            &weapons,
-            brawler::profiles::FighterProfileId(fighter_profile),
-            brawler::profiles::WeaponBaseId(weapon_base),
-            brawler::builds::UltimateDefinitionId(ultimate),
-            passives.map(brawler::builds::PassiveDefinitionId),
-        )
-        .unwrap();
         let capacity = loadout.primary_weapon.recipe.economy.capacity();
-        let projection =
-            brawler::builds::MatchLoadoutProjection::new(&loadout, builds.fighter_body);
+        let projection = brawler::builds::MatchLoadoutProjection::new(&loadout, fighter_body);
         self.server.world_mut().entity_mut(fighter_entity).insert((
             loadout.identity,
             loadout.clone(),

@@ -1,263 +1,201 @@
-pub(in crate::flow) use super::equipment::{
-    WeaponEquipmentDraft, keep_weapon_equipment_focus_visible, present_weapon_equipment,
-    scroll_weapon_equipment,
-};
-#[cfg(test)]
-pub(in crate::flow) use super::equipment::{WeaponEquipmentRoot, WeaponEquipmentScrollArea};
-// Saved-brawler browsing, creation, editing and deletion presentation.
-use super::shared::{FlowButton, FlowNavigation};
+//! Character select (BRL-egn6): the roster grid and the selected character's two ultimates and
+//! two passives. Presentation only; the profile reducer sends every pick.
+//!
+//! Focus indices form a four-column grid for keyboard and gamepad parity: the roster fills the
+//! first three columns row by row, the option column is the fourth (ultimates in rows 0-1,
+//! passives in rows 2-3), and Back sits above at [`BRAWLERS_BACK_INDEX`].
+
 use super::{
     dashboard::{DashboardLayoutClass, dashboard_layout_class},
-    scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible},
+    game_select::GameSelectionColumns,
+    shared::{FlowButton, FlowNavigation},
 };
 use crate::flow::{
     actions::FlowUiAction,
     model::{ClientFlow, ClientOverlay},
 };
-use crate::ui::theme::{ACCENT, TEXT, font, shell_background};
+use crate::ui::theme::{ACCENT, PANEL_RAISED, TEXT, font, shell_background};
 use bevy::{
-    input::mouse::MouseWheel,
     prelude::*,
-    ui::{InteractionDisabled, ScrollPosition, UiScale},
+    ui::{InteractionDisabled, UiScale},
     window::PrimaryWindow,
 };
+use brawler::characters::{CharacterChoice, CharacterId};
+use brawler::profiles::{AdvertisedCharacter, AdvertisedCharacterCatalog};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::flow) enum CreationPicker {
-    Fighter,
-    Weapon,
-    Ultimate,
-}
+mod art;
 
-#[derive(Resource, Clone, Debug, PartialEq, Eq)]
-pub(in crate::flow) struct BrawlerCreationDraft {
-    pub(in crate::flow) name: String,
-    pub(in crate::flow) name_caret: usize,
-    pub(in crate::flow) editing_name: bool,
-    pub(in crate::flow) picker: Option<CreationPicker>,
-    pub(in crate::flow) fighter_profile_id: brawler::profiles::FighterProfileId,
-    pub(in crate::flow) weapon_base_id: brawler::profiles::WeaponBaseId,
-    pub(in crate::flow) ultimate: brawler::builds::UltimateDefinitionId,
-    pub(in crate::flow) inline_error: Option<String>,
-}
+const ROSTER_COLUMNS: usize = 3;
+/// The navigation grid: the roster columns plus the option column.
+const GRID_COLUMNS: usize = ROSTER_COLUMNS + 1;
+pub(in crate::flow) const BRAWLERS_BACK_INDEX: usize = 1000;
 
-impl Default for BrawlerCreationDraft {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            name_caret: 0,
-            editing_name: false,
-            picker: None,
-            fighter_profile_id: brawler::profiles::FighterProfileId(1),
-            weapon_base_id: brawler::profiles::WeaponBaseId(1),
-            ultimate: brawler::builds::UltimateDefinitionId(1),
-            inline_error: None,
-        }
-    }
-}
+/// The last refused pick's message, shown on the screen until the next pick or reopen.
+#[derive(Resource, Default)]
+pub(in crate::flow) struct BrawlersNotice(pub(in crate::flow) Option<String>);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::flow) enum AbilityPicker {
-    Ultimate,
-    Passive(usize),
-}
-
-#[derive(Resource, Clone, Debug, PartialEq, Eq)]
-pub(in crate::flow) struct BrawlerEditDraft {
-    pub(in crate::flow) brawler_id: Option<brawler::profiles::SavedBrawlerId>,
-    pub(in crate::flow) name: String,
-    /// The saved name when editing began; keeping it skips the strict new-name rule (BRL-aj2q).
-    pub(in crate::flow) stored_name: String,
-    pub(in crate::flow) fighter_profile_id: brawler::profiles::FighterProfileId,
-    pub(in crate::flow) weapon_base_id: brawler::profiles::WeaponBaseId,
-    pub(in crate::flow) ultimate_id: brawler::builds::UltimateDefinitionId,
-    pub(in crate::flow) passive_ids: [brawler::builds::PassiveDefinitionId; 2],
-    pub(in crate::flow) name_caret: usize,
-    pub(in crate::flow) editing_name: bool,
-    pub(in crate::flow) inline_rename: bool,
-    pub(in crate::flow) picker: Option<AbilityPicker>,
-    pub(in crate::flow) inline_error: Option<String>,
-}
-
-impl Default for BrawlerEditDraft {
-    fn default() -> Self {
-        Self {
-            brawler_id: None,
-            name: String::new(),
-            stored_name: String::new(),
-            fighter_profile_id: brawler::profiles::FighterProfileId(1),
-            weapon_base_id: brawler::profiles::WeaponBaseId(1),
-            ultimate_id: brawler::builds::UltimateDefinitionId(1),
-            passive_ids: [
-                brawler::builds::PassiveDefinitionId(3),
-                brawler::builds::PassiveDefinitionId(4),
-            ],
-            name_caret: 0,
-            editing_name: false,
-            inline_rename: false,
-            picker: None,
-            inline_error: None,
-        }
-    }
-}
-
+/// Shows the Dashboard's live preview (the selected character) while the screen is open.
 #[derive(Component)]
-pub(in crate::flow) struct DeleteBrawlerConfirmationRoot;
+pub(crate) struct BrawlersPreviewHost;
 
-#[derive(Component, Clone, Copy, Debug, PartialEq)]
-pub(in crate::flow) struct BrawlerListRoot {
-    width: f32,
-    height: f32,
-    profile_revision: brawler::profiles::ProfileRevision,
-    pending: bool,
-}
-
-#[derive(Component)]
-pub(in crate::flow) struct BrawlerListScrollArea;
-
-/// A brawler card Riff preview holding this weapon family's model (`dashboard/card_preview.rs`).
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct BrawlerCardPreview(pub(crate) crate::presentation_3d::WeaponFamily);
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(in crate::flow) struct BrawlerDetailsRoot {
+#[derive(Component, Clone, Debug, PartialEq)]
+pub(in crate::flow) struct BrawlersRoot {
     viewport: (u32, u32),
-    brawler_id: brawler::profiles::SavedBrawlerId,
-    profile_revision: brawler::profiles::ProfileRevision,
+    compact: bool,
+    selection: CharacterChoice,
     pending: bool,
-    pub(in crate::flow) contextual_confirmation: bool,
-    layout: BrawlerDetailsLayout,
-    rename: Option<BrawlerEditDraft>,
+    notice: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BrawlerDetailsLayout {
-    Compact,
-    Wide,
+/// The roster tile's focus index for the character at `position` in catalog order.
+const fn tile_index(position: usize) -> usize {
+    (position / ROSTER_COLUMNS) * GRID_COLUMNS + position % ROSTER_COLUMNS
 }
 
-#[derive(Component)]
-pub(in crate::flow) struct BrawlerDetailsScrollArea;
-
-#[derive(Component)]
-pub(crate) struct BrawlerDetailsPreviewHost;
-
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(in crate::flow) struct BrawlerCreationRoot {
-    draft: BrawlerCreationDraft,
-    layout: BrawlerDetailsLayout,
-    viewport: (u32, u32),
-    pending: bool,
+/// The option column's focus index for `row` (0-1 ultimates, 2-3 passives).
+const fn option_index(row: usize) -> usize {
+    row * GRID_COLUMNS + ROSTER_COLUMNS
 }
 
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub(in crate::flow) struct BrawlerEditorRoot {
-    draft: BrawlerEditDraft,
-    viewport: (u32, u32),
-    pending: bool,
-}
-
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::flow) fn open_empty_profile_creation(
-    profile: Res<crate::ClientProfileModel>,
-    mut overlay: ResMut<ClientOverlay>,
-    mut draft: ResMut<BrawlerCreationDraft>,
-) {
-    if matches!(overlay.as_ref(), ClientOverlay::None)
-        && profile
-            .snapshot()
-            .is_some_and(|snapshot| snapshot.brawlers.is_empty())
-    {
-        let Some(catalog) = profile.catalog() else {
-            return;
-        };
-        let (Some(fighter), Some(weapon), Some(ultimate)) = (
-            catalog.fighter_profiles.first(),
-            catalog.weapon_bases.first(),
-            catalog.ultimates.first(),
-        ) else {
-            return;
-        };
-        *draft = BrawlerCreationDraft {
-            fighter_profile_id: fighter.id,
-            weapon_base_id: weapon.id,
-            ultimate: ultimate.id,
-            name: "Brawler 1".into(),
-            ..default()
-        };
-        *overlay = ClientOverlay::BrawlerCreation;
-    }
-}
-
-fn advertised_fighter_name(
-    catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
-    id: brawler::profiles::FighterProfileId,
-) -> &str {
-    catalog
-        .fighter(id)
-        .map_or("Unknown", |definition| definition.display_name.as_str())
-}
-
-fn advertised_weapon_name(
-    catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
-    id: brawler::profiles::WeaponBaseId,
-) -> &str {
-    catalog
-        .weapon(id)
-        .map_or("Unknown", |definition| definition.display_name.as_str())
-}
-
-pub(in crate::flow) fn ultimate_name(
-    catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
-    id: brawler::builds::UltimateDefinitionId,
-) -> &str {
-    catalog
-        .ultimate(id)
-        .map_or("Unknown", |definition| definition.display_name.as_str())
-}
-
-fn passive_name(
-    catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
-    id: brawler::builds::PassiveDefinitionId,
-) -> &str {
-    catalog
-        .passive(id)
-        .map_or("Unknown", |definition| definition.display_name.as_str())
-}
-
-pub(in crate::flow) fn brawler_loadout_summary(
-    brawler: &brawler::profiles::SavedBrawler,
-    catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
-) -> String {
-    format!(
-        "{} · {}\n{} · {} + {}",
-        advertised_fighter_name(catalog, brawler.fighter_profile_id),
-        advertised_weapon_name(catalog, brawler.weapon_base_id),
-        ultimate_name(catalog, brawler.ultimate_id),
-        passive_name(catalog, brawler.passive_ids[0]),
-        passive_name(catalog, brawler.passive_ids[1]),
+/// The focus index of a character's roster tile (the first tile when it is not advertised).
+pub(in crate::flow) fn focus_index_for_character(
+    catalog: &AdvertisedCharacterCatalog,
+    id: CharacterId,
+) -> usize {
+    tile_index(
+        catalog
+            .characters
+            .iter()
+            .position(|character| character.id == id)
+            .unwrap_or(0),
     )
 }
 
-struct BrawlerBrowserArt<'a> {
-    card_height: f32,
-    server: Option<&'a AssetServer>,
-    assets: Option<&'a crate::ClientAssetHandles>,
+#[derive(bevy::ecs::system::SystemParam)]
+pub(in crate::flow) struct BrawlersScreenUi<'w, 's> {
+    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    scale: Option<Res<'w, UiScale>>,
+    server: Option<Res<'w, AssetServer>>,
+    handles: Option<Res<'w, crate::ClientAssetHandles>>,
+    notice: Res<'w, BrawlersNotice>,
+    navigation: ResMut<'w, FlowNavigation>,
 }
 
-impl BrawlerBrowserArt<'_> {
-    fn label(
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy screen resources and owned render key"
+)]
+pub(in crate::flow) fn present_brawlers(
+    mut commands: Commands,
+    flow: Res<State<ClientFlow>>,
+    overlay: Res<ClientOverlay>,
+    profile: Res<crate::ClientProfileModel>,
+    mut screen: BrawlersScreenUi,
+    roots: Query<(Entity, &BrawlersRoot)>,
+) {
+    if !matches!(overlay.as_ref(), ClientOverlay::Brawlers) || *flow.get() != ClientFlow::Dashboard
+    {
+        for (entity, _) in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+    let (Some(snapshot), Some(catalog)) = (profile.snapshot(), profile.catalog()) else {
+        return;
+    };
+    let ui_scale = screen.scale.as_deref().map_or(1.0, |scale| scale.0);
+    let window = screen.windows.iter().next();
+    let size = window.map_or(Vec2::new(1280.0, 720.0), |window| {
+        Vec2::new(window.width(), window.height())
+    });
+    let compact = window.is_some_and(|window| {
+        dashboard_layout_class(
+            window.resolution.width(),
+            window.resolution.height(),
+            ui_scale,
+        ) == DashboardLayoutClass::Compact
+    });
+    let selection = profile
+        .pending_choice()
+        .unwrap_or_else(|| snapshot.selection());
+    let key = BrawlersRoot {
+        viewport: (size.x.to_bits(), size.y.to_bits()),
+        compact,
+        selection,
+        pending: profile.pending(),
+        notice: screen.notice.0.clone(),
+    };
+    if roots.iter().any(|(_, old)| *old == key) {
+        return;
+    }
+    if roots.is_empty() {
+        screen.navigation.focused = focus_index_for_character(catalog, selection.character_id);
+    }
+    for (entity, _) in &roots {
+        commands.entity(entity).despawn();
+    }
+    let Some(character) = catalog.character(selection.character_id) else {
+        return;
+    };
+    let view = BrawlersView {
+        catalog,
+        character,
+        selection,
+        disabled: key.pending,
+        compact,
+        server: screen.server.as_deref(),
+        handles: screen.handles.as_deref(),
+    };
+    commands
+        .spawn((
+            key.clone(),
+            GameSelectionColumns(GRID_COLUMNS),
+            DespawnOnExit(ClientFlow::Dashboard),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(px(24)),
+                row_gap: px(16),
+                ..default()
+            },
+            shell_background(),
+            GlobalZIndex(510),
+        ))
+        .with_children(|root| view.draw(root, key.notice.as_deref()));
+}
+
+struct BrawlersView<'a> {
+    catalog: &'a AdvertisedCharacterCatalog,
+    character: &'a AdvertisedCharacter,
+    selection: CharacterChoice,
+    disabled: bool,
+    compact: bool,
+    server: Option<&'a AssetServer>,
+    handles: Option<&'a crate::ClientAssetHandles>,
+}
+
+impl BrawlersView<'_> {
+    fn label(&self, parent: &mut ChildSpawnerCommands, text: impl Into<String>, size: f32) {
+        self.label_colored(parent, text, size, TEXT, Justify::Center);
+    }
+
+    fn label_colored(
         &self,
         parent: &mut ChildSpawnerCommands,
         text: impl Into<String>,
         size: f32,
         color: Color,
+        justify: Justify,
     ) {
         parent.spawn((
             Text::new(text),
-            font(self.assets, size),
+            font(self.handles, size),
             TextColor(color),
-            TextLayout::justify(Justify::Center),
+            TextLayout::justify(justify),
             Node {
                 width: percent(100),
                 min_width: px(0),
@@ -267,7 +205,43 @@ impl BrawlerBrowserArt<'_> {
         ));
     }
 
-    fn chrome(&self, root: &mut ChildSpawnerCommands, width: f32) {
+    fn icon(&self, parent: &mut ChildSpawnerCommands, name: &str, size: f32) {
+        if let Some(server) = self.server {
+            parent.spawn((
+                ImageNode::new(server.load(crate::ui::icons::path(name))),
+                Node {
+                    width: px(size),
+                    height: px(size),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ));
+        }
+    }
+
+    fn button(
+        &self,
+        parent: &mut ChildSpawnerCommands,
+        index: usize,
+        action: FlowUiAction,
+        node: Node,
+    ) -> Entity {
+        let mut entity = parent.spawn((
+            Button,
+            FlowButton {
+                index,
+                action,
+                error_action: true,
+            },
+            node,
+        ));
+        if self.disabled && index != BRAWLERS_BACK_INDEX {
+            entity.insert(InteractionDisabled);
+        }
+        entity.id()
+    }
+
+    fn draw(&self, root: &mut ChildSpawnerCommands, notice: Option<&str>) {
         if let Some(server) = self.server {
             root.spawn((
                 crate::ui::motifs::ShellBackdrop(crate::ui::motifs::MotifLayout::Edges),
@@ -286,6 +260,24 @@ impl BrawlerBrowserArt<'_> {
                 ZIndex(-1),
             ));
         }
+        self.header(root, notice);
+        root.spawn(Node {
+            width: percent(100),
+            min_height: px(0),
+            flex_grow: 1.0,
+            column_gap: px(20),
+            ..default()
+        })
+        .with_children(|body| {
+            if !self.compact {
+                self.portrait(body);
+            }
+            self.roster(body);
+            self.options(body);
+        });
+    }
+
+    fn header(&self, root: &mut ChildSpawnerCommands, notice: Option<&str>) {
         root.spawn(Node {
             width: percent(100),
             height: px(72),
@@ -295,18 +287,16 @@ impl BrawlerBrowserArt<'_> {
             ..default()
         })
         .with_children(|header| {
-            let back = Self::button(
+            let back = self.button(
                 header,
-                1000,
-                FlowUiAction::CloseBrawlerList,
-                false,
-                false,
+                BRAWLERS_BACK_INDEX,
+                FlowUiAction::CloseBrawlers,
                 Node {
                     position_type: PositionType::Absolute,
                     left: px(0),
                     top: px(4),
-                    width: px(130),
-                    height: px(54),
+                    width: px(150),
+                    height: px(60),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
                     padding: UiRect::axes(px(12), px(8)),
@@ -316,634 +306,293 @@ impl BrawlerBrowserArt<'_> {
             header
                 .commands()
                 .entity(back)
-                .with_children(|b| self.label(b, "‹ BACK", 22.0, TEXT));
+                .insert(AccessibleLabel::new("Back to Dashboard"))
+                .with_children(|b| self.label(b, "‹ BACK", 24.0));
             header
                 .spawn(Node {
-                    width: px((width - 330.0).max(130.0)),
+                    width: percent(50),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
                     ..default()
                 })
                 .with_children(|title| {
-                    self.label(
-                        title,
-                        "BRAWLERS",
-                        if width < 760.0 { 30.0 } else { 46.0 },
-                        TEXT,
-                    );
+                    self.label(title, "BRAWLERS", 46.0);
+                    if let Some(notice) = notice {
+                        self.label(title, notice, 18.0);
+                    }
                 });
         });
     }
 
-    fn cards(
-        &self,
-        grid: &mut ChildSpawnerCommands,
-        snapshot: &brawler::profiles::ProfileSnapshot,
-        catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
-        pending: bool,
-    ) {
-        let full = snapshot.brawlers.len() >= usize::from(catalog.limits.maximum_saved_brawlers);
-        let create = Self::button(
-            grid,
-            0,
-            FlowUiAction::CreateBrawler,
-            false,
-            pending || full,
-            browser_card_node(self.card_height),
-        );
-        grid.commands().entity(create).with_children(|card| {
-            self.label(card, "+", 96.0, ACCENT);
-            self.label(card, "CREATE\nBRAWLER", 32.0, TEXT);
-            if full {
-                self.label(card, "Brawler limit reached", 16.0, TEXT);
-            }
-        });
-        for (index, brawler) in snapshot.brawlers.iter().enumerate() {
-            spawn_brawler_list_row(
-                grid,
-                index + 1,
-                brawler,
-                snapshot.selected_brawler_id == Some(brawler.id),
-                catalog,
-                self,
-                pending,
-            );
-        }
-    }
-
-    fn button(
-        parent: &mut ChildSpawnerCommands,
-        index: usize,
-        action: FlowUiAction,
-        current: bool,
-        disabled: bool,
-        node: Node,
-    ) -> Entity {
-        let mut entity = parent.spawn((
-            Button,
-            FlowButton {
-                index,
-                action,
-                error_action: true,
-            },
-            crate::ui::surface::SurfaceState {
-                current,
-                ..default()
-            },
-            node,
-        ));
-        if disabled {
-            entity.insert(InteractionDisabled);
-        }
-        entity.id()
-    }
-}
-
-fn spawn_brawler_list_row(
-    parent: &mut ChildSpawnerCommands,
-    index: usize,
-    brawler: &brawler::profiles::SavedBrawler,
-    current: bool,
-    catalog: &brawler::profiles::AdvertisedBrawlerCatalog,
-    art: &BrawlerBrowserArt,
-    disabled: bool,
-) {
-    let summary = brawler_loadout_summary(brawler, catalog);
-    let id = BrawlerBrowserArt::button(
-        parent,
-        index,
-        FlowUiAction::OpenBrawlerDetails(brawler.id),
-        current,
-        disabled,
-        browser_card_node(art.card_height),
-    );
-    parent
-        .commands()
-        .entity(id)
-        .insert(AccessibleLabel::new(format!(
-            "{}{}: {summary}",
-            brawler.name,
-            if current { ", selected for play" } else { "" }
-        )))
-        .with_children(|card| {
-            card.spawn(Node {
-                width: percent(100),
-                height: px(art.card_height - 120.0),
-                // A long name that wraps shrinks the preview instead of overflowing the card.
-                min_height: px(0),
-                flex_shrink: 1.0,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                overflow: Overflow::clip(),
-                ..default()
-            })
-            .with_children(|frame| {
-                frame.spawn((
-                    BrawlerCardPreview(crate::presentation_3d::advertised_weapon_family(
-                        catalog,
-                        brawler.weapon_base_id,
-                    )),
-                    Node {
-                        width: px(0),
-                        height: px(0),
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                ));
-            });
-            art.label(card, brawler.name.to_uppercase(), 34.0, TEXT);
-            art.label(
-                card,
-                advertised_weapon_name(catalog, brawler.weapon_base_id),
-                20.0,
-                TEXT,
-            );
-        });
-}
-
-fn browser_columns(width: f32) -> usize {
-    if width >= 1350.0 {
-        5
-    } else if width >= 1050.0 {
-        4
-    } else if width >= 760.0 {
-        3
-    } else {
-        2
-    }
-}
-
-fn browser_card_node(height: f32) -> Node {
-    Node {
-        min_width: px(0),
-        height: px(height),
-        padding: UiRect::axes(px(20), px(18)),
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        row_gap: px(4),
-        ..default()
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::flow) fn scroll_brawler_list(
-    overlay: Res<ClientOverlay>,
-    mut events: MessageReader<MouseWheel>,
-    mut areas: Query<(&ComputedNode, &mut ScrollPosition), With<BrawlerListScrollArea>>,
-) {
-    if !matches!(
-        overlay.as_ref(),
-        ClientOverlay::BrawlerList | ClientOverlay::BrawlerCreation | ClientOverlay::BrawlerEditor
-    ) {
-        return;
-    }
-    let delta = normalized_wheel_delta(events.read(), 36.0);
-    if delta.abs() <= f32::EPSILON {
-        return;
-    }
-    for (node, mut position) in &mut areas {
-        position.0.y = clamp_scroll_offset(
-            position.0.y - delta,
-            node.content_size().y,
-            node.size().y,
-            node.inverse_scale_factor(),
-        );
-    }
-}
-
-#[allow(
-    clippy::needless_pass_by_value,
-    clippy::too_many_arguments,
-    reason = "screen-owned snapshot reconciliation and responsive rendering"
-)]
-pub(in crate::flow) fn present_brawler_list(
-    mut commands: Commands,
-    flow: Res<State<ClientFlow>>,
-    overlay: Res<ClientOverlay>,
-    profile: Res<crate::ClientProfileModel>,
-    roots: Query<(Entity, &BrawlerListRoot)>,
-    scroll_areas: Query<&ScrollPosition, With<BrawlerListScrollArea>>,
-    mut navigation: ResMut<FlowNavigation>,
-    server: Option<Res<AssetServer>>,
-    assets: Option<Res<crate::ClientAssetHandles>>,
-    windows: Query<&Window>,
-    scale: Option<Res<UiScale>>,
-) {
-    if !matches!(overlay.as_ref(), ClientOverlay::BrawlerList)
-        || *flow.get() != ClientFlow::Dashboard
-    {
-        for (entity, _) in &roots {
-            commands.entity(entity).despawn();
-        }
-        return;
-    }
-    let (Some(snapshot), Some(catalog)) = (profile.snapshot(), profile.catalog()) else {
-        return;
-    };
-    let scale = scale.map_or(1.0, |s| s.0);
-    let width = windows.iter().next().map_or(1600.0, Window::width) / scale;
-    let height = windows.iter().next().map_or(900.0, Window::height) / scale;
-    let pending = profile.pending();
-    let render_key = BrawlerListRoot {
-        profile_revision: snapshot.revision,
-        pending,
-        width,
-        height,
-    };
-    if roots.iter().any(|(_, root)| *root == render_key) {
-        return;
-    }
-    let retained_scroll = scroll_areas.iter().next().cloned().unwrap_or_default();
-    if roots.is_empty() {
-        navigation.focused = snapshot
-            .selected_brawler_id
-            .and_then(|selected| snapshot.brawlers.iter().position(|b| b.id == selected))
-            .map_or(0, |i| i + 1);
-    }
-    for (entity, _) in &roots {
-        commands.entity(entity).despawn();
-    }
-    let columns = browser_columns(width);
-    let column_count = f32::from(u16::try_from(columns).unwrap_or(5));
-    let card_height =
-        (((width - 64.0 - 16.0 * (column_count - 1.0)) / column_count) * 1.15).clamp(240.0, 350.0);
-    let art = BrawlerBrowserArt {
-        card_height,
-        server: server.as_deref(),
-        assets: assets.as_deref(),
-    };
-    commands
-        .spawn((
-            render_key,
-            super::game_select::GameSelectionColumns(columns),
-            DespawnOnExit(ClientFlow::Dashboard),
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(0),
-                bottom: px(0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(px(24)),
-                row_gap: px(20),
-                ..default()
-            },
-            shell_background(),
-            GlobalZIndex(510),
-        ))
-        .with_children(|root| {
-            art.chrome(root, width);
-            root.spawn((
-                BrawlerListScrollArea,
-                retained_scroll,
+    /// The selected character: the Dashboard's live preview, name, role and kit facts.
+    fn portrait(&self, body: &mut ChildSpawnerCommands) {
+        body.spawn(Node {
+            width: percent(27),
+            min_width: px(0),
+            flex_shrink: 0.0,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: px(4),
+            ..default()
+        })
+        .with_children(|portrait| {
+            portrait.spawn((
+                BrawlersPreviewHost,
                 Node {
                     width: percent(100),
                     min_height: px(0),
                     flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    overflow: Overflow::scroll_y(),
                     ..default()
                 },
-            ))
-            .with_children(|viewport| {
-                viewport
-                    .spawn(Node {
-                        width: percent(100),
-                        flex_shrink: 0.0,
-                        display: Display::Grid,
-                        grid_template_columns: RepeatedGridTrack::flex(
-                            u16::try_from(columns).unwrap_or(5),
-                            1.0,
-                        ),
-                        grid_auto_rows: vec![GridTrack::px(card_height)],
-                        column_gap: px(16),
-                        row_gap: px(16),
-                        padding: UiRect::all(px(8)),
-                        ..default()
-                    })
-                    .with_children(|grid| {
-                        art.cards(grid, snapshot, catalog, pending);
-                    });
-            });
+            ));
+            self.label(portrait, self.character.display_name.to_uppercase(), 48.0);
+            self.label_colored(
+                portrait,
+                format!(
+                    "{} · {}",
+                    self.character.role.label().to_uppercase(),
+                    self.character.body.label().to_uppercase()
+                ),
+                22.0,
+                ACCENT,
+                Justify::Center,
+            );
+            self.label(portrait, self.weapon_name(self.character), 24.0);
+            self.label(
+                portrait,
+                format!(
+                    "{} HEALTH · SPEED {:.0}",
+                    self.character.stats.maximum_health, self.character.stats.movement_speed
+                ),
+                18.0,
+            );
         });
-}
+    }
 
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::flow) fn keep_brawler_list_focus_visible(
-    overlay: Res<ClientOverlay>,
-    navigation: Res<FlowNavigation>,
-    buttons: Query<(&FlowButton, &ChildOf, &ComputedNode, &UiGlobalTransform)>,
-    parents: Query<&ChildOf>,
-    mut areas: Query<
-        (
-            Entity,
-            &ComputedNode,
-            &UiGlobalTransform,
-            &mut ScrollPosition,
-        ),
-        With<BrawlerListScrollArea>,
-    >,
-    mut prior: Local<Option<(Entity, usize)>>,
-) {
-    if !matches!(
-        overlay.as_ref(),
-        ClientOverlay::BrawlerList | ClientOverlay::BrawlerCreation | ClientOverlay::BrawlerEditor
-    ) {
-        *prior = None;
-        return;
+    fn weapon_name(&self, character: &AdvertisedCharacter) -> String {
+        self.catalog.weapon(character.weapon_base).map_or_else(
+            || "Unknown weapon".into(),
+            |weapon| weapon.display_name.clone(),
+        )
     }
-    let Some((area_entity, area_node, area_transform, mut scroll)) = areas.iter_mut().next() else {
-        *prior = None;
-        return;
-    };
-    let focus_key = (area_entity, navigation.focused);
-    if prior.as_ref() == Some(&focus_key) {
-        return;
-    }
-    let Some((_, _, button_node, button_transform)) =
-        buttons.iter().find(|(button, child_of, _, _)| {
-            (child_of.parent() == area_entity
-                || parents
-                    .get(child_of.parent())
-                    .is_ok_and(|p| p.parent() == area_entity))
-                && button.index == navigation.focused
+
+    fn roster(&self, body: &mut ChildSpawnerCommands) {
+        let rows = self.catalog.characters.len().div_ceil(ROSTER_COLUMNS);
+        body.spawn(Node {
+            min_width: px(0),
+            flex_grow: 1.0,
+            flex_basis: px(0),
+            display: Display::Grid,
+            grid_template_columns: RepeatedGridTrack::flex(
+                u16::try_from(ROSTER_COLUMNS).unwrap_or(3),
+                1.0,
+            ),
+            grid_template_rows: RepeatedGridTrack::flex(u16::try_from(rows).unwrap_or(3), 1.0),
+            column_gap: px(12),
+            row_gap: px(12),
+            ..default()
         })
-    else {
-        return;
-    };
-    if area_node.is_empty() || button_node.is_empty() {
-        return;
-    }
-    *prior = Some(focus_key);
-    let (_, _, area_center) = area_transform.to_scale_angle_translation();
-    let (_, _, button_center) = button_transform.to_scale_angle_translation();
-    let visible_top = area_center.y - area_node.size().y * 0.5 + 8.0;
-    let visible_bottom = area_center.y + area_node.size().y * 0.5 - 8.0;
-    let button_top = button_center.y - button_node.size().y * 0.5;
-    let button_bottom = button_center.y + button_node.size().y * 0.5;
-    let offset = offset_keeping_interval_visible(
-        scroll.0.y,
-        visible_top..visible_bottom,
-        button_top..button_bottom,
-        area_node.inverse_scale_factor(),
-    );
-    scroll.0.y = clamp_scroll_offset(
-        offset,
-        area_node.content_size().y,
-        area_node.size().y,
-        area_node.inverse_scale_factor(),
-    );
-}
-
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::flow) fn scroll_brawler_details(
-    overlay: Res<ClientOverlay>,
-    mut events: MessageReader<MouseWheel>,
-    mut areas: Query<(&ComputedNode, &mut ScrollPosition), With<BrawlerDetailsScrollArea>>,
-) {
-    if !matches!(overlay.as_ref(), ClientOverlay::BrawlerDetails(_)) {
-        return;
-    }
-    let delta = normalized_wheel_delta(events.read(), 36.0);
-    if delta.abs() <= f32::EPSILON {
-        return;
-    }
-    for (node, mut position) in &mut areas {
-        position.0.y = clamp_scroll_offset(
-            position.0.y - delta,
-            node.content_size().y,
-            node.size().y,
-            node.inverse_scale_factor(),
-        );
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-pub(in crate::flow) fn keep_brawler_details_focus_visible(
-    overlay: Res<ClientOverlay>,
-    navigation: Res<FlowNavigation>,
-    buttons: Query<(Entity, &FlowButton, &ComputedNode, &UiGlobalTransform)>,
-    parents: Query<&ChildOf>,
-    mut areas: Query<
-        (
-            Entity,
-            &ComputedNode,
-            &UiGlobalTransform,
-            &mut ScrollPosition,
-        ),
-        With<BrawlerDetailsScrollArea>,
-    >,
-    mut prior: Local<Option<(Entity, usize)>>,
-) {
-    if !matches!(overlay.as_ref(), ClientOverlay::BrawlerDetails(_)) {
-        *prior = None;
-        return;
-    }
-    let Some((area_entity, area_node, area_transform, mut scroll)) = areas.iter_mut().next() else {
-        *prior = None;
-        return;
-    };
-    let focus_key = (area_entity, navigation.focused);
-    if prior.as_ref() == Some(&focus_key) {
-        return;
-    }
-    *prior = Some(focus_key);
-    let Some((_, _, button_node, button_transform)) =
-        buttons.iter().find(|(entity, button, _, _)| {
-            button.index == navigation.focused
-                && parents
-                    .iter_ancestors(*entity)
-                    .any(|ancestor| ancestor == area_entity)
-        })
-    else {
-        return;
-    };
-    if area_node.is_empty() || button_node.is_empty() {
-        return;
-    }
-    let (_, _, area_center) = area_transform.to_scale_angle_translation();
-    let (_, _, button_center) = button_transform.to_scale_angle_translation();
-    let visible_top = area_center.y - area_node.size().y * 0.5 + 8.0;
-    let visible_bottom = area_center.y + area_node.size().y * 0.5 - 8.0;
-    let button_top = button_center.y - button_node.size().y * 0.5;
-    let button_bottom = button_center.y + button_node.size().y * 0.5;
-    let offset = offset_keeping_interval_visible(
-        scroll.0.y,
-        visible_top..visible_bottom,
-        button_top..button_bottom,
-        area_node.inverse_scale_factor(),
-    );
-    scroll.0.y = clamp_scroll_offset(
-        offset,
-        area_node.content_size().y,
-        area_node.size().y,
-        area_node.inverse_scale_factor(),
-    );
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-pub(in crate::flow) struct BrawlerScreenUi<'w, 's> {
-    windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
-    scale: Option<Res<'w, UiScale>>,
-    navigation: ResMut<'w, FlowNavigation>,
-}
-
-fn brawler_screen_layout(screen: &BrawlerScreenUi<'_, '_>) -> BrawlerDetailsLayout {
-    screen
-        .windows
-        .iter()
-        .next()
-        .map_or(BrawlerDetailsLayout::Wide, |window| {
-            if dashboard_layout_class(
-                window.resolution.width(),
-                window.resolution.height(),
-                screen.scale.as_deref().map_or(1.0, |scale| scale.0),
-            ) == DashboardLayoutClass::Compact
-            {
-                BrawlerDetailsLayout::Compact
-            } else {
-                BrawlerDetailsLayout::Wide
+        .with_children(|grid| {
+            for (position, character) in self.catalog.characters.iter().enumerate() {
+                self.tile(grid, position, character);
             }
+        });
+    }
+
+    fn tile(
+        &self,
+        grid: &mut ChildSpawnerCommands,
+        position: usize,
+        character: &AdvertisedCharacter,
+    ) {
+        let selected = character.id == self.selection.character_id;
+        let weapon = self.weapon_name(character);
+        let tile = self.button(
+            grid,
+            tile_index(position),
+            FlowUiAction::PickCharacter(character.id),
+            Node {
+                min_width: px(0),
+                min_height: px(76),
+                padding: UiRect::axes(px(10), px(6)),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: px(2),
+                ..default()
+            },
+        );
+        grid.commands()
+            .entity(tile)
+            .insert(AccessibleLabel::new(format!(
+                "{}: {} {}, {weapon}{}",
+                character.display_name,
+                character.role.label(),
+                character.body.label(),
+                if selected { ", selected" } else { "" }
+            )))
+            .with_children(|card| {
+                self.label(card, character.display_name.to_uppercase(), 30.0);
+                self.label_colored(
+                    card,
+                    character.role.label().to_uppercase(),
+                    16.0,
+                    ACCENT,
+                    Justify::Center,
+                );
+                self.label(card, weapon, 17.0);
+            });
+    }
+
+    /// The selected character's two ultimates and two passives.
+    fn options(&self, body: &mut ChildSpawnerCommands) {
+        body.spawn(Node {
+            width: percent(if self.compact { 34.0 } else { 26.0 }),
+            min_width: px(0),
+            flex_shrink: 0.0,
+            flex_direction: FlexDirection::Column,
+            row_gap: px(10),
+            ..default()
         })
-}
+        .with_children(|column| {
+            self.category(column, "ULTIMATE");
+            for (slot, id) in self.character.ultimate_options.into_iter().enumerate() {
+                let (name, icon) =
+                    self.catalog
+                        .ultimate(id)
+                        .map_or(("Unknown", "blast"), |ultimate| {
+                            (
+                                ultimate.display_name.as_str(),
+                                art::ultimate_icon(ultimate.kind),
+                            )
+                        });
+                self.option(
+                    column,
+                    option_index(slot),
+                    FlowUiAction::PickUltimate(id),
+                    name,
+                    icon,
+                    id == self.selection.ultimate_id,
+                );
+            }
+            self.category(column, "PASSIVE");
+            for (slot, id) in self.character.passive_options.into_iter().enumerate() {
+                let (name, icon) =
+                    self.catalog
+                        .passive(id)
+                        .map_or(("Unknown", "shield"), |passive| {
+                            (
+                                passive.display_name.as_str(),
+                                art::passive_icon(passive.kind),
+                            )
+                        });
+                self.option(
+                    column,
+                    option_index(2 + slot),
+                    FlowUiAction::PickPassive(id),
+                    name,
+                    icon,
+                    id == self.selection.passive_id,
+                );
+            }
+        });
+    }
 
-mod details;
-pub(in crate::flow) use details::present_brawler_details;
+    fn category(&self, column: &mut ChildSpawnerCommands, text: &str) {
+        column
+            .spawn(Node {
+                width: percent(100),
+                flex_shrink: 0.0,
+                align_items: AlignItems::Center,
+                column_gap: px(10),
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        height: px(2),
+                        ..default()
+                    },
+                    BackgroundColor(PANEL_RAISED),
+                ));
+                row.spawn(Node {
+                    width: px(120),
+                    flex_shrink: 0.0,
+                    ..default()
+                })
+                .with_children(|copy| {
+                    self.label_colored(copy, text, 22.0, ACCENT, Justify::Center);
+                });
+                row.spawn((
+                    Node {
+                        flex_grow: 1.0,
+                        height: px(2),
+                        ..default()
+                    },
+                    BackgroundColor(PANEL_RAISED),
+                ));
+            });
+    }
 
-mod creation;
-pub(in crate::flow) use creation::present_brawler_creation;
-
-mod abilities;
-mod choice_cards;
-pub(in crate::flow) use abilities::present_brawler_editor;
-
-pub(super) fn weapon_part_effect_text(effect: brawler::weapon_parts::WeaponPartEffect) -> String {
-    let modifier = |label: &str, flat: f64, percent: i16, unit: &str| {
-        let mut values = Vec::new();
-        if flat != 0.0 {
-            values.push(format!("{flat:+}{unit}"));
-        }
-        if percent != 0 {
-            values.push(format!("{:+}%", f32::from(percent) / 100.0));
-        }
-        format!("{label} {}", values.join(" / "))
-    };
-    match effect {
-        brawler::weapon_parts::WeaponPartEffect::Capacity {
-            flat,
-            percent_basis_points,
-        } => modifier("Capacity", f64::from(flat), percent_basis_points, ""),
-        brawler::weapon_parts::WeaponPartEffect::Damage {
-            flat,
-            percent_basis_points,
-        } => modifier("Damage", f64::from(flat), percent_basis_points, ""),
-        brawler::weapon_parts::WeaponPartEffect::FireInterval {
-            flat_ticks,
-            percent_basis_points,
-        } => modifier(
-            "Fire interval",
-            f64::from(flat_ticks) / brawler::timing::SIMULATION_TICK_HZ_F64,
-            percent_basis_points,
-            "s",
-        ),
-        brawler::weapon_parts::WeaponPartEffect::RefillInterval {
-            flat_ticks,
-            percent_basis_points,
-        } => modifier(
-            "Refill interval",
-            f64::from(flat_ticks) / brawler::timing::SIMULATION_TICK_HZ_F64,
-            percent_basis_points,
-            "s",
-        ),
-        brawler::weapon_parts::WeaponPartEffect::Reach {
-            flat_milliunits,
-            percent_basis_points,
-        } => modifier(
-            "Reach",
-            f64::from(flat_milliunits) / 1_000.0,
-            percent_basis_points,
-            "",
-        ),
-        brawler::weapon_parts::WeaponPartEffect::Slow {
-            penalty_basis_points,
-            duration_ticks,
-        } => format!(
-            "Slow {:.0}% for {:.1}s",
-            f32::from(penalty_basis_points) / 100.0,
-            brawler::timing::simulation_seconds_f64(u32::from(duration_ticks))
-        ),
-        brawler::weapon_parts::WeaponPartEffect::Cold { amount } => {
-            format!("Cold +{amount}")
-        }
-        brawler::weapon_parts::WeaponPartEffect::DamageOverTime {
-            kind,
-            damage_per_tick,
-            tick_interval,
-            duration_ticks,
-        } => format!(
-            "{kind:?} {damage_per_tick} every {:.1}s for {:.1}s",
-            brawler::timing::simulation_seconds_f64(u32::from(tick_interval)),
-            brawler::timing::simulation_seconds_f64(u32::from(duration_ticks))
-        ),
-        brawler::weapon_parts::WeaponPartEffect::Heal { amount } => {
-            format!("Allied healing {amount}")
-        }
+    fn option(
+        &self,
+        column: &mut ChildSpawnerCommands,
+        index: usize,
+        action: FlowUiAction,
+        name: &str,
+        icon: &str,
+        chosen: bool,
+    ) {
+        let option = self.button(
+            column,
+            index,
+            action,
+            Node {
+                width: percent(100),
+                min_height: px(76),
+                flex_grow: 1.0,
+                flex_basis: px(0),
+                padding: UiRect::axes(px(14), px(6)),
+                align_items: AlignItems::Center,
+                column_gap: px(12),
+                ..default()
+            },
+        );
+        column
+            .commands()
+            .entity(option)
+            .insert(AccessibleLabel::new(format!(
+                "{name}{}",
+                if chosen { ", chosen" } else { "" }
+            )))
+            .with_children(|row| {
+                self.icon(row, icon, 56.0);
+                row.spawn(Node {
+                    min_width: px(0),
+                    flex_grow: 1.0,
+                    ..default()
+                })
+                .with_children(|copy| {
+                    self.label_colored(copy, name.to_uppercase(), 22.0, TEXT, Justify::Left);
+                });
+            });
     }
 }
 
-pub(super) fn weapon_stat_rows(
-    weapon: &brawler::combat::ResolvedWeapon,
-) -> Vec<(&'static str, String)> {
-    let damage = weapon
-        .recipe
-        .payload_bundles
-        .iter()
-        .flat_map(|bundle| &bundle.effects)
-        .find_map(|effect| match effect {
-            brawler::combat::PayloadEffectDefinition::Damage { amount, .. } => Some(*amount),
-            _ => None,
-        })
-        .unwrap_or_default();
-    let slow = weapon.recipe.payload_bundles.iter().any(|bundle| {
-        bundle.effects.iter().any(|effect| {
-            matches!(
-                effect,
-                brawler::combat::PayloadEffectDefinition::Slow { .. }
-            )
-        })
-    });
-    let reach = match weapon.recipe.delivery {
-        brawler::combat::DeliveryMethod::Straight { range, .. }
-        | brawler::combat::DeliveryMethod::StickyStraight { range, .. } => range,
-        brawler::combat::DeliveryMethod::Lobbed { distance, .. }
-        | brawler::combat::DeliveryMethod::Splash { distance, .. } => distance,
-        brawler::combat::DeliveryMethod::MeleeArc { reach, .. }
-        | brawler::combat::DeliveryMethod::ConeSpray { reach, .. } => reach,
-    };
-    let mut rows = vec![
-        ("DAMAGE", damage.to_string()),
-        ("CAPACITY", weapon.recipe.economy.capacity().to_string()),
-        (
-            "FIRE INTERVAL",
-            format!(
-                "{:.2}s",
-                brawler::timing::simulation_seconds_f64(
-                    u32::try_from(weapon.recipe.fire_cooldown_ticks).unwrap_or(u32::MAX)
-                )
-            ),
-        ),
-        (
-            "REFILL INTERVAL",
-            format!(
-                "{:.2}s",
-                brawler::timing::simulation_seconds_f64(
-                    u32::try_from(weapon.recipe.economy.refill_ticks()).unwrap_or(u32::MAX)
-                )
-            ),
-        ),
-        ("REACH", format!("{reach:.0}")),
-    ];
-    if slow {
-        rows.push(("SLOW", "YES".into()));
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roster_and_option_indices_form_one_four_column_grid() {
+        let catalog = AdvertisedCharacterCatalog::embedded().unwrap();
+        let tiles: Vec<_> = (0..catalog.characters.len()).map(tile_index).collect();
+        let options: Vec<_> = (0..4).map(option_index).collect();
+        assert_eq!(tiles, [0, 1, 2, 4, 5, 6, 8, 9, 10]);
+        assert_eq!(options, [3, 7, 11, 15]);
+        assert!(tiles.iter().all(|index| !options.contains(index)));
+        assert_eq!(focus_index_for_character(&catalog, CharacterId(9)), 10);
+        assert_eq!(focus_index_for_character(&catalog, CharacterId(999)), 0);
     }
-    rows
 }

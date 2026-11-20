@@ -28,10 +28,10 @@ validate_peer=${BRAWLER_RENDER_VALIDATE_PEER:-1}
 practice_smoke=${BRAWLER_RENDER_PRACTICE:-0}
 reduced_effects=${BRAWLER_RENDER_REDUCED_EFFECTS:-0}
 combat_smoke=${BRAWLER_RENDER_COMBAT:-0}
-# Optional primary weapon for the measured client: a costed weapon ID from
-# content/catalogs/builds.ron. The client validates it against the embedded catalog and selects,
-# or creates and selects, a saved brawler with that weapon through the canonical profile commands.
-render_weapon=${BRAWLER_RENDER_WEAPON:-}
+# Optional roster character for the measured client: a character ID from
+# content/catalogs/characters.ron. The client validates it against the embedded roster and
+# selects it through the canonical profile command, so the server resolves its signature weapon.
+render_character=${BRAWLER_RENDER_CHARACTER:-}
 # Optional fixed aim for the measured client only (BRL-wegn): up, down, left, right, or a signed
 # X,Y axis. It replaces the combat-smoke aim (the peer keeps its own) so the captures show the
 # camera look-ahead toward one screen edge. Simulation +Y renders toward the top of the screen
@@ -93,13 +93,13 @@ case "$combat_smoke" in
         exit 2
         ;;
 esac
-case "$render_weapon" in
-    '') measured_weapon_flags= ;;
+case "$render_character" in
+    '') measured_character_flags= ;;
     *[!0-9]* | 0*)
-        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_WEAPON must be a build-catalog weapon ID' >&2
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_CHARACTER must be a roster character ID' >&2
         exit 2
         ;;
-    *) measured_weapon_flags="--weapon-preset $render_weapon" ;;
+    *) measured_character_flags="--character $render_character" ;;
 esac
 # Accept a signed X,Y pair whose components fit the client's i8 axis parser.
 is_axis() {
@@ -235,7 +235,7 @@ measured_args=(--client-id 1 --server "$bind_addr" --transport routed-udp
     --screenshot-count "$capture_count"
     --render-report "$report_path" --render-warmup-seconds "$warmup_seconds"
     --render-measure-seconds "$measure_seconds")
-measured_args+=($render_effect_flag $measured_combat_flags $measured_weapon_flags)
+measured_args+=($render_effect_flag $measured_combat_flags $measured_character_flags)
 peer_args=(--client-id 2 --server "$bind_addr" --transport routed-udp
     --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0'
     --window-size "$window_size" --offscreen

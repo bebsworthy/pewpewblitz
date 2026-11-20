@@ -69,8 +69,8 @@ pub struct ClientAutomationConfig {
     pub headless_fire: bool,
     pub headless_ultimate: bool,
     pub headless_simulation_ticks: Option<u32>,
-    /// Requested automation-brawler weapon, read by saved-brawler preparation.
-    pub weapon_preset: Option<u16>,
+    /// Requested roster character ID, read by automation character preparation.
+    pub character: Option<u16>,
     pub windowed_combat_demo: Option<WindowedCombatDemo>,
     pub windowed_controller_demo: Option<WindowedControllerDemo>,
     pub screenshot_schedule: Option<ScreenshotSchedule>,
@@ -111,7 +111,7 @@ impl Default for ClientAutomationConfig {
             headless_fire: false,
             headless_ultimate: false,
             headless_simulation_ticks: None,
-            weapon_preset: None,
+            character: None,
             windowed_combat_demo: None,
             windowed_controller_demo: None,
             screenshot_schedule: None,
@@ -259,8 +259,8 @@ impl ClientAutomationConfig {
         {
             return Err("--simulation-ticks must be greater than zero".to_string());
         }
-        if let Some(preset) = self.weapon_preset {
-            validate_selectable_weapon_preset(preset)?;
+        if let Some(character) = self.character {
+            validate_roster_character(character)?;
         }
         self.validate_scripted_input(headless)?;
         if headless && self.windowed_controller_demo.is_some() {
@@ -488,25 +488,24 @@ fn frames_per_second(interval: Duration) -> u128 {
     1_000_000_000 / interval.as_nanos().max(1)
 }
 
-/// Accepts only a weapon ID a saved brawler can select: the costed weapons in the embedded
-/// `content/catalogs/builds.ron`, so the bound follows the catalog instead of a literal.
-fn validate_selectable_weapon_preset(preset: u16) -> Result<(), String> {
-    let catalog = brawler::builds::BuildCatalog::embedded()?;
+/// Accepts only a character ID in the embedded `content/catalogs/characters.ron`, so the bound
+/// follows the roster instead of a literal.
+fn validate_roster_character(character: u16) -> Result<(), String> {
+    let catalog = brawler::characters::CharacterCatalog::embedded()?;
     if catalog
-        .weapon_costs
-        .iter()
-        .any(|cost| cost.weapon_id.0 == preset)
+        .character(brawler::characters::CharacterId(character))
+        .is_some()
     {
         return Ok(());
     }
     let ids = catalog
-        .weapon_costs
+        .characters
         .iter()
-        .map(|cost| cost.weapon_id.0.to_string())
+        .map(|character| character.id.0.to_string())
         .collect::<Vec<_>>()
         .join(", ");
     Err(format!(
-        "--weapon-preset must be a weapon ID from the build catalog ({ids})"
+        "--character must be a character ID from the roster ({ids})"
     ))
 }
 
@@ -713,35 +712,25 @@ mod tests {
     }
 
     #[test]
-    fn headless_weapon_preset_is_bounded_by_the_build_catalog() {
+    fn headless_character_is_bounded_by_the_roster() {
         let network = headless();
         let mut config = ClientAutomationConfig {
-            weapon_preset: Some(5),
+            character: Some(9),
             ..ClientAutomationConfig::default()
         };
         assert!(config.validate(&network).is_ok());
-        config.weapon_preset = Some(6);
-        assert!(config.validate(&network).is_ok());
-        // The bound follows the build catalog's costed weapons, including Splash.
-        let catalog = brawler::builds::BuildCatalog::embedded().expect("embedded build catalog");
-        for cost in &catalog.weapon_costs {
-            config.weapon_preset = Some(cost.weapon_id.0);
+        let catalog = brawler::characters::CharacterCatalog::embedded().expect("embedded roster");
+        for character in &catalog.characters {
+            config.character = Some(character.id.0);
             assert!(
                 config.validate(&network).is_ok(),
-                "weapon {}",
-                cost.weapon_id.0
+                "character {}",
+                character.id.0
             );
         }
-        let unknown = catalog
-            .weapon_costs
-            .iter()
-            .map(|cost| cost.weapon_id.0)
-            .max()
-            .expect("costed weapons")
-            + 1;
-        config.weapon_preset = Some(unknown);
+        config.character = Some(catalog.characters.last().unwrap().id.0 + 1);
         assert!(config.validate(&network).is_err());
-        config.weapon_preset = Some(0);
+        config.character = Some(0);
         assert!(config.validate(&network).is_err());
     }
 
@@ -815,7 +804,7 @@ mod tests {
             headless_move: Some((1, -1)),
             headless_fire: true,
             headless_simulation_ticks: Some(30),
-            weapon_preset: Some(3),
+            character: Some(3),
             ..ClientAutomationConfig::default()
         };
         let runtime = config.headless_automation();

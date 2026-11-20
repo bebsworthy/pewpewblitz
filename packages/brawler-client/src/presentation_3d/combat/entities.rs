@@ -1621,17 +1621,14 @@ mod tests {
         brawler::builds::ResolvedMatchLoadout,
         brawler::combat::AttackSource,
     ) {
-        let mut loadout = brawler::builds::resolve_build_recipe(
+        let mut loadout = brawler::builds::resolve_loadout(
             &brawler::builds::BuildCatalog::embedded().unwrap(),
             &brawler::combat::WeaponCatalog::embedded().unwrap(),
-            brawler::builds::BrawlerBuildRecipe {
-                weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(3)),
-                ultimate: brawler::builds::UltimateDefinitionId(1),
-                passives: [
-                    brawler::builds::PassiveDefinitionId(1),
-                    brawler::builds::PassiveDefinitionId(6),
-                ],
-            },
+            brawler::builds::LoadoutRecipe::test_default(
+                brawler::combat::WeaponPresetId(3),
+                brawler::builds::UltimateDefinitionId(1),
+                brawler::builds::PassiveDefinitionId(6),
+            ),
         )
         .unwrap();
         let fingerprint = brawler::combat::WeaponRecipeFingerprint(0xfeed);

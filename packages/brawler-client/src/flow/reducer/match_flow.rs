@@ -420,8 +420,8 @@ fn resolve_matchmaking_loading_action(
                 return;
             }
             *purpose = SessionPurpose::Multiplayer;
-            if let Some((brawler_id, brawler_revision)) = selected_brawler_identity(membership) {
-                let _ = queue.start_join(selection, brawler_id, brawler_revision, now);
+            if let Some(profile_revision) = profile_revision(membership) {
+                let _ = queue.start_join(selection, profile_revision, now);
             }
         }
         FlowUiAction::OpenPracticeMaps => {
@@ -473,8 +473,8 @@ fn resolve_matchmaking_loading_action(
                 return;
             }
             *purpose = SessionPurpose::Practice;
-            if let Some((brawler_id, brawler_revision)) = selected_brawler_identity(membership) {
-                let _ = practice.start(selection, brawler_id, brawler_revision);
+            if let Some(profile_revision) = profile_revision(membership) {
+                let _ = practice.start(selection, profile_revision);
             }
         }
         FlowUiAction::KeepLoading => {
@@ -552,16 +552,7 @@ fn resolve_results_replay_action(
                 selection.catalog_revision = Some(membership.catalog_revision);
                 selection.game_type_id = Some(game.id.clone());
                 selection.configuration_revision = Some(game.configuration_revision);
-                let selected_brawler = membership.profile.selected_brawler_id.and_then(|id| {
-                    membership
-                        .profile
-                        .brawlers
-                        .iter()
-                        .find(|brawler| brawler.id == id)
-                });
-                if selected_brawler
-                    .is_none_or(|brawler| !practice.start(selection, brawler.id, brawler.revision))
-                {
+                if !practice.start(selection, membership.profile.revision) {
                     commit.error = Some(FlowError {
                         kind: FlowErrorKind::Practice,
                         message: "The practice connection is unavailable.".to_string(),
@@ -628,22 +619,14 @@ fn resolve_results_replay_action(
     }
 }
 
-fn selected_brawler_identity(
+/// The lobby profile revision a queue or Practice request admits the selected pick at.
+fn profile_revision(
     membership: &LobbyMembershipQuery,
-) -> Option<(
-    brawler::profiles::SavedBrawlerId,
-    brawler::profiles::ProfileRevision,
-)> {
-    membership.iter().next().and_then(|(membership, _, _)| {
-        membership.profile.selected_brawler_id.and_then(|id| {
-            membership
-                .profile
-                .brawlers
-                .iter()
-                .find(|brawler| brawler.id == id)
-                .map(|brawler| (brawler.id, brawler.revision))
-        })
-    })
+) -> Option<brawler::profiles::ProfileRevision> {
+    membership
+        .iter()
+        .next()
+        .map(|(membership, _, _)| membership.profile.revision)
 }
 
 pub(in crate::flow) fn accept_game_type_draft(

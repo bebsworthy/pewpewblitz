@@ -938,17 +938,14 @@ mod tests {
     use super::*;
 
     fn resolved_test_loadout() -> ResolvedMatchLoadout {
-        brawler::builds::resolve_build_recipe(
+        brawler::builds::resolve_loadout(
             &brawler::builds::BuildCatalog::embedded().unwrap(),
             &brawler::combat::WeaponCatalog::embedded().unwrap(),
-            brawler::builds::BrawlerBuildRecipe {
-                weapon: brawler::builds::WeaponChoice::Preset(brawler::combat::WeaponPresetId(1)),
-                ultimate: UltimateDefinitionId(1),
-                passives: [
-                    brawler::builds::PassiveDefinitionId(1),
-                    brawler::builds::PassiveDefinitionId(6),
-                ],
-            },
+            brawler::builds::LoadoutRecipe::test_default(
+                brawler::combat::WeaponPresetId(1),
+                UltimateDefinitionId(1),
+                brawler::builds::PassiveDefinitionId(6),
+            ),
         )
         .unwrap()
     }

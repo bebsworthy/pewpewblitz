@@ -463,12 +463,7 @@ fn active_layer(overlay: &ClientOverlay) -> ShellLayer {
         ClientOverlay::Error(_) => ShellLayer::Error,
         ClientOverlay::None
         | ClientOverlay::DashboardMenu
-        | ClientOverlay::BrawlerList
-        | ClientOverlay::BrawlerDetails(_)
-        | ClientOverlay::BrawlerCreation
-        | ClientOverlay::BrawlerEditor
-        | ClientOverlay::WeaponEquipment
-        | ClientOverlay::DeleteBrawlerConfirmation(_)
+        | ClientOverlay::Brawlers
         | ClientOverlay::Confirmation(_)
         | ClientOverlay::ChangeServerConfirmation
         | ClientOverlay::LeaveConfirmation => ShellLayer::FlowOwned,

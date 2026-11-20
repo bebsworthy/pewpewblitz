@@ -115,7 +115,7 @@ fn projectile_hits_the_closest_valid_target_and_does_not_pass_through_it() {
             && harness.server_ids().len() == 2
     });
     for index in 0..2 {
-        harness.install_saved_brawler_recipe(index, 2, 1, 1, [3, 6]);
+        harness.install_compact_test_loadout(index);
     }
     let source_player = harness.controlled_player_id(0);
     let target_player = harness

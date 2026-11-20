@@ -294,27 +294,17 @@ fn observer_decision_is_scheduled_after_outcomes_and_before_cue_filtering() {
 #[test]
 fn public_participant_projection_consumes_weapon_without_replicated_loadout() {
     use crate::{
-        builds::{
-            BuildCatalog, PassiveDefinitionId, UltimateDefinitionId, resolve_saved_brawler_recipe,
-        },
-        combat::{TeamId, WeaponCatalog},
+        combat::TeamId,
         matchplay::{FighterDisplayName, MatchId, MatchParticipant, PublicParticipantState},
-        profiles::{FighterProfileId, WeaponBaseId},
         protocol::{Fighter, NetworkEntityId, PlayerId},
     };
     use bevy::prelude::*;
 
-    let builds = BuildCatalog::embedded().expect("embedded build catalog is valid");
-    let weapons = WeaponCatalog::embedded().expect("embedded weapon catalog is valid");
-    let loadout = resolve_saved_brawler_recipe(
-        &builds,
-        &weapons,
-        FighterProfileId(1),
-        WeaponBaseId(1),
-        UltimateDefinitionId(1),
-        [PassiveDefinitionId(3), PassiveDefinitionId(4)],
-    )
-    .expect("characterization loadout resolves");
+    let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+    let loadout = catalogs
+        .view()
+        .resolve(catalogs.characters.default_choice())
+        .expect("characterization loadout resolves");
     let expected_preset = loadout.primary_weapon.source_preset_id.map(|id| id.0);
 
     let mut app = App::new();

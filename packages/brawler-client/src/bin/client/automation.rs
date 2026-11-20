@@ -11,7 +11,7 @@ use brawler_client::{
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
 
-pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--weapon-preset <BUILD-CATALOG-WEAPON-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke | --product-publish-map-smoke | --product-published-maps-smoke [--withdraw-published-map <ID>]] [--publish-map-name <NAME>] [--account-id <HEX>] [--expect-published-map] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE> | --cancel-match-start] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen] [--check-config]";
+pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--character <ROSTER-CHARACTER-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke | --product-publish-map-smoke | --product-published-maps-smoke [--withdraw-published-map <ID>]] [--publish-map-name <NAME>] [--account-id <HEX>] [--expect-published-map] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE> | --cancel-match-start] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen] [--check-config]";
 
 fn parse_value<T: core::str::FromStr>(flag: &str, value: Option<String>) -> Result<T, String> {
     value
@@ -77,7 +77,7 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
     let mut headless_fire = false;
     let mut headless_ultimate = false;
     let mut headless_simulation_ticks = None;
-    let mut weapon_preset = None;
+    let mut character = None;
     let mut windowed_combat_demo = false;
     let mut windowed_controller_demo = false;
     let mut window_size = None;
@@ -197,8 +197,8 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
             "--simulation-ticks" => {
                 headless_simulation_ticks = Some(parse_value(&flag, args.next())?);
             }
-            "--weapon-preset" | "--weapon" => {
-                weapon_preset = Some(parse_value(&flag, args.next())?);
+            "--character" => {
+                character = Some(parse_value(&flag, args.next())?);
             }
             "--combat-demo" => windowed_combat_demo = true,
             "--controller-demo" => windowed_controller_demo = true,
@@ -350,7 +350,7 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
         headless_fire: headless_fire || windowed_combat_demo,
         headless_ultimate,
         headless_simulation_ticks,
-        weapon_preset,
+        character,
         windowed_combat_demo: windowed_combat_demo.then_some(WindowedCombatDemo),
         windowed_controller_demo: windowed_controller_demo.then_some(WindowedControllerDemo),
         screenshot_schedule: screenshot_dir.map(|dir| ScreenshotSchedule {

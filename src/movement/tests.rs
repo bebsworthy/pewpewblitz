@@ -367,17 +367,14 @@ fn resolved_velocity_uses_authored_adrenal_movement_bonus() {
     let movement = Vec2::X;
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let mut loadout = crate::builds::resolve_build_recipe(
+    let mut loadout = crate::builds::resolve_loadout(
         &builds,
         &weapons,
-        crate::builds::BrawlerBuildRecipe {
-            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
-            ultimate: crate::builds::UltimateDefinitionId(1),
-            passives: [
-                crate::builds::PassiveDefinitionId(3),
-                crate::builds::PassiveDefinitionId(4),
-            ],
-        },
+        crate::builds::LoadoutRecipe::test_default(
+            crate::combat::WeaponPresetId(1),
+            crate::builds::UltimateDefinitionId(1),
+            crate::builds::PassiveDefinitionId(3),
+        ),
     )
     .unwrap();
     loadout.passives[0].parameters = crate::builds::PassiveParameters::AdrenalResponse {

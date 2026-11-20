@@ -1,4 +1,5 @@
-//! Durable logical-server-local player profiles and saved brawlers.
+//! Durable logical-server-local player profiles: the selected roster character and the pick
+//! remembered for each character.
 
 #[cfg(feature = "server")]
 mod authority;
@@ -13,16 +14,14 @@ pub use authority::{
     PublishedMapStorageCompletion,
 };
 pub use catalog::{
-    AdvertisedBrawlerCatalog, AdvertisedBrawlerLimits, AdvertisedFighterProfile, AdvertisedPassive,
-    AdvertisedUltimate, AdvertisedWeaponBase, BrawlerCatalogRevision,
-    MAX_ADVERTISED_BRAWLER_CATALOG_BYTES, MAX_ADVERTISED_FIGHTER_PROFILES, MAX_ADVERTISED_PASSIVES,
-    MAX_ADVERTISED_ULTIMATES, MAX_ADVERTISED_WEAPON_BASES,
+    AdvertisedCharacter, AdvertisedCharacterCatalog, AdvertisedPassive, AdvertisedUltimate,
+    AdvertisedWeaponBase, CharacterCatalogRevision, MAX_ADVERTISED_CHARACTER_CATALOG_BYTES,
+    MAX_ADVERTISED_CHARACTERS, MAX_ADVERTISED_PASSIVES, MAX_ADVERTISED_ULTIMATES,
+    MAX_ADVERTISED_WEAPON_BASES,
 };
 pub use model::{
-    AccountId, BrawlerDraft, BrawlerEdit, FighterProfileId, MAX_BRAWLERS_PER_PROFILE,
-    MAX_PROFILE_SNAPSHOT_BYTES, MatchBuildSnapshotV3, ProfileCommand, ProfileDecision,
-    ProfileModelError, ProfileOutcome, ProfileRevision, ProfileSnapshot, SavedBrawler,
-    SavedBrawlerId, WeaponBaseId,
+    AccountId, MAX_PROFILE_SNAPSHOT_BYTES, MatchCharacterSnapshot, ProfileCommand, ProfileDecision,
+    ProfileModelError, ProfileOutcome, ProfileRevision, ProfileSnapshot,
 };
 #[cfg(feature = "server")]
 pub use storage::{
@@ -31,7 +30,7 @@ pub use storage::{
     ProfileStorageCommand, ProfileStorageError, ProfileStorageExecutor, ProfileStorageReply,
     ProfileStorageResult, PublishedMapAction, PublishedMapLimits, PublishedMapRecord,
     PublishedMapStatus, PublishedMapSubmission, PublishedMapSubmissionOutcome,
-    PublishedMapWithdrawal, backup_database,
+    PublishedMapWithdrawal, StoredProfile, backup_database,
 };
 
 #[cfg(test)]

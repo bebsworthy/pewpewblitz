@@ -1,107 +1,56 @@
-//! Automation-only saved-brawler preparation for headless and render-evidence clients.
+//! Automation-only character preparation for headless and render-evidence clients.
 //!
-//! The client never resolves a loadout itself: it issues the ordinary `CreateBrawler` /
-//! `SelectBrawler` profile commands, and the server validates the recipe and resolves the match
-//! loadout from the selected saved brawler exactly as it does for the interactive editor.
+//! The client never resolves a loadout itself: it issues the ordinary character-select profile
+//! command, and the server validates the pick and resolves the match loadout from the profile's
+//! selection exactly as it does for the interactive screen.
 
 use super::ClientProfileModel;
 use bevy::prelude::*;
-use brawler::profiles::{
-    AdvertisedBrawlerCatalog, BrawlerDraft, ProfileSnapshot, SavedBrawler, SavedBrawlerId,
-    WeaponBaseId,
-};
+use brawler::characters::{CharacterChoice, CharacterId};
+use brawler::profiles::{AdvertisedCharacterCatalog, ProfileSnapshot};
 
-/// Profile commands one automation run may need: one create plus one select, with headroom for a
-/// stale-revision retry. A run that exceeds it has a rejected recipe and fails instead of looping.
+/// Profile commands one automation run may need: one select, with headroom for a stale-revision
+/// retry. A run that exceeds it has a rejected pick and fails instead of looping.
 const MAX_AUTOMATION_PROFILE_REQUESTS: u8 = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum AutomationBrawlerStep {
-    Create(BrawlerDraft),
-    Select(SavedBrawlerId),
-    /// The requested weapon is not advertised, or the profile is full without a matching brawler.
+pub(super) enum AutomationCharacterStep {
+    Select(CharacterChoice),
+    /// The requested character is not advertised.
     Unavailable(&'static str),
 }
 
-/// Whether automation may queue with `brawler`: either no weapon was requested, or the selected
-/// saved brawler already carries the requested primary weapon.
+/// Whether automation may queue with `profile`: either no character was requested, or the
+/// profile already selects it.
 #[must_use]
-pub(crate) fn automation_brawler_ready(
+pub(crate) fn automation_character_ready(
     config: &crate::ClientAutomationConfig,
-    brawler: &SavedBrawler,
+    profile: &ProfileSnapshot,
 ) -> bool {
     config
-        .weapon_preset
-        .is_none_or(|preset| brawler.weapon_base_id == WeaponBaseId(preset))
+        .character
+        .is_none_or(|character| profile.selected_character_id == CharacterId(character))
 }
 
-/// The next profile command that gives automation a selected brawler with the requested weapon.
-/// Without a request it only seeds an empty profile with the first advertised weapon (the
-/// historical default), and never touches an existing selection.
-pub(super) fn plan_automation_brawler(
-    requested: Option<WeaponBaseId>,
-    catalog: &AdvertisedBrawlerCatalog,
+/// The profile command that makes the requested character the selection, with its remembered or
+/// default options. Without a request, automation keeps whatever the profile selects.
+pub(super) fn plan_automation_character(
+    requested: Option<CharacterId>,
+    catalog: &AdvertisedCharacterCatalog,
     snapshot: &ProfileSnapshot,
-) -> Option<AutomationBrawlerStep> {
-    let Some(requested) = requested else {
-        return snapshot
-            .brawlers
-            .is_empty()
-            .then(|| catalog.weapon_bases.first())
-            .flatten()
-            .and_then(|weapon| automation_draft(catalog, weapon.id))
-            .map(AutomationBrawlerStep::Create);
-    };
-    if catalog.weapon(requested).is_none() {
-        return Some(AutomationBrawlerStep::Unavailable(
-            "requested weapon is not in the advertised brawler catalog",
-        ));
-    }
-    let selected = snapshot
-        .selected_brawler_id
-        .and_then(|id| snapshot.brawlers.iter().find(|brawler| brawler.id == id));
-    if selected.is_some_and(|brawler| brawler.weapon_base_id == requested) {
+) -> Option<AutomationCharacterStep> {
+    let requested = requested?;
+    if snapshot.selected_character_id == requested {
         return None;
     }
-    if let Some(existing) = snapshot
-        .brawlers
-        .iter()
-        .filter(|brawler| brawler.weapon_base_id == requested)
-        .min_by_key(|brawler| brawler.creation_ordinal)
-    {
-        return Some(AutomationBrawlerStep::Select(existing.id));
-    }
-    if snapshot.brawlers.len() >= usize::from(catalog.limits.maximum_saved_brawlers) {
-        return Some(AutomationBrawlerStep::Unavailable(
-            "saved-brawler capacity reached without a brawler using the requested weapon",
-        ));
-    }
-    Some(automation_draft(catalog, requested).map_or(
-        AutomationBrawlerStep::Unavailable("catalog cannot form an automation recipe"),
-        AutomationBrawlerStep::Create,
+    Some(catalog.choice_for(snapshot, requested).map_or(
+        AutomationCharacterStep::Unavailable("requested character is not in the advertised roster"),
+        AutomationCharacterStep::Select,
     ))
 }
 
-fn automation_draft(
-    catalog: &AdvertisedBrawlerCatalog,
-    weapon_base_id: WeaponBaseId,
-) -> Option<BrawlerDraft> {
-    let fighter = catalog.fighter_profiles.first()?;
-    let ultimate = catalog.ultimates.first()?;
-    let mut passives = catalog
-        .selectable_passives()
-        .map(|definition| definition.id);
-    Some(BrawlerDraft {
-        name: "Automation Brawler".into(),
-        fighter_profile_id: fighter.id,
-        weapon_base_id,
-        ultimate_id: ultimate.id,
-        passive_ids: [passives.next()?, passives.next()?],
-    })
-}
-
 #[allow(clippy::needless_pass_by_value)]
-pub(super) fn prepare_automation_brawler(
+pub(super) fn prepare_automation_character(
     network: Res<brawler::config::ClientNetworkConfig>,
     config: Res<crate::ClientAutomationConfig>,
     mut model: ResMut<ClientProfileModel>,
@@ -118,38 +67,28 @@ pub(super) fn prepare_automation_brawler(
         return;
     };
     let Some(step) =
-        plan_automation_brawler(config.weapon_preset.map(WeaponBaseId), catalog, snapshot)
+        plan_automation_character(config.character.map(CharacterId), catalog, snapshot)
     else {
         return;
     };
     if *requests == MAX_AUTOMATION_PROFILE_REQUESTS {
         *requests += 1;
         error!(
-            weapon_preset = ?config.weapon_preset,
+            character = ?config.character,
             decision = ?model.take_decision(),
-            "automation could not prepare its saved brawler"
+            "automation could not select its character"
         );
         exit.write(AppExit::error());
         return;
     }
     let sent = match step {
-        AutomationBrawlerStep::Create(draft) => {
-            info!(
-                weapon_base_id = draft.weapon_base_id.0,
-                "automation creating saved brawler"
-            );
-            model.create(draft)
+        AutomationCharacterStep::Select(choice) => {
+            info!(?choice, "automation selecting the requested character");
+            model.select(choice)
         }
-        AutomationBrawlerStep::Select(brawler_id) => {
-            info!(
-                ?brawler_id,
-                "automation selecting saved brawler for requested weapon"
-            );
-            model.select(brawler_id)
-        }
-        AutomationBrawlerStep::Unavailable(reason) => {
+        AutomationCharacterStep::Unavailable(reason) => {
             *requests = MAX_AUTOMATION_PROFILE_REQUESTS + 1;
-            error!(weapon_preset = ?config.weapon_preset, reason, "automation weapon unavailable");
+            error!(character = ?config.character, reason, "automation character unavailable");
             exit.write(AppExit::error());
             return;
         }
@@ -164,139 +103,66 @@ mod tests {
     use super::*;
     use brawler::profiles::{AccountId, ProfileRevision};
 
-    fn catalog() -> AdvertisedBrawlerCatalog {
-        AdvertisedBrawlerCatalog::from_content(
-            &brawler::builds::BuildCatalog::embedded().expect("embedded build catalog"),
-            &brawler::combat::WeaponCatalog::embedded().expect("embedded weapon catalog"),
+    fn catalog() -> AdvertisedCharacterCatalog {
+        AdvertisedCharacterCatalog::embedded().unwrap()
+    }
+
+    fn fresh(catalog: &AdvertisedCharacterCatalog) -> ProfileSnapshot {
+        catalog.profile_from_stored(
+            AccountId::new(1).unwrap(),
+            ProfileRevision::INITIAL,
+            None,
+            [],
         )
-        .expect("embedded brawler advertisement")
-    }
-
-    fn weapon_id(catalog: &AdvertisedBrawlerCatalog, key: &str) -> WeaponBaseId {
-        catalog
-            .weapon_bases
-            .iter()
-            .find(|weapon| weapon.key == key)
-            .unwrap_or_else(|| panic!("catalog weapon {key}"))
-            .id
-    }
-
-    fn brawler(
-        ordinal: u64,
-        weapon: WeaponBaseId,
-        catalog: &AdvertisedBrawlerCatalog,
-    ) -> SavedBrawler {
-        let draft = automation_draft(catalog, weapon).expect("draft");
-        SavedBrawler {
-            id: SavedBrawlerId::from_bytes([u8::try_from(ordinal).unwrap(); 16]).unwrap(),
-            creation_ordinal: ordinal,
-            name: draft.name,
-            fighter_profile_id: draft.fighter_profile_id,
-            weapon_base_id: weapon,
-            ultimate_id: draft.ultimate_id,
-            passive_ids: draft.passive_ids,
-            equipped_part_ids: [None; brawler::weapon_parts::WEAPON_PART_SLOT_COUNT],
-            revision: ProfileRevision::INITIAL,
-        }
-    }
-
-    fn snapshot(brawlers: Vec<SavedBrawler>, selected: usize) -> ProfileSnapshot {
-        let mut snapshot = ProfileSnapshot::empty(AccountId::from_bytes([7; 16]).unwrap());
-        snapshot.selected_brawler_id = brawlers.get(selected).map(|brawler| brawler.id);
-        snapshot.next_brawler_ordinal = brawlers.len() as u64 + 1;
-        snapshot.brawlers = brawlers;
-        snapshot
     }
 
     #[test]
-    fn default_run_only_seeds_an_empty_profile_and_keeps_existing_selection() {
+    fn default_run_keeps_the_profile_selection() {
         let catalog = catalog();
-        let first = catalog.weapon_bases[0].id;
-        let Some(AutomationBrawlerStep::Create(draft)) =
-            plan_automation_brawler(None, &catalog, &snapshot(Vec::new(), 0))
-        else {
-            panic!("an empty profile is seeded");
-        };
-        assert_eq!(draft.weapon_base_id, first);
-        let splash = weapon_id(&catalog, "splash");
-        let existing = snapshot(vec![brawler(1, splash, &catalog)], 0);
-        assert_eq!(plan_automation_brawler(None, &catalog, &existing), None);
-    }
-
-    #[test]
-    fn requested_weapon_seeds_selects_or_creates_through_profile_commands() {
-        let catalog = catalog();
-        let pulse = weapon_id(&catalog, "pulse-sidearm");
-        let splash = weapon_id(&catalog, "splash");
-        let scatter = weapon_id(&catalog, "scatter-cannon");
-
-        let Some(AutomationBrawlerStep::Create(draft)) =
-            plan_automation_brawler(Some(splash), &catalog, &snapshot(Vec::new(), 0))
-        else {
-            panic!("an empty profile gets the requested weapon");
-        };
-        assert_eq!(draft.weapon_base_id, splash);
-        assert!(draft.clone().normalized().is_ok());
-
-        // A persisted Pulse selection from an earlier run gains a new Splash brawler.
-        let pulse_only = snapshot(vec![brawler(1, pulse, &catalog)], 0);
-        assert!(matches!(
-            plan_automation_brawler(Some(splash), &catalog, &pulse_only),
-            Some(AutomationBrawlerStep::Create(draft)) if draft.weapon_base_id == splash
-        ));
-
-        // An existing brawler with that weapon is selected (earliest creation first).
-        let mixed = snapshot(
-            vec![
-                brawler(1, pulse, &catalog),
-                brawler(3, splash, &catalog),
-                brawler(2, splash, &catalog),
-                brawler(4, scatter, &catalog),
-            ],
-            0,
-        );
         assert_eq!(
-            plan_automation_brawler(Some(splash), &catalog, &mixed),
-            Some(AutomationBrawlerStep::Select(mixed.brawlers[2].id))
-        );
-        // Already selected: nothing to do, and the queue gate opens.
-        let selected = snapshot(mixed.brawlers.clone(), 3);
-        assert_eq!(
-            plan_automation_brawler(Some(scatter), &catalog, &selected),
+            plan_automation_character(None, &catalog, &fresh(&catalog)),
             None
         );
-        let mut config = crate::ClientAutomationConfig {
-            weapon_preset: Some(scatter.0),
-            ..crate::ClientAutomationConfig::default()
-        };
-        assert!(automation_brawler_ready(&config, &selected.brawlers[3]));
-        assert!(!automation_brawler_ready(&config, &selected.brawlers[0]));
-        config.weapon_preset = None;
-        assert!(automation_brawler_ready(&config, &selected.brawlers[0]));
     }
 
     #[test]
-    fn unavailable_weapon_or_full_profile_fails_instead_of_looping() {
+    fn requested_character_is_selected_with_its_default_options_once() {
         let catalog = catalog();
-        let pulse = weapon_id(&catalog, "pulse-sidearm");
-        let splash = weapon_id(&catalog, "splash");
-        assert!(matches!(
-            plan_automation_brawler(
-                Some(WeaponBaseId(u16::MAX)),
-                &catalog,
-                &snapshot(Vec::new(), 0)
-            ),
-            Some(AutomationBrawlerStep::Unavailable(_))
-        ));
-        let full = snapshot(
-            (1..=u64::from(catalog.limits.maximum_saved_brawlers))
-                .map(|ordinal| brawler(ordinal, pulse, &catalog))
-                .collect(),
-            0,
+        let profile = fresh(&catalog);
+        let bumper = CharacterId(9);
+        let Some(AutomationCharacterStep::Select(choice)) =
+            plan_automation_character(Some(bumper), &catalog, &profile)
+        else {
+            panic!("a requested character is selected");
+        };
+        assert_eq!(
+            choice,
+            AdvertisedCharacterCatalog::default_choice_for(catalog.character(bumper).unwrap())
         );
+        let selected = catalog.profile_from_stored(
+            profile.account_id,
+            ProfileRevision::INITIAL,
+            Some(bumper),
+            [choice],
+        );
+        assert_eq!(
+            plan_automation_character(Some(bumper), &catalog, &selected),
+            None
+        );
+        let config = crate::ClientAutomationConfig {
+            character: Some(9),
+            ..Default::default()
+        };
+        assert!(automation_character_ready(&config, &selected));
+        assert!(!automation_character_ready(&config, &profile));
+    }
+
+    #[test]
+    fn unknown_character_fails_instead_of_looping() {
+        let catalog = catalog();
         assert!(matches!(
-            plan_automation_brawler(Some(splash), &catalog, &full),
-            Some(AutomationBrawlerStep::Unavailable(_))
+            plan_automation_character(Some(CharacterId(999)), &catalog, &fresh(&catalog)),
+            Some(AutomationCharacterStep::Unavailable(_))
         ));
     }
 }

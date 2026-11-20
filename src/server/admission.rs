@@ -6,10 +6,7 @@
 #[cfg(test)]
 use super::build_app_with_config;
 use super::build_match_worker_graph;
-#[cfg(test)]
-use crate::builds::BuildCatalogResource;
 use crate::{
-    builds::BuildCatalog,
     config::{GameMode, MatchRulesProfile, ServerNetworkConfig},
     content::gameplay_content_fingerprint_from_world,
     map::{MapContentCatalog, MapInstanceId, MapPresetId, ServerMapSelection},
@@ -326,18 +323,17 @@ pub(super) fn validate_match_hello(
 
 pub(super) fn resolve_join_loadout(
     worker_participant: Option<&MatchManifestParticipant>,
-    builds: &BuildCatalog,
-    weapons: &crate::combat::WeaponCatalog,
+    catalogs: crate::characters::LoadoutCatalogs<'_>,
 ) -> Result<Option<crate::builds::ResolvedMatchLoadout>, MatchJoinRejection> {
     worker_participant
         .map(|participant| {
             let snapshot =
-                crate::profiles::MatchBuildSnapshotV3::decode(&participant.build_snapshot)
+                crate::profiles::MatchCharacterSnapshot::decode(&participant.build_snapshot)
                     .map_err(|error| {
                         error!(%error, "admitted manifest build snapshot did not decode");
                         MatchJoinRejection::ContentMismatch
                     })?;
-            resolve_admitted_match_snapshot(snapshot, builds, weapons).map_err(|error| {
+            resolve_admitted_match_snapshot(snapshot, catalogs).map_err(|error| {
                 error!(
                     ?error,
                     "admitted manifest build did not resolve against the active server catalogs"
@@ -349,17 +345,16 @@ pub(super) fn resolve_join_loadout(
 }
 
 fn resolve_admitted_match_snapshot(
-    snapshot: crate::profiles::MatchBuildSnapshotV3,
-    builds: &BuildCatalog,
-    weapons: &crate::combat::WeaponCatalog,
+    snapshot: crate::profiles::MatchCharacterSnapshot,
+    catalogs: crate::characters::LoadoutCatalogs<'_>,
 ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
     #[cfg(feature = "balance-lab")]
     {
-        snapshot.resolve_revised_balance_lab_catalogs(builds, weapons)
+        snapshot.resolve_revised_balance_lab_catalogs(catalogs)
     }
     #[cfg(not(feature = "balance-lab"))]
     {
-        snapshot.resolve(builds, weapons)
+        snapshot.resolve(catalogs)
     }
 }
 
@@ -378,8 +373,7 @@ pub(super) struct MatchJoinPlanningContext<'a> {
     pub(super) spawn_points: &'a crate::map::SpawnPointCatalog,
     pub(super) match_state: &'a crate::matchplay::MatchState,
     pub(super) movement_skin_width: f32,
-    pub(super) builds: &'a BuildCatalog,
-    pub(super) weapons: &'a crate::combat::WeaponCatalog,
+    pub(super) catalogs: crate::characters::LoadoutCatalogs<'a>,
     pub(super) map_instance_id: MapInstanceId,
 }
 
@@ -393,8 +387,7 @@ pub(super) fn plan_match_join(
         spawn_points,
         match_state,
         movement_skin_width,
-        builds,
-        weapons,
+        catalogs,
         map_instance_id,
     } = context;
     let worker_participant = match &validated.source {
@@ -404,33 +397,38 @@ pub(super) fn plan_match_join(
             unreachable!("a rejoin reclaims its existing fighter and is never planned as a join")
         }
     };
-    let worker_loadout = resolve_join_loadout(worker_participant, builds, weapons)?;
+    let worker_loadout = resolve_join_loadout(worker_participant, catalogs)?;
     let (baseline_player_id, network_entity_id) = ids
         .allocate()
         .ok_or(MatchJoinRejection::IdentifierExhausted)?;
-    let (player_id, assigned_team, display_name, loadout) = if let Some(participant) =
-        worker_participant
-    {
-        (
-            crate::protocol::PlayerId(participant.player_id.get()),
-            crate::combat::TeamId(participant.team),
-            participant.display_name.as_str().to_string(),
-            worker_loadout.expect("routed participant resolved before identity allocation"),
-        )
-    } else {
-        let MatchJoinSource::Direct { assigned_team } = validated.source else {
-            unreachable!("routed participant handled above");
-        };
-        let loadout =
-            crate::builds::resolve_direct_diagnostic_loadout(builds, weapons, baseline_player_id.0)
+    let (player_id, assigned_team, display_name, loadout) =
+        if let Some(participant) = worker_participant {
+            (
+                crate::protocol::PlayerId(participant.player_id.get()),
+                crate::combat::TeamId(participant.team),
+                participant.display_name.as_str().to_string(),
+                worker_loadout.expect("routed participant resolved before identity allocation"),
+            )
+        } else {
+            let MatchJoinSource::Direct { assigned_team } = validated.source else {
+                unreachable!("routed participant handled above");
+            };
+            let loadout = catalogs
+                .characters
+                .resolve_direct_diagnostic(
+                    catalogs.builds,
+                    catalogs.weapons,
+                    catalogs.parts,
+                    baseline_player_id.0,
+                )
                 .expect("validated direct-diagnostic loadout policy");
-        (
-            baseline_player_id,
-            assigned_team,
-            crate::lobby::generated_display_name(baseline_player_id.0),
-            loadout,
-        )
-    };
+            (
+                baseline_player_id,
+                assigned_team,
+                crate::lobby::generated_display_name(baseline_player_id.0),
+                loadout,
+            )
+        };
     let candidates = spawn_points
         .0
         .get(&assigned_team.0)
@@ -446,7 +444,7 @@ pub(super) fn plan_match_join(
         candidates,
         living_fighters,
         assigned_team,
-        builds.fighter_body.radius * 2.0 + movement_skin_width,
+        catalogs.builds.fighter_body.radius * 2.0 + movement_skin_width,
         match_state.match_id,
         player_id,
         0,
@@ -533,17 +531,16 @@ fn expected_rules_profile(profile: MatchRulesProfile) -> u8 {
 }
 
 fn validate_build_rows(manifest: &MatchManifestV1) -> Result<(), MatchWorkerManifestError> {
-    let builds = BuildCatalog::embedded().map_err(MatchWorkerManifestError::Configuration)?;
-    let weapons = crate::combat::WeaponCatalog::embedded()
+    let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load()
         .map_err(MatchWorkerManifestError::Configuration)?;
     let validate = |snapshot_bytes: &brawler_routing::MatchBuildSnapshot,
                     recipe_fingerprint: u64,
                     revision: u16|
      -> Result<(), MatchWorkerManifestError> {
-        let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(snapshot_bytes)
+        let snapshot = crate::profiles::MatchCharacterSnapshot::decode(snapshot_bytes)
             .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
         let resolved = snapshot
-            .resolve(&builds, &weapons)
+            .resolve(catalogs.view())
             .map_err(|_| MatchWorkerManifestError::BuildSelectionMismatch)?;
         if snapshot.accepted_identity != resolved.identity
             || resolved.identity.recipe_fingerprint.0 != recipe_fingerprint
@@ -786,25 +783,12 @@ mod tests {
     )]
     fn manifest() -> MatchManifestV1 {
         let config = ServerNetworkConfig::default();
-        let builds = BuildCatalog::embedded().unwrap();
-        let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-        let brawler = crate::profiles::SavedBrawler {
-            id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
-            creation_ordinal: 1,
-            name: "Player One".into(),
-            fighter_profile_id: crate::profiles::FighterProfileId(1),
-            weapon_base_id: crate::profiles::WeaponBaseId(1),
-            ultimate_id: crate::builds::UltimateDefinitionId(1),
-            passive_ids: [
-                crate::builds::PassiveDefinitionId(3),
-                crate::builds::PassiveDefinitionId(4),
-            ],
-            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-            revision: crate::profiles::ProfileRevision::INITIAL,
-        };
-        let snapshot =
-            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
-                .unwrap();
+        let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+        let snapshot = crate::profiles::MatchCharacterSnapshot::from_choice(
+            catalogs.characters.default_choice(),
+            catalogs.view(),
+        )
+        .unwrap();
         let map = MapContentCatalog::embedded().unwrap().presets[0].clone();
         let map_preset = map.id.0;
         let map_revision = map.admission_revision;
@@ -908,19 +892,16 @@ mod tests {
     }
 
     fn embedded_planning_content() -> (
-        BuildCatalog,
-        crate::combat::WeaponCatalog,
+        crate::characters::EmbeddedLoadoutCatalogs,
         crate::map::SpawnPointCatalog,
     ) {
-        let builds = BuildCatalog::embedded().unwrap();
-        let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
+        let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
         let maps = MapContentCatalog::embedded().unwrap();
         let resolved = maps
             .resolve_preset(MapPresetId(1), MapInstanceId(1))
             .unwrap();
         (
-            builds,
-            weapons,
+            catalogs,
             crate::map::SpawnPointCatalog(resolved.spawn_points_by_team),
         )
     }
@@ -1118,7 +1099,7 @@ mod tests {
 
     #[test]
     fn routed_loadout_failure_does_not_consume_identifiers() {
-        let (builds, weapons, spawns) = embedded_planning_content();
+        let (catalogs, spawns) = embedded_planning_content();
         let mut participant = manifest().participants[0];
         participant.build_snapshot = brawler_routing::MatchBuildSnapshot::new(&[0]).unwrap();
         let mut ids = super::super::NextSessionIds::default();
@@ -1134,8 +1115,7 @@ mod tests {
             spawn_points: &spawns,
             match_state: &waiting_match(),
             movement_skin_width: 0.05,
-            builds: &builds,
-            weapons: &weapons,
+            catalogs: catalogs.view(),
             map_instance_id: MapInstanceId(1),
         });
         assert_eq!(result.err(), Some(MatchJoinRejection::ContentMismatch));
@@ -1150,7 +1130,7 @@ mod tests {
 
     #[test]
     fn routed_and_direct_plans_preserve_identity_team_and_spawn_policy() {
-        let (builds, weapons, spawns) = embedded_planning_content();
+        let (catalogs, spawns) = embedded_planning_content();
         let state = waiting_match();
         let participant = manifest().participants[0];
         let mut routed_ids = super::super::NextSessionIds::default();
@@ -1166,8 +1146,7 @@ mod tests {
             spawn_points: &spawns,
             match_state: &state,
             movement_skin_width: 0.05,
-            builds: &builds,
-            weapons: &weapons,
+            catalogs: catalogs.view(),
             map_instance_id: MapInstanceId(1),
         })
         .unwrap();
@@ -1188,7 +1167,9 @@ mod tests {
         );
 
         let mut direct_ids = super::super::NextSessionIds::default();
-        let expected = crate::builds::resolve_direct_diagnostic_loadout(&builds, &weapons, 1)
+        let expected = catalogs
+            .characters
+            .resolve_direct_diagnostic(&catalogs.builds, &catalogs.weapons, &catalogs.parts, 1)
             .unwrap()
             .identity;
         let direct = plan_match_join(MatchJoinPlanningContext {
@@ -1203,8 +1184,7 @@ mod tests {
             spawn_points: &spawns,
             match_state: &state,
             movement_skin_width: 0.05,
-            builds: &builds,
-            weapons: &weapons,
+            catalogs: catalogs.view(),
             map_instance_id: MapInstanceId(1),
         })
         .unwrap();
@@ -1551,13 +1531,14 @@ mod tests {
     }
 
     fn activate_bot_worker(worker: &mut App) {
-        worker
+        for character in &mut worker
             .world_mut()
-            .resource_mut::<BuildCatalogResource>()
+            .resource_mut::<crate::characters::CharacterCatalogResource>()
             .0
-            .fighter_profiles
-            .default
-            .maximum_health = 211;
+            .characters
+        {
+            character.stats.maximum_health = 211;
+        }
         worker.update();
         let world = worker.world_mut();
         let mut roots = world
@@ -1747,7 +1728,11 @@ mod tests {
                 expected_bot_count,
                 "unexpected {game_mode:?} bot count"
             );
-            assert!(rows.iter().all(|(_, health, _, _, _)| *health == 211));
+            // Bots resolve against the live catalog: 211 health, or 253 with Reinforced Frame.
+            assert!(
+                rows.iter()
+                    .all(|(_, health, _, _, _)| matches!(*health, 211 | 253))
+            );
             assert!(rows.iter().all(|(_, _, controlled, _, _)| !controlled));
             assert!(
                 rows.iter().any(|(_, _, _, input, _)| {

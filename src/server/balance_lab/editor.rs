@@ -1,9 +1,5 @@
 use super::BalanceLabSnapshotV3;
 use crate::{
-    builds::{
-        MAX_COLD_CAPACITY, MAX_FIGHTER_MOVEMENT_SPEED, MAX_REVEAL_PROXIMITY_RADIUS,
-        MIN_REVEAL_PROXIMITY_RADIUS,
-    },
     combat::WeaponCatalog,
     timing::{SIMULATION_TICK_HZ_F64, simulation_seconds_f64},
 };
@@ -13,7 +9,7 @@ mod passives;
 mod ultimates;
 mod weapons;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 13;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 14;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -67,7 +63,6 @@ impl From<usize> for EditorPathSegment {
 #[serde(rename_all = "kebab-case")]
 enum EditorSection {
     Global,
-    Fighters,
     Weapons,
     Ultimates,
     Passives,
@@ -168,20 +163,6 @@ impl NumberSpec {
         }
     }
 
-    fn resistance_basis_points() -> Self {
-        Self {
-            storage_kind: EditorStorageKind::Integer,
-            unit: "%",
-            storage_scale: 100.0,
-            minimum: 0.0,
-            maximum: 60.0,
-            minimum_exclusive: false,
-            step: 1.0,
-            control: EditorControl::RangeAndNumber,
-            help: Some("Displayed as a percentage and stored in basis points."),
-        }
-    }
-
     fn basis_points(minimum: u32, maximum: u32) -> Self {
         Self {
             storage_kind: EditorStorageKind::Integer,
@@ -231,7 +212,6 @@ impl BalanceLabEditorManifest {
     pub(super) fn from_catalogs(snapshot: &BalanceLabSnapshotV3, weapons: &WeaponCatalog) -> Self {
         let mut fields = Vec::new();
         add_global_fields(&mut fields);
-        add_fighter_fields(&mut fields);
         for (index, weapon) in snapshot.weapons.iter().enumerate() {
             weapons::add_fields(&mut fields, index, weapon, weapons);
         }
@@ -478,119 +458,6 @@ fn validate_comparison_contract(fields: &[EditorFieldDescriptor]) -> Result<(), 
         }
     }
     Ok(())
-}
-
-fn add_fighter_fields(fields: &mut Vec<EditorFieldDescriptor>) {
-    for (key, label) in [
-        ("default", "Default"),
-        ("lightweight", "Lightweight"),
-        ("reinforced", "Reinforced"),
-    ] {
-        add_field(
-            fields,
-            path!["fighterProfiles", key, "maximum_health"],
-            EditorSection::Fighters,
-            "maximum_health",
-            key,
-            label,
-            "Core stats",
-            "Maximum health",
-            NumberSpec::integer(1, u32::from(u16::MAX), "health"),
-        );
-        add_field(
-            fields,
-            path!["fighterProfiles", key, "movement_speed"],
-            EditorSection::Fighters,
-            "movement_speed",
-            key,
-            label,
-            "Core stats",
-            "Movement speed",
-            NumberSpec::decimal(
-                1.0,
-                f64::from(MAX_FIGHTER_MOVEMENT_SPEED),
-                1.0,
-                "world units/s",
-            )
-            .ranged(),
-        );
-        add_field(
-            fields,
-            path!["fighterProfiles", key, "health_recovery_rate"],
-            EditorSection::Fighters,
-            "health_recovery_rate",
-            key,
-            label,
-            "Recovery",
-            "Health recovery rate",
-            NumberSpec::integer(1, u32::from(u16::MAX), "health/s"),
-        );
-        add_field(
-            fields,
-            path!["fighterProfiles", key, "idle_attack_delay_ticks"],
-            EditorSection::Fighters,
-            "idle_attack_delay_ticks",
-            key,
-            label,
-            "Recovery",
-            "Attack-idle delay",
-            NumberSpec::ticks(1, u64::from(u32::MAX)),
-        );
-        add_field(
-            fields,
-            path!["fighterProfiles", key, "reveal_proximity_radius"],
-            EditorSection::Fighters,
-            "reveal_proximity_radius",
-            key,
-            label,
-            "Concealment",
-            "Reveal proximity",
-            NumberSpec::decimal(
-                f64::from(MIN_REVEAL_PROXIMITY_RADIUS),
-                f64::from(MAX_REVEAL_PROXIMITY_RADIUS),
-                1.0,
-                "world units",
-            )
-            .ranged(),
-        );
-        add_field(
-            fields,
-            path!["fighterProfiles", key, "cold_capacity"],
-            EditorSection::Fighters,
-            "cold_capacity",
-            key,
-            label,
-            "Elemental baselines",
-            "Cold capacity",
-            NumberSpec::integer(1, u32::from(MAX_COLD_CAPACITY), "cold")
-                .help("Target-owned buildup required to trigger Freeze."),
-        );
-        add_fighter_resistance_fields(fields, key, label);
-    }
-}
-
-fn add_fighter_resistance_fields(
-    fields: &mut Vec<EditorFieldDescriptor>,
-    subject_key: &str,
-    subject_label: &str,
-) {
-    for (field, label) in [
-        ("cold_resistance_basis_points", "Cold resistance"),
-        ("poison_resistance_basis_points", "Poison resistance"),
-        ("fire_resistance_basis_points", "Fire resistance"),
-    ] {
-        add_field(
-            fields,
-            path!["fighterProfiles", subject_key, field],
-            EditorSection::Fighters,
-            field,
-            subject_key,
-            subject_label,
-            "Elemental baselines",
-            label,
-            NumberSpec::resistance_basis_points(),
-        );
-    }
 }
 
 fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
@@ -893,7 +760,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 216);
+        assert_eq!(manifest.fields.len(), 193);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()
@@ -925,28 +792,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fighter_comparison_rows_align_all_three_profiles() {
-        let (snapshot, weapons) = fixture();
-        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
-        let fighter_fields: Vec<_> = manifest
-            .fields
-            .iter()
-            .filter(|field| field.section == EditorSection::Fighters)
-            .collect();
-        let row_counts =
-            fighter_fields
-                .iter()
-                .fold(std::collections::BTreeMap::new(), |mut counts, field| {
-                    *counts.entry(field.comparison_key.as_str()).or_insert(0) += 1;
-                    counts
-                });
-
-        assert_eq!(fighter_fields.len(), 27);
-        assert_eq!(row_counts.len(), 9);
-        assert!(row_counts.values().all(|count| *count == 3));
-    }
-
     fn comparison_row<'a>(
         manifest: &'a BalanceLabEditorManifest,
         section: EditorSection,
@@ -974,7 +819,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
 
-        assert_eq!(EDITOR_SCHEMA_VERSION, 13);
+        assert_eq!(EDITOR_SCHEMA_VERSION, 14);
         assert_eq!(comparison_row_count(&manifest, EditorSection::Weapons), 29);
         for (key, expected_subjects) in [
             ("economy/ammo_capacity", 7),
@@ -1021,7 +866,7 @@ mod tests {
             );
         }
 
-        assert_eq!(comparison_row_count(&manifest, EditorSection::Passives), 10);
+        assert_eq!(comparison_row_count(&manifest, EditorSection::Passives), 14);
         assert_eq!(
             comparison_row(
                 &manifest,
@@ -1101,7 +946,7 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(passive_fields.len(), 12);
+        assert_eq!(passive_fields.len(), 16);
         assert!(
             passive_fields
                 .iter()
@@ -1116,14 +961,14 @@ mod tests {
         let original = manifest
             .fields
             .iter()
-            .find(|field| field.section == EditorSection::Fighters)
-            .expect("fixture has fighter fields")
+            .find(|field| field.section == EditorSection::Weapons)
+            .expect("fixture has weapon fields")
             .clone();
 
         assert!(validate_comparison_contract(&[original.clone(), original.clone()]).is_err());
 
         let mut incompatible = original.clone();
-        incompatible.subject_key = "another-profile".to_string();
+        incompatible.subject_key = "another-weapon".to_string();
         incompatible.unit = "seconds".to_string();
         assert!(validate_comparison_contract(&[original, incompatible]).is_err());
     }
@@ -1419,7 +1264,56 @@ mod tests {
                 "help": help,
             })
         };
+        let frame_descriptor =
+            |index: u64, frame: &str, subject_key, subject_label, leaf, label| {
+                literal_descriptor(
+                    serde_json::json!(["passives", index, "parameters", frame, leaf]),
+                    subject_key,
+                    subject_label,
+                    "Effect",
+                    label,
+                    "%",
+                    100.0,
+                    50.0,
+                    200.0,
+                    0.01,
+                    "range-and-number",
+                    "Displayed as a percentage and stored in basis points.",
+                )
+            };
         let expected = serde_json::Value::Array(vec![
+            frame_descriptor(
+                0,
+                "LightweightFrame",
+                "lightweight-frame",
+                "Lightweight Frame",
+                "maximum_health_basis_points",
+                "Health scale",
+            ),
+            frame_descriptor(
+                0,
+                "LightweightFrame",
+                "lightweight-frame",
+                "Lightweight Frame",
+                "movement_speed_basis_points",
+                "Movement speed scale",
+            ),
+            frame_descriptor(
+                1,
+                "ReinforcedFrame",
+                "reinforced-frame",
+                "Reinforced Frame",
+                "maximum_health_basis_points",
+                "Health scale",
+            ),
+            frame_descriptor(
+                1,
+                "ReinforcedFrame",
+                "reinforced-frame",
+                "Reinforced Frame",
+                "movement_speed_basis_points",
+                "Movement speed scale",
+            ),
             literal_descriptor(
                 serde_json::json!([
                     "passives",
@@ -1709,7 +1603,7 @@ mod tests {
             );
             total_numeric_leaves += numeric_leaves.len();
         }
-        assert_eq!(total_numeric_leaves, 12);
+        assert_eq!(total_numeric_leaves, 16);
     }
 
     #[test]
@@ -2172,65 +2066,6 @@ mod tests {
         assert!((interval.storage_scale - SIMULATION_TICK_HZ_F64).abs() < f64::EPSILON);
         assert!((interval.minimum - 0.1).abs() < f64::EPSILON);
         assert!((interval.maximum - 10.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn fighter_bounds_follow_runtime_representation_not_balance_policy() {
-        let (snapshot, weapons) = fixture();
-        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
-        let health = manifest
-            .fields
-            .iter()
-            .find(|field| path_key(&field.path) == "fighterProfiles/default/maximum_health")
-            .unwrap();
-        assert!((health.minimum - 1.0).abs() < f64::EPSILON);
-        assert!((health.maximum - f64::from(u16::MAX)).abs() < f64::EPSILON);
-        assert_eq!(health.control, EditorControl::Number);
-
-        let speed = manifest
-            .fields
-            .iter()
-            .find(|field| path_key(&field.path) == "fighterProfiles/default/movement_speed")
-            .unwrap();
-        assert!((speed.minimum - 1.0).abs() < f64::EPSILON);
-        assert!((speed.maximum - f64::from(MAX_FIGHTER_MOVEMENT_SPEED)).abs() < f64::EPSILON);
-        assert!((speed.step - 1.0).abs() < f64::EPSILON);
-
-        let recovery = manifest
-            .fields
-            .iter()
-            .find(|field| path_key(&field.path) == "fighterProfiles/default/health_recovery_rate")
-            .unwrap();
-        assert_eq!(recovery.unit, "health/s");
-
-        let delay = manifest
-            .fields
-            .iter()
-            .find(|field| {
-                path_key(&field.path) == "fighterProfiles/default/idle_attack_delay_ticks"
-            })
-            .unwrap();
-        assert_eq!(delay.unit, "s");
-        assert!((delay.storage_scale - SIMULATION_TICK_HZ_F64).abs() < f64::EPSILON);
-
-        let cold_capacity = manifest
-            .fields
-            .iter()
-            .find(|field| path_key(&field.path) == "fighterProfiles/default/cold_capacity")
-            .unwrap();
-        assert_eq!(cold_capacity.unit, "cold");
-        assert!((cold_capacity.maximum - f64::from(MAX_COLD_CAPACITY)).abs() < f64::EPSILON);
-
-        let cold_resistance = manifest
-            .fields
-            .iter()
-            .find(|field| {
-                path_key(&field.path) == "fighterProfiles/default/cold_resistance_basis_points"
-            })
-            .unwrap();
-        assert_eq!(cold_resistance.unit, "%");
-        assert!((cold_resistance.storage_scale - 100.0).abs() < f64::EPSILON);
-        assert!((cold_resistance.maximum - 60.0).abs() < f64::EPSILON);
     }
 
     #[test]

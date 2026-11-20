@@ -16,18 +16,17 @@ const fn test_charge_policy() -> crate::builds::UltimateChargePolicy {
 #[cfg(feature = "server")]
 fn test_loadout(
     ultimate: crate::builds::UltimateDefinitionId,
-    passives: [crate::builds::PassiveDefinitionId; 2],
 ) -> crate::builds::ResolvedMatchLoadout {
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    crate::builds::resolve_build_recipe(
+    crate::builds::resolve_loadout(
         &builds,
         &weapons,
-        crate::builds::BrawlerBuildRecipe {
-            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
+        crate::builds::LoadoutRecipe::test_default(
+            crate::combat::WeaponPresetId(1),
             ultimate,
-            passives,
-        },
+            crate::builds::PassiveDefinitionId(3),
+        ),
     )
     .unwrap()
 }
@@ -223,17 +222,14 @@ fn demolition_activation_spends_charge_and_emits_one_typed_world_effect() {
 
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let loadout = crate::builds::resolve_build_recipe(
+    let loadout = crate::builds::resolve_loadout(
         &builds,
         &weapons,
-        crate::builds::BrawlerBuildRecipe {
-            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
-            ultimate: crate::builds::UltimateDefinitionId(6),
-            passives: [
-                crate::builds::PassiveDefinitionId(1),
-                crate::builds::PassiveDefinitionId(3),
-            ],
-        },
+        crate::builds::LoadoutRecipe::test_default(
+            crate::combat::WeaponPresetId(1),
+            crate::builds::UltimateDefinitionId(6),
+            crate::builds::PassiveDefinitionId(3),
+        ),
     )
     .unwrap();
     let mut app = App::new();
@@ -656,13 +652,7 @@ fn charge_observer_accepts_only_hostile_primary_damage_and_is_idempotent() {
         .init_resource::<AbilityTelemetry>()
         .add_systems(Update, charge::observe_primary_damage_charge);
     let owner = NetworkEntityId(1);
-    let loadout = test_loadout(
-        crate::builds::UltimateDefinitionId(1),
-        [
-            crate::builds::PassiveDefinitionId(1),
-            crate::builds::PassiveDefinitionId(3),
-        ],
-    );
+    let loadout = test_loadout(crate::builds::UltimateDefinitionId(1));
     app.world_mut().spawn((
         Fighter,
         owner,
@@ -954,13 +944,7 @@ fn sentry_characterization_app() -> App {
 
 #[cfg(feature = "server")]
 fn canonical_sentry_tuning() -> sentry::ResolvedSentryTuning {
-    let loadout = test_loadout(
-        crate::builds::UltimateDefinitionId(2),
-        [
-            crate::builds::PassiveDefinitionId(1),
-            crate::builds::PassiveDefinitionId(3),
-        ],
-    );
+    let loadout = test_loadout(crate::builds::UltimateDefinitionId(2));
     sentry::resolve_sentry_tuning_for_test(&loadout.ultimate).unwrap()
 }
 
@@ -973,13 +957,7 @@ fn spawn_sentry_owner(app: &mut App, position: Vec2) -> Entity {
     };
     use avian2d::prelude::Position;
 
-    let loadout = test_loadout(
-        crate::builds::UltimateDefinitionId(2),
-        [
-            crate::builds::PassiveDefinitionId(1),
-            crate::builds::PassiveDefinitionId(3),
-        ],
-    );
+    let loadout = test_loadout(crate::builds::UltimateDefinitionId(2));
     app.world_mut()
         .spawn((
             Fighter,
@@ -1010,13 +988,7 @@ fn spawn_sentry_target(app: &mut App, network_id: NetworkEntityId, position: Vec
             network_id,
             TeamId(1),
             Position(position),
-            test_loadout(
-                crate::builds::UltimateDefinitionId(2),
-                [
-                    crate::builds::PassiveDefinitionId(1),
-                    crate::builds::PassiveDefinitionId(3),
-                ],
-            ),
+            test_loadout(crate::builds::UltimateDefinitionId(2)),
             AbilityState::default(),
             ActiveCombatant,
         ))
@@ -1304,13 +1276,7 @@ fn sentry_revalidates_visibility_and_target_liveness_before_firing() {
     use bevy::prelude::*;
 
     fn custom_tuning() -> sentry::ResolvedSentryTuning {
-        let mut loadout = test_loadout(
-            crate::builds::UltimateDefinitionId(2),
-            [
-                crate::builds::PassiveDefinitionId(1),
-                crate::builds::PassiveDefinitionId(3),
-            ],
-        );
+        let mut loadout = test_loadout(crate::builds::UltimateDefinitionId(2));
         let crate::builds::UltimateParameters::Sentry {
             ref mut acquisition_interval_ticks,
             ..
@@ -1468,15 +1434,9 @@ fn sentry_cleanup_uses_reason_priority_and_purges_only_owned_work() {
             attack: foreign_source,
         })
         .id();
-    let recipe = test_loadout(
-        crate::builds::UltimateDefinitionId(2),
-        [
-            crate::builds::PassiveDefinitionId(1),
-            crate::builds::PassiveDefinitionId(3),
-        ],
-    )
-    .primary_weapon
-    .recipe;
+    let recipe = test_loadout(crate::builds::UltimateDefinitionId(2))
+        .primary_weapon
+        .recipe;
     let bundle = recipe.payload_bundles[0].clone();
     for source in [owned_source, foreign_source] {
         app.world_mut().write_message(PendingPayload {
@@ -1663,30 +1623,24 @@ fn passive_observer_rearms_adrenal_and_primes_quick_cycle_from_primary_facts() {
 
     let builds = crate::builds::BuildCatalog::embedded().unwrap();
     let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-    let runner = crate::builds::resolve_build_recipe(
+    let runner = crate::builds::resolve_loadout(
         &builds,
         &weapons,
-        crate::builds::BrawlerBuildRecipe {
-            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(1)),
-            ultimate: crate::builds::UltimateDefinitionId(1),
-            passives: [
-                crate::builds::PassiveDefinitionId(1),
-                crate::builds::PassiveDefinitionId(3),
-            ],
-        },
+        crate::builds::LoadoutRecipe::test_default(
+            crate::combat::WeaponPresetId(1),
+            crate::builds::UltimateDefinitionId(1),
+            crate::builds::PassiveDefinitionId(3),
+        ),
     )
     .unwrap();
-    let controller = crate::builds::resolve_build_recipe(
+    let controller = crate::builds::resolve_loadout(
         &builds,
         &weapons,
-        crate::builds::BrawlerBuildRecipe {
-            weapon: crate::builds::WeaponChoice::Preset(crate::combat::WeaponPresetId(3)),
-            ultimate: crate::builds::UltimateDefinitionId(2),
-            passives: [
-                crate::builds::PassiveDefinitionId(5),
-                crate::builds::PassiveDefinitionId(6),
-            ],
-        },
+        crate::builds::LoadoutRecipe::test_default(
+            crate::combat::WeaponPresetId(3),
+            crate::builds::UltimateDefinitionId(2),
+            crate::builds::PassiveDefinitionId(5),
+        ),
     )
     .unwrap();
     let mut app = App::new();

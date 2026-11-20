@@ -1,7 +1,7 @@
 //! Icons are selected by advertised semantic family, never by built-in definition IDs.
-pub(in crate::flow::screens::brawlers) use crate::ui::icons::ultimate_icon;
+pub(super) use crate::ui::icons::ultimate_icon;
 use brawler::builds::PassiveKind;
-pub(in crate::flow::screens::brawlers) fn passive_icon(kind: PassiveKind) -> &'static str {
+pub(super) fn passive_icon(kind: PassiveKind) -> &'static str {
     match kind {
         PassiveKind::LightweightFrame => "feather",
         PassiveKind::ReinforcedFrame | PassiveKind::Tenacity => "shield",

@@ -132,13 +132,21 @@ mod tests {
 
     #[test]
     fn common_assembly_stays_controller_neutral_and_callers_add_ownership() {
-        let builds = crate::builds::BuildCatalog::embedded().unwrap();
-        let weapons = crate::combat::WeaponCatalog::embedded().unwrap();
-        let connected_loadout =
-            crate::builds::resolve_direct_diagnostic_loadout(&builds, &weapons, 1).unwrap();
-        let practice_loadout =
-            crate::builds::resolve_direct_diagnostic_loadout(&builds, &weapons, 2).unwrap();
-        let fighter_body = builds.fighter_body;
+        let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
+        let diagnostic = |player_id| {
+            catalogs
+                .characters
+                .resolve_direct_diagnostic(
+                    &catalogs.builds,
+                    &catalogs.weapons,
+                    &catalogs.parts,
+                    player_id,
+                )
+                .unwrap()
+        };
+        let connected_loadout = diagnostic(1);
+        let practice_loadout = diagnostic(2);
+        let fighter_body = catalogs.builds.fighter_body;
         let mut world = World::new();
         let mut queue = CommandQueue::default();
         let (connected, practice);

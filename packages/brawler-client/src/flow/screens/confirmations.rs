@@ -1,35 +1,29 @@
 //! Shared fullscreen confirmations; reducers retain action and authority ownership.
 use super::{
-    brawlers::DeleteBrawlerConfirmationRoot,
     scroll::{clamp_scroll_offset, normalized_wheel_delta, offset_keeping_interval_visible},
     shared::{FlowButton, FlowNavigation},
 };
-use crate::ui::icons;
 use crate::{
-    ClientAssetHandles, ClientProfileModel,
+    ClientAssetHandles,
     flow::{
         actions::FlowUiAction,
         model::{ClientFlow, ClientOverlay},
-        reducer::PendingDeletedBrawler,
     },
     ui::{
         surface::{Surface, SurfaceState},
-        theme::{ACCENT, INK, TEXT, font, shell_background},
+        theme::{INK, TEXT, font, shell_background},
     },
 };
 use bevy::{
     input::mouse::MouseWheel,
     prelude::*,
-    ui::{InteractionDisabled, ScrollPosition, UiScale},
+    ui::{ScrollPosition, UiScale},
     window::PrimaryWindow,
 };
 
 #[derive(Component, PartialEq, Clone)]
 pub(in crate::flow) struct ConfirmationRoot {
     overlay: ClientOverlay,
-    name: String,
-    error: Option<String>,
-    pending: bool,
     size: Vec2,
 }
 #[derive(Component)]
@@ -52,8 +46,6 @@ pub(in crate::flow) fn present_confirmations(
     mut commands: Commands,
     flow: Res<State<ClientFlow>>,
     overlay: Res<ClientOverlay>,
-    profile: Res<ClientProfileModel>,
-    deletion: Res<PendingDeletedBrawler>,
     assets: ConfirmationAssets,
     mut navigation: ResMut<FlowNavigation>,
     roots: Query<(Entity, &ConfirmationRoot)>,
@@ -62,7 +54,7 @@ pub(in crate::flow) fn present_confirmations(
         (*flow.get(), overlay.as_ref()),
         (
             ClientFlow::Dashboard,
-            ClientOverlay::DeleteBrawlerConfirmation(_) | ClientOverlay::ChangeServerConfirmation
+            ClientOverlay::ChangeServerConfirmation
         ) | (ClientFlow::Match, ClientOverlay::LeaveConfirmation)
     );
     if !valid {
@@ -77,25 +69,8 @@ pub(in crate::flow) fn present_confirmations(
         .next()
         .map_or(Vec2::new(1440., 900.), |w| Vec2::new(w.width(), w.height()))
         / assets.scale.as_deref().map_or(1., |s| s.0);
-    let name = if let ClientOverlay::DeleteBrawlerConfirmation(id) = overlay.as_ref() {
-        profile
-            .snapshot()
-            .and_then(|s| s.brawlers.iter().find(|b| b.id == *id))
-            .map_or("Brawler", |b| b.name.as_str())
-            .to_owned()
-    } else {
-        String::new()
-    };
-    let is_delete = matches!(*overlay, ClientOverlay::DeleteBrawlerConfirmation(_));
     let key = ConfirmationRoot {
         overlay: overlay.clone(),
-        name,
-        error: if is_delete {
-            deletion.error.clone()
-        } else {
-            None
-        },
-        pending: is_delete && profile.pending(),
         size,
     };
     if roots.iter().any(|(_, old)| *old == key) {
@@ -107,31 +82,29 @@ pub(in crate::flow) fn present_confirmations(
     for (e, _) in &roots {
         commands.entity(e).despawn();
     }
-    let mut root = commands.spawn((
-        key.clone(),
-        DespawnOnExit(*flow.get()),
-        GlobalZIndex(610),
-        shell_background(),
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(0),
-            right: px(0),
-            top: px(0),
-            bottom: px(0),
-            flex_direction: FlexDirection::Column,
-            ..default()
-        },
-    ));
-    if is_delete {
-        root.insert(DeleteBrawlerConfirmationRoot);
-    }
-    root.with_children(|p| {
-        ConfirmationView {
-            key: &key,
-            assets: &assets,
-        }
-        .draw(p);
-    });
+    commands
+        .spawn((
+            key.clone(),
+            DespawnOnExit(*flow.get()),
+            GlobalZIndex(610),
+            shell_background(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+        ))
+        .with_children(|p| {
+            ConfirmationView {
+                key: &key,
+                assets: &assets,
+            }
+            .draw(p);
+        });
 }
 struct ConfirmationView<'a, 'w, 's> {
     key: &'a ConfirmationRoot,
@@ -198,14 +171,6 @@ impl ConfirmationView<'_, '_, '_> {
     }
     fn content(&self, body: &mut ChildSpawnerCommands, compact: bool) {
         let (title, copy, keep, confirm, keep_action, confirm_action) = match self.key.overlay {
-            ClientOverlay::DeleteBrawlerConfirmation(_) => (
-                "DELETE BRAWLER?",
-                "This cannot be undone.",
-                "KEEP BRAWLER",
-                "DELETE",
-                FlowUiAction::CancelDeleteBrawler,
-                FlowUiAction::ConfirmDeleteBrawler,
-            ),
             ClientOverlay::LeaveConfirmation => (
                 "LEAVE MATCH?",
                 "Return to the dashboard.",
@@ -225,21 +190,7 @@ impl ConfirmationView<'_, '_, '_> {
         };
         self.icon(body);
         self.text(body, title, if compact { 44. } else { 76. }, TEXT);
-        if !self.key.name.is_empty() {
-            self.text(
-                body,
-                &self.key.name,
-                if compact { 36. } else { 58. },
-                ACCENT,
-            );
-        }
         self.text(body, copy, if compact { 24. } else { 32. }, TEXT);
-        if self.key.pending {
-            self.text(body, "Deleting…", 22., TEXT);
-        }
-        if let Some(error) = &self.key.error {
-            self.text(body, error, 22., TEXT);
-        }
         body.spawn(Node {
             width: percent(100),
             max_width: px(1200),
@@ -296,28 +247,10 @@ impl ConfirmationView<'_, '_, '_> {
                 ..default()
             },
         ));
-        if self.key.pending {
-            e.insert(InteractionDisabled);
-        }
         e.with_children(|p| self.text(p, label, if compact { 26. } else { 34. }, TEXT));
     }
     fn icon(&self, p: &mut ChildSpawnerCommands) {
-        if matches!(
-            self.key.overlay,
-            ClientOverlay::DeleteBrawlerConfirmation(_)
-        ) {
-            if let Some(server) = self.assets.server.as_deref() {
-                p.spawn((
-                    ImageNode::new(server.load(icons::path("trash"))),
-                    Node {
-                        width: px(96),
-                        height: px(96),
-                        flex_shrink: 0.,
-                        ..default()
-                    },
-                ));
-            }
-        } else {
+        {
             p.spawn(Node {
                 width: px(112),
                 height: px(88),

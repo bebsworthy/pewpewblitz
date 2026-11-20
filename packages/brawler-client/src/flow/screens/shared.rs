@@ -1,13 +1,9 @@
 //! Shared flow-screen roots, buttons, navigation, and interaction presentation.
 
 use super::{dashboard::DashboardButtonStyle, game_select::GameTypeSelectionDraft};
+use crate::flow::{actions::FlowUiAction, input::overlay_allows_button, model::ClientOverlay};
 use crate::ui::surface::{Surface, SurfaceBurst, SurfaceState};
-use crate::{
-    ClientLobbyMembership,
-    flow::{actions::FlowUiAction, input::overlay_allows_button, model::ClientOverlay},
-};
 use bevy::{prelude::*, ui::InteractionDisabled};
-use lightyear::prelude::client::Client;
 
 #[derive(Resource, Default)]
 pub(in crate::flow) struct FlowNavigation {
@@ -119,11 +115,8 @@ pub(in crate::flow) fn update_flow_button_chrome(
     navigation: Res<FlowNavigation>,
     overlay: Res<ClientOverlay>,
     game_draft: Res<GameTypeSelectionDraft>,
-    equipment: Option<Res<super::equipment::WeaponEquipmentDraft>>,
-    creation: Option<Res<super::brawlers::BrawlerCreationDraft>>,
-    abilities: Option<Res<super::brawlers::BrawlerEditDraft>>,
+    profile: Option<Res<crate::ClientProfileModel>>,
     map_maker: Option<Res<super::map_maker::MapMakerRuntime>>,
-    memberships: Query<&ClientLobbyMembership, With<Client>>,
     mut buttons: Query<(
         Entity,
         &FlowButton,
@@ -134,42 +127,25 @@ pub(in crate::flow) fn update_flow_button_chrome(
         Has<super::map_maker::FlatControl>,
     )>,
 ) {
-    let selected_brawler = memberships
-        .iter()
-        .next()
-        .and_then(|m| m.profile.selected_brawler_id);
+    // The pick being saved shows as current at once; the server's answer confirms or reverts it.
+    let shown_pick = profile.as_deref().and_then(|profile| {
+        profile.pending_choice().or_else(|| {
+            profile
+                .snapshot()
+                .map(brawler::profiles::ProfileSnapshot::selection)
+        })
+    });
     for (entity, button, disabled, dashboard, state, role, flat) in &mut buttons {
         if matches!(dashboard, Some(DashboardButtonStyle::Preview)) {
             continue;
         }
         let current = match button.action {
             FlowUiAction::SelectGameTypeDraft(index) => game_draft.selected_index == Some(index),
-            FlowUiAction::OpenBrawlerDetails(id) => selected_brawler == Some(id),
-            FlowUiAction::SelectEquipmentSlot(slot) => equipment
-                .as_deref()
-                .is_some_and(|d| d.selected_slot == slot),
-            FlowUiAction::EquipWeaponPart(id) => equipment
-                .as_deref()
-                .is_some_and(|d| d.equipped_part_ids[d.selected_slot] == Some(id)),
-            FlowUiAction::UnequipWeaponPart => equipment
-                .as_deref()
-                .is_some_and(|d| d.equipped_part_ids[d.selected_slot].is_none()),
-            FlowUiAction::ChooseCreationFighter(id) => creation
-                .as_deref()
-                .is_some_and(|d| d.fighter_profile_id == id),
-            FlowUiAction::ChooseCreationWeapon(id) => {
-                creation.as_deref().is_some_and(|d| d.weapon_base_id == id)
+            FlowUiAction::PickCharacter(id) => {
+                shown_pick.is_some_and(|pick| pick.character_id == id)
             }
-            FlowUiAction::ChooseCreationUltimate(id) => {
-                creation.as_deref().is_some_and(|d| d.ultimate == id)
-            }
-            FlowUiAction::ChooseBrawlerUltimate(id) => {
-                abilities.as_deref().is_some_and(|d| d.ultimate_id == id)
-            }
-            FlowUiAction::ChooseBrawlerPassive(id) => abilities.as_deref().is_some_and(|d| {
-                matches!(d.picker,
-                Some(super::brawlers::AbilityPicker::Passive(slot)) if d.passive_ids[slot] == id)
-            }),
+            FlowUiAction::PickUltimate(id) => shown_pick.is_some_and(|pick| pick.ultimate_id == id),
+            FlowUiAction::PickPassive(id) => shown_pick.is_some_and(|pick| pick.passive_id == id),
             FlowUiAction::MapMakerSelectAsset(_)
             | FlowUiAction::MapMakerSelectCategory(_)
             | FlowUiAction::MapMakerToggleSearch
@@ -205,11 +181,7 @@ pub(in crate::flow) fn surface_role(action: &FlowUiAction) -> Surface {
     use FlowUiAction as A;
     match action {
         A::Back
-        | A::CloseBrawlerList
-        | A::BackToBrawlerList
-        | A::CancelWeaponEquipment
-        | A::CancelBrawlerEdit
-        | A::CancelCreateBrawler
+        | A::CloseBrawlers
         | A::CancelGameType
         | A::CancelPracticeMaps
         | A::CloseMapMaker
@@ -218,33 +190,26 @@ pub(in crate::flow) fn surface_role(action: &FlowUiAction) -> Surface {
         | A::CloseDashboardMenu => Surface::Back,
         A::JoinQueue
         | A::StartPractice
-        | A::SelectBrawler(_)
         | A::ConfirmGameType
-        | A::ConfirmCreateBrawler
         | A::Connect
         | A::QueueAgain
         | A::TestAuthoredMap
         | A::MapMakerToggleValidation
         | A::OpenDashboardMenu => Surface::Primary,
-        A::OpenPracticeMaps | A::OpenBrawlerList | A::OpenMapMaker | A::SaveMapDraft => {
+        A::OpenPracticeMaps | A::OpenBrawlers | A::OpenMapMaker | A::SaveMapDraft => {
             Surface::Secondary
         }
-        A::OpenBrawlerDetails(_)
-        | A::CreateBrawler
-        | A::SelectEquipmentSlot(_)
-        | A::EquipWeaponPart(_)
-        | A::UnequipWeaponPart
+        A::PickCharacter(_)
+        | A::PickUltimate(_)
+        | A::PickPassive(_)
         | A::SelectGameTypeDraft(_)
         | A::MapMakerSelectAsset(_)
         | A::MapMakerSelectCategory(_)
         | A::MapMakerToggleSearch
         | A::MapMakerClearSearch => Surface::Card,
-        A::OpenWeaponEquipment(_) | A::OpenBrawlerEditor(_) | A::OpenGameTypeSelect => {
-            Surface::Panel
-        }
+        A::OpenGameTypeSelect => Surface::Panel,
         A::EditAddress | A::EditName => Surface::Field,
         A::JoinSaved(_) => Surface::Row,
-        A::BeginBrawlerNameEdit | A::ConfirmBrawlerEdit => Surface::Quiet,
         A::MapMakerClear | A::MapMakerDeleteSelection => Surface::Danger,
         _ => Surface::Action,
     }

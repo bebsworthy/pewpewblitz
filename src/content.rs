@@ -438,7 +438,7 @@ mod tests {
         let baseline = gameplay_content_fingerprint(&weapons, &maps, &builds).unwrap();
 
         let mut changed = builds;
-        changed.direct_diagnostic.weapon_base_ids.rotate_left(1);
+        changed.direct_diagnostic.picks.rotate_left(1);
         changed.validate_weapon_references(&weapons).unwrap();
 
         assert_ne!(
@@ -455,7 +455,8 @@ mod tests {
             .resource_mut::<crate::builds::BuildCatalogResource>()
             .0
             .direct_diagnostic
-            .weapon_base_ids[0] = crate::profiles::WeaponBaseId(u16::MAX);
+            .picks[0]
+            .character_id = crate::characters::CharacterId(u16::MAX);
         assert!(gameplay_content_fingerprint_from_world(app.world()).is_err());
     }
 }

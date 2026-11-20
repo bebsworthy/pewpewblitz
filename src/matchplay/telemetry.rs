@@ -83,7 +83,8 @@ pub struct MatchParticipantSummary {
     pub weapon_preset: Option<WeaponPresetId>,
     pub total_points: Option<u8>,
     pub ultimate_id: Option<crate::builds::UltimateDefinitionId>,
-    pub passive_ids: Option<[crate::builds::PassiveDefinitionId; 2]>,
+    pub passive_ids:
+        Option<[crate::builds::PassiveDefinitionId; crate::builds::PASSIVE_SLOT_COUNT]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

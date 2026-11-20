@@ -72,16 +72,14 @@ fn spawn_headless_fighters(app: &mut App) -> Vec<Entity> {
         .resource::<brawler::combat::WeaponCatalogResource>()
         .0
         .clone();
-    let loadout = brawler::builds::resolve_saved_brawler_recipe(
+    let loadout = brawler::builds::resolve_loadout(
         &builds,
         &weapons,
-        brawler::profiles::FighterProfileId(1),
-        brawler::profiles::WeaponBaseId(1),
-        brawler::builds::UltimateDefinitionId(1),
-        [
+        brawler::builds::LoadoutRecipe::test_default(
+            WeaponPresetId(1),
+            brawler::builds::UltimateDefinitionId(1),
             brawler::builds::PassiveDefinitionId(3),
-            brawler::builds::PassiveDefinitionId(4),
-        ],
+        ),
     )
     .unwrap();
     let mut entities = Vec::with_capacity(100);
@@ -161,16 +159,14 @@ fn spawn_m05_fighter(
         .clone();
     let build_catalog =
         brawler::builds::BuildCatalog::embedded().expect("embedded build catalog is valid");
-    let loadout = brawler::builds::resolve_saved_brawler_recipe(
+    let loadout = brawler::builds::resolve_loadout(
         &build_catalog,
         &weapon_catalog,
-        brawler::profiles::FighterProfileId(1),
-        brawler::profiles::WeaponBaseId(preset_id),
-        brawler::builds::UltimateDefinitionId(1),
-        [
+        brawler::builds::LoadoutRecipe::test_default(
+            WeaponPresetId(preset_id),
+            brawler::builds::UltimateDefinitionId(1),
             brawler::builds::PassiveDefinitionId(3),
-            brawler::builds::PassiveDefinitionId(4),
-        ],
+        ),
     )
     .expect("benchmark loadout resolves");
     let (fighter_id, team, health, weapon) =
@@ -366,17 +362,14 @@ fn m08_four_sentries_target_fire_and_cleanup_within_fixed_tick_budget() {
         .resource::<brawler::combat::WeaponCatalogResource>()
         .0
         .clone();
-    let controller = brawler::builds::resolve_build_recipe(
+    let controller = brawler::builds::resolve_loadout(
         &build_catalog,
         &weapon_catalog,
-        brawler::builds::BrawlerBuildRecipe {
-            weapon: brawler::builds::WeaponChoice::Preset(WeaponPresetId(3)),
-            ultimate: brawler::builds::UltimateDefinitionId(2),
-            passives: [
-                brawler::builds::PassiveDefinitionId(5),
-                brawler::builds::PassiveDefinitionId(6),
-            ],
-        },
+        brawler::builds::LoadoutRecipe::test_default(
+            WeaponPresetId(3),
+            brawler::builds::UltimateDefinitionId(2),
+            brawler::builds::PassiveDefinitionId(5),
+        ),
     )
     .unwrap();
     let mut owners = Vec::new();

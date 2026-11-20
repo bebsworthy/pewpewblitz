@@ -19,50 +19,57 @@ pub struct PassiveDefinitionId(pub u16);
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct DeployableId(pub u64);
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PulsePower {
-    Light,
-    Balanced,
-    Heavy,
-}
+/// A character has one passive, chosen from its two options (BRL-egn6). Combat reads passives only
+/// through [`ResolvedPassives`], so the slot count is a representation ceiling kept here.
+pub const PASSIVE_SLOT_COUNT: usize = 1;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PulseReach {
-    Compact,
-    Standard,
-    Long,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PulseMagazine {
-    Quick,
-    Standard,
-    Expanded,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum WeaponChoice {
-    Preset(WeaponPresetId),
-    CustomPulse {
-        power: PulsePower,
-        reach: PulseReach,
-        magazine: PulseMagazine,
-    },
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BrawlerBuildRecipe {
-    pub weapon: WeaponChoice,
+/// Everything one authoritative loadout resolution reads: the character's own stats and signature
+/// weapon, and the ultimate and passive the player chose for it.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct LoadoutRecipe {
+    pub character_id: crate::characters::CharacterId,
+    pub fighter_stats: ResolvedFighterStats,
+    pub weapon_base: WeaponPresetId,
+    pub weapon_modifiers: crate::weapon_parts::CanonicalWeaponModifiers,
     pub ultimate: UltimateDefinitionId,
-    pub passives: [PassiveDefinitionId; 2],
+    pub passive: PassiveDefinitionId,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl LoadoutRecipe {
+    /// A test recipe on the Normal-body baseline stats (1000 health, 70 speed) without parts.
+    #[must_use]
+    pub fn test_default(
+        weapon_base: WeaponPresetId,
+        ultimate: UltimateDefinitionId,
+        passive: PassiveDefinitionId,
+    ) -> Self {
+        Self {
+            character_id: crate::characters::CharacterId(1),
+            fighter_stats: ResolvedFighterStats {
+                maximum_health: 1_000,
+                movement_speed: 70.0,
+                health_recovery_rate: 100,
+                idle_attack_delay_ticks: 180,
+                reveal_proximity_radius: 160.0,
+                cold_capacity: 1_000,
+                cold_resistance_basis_points: 0,
+                poison_resistance_basis_points: 0,
+                fire_resistance_basis_points: 0,
+            },
+            weapon_base,
+            weapon_modifiers: crate::weapon_parts::CanonicalWeaponModifiers::default(),
+            ultimate,
+            passive,
+        }
+    }
 }
 
 /// Public, reproducible result of authoritative build resolution.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AcceptedBuildSummary {
-    pub canonical_recipe: BrawlerBuildRecipe,
+    pub character: crate::characters::CharacterChoice,
     pub identity: SelectedBuild,
-    pub total_points: u8,
 }
 
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -356,11 +363,22 @@ pub(crate) const PASSIVE_TENACITY_SLOW_BASIS_POINTS_BOUNDS: PassiveParameterBoun
     PassiveParameterBounds::new(1, 10_000);
 pub(crate) const PASSIVE_ELEMENTAL_RESISTANCE_BASIS_POINTS_BOUNDS: PassiveParameterBounds<u16> =
     PassiveParameterBounds::new(1, 6_000);
+pub(crate) const PASSIVE_FRAME_HEALTH_BASIS_POINTS_BOUNDS: PassiveParameterBounds<u16> =
+    PassiveParameterBounds::new(5_000, 20_000);
+pub(crate) const PASSIVE_FRAME_SPEED_BASIS_POINTS_BOUNDS: PassiveParameterBounds<u16> =
+    PassiveParameterBounds::new(5_000, 20_000);
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PassiveParameters {
-    LightweightFrame,
-    ReinforcedFrame,
+    /// Scales the character's own maximum health and movement speed (10 000 = unchanged).
+    LightweightFrame {
+        maximum_health_basis_points: u16,
+        movement_speed_basis_points: u16,
+    },
+    ReinforcedFrame {
+        maximum_health_basis_points: u16,
+        movement_speed_basis_points: u16,
+    },
     AdrenalResponse {
         duration_ticks: u64,
         rearm_ticks: u64,
@@ -400,7 +418,7 @@ pub struct ResolvedPassive {
 /// The immutable passive capabilities installed for one resolved loadout generation.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResolvedPassives {
-    pub passives: [ResolvedPassive; 2],
+    pub passives: [ResolvedPassive; PASSIVE_SLOT_COUNT],
 }
 
 impl ResolvedPassives {
@@ -415,11 +433,13 @@ impl ResolvedPassives {
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ResolvedMatchLoadout {
     pub identity: SelectedBuild,
+    /// The stable roster identity every client maps to its presentation (model and tint).
+    pub character_id: crate::characters::CharacterId,
     pub total_points: u8,
     pub fighter_stats: ResolvedFighterStats,
     pub primary_weapon: ResolvedWeapon,
     pub ultimate: ResolvedUltimate,
-    pub passives: [ResolvedPassive; 2],
+    pub passives: [ResolvedPassive; PASSIVE_SLOT_COUNT],
 }
 
 /// Server-local immutable components projected atomically from a resolved loadout generation.

@@ -44,11 +44,11 @@ export function PlayerLoadouts({ players }: { players: PlayerLoadout[] }) {
                 </div>
               </header>
               <dl>
-                <div><dt>Fighter</dt><dd>{player.fighterProfile.displayName}</dd></div>
+                <div><dt>Character</dt><dd>{player.character.displayName}</dd></div>
                 <div><dt>Weapon</dt><dd>{player.weaponBase.displayName}</dd></div>
                 <div><dt>Ultimate</dt><dd>{player.ultimate.displayName}</dd></div>
                 <div>
-                  <dt>Passives</dt>
+                  <dt>Passive</dt>
                   <dd>{player.passives.map((passive) => passive.displayName).join(" · ")}</dd>
                 </div>
               </dl>

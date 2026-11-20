@@ -4,7 +4,7 @@
 use crate::combat::TestDummy;
 use crate::{
     VERSION,
-    combat::{ServerCombatPlugin, TeamId, WeaponCatalogResource, WeaponPresetId},
+    combat::{ServerCombatPlugin, TeamId, WeaponPresetId},
     config::{MatchRulesProfile, NetworkTransport, ServerNetworkConfig},
     content::GameplayContentPlugin,
     gameplay::GameplayPlugin,
@@ -557,8 +557,7 @@ fn initialize_sessions(
 #[derive(SystemParam)]
 struct ServerHelloContent<'w, 's> {
     role: Res<'w, ServerRoleResource>,
-    builds: Res<'w, crate::builds::BuildCatalogResource>,
-    weapon_catalog: Res<'w, WeaponCatalogResource>,
+    catalogs: crate::characters::LoadoutCatalogResources<'w>,
     spawn_points: Res<'w, SpawnPointCatalog>,
     resolved_map: Res<'w, ResolvedMap>,
     movement_tuning: Res<'w, MovementTuning>,
@@ -595,8 +594,7 @@ impl ServerHelloContent<'_, '_> {
             spawn_points: &self.spawn_points,
             match_state,
             movement_skin_width: self.movement_tuning.skin_width,
-            builds: &self.builds.0,
-            weapons: &self.weapon_catalog.0,
+            catalogs: self.catalogs.view(),
             map_instance_id: self.resolved_map.snapshot.identity.instance_id,
         });
         match plan {
@@ -604,7 +602,7 @@ impl ServerHelloContent<'_, '_> {
                 commands,
                 connection,
                 session,
-                self.builds.0.fighter_body,
+                self.catalogs.view().builds.fighter_body,
                 plan,
                 batch,
                 self.role.manifest().is_some(),

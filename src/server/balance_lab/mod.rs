@@ -16,9 +16,9 @@ use crate::{
 };
 use crate::{
     builds::{
-        BuildCatalog, BuildCatalogResource, ElementalFieldEffect, FighterStatProfiles,
-        PassiveDefinitionId, PassiveKind, PassiveParameters, UltimateChargePolicy,
-        UltimateDefinitionId, UltimateKind, UltimateParameters,
+        BuildCatalog, BuildCatalogResource, ElementalFieldEffect, PassiveDefinitionId, PassiveKind,
+        PassiveParameters, UltimateChargePolicy, UltimateDefinitionId, UltimateKind,
+        UltimateParameters,
     },
     combat::{
         DamageFalloff, DeliveryMethod, FiringPattern, PayloadEffectDefinition, RecipientPolicy,
@@ -38,7 +38,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 20;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 21;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -185,7 +185,6 @@ impl EffectTileTuning {
 struct BalanceLabSnapshotV3 {
     schema_version: u16,
     condition_rules: crate::combat::CombatConditionRules,
-    fighter_profiles: FighterStatProfiles,
     ultimate_charge: UltimateChargePolicy,
     weapons: Vec<WeaponPresetTuning>,
     ultimates: Vec<UltimateTuning>,
@@ -206,7 +205,6 @@ impl BalanceLabSnapshotV3 {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
             condition_rules: crate::combat::CombatConditionRules::embedded()
                 .expect("embedded combat-condition rules are valid"),
-            fighter_profiles: builds.fighter_profiles,
             ultimate_charge: builds.ultimate_charge,
             weapons: weapons
                 .presets
@@ -357,6 +355,35 @@ struct BalanceLabStartupConfig {
     persistence_path: PathBuf,
 }
 
+/// The roster content Balance Lab does not tune (characters and authored weapon parts), paired
+/// with the revised build and weapon catalogs a candidate resolves against.
+struct UntunedRosterContent {
+    characters: crate::characters::CharacterCatalog,
+    parts: crate::weapon_parts::WeaponPartCatalog,
+}
+
+impl UntunedRosterContent {
+    fn embedded() -> Result<Self, String> {
+        Ok(Self {
+            characters: crate::characters::CharacterCatalog::embedded()?,
+            parts: crate::weapon_parts::WeaponPartCatalog::embedded()?,
+        })
+    }
+
+    const fn with<'a>(
+        &'a self,
+        builds: &'a BuildCatalog,
+        weapons: &'a WeaponCatalog,
+    ) -> crate::characters::LoadoutCatalogs<'a> {
+        crate::characters::LoadoutCatalogs {
+            characters: &self.characters,
+            builds,
+            weapons,
+            parts: &self.parts,
+        }
+    }
+}
+
 fn projected_player_loadouts(
     world: &World,
     builds: &BuildCatalog,
@@ -366,7 +393,8 @@ fn projected_player_loadouts(
         .resource::<ServerRoleResource>()
         .manifest()
         .ok_or_else(|| "Practice manifest disappeared during startup".to_string())?;
-    roster::from_manifest(manifest, builds, weapons)
+    let content = UntunedRosterContent::embedded()?;
+    roster::from_manifest(manifest, content.with(builds, weapons))
 }
 
 fn validate_revised_manifest_loadouts(
@@ -378,9 +406,10 @@ fn validate_revised_manifest_loadouts(
         .resource::<ServerRoleResource>()
         .manifest()
         .ok_or_else(|| "Practice manifest disappeared during startup".to_string())?;
+    let content = UntunedRosterContent::embedded()?;
     for snapshot in manifest_selections(manifest)?.into_values() {
         snapshot
-            .resolve_revised_balance_lab_catalogs(builds, weapons)
+            .resolve_revised_balance_lab_catalogs(content.with(builds, weapons))
             .map_err(|error| {
                 format!("admitted loadout is incompatible with persisted tuning: {error:?}")
             })?;
@@ -579,7 +608,7 @@ fn validate_mode_specific_tuning(
 
 fn manifest_selections(
     manifest: &brawler_routing::MatchManifestV1,
-) -> Result<BTreeMap<u64, crate::profiles::MatchBuildSnapshotV3>, String> {
+) -> Result<BTreeMap<u64, crate::profiles::MatchCharacterSnapshot>, String> {
     let mut selections = BTreeMap::new();
     for (player_id, bytes) in manifest
         .participants
@@ -592,7 +621,7 @@ fn manifest_selections(
                 .map(|row| (row.player_id.get(), &row.build_snapshot)),
         )
     {
-        let snapshot = crate::profiles::MatchBuildSnapshotV3::decode(bytes)
+        let snapshot = crate::profiles::MatchCharacterSnapshot::decode(bytes)
             .map_err(|_| "invalid admitted build snapshot".to_string())?;
         if selections.insert(player_id, snapshot).is_some() {
             return Err("duplicate admitted player build".into());
@@ -646,12 +675,11 @@ fn validate_snapshot(
     next_weapons.recipe_policy.max_map_destruction_radius = 128.0;
     next_weapons.validate()?;
     let mut next_builds = current_builds.clone();
-    next_builds.fighter_profiles = candidate.fighter_profiles;
     next_builds.ultimate_charge = candidate.ultimate_charge;
     apply_ultimate_tuning(candidate, baseline, &mut next_builds)?;
     apply_passive_tuning(candidate, baseline, &mut next_builds)?;
     next_builds.validate()?;
-    validate_saved_brawler_combinations(&next_builds, &next_weapons)?;
+    validate_character_combinations(&next_builds, &next_weapons)?;
     let mut next_maps = current_maps.clone();
     if candidate.barrel.damage_profile.id != baseline.barrel.damage_profile.id
         || candidate.barrel.explosion_profile.id != baseline.barrel.explosion_profile.id
@@ -736,90 +764,17 @@ fn validate_effect_tile_tuning_topology(
     Ok(())
 }
 
-fn validate_saved_brawler_combinations(
+/// Every roster character's every option combination, and every direct-diagnostic pick, still
+/// resolves against the revised catalogs.
+fn validate_character_combinations(
     builds: &BuildCatalog,
     weapons: &WeaponCatalog,
 ) -> Result<(), String> {
-    let advertised = crate::profiles::AdvertisedBrawlerCatalog::from_content(builds, weapons)?;
-    let ultimate_id = advertised
-        .ultimates
-        .first()
-        .ok_or_else(|| "revised catalog has no ultimate".to_string())?
-        .id;
-    let mut passives = advertised
-        .selectable_passives()
-        .map(|definition| definition.id);
-    let passive_ids = [
-        passives
-            .next()
-            .ok_or_else(|| "revised catalog lacks selectable passives".to_string())?,
-        passives
-            .next()
-            .ok_or_else(|| "revised catalog lacks selectable passives".to_string())?,
-    ];
-    for fighter_profile in &advertised.fighter_profiles {
-        for weapon_base in &advertised.weapon_bases {
-            let brawler = crate::profiles::SavedBrawler {
-                id: crate::profiles::SavedBrawlerId::new(
-                    u128::from(fighter_profile.id.0) * 100 + u128::from(weapon_base.id.0),
-                )
-                .expect("bounded nonzero test identity"),
-                creation_ordinal: u64::from(fighter_profile.id.0) * 100
-                    + u64::from(weapon_base.id.0),
-                name: "Balance candidate".into(),
-                fighter_profile_id: fighter_profile.id,
-                weapon_base_id: weapon_base.id,
-                ultimate_id,
-                passive_ids,
-                equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-                revision: crate::profiles::ProfileRevision::INITIAL,
-            };
-            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, builds, weapons)
-                .map_err(|_| {
-                    "revised fighter profile or weapon base did not resolve".to_string()
-                })?;
-        }
-    }
-    let parts = crate::weapon_parts::WeaponPartCatalog::embedded()?;
-    let canonical_weapons = WeaponCatalog::embedded()?;
-    let slot_count = u32::try_from(crate::weapon_parts::WEAPON_PART_SLOT_COUNT)
-        .expect("weapon-part slot count fits u32");
-    for mask in 0_u16..(1_u16 << parts.definitions.len()) {
-        if mask.count_ones() > slot_count {
-            continue;
-        }
-        let effects = parts
-            .definitions
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| mask & (1 << index) != 0)
-            .flat_map(|(_, definition)| definition.effects.iter().copied());
-        let Ok(modifiers) = crate::weapon_parts::aggregate_weapon_part_effects(effects) else {
-            continue;
-        };
-        for weapon_base in &advertised.weapon_bases {
-            if crate::weapon_parts::resolve_weapon_parts(
-                &canonical_weapons,
-                builds.fighter_body,
-                WeaponPresetId(weapon_base.id.0),
-                modifiers,
-            )
-            .is_err()
-            {
-                continue;
-            }
-            crate::weapon_parts::resolve_weapon_parts(
-                weapons,
-                builds.fighter_body,
-                WeaponPresetId(weapon_base.id.0),
-                modifiers,
-            )
-            .map_err(|_| {
-                "revised weapon base invalidated a legal starter-part combination".to_string()
-            })?;
-        }
-    }
-    Ok(())
+    let content = UntunedRosterContent::embedded()?;
+    content
+        .characters
+        .validate_references(builds, weapons, &content.parts)
+        .map_err(|error| format!("revised catalogs break a roster character: {error}"))
 }
 
 fn apply_ultimate_tuning(
@@ -904,11 +859,11 @@ fn same_passive_parameter_shape(expected: PassiveParameters, supplied: PassivePa
     matches!(
         (expected, supplied),
         (
-            PassiveParameters::LightweightFrame,
-            PassiveParameters::LightweightFrame
+            PassiveParameters::LightweightFrame { .. },
+            PassiveParameters::LightweightFrame { .. }
         ) | (
-            PassiveParameters::ReinforcedFrame,
-            PassiveParameters::ReinforcedFrame
+            PassiveParameters::ReinforcedFrame { .. },
+            PassiveParameters::ReinforcedFrame { .. }
         ) | (
             PassiveParameters::AdrenalResponse { .. },
             PassiveParameters::AdrenalResponse { .. }
@@ -1203,33 +1158,31 @@ fn publish_result(
 mod tests {
     use super::*;
 
-    pub(super) fn admitted_brawler(
+    /// One roster character's default pick, admitted the way the lobby admits it.
+    pub(super) fn admitted_character(
         builds: &BuildCatalog,
         weapons: &WeaponCatalog,
-        fighter_profile_id: u16,
-        weapon_base_id: u16,
-    ) -> (crate::profiles::MatchBuildSnapshotV3, ResolvedMatchLoadout) {
-        let identity = fighter_profile_id * 10 + weapon_base_id;
-        let brawler = crate::profiles::SavedBrawler {
-            id: crate::profiles::SavedBrawlerId::new(u128::from(identity)).unwrap(),
-            creation_ordinal: u64::from(identity),
-            name: format!("Lab {identity}"),
-            fighter_profile_id: crate::profiles::FighterProfileId(fighter_profile_id),
-            weapon_base_id: crate::profiles::WeaponBaseId(weapon_base_id),
-            ultimate_id: UltimateDefinitionId(1),
-            passive_ids: [PassiveDefinitionId(3), PassiveDefinitionId(4)],
-            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-            revision: crate::profiles::ProfileRevision::INITIAL,
-        };
+        character: u16,
+    ) -> (
+        crate::profiles::MatchCharacterSnapshot,
+        ResolvedMatchLoadout,
+    ) {
+        let content = UntunedRosterContent::embedded().unwrap();
+        let catalogs = content.with(builds, weapons);
+        let definition = catalogs
+            .characters
+            .character(crate::characters::CharacterId(character))
+            .unwrap();
+        let choice = crate::characters::CharacterChoice::default_for(definition);
         let snapshot =
-            crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, builds, weapons).unwrap();
-        let resolved = snapshot.resolve(builds, weapons).unwrap();
+            crate::profiles::MatchCharacterSnapshot::from_choice(choice, catalogs).unwrap();
+        let resolved = snapshot.resolve(catalogs).unwrap();
         (snapshot, resolved)
     }
 
     pub(super) fn practice_manifest(
-        human: &crate::profiles::MatchBuildSnapshotV3,
-        bot: &crate::profiles::MatchBuildSnapshotV3,
+        human: &crate::profiles::MatchCharacterSnapshot,
+        bot: &crate::profiles::MatchCharacterSnapshot,
     ) -> brawler_routing::MatchManifestV1 {
         use brawler_routing::{
             AllocationId, Generation, LobbySessionId, LogicalServerId, ManifestCommon,
@@ -1299,23 +1252,27 @@ mod tests {
     fn roster_projection_exposes_human_and_bot_loadouts_with_catalog_names() {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
-        let (human, _) = admitted_brawler(&builds, &weapons, 2, 1);
-        let (bot, _) = admitted_brawler(&builds, &weapons, 3, 2);
-        let players =
-            roster::from_manifest(&practice_manifest(&human, &bot), &builds, &weapons).unwrap();
+        let (human, _) = admitted_character(&builds, &weapons, 1);
+        let (bot, _) = admitted_character(&builds, &weapons, 4);
+        let content = UntunedRosterContent::embedded().unwrap();
+        let players = roster::from_manifest(
+            &practice_manifest(&human, &bot),
+            content.with(&builds, &weapons),
+        )
+        .unwrap();
         let json = serde_json::to_value(players).unwrap();
 
         assert_eq!(json[0]["displayName"], "Operator");
         assert_eq!(json[0]["participantType"], "human");
         assert_eq!(json[0]["team"], 0);
-        assert_eq!(json[0]["fighterProfile"]["displayName"], "Lightweight");
+        assert_eq!(json[0]["character"]["displayName"], "Riff");
         assert_eq!(json[0]["weaponBase"]["displayName"], "Pulse Sidearm");
         assert_eq!(json[0]["ultimate"]["displayName"], "Dash");
         assert_eq!(json[0]["passives"][0]["displayName"], "Adrenal Response");
         assert_eq!(json[1]["displayName"], "Bot 1");
         assert_eq!(json[1]["participantType"], "bot");
         assert_eq!(json[1]["team"], 1);
-        assert_eq!(json[1]["fighterProfile"]["displayName"], "Reinforced");
+        assert_eq!(json[1]["character"]["displayName"], "Plunk");
         assert_eq!(json[1]["weaponBase"]["displayName"], "Scatter Cannon");
         assert_eq!(json[1]["weaponModifiers"]["capacity"]["flat"], 0);
     }
@@ -1383,9 +1340,11 @@ mod tests {
         );
         let json = serde_json::to_string(&snapshot).unwrap();
         assert!(json.contains(&format!("\"schemaVersion\":{SNAPSHOT_SCHEMA_VERSION}")));
-        assert!(json.contains("\"fighterProfiles\""));
+        assert!(
+            !json.contains("fighterProfiles"),
+            "character stats are not Balance Lab tuning"
+        );
         assert!(json.contains("\"ultimates\""));
-        assert!(json.contains("\"reveal_proximity_radius\""));
         assert!(json.contains("\"displayName\""));
         assert!(json.contains("\"heist\""));
         assert!(json.contains("\"effectTiles\""));
@@ -1499,36 +1458,12 @@ mod tests {
     }
 
     #[test]
-    fn revised_weapon_tuning_recomputes_an_admitted_modified_weapon_identity() {
+    fn revised_weapon_tuning_keeps_the_pick_identity_and_re_resolves_the_weapon() {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
-        let brawler = crate::profiles::SavedBrawler {
-            id: crate::profiles::SavedBrawlerId::new(1).unwrap(),
-            creation_ordinal: 1,
-            name: "Modified Arc".into(),
-            fighter_profile_id: crate::profiles::FighterProfileId(1),
-            weapon_base_id: crate::profiles::WeaponBaseId(3),
-            ultimate_id: UltimateDefinitionId(7),
-            passive_ids: [PassiveDefinitionId(5), PassiveDefinitionId(6)],
-            equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-            revision: crate::profiles::ProfileRevision::INITIAL,
-        };
-        let modifiers = crate::weapon_parts::aggregate_weapon_part_effects([
-            crate::weapon_parts::WeaponPartEffect::Damage {
-                flat: 0,
-                percent_basis_points: -1_000,
-            },
-            crate::weapon_parts::WeaponPartEffect::Slow {
-                penalty_basis_points: 1_500,
-                duration_ticks: 36,
-            },
-        ])
-        .unwrap();
-        let snapshot = crate::profiles::MatchBuildSnapshotV3::from_brawler_and_modifiers(
-            &brawler, modifiers, &builds, &weapons,
-        )
-        .unwrap();
-        let canonical = snapshot.resolve(&builds, &weapons).unwrap();
+        // Torque carries the Arc Caster (weapon base 3).
+        let (snapshot, canonical) = admitted_character(&builds, &weapons, 2);
+        let content = UntunedRosterContent::embedded().unwrap();
         let mut revised_weapons = weapons.clone();
         let arc = revised_weapons
             .presets
@@ -1549,14 +1484,12 @@ mod tests {
         *damage = damage.saturating_sub(1);
         revised_weapons.validate().unwrap();
 
-        assert_eq!(
-            snapshot.resolve(&builds, &revised_weapons),
-            Err(crate::builds::BuildResolutionError::InvalidCombination)
-        );
         let revised = snapshot
-            .resolve_revised_balance_lab_catalogs(&builds, &revised_weapons)
+            .resolve_revised_balance_lab_catalogs(content.with(&builds, &revised_weapons))
             .unwrap();
-        assert_ne!(revised.identity, canonical.identity);
+        // The identity names the pick (character, weapon base, options), not tuned values; the
+        // gameplay content fingerprint and the revised weapon recipe carry the tuning.
+        assert_eq!(revised.identity, canonical.identity);
         assert_ne!(
             revised.primary_weapon.recipe_fingerprint,
             canonical.primary_weapon.recipe_fingerprint
@@ -1575,21 +1508,13 @@ mod tests {
                 crate::map::MapInstanceId(1),
             )
             .unwrap();
-        let (human_snapshot, human_loadout) = admitted_brawler(&builds, &weapons, 2, 1);
-        let (bot_snapshot, bot_loadout) = admitted_brawler(&builds, &weapons, 3, 2);
+        let (human_snapshot, human_loadout) = admitted_character(&builds, &weapons, 1);
+        let (bot_snapshot, bot_loadout) = admitted_character(&builds, &weapons, 4);
         let manifest = practice_manifest(&human_snapshot, &bot_snapshot);
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let mut applied = baseline.clone();
         applied.heist.safe_maximum_health = 2_750;
         let mut candidate = applied.clone();
-        candidate.fighter_profiles.lightweight.maximum_health = 211;
-        candidate.fighter_profiles.lightweight.cold_capacity = 750;
-        candidate
-            .fighter_profiles
-            .lightweight
-            .cold_resistance_basis_points = 1_000;
-        candidate.fighter_profiles.reinforced.maximum_health = 233;
-        candidate.fighter_profiles.reinforced.cold_capacity = 1_250;
         candidate.condition_rules.freeze_duration_ticks = 45;
         candidate.condition_rules.cold_decay_per_tick = 12;
         candidate
@@ -1729,12 +1654,9 @@ mod tests {
         assert_eq!(bot_after.identity, bot_loadout.identity);
         assert_eq!(human_passives.passives, human_after.passives);
         assert_eq!(bot_passives.passives, bot_after.passives);
-        assert_eq!(human_after.fighter_stats.cold_capacity, 750);
-        assert_eq!(
-            human_after.fighter_stats.cold_resistance_basis_points,
-            1_000
-        );
-        assert_eq!(bot_after.fighter_stats.cold_capacity, 1_250);
+        // Character stats are not Balance Lab tuning (BRL-5v3c); the re-resolve keeps them.
+        assert_eq!(human_after.fighter_stats, human_loadout.fighter_stats);
+        assert_eq!(bot_after.fighter_stats, bot_loadout.fighter_stats);
         assert_eq!(
             app.world()
                 .resource::<crate::combat::CombatConditionRulesResource>()
@@ -1751,11 +1673,11 @@ mod tests {
         );
         assert_eq!(
             app.world().get::<CurrentHealth>(human),
-            Some(&CurrentHealth(211))
+            Some(&CurrentHealth(human_loadout.fighter_stats.maximum_health))
         );
         assert_eq!(
             app.world().get::<CurrentHealth>(bot),
-            Some(&CurrentHealth(233))
+            Some(&CurrentHealth(bot_loadout.fighter_stats.maximum_health))
         );
         assert!(matches!(
             app.world().get::<WeaponState>(human),

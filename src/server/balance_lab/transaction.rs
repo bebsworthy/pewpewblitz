@@ -140,6 +140,7 @@ fn prepare_transaction(
     )
     .map_err(str::to_string)?;
     let selections = manifest_selections(manifest)?;
+    let content = super::UntunedRosterContent::embedded()?;
     let mut instantiated: Vec<_> = identities
         .iter()
         .map(|(entity, player_id)| (player_id.0, entity))
@@ -155,7 +156,7 @@ fn prepare_transaction(
             .get(&player_id)
             .ok_or_else(|| "practice fighter has no admitted build snapshot".to_string())?;
         let loadout = snapshot
-            .resolve_revised_balance_lab_catalogs(&next_builds, &next_weapons)
+            .resolve_revised_balance_lab_catalogs(content.with(&next_builds, &next_weapons))
             .map_err(|_| "revised practice loadout did not resolve".to_string())?;
         resolved_player_ids.push(player_id);
         resolved_roster.push((entity, loadout));
@@ -368,7 +369,7 @@ mod tests {
         server::balance_lab::{
             ApplyRequestV1, BalanceLabStateView, TransactionView,
             editor::BalanceLabEditorManifest,
-            tests::{admitted_brawler, practice_manifest},
+            tests::{admitted_character, practice_manifest},
         },
     };
     use std::{
@@ -505,13 +506,14 @@ mod tests {
                     crate::map::MapInstanceId(1),
                 )
                 .unwrap();
-            let (human_snapshot, _) = admitted_brawler(&canonical_builds, &canonical_weapons, 2, 1);
-            let (bot_snapshot, _) = admitted_brawler(&canonical_builds, &canonical_weapons, 3, 2);
+            let roster_content = super::super::UntunedRosterContent::embedded().unwrap();
+            let (human_snapshot, _) = admitted_character(&canonical_builds, &canonical_weapons, 1);
+            let (bot_snapshot, _) = admitted_character(&canonical_builds, &canonical_weapons, 4);
             let human_loadout = human_snapshot
-                .resolve_revised_balance_lab_catalogs(&builds, &weapons)
+                .resolve_revised_balance_lab_catalogs(roster_content.with(&builds, &weapons))
                 .unwrap();
             let bot_loadout = bot_snapshot
-                .resolve_revised_balance_lab_catalogs(&builds, &weapons)
+                .resolve_revised_balance_lab_catalogs(roster_content.with(&builds, &weapons))
                 .unwrap();
             let manifest = practice_manifest(&human_snapshot, &bot_snapshot);
             let state = shared_test_state(&baseline, &applied, &canonical_weapons, revision);
@@ -718,7 +720,7 @@ mod tests {
         let mut fixture =
             TransactionFixture::create(persistence_path, None, BalanceLabRevision::default());
         let mut candidate = fixture.baseline.clone();
-        candidate.fighter_profiles.lightweight.maximum_health += 1;
+        candidate.weapons[0].recipe.fire_cooldown_ticks += 1;
         fixture.queue_apply(candidate, 0);
         fixture.install_direct_system();
         let before = authority_snapshot(&fixture);
@@ -762,7 +764,7 @@ mod tests {
                 .stage(pending)
         );
         let mut candidate = fixture.baseline.clone();
-        candidate.fighter_profiles.lightweight.maximum_health += 1;
+        candidate.weapons[0].recipe.fire_cooldown_ticks += 1;
         fixture.queue_apply(candidate, 0);
         fixture.install_direct_system();
         let before = authority_snapshot(&fixture);
@@ -891,7 +893,7 @@ mod tests {
         )
         .unwrap();
         let mut tuned = baseline.clone();
-        tuned.fighter_profiles.lightweight.maximum_health = 321;
+        tuned.weapons[0].recipe.fire_cooldown_ticks += 1;
         tuned.condition_rules.freeze_duration_ticks += 1;
         tuned
             .effect_tiles
@@ -929,7 +931,12 @@ mod tests {
                 .get::<ResolvedFighterStats>(fixture.human)
                 .unwrap()
                 .maximum_health,
-            fixture.baseline.fighter_profiles.lightweight.maximum_health
+            crate::characters::CharacterCatalog::embedded()
+                .unwrap()
+                .character(crate::characters::CharacterId(1))
+                .unwrap()
+                .stats
+                .maximum_health
         );
         assert!(world.resource::<PendingMatchRestart>().slot().is_some_and(
             |slot| slot.previous_id == crate::matchplay::MatchId(40)

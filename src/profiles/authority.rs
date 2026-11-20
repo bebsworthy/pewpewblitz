@@ -1,8 +1,8 @@
 use super::{
-    AccountId, AccountPublishedMaps, AdvertisedBrawlerCatalog, MatchBuildSnapshotV3,
+    AccountId, AccountPublishedMaps, AdvertisedCharacterCatalog, MatchCharacterSnapshot,
     ProfileCommand, ProfileDecision, ProfileOutcome, ProfileSnapshot, ProfileStorageCommand,
     ProfileStorageError, ProfileStorageExecutor, ProfileStorageReply, PublishedMapLimits,
-    PublishedMapRecord, PublishedMapSubmission, PublishedMapSubmissionOutcome, SavedBrawlerId,
+    PublishedMapRecord, PublishedMapSubmission, PublishedMapSubmissionOutcome, StoredProfile,
 };
 use bevy::prelude::Resource;
 use std::{collections::BTreeMap, path::PathBuf};
@@ -24,7 +24,6 @@ enum PendingOperation {
     },
     Mutation {
         client_key: u64,
-        request_id: u64,
         command: ProfileCommand,
     },
     PublishedMap,
@@ -52,7 +51,7 @@ pub enum PublishedMapStorageCompletion {
 #[derive(Resource)]
 pub struct ProfileAuthority {
     storage: ProfileStorageExecutor,
-    catalog: AdvertisedBrawlerCatalog,
+    catalog: AdvertisedCharacterCatalog,
     next_storage_request_id: u64,
     sessions: BTreeMap<u64, AcceptedProfileSession>,
     active_accounts: BTreeMap<AccountId, u64>,
@@ -91,18 +90,14 @@ type ProfilePollResult = (Vec<ProfileLoadCompletion>, Vec<(u64, ProfileOutcome)>
 
 impl ProfileAuthority {
     pub fn start(path: PathBuf) -> Result<Self, ProfileStorageError> {
-        let builds =
-            crate::builds::BuildCatalog::embedded().map_err(ProfileStorageError::Database)?;
-        let weapons =
-            crate::combat::WeaponCatalog::embedded().map_err(ProfileStorageError::Database)?;
-        let catalog = AdvertisedBrawlerCatalog::from_content(&builds, &weapons)
-            .map_err(ProfileStorageError::Database)?;
+        let catalog =
+            AdvertisedCharacterCatalog::embedded().map_err(ProfileStorageError::Database)?;
         Self::start_with_catalog(path, catalog)
     }
 
     pub fn start_with_catalog(
         path: PathBuf,
-        catalog: AdvertisedBrawlerCatalog,
+        catalog: AdvertisedCharacterCatalog,
     ) -> Result<Self, ProfileStorageError> {
         catalog.validate().map_err(ProfileStorageError::Database)?;
         Ok(Self {
@@ -169,6 +164,7 @@ impl ProfileAuthority {
             else {
                 continue;
             };
+            let completion_result = completion_result.map(|stored| self.normalize(stored));
             match pending {
                 PendingOperation::PublishedMap => {}
                 PendingOperation::Load {
@@ -176,15 +172,7 @@ impl ProfileAuthority {
                     account_id,
                 } => {
                     self.pending_accounts.remove(&account_id);
-                    let result = completion_result
-                        .map_err(|error| storage_decision(&error))
-                        .and_then(|snapshot| {
-                            if snapshot_catalog_is_valid(&snapshot, &self.catalog) {
-                                Ok(snapshot)
-                            } else {
-                                Err(ProfileDecision::StorageFault)
-                            }
-                        });
+                    let result = completion_result.map_err(|error| storage_decision(&error));
                     if let Ok(snapshot) = &result {
                         self.active_accounts.insert(account_id, client_key);
                         self.sessions.insert(
@@ -206,24 +194,14 @@ impl ProfileAuthority {
                 }
                 PendingOperation::Mutation {
                     client_key,
-                    request_id,
                     command,
                 } => {
-                    let result = completion_result.and_then(|snapshot| {
-                        if snapshot_catalog_is_valid(&snapshot, &self.catalog) {
-                            Ok(snapshot)
-                        } else {
-                            Err(ProfileStorageError::InvalidData(
-                                super::ProfileModelError::InvalidPart,
-                            ))
-                        }
-                    });
-                    let decision = result
+                    let decision = completion_result
                         .as_ref()
                         .map_or_else(storage_decision, |_| ProfileDecision::Accepted);
-                    let snapshot = result.ok();
+                    let snapshot = completion_result.ok();
                     let outcome = ProfileOutcome {
-                        request_id,
+                        request_id: command.request_id,
                         decision,
                         snapshot: snapshot.clone(),
                     };
@@ -242,6 +220,16 @@ impl ProfileAuthority {
         Ok((loads, mutations))
     }
 
+    /// The wire profile for stored rows, normalized against the advertised roster.
+    fn normalize(&self, stored: StoredProfile) -> ProfileSnapshot {
+        self.catalog.profile_from_stored(
+            stored.account_id,
+            stored.revision,
+            stored.selected_character_id,
+            stored.choices,
+        )
+    }
+
     pub fn submit_command(
         &mut self,
         client_key: u64,
@@ -258,19 +246,14 @@ impl ProfileAuthority {
                 ProfileDecision::QueueLocked,
             )));
         }
-        if command_request_id(&command) == 0 {
+        if command.request_id == 0 || !self.catalog.accepts(command.choice) {
             return Ok(ProfileMutationSubmission::Immediate(rejected_outcome(
                 &command,
                 ProfileDecision::InvalidRequest,
             )));
         }
-        if let Some(decision) = command_catalog_rejection(&command, &self.catalog) {
-            return Ok(ProfileMutationSubmission::Immediate(rejected_outcome(
-                &command, decision,
-            )));
-        }
         if let Some(last) = session.last_command.as_ref()
-            && command_request_id(&command) <= command_request_id(last)
+            && command.request_id <= last.request_id
         {
             return Ok(ProfileMutationSubmission::Immediate(if last == &command {
                 session
@@ -287,28 +270,15 @@ impl ProfileAuthority {
                 ProfileDecision::TemporarilyUnavailable,
             )));
         }
-        if let ProfileCommand::EquipWeaponParts {
-            brawler_id,
-            equipped_part_ids,
-            ..
-        } = &command
-            && !equipment_candidate_is_valid(
-                &session.snapshot,
-                self.catalog.fighter_body,
-                *brawler_id,
-                *equipped_part_ids,
-            )
-        {
-            return Ok(ProfileMutationSubmission::Immediate(rejected_outcome(
-                &command,
-                ProfileDecision::IncompatibleWeapon,
-            )));
-        }
         let account_id = session.account_id;
         let storage_request_id = self.next_storage_request_id()?;
-        let storage_command = translate_command(account_id, storage_request_id, &command)?;
         self.storage
-            .try_submit(storage_command)
+            .try_submit(ProfileStorageCommand::SelectCharacter {
+                request_id: storage_request_id,
+                account_id,
+                expected_profile_revision: command.expected_profile_revision,
+                choice: command.choice,
+            })
             .map_err(|error| map_submission_error(&error))?;
         self.sessions
             .get_mut(&client_key)
@@ -318,7 +288,6 @@ impl ProfileAuthority {
             storage_request_id,
             PendingOperation::Mutation {
                 client_key,
-                request_id: command_request_id(&command),
                 command,
             },
         );
@@ -330,7 +299,7 @@ impl ProfileAuthority {
         &mut self,
         storage_request_id: u64,
         reply: ProfileStorageReply,
-    ) -> Option<Result<ProfileSnapshot, ProfileStorageError>> {
+    ) -> Option<Result<StoredProfile, ProfileStorageError>> {
         let completion = match reply {
             ProfileStorageReply::Profile(result) => return Some(result),
             ProfileStorageReply::PublishedMapSubmission(result) => {
@@ -447,14 +416,14 @@ impl ProfileAuthority {
             .is_some_and(|session| session.in_flight)
     }
 
+    /// The selected pick of a settled profile at the revision the client saw, as the immutable
+    /// snapshot routing carries into the match.
     pub fn admitted_snapshot(
         &self,
         client_key: u64,
-        expected_brawler_id: SavedBrawlerId,
-        expected_brawler_revision: super::ProfileRevision,
-        builds: &crate::builds::BuildCatalog,
-        weapons: &crate::combat::WeaponCatalog,
-    ) -> Result<MatchBuildSnapshotV3, ProfileAuthorityError> {
+        expected_profile_revision: super::ProfileRevision,
+        catalogs: crate::characters::LoadoutCatalogs<'_>,
+    ) -> Result<MatchCharacterSnapshot, ProfileAuthorityError> {
         let session = self
             .sessions
             .get(&client_key)
@@ -462,17 +431,10 @@ impl ProfileAuthority {
         if session.in_flight {
             return Err(ProfileAuthorityError::TemporarilyUnavailable);
         }
-        let brawler = session
-            .snapshot
-            .brawlers
-            .iter()
-            .find(|brawler| {
-                brawler.id == expected_brawler_id
-                    && brawler.revision == expected_brawler_revision
-                    && session.snapshot.selected_brawler_id == Some(brawler.id)
-            })
-            .ok_or(ProfileAuthorityError::InvalidRequest)?;
-        MatchBuildSnapshotV3::from_profile_brawler(&session.snapshot, brawler, builds, weapons)
+        if session.snapshot.revision != expected_profile_revision {
+            return Err(ProfileAuthorityError::InvalidRequest);
+        }
+        MatchCharacterSnapshot::from_choice(session.snapshot.selection(), catalogs)
             .map_err(|_| ProfileAuthorityError::IncompatibleBuild)
     }
 
@@ -507,90 +469,9 @@ impl ProfileAuthority {
     }
 }
 
-fn command_request_id(command: &ProfileCommand) -> u64 {
-    match command {
-        ProfileCommand::CreateBrawler { request_id, .. }
-        | ProfileCommand::EditBrawler { request_id, .. }
-        | ProfileCommand::SelectBrawler { request_id, .. }
-        | ProfileCommand::DeleteBrawler { request_id, .. }
-        | ProfileCommand::EquipWeaponParts { request_id, .. } => *request_id,
-    }
-}
-
-fn translate_command(
-    account_id: AccountId,
-    storage_request_id: u64,
-    command: &ProfileCommand,
-) -> Result<ProfileStorageCommand, ProfileAuthorityError> {
-    Ok(match command {
-        ProfileCommand::CreateBrawler {
-            expected_profile_revision,
-            draft,
-            ..
-        } => ProfileStorageCommand::Create {
-            request_id: storage_request_id,
-            account_id,
-            expected_profile_revision: *expected_profile_revision,
-            brawler_id: SavedBrawlerId::random()
-                .map_err(|_| ProfileAuthorityError::IdentifierExhausted)?,
-            draft: draft.clone(),
-        },
-        ProfileCommand::EditBrawler {
-            expected_profile_revision,
-            brawler_id,
-            expected_brawler_revision,
-            edit,
-            ..
-        } => ProfileStorageCommand::Edit {
-            request_id: storage_request_id,
-            account_id,
-            expected_profile_revision: *expected_profile_revision,
-            brawler_id: *brawler_id,
-            expected_brawler_revision: *expected_brawler_revision,
-            edit: edit.clone(),
-        },
-        ProfileCommand::SelectBrawler {
-            expected_profile_revision,
-            brawler_id,
-            ..
-        } => ProfileStorageCommand::Select {
-            request_id: storage_request_id,
-            account_id,
-            expected_profile_revision: *expected_profile_revision,
-            brawler_id: *brawler_id,
-        },
-        ProfileCommand::DeleteBrawler {
-            expected_profile_revision,
-            brawler_id,
-            expected_brawler_revision,
-            ..
-        } => ProfileStorageCommand::Delete {
-            request_id: storage_request_id,
-            account_id,
-            expected_profile_revision: *expected_profile_revision,
-            brawler_id: *brawler_id,
-            expected_brawler_revision: *expected_brawler_revision,
-        },
-        ProfileCommand::EquipWeaponParts {
-            expected_profile_revision,
-            brawler_id,
-            expected_brawler_revision,
-            equipped_part_ids,
-            ..
-        } => ProfileStorageCommand::Equip {
-            request_id: storage_request_id,
-            account_id,
-            expected_profile_revision: *expected_profile_revision,
-            brawler_id: *brawler_id,
-            expected_brawler_revision: *expected_brawler_revision,
-            equipped_part_ids: *equipped_part_ids,
-        },
-    })
-}
-
-fn rejected_outcome(command: &ProfileCommand, decision: ProfileDecision) -> ProfileOutcome {
+const fn rejected_outcome(command: &ProfileCommand, decision: ProfileDecision) -> ProfileOutcome {
     ProfileOutcome {
-        request_id: command_request_id(command),
+        request_id: command.request_id,
         decision,
         snapshot: None,
     }
@@ -605,131 +486,13 @@ fn map_submission_error(error: &ProfileStorageError) -> ProfileAuthorityError {
 
 fn storage_decision(error: &ProfileStorageError) -> ProfileDecision {
     match error {
-        ProfileStorageError::InvalidData(_) => ProfileDecision::InvalidRequest,
+        ProfileStorageError::InvalidData(_) | ProfileStorageError::CapacityReached => {
+            ProfileDecision::InvalidRequest
+        }
         ProfileStorageError::StaleRevision => ProfileDecision::StaleRevision,
-        ProfileStorageError::MissingBrawler => ProfileDecision::MissingBrawler,
-        ProfileStorageError::CapacityReached => ProfileDecision::CapacityReached,
-        ProfileStorageError::MissingPart => ProfileDecision::MissingPart,
-        ProfileStorageError::PartAlreadyEquipped => ProfileDecision::PartAlreadyEquipped,
         ProfileStorageError::QueueFull => ProfileDecision::TemporarilyUnavailable,
         ProfileStorageError::Database(_) | ProfileStorageError::ExecutorStopped => {
             ProfileDecision::StorageFault
         }
     }
-}
-
-fn equipment_candidate_is_valid(
-    snapshot: &ProfileSnapshot,
-    fighter_body: crate::builds::FighterBody,
-    brawler_id: SavedBrawlerId,
-    equipped_part_ids: [Option<crate::weapon_parts::WeaponPartInstanceId>;
-        crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-) -> bool {
-    let mut candidate = snapshot.clone();
-    let Some(brawler) = candidate
-        .brawlers
-        .iter_mut()
-        .find(|brawler| brawler.id == brawler_id)
-    else {
-        return false;
-    };
-    brawler.equipped_part_ids = equipped_part_ids;
-    if candidate.validate().is_err() {
-        return false;
-    }
-    let Some(brawler) = candidate.brawlers.iter().find(|item| item.id == brawler_id) else {
-        return false;
-    };
-    let Ok(modifiers) = candidate.weapon_modifiers(brawler) else {
-        return false;
-    };
-    let Ok(weapons) = crate::combat::WeaponCatalog::embedded() else {
-        return false;
-    };
-    crate::weapon_parts::resolve_weapon_parts(
-        &weapons,
-        fighter_body,
-        crate::combat::WeaponPresetId(brawler.weapon_base_id.0),
-        modifiers,
-    )
-    .is_ok()
-}
-
-fn command_catalog_rejection(
-    command: &ProfileCommand,
-    catalog: &AdvertisedBrawlerCatalog,
-) -> Option<ProfileDecision> {
-    match command {
-        ProfileCommand::CreateBrawler { draft, .. } => catalog
-            .validate_draft(draft)
-            .err()
-            .map(|_| ProfileDecision::InvalidRequest)
-            .or_else(|| {
-                (!resistance_passives_are_compatible(catalog, draft.passive_ids))
-                    .then_some(ProfileDecision::IncompatibleBuild)
-            }),
-        ProfileCommand::EditBrawler { edit, .. } => catalog
-            .validate_edit(edit)
-            .err()
-            .map(|_| ProfileDecision::InvalidRequest)
-            .or_else(|| {
-                (!resistance_passives_are_compatible(catalog, edit.passive_ids))
-                    .then_some(ProfileDecision::IncompatibleBuild)
-            }),
-        ProfileCommand::SelectBrawler { .. }
-        | ProfileCommand::DeleteBrawler { .. }
-        | ProfileCommand::EquipWeaponParts { .. } => None,
-    }
-}
-
-fn resistance_passives_are_compatible(
-    catalog: &AdvertisedBrawlerCatalog,
-    passive_ids: [crate::builds::PassiveDefinitionId; 2],
-) -> bool {
-    passive_ids
-        .iter()
-        .filter_map(|id| catalog.passives.iter().find(|passive| passive.id == *id))
-        .filter(|passive| {
-            matches!(
-                passive.kind,
-                crate::builds::PassiveKind::CryogenicInsulation
-                    | crate::builds::PassiveKind::FilteredCirculation
-                    | crate::builds::PassiveKind::HeatShielding
-            )
-        })
-        .count()
-        <= 1
-}
-
-fn snapshot_catalog_is_valid(
-    snapshot: &ProfileSnapshot,
-    catalog: &AdvertisedBrawlerCatalog,
-) -> bool {
-    if catalog.validate_profile(snapshot).is_err() {
-        return false;
-    }
-    let Ok(parts) = crate::weapon_parts::WeaponPartCatalog::embedded() else {
-        return false;
-    };
-    if snapshot
-        .inventory
-        .iter()
-        .any(|part| parts.definition(part.definition_id).is_none())
-    {
-        return false;
-    }
-    let Ok(weapons) = crate::combat::WeaponCatalog::embedded() else {
-        return false;
-    };
-    snapshot.brawlers.iter().all(|brawler| {
-        snapshot.weapon_modifiers(brawler).is_ok_and(|modifiers| {
-            crate::weapon_parts::resolve_weapon_parts(
-                &weapons,
-                catalog.fighter_body,
-                crate::combat::WeaponPresetId(brawler.weapon_base_id.0),
-                modifiers,
-            )
-            .is_ok()
-        })
-    })
 }

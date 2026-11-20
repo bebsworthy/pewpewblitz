@@ -2,8 +2,9 @@
 # Native player-shell captures (BRL-pw9k): for each window size, start one scratch routed
 # supervisor and run one automation client per route. Each client opens its route through the
 # canonical flow actions (`--shell-capture <route>`), saves `<size>/<route>.png|json` once the
-# screen has settled, and exits. Routes run in order against one profile, so `first-brawler`
-# captures the empty-profile creation screen and creates the brawler the later routes show.
+# screen has settled, and exits. Routes run in order against one profile: `brawlers` shows the
+# default pick, `brawlers-picked` selects Bumper with his second ultimate and second passive, and
+# the routes after it (from `dashboard-picked`) show that pick.
 # Clients render off-screen (`--offscreen`, BRL-g7ny): no window appears and focus never moves.
 #
 # Live-match routes (BRL-wqst: match-loading, match-menu, leave-confirmation, results) play a real
@@ -34,9 +35,8 @@ cd "$project_dir"
 # Keep in the order of `ShellCaptureRoute::ALL` (packages/brawler-client/src/flow/automation.rs);
 # the client rejects a name it does not know.
 all_routes=(
-    first-brawler dashboard dashboard-menu settings credits change-server
-    brawler-list brawler-details brawler-create brawler-editor ultimate-picker
-    weapon-equipment weapon-parts delete-brawler
+    dashboard dashboard-menu settings credits change-server
+    brawlers brawlers-picked dashboard-picked
     game-select practice-maps map-library map-editor map-editor-palette
     map-create map-editor-select map-editor-issues map-editor-test
     map-editor-rule map-editor-rule-show map-editor-focus map-editor-saved
@@ -261,16 +261,16 @@ prepare_results_published() {
     sleep 6
     # A built-in 1v1 match takes rotation slot 0; both fixture clients leave at Active.
     fixture_client burn-a --client-id 7312 --product-game-type wipeout-1v1 \
-        --product-match-smoke-1v1 --weapon-preset 1 &
+        --product-match-smoke-1v1 --character 1 &
     local burn_a=$!
     sleep 2
     fixture_client burn-b --client-id 7313 --product-game-type wipeout-1v1 \
-        --product-match-smoke-1v1 --weapon-preset 1 || fixture_failed "built-in slot"
+        --product-match-smoke-1v1 --character 1 || fixture_failed "built-in slot"
     wait "$burn_a" || fixture_failed "built-in slot"
     # The opponent for the community match: it leaves once the match is Active.
     "$target_dir"/release/brawler-client --server "$bind_addr" --transport routed-udp \
         --auto-connect --headless --client-id 7314 --product-game-type wipeout-1v1 \
-        --product-match-smoke-1v1 --weapon-preset 1 --expect-published-map \
+        --product-match-smoke-1v1 --character 1 --expect-published-map \
         >"$run_dir/opponent.log" 2>&1 &
     opponent_pid=$!
 }

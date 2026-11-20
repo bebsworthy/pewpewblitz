@@ -71,26 +71,14 @@ pub struct TestRoutedParticipant {
     pub team: u8,
 }
 
-/// The embedded default saved brawler's admitted match snapshot.
-fn default_brawler_snapshot() -> crate::profiles::MatchBuildSnapshotV3 {
-    let builds = crate::builds::BuildCatalog::embedded().expect("embedded builds");
-    let weapons = crate::combat::WeaponCatalog::embedded().expect("embedded weapons");
-    let brawler = crate::profiles::SavedBrawler {
-        id: crate::profiles::SavedBrawlerId::new(1).expect("nonzero brawler"),
-        creation_ordinal: 1,
-        name: "Rejoin Pilot".into(),
-        fighter_profile_id: crate::profiles::FighterProfileId(1),
-        weapon_base_id: crate::profiles::WeaponBaseId(1),
-        ultimate_id: crate::builds::UltimateDefinitionId(1),
-        passive_ids: [
-            crate::builds::PassiveDefinitionId(3),
-            crate::builds::PassiveDefinitionId(4),
-        ],
-        equipped_part_ids: [None; crate::weapon_parts::WEAPON_PART_SLOT_COUNT],
-        revision: crate::profiles::ProfileRevision::INITIAL,
-    };
-    crate::profiles::MatchBuildSnapshotV3::from_brawler(&brawler, &builds, &weapons)
-        .expect("default brawler snapshot")
+/// The embedded default character pick's admitted match snapshot.
+fn default_brawler_snapshot() -> crate::profiles::MatchCharacterSnapshot {
+    let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().expect("embedded catalogs");
+    crate::profiles::MatchCharacterSnapshot::from_choice(
+        catalogs.characters.default_choice(),
+        catalogs.view(),
+    )
+    .expect("default character snapshot")
 }
 
 /// Build one validated two-team Wipeout match manifest whose participants all use the embedded

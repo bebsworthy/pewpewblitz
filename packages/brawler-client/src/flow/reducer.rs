@@ -18,7 +18,7 @@ use crate::{
         },
         persistence::{ClientLocalLoadFailures, ConnectionPersistence, local_load_error},
         screens::{
-            brawlers::{BrawlerCreationDraft, BrawlerEditDraft, WeaponEquipmentDraft},
+            brawlers::BrawlersNotice,
             dashboard::{
                 DASHBOARD_MENU_INDEX, DASHBOARD_PLAY_INDEX, DashboardNotice, DashboardReturnFocus,
             },
@@ -32,7 +32,6 @@ use bevy::prelude::*;
 use lightyear::prelude::client::Client;
 use lightyear::prelude::{Unlink, UnlinkReason, client::Disconnect};
 
-mod equipment;
 mod match_flow;
 mod profile;
 
@@ -44,9 +43,6 @@ pub(in crate::flow) use match_flow::MatchFailureNotice;
     reason = "the reducer facade preserves the focused test and composition path"
 )]
 pub(super) use match_flow::accept_game_type_draft;
-pub(in crate::flow) use profile::{
-    PendingCreatedBrawler, PendingDeletedBrawler, PendingEditedBrawler,
-};
 use profile::{resolve_profile_action, resolve_profile_decision};
 
 type LobbyMembershipQuery<'w, 's> = Query<
@@ -451,12 +447,7 @@ pub(super) fn resolve_flow_action(
         ResMut<GameTypeSelectionDraft>,
         ResMut<DashboardReturnFocus>,
         ResMut<DashboardNotice>,
-        ResMut<PendingCreatedBrawler>,
-        ResMut<PendingEditedBrawler>,
-        ResMut<PendingDeletedBrawler>,
-        ResMut<BrawlerCreationDraft>,
-        ResMut<BrawlerEditDraft>,
-        ResMut<WeaponEquipmentDraft>,
+        ResMut<BrawlersNotice>,
     ),
     models: (
         ResMut<crate::ClientQueueModel>,
@@ -476,12 +467,7 @@ pub(super) fn resolve_flow_action(
         mut game_draft,
         mut dashboard_focus,
         mut dashboard_notice,
-        mut pending_created_brawler,
-        mut pending_edited_brawler,
-        mut pending_deleted_brawler,
-        mut creation_draft,
-        mut brawler_edit,
-        mut equipment_draft,
+        mut brawlers_notice,
     ) = dashboard;
     let (
         mut queue,
@@ -496,14 +482,10 @@ pub(super) fn resolve_flow_action(
         local_failures,
     ) = models;
     resolve_profile_decision(
+        overlay.as_ref(),
         &mut profile,
         &mut dashboard_notice,
-        &mut pending_created_brawler,
-        &mut pending_edited_brawler,
-        &mut pending_deleted_brawler,
-        &mut creation_draft,
-        &mut brawler_edit,
-        &mut equipment_draft,
+        &mut brawlers_notice,
         &mut commit,
     );
     if let Some(explicit) = actions.explicit.take() {
@@ -523,15 +505,6 @@ pub(super) fn resolve_flow_action(
         // was reduced on; with the flow-change record in `commit_flow` this explains every
         // navigation on a device without a debugger (BRL-k0tr).
         info!(flow = ?flow.get(), ?observation, "brawler client flow observed a session fact");
-        if matches!(
-            observation,
-            SessionObservation::UnexpectedLoss
-                | SessionObservation::LobbyReturnFailed
-                | SessionObservation::TimedOut
-                | SessionObservation::Rejected(_)
-        ) {
-            *equipment_draft = WeaponEquipmentDraft::default();
-        }
         resolve_session_observation(
             observation,
             *flow.get(),
@@ -619,59 +592,19 @@ pub(super) fn resolve_flow_action(
         FlowUiAction::ToggleFavoriteServer => {
             toggle_favorite_server(&membership, &path, &mut persistence, &mut commit);
         }
-        action @ (FlowUiAction::OpenBrawlerList
-        | FlowUiAction::BackToBrawlerList
-        | FlowUiAction::CloseBrawlerList
-        | FlowUiAction::OpenBrawlerDetails(_)
-        | FlowUiAction::CreateBrawler
-        | FlowUiAction::OpenCreationFighter
-        | FlowUiAction::OpenCreationWeapon
-        | FlowUiAction::ChooseCreationFighter(_)
-        | FlowUiAction::ChooseCreationWeapon(_)
-        | FlowUiAction::ChooseCreationUltimate(_)
-        | FlowUiAction::EditCreationName
-        | FlowUiAction::OpenCreationUltimate
-        | FlowUiAction::CancelCreateBrawler
-        | FlowUiAction::ConfirmCreateBrawler
-        | FlowUiAction::CancelBrawlerEdit
-        | FlowUiAction::CancelDeleteBrawler
-        | FlowUiAction::SelectBrawler(_)
-        | FlowUiAction::OpenBrawlerEditor(_)
-        | FlowUiAction::BeginBrawlerNameEdit
-        | FlowUiAction::OpenBrawlerUltimate
-        | FlowUiAction::OpenBrawlerPassive(_)
-        | FlowUiAction::ChooseBrawlerUltimate(_)
-        | FlowUiAction::ChooseBrawlerPassive(_)
-        | FlowUiAction::ConfirmBrawlerEdit
-        | FlowUiAction::DeleteBrawler(_)
-        | FlowUiAction::ConfirmDeleteBrawler) => resolve_profile_action(
+        action @ (FlowUiAction::OpenBrawlers
+        | FlowUiAction::CloseBrawlers
+        | FlowUiAction::PickCharacter(_)
+        | FlowUiAction::PickUltimate(_)
+        | FlowUiAction::PickPassive(_)) => resolve_profile_action(
             &action,
             overlay.as_ref(),
             &queue,
             &practice,
             &mut profile,
-            &mut creation_draft,
-            &mut brawler_edit,
-            &mut pending_created_brawler,
-            &mut pending_edited_brawler,
-            &mut pending_deleted_brawler,
-            &mut dashboard_notice,
+            &mut brawlers_notice,
             &mut commit,
         ),
-        action @ (FlowUiAction::OpenWeaponEquipment(_)
-        | FlowUiAction::SelectEquipmentSlot(_)
-        | FlowUiAction::EquipWeaponPart(_)
-        | FlowUiAction::UnequipWeaponPart
-        | FlowUiAction::CancelWeaponEquipment) => {
-            equipment::resolve_equipment_action(
-                &action,
-                &queue,
-                &practice,
-                &mut profile,
-                &mut equipment_draft,
-                &mut commit,
-            );
-        }
         action @ (FlowUiAction::SelectGameTypeDraft(_)
         | FlowUiAction::ConfirmGameType
         | FlowUiAction::CancelGameType
@@ -913,14 +846,7 @@ pub(super) fn commit_flow(
             OverlayCommit::Settings => ClientOverlay::Settings,
             OverlayCommit::Credits => ClientOverlay::Credits,
             OverlayCommit::DashboardMenu => ClientOverlay::DashboardMenu,
-            OverlayCommit::BrawlerList => ClientOverlay::BrawlerList,
-            OverlayCommit::BrawlerDetails(value) => ClientOverlay::BrawlerDetails(value),
-            OverlayCommit::BrawlerCreation => ClientOverlay::BrawlerCreation,
-            OverlayCommit::BrawlerEditor => ClientOverlay::BrawlerEditor,
-            OverlayCommit::WeaponEquipment => ClientOverlay::WeaponEquipment,
-            OverlayCommit::DeleteBrawlerConfirmation(value) => {
-                ClientOverlay::DeleteBrawlerConfirmation(value)
-            }
+            OverlayCommit::Brawlers => ClientOverlay::Brawlers,
             OverlayCommit::Confirmation(value) => ClientOverlay::Confirmation(value),
             OverlayCommit::ChangeServerConfirmation => ClientOverlay::ChangeServerConfirmation,
         };

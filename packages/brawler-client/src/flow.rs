@@ -9,19 +9,9 @@ use connection::{ConnectionGeneration, ResolverState, start_initial_connection};
 use input::{collect_flow_input, publish_back_root, publish_text_entry};
 use observation::observe_session;
 use persistence::load_connection_state;
-use reducer::{
-    MatchFailureNotice, PendingCreatedBrawler, PendingDeletedBrawler, PendingEditedBrawler,
-    commit_flow, resolve_flow_action, teardown_session,
-};
+use reducer::{MatchFailureNotice, commit_flow, resolve_flow_action, teardown_session};
 use screens::{
-    brawlers::{
-        BrawlerCreationDraft, BrawlerEditDraft, WeaponEquipmentDraft,
-        keep_brawler_details_focus_visible, keep_brawler_list_focus_visible,
-        keep_weapon_equipment_focus_visible, open_empty_profile_creation, present_brawler_creation,
-        present_brawler_details, present_brawler_editor, present_brawler_list,
-        present_weapon_equipment, scroll_brawler_details, scroll_brawler_list,
-        scroll_weapon_equipment,
-    },
+    brawlers::{BrawlersNotice, present_brawlers},
     confirmations::{present_confirmations, scroll_confirmations},
     connecting::{spawn_connecting, update_connecting_copy},
     dashboard::{
@@ -79,7 +69,7 @@ pub(super) use persistence::{ClientLocalLoadFailures, ConnectionPersistence};
 #[cfg(feature = "automation")]
 pub(super) use screens::dashboard::DashboardRoot;
 pub(super) use screens::{
-    brawlers::{BrawlerCardPreview, BrawlerDetailsPreviewHost},
+    brawlers::BrawlersPreviewHost,
     dashboard::DashboardPreviewHost,
     map_maker::{MapPalettePreviewHost, MapPaletteVisual},
 };
@@ -133,12 +123,7 @@ impl Plugin for ClientFlowPlugin {
             .init_resource::<PracticeCarousel>()
             .init_resource::<DashboardReturnFocus>()
             .init_resource::<DashboardNotice>()
-            .init_resource::<PendingCreatedBrawler>()
-            .init_resource::<PendingEditedBrawler>()
-            .init_resource::<PendingDeletedBrawler>()
-            .init_resource::<BrawlerCreationDraft>()
-            .init_resource::<BrawlerEditDraft>()
-            .init_resource::<WeaponEquipmentDraft>()
+            .init_resource::<BrawlersNotice>()
             .init_resource::<super::ClientProfileModel>()
             .init_resource::<SessionPurpose>()
             .init_resource::<super::ClientMatchResultState>()
@@ -272,16 +257,7 @@ impl Plugin for ClientFlowPlugin {
                     scroll_dashboard.after(apply_dashboard_layout),
                     update_dashboard_live_facts,
                     present_dashboard_menu,
-                    scroll_brawler_list.before(present_brawler_list),
-                    present_brawler_list,
-                    keep_brawler_list_focus_visible.after(present_brawler_list),
-                    scroll_brawler_details.before(present_brawler_details),
-                    present_brawler_details,
-                    keep_brawler_details_focus_visible.after(present_brawler_details),
-                    present_brawler_creation,
-                    present_brawler_editor,
-                    scroll_weapon_equipment.before(present_weapon_equipment),
-                    present_weapon_equipment,
+                    present_brawlers,
                     present_confirmations,
                     scroll_game_type_select,
                 )
@@ -292,12 +268,7 @@ impl Plugin for ClientFlowPlugin {
             .add_systems(OnEnter(ClientFlow::Connecting), spawn_connecting)
             .add_systems(
                 OnEnter(ClientFlow::Dashboard),
-                (
-                    return_to_editor_after_practice,
-                    spawn_dashboard,
-                    open_empty_profile_creation,
-                )
-                    .chain(),
+                (return_to_editor_after_practice, spawn_dashboard).chain(),
             )
             .add_systems(OnEnter(ClientFlow::GameTypeSelect), spawn_game_type_select)
             .add_systems(OnEnter(ClientFlow::Match), enter_match_input)
@@ -314,10 +285,7 @@ impl Plugin for ClientFlowPlugin {
         );
         app.add_systems(
             PostUpdate,
-            (
-                keep_dashboard_focus_visible,
-                keep_weapon_equipment_focus_visible,
-            )
+            (keep_dashboard_focus_visible,)
                 .after(UiSystems::Layout)
                 .run_if(in_state(ClientFlow::Dashboard)),
         );
@@ -380,5 +348,3 @@ fn exit_match_input(mut context: ResMut<super::ClientInputContext>) {
 
 #[cfg(test)]
 mod tests;
-
-pub(crate) use screens::equipment::WeaponPreviewHost;

@@ -2,7 +2,7 @@
 
 use super::{
     ClientFlow,
-    flow::{BrawlerDetailsPreviewHost, DashboardPreviewHost},
+    flow::{BrawlersPreviewHost, DashboardPreviewHost},
 };
 use bevy::{
     asset::RenderAssetUsages,
@@ -15,9 +15,6 @@ use bevy::{
     world_serialization::{WorldAssetRoot, WorldInstanceReady},
 };
 use core::time::Duration;
-
-mod card_preview;
-mod weapon_preview;
 
 const DASHBOARD_RENDER_LAYER: usize = 29;
 
@@ -82,8 +79,6 @@ pub(super) struct ClientDashboardPlugin;
 
 impl Plugin for ClientDashboardPlugin {
     fn build(&self, app: &mut App) {
-        weapon_preview::install(app);
-        card_preview::install(app);
         app.add_plugins(super::ui::surface::SurfacePlugin);
         app.add_plugins(UiMaterialPlugin::<DashboardBackgroundMaterial>::default())
             .add_systems(
@@ -98,8 +93,6 @@ impl Plugin for ClientDashboardPlugin {
                 (
                     spawn_dashboard_preview,
                     bind_dashboard_preview_host,
-                    card_preview::ensure,
-                    card_preview::bind,
                     upgrade_dashboard_preview,
                     sync_dashboard_preview_weapon,
                 )
@@ -117,7 +110,6 @@ impl Plugin for ClientDashboardPlugin {
                 (
                     release_dashboard_preview_target,
                     release_dashboard_background_target,
-                    card_preview::release,
                 ),
             )
             .add_observer(setup_dashboard_imported_scene);
@@ -324,13 +316,13 @@ fn spawn_dashboard_preview(
 fn bind_dashboard_preview_host(
     mut commands: Commands,
     dashboard_hosts: Query<Entity, With<DashboardPreviewHost>>,
-    detail_hosts: Query<Entity, With<BrawlerDetailsPreviewHost>>,
+    brawlers_hosts: Query<Entity, With<BrawlersPreviewHost>>,
     mut target: Option<ResMut<DashboardPreviewTarget>>,
 ) {
     let Some(target) = target.as_deref_mut() else {
         return;
     };
-    let desired_host = detail_hosts
+    let desired_host = brawlers_hosts
         .iter()
         .next()
         .or_else(|| dashboard_hosts.iter().next());
@@ -347,13 +339,6 @@ fn bind_dashboard_preview_host(
         .entity(desired_host)
         .insert(ViewportNode::new(target.camera));
     target.host = desired_host;
-}
-
-fn contained_preview_size(source: Vec2, bounds: Vec2) -> Vec2 {
-    if source.min_element() <= 0.0 || bounds.min_element() <= 0.0 {
-        return Vec2::ZERO;
-    }
-    source * (bounds / source).min_element()
 }
 
 /// The toon material bands directional light and ambient only (BRL-0179), so the preview rig is
@@ -549,19 +534,6 @@ fn release_dashboard_background_target(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::system::RunSystemOnce;
-
-    #[test]
-    fn card_preview_fits_wide_and_tall_targets_without_distortion() {
-        for source in [Vec2::new(800.0, 450.0), Vec2::new(450.0, 800.0)] {
-            let bounds = Vec2::new(210.0, 180.0);
-            let fitted = contained_preview_size(source, bounds);
-            assert!(fitted.x <= bounds.x && fitted.y <= bounds.y);
-            assert!((fitted.x / fitted.y - source.x / source.y).abs() < 0.001);
-            assert!((fitted.x - bounds.x).abs() < 0.001 || (fitted.y - bounds.y).abs() < 0.001);
-        }
-        assert_eq!(contained_preview_size(Vec2::ONE, Vec2::ZERO), Vec2::ZERO);
-    }
 
     #[test]
     fn reduced_motion_or_effects_freezes_the_dashboard_shader() {
@@ -571,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn brawler_details_temporarily_owns_the_dashboard_preview_viewport() {
+    fn brawlers_screen_temporarily_owns_the_dashboard_preview_viewport() {
         let mut app = App::new();
         app.add_systems(Update, bind_dashboard_preview_host);
         let camera = app.world_mut().spawn_empty().id();
@@ -579,7 +551,7 @@ mod tests {
             .world_mut()
             .spawn((DashboardPreviewHost, ViewportNode::new(camera)))
             .id();
-        let details = app.world_mut().spawn(BrawlerDetailsPreviewHost).id();
+        let details = app.world_mut().spawn(BrawlersPreviewHost).id();
         app.world_mut().insert_resource(DashboardPreviewTarget {
             image: Handle::default(),
             camera,
@@ -600,7 +572,6 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Assets<Image>>()
             .init_resource::<Assets<DashboardBackgroundMaterial>>()
-            .init_resource::<card_preview::Targets>()
             .insert_resource(
                 super::super::presentation_3d::WorldLookCatalog::embedded()
                     .expect("embedded world look"),
@@ -610,7 +581,6 @@ mod tests {
                 (
                     release_dashboard_preview_target,
                     release_dashboard_background_target,
-                    card_preview::release,
                 ),
             );
         let image_baseline = app.world().resource::<Assets<Image>>().len();
@@ -641,34 +611,7 @@ mod tests {
             });
             app.world_mut()
                 .insert_resource(DashboardBackgroundTarget(material));
-            // Brawler cards of two families still on screen as the Dashboard exits.
-            let frame = app.world_mut().spawn(ComputedNode::default()).id();
-            for family in [
-                super::super::presentation_3d::WeaponFamily::OneHanded,
-                super::super::presentation_3d::WeaponFamily::Melee,
-            ] {
-                app.world_mut().spawn((
-                    super::super::flow::BrawlerCardPreview(family),
-                    Node::default(),
-                    ChildOf(frame),
-                ));
-            }
-            app.world_mut()
-                .run_system_once(card_preview::ensure)
-                .unwrap();
-            assert_eq!(
-                app.world().resource::<Assets<Image>>().len(),
-                image_baseline + 3
-            );
             app.update();
-            assert!(
-                app.world_mut()
-                    .query_filtered::<(), With<card_preview::BrawlerCardCamera>>()
-                    .iter(app.world())
-                    .next()
-                    .is_none()
-            );
-            app.world_mut().entity_mut(frame).despawn();
             assert!(!app.world().contains_resource::<DashboardPreviewTarget>());
             assert!(!app.world().contains_resource::<DashboardBackgroundTarget>());
             assert_eq!(

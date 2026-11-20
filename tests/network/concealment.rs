@@ -179,19 +179,19 @@ fn self_cloak_ignores_proximity_and_team_scan_reveals_then_rehides() {
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(2);
+        .character = Some(4);
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(1);
+        .character = Some(1);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.client_is_active(1)
             && harness.loadout_is_ready(0)
             && harness.loadout_is_ready(1)
     });
-    harness.install_saved_brawler_loadout(0, 2, 4, [5, 6]);
-    harness.install_saved_brawler_loadout(1, 1, 3, [4, 6]);
+    harness.install_test_loadout(0, 2, 4, 5);
+    harness.install_test_loadout(1, 1, 3, 4);
     let (observer, subject, subject_id) = {
         let mut query = harness.server.world_mut().query_filtered::<(
             Entity,
@@ -347,14 +347,14 @@ fn concealment_field_is_public_hides_at_range_and_confirmation_does_not_fire() {
     harness.clients[1]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(3);
+        .character = Some(2);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.client_is_active(1)
             && harness.loadout_is_ready(0)
             && harness.loadout_is_ready(1)
     });
-    harness.install_saved_brawler_loadout(1, 3, 5, [5, 6]);
+    harness.install_test_loadout(1, 3, 5, 5);
     let (observer, caster, caster_id) = {
         let mut query = harness.server.world_mut().query_filtered::<(
             Entity,

@@ -8,13 +8,13 @@ fn splash_lands_as_a_replicated_stationary_area_with_repeated_server_damage() {
     harness.clients[0]
         .world_mut()
         .resource_mut::<ClientAutomationConfig>()
-        .weapon_preset = Some(7);
+        .character = Some(5);
     harness.step_until(|harness| {
         harness.client_is_active(0)
             && harness.server_ids().len() == 1
             && harness.loadout_is_ready(0)
     });
-    harness.install_saved_brawler_loadout(0, 7, 2, [5, 6]);
+    harness.install_test_loadout(0, 7, 2, 5);
     harness.set_controlled_input(0, FighterInput::default());
     harness.step();
 

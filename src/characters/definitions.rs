@@ -137,7 +137,8 @@ impl CharacterCatalog {
         Ok(())
     }
 
-    /// References into the build, weapon, and weapon-part catalogs.
+    /// References into the build, weapon, and weapon-part catalogs: every option combination of
+    /// every character, and every direct-diagnostic pick, resolves.
     pub fn validate_references(
         &self,
         builds: &BuildCatalog,
@@ -145,27 +146,25 @@ impl CharacterCatalog {
         parts: &WeaponPartCatalog,
     ) -> Result<(), String> {
         self.validate()?;
+        builds.validate_weapon_references(weapons)?;
         for character in &self.characters {
-            if weapons.preset(character.weapon.base).is_none()
-                || character
-                    .weapon
-                    .parts
-                    .iter()
-                    .any(|part| parts.definition(*part).is_none())
-                || character
-                    .ultimate_options
-                    .iter()
-                    .any(|id| builds.ultimate(*id).is_none())
-                || character
-                    .passive_options
-                    .iter()
-                    .any(|id| builds.passive(*id).is_none())
-            {
-                return Err(format!(
-                    "character {} references unknown content",
-                    character.key
-                ));
+            for ultimate_id in character.ultimate_options {
+                for passive_id in character.passive_options {
+                    let choice = super::CharacterChoice {
+                        character_id: character.id,
+                        ultimate_id,
+                        passive_id,
+                    };
+                    self.resolve(choice, builds, weapons, parts)
+                        .map_err(|error| {
+                            format!("character {} does not resolve: {error:?}", character.key)
+                        })?;
+                }
             }
+        }
+        for pick in builds.direct_diagnostic_picks() {
+            self.resolve(*pick, builds, weapons, parts)
+                .map_err(|error| format!("direct diagnostic pick does not resolve: {error:?}"))?;
         }
         Ok(())
     }

@@ -279,11 +279,11 @@ fi
 client_one_args=("${client_args[@]}" --client-id 1)
 client_two_args=("${client_args[@]}" --client-id 2)
 
-if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
-    client_one_args+=(--weapon-preset "$BRAWLER_NETWORK_WEAPON_PRESET")
+if [[ -n "${BRAWLER_NETWORK_CHARACTER:-}" ]]; then
+    client_one_args+=(--character "$BRAWLER_NETWORK_CHARACTER")
 fi
-if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO:-}" ]]; then
-    client_two_args+=(--weapon-preset "$BRAWLER_NETWORK_WEAPON_PRESET_CLIENT_TWO")
+if [[ -n "${BRAWLER_NETWORK_CHARACTER_CLIENT_TWO:-}" ]]; then
+    client_two_args+=(--character "$BRAWLER_NETWORK_CHARACTER_CLIENT_TWO")
 fi
 if [[ "$windowed_combat_demo" == "1" ]]; then
     client_one_args+=(--combat-demo)
@@ -330,8 +330,8 @@ for index in $(seq 1 "$client_count"); do
             ;;
         *)
             args=(--server "$network_addr" --client-id "$index" --auto-connect)
-            if [[ -n "${BRAWLER_NETWORK_WEAPON_PRESET:-}" ]]; then
-                args+=(--weapon-preset "$BRAWLER_NETWORK_WEAPON_PRESET")
+            if [[ -n "${BRAWLER_NETWORK_CHARACTER:-}" ]]; then
+                args+=(--character "$BRAWLER_NETWORK_CHARACTER")
             fi
             if [[ "$headless" == "1" ]]; then
                 args+=(--headless --exit-after-roster "$client_count" --simulation-ticks 600)

@@ -84,7 +84,7 @@ pub(in crate::flow) fn spawn_queue(
         .0
         .ultimates
         .iter()
-        .find(|definition| definition.id == membership.accepted_build.canonical_recipe.ultimate)
+        .find(|definition| definition.id == membership.accepted_build.character.ultimate_id)
         .zip(server.as_deref())
         .map(|(definition, server)| {
             server.load(crate::ui::icons::path(crate::ui::icons::ultimate_icon(
@@ -283,35 +283,23 @@ pub(in crate::flow) fn queue_copy(
         "Updating queue".to_string()
     };
     let game = queued_game(membership, lobby);
+    let pick = membership.accepted_build.character;
     let brawler = lobby
-        .and_then(|lobby| {
-            lobby
-                .profile
-                .brawlers
-                .iter()
-                .find(|brawler| brawler.id == membership.brawler_id)
-        })
+        .and_then(|lobby| lobby.character_catalog.character(pick.character_id))
         .map_or_else(
-            || "Saved brawler".to_string(),
-            |brawler| brawler.name.clone(),
+            || "Brawler".to_string(),
+            |character| character.display_name.clone(),
         );
-    let recipe = membership.accepted_build.canonical_recipe;
     let ultimate = builds
-        .ultimates
-        .iter()
-        .find(|definition| definition.id == recipe.ultimate)
+        .ultimate(pick.ultimate_id)
         .map_or("Unknown ultimate", |definition| {
             definition.display_name.as_str()
         });
-    let passives = recipe.passives.map(|id| {
-        builds
-            .passives
-            .iter()
-            .find(|definition| definition.id == id)
-            .map_or("Unknown passive", |definition| {
-                definition.display_name.as_str()
-            })
-    });
+    let passive = builds
+        .passive(pick.passive_id)
+        .map_or("Unknown passive", |definition| {
+            definition.display_name.as_str()
+        });
     QueueCopy {
         mode: game.map_or("GAME", dashboard_mode_title).to_string(),
         game: game
@@ -321,7 +309,7 @@ pub(in crate::flow) fn queue_copy(
             .to_string(),
         population,
         brawler,
-        build: format!("{ultimate} · {} / {}", passives[0], passives[1]),
+        build: format!("{ultimate} · {passive}"),
     }
 }
 

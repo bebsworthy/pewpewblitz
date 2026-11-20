@@ -85,25 +85,8 @@ fn shipped_weapon_glbs_match_the_attachment_contract() {
 }
 
 #[test]
-fn preview_framing_centres_each_model() {
-    let catalog = catalog();
-    for family in WeaponFamily::ALL {
-        let transform = catalog.preview_transform(family);
-        let model = catalog.model(family);
-        assert!(
-            (transform.transform_point(model.preview_center)).length() < 1e-5,
-            "{family:?} preview centre lands on the camera target"
-        );
-    }
-}
-
-#[test]
 fn catalog_rejects_missing_duplicate_and_out_of_tree_models() {
-    let row = |family: &str, model: &str| {
-        format!(
-            "(family: {family}, model: \"{model}\", preview_scale: 1.0, preview_center: (0.0, 0.0, 0.0))"
-        )
-    };
+    let row = |family: &str, model: &str| format!("(family: {family}, model: \"{model}\")");
     let source = |rows: &[String]| format!("(schema_version: 1, weapons: [{}])", rows.join(", "));
     let good = |family| row(family, "brawler/models/original/weapons/wpn_test.glb");
     let all = ["OneHanded", "Heavy", "Throwable", "Melee"]
