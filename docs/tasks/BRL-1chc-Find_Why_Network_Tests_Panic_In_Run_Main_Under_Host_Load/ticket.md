@@ -3,9 +3,9 @@ id: BRL-1chc
 
 title: Find why network tests panic in run_main under host load
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-20T02:55:37Z
+status_changed: 2026-11-20T02:55:41Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-xbhb]
 
 parent:
 
-rank: 10878976
+rank: 11337728
 ---
 
 # Description
