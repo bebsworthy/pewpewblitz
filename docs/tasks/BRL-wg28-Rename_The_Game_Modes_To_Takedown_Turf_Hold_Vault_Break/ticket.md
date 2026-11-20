@@ -1,7 +1,7 @@
 ---
 id: BRL-wg28
 
-title: Give the game modes original names
+title: 'Rename the game modes to Takedown, Turf Hold, Vault Break, Last Stand'
 
 status: backlog
 closed:

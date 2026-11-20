@@ -39,4 +39,4 @@ The owner reads the mode picker, HUD, and results in a native client and confirm
 # Decisions
 
 - 2026-11-20, owner (q-446v98f): Set A. Wipeout → **Takedown**, Hot Zone → **Turf Hold**, Heist → **Vault Break**, Showdown → **Last Stand**.
-- Internal identifiers: pending q-vmzjrnz.
+- 2026-11-20, owner (q-vmzjrnz): rename **everything**. This covers the `GameMode` variants (`Takedown`, `TurfHold`, `VaultBreak`), mode keys and game-type IDs (`takedown-*`, `turf-hold-*`, `vault-break-*`), the matching map keys (for example `feature-yard-wipeout`), modules and files (`src/modes/`, `src/matchplay/`), `just` recipe defaults, scripts, tests, and types such as `HeistSafe`. The rename comes with the global protocol compatibility bump, the content-fingerprint change, and a one-time cutover of game-type-keyed data and published-map submissions. There are no aliases or compatibility decoders. `docs/18-damageable-world-objects-and-heist.md` is renamed in place, with its inbound links updated.
