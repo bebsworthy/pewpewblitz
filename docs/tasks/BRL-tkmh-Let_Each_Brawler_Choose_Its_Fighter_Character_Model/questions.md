@@ -2,14 +2,7 @@
 
 # Questions · BRL-tkmh
 
-## q-wr6gc13 · answered · by Boyd
-
-Per-brawler character models need a second production character, and there is only Riff. Where should it come from? Choose one, and I'll file a ticket to make or import it before BRL-tkmh.
-
-- [x] Make an original character like Riff (Blender, same clip contract)
-- [ ] Import a CC0 pack character (e.g. Kenney/Quaternius) and retarget clips
-- [ ] Defer: keep BRL-tkmh in backlog for now
-
 ## Resolved
 
+- q-wr6gc13
 - q-m6n2sj1

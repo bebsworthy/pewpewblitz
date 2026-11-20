@@ -6,3 +6,5 @@
 {"v":2,"eid":"c35c1e51c95e0d5d","at":"2026-11-18T22:01:49Z","n":1,"op":"question.resolve","id":"q-y21kgwz","by":"Boyd","basis":"5c8715c3c921c7ff"}
 {"v":2,"eid":"e758ee333d071f55","at":"2026-11-19T05:10:37Z","n":0,"op":"question.answer","id":"q-rc8skq9","by":"Boyd","text":"Owner (chat 2026-11-19): keep the current cyan frame + pointer and gold rim; fix the spacing so rings never overlap content."}
 {"v":2,"eid":"12e5ee77d0bbc640","at":"2026-11-19T05:10:37Z","n":1,"op":"question.approve","id":"q-4yrvg6g","by":"Boyd","suggestion":1,"replace":true}
+{"v":2,"eid":"1493fd694968094a","at":"2026-11-20T16:46:13Z","n":0,"op":"question.resolve","id":"q-4yrvg6g","by":"Boyd","basis":"12e5ee77d0bbc640"}
+{"v":2,"eid":"9acfd15dddc00335","at":"2026-11-20T16:46:13Z","n":1,"op":"question.resolve","id":"q-rc8skq9","by":"Boyd","basis":"e758ee333d071f55"}

@@ -5,3 +5,6 @@
 {"v":2,"eid":"05a094340f238885","at":"2026-11-19T13:18:32Z","n":0,"op":"question.approve","id":"q-05dkczb","by":"Boyd","suggestion":3,"replace":true}
 {"v":2,"eid":"477ac69ab9e4f403","at":"2026-11-19T13:20:08Z","n":0,"op":"question.approve","id":"q-6xhzeej","by":"Boyd","suggestion":1,"replace":true}
 {"v":2,"eid":"9ea557d81e84a24b","at":"2026-11-19T13:20:08Z","n":1,"op":"question.answer","id":"q-6xhzeej","by":"Boyd","text":"3 pending is fine, 2 minutes cooldown (it takes time to create a map), but no limit on approved per account"}
+{"v":2,"eid":"2c168d7630fd8673","at":"2026-11-20T16:46:13Z","n":0,"op":"question.resolve","id":"q-05dkczb","by":"Boyd","basis":"05a094340f238885"}
+{"v":2,"eid":"edfca9ef4b66c441","at":"2026-11-20T16:46:13Z","n":1,"op":"question.resolve","id":"q-zprr9ba","by":"Boyd","basis":"b7a3abd598b7300c"}
+{"v":2,"eid":"089b3acf66fa77b4","at":"2026-11-20T16:46:13Z","n":2,"op":"question.resolve","id":"q-6xhzeej","by":"Boyd","basis":"9ea557d81e84a24b"}

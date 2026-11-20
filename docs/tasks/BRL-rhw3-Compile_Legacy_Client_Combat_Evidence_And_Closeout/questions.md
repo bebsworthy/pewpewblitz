@@ -2,9 +2,6 @@
 
 # Questions · BRL-rhw3
 
-## q-kzvs6r0 · answered · by Boyd
+## Resolved
 
-Should the legacy direct-UDP combat-profile evidence path be retired? Routed evidence now covers normal play. Retiring it closes BRL-rhw3 by deletion and makes BRL-5fk5 (preset 3 lob checkpoint) obsolete. Keeping it means moving that code behind brawler-client/automation and then fixing 5fk5.
-
-- [x] Retire it (delete the legacy path; cancel BRL-5fk5)
-- [ ] Keep it (move behind automation, then fix BRL-5fk5)
+- q-kzvs6r0

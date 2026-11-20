@@ -2,24 +2,6 @@
 
 # Questions · BRL-z2hf
 
-## q-vc9wxqv · answered · blocking · by Boyd
+## Resolved
 
-Which emoji font should the Android client bundle so emoji in player names render?
-
-Android 17's system `NotoColorEmoji.ttf` is the COLRv1 build; bevy_text 0.19 rasterizes through swash, which supports COLRv0, CBDT/sbix and plain outlines but not COLRv1, so 🎮 renders as nothing on the Pixel (see spec Leads). Every fix bundles a font into the APK, which works against BRL-5k0g's size goal, so the cost needs your call. Sizes below are approximate and will be measured before committing.
-
-- [x] Colour COLRv0 emoji font, Android only *(recommended · default if unanswered)*
-
-  A COLRv0 colour emoji font (e.g. Twemoji COLRv0 — artwork CC-BY 4.0, needs an attribution note — or a Noto COLRv0 subset if one is available), about 1.5 MB, registered as the Emoji fallback on Android. Emoji look colourful, close to desktop. Desktop keeps the system emoji.
-
-- [ ] Monochrome Noto Emoji (OFL), Android only
-
-  Outline-only Noto Emoji, about 1–2 MB. Emoji render as single-colour glyphs in the text colour; less pretty but unambiguous licence (OFL) and smallest risk.
-
-- [ ] Full CBDT Noto Color Emoji, Android only
-
-  Pixel-identical to Android's own emoji, but about 10 MB of APK size.
-
-- [ ] Accept the gap
-
-  Emoji stay invisible on Android until Bevy/swash gains COLRv1 support; close or park this ticket.
+- q-vc9wxqv

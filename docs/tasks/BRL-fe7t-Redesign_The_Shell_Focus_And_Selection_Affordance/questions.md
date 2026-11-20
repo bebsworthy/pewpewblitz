@@ -2,63 +2,8 @@
 
 # Questions · BRL-fe7t
 
-## q-4yrvg6g · answered · blocking · edited 2026-11-18 22:01 · by Boyd
-
-Should the shell hide focus after touch input and show it again after keyboard or gamepad input?
-
-Focus is where your keyboard, gamepad or mouse cursor is. Today `flow/screens/shared.rs` draws focus on whichever control `navigation.focused` points at, whatever the input, so on a phone the last tapped control (or the screen's default one) keeps a focus frame even though nobody is navigating with a cursor. None of the focus looks settles this; each only changes how focus looks. The "TOUCH · after tap, focus hidden" rows on every sheet show the proposed result: after a tap, the press feedback and the current-choice mark stay (for example your chosen brawler keeps its badge), and focus is not drawn.
-
-- [x] Focus visible by input type *(recommended · default if unanswered)*
-
-  Focus is hidden after a touch press and shown again on the next keyboard or gamepad navigation. Mouse hover and click keep today's behaviour (focus follows the pointer and stays visible). Navigation state doesn't change, so a gamepad picks up exactly where the touch left off. Verified with a small schedule test plus the Pixel 8a check in the acceptance criteria.
-
-- [ ] Hide focus on touch platforms entirely
-
-  Android never draws focus, even with a connected gamepad or keyboard. Simpler, but a Bluetooth gamepad on the phone loses its focus target.
-
-- [ ] Keep focus always visible
-
-  No input-type rule; touch users keep seeing the focus look (made less noisy by the chosen look).
-
-## q-rc8skq9 · answered · blocking · by Boyd
-
-Which focus look should the shell use, together with its "current choice" mark?
-
-Two different things get highlighted in the menus, and the first review mixed them up:
-
-- **Focus** is where your keyboard, gamepad or mouse cursor is. Every button can have it: Play, Practice, Back, Connect, the Map Maker icon buttons, and the choice cards too. Moving the stick or hovering the mouse moves it.
-- **Current** is the option you've chosen in a set. Only choice components have it: the game type card on Game Select, your brawler card in the brawler list, the active loadout slot and the equipped part card on the equip parts screen, the active Map Maker tool (Place / Select / Erase), and the open Settings category. Action buttons never show it.
-
-Each sheet has two board pages, each beside today's look, at desktop size (1280x720) and phone size (914x411): **action buttons** (rest / focus / pressed / disabled, no current state) and **choice components** (rest / current / focus / current + focus / disabled), plus a touch row (after a tap, focus hidden). Below them are the live Dashboard, Settings and Game Select screens. Pressed (the squash) and disabled (greyed out) look the same in every option. All three new looks mark "current" with a gold check badge in the top-right corner, so "this is your choice" reads the same way everywhere; they differ in the gold trim that goes with it and in how focus looks. Try them live with `BRAWLER_UI_GALLERY_AFFORDANCE_BOARD=1 just ui-gallery`: V cycles the looks, B switches between the two pages.
-
-- [ ] Bright frame *(recommended · default if unanswered)*
-
-  - **Focus:** the dark outline turns white, the button face brightens in its own colour with a soft inner glow, and the button lifts slightly (3.5%). The glow pulses gently; with reduced motion there is no lift or pulse.
-  - **Current:** a gold trim inside the outline plus the gold check badge.
-  - **Together:** white outside, gold inside, plus the badge, so you can tell "my choice" and "where I am" apart on the same card.
-  - Strongest from couch distance and on the phone. Risk: the lift needs about 6 px of space between neighbouring buttons.
-  - Sheet: `fe7t-frame-sheet.png` (ticket asset).
-
-- [ ] Reticle
-
-  - **Focus:** white corner brackets snap onto the button's corners and gently grow and shrink. The face doesn't change.
-  - **Current:** a gold bar along the bottom of the face, like an active tab, plus the gold check badge.
-  - The lightest look and the most "gamepad target"-like. On small buttons (Map Maker tools, settings rows) the brackets are short, so focus is weaker at phone size.
-  - Sheet: `fe7t-reticle-sheet.png` (ticket asset).
-
-- [ ] Spotlight
-
-  - **Focus:** the whole face lights up (cyan on blue buttons, gold on Play) under a thin white inner edge, and gently pulses.
-  - **Current:** the outline turns gold, plus the gold check badge.
-  - The clearest focus from far away, but focus recolours whatever it's on, so a focused card no longer shows its own colour.
-  - Sheet: `fe7t-spotlight-sheet.png` (ticket asset).
-
-- [ ] Keep the current look
-
-  No change: cyan frame with a small pointer arrow for focus, and a yellow rim with a lighter face for the current choice. It's the left column of every sheet.
-
-> **Answer** (2026-11-19 05:10 · by Boyd): Owner (chat 2026-11-19): keep the current cyan frame + pointer and gold rim; fix the spacing so rings never overlap content.
-
 ## Resolved
 
 - q-y21kgwz
+- q-4yrvg6g
+- q-rc8skq9

@@ -2,58 +2,8 @@
 
 # Questions · BRL-w9z1
 
-## q-05dkczb · answered · blocking · by Boyd
+## Resolved
 
-Who approves a published map before other players can get it in rotation?
-
-Accounts are an unauthenticated development seam (docs/13: the client generates its AccountId and there is no creation rate limit), so any trust tied to an account can be farmed. The map name is free text. The only existing operator surfaces are the offline `brawler-profile-admin` CLI, which today only runs `backup` against the server's profile database, and Balance Lab, which is development-only, lives on a Practice worker's loopback page and has no authentication. The validator (`src/map/authoring.rs:111`) guarantees a map is legal, not that it is fun or decent.
-
-- [ ] Operator pre-approval with the CLI *(recommended · default if unanswered)*
-
-  Submissions are stored as Pending. An operator runs `brawler-profile-admin maps list / approve / reject / remove` (and `export`, to open the map in Map Maker and test it). Nothing reaches other players until it is approved. It is safe on any server, but a human has to act, and the author waits.
-
-- [ ] Automatic publish, operator removes afterwards
-
-  Every valid submission enters rotation immediately; the operator uses `remove` after a complaint. The loop is fastest, but offensive names and griefing layouts reach players first.
-
-- [x] Per-server setting, defaulting to pre-approval
-
-  `map_publishing.moderation: Approve | Automatic` in `game-types.ron`, so a private LAN server can skip review. It adds one config field and both code paths to test.
-
-## q-zprr9ba · answered · blocking · by Boyd
-
-Where do approved community maps get played?
-
-Queue rotation today is a round-robin over each game type's `maps: [...]` list in `config/server/game-types.ron` (`src/server/lobby/queue.rs:996-1014`). A published map is validated against one game type's exact roster, because spawn capacity is per team size. Community maps are kept out of the advertised map list and the catalog revision, so approving a map never invalidates players' queue joins.
-
-- [x] Mixed into existing game types, opted in per game type by the operator *(recommended · default if unanswered)*
-
-  A game type with `community_maps: true` round-robins over its built-in maps, then its approved community maps. It reuses the existing rotation and doesn't split a small player population. A player can't opt out per match; Match Loading shows "Map — by Author".
-
-- [ ] Separate Community game types
-
-  The operator adds, for example, "Community Wipeout 2v2" with only community maps. Players choose it explicitly, but the queue population splits, and each team size needs its own entry.
-
-- [ ] Practice only at first
-
-  Approved maps appear in every player's Practice map picker with bots; there is no queue rotation yet. It has the lowest matchmaking risk, but it isn't "in rotation" and needs Practice-picker work instead.
-
-## q-6xhzeej · answered · by Boyd
-
-Are these default publishing limits right?
-
-Hard ceilings stay in code: 256 KiB per recipe, 256 stored and 64 pending maps per server, 64 rotation maps per game type. Per-account quotas are operator policy in `game-types.ron`. Because accounts are free to create, the per-server pending cap is the real bound and the per-account numbers only shape normal use.
-
-- [x] 3 pending, 10 approved per account, 60 s submit cooldown *(recommended · default if unanswered)*
-
-  This is enough to iterate on a few maps without one account filling the review queue.
-
-- [ ] 1 pending, 5 approved, 5 min cooldown
-
-  Stricter: less review load, but authors who are iterating wait longer.
-
-- [ ] No per-account quota, only the per-server caps
-
-  The simplest option. One account can fill all 64 pending slots.
-
-> **Answer** (2026-11-19 13:20 · by Boyd): 3 pending is fine, 2 minutes cooldown (it takes time to create a map), but no limit on approved per account
+- q-05dkczb
+- q-zprr9ba
+- q-6xhzeej
