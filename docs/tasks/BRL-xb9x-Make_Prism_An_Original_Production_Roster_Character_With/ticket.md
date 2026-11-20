@@ -3,9 +3,9 @@ id: BRL-xb9x
 
 title: 'Make Prism, an original production roster character with Riff''s clip contract'
 
-status: doing
-closed:
-status_changed: 2026-11-20T15:50:51Z
+status: done
+closed: 2026-11-20T16:50:25Z
+status_changed: 2026-11-20T16:50:25Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-7sqn, BRL-egn6, BRL-qfaj]
 
 parent:
 
-rank: 11337728
+rank:
 ---
 
 # Description

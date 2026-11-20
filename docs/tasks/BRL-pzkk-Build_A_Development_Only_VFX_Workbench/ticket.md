@@ -4,9 +4,9 @@ was: BRL-0096
 
 title: Build a development-only VFX Workbench
 
-status: backlog
+status: idea
 closed:
-status_changed: 2026-11-12T20:15:05Z
+status_changed: 2026-11-20T16:47:13Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-08sz, BRL-hheg, BRL-kfdm]
 
 parent:
 
-rank: 10738538
+rank: 327680
 ---
 
 # Description
