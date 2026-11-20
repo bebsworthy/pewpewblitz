@@ -34,3 +34,9 @@ Historical records under `docs/implementation/` and done tickets are never rewri
 # Playtest notes (owner, after done)
 
 The owner reads the mode picker, HUD, and results in a native client and confirms the names read well.
+
+
+# Decisions
+
+- 2026-11-20, owner (q-446v98f): Set A. Wipeout → **Takedown**, Hot Zone → **Turf Hold**, Heist → **Vault Break**, Showdown → **Last Stand**.
+- Internal identifiers: pending q-vmzjrnz.

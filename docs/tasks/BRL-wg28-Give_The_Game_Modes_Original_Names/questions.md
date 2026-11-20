@@ -2,7 +2,21 @@
 
 # Questions · BRL-wg28
 
-## q-446v98f · open · blocking · by Boyd
+## q-vmzjrnz · open · blocking · by Boyd
+
+Should internal identifiers change too, or only player-visible text?
+
+The mode names reach roughly 100–150 files each, including `GameMode` variants (a closed protocol enum), game-type IDs like `wipeout-3v3`, `just` recipe defaults, scripts, module names, and tests.
+
+- [ ] Player-visible text only *(recommended · default if unanswered)*
+
+  Change labels, display names, HUD, Balance Lab, and docs. Keep `GameMode::Wipeout`, `wipeout-3v3`, and the module names as internal codenames. There is no protocol bump or data cutover, so the change is small and low-risk. The cost is that internal names differ from what players see.
+
+- [ ] Everything
+
+  Rename the enum variants, mode keys, game-type IDs, modules, scripts, and tests as well. Code and UI then match, but it needs a protocol and fingerprint bump, a one-time cutover of game-type-keyed data and published-map submissions, and a large diff.
+
+## q-446v98f · answered · blocking · by Boyd
 
 Which original names should replace the four mode names?
 
@@ -35,16 +49,4 @@ These are mode names from another commercial game. The names should form a match
 
   Punchier one-word names where possible.
 
-## q-vmzjrnz · open · blocking · by Boyd
-
-Should internal identifiers change too, or only player-visible text?
-
-The mode names reach roughly 100–150 files each, including `GameMode` variants (a closed protocol enum), game-type IDs like `wipeout-3v3`, `just` recipe defaults, scripts, module names, and tests.
-
-- [ ] Player-visible text only *(recommended · default if unanswered)*
-
-  Change labels, display names, HUD, Balance Lab, and docs. Keep `GameMode::Wipeout`, `wipeout-3v3`, and the module names as internal codenames. There is no protocol bump or data cutover, so the change is small and low-risk. The cost is that internal names differ from what players see.
-
-- [ ] Everything
-
-  Rename the enum variants, mode keys, game-type IDs, modules, scripts, and tests as well. Code and UI then match, but it needs a protocol and fingerprint bump, a one-time cutover of game-type-keyed data and published-map submissions, and a large diff.
+> **Answer** (2026-11-20 18:21 · by Boyd): Set A (owner, 2026-11-20): Wipeout → Takedown, Hot Zone → Turf Hold, Heist → Vault Break, Showdown → Last Stand.
