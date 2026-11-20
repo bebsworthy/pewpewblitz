@@ -2,7 +2,7 @@
 id: BRL-wrer
 was: BRL-0035
 
-title: Add the Gem Grab team objective mode
+title: Add the collect-and-hold team objective mode
 
 status: backlog
 closed:
@@ -16,7 +16,7 @@ created: 2026-08-28T09:40:58Z
 
 blocks: []
 
-related: []
+related: [BRL-wg28]
 
 parent:
 
