@@ -3,9 +3,9 @@ id: BRL-nwhr
 
 title: 'Make Torque, an original production roster character with Riff''s clip contract'
 
-status: backlog
+status: doing
 closed:
-status_changed: 2026-11-20T00:40:07Z
+status_changed: 2026-11-20T03:39:45Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-7sqn, BRL-egn6, BRL-qfaj]
 
 parent:
 
-rank: 10223616
+rank: 11337728
 ---
 
 # Description
