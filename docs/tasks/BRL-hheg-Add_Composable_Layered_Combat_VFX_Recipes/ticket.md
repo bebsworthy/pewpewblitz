@@ -4,9 +4,9 @@ was: BRL-0094
 
 title: Add composable layered combat VFX recipes
 
-status: backlog
-closed:
-status_changed: 2026-11-12T20:15:05Z
+status: done
+closed: 2026-11-20T18:00:26Z
+status_changed: 2026-11-20T18:00:26Z
 
 theme:
 
@@ -16,11 +16,11 @@ created: 2026-08-31T07:44:11Z
 
 blocks: []
 
-related: [BRL-08sz, BRL-4ms7, BRL-4vph, BRL-6akb, BRL-az3n, BRL-b6hr, BRL-h270, BRL-k66v, BRL-kfdm, BRL-khe4, BRL-pykq, BRL-pzkk, BRL-qq36, BRL-qxdw, BRL-rk50, BRL-rxx0, BRL-t5vg, BRL-vtnc, BRL-wfmj, BRL-xrs7, BRL-yqpx]
+related: [BRL-08sz, BRL-4ms7, BRL-4vph, BRL-6akb, BRL-az3n, BRL-b6hr, BRL-h270, BRL-k66v, BRL-kfdm, BRL-khe4, BRL-nhs7, BRL-pykq, BRL-pzkk, BRL-qq36, BRL-qxdw, BRL-rk50, BRL-rxx0, BRL-t5vg, BRL-vtnc, BRL-wfmj, BRL-xrs7, BRL-yqpx]
 
 parent:
 
-rank: 10729176
+rank:
 ---
 
 # Description
