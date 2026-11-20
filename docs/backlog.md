@@ -86,8 +86,9 @@ them in a focused ticket when their trigger occurs or another ticket changes the
 
 - **Bots:** begin with the server-hosted practice vertical slice. External bot clients, automatic
   multiplayer substitution, and supervisor-managed bot processes are later decisions.
-- **Arsenal and equipment:** saved brawler identity and owned item instances are distinct. Ticket
-  only the acquisition, entitlement, persistence, and UI behavior required by the selected slice.
+- **Roster and equipment:** roster characters are authored content, and any future owned item
+  instances would be distinct from them. Ticket only the acquisition, entitlement, persistence, and
+  UI behavior required by the selected slice.
 - **Browser surfaces:** a web arsenal is an HTTP adapter over profile authority and does not require
   a browser game client. A WASM game client is a separate platform/transport effort and cannot use
   the current raw-UDP ingress.

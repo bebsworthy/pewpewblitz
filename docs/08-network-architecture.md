@@ -42,7 +42,7 @@ Client presentation and local feedback
 - present a caller-supplied development account ID at lobby admission and request profile mutations
   or selected-brawler admission using stable identity/revision data;
 - validate and install the accepted connection-scoped profile, game-type catalog, and advertised
-  brawler catalog before entering Dashboard, then clear them together when that lobby ends;
+  character catalog before entering Dashboard, then clear them together when that lobby ends;
 - send timestamped input commands or input frames;
 - predict only its own fighter's movement with the shared movement step, reconcile against
   confirmed authoritative poses, and present the predicted pose (see owner prediction below);
@@ -60,10 +60,10 @@ Client presentation and local feedback
 ### Server responsibilities
 
 - own the match lifecycle and mode rules;
-- load the server-owned profile, resolve its selected saved brawler, and create immutable resolved
+- load the server-owned profile, resolve its selected character pick, and create immutable resolved
   match loadouts without accepting client-authored combat values at queue admission;
-- derive and advertise the bounded legal brawler inventory and player-facing metadata from active
-  server content, and validate profile references against that same catalog;
+- derive and advertise the bounded character roster and player-facing metadata from active server
+  content, and validate profile references against that same catalog;
 - simulate fighter movement and abilities;
 - validate fire commands and cooldowns;
 - own current health, attack-idle health recovery, ammunition stock, and each ammunition-recovery
@@ -278,11 +278,11 @@ on authority at a bounded speed. Cosmetic projectiles stop at replicated project
 geometry but never test fighters, deployables, damage, or status. Nothing is sent to the server
 and the protocol is unchanged; acceptance, ammunition, deliveries, hits, and damage stay server-only.
 
-Saved-brawler and weapon-equipment edits are not per-tick combat input. They use ordered,
+Character and option selections are not per-tick combat input. They use ordered,
 idempotent profile requests tied to the receiving authenticated lobby connection. A request never
 authoritatively names another fighter or installs match ECS runtime state.
 
-### Lobby profile and brawler-catalog installation
+### Lobby profile and character-catalog installation
 
 The accepted lobby envelope installs one coherent membership:
 
@@ -290,17 +290,18 @@ The accepted lobby envelope installs one coherent membership:
 LobbyJoinOutcome::Accepted
   logical server and player identity
   bounded game-type catalog + revision
-  bounded AdvertisedBrawlerCatalog + revision
+  bounded AdvertisedCharacterCatalog + revision
   bounded server-owned ProfileSnapshot
 ```
 
-The brawler advertisement is derived by lobby authority from its active build and weapon catalogs.
-It carries stable fighter-profile, weapon-base, ultimate, and passive identities plus the bounded
-names, kinds, eligibility, statistics, weapon configuration/policy, and limits required by the
-player flow. The complete welcome remains under the existing 64 KiB envelope bound; each variable
-collection and the brawler catalog's 16 KiB encoded ceiling are enforced while decoding.
+The character advertisement is derived by lobby authority from its active character, build, and
+weapon catalogs. It carries each character's stable ID, names, role, body, stats, weapon base, and
+two ultimate and two passive option identities, plus the weapon, ultimate, and passive display
+metadata the player flow needs. The complete welcome remains under the existing 64 KiB envelope
+bound; each variable collection and the character catalog's 16 KiB encoded ceiling are enforced
+while decoding.
 
-The client validates game types, brawler-catalog structure/revision, profile structure, and profile
+The client validates game types, character-catalog structure/revision, profile structure, and profile
 references before installing any of them. A conflicting, partial, malformed, or incompatible batch
 fails the lobby join; there is no locally reconstructed fallback. Membership, profile, and both
 catalogs are connection-scoped and clear on disconnect, server change, rejected replacement, or
@@ -319,16 +320,17 @@ Keep these network concepts separate:
 Shared content/rule catalog fingerprint
   proves client/server schema and known primitive compatibility
 
-Advertised brawler catalog
-  bounded server-derived legal inventory and presentation/preview metadata for this lobby session
+Advertised character catalog
+  bounded server-derived roster and presentation/preview metadata for this lobby session
 
-Selected saved-brawler identity and revision
+Selected character choice and profile revision
   bounded client intent tied to the accepted lobby session
   resolved against the lobby's server-owned profile snapshot
 
 Resolved match loadout
   created and owned by the server
-  replicated as stable identity plus the bounded public configuration needed for HUD/presentation
+  replicated as stable identity, the CharacterId, and the bounded public configuration needed for
+  HUD/presentation
 
 Runtime weapon state
   ammo/charges, fire cooldown, and next-ammunition start/target ticks; mutated only by server simulation
@@ -338,19 +340,19 @@ The client derives a filling ammunition segment from the replicated interval and
 authoritative tick. It may extrapolate presentation, but it never restores ammunition locally;
 fire intent continues normally and the server alone accepts or rejects it from current state.
 
-V7 clients request admission with a selected `SavedBrawlerId` and expected brawler revision. The
-lobby resolves the authored fighter profile, weapon base, four or fewer owned part instances,
-ultimate, and passives from its accepted profile cache against active catalogs. Invalid, stale,
-unselected, incompatible, or mutation-in-flight state does not create a queue ticket. The resulting
-V3 snapshot crosses routing opaquely with fixed-order canonical weapon modifiers and the accepted
-resolved identity; it contains no `AccountId`, part-instance metadata, inventory, or database
-authority. The match worker re-resolves and verifies that immutable snapshot before spawning combat.
+Clients request admission with the expected profile revision. The lobby resolves the selected
+character's stats, signature weapon (base plus authored parts), and chosen ultimate and passive from
+its accepted profile cache against active catalogs. Invalid, stale, unselected, or
+mutation-in-flight state does not create a queue ticket. The resulting match character snapshot
+(schema 8: the `CharacterChoice` plus the accepted identity) crosses routing opaquely; it contains no
+`AccountId` or database authority. The match worker re-resolves and verifies that immutable snapshot
+before spawning combat.
 
-Per-player equipped instances and exact persisted rolls are authoritative profile/session data, not
-part of the global gameplay-content fingerprint. The fingerprint covers the shared schema,
-primitive/base catalogs, and authored weapon-part catalog. The server replicates the accepted
-resolved public configuration so late join and reconnect do not depend on every client having a
-player's inventory preinstalled.
+The gameplay-content fingerprint covers the shared schema, the character catalog, and the
+primitive, base, and authored weapon-part catalogs. The server replicates the accepted resolved
+public configuration and the stable `CharacterId` so late join and reconnect do not depend on any
+per-player data preinstalled on clients. Clients map the `CharacterId` to a model, tint, scale, and
+socket through a client-only presentation catalog; no asset path crosses the wire.
 
 ### Map-recipe and mode authority
 
@@ -691,3 +693,14 @@ without control characters. No account, entity, path or recipe crosses the wire,
 maps stay outside both the gameplay content fingerprint and the catalog revision. The two
 registrations change the protocol-registry fingerprint, so the global handshake rejects a protocol
 52 peer. Match-manifest v5, control IPC v7, and the route envelope are unchanged.
+
+Protocol 54 replaces saved brawlers with roster character picks (BRL-egn6). `ProfileSnapshot` carries
+`selected_character_id` and the remembered per-character `CharacterChoice { character_id,
+ultimate_id, passive_id }` rows; `ProfileCommand` is one `{ request_id, expected_profile_revision,
+choice }` selection, and the brawler create, edit, select, delete, and part-equip commands and their
+decisions are removed. `LobbyJoinOutcome::Accepted` carries an `AdvertisedCharacterCatalog` (format
+6). Queue and Practice requests carry the profile revision instead of a brawler identity, and
+`AcceptedBuildSummary` is `{ character, identity }`. `ResolvedMatchLoadout` gains the replicated
+`character_id` and holds one passive. The global handshake rejects a protocol 53 peer; every role
+must be rebuilt. Match-manifest v5, control IPC v7, and the route envelope are unchanged; the opaque
+match character snapshot inside the manifest moves to schema 8.

@@ -2,7 +2,7 @@
 set -eu
 
 # M04 production queue smoke: one real routed lobby client observes the initial full snapshot,
-# joins with a saved brawler, observes the admission revision, cancels, observes the removal
+# joins with its character pick, observes the admission revision, cancels, observes the removal
 # revision, and exits. The production lobby composition installs no allocation driver.
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

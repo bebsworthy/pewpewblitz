@@ -1,6 +1,8 @@
 Yes. I’d treat the references as **design-system research**, not as sources for individual character designs. The strongest lesson from games like *Brawl Stars*, *Overwatch*, and *Smash Legends* is that a roster works when players can infer a character’s combat behavior from silhouette, proportions, animation, and VFX before learning the kit. *Brawl Stars* explicitly separates Damage, Tank, Support, Controller and other combat classes; *Overwatch* similarly uses role-specific behaviors; and the *Smash Legends* developers specifically describe distinctive appearance and clear attack/hitbox readability as priorities when building characters. ([Supercell Support Portal][1])
 
-For **PewPew Blitz**, there is one particularly important constraint: **weapons are interchangeable**. So I would *not* make “the rocket guy,” “the bow girl,” “the sniper robot,” etc. The character itself should communicate personality, body class and broad combat role, while the equipped weapon remains a separate layer.
+> **Superseded (BRL-egn6, 2026-11-20):** the "weapons are interchangeable" constraint below is retired. Each roster character now has its own authored signature weapon (`content/catalogs/characters.ron`), so a character may be designed around its weapon. The shared grip and socket standard in "Weapon modularity" still applies: weapon bases are reused across characters and every model keeps Riff's clip and socket contract.
+
+For **PewPew Blitz**, the original constraint was that **weapons are interchangeable**. So I would *not* make “the rocket guy,” “the bow girl,” “the sniper robot,” etc. The character itself should communicate personality, body class and broad combat role, while the equipped weapon remains a separate layer.
 
 ## Visual language for the roster
 

@@ -212,23 +212,20 @@ keep it and its passwords outside the repository, and enroll it in Play App Sign
 
 ## Current player flow
 
-Dashboard is the sole authenticated home. The server loads the account's saved-brawler profile
-before admitting the client. The accepted lobby response atomically supplies that profile and the
-server's bounded, revisioned brawler catalog: legal fighter profiles, weapon bases, ultimates,
-passives, display metadata, preview values, and selection limits. The client installs that catalog
-for the connection, drives every brawler screen from it, and clears it on disconnect or server
-change; it does not reconstruct legal choices from numeric ranges or local name tables.
+Dashboard is the sole authenticated home. The server loads the account's profile (the selected
+roster character and the ultimate and passive last chosen for each character) before admitting the
+client. The accepted lobby response atomically supplies that profile and the server's bounded,
+revisioned character catalog: the roster with roles, bodies, stats, signature weapons, option
+pairs, and display metadata. The client installs that catalog for the connection, drives the
+Brawlers screen and Dashboard from it, and clears it on disconnect or server change; it does not
+reconstruct legal choices from local tables.
 
-New profiles start empty; create a brawler before Play or Practice. Each brawler permanently binds
-one advertised fighter profile and weapon base, while its name, ultimate, two passives, and four
-generic weapon-part slots remain server-owned editable data outside queue. Every profile receives
-eight starter part instances once. Tapping the Dashboard brawler card opens the full-screen
-Brawlers List, then a full-screen Brawler screen; creation, ability customization, and weapon
-customization are full-screen child destinations. Delete is a small contextual confirmation over
-the invoking Brawler screen. Play enters the selected game type's multiplayer queue and Practice
-fills the remaining roster with active deterministic `Bot N` fighters using the canonical
-Pulse/Dash recipe. Queue admission freezes the selected
-brawler revision and resolved part modifiers for that match.
+New profiles start on the first character with its first options. `View brawlers` on Dashboard
+opens the Brawlers select screen: a roster grid of all nine characters, the selected character's
+preview and facts, and its two ultimate and two passive options. Each press is one authoritative
+selection. Play enters the selected game type's multiplayer queue and Practice fills the remaining
+roster with active deterministic `Bot N` fighters on roster characters. Queue admission freezes the
+resolved pick for that match.
 
 Queue cancellation, loading cancellation, confirmed leave, and ordinary no-result return converge
 on Dashboard while the lobby remains valid. Results retains the authoritative outcome and offers

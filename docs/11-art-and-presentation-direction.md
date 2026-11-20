@@ -46,10 +46,17 @@ tickets tune them through native review but do not change the direction.
 - Bumper (`asset_src/characters/bumper/`, `just bumper-asset`, BRL-qfaj), a stocky ram in padded
   teal sports gear, is the second production character. His builder reuses Riff's pipeline and
   exports the same clip names, sockets, weapon grip frame, and budgets, in the same source units,
-  so a character choice (BRL-tkmh) only swaps the GLB and its reviewed bounds. His silhouette is
+  so a roster character only swaps the GLB and its reviewed bounds. His silhouette is
   wide rather than tall: curled horns and a wool cap instead of ears. At Riff's source-to-world
   scale his body stays inside the 14-unit radius and he stands about 1.15 cells to his horn tops;
   scaling him to 1.6 cells would push his hands well past the radius.
+- Roster presentation (BRL-egn6): the replicated loadout names each fighter's stable `CharacterId`,
+  and the client-only catalog `assets/catalogs/fighter_characters.ron` maps it to a model, a tint,
+  a scale (times Riff's source-to-world scale) and the weapon socket. Riff and Bumper draw untinted;
+  every other launch character is a tinted placeholder (Light on Riff, Normal and Heavy on Bumper)
+  until its art ticket adds a `models` entry and repoints only that character. An unknown ID draws
+  the fallback model untinted. The tint multiplies into the base colours when the scene converts to
+  the toon material, cached per source material and tint. Every catalog model loads at startup.
 - Each primary-weapon animation family has its own original held weapon (BRL-q29d): a one-handed
   blaster (`1h`), a two-handed heavy sprayer (`heavy`), a two-handed lobber (`throwable`), and a
   two-handed impact blade (`melee`), built by `asset_src/weapons/build_weapons.py`
@@ -439,13 +446,12 @@ applies. The toon material bands only directional light plus ambient, so the pre
 shadowless key light plus a per-camera ambient, both from `preview_light` in
 `assets/catalogs/world_look.ron`. The per-camera ambient keeps the preview independent of the last
 presented map theme. There are no point lights or preview shadow maps; the toon rim takes the place
-of the former coloured rim light. The Dashboard brawler and the brawler-card Riff (card list,
-details portrait, creation choice card) draw the fighter outline too, held weapon included, on the
-preview's own render layer (BRL-y3hb). The preview Riff is scaled about 1.8x an arena fighter and
+of the former coloured rim light. The Dashboard brawler preview, which the Brawlers select screen reuses, draws the fighter outline
+too, held weapon included, on the preview's own render layer (BRL-y3hb). It shows the selected
+character's model and tint. The preview fighter is scaled about 1.8x an arena fighter and
 framed close, so it uses `preview_width_world` from `assets/catalogs/fighter_outline.ron` and a
 deeper hull depth push in code, which keeps face details and pockets from picking up their own dark
-rings. The standalone weapon close-ups (weapon equipment, creation weapon card) stay unoutlined:
-they are UI illustrations of a part, not a fighter silhouette.
+rings.
 
 ### Bevy UI
 
@@ -486,8 +492,8 @@ The imported character's model-space forward direction is corrected once at its 
 primary weapon family's model attaches to the character's `socket_weapon_r` node inside that
 corrected hierarchy at unit scale, and animation-specific transforms remain below it. The model
 follows the replicated loadout, so a loadout that arrives after the scene is ready swaps it; the
-Dashboard brawler holds the selected saved brawler's family (switching to that family's preview
-clip with the model), and each shell weapon preview shows its own weapon's family. The standard fighter has one canonical 14-unit
+Dashboard brawler holds the selected character's family (switching to that family's preview
+clip with the model). The standard fighter has one canonical 14-unit
 authoritative radius: its circular hitbox, exact outer ground-ring edge, and fallback sphere agree.
 Riff is scaled uniformly from his reviewed source height so he stands 1.6 map cells (51.2 units)
 including ears; that scale does not depend on the radius, and a test keeps his bind-pose feet,

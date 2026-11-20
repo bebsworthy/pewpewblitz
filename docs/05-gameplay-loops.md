@@ -164,7 +164,7 @@ phase transitions, results handoff, cleanup, and restart behavior that is genuin
 
 A completed match must terminate cleanly, preserve one authoritative result, release its isolated
 worker resources, and offer a clear player choice. **Play Again** requests new admission using the
-exact game type and saved-brawler identity/revision only while the fresh game-type and brawler
+exact game type and the current character pick only while the fresh game-type and character
 catalogs remain compatible; it is not recorded-match playback. No-result disconnect and recovery
 paths return to a usable product state rather than pretending that an outcome occurred.
 
@@ -174,9 +174,9 @@ The supported ordinary session begins at the connected Player Dashboard:
 
 ```text
 Dashboard
-   ├─ choose game type and saved brawler → multiplayer admission → match
-   ├─ choose game type and saved brawler → server-hosted practice → match
-   ├─ inspect, create, or customize saved brawlers
+   ├─ choose game type and character pick → multiplayer admission → match
+   ├─ choose game type and character pick → server-hosted practice → match
+   ├─ pick a roster character and its ultimate and passive
    └─ adjust settings or recover connection
 
 match → results → Play Again with an exact compatible selection, or Dashboard
@@ -187,18 +187,18 @@ mode rules, maps, combat, and results. Practice removes dependence on a populate
 does not create a client-authoritative or reduced-rule simulation.
 
 The session loop should minimize repeated configuration without hiding meaningful choices. Lobby
-admission loads the server-owned profile plus bounded brawler and game-type advertisements before
+admission loads the server-owned profile plus bounded character and game-type advertisements before
 Dashboard entry. The client mirrors those connection-scoped facts, exposes their current validity,
 and makes Play and Practice the two ordinary admission actions. Queueing, loading, cancellation,
 confirmed leave, disconnect, results, and Play Again must converge predictably rather than creating
 separate dead-end flows.
 
-## Build-learning loop
+## Character-learning loop
 
-Buildcraft becomes valuable through use, observation, and revision:
+A pick becomes valuable through use, observation, and revision:
 
 ```text
-Choose or configure a legal brawler
+Pick a character and its options
         ↓
 Test its intended range and rhythm in practice
         ↓
@@ -206,45 +206,40 @@ Use it against human decisions and mode pressure
         ↓
 Read outcomes and identify a strength, weakness, or tradeoff
         ↓
-Adjust one bounded choice or select another saved brawler
+Swap one option or pick another character
         ↓
 Repeat
 ```
 
-Each saved brawler permanently owns one advertised fighter profile and weapon base, and may change
-its name, ultimate, exactly two passives, and four generic weapon-part slots outside queue. The
-server validates stable-ID mutations against its active catalog and resolves the selected brawler
-into an immutable match loadout. The client never supplies gameplay values or defines the legal
-inventory.
+Each roster character owns its stats and signature weapon and offers two ultimates and two
+passives; the player chooses one of each outside queue, remembered per character. The server
+validates stable-ID selections against its active catalog and resolves the pick into an immutable
+match loadout. The client never supplies gameplay values or defines the legal roster.
 
 Build feedback should emphasize decisions rather than only aggregate power. Useful questions include:
 
 - Did the player fight at the weapon's intended distance?
 - Did ammunition, fire cadence, or cooldown create the expected opening?
 - Did the ultimate change position or pressure at a meaningful moment?
-- Did each passive produce an observable advantage with an opportunity cost?
-- Did the selected mode or map expose a weakness that another build choice could address?
+- Did the passive produce an observable advantage over the other option?
+- Did the selected mode or map expose a weakness that another character or option could address?
 
 Practice is the fastest experimentation path. Server-hosted deterministic bots already exercise
 movement, weapon range, pressure, Wipeout/Hot Zone/Heist objectives, and selected typed capabilities
 through ordinary input intent. Broader build coverage, difficulty profiles, and richer tactics remain
 separate product slices rather than alternate gameplay authority.
 
-## Saved-brawler arsenal loop
+## Roster loop
 
-V7 established an arsenal of player-authored brawlers rather than a roster of fixed heroes. A
-player can create, name, save, inspect, customize, delete, and select multiple validated brawlers
-for different modes, maps, team needs, or personal styles through the full-screen Dashboard child
-flow.
+Players choose from an authored roster of original characters (BRL-egn6 replaced V7's arsenal of
+player-authored brawlers). Each character is a curated composition of the shared primitives, so the
+roster grows by authoring catalog entries rather than new combat systems. Every character is
+available; future acquisition or entitlement may narrow availability but cannot move legality to the
+client. The server-advertised catalog defines which characters the current lobby permits, profile
+authority validates the selection, and the same resolver produces the immutable match loadout.
 
-Persistence and collection do not alter combat legality. The server-advertised catalog defines
-which definitions the current lobby permits, profile authority validates ownership and selection,
-and the same resolver produces the immutable match loadout. Future acquisition or entitlement may
-narrow availability but cannot move legality to the client.
-
-The arsenal should reward mastery and expression without forcing constant replacement of understood
-builds. New content should create new decisions, counters, or play patterns rather than merely higher
-numbers.
+New characters and options should create new decisions, counters, or play patterns rather than
+merely higher numbers.
 
 ## Envisioned progression and social loops
 

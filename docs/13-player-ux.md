@@ -63,25 +63,9 @@ flowchart TD
     Connecting -- "cancel / bounded failure / rejection" --> ServerSelect[Server Select]
     ServerSelect -- connect --> Connecting
 
-    Dashboard -- "tap active brawler card" --> BrawlerList[Brawlers List screen]
-    BrawlerList -- Back --> Dashboard
-    BrawlerList -- Create --> BrawlerCreate[Create Brawler screen]
-    BrawlerCreate -- Back --> BrawlerList
-    BrawlerCreate -- "accepted create" --> BrawlerDetails[Brawler screen]
-    BrawlerCreate -- "rejected create" --> BrawlerCreate
-    BrawlerList -- "tap row" --> BrawlerDetails
-    BrawlerDetails -- Back --> BrawlerList
-    BrawlerDetails -- "Select for Play" --> Dashboard
-    BrawlerDetails -- "Customize Abilities" --> AbilityCustomize[Customize Abilities screen]
-    AbilityCustomize -- Back --> BrawlerDetails
-    AbilityCustomize -- "choose slot" --> AbilityPicker[Fullscreen ability picker]
-    AbilityPicker -- "Back / accepted change" --> AbilityCustomize
-    AbilityPicker -- "rejected change" --> AbilityPicker
-    BrawlerDetails -- "Customize Weapon" --> WeaponCustomize[Customize Weapon screen]
-    WeaponCustomize -- "Back / Save" --> BrawlerDetails
-    BrawlerDetails -- Delete --> DeleteConfirm{Delete confirmation}
-    DeleteConfirm -- Cancel --> BrawlerDetails
-    DeleteConfirm -- "Confirm (mutation pending)" --> BrawlerList
+    Dashboard -- "View brawlers" --> Brawlers[Brawlers select screen]
+    Brawlers -- "pick character or option (one accepted round trip)" --> Brawlers
+    Brawlers -- Back --> Dashboard
     Dashboard -- "activate game card" --> GameTypeSelect[Game Type Select child]
     GameTypeSelect -- "Confirm / Back" --> Dashboard
 
@@ -123,19 +107,15 @@ remain explicit.
 |---|---|---|
 | Connecting | Initial or manual lobby connection progress | Shows the real logo, live phase, and Cancel; success enters Dashboard and failure enters full-screen recovery |
 | Server Select | Recovery and manual connection | Owns address, display name, favorites, and recents; it does not pretend to be a connected home |
-| Player Dashboard | Sole authenticated home | Presents the selected brawler and entry to Brawlers List, selected game summary, Play, Practice, and connected utilities |
+| Player Dashboard | Sole authenticated home | Presents the selected character and entry to Brawlers, selected game summary, Play, Practice, and connected utilities |
 | Game Type Select | Dashboard child | Edits one local advertised-game draft; Confirm commits and Back discards |
-| Brawlers List | Full-screen Dashboard child | Shows every saved brawler with a human-readable loadout and one clear selected marker; owns Create and row navigation |
-| Brawler | Full-screen saved-brawler detail | Presents the saved name with inline rename, fighter preview, whole Weapon and Abilities panels, four attachment summaries, Select for Play, Delete, and Back |
-| Create Brawler | Full-screen creation destination | Three whole cards open fullscreen fighter, weapon and ultimate catalog pickers; choices return to the retained named draft, and one authoritative Create request opens the new Brawler screen on acceptance |
-| Customize Abilities | Full-screen Brawler child | Keeps permanent facts read-only and edits name, ultimate, and two distinct selectable passives; accepted save returns to the invoking Brawler screen |
-| Customize Weapon | Full-screen Brawler child | Presents the weapon, resolved statistics and four slots; each slot opens a fullscreen responsive parts picker with automatic saving |
+| Brawlers | Full-screen Dashboard child | Roster grid of every character (name, role and weapon), the selected character's preview and facts, and its two ultimate and two passive options; each pick is one authoritative selection; Back returns to Dashboard |
 | Queue | Accepted multiplayer admission | Shows the frozen accepted request and honest pool facts; Cancel awaits acknowledgement |
 | Match Loading | Reserved-match handoff and readiness | Shows server-owned progress and bounded cancellation or return behavior |
 | Match | Authoritative gameplay | Owns world presentation, HUD, non-pausing menu, and scoreboard presentation |
 | Match Complete | Transient result-preservation bridge | Accepts no navigation while lobby return and result capture converge |
 | Results | Completed-match decision | Keeps the authoritative outcome visible and offers exact replay or Dashboard |
-| Dashboard Menu | Connected utility overlay | Owns Settings, Credits, favorite-server action, Change Server, and Quit; saved-brawler navigation starts from the Dashboard card |
+| Dashboard Menu | Connected utility overlay | Owns Settings, Credits, favorite-server action, Change Server, and Quit; character selection starts from the Dashboard card |
 | Settings | Local settings surface | Returns to its explicit product-flow or match-menu origin |
 | Credits | Attribution surface | Reached from Dashboard Menu; required attribution mirrors `assets/licenses/THIRD_PARTY.md` and the original-work license notes, guarded by drift tests |
 | Confirmations | Small contextual overlays | Preserve their invoking screen visibly underneath and restore it deterministically |
@@ -216,38 +196,37 @@ not by itself solve internet reachability, trust, or moderation.
 
 ## Dashboard and selection contract
 
-Dashboard presents the selected saved brawler and selected advertised game type. It owns the only
+Dashboard presents the selected character and selected advertised game type. It owns the only
 ordinary Play and Practice actions. The accepted lobby membership atomically provides the
-server-owned profile plus bounded brawler and game-type catalogs before Dashboard is enterable.
+server-owned profile plus bounded character and game-type catalogs before Dashboard is enterable.
 The whole mode card opens Game Type Select; its visible copy is mode and team size, with a semantic
 badge and chevron. Population and map-pool detail belong to the relevant selection/queue surfaces.
 Connected identity shows player and server names without redundant Online text. Settings is inside
 Menu; no device-specific button footer is shown. The approved clean palette and composition are
 specified in [player-shell design](design/player-shell/README.md).
 
-Every brawler name, loadout summary, statistic, creation/edit choice, preview, and selection limit
-comes from that connection-scoped brawler advertisement. Disconnect, server change, rejected
-welcome, or lobby-generation replacement clears it; reconnect installs a fresh snapshot rather
-than retaining client-local metadata.
+Every character name, role, statistic, weapon, option, and preview comes from that
+connection-scoped character advertisement. Disconnect, server change, rejected welcome, or
+lobby-generation replacement clears it; reconnect installs a fresh snapshot rather than retaining
+client-local metadata.
 
-Saved-brawler creation/editing and Game Type Select are child flows, not alternate hubs: they
-contain no queue, practice, favorite, server-change, or disconnect controls.
+Brawlers and Game Type Select are child flows, not alternate hubs: they contain no queue,
+practice, favorite, server-change, or disconnect controls.
 
-The Dashboard brawler action opens Brawlers List when a profile is selected; an empty profile offers creation. The list owns the complete saved
-collection, its selected marker, human-readable loadouts, Create action, and Back to Dashboard.
-Tapping a row opens that Brawler screen; merely opening a row does not select it. `Select for Play`
-is always available, including for the already-selected brawler, and returns directly to Dashboard.
+The Dashboard `View brawlers` action opens the Brawlers select screen. It shows the roster as a
+grid of character tiles (name, role and weapon), the selected character's live preview, role, body
+and weapon, an ULTIMATE row and a PASSIVE row of two options each, and Back to Dashboard. Pressing a
+tile selects that character immediately with its remembered (or first) options; pressing an option
+selects it for the current character. Each press is one revision-bound authoritative selection:
+while it is pending the controls are disabled, acceptance updates the marker and preview, and
+rejection keeps the last accepted pick with an inline reason. Selecting the current choice sends no
+write. Every tile and option is an ordinary focus target at least 48 dp, so touch, pointer,
+keyboard, and controller reach the same actions; arrow keys move across the grid and option rows.
+Wide windows place the preview, grid and options side by side; compact windows keep the grid and
+options and drop the preview. Placeholder characters render as tinted Riff or Bumper models until
+their art lands.
 
-Every Brawler screen has Back to Brawlers. Customize Abilities and Customize Weapon are opaque
-full-screen children with Back to the same Brawler. Delete opens an opaque fullscreen confirmation
-with the saved name, an irreversible-action explanation, and Keep Brawler / Delete actions.
-Keep Brawler starts focused. Confirmation sends the authoritative intent, disables repeated
-submission and cancellation while pending, and returns to Brawlers List only after acceptance.
-Rejection retains the confirmation and explains the failure so the player can retry or cancel.
-Deleting the selected brawler selects the next creation ordinal with wraparound; deleting the last
-leaves the empty list with Create available.
-
-Delete Brawler, Leave Match, and Change Server share the same fullscreen confirmation composition,
+Leave Match and Change Server share the same fullscreen confirmation composition,
 white display type with an `ink` stroke and slanted cut-corner actions. Safe actions use `panel`;
 confirming actions use `play`. Wide windows place actions side by side; compact windows stack them with vertical scrolling
 and focus reveal. Arrow keys or gamepad navigation move between actions; cancel returns safely.
@@ -262,27 +241,7 @@ Its bounded list remains vertically scrollable by pointer wheel and keyboard/con
 focused rows scroll into view, and Confirm plus Back remain reachable even at the maximum admitted
 catalog length.
 
-Creation starts from safe defaults, clearly identifies fighter profile and weapon base as permanent,
-and requires confirmation. An accepted create opens the new Brawler screen; rejection remains on
-Create with an inline reason, and Back discards the draft to Brawlers List. Customize Abilities
-shows permanent fighter/weapon choices read-only while name, ultimate, and the two ordinary
-passives remain editable. Accepted save returns to the same Brawler; rejection retains the draft
-and inline reason.
-
-Customize Weapon presents the native weapon preview, borderless resolved statistics and four
-numbered slot tiles. A slot opens a fullscreen owned-parts grid with six columns on wide screens, five at medium widths and fewer on compact windows. Nothing is the first
-selectable item and clears that slot. The accepted choice uses the shared selection treatment
-(`panel-raised` fill with a `play-highlight` rim); keyboard/gamepad focus has
-an independent outline, without a duplicate Selected label. Part family illustrations are UI
-symbols, not claims that the physical weapon model changes with equipment.
-
-Choosing a part or Nothing sends one revision-bound slot replacement automatically. While it is
-pending, another choice or Back cannot race the mutation. Acceptance returns to the weapon view;
-rejection keeps the picker open with an inline reason and restores the last accepted equipment.
-Choosing the already equipped item returns without a write. Back from the picker returns to the
-weapon view; its single Back returns to the invoking Brawler. An instance used by another brawler
-is identified and cannot be silently moved. Queue and Practice admission retain their mutation
-locks. Match loading uses the shared abstract shell background, native fighter preview, mode
+Queue and Practice admission lock character selection. Match loading uses the shared abstract shell background, native fighter preview, mode
 badge and topology, factual phase, reduced-motion-aware activity and a single Cancel action.
 
 
@@ -318,10 +277,11 @@ controller, and accessibility activation feed the same flow-action owner.
 
 ## Admission, queue, and match loading
 
-Play submits the committed game type plus selected saved-brawler identity and expected revision to
+Play submits the committed game type plus the expected profile revision to
 the connected server's multiplayer admission path. Successful admission freezes the server-resolved
-loadout snapshot on an immutable queue ticket. Editing thereafter requires acknowledged cancellation
-and a new admission; a pending or accepted queue command never reopens an editor as its retry owner.
+loadout snapshot on an immutable queue ticket. Changing the pick thereafter requires acknowledged
+cancellation and a new admission; a pending or accepted queue command never reopens the select
+screen as its retry owner.
 
 Each advertised game type has an exact server-owned topology. Its multiplayer pool contains human
 tickets and forms only a complete roster; overflow remains queued. Queue presentation shows the
@@ -450,14 +410,11 @@ data. The retired local build file is neither imported nor rewritten. Favorites 
 recents remain bounded and automatic. None of this persistence
 belongs in the dedicated-server feature graph.
 
-V7 adds a fresh server-side persistent arsenal and does not import the locally saved build. An
-account may own up to 16 brawlers, delete them, and reuse display names. Fighter profile and weapon
-base are permanent creation choices; name, four generic weapon-part slots, ultimate, and both
-passives remain editable outside queue. Queue admission freezes the brawler and every edit is
-rejected while queued. The 12-point budget and the Runner, Bruiser, Controller, and Duelist builds
-do not carry into this flow.
+The server-side profile stores the selected character and the last ultimate and passive chosen for
+each character (BRL-egn6, which retired V7's saved brawlers, part inventory and equipment). Every
+roster character is available, and every selection is rejected while queued.
 
-The V7 store uses SQLite WAL/transactions, versioned migrations, an operator backup command, and a
+The profile store uses SQLite WAL/transactions, versioned schemas, an operator backup command, and a
 tested restore path. Unavailable storage fails fast. Corrupt storage is preserved for recovery;
 unsafe records are rejected and reported without silently resetting owned data. Production
 authentication and external identity schemes remain deferred. For V7, the client generates and
@@ -703,15 +660,8 @@ Each extension requires a focused Ticket. It should attach to Dashboard or anoth
 demonstrated owner rather than creating a new top-level hub or generic navigation framework in
 advance.
 
-### Saved-brawler ability selection
+### Character option selection
 
-The ability overview has one ultimate and two passive cards. Each opens a fullscreen,
-responsive catalog grid (five columns on wide screens), with vertical wheel scrolling and
-keyboard/gamepad focus reveal. The current choice uses the shared selection treatment; the `accent`
-focus
-frame identifies navigation separately. Choosing a valid replacement submits one authoritative
-profile edit while preserving the name and other slots. The picker returns only after server
-acceptance; rejection retains the prior accepted build and shows the error in the picker.
-There is no Save button. Selecting the current choice returns without a mutation.
-Frame passives remain fighter-profile-owned, and duplicate passives are unavailable with
-a concise reason. Name editing stays on brawler details.
+Each character offers exactly two ultimates and two passives, authored in the character catalog.
+The Brawlers screen shows them as two option rows beside the roster grid; there is no separate
+picker, Save button, or free choice from the full ultimate and passive catalogs.

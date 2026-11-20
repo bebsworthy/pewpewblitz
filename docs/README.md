@@ -30,9 +30,9 @@ run `ticket list` and `ticket task <ID>` rather than inferring active work from 
 
 - [Product direction](./00-product-direction.md) — product promise, differentiation, principles,
   creator direction, and non-goals.
-- [Fighter and build specification](./02-fighter-model.md) — authored choices, accepted build
-  identity, resolved loadouts, fighter runtime, statuses, and the implemented saved-brawler arsenal
-  and equipment boundaries.
+- [Fighter and build specification](./02-fighter-model.md) — the roster character catalog,
+  character picks, accepted build identity, resolved loadouts, fighter runtime, statuses, and the
+  profile lifecycle.
 - [Weapons and abilities specification](./03-weapons-and-abilities.md) — combat authoring layers,
   weapon recipes, delivery, payloads, effects, abilities, presentation facts, and extension rules.
 - [Map and mode specification](./04-maps-and-game-modes.md) — authored, resolved, and runtime map
@@ -114,18 +114,15 @@ override later durable specifications or accepted changes recorded by subsequent
 These definitions provide cross-document orientation. The linked owning specifications remain
 authoritative for exact schemas, supported fields, and lifecycle rules.
 
-- **Brawler:** the product-level player-authored configuration or identity from which a match
-  fighter is instantiated. V7 owns the promoted long-lived server-side identity, persistence, and
-  equipment loop; earlier versions retain match-scoped selections only.
-- **Fighter:** the server-owned in-match combatant instantiated from a validated, resolved brawler
-  loadout.
-- **Build:** a bounded player selection that the server validates and resolves. The supported
-  foundation contains a primary-weapon selection, one ultimate, and two passives; additional body,
-  item, or equipment choices require an explicitly supported extension.
-- **Player weapon selection:** the bounded preset identity or typed specification chosen for the
-  brawler's primary weapon.
-- **Weapon recipe:** the operational, server-resolved weapon composition derived from a legal
-  player selection or developer-authored preset; it is not arbitrary client-authored runtime data.
+- **Brawler / character:** one authored roster character (stable `CharacterId`, role, body, stats,
+  signature weapon, and two ultimate and two passive options) that a player picks (BRL-egn6, which
+  retired V7's saved brawlers and part equipment).
+- **Fighter:** the server-owned in-match combatant instantiated from a validated, resolved
+  character loadout.
+- **Build / pick:** the bounded player selection the server validates and resolves: one character,
+  one of its ultimates, and one of its passives.
+- **Weapon recipe:** the operational, server-resolved weapon composition derived from a character's
+  signature weapon (a developer-authored base plus authored parts); it is not arbitrary client-authored runtime data.
 - **Map recipe:** a bounded authored layout that resolves into an immutable server-validated map
   snapshot. Built-in presets and future player-authored maps use the same recipe boundary.
 - **Mode:** a developer-authored authoritative rules implementation. A compatible map supplies

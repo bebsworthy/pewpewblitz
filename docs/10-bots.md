@@ -48,7 +48,7 @@ This decision follows from the existing product flow:
 - Start Practice already asks the lobby to allocate one match worker containing the human and
   manifest bots in the remaining roster positions.
 - The worker already materializes each manifest bot as an ordinary fighter with a resolved
-  saved-brawler snapshot, lifecycle state, and neutral `ActionState<FighterInput>`.
+  character snapshot, lifecycle state, and neutral `ActionState<FighterInput>`.
 - Making those entities produce intent requires no bot admission protocol, route capability,
   subprocess orchestration, check-in exception, or second combat simulation.
 
@@ -73,7 +73,7 @@ Alternatives remain:
 
 The completed server-hosted controller uses the existing production integration points:
 
-- the practice allocation and manifest own stable bot identity, team, saved-brawler snapshot, and
+- the practice allocation and manifest own stable bot identity, team, character snapshot, and
   roster capacity;
 - worker startup materializes manifest bots as full fighters with `ActionState<FighterInput>` and
   `InputFreshness`;
@@ -94,8 +94,8 @@ The bot feature owns these integration seams:
    `ActionState<FighterInput>` with `InputFreshness` in the fixed input phase.
 4. A private monotonic controller-life generation follows authoritative defeat, respawn, and active
    transitions without adding bot-only replicated lifecycle state.
-5. The manifest uses an explicit authored saved-brawler-native recipe, and executors choose behavior
-   from resolved capabilities rather than legacy preset IDs.
+5. The manifest carries a deterministic roster character pick per bot, and executors choose
+   behavior from resolved capabilities rather than character or preset IDs.
 6. Bot observation uses the same pure observer-specific reveal rule as client visibility without
    fake connections or access to the connection-keyed cache.
 
@@ -112,9 +112,9 @@ focused Ticket specification before changing one of those contracts.
   player-affecting Practice tuning; there are no player-facing difficulty presets or skill ranking.
   The target is readable opposition with delayed reactions, imperfect aim, coordinated objective
   play, and bounded tactical commitments.
-- **One canonical saved brawler.** Manifest bots use one validated built-in saved-brawler recipe
-  with Pulse primary and Dash. The human may practice with any legal build. Additional bot weapon
-  and ability capabilities are evidence-gated.
+- **Deterministic roster picks.** Manifest bot ordinal `n` plays roster character `n mod 9` with
+  its first ultimate and passive, resolved through the ordinary character path (BRL-egn6). Bot
+  behavior and matchup variety across those weapons and abilities are BRL-abys.
 - **All Practice-compatible mode goals.** Wipeout supplies survival and pressure goals; Hot Zone
   supplies contest and defend goals; Heist supplies attack-safe, defend-safe, and lane-pressure
   goals. Zombie supplies close-range hostile-NPC pressure: the human and friendly bots share team
@@ -321,8 +321,8 @@ enemy—rather than becoming a stringly typed rule language.
   retreat burst, aim-error hold, route identity, stuck window, and reaction deadline live in
   explicit returned state.
 - **Combat uses resolved capabilities.** The first executor supports Pulse primary fire and Dash.
-  It derives range, projectile speed, reload, charge, and activation facts from the resolved saved-
-  brawler snapshot. Predictive aim uses permitted delayed target velocity/positions, retains bounded
+  It derives range, projectile speed, reload, charge, and activation facts from the resolved
+  loadout. Predictive aim uses permitted delayed target velocity/positions, retains bounded
   error, and checks line of fire. Dash has explicit engage, escape, and traversal safety rules.
   Demolition Strike adds one focused executor branch: when charged, a bot may aim it at an observed
   public target within the resolved maximum range and emits the same ordinary targeted-ultimate
@@ -396,7 +396,7 @@ to internal trace/replay artifacts, not separate application-protocol compatibil
 ## Lifecycle and practice integration
 
 The existing Start Practice transaction remains the entry point. Manifest bot rows continue to own
-stable display name, player ID, team, selected saved-brawler snapshot, and spawn assignment. Worker
+stable display name, player ID, team, selected character snapshot, and spawn assignment. Worker
 materialization additionally installs private controller and policy-state components for those
 rows; connected human participants never receive them.
 
@@ -470,7 +470,7 @@ The playable bot slice is protected by:
 - budget tests for stable queued/incremental path work, safe exhaustion, bounded retained search
   state, and no fixed-tick spike at the maximum declared supported topology;
 - focused Wipeout, Hot Zone, and Heist goal/role/reservation tests, including safe attack/defense;
-- representative saved-brawler tests for predictive but imperfect Pulse aim, range control, primary
+- representative loadout tests for predictive but imperfect Pulse aim, range control, primary
   fire, and bounded Dash engage/escape/traversal behavior;
 - barrel reasoning tests plus chest/pickup usefulness, contest, collection, expiry,
   and full-health rejection behavior through ordinary authoritative input;
@@ -493,7 +493,7 @@ tests, and do not raise the production map-dimension limit merely to test naviga
 
 Add later behavior only when its owning slice is implemented and tested:
 
-- additional straight, lobbed, and melee bot-controlled saved-brawler recipes;
+- deliberate bot behavior for every roster weapon and ability (BRL-abys);
 - active items, Sentry, Self Cloak, Concealment Field, and other ability primitives;
 - bounded projectile awareness and avoidance without perfect tracking;
 - richer squad tactics or map control after the first role/reservation planner is readable;

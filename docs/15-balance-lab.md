@@ -23,8 +23,8 @@ restoration-pickup evolution.
    Balance Lab, so the launcher waits for that worker's endpoint and then opens
    <http://127.0.0.1:5123> once in the default browser.
 3. Review **Players & loadouts** for the authoritative human and bot roster admitted to this
-   Practice worker. Each card identifies the team, fighter profile, weapon base, ultimate, two
-   passives, and effective weapon modifiers. Collapse the panel when more tuning space is useful.
+   Practice worker. Each card identifies the team, roster character, weapon base, ultimate,
+   passive, and effective weapon modifiers. Collapse the panel when more tuning space is useful.
 4. Choose a gameplay category. Subjects are columns and comparable properties are aligned rows;
    unsupported subject/property intersections show an em dash. Edit exact draft values directly in
    the matrix. Scroll horizontally for wide categories; the property and subject headers remain
@@ -58,12 +58,14 @@ their persisted variants use different field names: examples include weapon rang
 targeted-ultimate range/radius/duration, subordinate ultimate projectiles, and elemental-resistance
 passives. Their gameplay paths and values remain unchanged. Its
 **Global** tab currently contains a **Cold & Freeze** section for buildup decay delay/rate, Freeze
-duration, and post-thaw immunity. It also exposes the three permanent fighter profiles, seven
-canonical weapon-base recipes, all 12 numeric parameters across the seven parameterized passives,
+duration, and post-thaw immunity. It also exposes the seven canonical weapon-base recipes, all 16 numeric parameters across the
+nine parameterized passives (including the Lightweight and Reinforced Frame health and speed
+scales),
 and the bounded parameters of all eleven tunable ultimates. The comparison workspace presents each
 category as a server-ordered matrix, aligns only fields with the same declared comparison identity,
-and preserves every numeric field exactly once. Lightweight Frame and Reinforced Frame
-remain supported snapshot identities but have no numeric editor controls.
+and preserves every numeric field exactly once. Character stats are not tunable yet: the shared
+fighter profiles were retired with saved brawlers (BRL-egn6), and per-character editing is
+BRL-5v3c.
 Weapon coverage includes every Sticky Blomb delivery/fuse value and every Splash numeric delivery
 value; ultimate coverage includes every Big Blob parent/secondary value. The **World objects** tab
 exposes one comparison column per authored effect-tile definition and discovers each registered
@@ -83,14 +85,13 @@ elemental-resistance, elemental-field, Cold-capacity, global condition-rule, and
 defaults before validation while retaining existing tuning. The removed full-build workflow is not
 a Balance Lab surface. Apply validation
 re-resolves the complete 3×7 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
-and advertised brawler catalog, and then starts a clean Practice epoch.
+and advertised character catalog, and then starts a clean Practice epoch.
 
 The roster view is also non-persisted and read-only. It is projected from the worker's authoritative
 admission manifest rather than inferred from client state. The routed match snapshot contains each
-selected fighter profile, weapon base, ultimate, passive pair, and the canonical aggregate of all
-equipped weapon parts. It does not retain the individual weapon-part identities, so Balance Lab
-truthfully presents their effective capacity, damage, timing, reach, and slow modifiers instead of
-inventing part names.
+selected character and its chosen ultimate and passive; the card resolves the character's
+signature weapon and presents the canonical aggregate of its authored parts as effective capacity,
+damage, timing, reach, and slow modifiers.
 
 Fighter tuning also exposes health recovery per second and the accepted-attack idle delay. Weapon
 refill/recharge timing is labeled as recovery for one round or charge. These durations require a
@@ -118,14 +119,14 @@ otherwise canonical map catalog passes validation. The clean restart then resolv
 from that revised catalog; placement, asset identity, visuals, and production catalog defaults do
 not change.
 
-Each fighter profile also exposes its own Cold capacity and Cold, Poison, and Fire resistance
+Each roster card also shows its character's Cold capacity and Cold, Poison, and Fire resistance
 baseline. Resistance is displayed as a percentage while stored in basis points. The roster always
 shows these baselines, including zero values, and distinguishes an equipped passive's additive
 bonus from the effective resolved resistance. Cryogenic weapon and field values are labeled as Cold
 per hit or per pulse, while the target card supplies the capacity denominator that determines
 Freeze timing.
 
-Global Cold lifecycle controls are deliberately separate from fighter profiles. Capacity and
+Global Cold lifecycle controls are deliberately separate from character stats. Capacity and
 resistance describe how difficult a target is to freeze; the shared decay delay, decay rate, Freeze
 duration, and post-thaw immunity describe how the condition behaves for everyone. Timing is shown in
 seconds and stored as authoritative ticks. Decay is shown in Cold per second and stored as an integer
@@ -195,11 +196,9 @@ revalidates the complete stored snapshot. Authored policy may remain narrower fo
 while Balance Lab uses a wider proven-safe engine ceiling. Expanding a real engine ceiling requires
 updating the affected runtime, wire, client-convergence, and capacity tests together.
 
-For fighter profiles, maximum health accepts the complete nonzero `u16` representation
-(`1..=65,535`). Movement speed must be finite and greater than zero; the ordinary UI starts at `1`
-world unit per second because its control advances in whole-unit steps. These are representation and
-runtime invariants rather than shipping balance policy. The existing `1,200` movement ceiling and
-world-object health bounds remain separately owned constraints pending their own review.
+Character stats share the authoritative fighter-stat bounds (`validate_fighter_stats`): maximum
+health is a nonzero `u16` and movement speed is finite and greater than zero. Per-character editing
+will expose them under BRL-5v3c.
 
 ## Required maintenance contract
 

@@ -2,37 +2,41 @@
 
 ## One-sentence pitch
 
-PewPew Blitz is a short-match arena shooter where players create a brawler around a customized
-primary weapon and win through movement, aim, positioning, and tactical use of equipment.
+PewPew Blitz is a short-match arena shooter where players pick a brawler from an original roster,
+choose one of its two ultimates and one of its two passives, and win through movement, aim,
+positioning, and tactical use of that kit.
 
 ## Design pillars
 
 1. **Combat first.** Every system must improve the feel, clarity, or depth of the moment-to-moment fight.
-2. **Meaningful builds.** A customized weapon, ultimate, and two passives should create a
-   recognizable play pattern, not merely add invisible numerical power.
+2. **Meaningful picks.** Each character's signature weapon, stats, and role should create a
+   recognizable play pattern, and each ultimate or passive option should change how it plays, not
+   merely add invisible numerical power.
 3. **Readable competition.** Players should understand why they were damaged, slowed, defeated, or denied an objective.
-4. **Short feedback cycles.** A match should expose a build's strengths and weaknesses quickly.
-5. **Content through composition.** New weapon recipes, payloads, items, and map layouts should
-   combine from bounded primitives without requiring a bespoke fighter class or a custom mode
-   script for each map. Genuinely new game modes may still require developer-authored authoritative
+4. **Short feedback cycles.** A match should expose a pick's strengths and weaknesses quickly.
+5. **Content through composition.** New characters, weapon recipes, payloads, items, and map
+   layouts should combine from bounded primitives without requiring a bespoke fighter class or a
+   custom mode script for each map. A roster character is an authored composition of stats, a
+   weapon base with optional parts, and option pairs of existing ultimates and passives. Genuinely new game modes may still require developer-authored authoritative
    rules.
 6. **Network-first simulation.** The product is a networked competitive game; offline and local testing must exercise the same server-authoritative simulation path.
 
 ## Differentiation
 
-The reference genre usually begins with a predefined character and then adds character-specific
-upgrades. PewPew Blitz reverses that relationship:
+Players meet PewPew Blitz through a small, readable roster: nine original characters at launch, each
+with a role (Damage, Tank, Helper, Controller), a body (Light, Normal, Heavy), its own stats, and a
+signature weapon. Every character is available; there are no unlocks or progression. The choice a
+player makes before a match is the character plus one of two ultimates and one of two passives,
+remembered per character.
 
-- the body is a relatively small, understandable foundation;
-- the player composes the weapon's behavior and bounded specifications, which determine the primary
+Underneath, characters stay compositions rather than bespoke hero code:
+
+- the body and stats are a small, understandable foundation;
+- the signature weapon, built from shared weapon bases and authored parts, determines the primary
   combat pattern;
-- the ultimate and passives create specialization;
-- players trade strengths and weaknesses through bounded legality, slots, and explicit opportunity
-  costs.
-
-The player's long-lived collection is an arsenal of authored brawlers, each with its own validated
-weapon configuration and loadout. This creates a buildcraft game without requiring a large roster
-of developer-defined heroes.
+- the ultimate and passive options create specialization within that character;
+- a new character is a catalog entry over existing primitives, so the roster can grow without new
+  combat systems.
 
 ## Creator direction
 
@@ -57,9 +61,8 @@ explicitly support them.
 
 ## Balance principle
 
-Customization must not mean that every stat can be maximized independently. Each build should use
-bounded legality, slot restrictions, explicit tradeoffs, or—where a design deliberately adopts
-one—a power budget.
+Characters must not be strictly better than one another. Each character and option should use
+bounded legality, explicit tradeoffs, and authored sidegrades rather than a power budget.
 
 Examples:
 
@@ -68,24 +71,22 @@ Examples:
 - a strong crowd-control item can have a long cooldown;
 - a mobility item can occupy the same slot as a defensive item.
 
-Built-in weapon and brawler presets and player-authored builds must use the same compositional recipe
-and validation path. The current saved-brawler weapon model uses four generic part slots and
-validated sidegrade rules rather than a player-facing point budget. Acquisition mechanics such as
-currency, loot,
-unlocks, and progression decide which options a player owns, not whether a weapon is legal in
-combat, and are later product problems. Automatic balancing and procedural item generation are
+Player picks, Practice bots, diagnostics, and Balance Lab must use the same compositional recipe and
+validation path. Acquisition mechanics such as currency, loot, unlocks, and progression would decide
+which characters a player may pick, not whether a loadout is legal in combat, and are later product
+problems. Automatic balancing and procedural item generation are
 also later problems.
 
 ## Product boundaries
 
 PewPew Blitz's identity does not depend on delivering these concerns before its combat,
-build-learning, match, and creator loops are valuable:
+character-learning, match, and creator loops are valuable:
 
 - production matchmaking and party services;
 - persistent progression or currencies;
 - ranked play;
 - cosmetics and account systems;
-- a large fighter roster;
+- a large roster beyond the launch characters;
 - procedural map generation;
 - a complete mobile control scheme;
 - a production-grade backend;

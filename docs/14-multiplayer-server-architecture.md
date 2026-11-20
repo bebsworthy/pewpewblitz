@@ -29,7 +29,7 @@ One logical Brawler server consists of:
 1. One **supervisor/router process** owning the public UDP socket, routing capabilities, bounded
    route and worker registries, host admission, child handles, and shutdown coordination.
 2. One long-lived **lobby worker process** owning a headless Bevy `App`/`World`, Lightyear
-   authority for game types, sessions, profiles, the server-derived advertised brawler catalog,
+   authority for game types, sessions, profiles, the server-derived advertised character catalog,
    queues, and reservations, plus the exclusive bounded SQLite profile-storage executor—not match
    simulation. It
    requests host admission and match-worker allocation from the supervisor. Embedding the lobby in
@@ -357,7 +357,7 @@ client.
 |---|---|
 | Public UDP socket and route envelope | Supervisor/router |
 | Route capability creation, validation, expiry, revocation | Supervisor from validated lobby allocation input |
-| Game-type and advertised brawler catalogs, profile content validation, queue tickets, formation, reservation | Lobby authority |
+| Game-type and advertised character catalogs, profile content validation, queue tickets, formation, reservation | Lobby authority |
 | Saved-profile structural persistence and atomic load/store | Lobby-owned storage executor |
 | Published-map validation, quota, cooldown, and community rotation | Lobby authority, stored by the same executor |
 | Published-map moderation decisions | Operator, through `brawler-profile-admin maps` |
