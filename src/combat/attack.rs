@@ -786,7 +786,6 @@ mod tests {
         crate::builds::ResolvedPassive {
             id: crate::builds::PassiveDefinitionId(5),
             kind: crate::builds::PassiveKind::QuickCycle,
-            point_cost: 2,
             parameters: crate::builds::PassiveParameters::QuickCycle {
                 refill_duration_basis_points,
             },

@@ -590,7 +590,6 @@ fn refresh_match_roster(
             team: *team,
             selected_build: *build,
             weapon_preset: selected.and_then(|loadout| loadout.primary_weapon.source_preset_id),
-            total_points: selected.map(|loadout| loadout.total_points),
             ultimate_id: selected.map(|loadout| loadout.ultimate.id),
             passive_ids: selected.map(|loadout| loadout.passives.map(|passive| passive.id)),
         });

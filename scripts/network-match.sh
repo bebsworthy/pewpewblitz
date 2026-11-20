@@ -120,7 +120,7 @@ for required in initial_match_id restarted_match_id participant_count mode_defin
     final_score_team_1 final_score_team_2 result active_duration_ticks defeats respawns participant_active_ticks_team_1 \
     participant_active_ticks_team_2 records dropped_records summary_count \
     weapon_aggregate_count weapon_preset_ids build_fingerprints \
-    build_total_points ultimate_ids passive_ids first_full_charge_ticks first_full_charge_active_ticks ability_uses_by_owner \
+    ultimate_ids passive_ids first_full_charge_ticks first_full_charge_active_ticks ability_uses_by_owner \
     charge_dealt_by_owner charge_received_by_owner passive_triggers accepted_attacks \
     attacks_with_hostile_contact ability_attempts \
     ability_accepts dash_uses sentry_uses \

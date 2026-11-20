@@ -48,7 +48,6 @@ fn runtime_projection_installs_the_exact_resolved_ability_capabilities() {
 fn embedded_catalog_exposes_current_authored_inventory_and_ultimate_parameters() {
     let (builds, _) = catalogs();
     assert_eq!(builds.balance_revision, BuildRevision(13));
-    assert_eq!(builds.weapon_costs.len(), 7);
     assert_eq!(builds.ultimates.len(), 11);
     assert_eq!(builds.passives.len(), 9);
     assert_eq!(
@@ -760,7 +759,6 @@ fn loadouts_reject_unknown_ids_and_keep_the_character_stats() {
     let (builds, weapons) = catalogs();
     let resolved = resolve_loadout(&builds, &weapons, recipe(3, 2, 5)).unwrap();
     assert_eq!(resolved.fighter_stats, stats());
-    assert_eq!(resolved.total_points, 0);
     assert_eq!(
         resolved.primary_weapon.source_preset_id,
         Some(crate::combat::WeaponPresetId(3))
@@ -854,9 +852,6 @@ fn catalog_accepts_additive_inventory_and_rejects_identity_and_cost_mutations() 
     additive.passives.push(passive);
     assert!(additive.validate().is_ok());
     let mut invalid = builds.clone();
-    invalid.ultimates[0].point_cost = BUILD_POINT_BUDGET + 1;
-    assert!(invalid.validate().is_err());
-    let mut invalid = builds.clone();
     invalid.schema_version = 0;
     assert!(invalid.validate().is_err());
     let mut invalid = builds.clone();
@@ -870,9 +865,6 @@ fn catalog_accepts_additive_inventory_and_rejects_identity_and_cost_mutations() 
     assert!(invalid.validate().is_err());
     let mut invalid = builds.clone();
     invalid.passives[1].key = invalid.passives[0].key.clone();
-    assert!(invalid.validate().is_err());
-    let mut invalid = builds.clone();
-    invalid.passives[0].point_cost = 0;
     assert!(invalid.validate().is_err());
     let mut invalid = builds.clone();
     invalid.ultimates[0].kind = UltimateKind::Sentry;
@@ -1250,23 +1242,16 @@ fn passive_parameter_bounds_and_cross_field_invariants_are_enforced() {
 }
 
 #[test]
-fn weapon_costs_must_exactly_cover_an_additive_weapon_catalog() {
-    let (mut builds, mut weapons) = catalogs();
+fn an_additive_weapon_catalog_needs_no_build_catalog_entry() {
+    let (builds, mut weapons) = catalogs();
     let mut eighth = weapons.presets.last().unwrap().clone();
     eighth.id = crate::combat::WeaponPresetId(8);
     eighth.key = "eighth-preset".into();
     eighth.display_name = "Eighth Preset".into();
     weapons.presets.push(eighth);
-    builds.weapon_costs.push(WeaponPointCost {
-        weapon_id: crate::combat::WeaponPresetId(8),
-        point_cost: 4,
-    });
 
     assert!(weapons.validate().is_ok());
     assert!(builds.validate_weapon_references(&weapons).is_ok());
-
-    builds.weapon_costs.pop();
-    assert!(builds.validate_weapon_references(&weapons).is_err());
 }
 
 #[test]

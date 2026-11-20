@@ -140,13 +140,6 @@ pub(super) fn verify_process_match(
         .map(|build| build.recipe_fingerprint.0.to_string())
         .collect::<Vec<_>>()
         .join(",");
-    let build_total_points = summary
-        .participants
-        .iter()
-        .filter_map(|participant| participant.total_points)
-        .map(|points| points.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
     let passive_ids = summary
         .participants
         .iter()
@@ -248,7 +241,7 @@ pub(super) fn verify_process_match(
         )
     });
     let report = format!(
-        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nmode_definition_id={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\nbuild_fingerprints={}\nbuild_total_points={}\nultimate_ids={}\npassive_ids={}\nfirst_full_charge_ticks={}\nfirst_full_charge_active_ticks={}\nability_uses_by_owner={}\ncharge_dealt_by_owner={}\ncharge_received_by_owner={}\npassive_triggers={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\nability_attempts={}\nability_accepts={}\ndash_uses={}\nsentry_uses={}\nself_cloak_uses={}\nself_cloak_active_ticks={}\nself_cloak_end_reasons={:?}\nreveal_scan_uses={}\nreveal_scan_targets={}\nconcealment_field_uses={}\nsentry_shots={}\nability_dropped_records={}\nwasted_charge={}\nready_to_use_delay_ticks={}\nready_to_use_count={}\nability_rejections={:?}\ndash_requested_distance_milli={:?}\ndash_actual_distance_milli={:?}\ndash_map_collision_truncations={:?}\ndash_contacts={:?}\ndash_interruptions={:?}\nability_damage={:?}\nability_targets={:?}\nability_defeats={:?}\nsentry_cleanup_reasons={:?}\nconcurrent_sentry_high_water={}\nsentries={:?}\npassive_active_ticks={:?}\npassive_modified_amounts={:?}\npassive_unused_triggers={:?}\nmap_catalog_schema_version={}\nmap_dynamic_fingerprint={}\nmap_placement_count={}\nmap_terminal_state_count={}\nmap_dynamic_revision={}\nmap_dynamic_digest={}\nmap_destruction_revision={}\nmap_placements_changed={}\nmap_collider_updates={}\nmap_recovery_requests={}\nmap_recovery_responses={}\nmap_recovery_rejections={}\nmap_recovery_snapshot_bytes={}\nmap_event_min_bytes={:?}\nmap_event_max_bytes={:?}\nmap_defensive_repairs={}\nmap_dropped_records={}\n",
+        "initial_match_id={}\nrestarted_match_id={}\nparticipant_count={}\nsummary_participant_count={}\nmap_instance_id={}\nmap_recipe_fingerprint={}\ncontent_fingerprint={}\nrules_revision={}\nmode_definition_id={}\nfinal_score_team_1={}\nfinal_score_team_2={}\nresult={:?}\nactive_duration_ticks={}\ndefeats={}\nrespawns={}\nparticipant_active_ticks_team_1={}\nparticipant_active_ticks_team_2={}\nrecords={}\ndropped_records={}\nsummary_count={}\nweapon_aggregate_count={}\nweapon_preset_ids={}\nbuild_fingerprints={}\nultimate_ids={}\npassive_ids={}\nfirst_full_charge_ticks={}\nfirst_full_charge_active_ticks={}\nability_uses_by_owner={}\ncharge_dealt_by_owner={}\ncharge_received_by_owner={}\npassive_triggers={}\npreset_defeats={}\npreset_deaths={}\npreset_death_rates={}\naccepted_attacks={}\nattacks_with_hostile_contact={}\nability_attempts={}\nability_accepts={}\ndash_uses={}\nsentry_uses={}\nself_cloak_uses={}\nself_cloak_active_ticks={}\nself_cloak_end_reasons={:?}\nreveal_scan_uses={}\nreveal_scan_targets={}\nconcealment_field_uses={}\nsentry_shots={}\nability_dropped_records={}\nwasted_charge={}\nready_to_use_delay_ticks={}\nready_to_use_count={}\nability_rejections={:?}\ndash_requested_distance_milli={:?}\ndash_actual_distance_milli={:?}\ndash_map_collision_truncations={:?}\ndash_contacts={:?}\ndash_interruptions={:?}\nability_damage={:?}\nability_targets={:?}\nability_defeats={:?}\nsentry_cleanup_reasons={:?}\nconcurrent_sentry_high_water={}\nsentries={:?}\npassive_active_ticks={:?}\npassive_modified_amounts={:?}\npassive_unused_triggers={:?}\nmap_catalog_schema_version={}\nmap_dynamic_fingerprint={}\nmap_placement_count={}\nmap_terminal_state_count={}\nmap_dynamic_revision={}\nmap_dynamic_digest={}\nmap_destruction_revision={}\nmap_placements_changed={}\nmap_collider_updates={}\nmap_recovery_requests={}\nmap_recovery_responses={}\nmap_recovery_rejections={}\nmap_recovery_snapshot_bytes={}\nmap_event_min_bytes={:?}\nmap_event_max_bytes={:?}\nmap_defensive_repairs={}\nmap_dropped_records={}\n",
         initial.0,
         state.match_id.0,
         participant_count,
@@ -272,7 +265,6 @@ pub(super) fn verify_process_match(
         summary.weapon_aggregates.len(),
         weapon_preset_ids,
         build_fingerprints,
-        build_total_points,
         ultimate_ids,
         passive_ids,
         first_full_charge_ticks,

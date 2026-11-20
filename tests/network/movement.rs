@@ -431,7 +431,6 @@ fn client_owned_component_writes_cannot_mutate_authoritative_loadout_runtime_or_
         forged_build.recipe_fingerprint = brawler::builds::BuildRecipeFingerprint(0xdead_beef);
         let mut forged_loadout = server_loadout.clone();
         forged_loadout.primary_weapon.recipe_fingerprint = WeaponRecipeFingerprint(0xdead_beef);
-        forged_loadout.total_points = 0;
         forged_loadout.fighter_stats.maximum_health = u16::MAX;
         world.entity_mut(client_entity).insert((
             forged_build,

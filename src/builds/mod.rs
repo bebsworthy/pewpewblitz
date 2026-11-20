@@ -18,12 +18,11 @@ pub(crate) use model::{
 
 pub use definitions::resolve_reveal_proximity_radius;
 pub use definitions::{
-    BUILD_CATALOG_SCHEMA_VERSION, BUILD_FINGERPRINT_FORMAT_VERSION, BUILD_POINT_BUDGET,
-    BuildCatalog, BuildCatalogResource, BuildContentPlugin, BuildResolutionError,
-    MAX_COLD_CAPACITY, MAX_FIGHTER_BODY_RADIUS, MAX_FIGHTER_MOVEMENT_SPEED,
-    MAX_RESOLVED_LOADOUT_BYTES, MAX_REVEAL_PROXIMITY_RADIUS, MIN_FIGHTER_BODY_RADIUS,
-    MIN_REVEAL_PROXIMITY_RADIUS, PassiveDefinition, UltimateDefinition, WeaponPointCost,
-    resolve_loadout,
+    BUILD_CATALOG_SCHEMA_VERSION, BUILD_FINGERPRINT_FORMAT_VERSION, BuildCatalog,
+    BuildCatalogResource, BuildContentPlugin, BuildResolutionError, MAX_COLD_CAPACITY,
+    MAX_FIGHTER_BODY_RADIUS, MAX_FIGHTER_MOVEMENT_SPEED, MAX_RESOLVED_LOADOUT_BYTES,
+    MAX_REVEAL_PROXIMITY_RADIUS, MIN_FIGHTER_BODY_RADIUS, MIN_REVEAL_PROXIMITY_RADIUS,
+    PassiveDefinition, UltimateDefinition, resolve_loadout,
 };
 pub use model::{
     AbilityPhase, AbilityState, AcceptedBuildSummary, BuildRecipeFingerprint, BuildRevision,

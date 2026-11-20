@@ -307,7 +307,6 @@ pub fn world_units_from_milliunits(value: u32) -> Option<f32> {
 pub struct ResolvedUltimate {
     pub id: UltimateDefinitionId,
     pub kind: UltimateKind,
-    pub point_cost: u8,
     pub parameters: UltimateParameters,
     pub charge_policy: UltimateChargePolicy,
 }
@@ -411,7 +410,6 @@ pub enum PassiveParameters {
 pub struct ResolvedPassive {
     pub id: PassiveDefinitionId,
     pub kind: PassiveKind,
-    pub point_cost: u8,
     pub parameters: PassiveParameters,
 }
 
@@ -435,7 +433,6 @@ pub struct ResolvedMatchLoadout {
     pub identity: SelectedBuild,
     /// The stable roster identity every client maps to its presentation (model and tint).
     pub character_id: crate::characters::CharacterId,
-    pub total_points: u8,
     pub fighter_stats: ResolvedFighterStats,
     pub primary_weapon: ResolvedWeapon,
     pub ultimate: ResolvedUltimate,

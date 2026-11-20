@@ -10,20 +10,19 @@ use super::{
     RevealProximityModifier, SelectedBuild, ULTIMATE_PARAMETER_BOUNDS, UltimateChargePolicy,
     UltimateDefinitionId, UltimateKind, UltimateParameters,
 };
-use crate::combat::{DamageOverTimeKind, WeaponCatalog, WeaponPresetId};
+use crate::combat::{DamageOverTimeKind, WeaponCatalog};
 use crate::content::{GameplayContentFingerprint, fnv1a64};
 use bevy::prelude::{FromWorld, Plugin, Resource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 18;
+pub const BUILD_CATALOG_SCHEMA_VERSION: u16 = 19;
 pub const BUILD_FINGERPRINT_FORMAT_VERSION: u16 = 17;
 const BUILD_RECIPE_SCHEMA_VERSION: u16 = 17;
 pub const MAX_RESOLVED_LOADOUT_BYTES: usize = 4096;
 pub(crate) const MAX_DIRECT_DIAGNOSTIC_PICKS: usize = 8;
 pub(crate) const MAX_ULTIMATE_DEFINITIONS: usize = 32;
 pub(crate) const MAX_PASSIVE_DEFINITIONS: usize = 32;
-pub const BUILD_POINT_BUDGET: u8 = 12;
 pub const MAX_FIGHTER_MOVEMENT_SPEED: f32 = 1_200.0;
 pub const MIN_FIGHTER_BODY_RADIUS: f32 = 1.0;
 /// Largest body supported by the one-cell map navigation and spawn-clearance contract.
@@ -42,7 +41,6 @@ pub struct BuildCatalog {
     pub fighter_body: FighterBody,
     pub ultimate_charge: UltimateChargePolicy,
     pub(crate) direct_diagnostic: DirectDiagnosticLoadoutPolicy,
-    pub weapon_costs: Vec<WeaponPointCost>,
     pub ultimates: Vec<UltimateDefinition>,
     pub passives: Vec<PassiveDefinition>,
 }
@@ -55,18 +53,11 @@ pub(crate) struct DirectDiagnosticLoadoutPolicy {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct WeaponPointCost {
-    pub weapon_id: WeaponPresetId,
-    pub point_cost: u8,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct UltimateDefinition {
     pub id: UltimateDefinitionId,
     pub key: String,
     pub display_name: String,
     pub kind: UltimateKind,
-    pub point_cost: u8,
     pub parameters: UltimateParameters,
 }
 
@@ -76,7 +67,6 @@ pub struct PassiveDefinition {
     pub key: String,
     pub display_name: String,
     pub kind: PassiveKind,
-    pub point_cost: u8,
     pub parameters: PassiveParameters,
 }
 
@@ -100,9 +90,7 @@ impl BuildCatalog {
             return Err("unsupported build catalog schema/revision".into());
         }
         self.validate_tuning()?;
-        if self.weapon_costs.is_empty()
-            || self.weapon_costs.len() > crate::combat::MAX_WEAPON_PRESETS
-            || self.ultimates.is_empty()
+        if self.ultimates.is_empty()
             || self.ultimates.len() > MAX_ULTIMATE_DEFINITIONS
             || self.passives.len() < 2
             || self.passives.len() > MAX_PASSIVE_DEFINITIONS
@@ -111,35 +99,9 @@ impl BuildCatalog {
         }
         validate_metadata(&self.ultimates, |d| d.id.0, |d| &d.key, |d| &d.display_name)?;
         validate_metadata(&self.passives, |d| d.id.0, |d| &d.key, |d| &d.display_name)?;
-        if self
-            .weapon_costs
-            .windows(2)
-            .any(|pair| pair[0].weapon_id >= pair[1].weapon_id)
-            || self
-                .weapon_costs
-                .iter()
-                .any(|definition| definition.weapon_id.0 == 0)
-        {
-            return Err("weapon point costs must have unique ascending non-zero IDs".into());
-        }
         validate_ultimate_definitions(&self.ultimates)?;
         validate_passive_definitions(&self.passives)?;
         self.validate_direct_diagnostic_policy()?;
-        if self
-            .ultimates
-            .iter()
-            .any(|d| d.point_cost == 0 || d.point_cost > BUILD_POINT_BUDGET)
-            || self
-                .passives
-                .iter()
-                .any(|d| d.point_cost == 0 || d.point_cost > BUILD_POINT_BUDGET)
-            || self
-                .weapon_costs
-                .iter()
-                .any(|d| d.point_cost == 0 || d.point_cost > BUILD_POINT_BUDGET)
-        {
-            return Err("invalid authored point cost".into());
-        }
         if postcard::to_allocvec(self).map_or(true, |bytes| bytes.len() > 16 * 1024) {
             return Err("build catalog exceeds engine size ceiling".into());
         }
@@ -150,15 +112,6 @@ impl BuildCatalog {
     pub(crate) fn validate_weapon_references(&self, weapons: &WeaponCatalog) -> Result<(), String> {
         self.validate()?;
         weapons.validate()?;
-        let cost_ids: HashSet<_> = self
-            .weapon_costs
-            .iter()
-            .map(|definition| definition.weapon_id)
-            .collect();
-        let preset_ids: HashSet<_> = weapons.presets.iter().map(|preset| preset.id).collect();
-        if cost_ids != preset_ids {
-            return Err("weapon point costs must exactly cover the weapon catalog".into());
-        }
         for preset in &weapons.presets {
             weapons.resolve_preset(preset.id, self.fighter_body)?;
         }
@@ -665,7 +618,6 @@ pub fn resolve_loadout(
         .map(|definition| ResolvedPassive {
             id: definition.id,
             kind: definition.kind,
-            point_cost: definition.point_cost,
             parameters: definition.parameters,
         })
         .ok_or(BuildResolutionError::UnknownId)?;
@@ -675,7 +627,6 @@ pub fn resolve_loadout(
     let ultimate = ResolvedUltimate {
         id: ultimate_definition.id,
         kind: ultimate_definition.kind,
-        point_cost: ultimate_definition.point_cost,
         parameters: ultimate_definition.parameters,
         charge_policy: catalog.ultimate_charge,
     };
@@ -706,7 +657,6 @@ pub fn resolve_loadout(
             revision: catalog.balance_revision,
         },
         character_id: recipe.character_id,
-        total_points: 0,
         fighter_stats,
         primary_weapon,
         ultimate,

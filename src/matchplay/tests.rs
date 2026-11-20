@@ -515,7 +515,6 @@ fn two_preset_telemetry_context() -> MatchTelemetryContext {
                     revision: crate::builds::BuildRevision(1),
                 },
                 weapon_preset: Some(preset),
-                total_points: None,
                 ultimate_id: None,
                 passive_ids: None,
             },
