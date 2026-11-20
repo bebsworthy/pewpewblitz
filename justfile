@@ -123,6 +123,10 @@ plunk-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
 pollen-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/characters/pollen/build_pollen.py
 
+# Rebuild Orbit's runtime GLB, source master, and review renders (headless).
+orbit-asset blender="/Applications/Blender.app/Contents/MacOS/Blender":
+    {{blender}} -b --factory-startup -P asset_src/characters/orbit/build_orbit.py
+
 # Rebuild the Crossroads Facility environment kit GLBs, source master, and review sheet (headless).
 facility-kit blender="/Applications/Blender.app/Contents/MacOS/Blender":
     {{blender}} -b --factory-startup -P asset_src/environment/crossroads-facility/build_kit.py

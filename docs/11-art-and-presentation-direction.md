@@ -84,10 +84,22 @@ tickets tune them through native review but do not change the direction.
   her signature Splash (`throwable`) low on the weapon side so her face stays clear above it. At
   the Light draw scale 0.96 her widest bind-pose reach (the wing tips) is 13.4 world units, inside
   the 14-unit body radius.
+- Orbit (`asset_src/characters/orbit/`, `just orbit-asset`, BRL-m6an), a small alien helper robot
+  (Helper / Light), is the seventh production character, on the same pipeline and contract and on
+  Riff's core skeleton. Its silhouette is a big round white helmet with a dark visor and two lime
+  eye lights, orange ear caps and a short antenna with a yellow bulb, a small white egg body, and a
+  hover thruster with a cyan jet in place of legs. Its two graphite claws float free: they ride
+  Riff's `hand_*` bones while the clavicle, upper arm and forearm bones carry no geometry, so
+  weapons attach to `socket_weapon_r` and the two-handed IK lands the claws on the grips as for
+  every fighter. The leg bones are kept and carry no geometry. The jet's flare is one extra animated
+  channel, the `thruster` bone's scale (as Plunk's belly), so the legless run, dash and KO read
+  through the lean, the bob and the jet flaring or cutting out. It holds its signature Pulse Sidearm
+  (`1h`) in Riff's one-handed hold. At the Light draw scale 0.96 its widest bind-pose reach (the
+  claws) is 13.0 world units, inside the 14-unit body radius.
 - Roster presentation (BRL-egn6): the replicated loadout names each fighter's stable `CharacterId`,
   and the client-only catalog `assets/catalogs/fighter_characters.ron` maps it to a model, a tint,
   a scale (times Riff's source-to-world scale) and the weapon socket. Riff, Bumper, Torque, Cobble,
-  Plunk and Pollen draw untinted; every other launch character is a tinted placeholder (Light on Riff,
+  Plunk, Pollen and Orbit draw untinted; every other launch character is a tinted placeholder (Light on Riff,
   Normal and Heavy on Bumper) until its art ticket adds a `models` entry and repoints only that
   character. An unknown ID draws the fallback model untinted. The tint multiplies into the base
   colours when the scene converts to the toon material, cached per source material and tint. Every
@@ -1035,7 +1047,7 @@ Every redistributed third-party file must have exact provenance in the manifest 
 license text where required. Original replacements should also preserve their source masters and
 document the export pipeline needed to reproduce runtime derivatives. Original runtime models live
 under `assets/brawler/models/original/`; their provenance is the `asset_src/` source directory and
-its README (for Riff, Bumper, Torque, Cobble, Plunk and Pollen, `asset_src/characters/<name>/README.md`; for the
+its README (for Riff, Bumper, Torque, Cobble, Plunk, Pollen and Orbit, `asset_src/characters/<name>/README.md`; for the
 held weapons, `asset_src/weapons/README.md`; for environment kits,
 `asset_src/environment/<kit>/README.md`), not a manifest row. `assets/licenses/pewpew-blitz-original-environment.txt`,
 `pewpew-blitz-original-weapons.txt` and `pewpew-blitz-original-characters.txt` point at the

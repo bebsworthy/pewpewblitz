@@ -43,3 +43,10 @@ asset_src/characters/pollen/build_pollen.py (which reuses the Riff builder's pip
 brief in asset_src/characters/pollen/spec.md. It writes the source master pollen.blend and review
 renders beside the script and contains no third-party, purchased, commissioned or hand-edited
 model data.
+
+The Orbit fighter (brawler/models/original/characters/orbit/chr_orbit.glb, BRL-m6an) is
+original work of the PewPew Blitz project, built the same way by
+asset_src/characters/orbit/build_orbit.py (which reuses the Riff builder's pipeline) from the
+brief in asset_src/characters/orbit/spec.md. It writes the source master orbit.blend and review
+renders beside the script and contains no third-party, purchased, commissioned or hand-edited
+model data.

@@ -36,14 +36,19 @@ const PLUNK_ASSET_PATH: &str = "brawler/models/original/characters/plunk/chr_plu
 /// `asset_src/characters/pollen/build_pollen.py` on the same contract; the catalog draws Pollen
 /// with it, untinted.
 const POLLEN_ASSET_PATH: &str = "brawler/models/original/characters/pollen/chr_pollen.glb";
+/// Orbit (BRL-m6an), the little helper robot with floating hands, built by
+/// `asset_src/characters/orbit/build_orbit.py` on the same contract (plus a thruster jet scale
+/// channel); the catalog draws Orbit with it, untinted.
+const ORBIT_ASSET_PATH: &str = "brawler/models/original/characters/orbit/chr_orbit.glb";
 /// Every shipped fighter character GLB the runtime contract covers.
-const SHIPPED_CHARACTER_ASSETS: [&str; 6] = [
+const SHIPPED_CHARACTER_ASSETS: [&str; 7] = [
     RIFF_ASSET_PATH,
     BUMPER_ASSET_PATH,
     TORQUE_ASSET_PATH,
     COBBLE_ASSET_PATH,
     PLUNK_ASSET_PATH,
     POLLEN_ASSET_PATH,
+    ORBIT_ASSET_PATH,
 ];
 
 fn inputs() -> MotionInputs {
@@ -178,6 +183,7 @@ fn roster_characters_with_their_own_model_are_drawn_with_it_untinted() {
         ("cobble", COBBLE_ASSET_PATH),
         ("plunk", PLUNK_ASSET_PATH),
         ("pollen", POLLEN_ASSET_PATH),
+        ("orbit", ORBIT_ASSET_PATH),
     ] {
         let character = roster
             .characters
