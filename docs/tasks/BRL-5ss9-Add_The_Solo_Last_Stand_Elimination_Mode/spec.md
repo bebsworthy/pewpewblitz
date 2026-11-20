@@ -49,6 +49,7 @@ Existing pieces to reuse:
 
 # Acceptance criteria
 
+- Death drops follow `clamp(stacks, 1, 2)` at validated reachable cells (focused tests for 0, 1, 2 and 3+ stacks, and for an outside-zone death).
 - Admission, spawn separation, elimination, ranking, last survivor, simultaneous defeat, boundary phases, outside-zone damage, timeout, the observer transition, results, restart, late-join rejection, and recovery pass focused tests and `tests/network/` scenarios.
 - Existing 1v1, 2v2, 3v3, and Zombie topologies pass unchanged.
 - Boundary and danger feedback stay readable at the supported camera framing and with reduced effects.
@@ -78,6 +79,8 @@ This is not a gate for done. The agent fills in the run path and controls when t
 - 2026-11-20, owner (q-9xg5t3j): **6 fighters** (six teams of one). The game-type ID is `last-stand-6p`, and the `<N>` in the verification commands is 6. The performance gate runs at the existing 6-active-fighter budget. Raising the count later needs new evidence and a new ticket.
 - 2026-11-20, owner (q-1sqcp61): pickups come from **destructible chests**. The map places neutral `treasure-chest` assets (`MapAssetId(26)`). Destroying one drops a public boost pickup that any fighter can collect. Collecting it grants a bounded boost stack for the rest of that life.
   - Reuse Zombie's existing chest-to-boost path: `ProcessedZombieChests`, `BoostPickup`, `BoostPickupSource::Chest`, and `BoostGrantScope::Individual` in `src/matchplay/zombie.rs`. Do not write a parallel implementation. Extract the shared part into a helper, owned beside the map chest terminal path, only where both modes behave identically, and record which part was shared.
-  - Agent default, not asked: carried stacks are **not** dropped on defeat. This keeps the round free of snowball drop-scatter rules, and can be revisited from playtest feedback.
+  - 2026-11-20, owner: a defeated fighter **drops boost pickups on death**, with `drop = clamp(carried_stacks, 1, 2)`: 0 stacks drops 1, 1 stack drops 1, and 2 or more drops 2. A kill always leaves at least one boost on the ground. Stacks beyond two are lost with that life. Reuse Zombie's `BoostPickupSource::PlayerDeath` path.
+  - Drop placement (agent default, revisit from playtests): each pickup goes to a distinct validated free cell at or next to the defeat position, never inside walls or out of bounds. If the defeat happened outside the safe zone, the pickups go to the nearest valid cells inside the current safe zone, so they stay reachable. If no valid cell exists, the drop is skipped and recorded in telemetry.
+  - Dropped pickups are public, collected by the first fighter to overlap them, and bounded by the same live-pickup ceiling as chest pickups.
   - Stack value, cap, chest count, and chest health are authored per game type, starting from Zombie's +5% health and +5% damage per stack. Chest placements are mirrored or rotationally fair across the six spawns.
   - Bots get a destroy-chest and collect goal (the pickup goal in Scope).
