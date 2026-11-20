@@ -5,6 +5,51 @@ use super::*;
 static PRODUCT_LOBBY_DATABASE_SEQUENCE: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
+/// One product lobby's SQLite profile database, fresh for this harness and removed with it.
+///
+/// The path is keyed by process ID and a per-process sequence, and macOS recycles process IDs.
+/// A file left by an earlier run (an older schema, or another test's accounts and maps) would
+/// otherwise be reopened: an old schema panics `initialize_lobby_state` at startup, and old rows
+/// change publishing and queue outcomes (BRL-1chc).
+struct ProfileDatabaseFile(std::path::PathBuf);
+
+impl ProfileDatabaseFile {
+    fn fresh(path: std::path::PathBuf) -> Self {
+        let file = Self(path);
+        for path in file.files() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => panic!("remove stale profile database {path:?}: {error}"),
+            }
+        }
+        file
+    }
+
+    fn path(&self) -> String {
+        self.0.to_string_lossy().into_owned()
+    }
+
+    /// The database and its WAL-mode side files.
+    fn files(&self) -> impl Iterator<Item = std::ffi::OsString> + '_ {
+        ["", "-wal", "-shm"].into_iter().map(|suffix| {
+            let mut path = self.0.clone().into_os_string();
+            path.push(suffix);
+            path
+        })
+    }
+}
+
+impl Drop for ProfileDatabaseFile {
+    fn drop(&mut self) {
+        // The harness drops its apps first, so the storage executor has joined and closed it.
+        // Never panic here: this also runs while a failed test unwinds.
+        for path in self.files() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct MismatchedMessage(u8);
 
@@ -238,6 +283,8 @@ pub(super) struct Harness {
     /// Clients that are no longer updated, rehearsing an app killed without a disconnect.
     pub(super) suspended_clients: Vec<bool>,
     pub(super) now: Instant,
+    /// Declared after the apps so it is removed only once the lobby closed it.
+    _profile_database: Option<ProfileDatabaseFile>,
 }
 
 impl Harness {
@@ -335,6 +382,10 @@ impl Harness {
             handshake_timeout: std::time::Duration::from_millis(250),
             ..Default::default()
         };
+        let profile_database = ProfileDatabaseFile::fresh(std::env::temp_dir().join(format!(
+            "brawler-network-profiles-{}-{database_sequence}.sqlite3",
+            std::process::id(),
+        )));
         let identity = brawler::server::routing_identity().expect("routing identity resolves");
         let raw_catalog = include_bytes!("../../config/server/game-types.ron").to_vec();
         let manifest = brawler_routing::LobbyManifest {
@@ -358,13 +409,7 @@ impl Harness {
             outstanding_allocations: 2,
             active_matches: 2,
             heartbeat_ms: 100,
-            profile_database_path: std::env::temp_dir()
-                .join(format!(
-                    "brawler-network-profiles-{}-{database_sequence}.sqlite3",
-                    std::process::id(),
-                ))
-                .to_string_lossy()
-                .into_owned(),
+            profile_database_path: profile_database.path(),
             raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(&raw_catalog),
             raw_catalog,
             nonce: 11,
@@ -388,6 +433,7 @@ impl Harness {
             client_heist_cues: Vec::with_capacity(client_count),
             suspended_clients: Vec::with_capacity(client_count),
             now: Instant::now(),
+            _profile_database: Some(profile_database),
         };
         for client_index in 0..client_count {
             let client_id = u64::try_from(client_index + 1).expect("test client count fits u64");
@@ -436,6 +482,7 @@ impl Harness {
             client_heist_cues: Vec::new(),
             suspended_clients: Vec::new(),
             now: Instant::now(),
+            _profile_database: None,
         }
     }
 
@@ -642,6 +689,7 @@ impl Harness {
             client_heist_cues: Vec::with_capacity(client_count),
             suspended_clients: Vec::with_capacity(client_count),
             now: Instant::now(),
+            _profile_database: None,
         };
         for client_id in 1..=client_count as u64 {
             harness.add_client_with_options(
