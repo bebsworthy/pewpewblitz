@@ -3,9 +3,9 @@ id: BRL-qqch
 
 title: 'Make Plunk, an original production roster character with Riff''s clip contract'
 
-status: doing
-closed:
-status_changed: 2026-11-20T06:56:36Z
+status: done
+closed: 2026-11-20T07:43:20Z
+status_changed: 2026-11-20T07:43:20Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-7sqn, BRL-egn6, BRL-qfaj]
 
 parent:
 
-rank: 11337728
+rank:
 ---
 
 # Description
