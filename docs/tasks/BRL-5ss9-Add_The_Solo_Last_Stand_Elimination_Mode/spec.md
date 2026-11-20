@@ -71,3 +71,9 @@ This is not a gate for done. The agent fills in the run path and controls when t
 - whether any spawn feels advantaged;
 - whether the final convergence produces a real fight;
 - whether being eliminated and observing feels clear.
+
+
+# Decisions
+
+- 2026-11-20, owner (q-9xg5t3j): **6 fighters** (six teams of one). The game-type ID is `last-stand-6p`, and the `<N>` in the verification commands is 6. The performance gate runs at the existing 6-active-fighter budget. Raising the count later needs new evidence and a new ticket.
+- Pickups: pending q-1sqcp61.
