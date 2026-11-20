@@ -25,4 +25,4 @@ rank: 10654280
 
 # Description
 
-Add and advertise a second deliberate 3v3 Wipeout map that creates different range, flank, cover, concealment, and re-entry decisions from the current map while reusing established gameplay primitives.
+Add a second deliberate 3v3 Wipeout map to the existing `wipeout-3v3` rotation, alongside Verdant Crossfire. It should create different range, flank, cover, concealment, and re-entry decisions while reusing established gameplay primitives.
