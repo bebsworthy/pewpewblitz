@@ -174,6 +174,9 @@ fn start_headless_product_request(
         return None;
     }
     let profile_revision = lobby.profile.revision;
+    if let Some(map) = config.product_practice_map {
+        practice.selected_map = Some((game.id.clone(), map));
+    }
     if config.product_practice_smoke && practice.start(&selection, profile_revision) {
         debug!(
             game_type = game.id.as_str(),

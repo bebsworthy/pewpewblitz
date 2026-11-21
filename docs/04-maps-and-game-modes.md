@@ -290,11 +290,23 @@ anchors required by that mode. Mirrored tall-grass groups touch contested approa
 exercises terrain concealment during live mode play rather than on an isolated map. Feature Yard is
 functional test content, not a fun, balanced, or release-ready map claim.
 
-The 3v3 paths instead advertise **Verdant Crossfire** for Wipeout, **Switchback Basin** for Hot
-Zone, and **Powderline Vault** for Heist. Each is an independent padded 25×37 sparse recipe with
-three safe spawns per team and mode-owned objective topology. Their first-pass layouts preserve the
-supplied references' lanes, blocker silhouettes, concealment groups, and objective positions using
-existing Brawler assets; final geometry and presentation remain subject to native playtest feedback.
+The 3v3 paths instead advertise **Verdant Crossfire** and **Sluicegate Works** for Wipeout,
+**Switchback Basin** for Hot Zone, and **Powderline Vault** for Heist. Verdant Crossfire, Switchback
+Basin, and Powderline Vault are independent padded 25×37 portrait sparse recipes with three safe
+spawns per team and mode-owned objective topology. Their first-pass layouts preserve the supplied
+references' lanes, blocker silhouettes, concealment groups, and objective positions using existing
+Brawler assets; final geometry and presentation remain subject to native playtest feedback.
+
+Sluicegate Works (BRL-9gqj) is the deliberately different second Wipeout layout: a padded 33×25
+landscape recipe on the facility theme, point-symmetric about its centre so neither side owns a
+route advantage. Its spawns sit 26 cells apart (Verdant's are 32) behind three-cell shield walls
+with exits up, down, and ahead. Two water canals, which block movement but not projectiles, split
+it into a centre lane and two flanks. Each canal has one bridge offset toward one team, plus open
+ends near each base. The centre lane is a close-range brawl around a wall pillar ringed by
+destructible crates and oil barrels. Each flank holds a treasure chest behind a guard wall
+and only one tall-grass patch (16 concealing cells in total, against Verdant's 46). Long trades
+happen across the canals and along the canal-side rows. The `wipeout-3v3` game type ("Wipeout
+3v3") lists both maps: matchmaking alternates them and Practice lets the player choose.
 Ordinary matches are expected to center on 3v3, while the architecture may support larger bounded
 arrangements such as twelve solo fighters, two teams of five, or three teams of three when a concrete
 mode, map, HUD, admission profile, and capacity evidence all allow it. No common subsystem may assume

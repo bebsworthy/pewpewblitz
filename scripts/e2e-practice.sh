@@ -2,6 +2,8 @@
 set -euo pipefail
 
 game_type=${1:-wipeout-1v1}
+# Optional built-in map preset ID; Practice otherwise starts the game type's first map.
+map_preset=${2:-}
 case "$game_type" in
     wipeout-1v1 | wipeout-2v2 | wipeout-3v3 | \
     hot-zone-1v1 | hot-zone-2v2 | hot-zone-3v3 | \
@@ -28,7 +30,8 @@ PY
     export BRAWLER_ROUTED_BIND="127.0.0.1:$port"
 fi
 
-printf 'brawler Practice e2e: running %s on %s\n' "$game_type" "$BRAWLER_ROUTED_BIND"
+printf 'brawler Practice e2e: running %s%s on %s\n' "$game_type" "${map_preset:+ map $map_preset}" "$BRAWLER_ROUTED_BIND"
+BRAWLER_PRODUCT_PRACTICE_MAP="$map_preset" \
 BRAWLER_NETWORK_HEADLESS=1 \
 BRAWLER_PRODUCT_CLIENT_COUNT=1 \
 BRAWLER_PRODUCT_PRACTICE_SMOKE=1 \

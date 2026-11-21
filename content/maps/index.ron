@@ -78,5 +78,12 @@
             admission_revision: 1,
             document: "builtin/zombie-yard.ron",
         ),
+        (
+            id: MapPresetId(14),
+            key: "sluicegate-works",
+            display_name: "Sluicegate Works",
+            admission_revision: 1,
+            document: "builtin/sluicegate-works.ron",
+        ),
     ],
 )

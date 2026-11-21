@@ -1324,6 +1324,12 @@ mod tests {
                 crate::map::VERDANT_CROSSFIRE_ADMISSION_REVISION,
             ),
             (
+                GameMode::Wipeout,
+                brawler_routing::GameMode::Wipeout,
+                crate::map::SLUICEGATE_WORKS_PRESET,
+                crate::map::SLUICEGATE_WORKS_ADMISSION_REVISION,
+            ),
+            (
                 GameMode::HotZone,
                 brawler_routing::GameMode::HotZone,
                 crate::map::SWITCHBACK_BASIN_PRESET,

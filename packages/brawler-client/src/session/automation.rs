@@ -100,6 +100,19 @@ pub(super) fn finish_product_match_smoke(
             exit.write(AppExit::error());
             return;
         }
+        if let Some(map) = config.product_practice_map {
+            let expected = brawler::map::MapContentCatalog::embedded()
+                .ok()
+                .and_then(|maps| maps.preset(map).map(|preset| preset.recipe.recipe_id));
+            if identity.map(|identity| identity.recipe_id) != expected {
+                bevy::log::error!(
+                    map = map.0,
+                    "brawler Practice smoke reached Active on a different map"
+                );
+                exit.write(AppExit::error());
+                return;
+            }
+        }
         exit.write(AppExit::Success);
     }
 }

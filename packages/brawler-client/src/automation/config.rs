@@ -63,6 +63,9 @@ pub struct ClientAutomationConfig {
     pub expect_published_map: bool,
     pub product_match_players_per_team: u8,
     pub product_match_game_type: Option<brawler::lobby::GameTypeId>,
+    /// Headless BRL-9gqj evidence: the built-in map Practice automation selects. The match must
+    /// reach Active on that map's recipe, or the smoke fails.
+    pub product_practice_map: Option<brawler::map::MapPresetId>,
     pub headless_move: Option<(i8, i8)>,
     pub headless_aim: Option<(i8, i8)>,
     pub headless_aim_at_dummy: bool,
@@ -105,6 +108,7 @@ impl Default for ClientAutomationConfig {
             expect_published_map: false,
             product_match_players_per_team: 2,
             product_match_game_type: None,
+            product_practice_map: None,
             headless_move: None,
             headless_aim: None,
             headless_aim_at_dummy: false,
@@ -330,6 +334,21 @@ impl ClientAutomationConfig {
         }
         if self.product_practice_smoke && !self.product_match_smoke {
             return Err("--product-practice-smoke requires product match automation".to_string());
+        }
+        if let Some(map) = self.product_practice_map {
+            if !self.product_practice_smoke || self.product_match_game_type.is_none() {
+                return Err(
+                    "--product-practice-map requires Practice automation with --product-game-type"
+                        .to_string(),
+                );
+            }
+            if brawler::map::MapContentCatalog::embedded()
+                .ok()
+                .and_then(|maps| maps.preset(map).map(|_| ()))
+                .is_none()
+            {
+                return Err("--product-practice-map must name a built-in map preset".to_string());
+            }
         }
         if self.product_network_change_smoke && !self.product_practice_smoke {
             return Err("--product-network-change-smoke requires Practice automation".to_string());
@@ -709,6 +728,13 @@ mod tests {
 
         config.product_practice_smoke = true;
         assert!(config.validate(&network).is_ok());
+
+        config.product_practice_map = Some(brawler::map::MapPresetId(99));
+        assert!(config.validate(&network).is_err());
+        config.product_practice_map = Some(brawler::map::SLUICEGATE_WORKS_PRESET);
+        assert!(config.validate(&network).is_ok());
+        config.product_practice_smoke = false;
+        assert!(config.validate(&network).is_err());
     }
 
     #[test]

@@ -740,7 +740,10 @@ mod grid_catalog_tests {
     #[test]
     fn crossroads_facility_maps_render_only_their_theme_kit() {
         let maps = assert_theme_maps_render_only_their_kit(brawler::map::MapPresentationThemeId(1));
-        assert_eq!(maps, 6, "every theme-1 built-in map is covered");
+        assert_eq!(
+            maps, 7,
+            "every theme-1 built-in map, including Sluicegate Works, is covered"
+        );
     }
 
     #[test]

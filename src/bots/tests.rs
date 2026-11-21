@@ -1210,3 +1210,35 @@ fn observation(tick: u64) -> BotObservation {
         healing_weapon: false,
     }
 }
+
+/// BRL-9gqj: from every Sluicegate Works spawn, Practice bot navigation reaches the contested
+/// centre lane and both flanks, so neither the canals nor the spawn shields strand a bot.
+#[test]
+fn sluicegate_works_spawns_reach_the_centre_and_both_flanks() {
+    let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+    let map = catalog
+        .resolve_preset(
+            crate::map::SLUICEGATE_WORKS_PRESET,
+            crate::map::MapInstanceId(1),
+        )
+        .unwrap();
+    let radius = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body
+        .radius;
+    let navigation = BotNavigationSnapshot::from_map(&map, radius + 1.0, 2_000).unwrap();
+    let dimensions = map.snapshot.dimensions;
+    // Centre lane beside the pillar, lower flank by its chest, upper flank by its chest.
+    let goals = [(15, 12), (16, 2), (16, 22)]
+        .map(|(x, y)| dimensions.cell_center(crate::map::MapCell::new(x, y)));
+    let spawns: Vec<_> = map.spawn_points_by_team.values().flatten().collect();
+    assert_eq!(spawns.len(), 6);
+    for spawn in spawns {
+        for goal in goals {
+            let route = navigation
+                .route(spawn.position, goal, &[], 4_096, 128)
+                .unwrap_or_else(|| panic!("no route from {:?} to {goal:?}", spawn.position));
+            assert_eq!(route.last().copied(), Some(goal));
+        }
+    }
+}

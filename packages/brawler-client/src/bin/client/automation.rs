@@ -11,7 +11,7 @@ use brawler_client::{
 use core::net::SocketAddr;
 use std::{env, path::PathBuf, process, time::Duration};
 
-pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--character <ROSTER-CHARACTER-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke | --product-publish-map-smoke | --product-published-maps-smoke [--withdraw-published-map <ID>]] [--publish-map-name <NAME>] [--account-id <HEX>] [--expect-published-map] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE> | --cancel-match-start] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen] [--check-config]";
+pub(super) const USAGE: &str = "usage: brawler-client [--client-id <u64>] [--auto-connect] [--server <HOST[:PORT]>] [--local-addr <IP:PORT>] [--transport <udp|routed-udp>] [--character <ROSTER-CHARACTER-ID>] [--window-size <WIDTHxHEIGHT>] [--headless (...)] [--product-game-type <ID>] [--product-practice-map <PRESET-ID>] [--product-practice-smoke | --product-network-change-smoke | --product-rejoin-smoke | --product-publish-map-smoke | --product-published-maps-smoke [--withdraw-published-map <ID>]] [--publish-map-name <NAME>] [--account-id <HEX>] [--expect-published-map] [--product-completed-rejoin-smoke <CUE-FILE> | --leave-match-cue <CUE-FILE> | --cancel-match-start] [--combat-demo | --controller-demo] [--screenshot-dir <DIR> ...] [--shell-capture <ROUTE> --screenshot-dir <DIR>] [--render-report <FILE> --render-warmup-seconds <1-120> --render-measure-seconds <1-120> [--render-reduced-effects]] [--offscreen] [--check-config]";
 
 fn parse_value<T: core::str::FromStr>(flag: &str, value: Option<String>) -> Result<T, String> {
     value
@@ -71,6 +71,7 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
     let mut expect_published_map = false;
     let mut product_match_players_per_team = 2;
     let mut product_match_game_type = None;
+    let mut product_practice_map = None;
     let mut headless_move = None;
     let mut headless_aim = None;
     let mut headless_aim_at_dummy = false;
@@ -188,6 +189,10 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
                     brawler::lobby::GameTypeId::new(value)
                         .map_err(|error| format!("invalid value for {flag}: {error}"))?,
                 );
+            }
+            "--product-practice-map" => {
+                product_practice_map =
+                    Some(brawler::map::MapPresetId(parse_value(&flag, args.next())?));
             }
             "--move-axis" => headless_move = Some(parse_axis(&flag, args.next())?),
             "--aim-axis" => headless_aim = Some(parse_axis(&flag, args.next())?),
@@ -343,6 +348,7 @@ pub(super) fn parse_args() -> Result<(ClientNetworkConfig, ClientAutomationConfi
         expect_published_map,
         product_match_players_per_team,
         product_match_game_type,
+        product_practice_map,
         headless_move,
         headless_aim,
         // The windowed combat demo aims at the dummy and fires through the scripted input path.

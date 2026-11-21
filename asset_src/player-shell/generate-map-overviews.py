@@ -74,4 +74,4 @@ def overview(key):
     print(key, w,h,'expanded placements:',len(cells))
     return w,h,body
 
-for key in ["feature-yard-wipeout", "feature-yard-hot-zone", "feature-yard-heist", "verdant-crossfire", "switchback-basin", "powderline-vault", "zombie-yard"]: overview(key)
+for key in ["feature-yard-wipeout", "feature-yard-hot-zone", "feature-yard-heist", "verdant-crossfire", "sluicegate-works", "switchback-basin", "powderline-vault", "zombie-yard"]: overview(key)

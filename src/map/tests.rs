@@ -512,6 +512,101 @@ fn proper_three_vs_three_maps_resolve_exact_mode_topology() {
     );
 }
 
+/// BRL-9gqj: the second advertised 3v3 Wipeout map is a landscape, point-symmetric layout built
+/// from canals, destructible centre crates, barrels, flank chests, and only two grass patches.
+#[test]
+fn sluicegate_works_resolves_a_point_symmetric_landscape_wipeout_layout() {
+    let catalog = MapContentCatalog::embedded().unwrap();
+    let map = catalog
+        .resolve_preset(SLUICEGATE_WORKS_PRESET, MapInstanceId(14))
+        .unwrap();
+    let verdant = catalog
+        .resolve_preset(VERDANT_CROSSFIRE_PRESET, MapInstanceId(10))
+        .unwrap();
+    let dimensions = map.snapshot.dimensions;
+    assert_eq!(
+        dimensions,
+        MapDimensions {
+            width: 33,
+            height: 25,
+        }
+    );
+    assert_eq!(map.snapshot.mode_definition_id, WIPEOUT_MODE_DEFINITION);
+    assert_ne!(
+        map.snapshot.presentation_theme_id,
+        verdant.snapshot.presentation_theme_id
+    );
+    assert!(map.objective_zone.is_none());
+    assert!(map.heist_safes.is_empty());
+    assert!(map.zombie_ingress.is_empty());
+    assert_eq!(map.spawn_points_by_team.len(), 2);
+    assert!(
+        map.spawn_points_by_team
+            .values()
+            .all(|spawns| spawns.len() == 3)
+    );
+
+    // Every non-spawn placement has a twin under a 180-degree rotation about the centre, and each
+    // team's spawns mirror the other's, so neither side owns a route advantage.
+    let placed = map
+        .snapshot
+        .placements
+        .iter()
+        .filter(|placement| placement.asset_id != PLAYER_SPAWN_ASSET)
+        .map(|placement| (placement.asset_id, placement.cell))
+        .collect::<BTreeSet<_>>();
+    let mirror = |cell: MapCell| {
+        MapCell::new(
+            dimensions.width - 1 - cell.x,
+            dimensions.height - 1 - cell.y,
+        )
+    };
+    for (asset_id, cell) in &placed {
+        assert!(
+            placed.contains(&(*asset_id, mirror(*cell))),
+            "{asset_id:?} {cell:?}"
+        );
+    }
+    let spawn_cells = |team: u8| {
+        map.snapshot
+            .placements
+            .iter()
+            .filter(|placement| {
+                matches!(
+                    placement.parameters,
+                    MapPlacementParameters::PlayerSpawn { team_slot, .. } if team_slot == team
+                )
+            })
+            .map(|placement| placement.cell)
+            .collect::<BTreeSet<_>>()
+    };
+    assert_eq!(
+        spawn_cells(0)
+            .into_iter()
+            .map(mirror)
+            .collect::<BTreeSet<_>>(),
+        spawn_cells(1)
+    );
+
+    let count = |asset_id| {
+        placed
+            .iter()
+            .filter(|(placed_asset, _)| *placed_asset == asset_id)
+            .count()
+    };
+    assert!(count(WATER_ASSET) > 0);
+    assert!(count(DESTRUCTIBLE_COVER_ASSET) > 0);
+    assert!(count(OIL_BARREL_ASSET) > 0);
+    assert_eq!(count(TREASURE_CHEST_ASSET), 2);
+    let verdant_grass = verdant
+        .snapshot
+        .placements
+        .iter()
+        .filter(|placement| placement.asset_id == TALL_GRASS_ASSET)
+        .count();
+    assert!(count(TALL_GRASS_ASSET) > 0 && count(TALL_GRASS_ASSET) * 2 < verdant_grass);
+}
+
 #[test]
 fn zombie_yard_resolves_cooperative_spawns_and_perimeter_ingress() {
     let catalog = MapContentCatalog::embedded().unwrap();

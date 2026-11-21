@@ -61,9 +61,9 @@ e2e clients="2":
 zombie-e2e players="2":
     ./scripts/e2e-zombie.sh {{players}}
 
-# Run one exact real-process Practice game with one human and manifest bots.
-practice-e2e game_type="wipeout-1v1":
-    ./scripts/e2e-practice.sh {{game_type}}
+# Run one exact real-process Practice game with one human and manifest bots; `map` picks a built-in map preset ID.
+practice-e2e game_type="wipeout-1v1" map="":
+    ./scripts/e2e-practice.sh {{game_type}} {{map}}
 
 # Publish a map from one client, approve it with the operator CLI, and play it in a routed 1v1 queue match.
 published-map-e2e:
@@ -253,6 +253,7 @@ _practice-e2e-matrix:
     ./scripts/e2e-practice.sh wipeout-1v1
     ./scripts/e2e-practice.sh wipeout-2v2
     ./scripts/e2e-practice.sh wipeout-3v3
+    ./scripts/e2e-practice.sh wipeout-3v3 14
     ./scripts/e2e-practice.sh hot-zone-1v1
     ./scripts/e2e-practice.sh hot-zone-2v2
     ./scripts/e2e-practice.sh hot-zone-3v3

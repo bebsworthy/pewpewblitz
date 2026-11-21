@@ -26,6 +26,9 @@ window_size=${BRAWLER_RENDER_WINDOW_SIZE:-1280x720}
 peer_render_profile=${BRAWLER_RENDER_PEER_PROFILE:-native}
 validate_peer=${BRAWLER_RENDER_VALIDATE_PEER:-1}
 practice_smoke=${BRAWLER_RENDER_PRACTICE:-0}
+# Optional built-in map preset ID that Practice selects (BRL-9gqj); defaults to the game type's
+# first map. Matchmade runs always start a fresh rotation on the first map.
+practice_map=${BRAWLER_RENDER_PRACTICE_MAP:-}
 reduced_effects=${BRAWLER_RENDER_REDUCED_EFFECTS:-0}
 combat_smoke=${BRAWLER_RENDER_COMBAT:-0}
 # Optional roster character for the measured client: a character ID from
@@ -64,6 +67,20 @@ case "$practice_smoke" in
     *)
         printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_PRACTICE must be 0 or 1' >&2
         exit 2
+        ;;
+esac
+case "$practice_map" in
+    '') practice_map_flags= ;;
+    *[!0-9]* | 0*)
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_PRACTICE_MAP must be a built-in map preset ID' >&2
+        exit 2
+        ;;
+    *)
+        if [[ "$practice_smoke" != 1 ]]; then
+            printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_PRACTICE_MAP requires BRAWLER_RENDER_PRACTICE=1' >&2
+            exit 2
+        fi
+        practice_map_flags="--product-practice-map $practice_map"
         ;;
 esac
 case "$reduced_effects" in
@@ -235,7 +252,7 @@ measured_args=(--client-id 1 --server "$bind_addr" --transport routed-udp
     --screenshot-count "$capture_count"
     --render-report "$report_path" --render-warmup-seconds "$warmup_seconds"
     --render-measure-seconds "$measure_seconds")
-measured_args+=($render_effect_flag $measured_combat_flags $measured_character_flags)
+measured_args+=($render_effect_flag $measured_combat_flags $measured_character_flags $practice_map_flags)
 peer_args=(--client-id 2 --server "$bind_addr" --transport routed-udp
     --auto-connect "$match_flag" --product-game-type "$game_type" --move-axis '-1,0'
     --window-size "$window_size" --offscreen

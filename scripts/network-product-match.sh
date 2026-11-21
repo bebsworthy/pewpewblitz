@@ -18,6 +18,8 @@ requeue_smoke=${BRAWLER_PRODUCT_REQUEUE_SMOKE:-0}
 practice_smoke=${BRAWLER_PRODUCT_PRACTICE_SMOKE:-0}
 network_change_smoke=${BRAWLER_PRODUCT_NETWORK_CHANGE_SMOKE:-0}
 rejoin_smoke=${BRAWLER_PRODUCT_REJOIN_SMOKE:-0}
+# Optional built-in map preset ID for the Practice smoke (BRL-9gqj); defaults to the first map.
+practice_map=${BRAWLER_PRODUCT_PRACTICE_MAP:-}
 case "$headless" in
     0 | 1) ;;
     *)
@@ -74,6 +76,19 @@ case "$rejoin_smoke" in
     *)
         echo "brawler product match: BRAWLER_PRODUCT_REJOIN_SMOKE must be 0, 1 or completed" >&2
         exit 2
+        ;;
+esac
+case "$practice_map" in
+    '') ;;
+    *[!0-9]* | 0*)
+        echo "brawler product match: BRAWLER_PRODUCT_PRACTICE_MAP must be a built-in map preset ID" >&2
+        exit 2
+        ;;
+    *)
+        [ "$practice_smoke" = 1 ] || {
+            echo "brawler product match: BRAWLER_PRODUCT_PRACTICE_MAP requires Practice smoke" >&2
+            exit 2
+        }
         ;;
 esac
 product_topology=pvp
@@ -262,6 +277,7 @@ while [ "$index" -le "$client_count" ]; do
                 --headless \
                 "$practice_flag" \
                 --product-game-type "$game_type" \
+                ${practice_map:+--product-practice-map "$practice_map"} \
                 --character "$first_character" &
         elif [ "$rejoin_smoke" = completed ]; then
             if [ "$index" -eq 1 ]; then
@@ -402,7 +418,7 @@ if [ "$headless" = 1 ]; then
     elif [ "$network_change_smoke" = 1 ]; then
         echo "brawler product match: Practice $game_type kept its match session across a source-port change and a return to the original port"
     elif [ "$practice_smoke" = 1 ]; then
-        echo "brawler product match: Practice $game_type reached Active with one human"
+        echo "brawler product match: Practice $game_type${practice_map:+ (map preset $practice_map)} reached Active with one human"
     elif [ "$requeue_smoke" = 1 ]; then
         echo "brawler product match: Results -> Queue Again received a fresh Joined outcome"
     else
