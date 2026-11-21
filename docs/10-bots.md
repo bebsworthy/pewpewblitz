@@ -112,9 +112,12 @@ focused Ticket specification before changing one of those contracts.
   player-affecting Practice tuning; there are no player-facing difficulty presets or skill ranking.
   The target is readable opposition with delayed reactions, imperfect aim, coordinated objective
   play, and bounded tactical commitments.
-- **Deterministic roster picks.** Manifest bot ordinal `n` plays roster character `n mod 9` with
-  its first ultimate and passive, resolved through the ordinary character path (BRL-egn6). Bot
-  behavior and matchup variety across those weapons and abilities are BRL-abys.
+- **Varied deterministic roster picks.** Each Practice start seeds its bots with the lobby request
+  number. Bot ordinal `n` plays roster character `(seed + n) mod 9`, its ultimate option
+  `(seed / 9 + n) mod 2`, and its passive option `(seed / 18 + n) mod 2`. All picks resolve through
+  the ordinary character path. One roster never repeats a character, and any 18 consecutive seeds
+  give even a lone 1v1 bot every character with both of its ultimates. The pick never reads the
+  human's choice (BRL-abys).
 - **All Practice-compatible mode goals.** Wipeout supplies survival and pressure goals; Hot Zone
   supplies contest and defend goals; Heist supplies attack-safe, defend-safe, and lane-pressure
   goals. Zombie supplies close-range hostile-NPC pressure: the human and friendly bots share team
@@ -320,16 +323,13 @@ enemy—rather than becoming a stringly typed rule language.
 - **Committed state prevents dithering.** Target lock, role/goal reservation, strafe direction,
   retreat burst, aim-error hold, route identity, stuck window, and reaction deadline live in
   explicit returned state.
-- **Combat uses resolved capabilities.** The first executor supports Pulse primary fire and Dash.
-  It derives range, projectile speed, reload, charge, and activation facts from the resolved
-  loadout. Predictive aim uses permitted delayed target velocity/positions, retains bounded
-  error, and checks line of fire. Dash has explicit engage, escape, and traversal safety rules.
-  Demolition Strike adds one focused executor branch: when charged, a bot may aim it at an observed
-  public target within the resolved maximum range and emits the same ordinary targeted-ultimate
-  input as a player. It receives no terrain mutation shortcut or hidden map knowledge.
-  Resolved primary range extraction treats Splash like another lobbed delivery and uses its maximum
-  placement distance for approach, hold-range, and fire eligibility. Bots receive no private area
-  occupancy or future-pulse knowledge and do not own a separate Splash execution path.
+- **Combat uses resolved capabilities.** Executors read the resolved loadout, never character or
+  preset IDs. Range, projectile speed, lob flight, ammo/charges and each ultimate's reach all come
+  from that loadout. Predictive aim uses permitted, delayed target velocities and positions, and
+  keeps a bounded aim error. Every behavior emits the same ordinary `FighterInput` a player sends,
+  and none gets a terrain, landing or occupancy shortcut. See the
+  [supported content matrix](#supported-content-matrix).
+
 - **Mode goals are focused adapters.** Wipeout, Hot Zone, and Heist produce bounded goal candidates
   for the common planner rather than scattering mode branches through navigation and combat. An
   objective role retains its zone/safe anchor while opportunistically aiming at visible enemies;
@@ -365,6 +365,38 @@ the goal into a committed route; the capability executor combines intent, route 
 resolved capabilities into `BotDecision`. `BotDecision` contains the next explicit state, ordinary
 `FighterInput`, selected stable identities, chosen tactic, and one bounded diagnostic reason.
 Diagnostics support tests and tuning; they do not become bot-specific gameplay protocol messages.
+
+## Supported content matrix
+
+Delivery behavior (from `DeliveryMethod`):
+
+| Delivery | Weapons | Bot behavior |
+|---|---|---|
+| Straight / StickyStraight | Pulse Sidearm, Scatter Cannon (spread), Sticky Blomb | Leads by projectile speed; fires only along a clear line |
+| Lobbed / Splash | Arc Launcher, Splash | Leads by the distance-scaled authored lob flight; fires over cover and sends the intercept distance as the aim distance |
+| MeleeArc | Impact Blade | Closes to reach-derived preferred range; Dash closes the gap |
+| ConeSpray | Spray | Holds reach-derived preferred range; needs a clear line |
+
+With an empty weapon (magazine refilling or charges spent), every delivery gives ground to its full
+range and strafes there. It neither closes nor Dashes until a shot is back.
+
+Ultimate behavior (from `UltimateKind`):
+
+| Ultimate | Bot behavior |
+|---|---|
+| Dash, Self Cloak | Engage when far outside range, escape on retreat (`intent.dash`) |
+| Sentry | Deploys facing a visible enemy inside the resolved acquisition range |
+| Reveal Scan | With no enemy visible, scans the nearest remembered contact inside its maximum range |
+| Concealment Field | Centered on the bot (aim distance 0) while it is engaged within weapon range or retreating; primary fire waits that tick |
+| Demolition Strike, Big Blob, Cryogenic/Fire/Poison Field | Aimed at the current target when it is inside the resolved maximum range |
+| Restoration Field | Aimed at the most injured ally (or self) at the restoration health threshold |
+
+The 9 launch characters (Riff, Torque, Cobble, Plunk, Pollen, Orbit, Sumi, Prism, Bumper) cover all
+7 weapon bases and all 11 ultimates. `practice_bot_rosters_cover_every_character_weapon_and_ultimate_without_repeats`
+proves that the bounded scenario set (18 seeds × 1v1/2v2/3v3) reaches all of them. Passives need no
+bot behavior; they apply through authoritative rules. Content added after this matrix (for example
+elemental weapon effects, BRL-k66v) owns its bot support in its own ticket. Until then, the bot plays
+that content through the nearest matching delivery or ultimate row above.
 
 ## Profile and deterministic entropy
 
@@ -471,7 +503,10 @@ The playable bot slice is protected by:
   state, and no fixed-tick spike at the maximum declared supported topology;
 - focused Wipeout, Hot Zone, and Heist goal/role/reservation tests, including safe attack/defense;
 - representative loadout tests for predictive but imperfect Pulse aim, range control, primary
-  fire, and bounded Dash engage/escape/traversal behavior;
+  fire, bounded Dash engage/escape/traversal behavior, lob-over-cover fire, empty-weapon spacing,
+  and Sentry, Reveal Scan, and Concealment Field use;
+- a roster coverage test proving the bounded Practice scenario set reaches every character, weapon
+  base, and ultimate without repeating a character in one roster;
 - barrel reasoning tests plus chest/pickup usefulness, contest, collection, expiry,
   and full-health rejection behavior through ordinary authoritative input;
 - worker-level practice tests proving Start Practice creates one human plus active manifest bots,
@@ -493,8 +528,9 @@ tests, and do not raise the production map-dimension limit merely to test naviga
 
 Add later behavior only when its owning slice is implemented and tested:
 
-- deliberate bot behavior for every roster weapon and ability (BRL-abys);
-- active items, Sentry, Self Cloak, Concealment Field, and other ability primitives;
+- bot behavior for content added after the [supported content matrix](#supported-content-matrix),
+  owned by that content's ticket;
+- active items and other new ability primitives;
 - bounded projectile awareness and avoidance without perfect tracking;
 - richer squad tactics or map control after the first role/reservation planner is readable;
 - an alternative graph builder or navmesh only if a real future map representation cannot lower

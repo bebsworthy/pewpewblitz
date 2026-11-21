@@ -51,11 +51,21 @@ impl CharacterCatalog {
             .is_some_and(|character| choice.is_offered_by(character))
     }
 
-    /// The deterministic Practice bot pick for one bot ordinal: the roster in catalog order with
-    /// each character's first options. Matchup variety and behavior stay with BRL-abys.
+    /// The deterministic Practice bot pick for one bot ordinal in a roster started with
+    /// `roster_seed` (BRL-abys). Bots of one roster take consecutive characters, so they never
+    /// repeat while the roster is no larger than the catalog. The seed walks the character first,
+    /// then the ultimate option, then the passive option, so any `2 × len` consecutive seeds give a
+    /// single bot every character with each of its two ultimates.
     #[must_use]
-    pub fn practice_bot_choice(&self, bot_ordinal: usize) -> CharacterChoice {
-        CharacterChoice::default_for(&self.characters[bot_ordinal % self.characters.len()])
+    pub fn practice_bot_choice(&self, roster_seed: u64, bot_ordinal: usize) -> CharacterChoice {
+        let count = self.characters.len();
+        let seed = usize::try_from(roster_seed % (4 * count as u64)).unwrap_or(0);
+        let character = &self.characters[(seed + bot_ordinal) % count];
+        CharacterChoice {
+            character_id: character.id,
+            ultimate_id: character.ultimate_options[(seed / count + bot_ordinal) % 2],
+            passive_id: character.passive_options[(seed / (2 * count) + bot_ordinal) % 2],
+        }
     }
 
     /// The validated recipe for one pick: the character's stats, its signature weapon with the

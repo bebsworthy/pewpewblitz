@@ -464,9 +464,19 @@ mod combat {
         let direction = (enemy.position - self_position)
             .try_normalize()
             .unwrap_or(Vec2::X);
-        let move_goal = if distance > preferred * context.profile.pressure_far_range_fraction {
+        // An empty weapon (magazine refilling or melee charges spent) gives ground to its full
+        // range and strafes there instead of closing, then re-engages once a shot is back.
+        let empty = observation.weapon_ammo == 0;
+        let move_goal = if empty && distance < observation.weapon_range {
+            self_position
+                - direction
+                    * (observation.weapon_range - distance).clamp(
+                        context.profile.retreat_step_min_world,
+                        context.profile.retreat_step_max_world,
+                    )
+        } else if !empty && distance > preferred * context.profile.pressure_far_range_fraction {
             enemy.position - direction * preferred
-        } else if distance < preferred * context.profile.pressure_near_range_fraction {
+        } else if !empty && distance < preferred * context.profile.pressure_near_range_fraction {
             self_position - direction * preferred * context.profile.pressure_retreat_fraction
         } else {
             let strafe = Vec2::new(-direction.y, direction.x)
@@ -485,8 +495,9 @@ mod combat {
                 move_goal: Some(move_goal),
                 aim_target: Some((enemy.position, enemy.velocity)),
                 fire: distance <= observation.weapon_range,
-                dash: distance
-                    > observation.weapon_range * context.profile.pressure_dash_range_fraction,
+                dash: !empty
+                    && distance
+                        > observation.weapon_range * context.profile.pressure_dash_range_fraction,
             },
         );
     }
@@ -696,6 +707,7 @@ mod tests {
             ultimate_range: 100.0,
             weapon_range: 100.0,
             projectile_speed: 100.0,
+            lob_flight_ticks_at_range: None,
             healing_weapon: false,
         }
     }

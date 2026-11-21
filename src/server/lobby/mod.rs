@@ -97,9 +97,12 @@ fn build_identity(
     })
 }
 
-/// Practice bots take the roster in catalog order through the ordinary character path
-/// (`CharacterCatalog::practice_bot_choice`).
+/// Practice bots take varied roster characters through the ordinary character path
+/// (`CharacterCatalog::practice_bot_choice`). `roster_seed` is the Practice request number, so
+/// consecutive starts rotate through every character and ultimate without reading the human's
+/// pick (BRL-abys).
 fn practice_bot_rows(
+    roster_seed: u64,
     team_count: u8,
     players_per_team: u8,
 ) -> Result<Vec<brawler_routing::AllocateBot>, crate::lobby::PracticeStartRejection> {
@@ -113,7 +116,9 @@ fn practice_bot_rows(
         let team = u8::try_from(roster_index / usize::from(players_per_team))
             .map_err(|_| Rejection::Internal)?;
         let build = build_identity(
-            catalogs.characters.practice_bot_choice(ordinal),
+            catalogs
+                .characters
+                .practice_bot_choice(roster_seed, ordinal),
             catalogs.view(),
         )
         .map_err(|_| Rejection::Internal)?;
@@ -796,6 +801,7 @@ impl LobbyState {
         let accepted_map = resolve_practice_map(command, game, &maps, catalog)?;
         let accepted_identity = human_snapshot.accepted_identity;
         let human_snapshot = human_snapshot.encode().map_err(|_| Rejection::Internal)?;
+        let roster_seed = self.next_request_id;
         let request_id = RequestId::new(self.next_request_id).ok_or(Rejection::Internal)?;
         self.next_request_id = self
             .next_request_id
@@ -822,7 +828,7 @@ impl LobbyState {
             build_revision: accepted_identity.revision.0,
             build_snapshot: human_snapshot,
         };
-        let bots = practice_bot_rows(game.team_count, game.players_per_team)?;
+        let bots = practice_bot_rows(roster_seed, game.team_count, game.players_per_team)?;
         let rules = catalog.rules(&game.id).ok_or(Rejection::Internal)?;
         self.pending = Some(PendingAllocation {
             body: AllocateRequestBody {
@@ -2663,7 +2669,9 @@ mod tests {
         assert_eq!(request.bots.iter().filter(|bot| bot.team == 1).count(), 3);
         for (ordinal, bot) in request.bots.iter().enumerate() {
             let expected = build_identity(
-                catalogs.characters.practice_bot_choice(ordinal),
+                catalogs
+                    .characters
+                    .practice_bot_choice(request.request_id.get(), ordinal),
                 catalogs.view(),
             )
             .unwrap();
@@ -2681,13 +2689,14 @@ mod tests {
                     .character_id
             })
             .collect();
+        let seed = usize::try_from(request.request_id.get()).unwrap();
+        let roster = &catalogs.characters.characters;
         assert_eq!(
             bot_characters,
-            catalogs.characters.characters[..5]
-                .iter()
-                .map(|character| character.id)
+            (0..5)
+                .map(|ordinal| roster[(seed + ordinal) % roster.len()].id)
                 .collect::<Vec<_>>(),
-            "Practice bots take the roster in catalog order"
+            "Practice bots take consecutive roster characters from the request seed"
         );
 
         lobby.pending = None;
@@ -2722,11 +2731,11 @@ mod tests {
 
     #[test]
     fn zombie_practice_bot_rows_fill_only_the_friendly_team() {
-        let two_player = practice_bot_rows(1, 2).unwrap();
+        let two_player = practice_bot_rows(1, 1, 2).unwrap();
         assert_eq!(two_player.len(), 1);
         assert!(two_player.iter().all(|bot| bot.team == 0));
 
-        let three_player = practice_bot_rows(1, 3).unwrap();
+        let three_player = practice_bot_rows(1, 1, 3).unwrap();
         assert_eq!(three_player.len(), 2);
         assert!(three_player.iter().all(|bot| bot.team == 0));
     }

@@ -300,24 +300,8 @@ fn capture_observations(
                 }),
         );
         visible_enemies.sort_by_key(|enemy| enemy.network_id);
-        let (weapon_range, projectile_speed) = weapon_capabilities(&observer.loadout);
-        let ultimate_range = match observer.loadout.ultimate.parameters {
-            crate::builds::UltimateParameters::DemolitionStrike {
-                maximum_range_milliunits,
-                ..
-            }
-            | crate::builds::UltimateParameters::ElementalField {
-                maximum_range_milliunits,
-                ..
-            }
-            | crate::builds::UltimateParameters::BigBlob {
-                maximum_range_milliunits,
-                ..
-            } => {
-                crate::builds::world_units_from_milliunits(maximum_range_milliunits).unwrap_or(0.0)
-            }
-            _ => 0.0,
-        };
+        let weapon = weapon_capabilities(&observer.loadout);
+        let ultimate_range = ultimate_range(observer.loadout.ultimate.parameters);
         controller.push_observation(BotObservation {
             tick: tick.0,
             match_id: match_state.match_id,
@@ -336,8 +320,9 @@ fn capture_observations(
             ability_ready: matches!(observer.ability.phase, AbilityPhase::Ready),
             ultimate_kind: observer.loadout.ultimate.kind,
             ultimate_range,
-            weapon_range,
-            projectile_speed,
+            weapon_range: weapon.range,
+            projectile_speed: weapon.projectile_speed,
+            lob_flight_ticks_at_range: weapon.lob_flight_ticks_at_range,
             healing_weapon: observer
                 .loadout
                 .primary_weapon
@@ -369,15 +354,74 @@ fn public_fighter_view(raw: &RawFighterView) -> BotFighterView {
     }
 }
 
-fn weapon_capabilities(loadout: &ResolvedMatchLoadout) -> (f32, f32) {
+struct BotWeaponCapabilities {
+    range: f32,
+    projectile_speed: f32,
+    lob_flight_ticks_at_range: Option<u64>,
+}
+
+fn weapon_capabilities(loadout: &ResolvedMatchLoadout) -> BotWeaponCapabilities {
+    use crate::combat::DeliveryMethod;
+    let direct = |range, projectile_speed| BotWeaponCapabilities {
+        range,
+        projectile_speed,
+        lob_flight_ticks_at_range: None,
+    };
     match loadout.primary_weapon.recipe.delivery {
-        crate::combat::DeliveryMethod::Straight { speed, range, .. }
-        | crate::combat::DeliveryMethod::StickyStraight { speed, range, .. } => (range, speed),
-        crate::combat::DeliveryMethod::Lobbed { distance, .. }
-        | crate::combat::DeliveryMethod::Splash { distance, .. } => (distance, 0.0),
-        crate::combat::DeliveryMethod::MeleeArc { reach, .. }
-        | crate::combat::DeliveryMethod::ConeSpray { reach, .. } => (reach, 0.0),
+        DeliveryMethod::Straight { speed, range, .. }
+        | DeliveryMethod::StickyStraight { speed, range, .. } => direct(range, speed),
+        DeliveryMethod::Lobbed {
+            distance,
+            max_flight_ticks,
+            ..
+        }
+        | DeliveryMethod::Splash {
+            distance,
+            max_flight_ticks,
+            ..
+        } => BotWeaponCapabilities {
+            range: distance,
+            projectile_speed: 0.0,
+            lob_flight_ticks_at_range: Some(max_flight_ticks),
+        },
+        DeliveryMethod::MeleeArc { reach, .. } | DeliveryMethod::ConeSpray { reach, .. } => {
+            direct(reach, 0.0)
+        }
     }
+}
+
+/// The resolved reach that gates each ultimate: placement range for targeted fields, strikes and
+/// scans, and the acquisition range a Sentry covers from its placement beside the bot.
+fn ultimate_range(parameters: crate::builds::UltimateParameters) -> f32 {
+    use crate::builds::UltimateParameters;
+    let milliunits = match parameters {
+        UltimateParameters::DemolitionStrike {
+            maximum_range_milliunits,
+            ..
+        }
+        | UltimateParameters::ElementalField {
+            maximum_range_milliunits,
+            ..
+        }
+        | UltimateParameters::BigBlob {
+            maximum_range_milliunits,
+            ..
+        }
+        | UltimateParameters::RevealScan {
+            maximum_range_milliunits,
+            ..
+        }
+        | UltimateParameters::ConcealmentField {
+            maximum_range_milliunits,
+            ..
+        } => maximum_range_milliunits,
+        UltimateParameters::Sentry {
+            acquisition_range_milliunits,
+            ..
+        } => acquisition_range_milliunits,
+        UltimateParameters::Dash { .. } | UltimateParameters::SelfCloak { .. } => 0,
+    };
+    crate::builds::world_units_from_milliunits(milliunits).unwrap_or(0.0)
 }
 
 #[allow(

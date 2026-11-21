@@ -97,3 +97,59 @@ fn catalog_rejects_duplicate_options_unknown_references_and_unsorted_ids() {
         vec![crate::weapon_parts::WeaponPartDefinitionId(1); 5];
     assert!(too_many_parts.validate().is_err());
 }
+
+#[test]
+fn practice_bot_rosters_cover_every_character_weapon_and_ultimate_without_repeats() {
+    let (characters, builds, weapons, _) = embedded();
+    let roster_seeds = 0..u64::try_from(2 * characters.characters.len()).unwrap();
+    // Bot seats for the routed 1v1, 2v2 and 3v3 Practice compositions.
+    let compositions = [1_usize, 3, 5];
+    let mut picked = BTreeSet::new();
+    for bots in compositions {
+        let mut single_seat = BTreeSet::new();
+        for seed in roster_seeds.clone() {
+            let roster: Vec<_> = (0..bots)
+                .map(|ordinal| characters.practice_bot_choice(seed, ordinal))
+                .collect();
+            assert!(roster.iter().all(|choice| characters.accepts(*choice)));
+            let distinct: BTreeSet<_> = roster.iter().map(|choice| choice.character_id).collect();
+            assert_eq!(distinct.len(), bots, "a roster never repeats a character");
+            assert_eq!(
+                roster,
+                (0..bots)
+                    .map(|ordinal| characters.practice_bot_choice(seed, ordinal))
+                    .collect::<Vec<_>>(),
+                "picks are deterministic"
+            );
+            single_seat.insert((roster[0].character_id, roster[0].ultimate_id));
+            picked.extend(roster);
+        }
+        assert_eq!(
+            single_seat.len(),
+            2 * characters.characters.len(),
+            "consecutive starts give the first seat every character with both ultimates"
+        );
+    }
+    let picked_weapons: BTreeSet<_> = picked
+        .iter()
+        .map(|choice| {
+            characters
+                .character(choice.character_id)
+                .unwrap()
+                .weapon
+                .base
+        })
+        .collect();
+    let all_weapons: BTreeSet<_> = weapons.presets.iter().map(|preset| preset.id).collect();
+    assert_eq!(picked_weapons, all_weapons);
+    let picked_ultimates: BTreeSet<_> = picked.iter().map(|choice| choice.ultimate_id).collect();
+    let all_ultimates: BTreeSet<_> = builds
+        .ultimates
+        .iter()
+        .map(|ultimate| ultimate.id)
+        .collect();
+    assert_eq!(picked_ultimates, all_ultimates);
+    let picked_passives: BTreeSet<_> = picked.iter().map(|choice| choice.passive_id).collect();
+    let all_passives: BTreeSet<_> = builds.passives.iter().map(|passive| passive.id).collect();
+    assert_eq!(picked_passives, all_passives);
+}

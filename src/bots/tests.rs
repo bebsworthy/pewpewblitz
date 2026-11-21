@@ -918,6 +918,251 @@ fn maximum_practice_roster_pure_decisions_stay_inside_one_fixed_tick() {
     assert!(p95 < crate::timing::SIMULATION_TICK, "bot p95 was {p95:?}");
 }
 
+fn open_navigation() -> BotNavigationSnapshot {
+    BotNavigationSnapshot {
+        dimensions: MapDimensions {
+            width: 32,
+            height: 24,
+        },
+        blocked: BTreeSet::new(),
+        terrain_cost_milli: BTreeMap::new(),
+        minimum_terrain_cost_milli: 1_000,
+    }
+}
+
+fn decide(
+    observed: &BotObservation,
+    state: &mut super::model::BotState,
+    navigation: &BotNavigationSnapshot,
+) -> crate::protocol::FighterInput {
+    policy::decide(
+        observed,
+        state,
+        policy::BotDecisionPolicy::new(
+            BotProfile::embedded().unwrap(),
+            &arbitration_policy(),
+            behaviors::built_in_registry(),
+        ),
+        navigation,
+        7,
+        BotRole::Pressure,
+        512,
+    )
+    .input
+}
+
+fn enemy_at(position: Vec2, velocity: Vec2) -> super::model::BotFighterView {
+    super::model::BotFighterView {
+        network_id: crate::protocol::NetworkEntityId(2),
+        team: crate::combat::TeamId(1),
+        position,
+        velocity,
+        current_health: 100,
+        maximum_health: 100,
+        active: true,
+        cold_meter: 0,
+        frozen: false,
+        poisoned: false,
+        burning: false,
+    }
+}
+
+fn pressed(input: crate::protocol::FighterInput, button: u8) -> bool {
+    input.gameplay_buttons & button != 0
+}
+
+fn aim_distance(input: crate::protocol::FighterInput) -> f32 {
+    input.aim_distance.unwrap().to_world_units()
+}
+
+#[test]
+fn lobbed_weapons_fire_over_cover_and_lead_by_the_scaled_lob_flight() {
+    let mut navigation = open_navigation();
+    // Wall the whole column between the bot (x = 0) and the enemy (x = 200).
+    navigation.blocked = (0..24).map(|y| y * 32 + 19).collect();
+    let mut observed = observation(20);
+    observed.weapon_range = 520.0;
+    observed.projectile_speed = 0.0;
+    observed
+        .visible_enemies
+        .push(enemy_at(Vec2::new(200.0, 0.0), Vec2::new(60.0, 0.0)));
+
+    let straight = decide(
+        &observed,
+        &mut super::model::BotState::default(),
+        &navigation,
+    );
+    assert!(
+        !pressed(straight, crate::protocol::FighterInput::PRIMARY_FIRE),
+        "a straight delivery holds fire into cover"
+    );
+
+    observed.lob_flight_ticks_at_range = Some(45);
+    let lob = decide(
+        &observed,
+        &mut super::model::BotState::default(),
+        &navigation,
+    );
+    assert!(pressed(lob, crate::protocol::FighterInput::PRIMARY_FIRE));
+    // 200 / 520 of a 45-tick flight is ~0.29 s, so a 60 u/s target is led by ~17 world units.
+    let led = aim_distance(lob);
+    assert!((212.0..222.0).contains(&led), "lob aim distance {led}");
+}
+
+#[test]
+fn empty_weapon_gives_ground_instead_of_closing_or_dashing() {
+    let mut observed = observation(20);
+    observed.weapon_range = 120.0;
+    observed.projectile_speed = 0.0;
+    observed
+        .visible_enemies
+        .push(enemy_at(Vec2::new(60.0, 0.0), Vec2::ZERO));
+    let profile = BotProfile::embedded().unwrap();
+
+    let armed = policy::choose_intent(
+        &observed,
+        &mut super::model::BotState::default(),
+        profile,
+        &arbitration_policy(),
+        BotRole::Pressure,
+    );
+    assert!(armed.fire);
+
+    observed.weapon_ammo = 0;
+    let empty = policy::choose_intent(
+        &observed,
+        &mut super::model::BotState::default(),
+        profile,
+        &arbitration_policy(),
+        BotRole::Pressure,
+    );
+    assert!(
+        empty.move_goal.unwrap().x < 0.0,
+        "backs away from the enemy"
+    );
+    assert!(!empty.dash);
+
+    observed.visible_enemies[0].position = Vec2::new(400.0, 0.0);
+    let far = policy::choose_intent(
+        &observed,
+        &mut super::model::BotState::default(),
+        profile,
+        &arbitration_policy(),
+        BotRole::Pressure,
+    );
+    assert!(
+        far.move_goal.unwrap().x.abs() < 1.0,
+        "strafes instead of closing"
+    );
+    assert!(!far.dash, "no gap-closing Dash while empty");
+}
+
+#[test]
+fn sentry_deploys_only_toward_an_enemy_inside_acquisition_range() {
+    let navigation = open_navigation();
+    let mut observed = observation(20);
+    observed.ability_ready = true;
+    observed.ultimate_kind = crate::builds::UltimateKind::Sentry;
+    observed.ultimate_range = 480.0;
+    observed.weapon_range = 320.0;
+    observed
+        .visible_enemies
+        .push(enemy_at(Vec2::new(0.0, 300.0), Vec2::ZERO));
+    let near = decide(
+        &observed,
+        &mut super::model::BotState::default(),
+        &navigation,
+    );
+    assert!(pressed(near, crate::protocol::FighterInput::ULTIMATE));
+    assert!(
+        near.aim_update.unwrap().to_vec2().y > 0.9,
+        "faces the enemy"
+    );
+
+    observed.visible_enemies[0].position = Vec2::new(0.0, 600.0);
+    let far = decide(
+        &observed,
+        &mut super::model::BotState::default(),
+        &navigation,
+    );
+    assert!(
+        !pressed(far, crate::protocol::FighterInput::ULTIMATE),
+        "no Sentry as a gap-closer"
+    );
+}
+
+#[test]
+fn reveal_scan_targets_only_a_remembered_unseen_contact_in_range() {
+    let navigation = open_navigation();
+    let mut observed = observation(40);
+    observed.ability_ready = true;
+    observed.ultimate_kind = crate::builds::UltimateKind::RevealScan;
+    observed.ultimate_range = 640.0;
+    let mut state = super::model::BotState::default();
+    state.contacts.push(super::model::BotContact {
+        network_id: crate::protocol::NetworkEntityId(2),
+        position: Vec2::new(300.0, 0.0),
+        velocity: Vec2::ZERO,
+        observed_at_tick: 30,
+    });
+    let scan = decide(&observed, &mut state.clone(), &navigation);
+    assert!(pressed(scan, crate::protocol::FighterInput::ULTIMATE));
+    assert!((aim_distance(scan) - 300.0).abs() < 2.0);
+    assert!(!pressed(scan, crate::protocol::FighterInput::PRIMARY_FIRE));
+
+    observed
+        .visible_enemies
+        .push(enemy_at(Vec2::new(300.0, 0.0), Vec2::ZERO));
+    let seen = decide(&observed, &mut state.clone(), &navigation);
+    assert!(
+        !pressed(seen, crate::protocol::FighterInput::ULTIMATE),
+        "a visible enemy needs no scan"
+    );
+
+    observed.visible_enemies.clear();
+    state.contacts[0].position = Vec2::new(500.0, 400.0);
+    let out_of_range = decide(&observed, &mut state, &navigation);
+    assert!(!pressed(
+        out_of_range,
+        crate::protocol::FighterInput::ULTIMATE
+    ));
+}
+
+#[test]
+fn concealment_field_covers_the_engaged_bot_without_spending_a_shot() {
+    let navigation = open_navigation();
+    let mut observed = observation(20);
+    observed.ability_ready = true;
+    observed.ultimate_kind = crate::builds::UltimateKind::ConcealmentField;
+    observed.ultimate_range = 480.0;
+    observed.weapon_range = 240.0;
+    observed
+        .visible_enemies
+        .push(enemy_at(Vec2::new(150.0, 0.0), Vec2::ZERO));
+    let engaged = decide(
+        &observed,
+        &mut super::model::BotState::default(),
+        &navigation,
+    );
+    assert!(pressed(engaged, crate::protocol::FighterInput::ULTIMATE));
+    assert!(
+        aim_distance(engaged) < 1.0,
+        "the field is centered on the bot"
+    );
+    assert!(!pressed(
+        engaged,
+        crate::protocol::FighterInput::PRIMARY_FIRE
+    ));
+
+    observed.visible_enemies[0].position = Vec2::new(400.0, 0.0);
+    let distant = decide(
+        &observed,
+        &mut super::model::BotState::default(),
+        &navigation,
+    );
+    assert!(!pressed(distant, crate::protocol::FighterInput::ULTIMATE));
+}
+
 fn observation(tick: u64) -> BotObservation {
     use super::model::BotFighterView;
     use crate::{
@@ -961,6 +1206,7 @@ fn observation(tick: u64) -> BotObservation {
         ultimate_range: 0.0,
         weapon_range: 100.0,
         projectile_speed: 100.0,
+        lob_flight_ticks_at_range: None,
         healing_weapon: false,
     }
 }

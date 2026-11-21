@@ -4,9 +4,9 @@ was: BRL-0033
 
 title: Expand Practice bots across current weapon and ability matchups
 
-status: backlog
-closed:
-status_changed: 2026-11-20T16:51:40Z
+status: done
+closed: 2026-11-21T07:26:16Z
+status_changed: 2026-11-21T07:26:16Z
 
 theme: core
 
@@ -20,7 +20,9 @@ related: [BRL-7r6j, BRL-7sqn, BRL-k66v]
 
 parent:
 
-rank: 5317778
+rank:
+
+assignee: Boyd
 ---
 
 # Description

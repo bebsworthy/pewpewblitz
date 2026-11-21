@@ -67,6 +67,10 @@ pub(super) struct BotObservation {
     pub ultimate_range: f32,
     pub weapon_range: f32,
     pub projectile_speed: f32,
+    /// Authored flight at maximum range for Lobbed and Splash deliveries, which land past cover
+    /// (the authoritative flight scales with distance). `None` for Straight, melee and cone
+    /// deliveries, which need a clear line.
+    pub lob_flight_ticks_at_range: Option<u64>,
     pub healing_weapon: bool,
 }
 
