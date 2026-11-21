@@ -1166,7 +1166,7 @@ fn shard_rush_performance_app() -> App {
     app.insert_resource(brawler::matchplay::ShardRushRules {
         target_shards: brawler::matchplay::MAX_SHARD_RUSH_TARGET,
         policy: brawler::matchplay::ShardRushPolicy {
-            hold_ticks: 720,
+            hold_ticks: brawler::matchplay::ShardRushPolicy::PRODUCTION.hold_ticks,
             spawn_interval_ticks: 1,
             live_shard_ceiling: brawler::matchplay::MAX_SHARD_RUSH_LIVE_CEILING,
         },

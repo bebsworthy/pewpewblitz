@@ -37,11 +37,34 @@ pub struct ShardRushPolicy {
     pub live_shard_ceiling: u8,
 }
 
+/// A whole-second policy duration in simulation ticks, through `src/timing.rs`.
+const fn policy_ticks(seconds: u64) -> u16 {
+    match crate::timing::simulation_ticks_from_seconds(seconds) {
+        Some(ticks) if ticks < 1 << 16 => {
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "the guard keeps the tick count inside u16"
+            )]
+            let ticks = ticks as u16;
+            ticks
+        }
+        _ => panic!("Shard Rush policy duration fits u16 ticks"),
+    }
+}
+
 impl ShardRushPolicy {
-    /// Shorter verification policy with the same semantics.
+    /// Shorter verification policy with the same semantics: a 1 s hold and a 0.5 s cadence.
     pub const PROCESS_VERIFICATION: Self = Self {
-        hold_ticks: 60,
-        spawn_interval_ticks: 30,
+        hold_ticks: policy_ticks(1),
+        spawn_interval_ticks: policy_ticks(1) / 2,
+        live_shard_ceiling: 12,
+    };
+
+    /// Built-in production fallback matching the checked-in catalog: a 12 s hold, one shard
+    /// every 6 s, at most 12 on the ground.
+    pub const PRODUCTION: Self = Self {
+        hold_ticks: policy_ticks(12),
+        spawn_interval_ticks: policy_ticks(6),
         live_shard_ceiling: 12,
     };
 
@@ -218,11 +241,7 @@ pub fn shard_rush_rules_for_profile(profile: crate::config::MatchRulesProfile) -
     match profile {
         crate::config::MatchRulesProfile::Production => ShardRushRules {
             target_shards: 8,
-            policy: ShardRushPolicy {
-                hold_ticks: 720,
-                spawn_interval_ticks: 360,
-                live_shard_ceiling: 12,
-            },
+            policy: ShardRushPolicy::PRODUCTION,
         },
         crate::config::MatchRulesProfile::ProcessVerification => ShardRushRules {
             target_shards: 3,

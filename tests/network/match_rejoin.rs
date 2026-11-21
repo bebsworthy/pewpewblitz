@@ -32,7 +32,12 @@ const PLAYER_TWO: TestRoutedParticipant = TestRoutedParticipant {
 
 /// A 1v1 routed match with both participants connected, checked in, and Active.
 fn active_routed_match() -> Harness {
-    let mut harness = Harness::new_routed_match(&[PLAYER_ONE, PLAYER_TWO]);
+    active_routed_match_with(|_| {})
+}
+
+/// `active_routed_match` with one manifest edit, for example another mode and map.
+fn active_routed_match_with(edit: impl FnOnce(&mut brawler_routing::MatchManifestV1)) -> Harness {
+    let mut harness = Harness::new_routed_match_with(&[PLAYER_ONE, PLAYER_TWO], edit);
     for participant in [PLAYER_ONE, PLAYER_TWO] {
         harness.add_routed_match_client(participant.netcode_client_id, participant.peer_id);
     }
@@ -804,4 +809,121 @@ fn a_match_with_no_held_seat_sends_its_result_at_completion() {
     );
     let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
     assert_eq!(reply.refusal, Some(RejoinReason::SeatExpired));
+}
+
+/// Turn the routed Takedown manifest into a Shard Rush match on Prism Quarry.
+fn shard_rush_manifest(manifest: &mut brawler_routing::MatchManifestV1) {
+    let maps = brawler::map::MapContentCatalog::embedded().expect("embedded maps");
+    let preset = maps
+        .presets
+        .iter()
+        .find(|preset| preset.id == brawler::map::PRISM_QUARRY_PRESET)
+        .expect("Prism Quarry preset");
+    manifest.mode = brawler_routing::GameMode::ShardRush;
+    manifest.map_preset = preset.id.0;
+    manifest.map_revision = u32::from(preset.admission_revision);
+    manifest.map_recipe_fingerprint = maps
+        .resolve_preset(preset.id, MapInstanceId(1))
+        .expect("Prism Quarry resolves")
+        .snapshot
+        .identity
+        .recipe_fingerprint
+        .0;
+    manifest.objective_target = 8;
+}
+
+fn dropped_shards(harness: &mut Harness) -> usize {
+    let world = harness.server.world_mut();
+    world
+        .query::<&brawler::matchplay::ShardOrigin>()
+        .iter(world)
+        .filter(|origin| **origin == brawler::matchplay::ShardOrigin::Dropped)
+        .count()
+}
+
+/// BRL-wrer review: a Shard Rush carrier whose session is lost scatters its shards when the seat
+/// goes on hold, the bot-held seat neither collects nor counts toward the team total, and the
+/// rejoining player starts with none.
+#[test]
+fn a_held_shard_rush_seat_drops_its_shards_and_rejoins_with_none() {
+    let mut harness = active_routed_match_with(shard_rush_manifest);
+    let fighter = harness
+        .server_fighter(PLAYER_ONE.player_id)
+        .expect("fighter exists");
+    harness
+        .server
+        .world_mut()
+        .get_mut::<brawler::matchplay::ShardCarrier>(fighter)
+        .unwrap()
+        .0 = 3;
+    harness.step();
+    let team_shards = |harness: &mut Harness| {
+        let world = harness.server.world_mut();
+        world
+            .query::<&brawler::matchplay::ShardRushState>()
+            .single(world)
+            .unwrap()
+            .team_shards
+    };
+    assert_eq!(
+        team_shards(&mut harness)[0],
+        3,
+        "a connected carrier counts"
+    );
+
+    let fighter = lose_session(&mut harness, 0, PLAYER_ONE.player_id);
+    harness.step_until(|harness| dropped_shards(harness) >= 3);
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .get::<brawler::matchplay::ShardCarrier>(fighter)
+            .unwrap()
+            .0,
+        0,
+        "the held seat scattered every carried shard"
+    );
+    // The bot drives the held fighter for a while: it never collects or scores.
+    for _ in 0..240 {
+        harness.step();
+        assert_eq!(
+            harness
+                .server
+                .world()
+                .get::<brawler::matchplay::ShardCarrier>(fighter)
+                .unwrap()
+                .0,
+            0
+        );
+        assert_eq!(team_shards(&mut harness)[0], 0);
+    }
+
+    // The scattered shards still lie at the held fighter's feet; clear them so the rejoin check
+    // is not confused with the returning player legitimately picking them back up.
+    let world = harness.server.world_mut();
+    let ground = world
+        .query_filtered::<Entity, With<brawler::matchplay::Shard>>()
+        .iter(world)
+        .collect::<Vec<_>>();
+    for shard in ground {
+        world.entity_mut(shard).despawn();
+    }
+
+    let reply = rebind(&mut harness, 1, PLAYER_ONE, 80, 81);
+    assert_eq!(reply.refusal, None);
+    reclaim(&mut harness, fighter, 80, 81);
+    assert_eq!(
+        harness
+            .server
+            .world()
+            .get::<brawler::matchplay::ShardCarrier>(fighter)
+            .unwrap()
+            .0,
+        0,
+        "the rejoining player starts with no shards"
+    );
+    assert!(matches!(
+        harness.server_match_phase(),
+        MatchPhase::Active { .. }
+    ));
 }

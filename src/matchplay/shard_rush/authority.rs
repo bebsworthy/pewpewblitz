@@ -19,6 +19,7 @@ use crate::{
         prepare_mode_rule_facts,
     },
     protocol::{Fighter, NetworkEntityId},
+    server::SeatHold,
     timing::SimulationTick,
 };
 use avian2d::prelude::Position;
@@ -341,7 +342,12 @@ fn spawn_source_shards(
         || tick.0 >= shard_rush.next_spawn_at_tick
     {
         if ground < rules.policy.live_shard_ceiling {
-            let offset = shard_fan_offset(ledger.telemetry.shards_spawned, 20.0, 6.0);
+            // The opening shard sits on the source itself, equidistant from mirrored spawns;
+            // later shards fan out around it.
+            let offset = match ledger.telemetry.shards_spawned {
+                0 => Vec2::ZERO,
+                spawned => shard_fan_offset(spawned, 20.0, 6.0),
+            };
             let position = placement.resolve(source.position + offset, source.position);
             if ledger.spawn(state.match_id, ShardOrigin::Source, position) {
                 ground = ground.saturating_add(1);
@@ -390,7 +396,12 @@ fn collect_shards(
             &Position,
             &mut ShardCarrier,
         ),
-        (With<Fighter>, With<ActiveCombatant>, Without<Defeated>),
+        (
+            With<Fighter>,
+            With<ActiveCombatant>,
+            Without<Defeated>,
+            Without<SeatHold>,
+        ),
     >,
 ) {
     let Ok((state, mut shard_rush)) = roots.single_mut() else {
@@ -439,8 +450,9 @@ fn collect_shards(
 }
 
 /// Defeat and disconnect outcomes: a defeated carrier scatters every carried shard around its
-/// defeat position; a carrier that left the connected roster scatters at its last position.
-#[allow(clippy::needless_pass_by_value)]
+/// defeat position; a carrier that left the connected roster, or whose routed seat went on hold
+/// (a lost link the bot now drives), scatters at its last position.
+#[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
 fn drop_carried_shards(
     mut signals: DropSignals,
     mut ledger: ShardLedger,
@@ -451,6 +463,7 @@ fn drop_carried_shards(
             &MatchParticipant,
             &Position,
             &mut ShardCarrier,
+            Has<SeatHold>,
         ),
         With<Fighter>,
     >,
@@ -482,10 +495,11 @@ fn drop_carried_shards(
     let roster_current = roster.match_id == Some(state.match_id);
     let mut dropping = fighters
         .iter_mut()
-        .filter(|(network_id, participant, _, carrier)| {
+        .filter(|(network_id, participant, _, carrier, held)| {
             carrier.0 > 0
                 && participant.match_id == state.match_id
-                && (defeated.contains(&network_id.0)
+                && (*held
+                    || defeated.contains(&network_id.0)
                     || (roster_current && !roster.connected_network_ids.contains(&network_id.0)))
         })
         .collect::<Vec<_>>();
@@ -499,7 +513,7 @@ fn drop_carried_shards(
             }
         }
     };
-    for (_, _, position, mut carrier) in dropping {
+    for (_, _, position, mut carrier, _) in dropping {
         scatter(position.0, carrier.0);
         carrier.0 = 0;
     }
@@ -523,7 +537,10 @@ fn evaluate_shard_rush_hold(
     mut outcomes: ResMut<ModeRuleOutcome>,
     mut diagnostics: ResMut<MatchOutcomeDiagnostics>,
     mut roots: Query<(&MatchState, &mut ShardRushState), With<MatchRoot>>,
-    fighters: Query<(&NetworkEntityId, &MatchParticipant, &TeamId, &ShardCarrier), With<Fighter>>,
+    fighters: Query<
+        (&NetworkEntityId, &MatchParticipant, &TeamId, &ShardCarrier),
+        (With<Fighter>, Without<SeatHold>),
+    >,
 ) {
     let Ok((state, mut shard_rush)) = roots.single_mut() else {
         return;
@@ -823,7 +840,10 @@ mod tests {
         step(&mut app);
         let first = ground(&mut app);
         assert_eq!(first.len(), 1, "the first active tick spawns one shard");
-        assert!(first[0].distance(source) < 40.0);
+        assert!(
+            first[0].distance(source) < 1.0,
+            "the opening shard sits on the source, equidistant from mirrored spawns"
+        );
         for _ in 0..29 {
             step(&mut app);
         }
@@ -939,6 +959,45 @@ mod tests {
             app.world().resource::<ShardRushTelemetry>().shards_dropped,
             7
         );
+    }
+
+    #[test]
+    fn a_held_seat_scatters_its_shards_and_neither_collects_nor_counts_while_held() {
+        let (mut app, root) = app();
+        let source = app.world().resource::<ShardRushSource>().position;
+        let origin = source + Vec2::new(0.0, 200.0);
+        // A held seat stays in the connected roster (BRL-yyeg) but its player is gone.
+        let held = fighter(&mut app, 1, 0, origin);
+        set_carried(&mut app, held, 3);
+        app.world_mut().entity_mut(held).insert(SeatHold {
+            expires_at_tick: 10_000,
+        });
+        step(&mut app);
+        assert_eq!(
+            carried(&app, held),
+            0,
+            "the hold scatters every carried shard"
+        );
+        assert_eq!(
+            app.world().resource::<ShardRushTelemetry>().shards_dropped,
+            3
+        );
+        assert_eq!(state(&app, root).team_shards, [0, 0]);
+        assert_eq!(state(&app, root).countdown, None);
+
+        // The bot-driven held fighter walks over shards without collecting them.
+        app.world_mut().get_mut::<Position>(held).unwrap().0 = origin;
+        for _ in 0..5 {
+            step(&mut app);
+        }
+        assert_eq!(carried(&app, held), 0);
+
+        // A carried count on a held seat (never expected) still cannot win the countdown.
+        app.world_mut().get_mut::<Position>(held).unwrap().0 = Vec2::new(-10_000.0, -10_000.0);
+        set_carried(&mut app, held, 3);
+        step(&mut app);
+        assert_eq!(carried(&app, held), 0);
+        assert_eq!(state(&app, root).countdown, None);
     }
 
     #[test]

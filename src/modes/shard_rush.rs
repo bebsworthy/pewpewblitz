@@ -120,11 +120,7 @@ mod tests {
             lifecycle: crate::matchplay::MatchLifecycleRules::default(),
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
-            shard_rush: crate::matchplay::ShardRushPolicy {
-                hold_ticks: 720,
-                spawn_interval_ticks: 360,
-                live_shard_ceiling: 12,
-            },
+            shard_rush: crate::matchplay::ShardRushPolicy::PRODUCTION,
         }
     }
 
@@ -136,7 +132,7 @@ mod tests {
                 objective_target: 8,
                 rules_summary: crate::lobby::AdvertisedRulesSummary::ShardRush {
                     target_shards: 8,
-                    hold_ticks: 720,
+                    hold_ticks: crate::matchplay::ShardRushPolicy::PRODUCTION.hold_ticks,
                     active_limit_ticks: 10_800,
                 },
             }

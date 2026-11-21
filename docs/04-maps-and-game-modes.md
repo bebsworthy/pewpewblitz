@@ -386,14 +386,17 @@ is a mode contract and never implies treasure-chest loot.
 ### Shard Rush
 
 Shard Rush (BRL-wrer) is a 3v3 collect-and-hold mode. During Active, the server spawns one shard
-every spawn interval (6 s shipped) at a deterministic golden-angle fan around the map's single
-`ShardRushSource` anchor, until the on-ground ceiling (12) is reached. Placement resolves each point
+every spawn interval (6 s shipped), until the on-ground ceiling (12) is reached. The opening
+shard lands on the map's single `ShardRushSource` anchor itself, so neither mirrored side is
+favoured, and later shards fan out around it on a deterministic golden-angle pattern. Placement resolves each point
 clear of blocking geometry. Any active fighter that touches a shard collects it, up to the team
 target. The carried count is a public, replicated per-fighter `ShardCarrier` component, and team
 totals live on the replicated `ShardRushState`.
 
-A carrier that is defeated, disconnects, or whose entity is removed scatters every carried shard
-around its last position as dropped shards. Drops ignore the spawn ceiling, so no shard ever leaves
+A carrier that is defeated, disconnects, whose routed seat goes on hold, or whose entity is removed
+scatters every carried shard around its last position as dropped shards. A held seat's
+bot-driven fighter neither collects shards nor counts toward its team total, so a rejoining player
+starts with none. Drops ignore the spawn ceiling, so no shard ever leaves
 play. Respawn and restart clear carried counts. Concealment has no special rule: a hidden carrier's
 count is hidden with the fighter, through the same entity visibility as everything else.
 
