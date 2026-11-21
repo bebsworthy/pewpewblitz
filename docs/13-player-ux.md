@@ -312,7 +312,8 @@ bounded undo/redo, Clear confirmation and explicit local Save. Safe incomplete d
 saveable; Test in Practice is enabled by resolving the exact current recipe against the connected
 server's advertised mode and roster, then submitting that saved revision for authoritative
 admission. Results and deliberate Practice exit retain a return path to the same document. Player
-drafts stay in app-owned local storage.
+drafts stay in app-owned local storage as draft schema 2; loading a schema-1 draft renames its
+BRL-wg28 mode-anchor kinds and intended game-type ID and saves it back as schema 2.
 
 The editor has two keyboard/controller input modes (BRL-q5sm). In map-cursor mode the arrows and
 D-pad move the grid cursor and Enter/South places. **Q** or the controller's **Select** switches to

@@ -726,6 +726,8 @@ types that carried the old names (for example `TakedownState`, `TurfHoldState`, 
 which changes the gameplay content fingerprint. This is a one-time cutover with no aliases: the
 profile database moves to schema 5, whose migration rewrites stored published-map game-type IDs to
 the new names, and the Balance Lab moves to snapshot schema 23, persistence envelope 17, and editor
-manifest 16, whose load migration moves persisted `heist` tuning to `vaultBreak`. Match-manifest v5,
+manifest 16, whose load migration moves persisted `heist` tuning to `vaultBreak`. Local Map Maker
+drafts move to draft schema 2: a schema-1 draft is rewritten on load (`HotZoneCircle`/`HeistSafe`
+anchor kinds and the old game-type ID prefixes) and saved back. Match-manifest v5,
 control IPC v7, and the route envelope keep their shapes, but carry the new game-type IDs. Every role
 must be rebuilt.

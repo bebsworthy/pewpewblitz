@@ -126,7 +126,7 @@ impl GameMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "takedown" | "default" => Some(Self::Takedown),
             "turf-hold" | "turf_hold" | "turfhold" => Some(Self::TurfHold),
-            "vault-break" => Some(Self::VaultBreak),
+            "vault-break" | "vault_break" | "vaultbreak" => Some(Self::VaultBreak),
             "zombie" => Some(Self::Zombie),
             _ => None,
         }
@@ -414,6 +414,7 @@ mod tests {
         assert_eq!(GameMode::parse("turf-hold"), Some(GameMode::TurfHold));
         assert_eq!(GameMode::parse("Turf_Hold"), Some(GameMode::TurfHold));
         assert_eq!(GameMode::parse("vault-break"), Some(GameMode::VaultBreak));
+        assert_eq!(GameMode::parse("Vault_Break"), Some(GameMode::VaultBreak));
         assert_eq!(GameMode::parse("koth"), None);
         assert_eq!(GameMode::TurfHold.name(), "turf-hold");
         assert_eq!(GameMode::VaultBreak.name(), "vault-break");

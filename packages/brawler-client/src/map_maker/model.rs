@@ -8,7 +8,7 @@ use brawler::map::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-pub const MAP_DRAFT_SCHEMA_VERSION: u16 = 1;
+pub const MAP_DRAFT_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct MapDraftId(pub u64);
