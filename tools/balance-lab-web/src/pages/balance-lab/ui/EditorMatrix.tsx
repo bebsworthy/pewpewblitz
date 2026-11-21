@@ -34,7 +34,7 @@ export function EditorMatrix(props: Props) {
         {props.matrix.groups.map((group) => (
           <tbody key={group.label}>
             <tr className="matrix-group-row">
-              <th colSpan={columnCount} scope="rowgroup">{group.label}</th>
+              <th colSpan={columnCount} scope="rowgroup"><span>{group.label}</span></th>
             </tr>
             {group.rows.map((row) => (
               <tr key={row.key}>

@@ -27,9 +27,15 @@ restoration-pickup evolution.
    passive, and effective weapon modifiers. Collapse the panel when more tuning space is useful.
 4. Choose a gameplay category. Subjects are columns and comparable properties are aligned rows;
    unsupported subject/property intersections show an em dash. Edit exact draft values directly in
-   the matrix. Scroll horizontally for wide categories; the property and subject headers remain
-   visible. Passives have their own category rather than appearing among Ultimates. **Characters**
-   has one column per roster character (see [Roster characters](#roster-characters)).
+   the matrix. Subject columns keep a readable fixed width, so wide categories (Characters,
+   Weapons, Ultimates, Passives) scroll horizontally inside the matrix while the property column,
+   subject headers, and group labels stay pinned. Choice cells (for example a character's weapon
+   base) show the full option name on hover and in the focused-field detail. On a phone-width
+   browser the property column narrows so two subject columns sit side by side. When the page is
+   short, scroll the page once: the category bar sticks to the top and the matrix plus its detail
+   strip fit above the action bar. Passives have their own category rather than appearing among
+   Ultimates. **Characters** has one column per roster character (see
+   [Roster characters](#roster-characters)).
 5. Focus a value to review its applied value, server default, authoritative range, help, slider
    where applicable, and **Reset to applied** action. A cyan border and **Edited** marker identify
    unapplied changes. A red border and **Default Δ** marker independently identify values that

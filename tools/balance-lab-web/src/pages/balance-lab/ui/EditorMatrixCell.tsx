@@ -40,6 +40,7 @@ export function EditorMatrixCell({
   const differsFromDefault = storedNumber(draft, field) !== storedNumber(baseline, field);
   const [text, setText] = useState(formatFieldNumber(display, field));
   const id = pathKey(field.path);
+  const selectedLabel = field.options?.find((option) => option.value === display)?.label;
 
   useEffect(
     () => setText(formatFieldNumber(display, field)),
@@ -63,6 +64,7 @@ export function EditorMatrixCell({
             aria-describedby={error ? `${id}-error` : undefined}
             aria-invalid={Boolean(error)}
             value={String(display)}
+            title={selectedLabel}
             disabled={disabled}
             onFocus={() => onSelect(field)}
             onChange={(event) => update(event.target.value)}

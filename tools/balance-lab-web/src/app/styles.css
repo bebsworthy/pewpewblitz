@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 50% 0, #10294a 0, #07111f 42rem); }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 main { width: min(1240px, calc(100% - 32px)); margin: 0 auto; padding: 20px 0 104px; }
 h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 3px; font-size: clamp(2rem, 4vw, 2.8rem); letter-spacing: -.045em; }
@@ -73,11 +73,12 @@ button:disabled { cursor: not-allowed; opacity: .42; }
 .legend-edited { border-color: #28c8ef !important; background: #123f55; }
 .legend-default { border-color: #e76b7c !important; background: #4a202b; }
 .matrix-scroll { max-height: min(52vh, 500px); overflow: auto; outline: none; scrollbar-color: #31516d #071522; }
-.comparison-matrix { width: 100%; min-width: max-content; border-spacing: 0; border-collapse: separate; table-layout: fixed; }
+.comparison-matrix { width: max-content; min-width: 100%; border-spacing: 0; border-collapse: separate; table-layout: fixed; }
 .comparison-matrix th, .comparison-matrix td { border-right: 1px solid #19364e; border-bottom: 1px solid #19364e; }
 .comparison-matrix thead th { position: sticky; z-index: 3; top: 0; min-width: 174px; height: 42px; padding: 9px 12px; color: #dceeff; background: #0d2940; text-align: left; }
 .comparison-matrix thead .property-column { z-index: 4; left: 0; min-width: 220px; width: 220px; color: #8fc5e7; background: #0b2337; }
-.matrix-group-row th { position: sticky; z-index: 2; left: 0; padding: 7px 12px; color: #5bddff; background: #071522; font-size: .67rem; letter-spacing: .1em; text-align: left; text-transform: uppercase; }
+.matrix-group-row th { padding: 7px 12px; color: #5bddff; background: #071522; font-size: .67rem; letter-spacing: .1em; text-align: left; text-transform: uppercase; }
+.matrix-group-row th span { position: sticky; left: 12px; }
 .matrix-row-heading { position: sticky; z-index: 2; left: 0; width: 220px; min-width: 220px; padding: 8px 12px; color: #d9ecf8; background: #0a1e30; text-align: left; }
 .matrix-row-heading span, .matrix-row-heading small { display: block; }
 .matrix-row-heading span { font-size: .8rem; }
@@ -180,8 +181,10 @@ button.primary { border-color: #1dbee7; background: #087fa4; font-weight: 750; }
   .matrix-summary span { padding: 4px 7px; }
   .matrix-legend { flex-wrap: nowrap; gap: 14px; overflow-x: auto; padding: 7px 12px; white-space: nowrap; }
   .matrix-scroll { max-height: 48vh; }
-  .comparison-matrix thead th, .matrix-cell { min-width: 150px; width: 150px; }
-  .comparison-matrix thead .property-column, .matrix-row-heading { min-width: 176px; width: 176px; }
+  .comparison-matrix thead th, .matrix-cell { min-width: 118px; width: 118px; }
+  .comparison-matrix thead .property-column, .matrix-row-heading { min-width: 132px; width: 132px; }
+  .matrix-row-heading, .comparison-matrix thead th { padding-inline: 8px; }
+  .matrix-cell { padding-inline: 5px; }
   .field-detail { padding: 13px; }
   .actionbar { gap: 7px; padding: 8px 16px; }
   .actionbar small { display: none; }
