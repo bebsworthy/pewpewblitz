@@ -4,9 +4,9 @@ was: BRL-0039
 
 title: Add the solo Last Stand elimination mode
 
-status: backlog
-closed:
-status_changed: 2026-08-28T09:41:01Z
+status: done
+closed: 2026-11-21T19:31:53Z
+status_changed: 2026-11-21T19:31:53Z
 
 theme: core
 
@@ -16,11 +16,11 @@ created: 2026-08-28T09:40:59Z
 
 blocks: []
 
-related: [BRL-wg28]
+related: [BRL-7k07, BRL-c96b, BRL-dtbs, BRL-wg28, BRL-z6gj]
 
 parent:
 
-rank: 10691728
+rank:
 ---
 
 # Description

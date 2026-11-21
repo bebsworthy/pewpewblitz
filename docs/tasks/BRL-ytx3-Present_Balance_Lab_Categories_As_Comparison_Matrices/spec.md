@@ -395,3 +395,43 @@ The required native `just balance-lab` operator playtest remains pending, so the
 # Roster note (2026-11-19)
 
 With the roster direction (BRL-7sqn), roster characters become the main comparison subject: characters as columns, stats and kit as rows. Coordinate with BRL-5v3c (the Characters category in Balance Lab) so there is one layout, not two.
+
+
+# Close-out after BRL-5v3c — 2026-11-21
+
+## Research
+
+- The matrix (7985de0d) and semantic rows (b9496d6a) were already merged; the ticket had drifted back to backlog awaiting the native playtest. BRL-5v3c then replaced Fighters with a **Characters** category (9 columns, 162 fields including `select` choice cells) on the same matrix, so there is one layout, not two. No manifest/server change was needed.
+- Browser pass against a server-shaped state (the embedded HTTP fixture serialized to JSON, served with the production `dist` by a throwaway mock) found three layout defects that only appeared with nine columns:
+  1. `table-layout: fixed; width: 100%` ignored the cells' `min-width`, squeezing nine columns to 113 px; choice cells truncated ("Pulse Sid…", "Arc Launc…").
+  2. Group separators (`th colSpan` with `position: sticky`) scrolled out of view horizontally, leaving blank bands.
+  3. At 390 px, 176 px property + 150 px cells showed one subject at a time — no comparison.
+
+## Decisions / changes (web only)
+
+- Matrix table is `width: max-content; min-width: 100%`: columns honor 174 px and scroll horizontally; few-column categories still fill the panel.
+- Group labels are a sticky `span` inside the full-width group header, so they stay pinned at the left edge.
+- `select` inherits the page font; choice cells carry a `title` with the full option name (aria-label unchanged).
+- Phone breakpoint (≤620 px): 132 px property column, 118 px cells → two subject columns side by side.
+- Kept the focused-field detail below the matrix: at 1280×720 it sits under the action bar until the page scrolls ~155 px, after which the sticky category bar, matrix, and detail all fit. Moving it above the matrix would cost the 4-row density target. Documented in the operator guide.
+
+## Verification
+
+- Browser (production build, 1280×720): Characters 9×174 px columns, matrix scrolls 1786/1238 px with sticky row headings and group labels; 4 value rows above the action bar; no select overflow. Field counts per category equal the manifest (Global 7, Characters 162, Weapons 87, Ultimates 68, Passives 16, World objects 14, Modes 1). Edit → Edited + Default Δ markers and "1 field changed"; 999999 → exact-cell error, `aria-invalid`, Apply disabled; Apply → revision 1, Default Δ only; select edit (Weapon base → Splash) → markers, detail shows applied/default labels and help, Reset to applied restores; Restore canonical defaults clears all. No console errors.
+- Browser (390×844): document width 390, matrix scrolls 1526/368, sticky headers on both axes, two subject columns visible, 4 rows above the action bar, no select overflow.
+- `just lint` — pass (includes balance-lab web `npm ci`/test 17 pass/build).
+- `just test` — pass: 24 suites, 2,616 tests, 0 failures.
+
+## Playtest (owner)
+
+1. `just balance-lab`, enter Practice; open http://127.0.0.1:5123.
+2. Characters: scroll the matrix sideways — Property column, character names, and group labels (Core stats, Signature weapon, Options…) stay visible; weapon/option names are readable.
+3. Compare two characters' Maximum health and Movement speed in one row; edit, Apply & reset match, confirm the HUD.
+4. Weapons/Ultimates: shared rows (Maximum range, Effect radius) align across subjects; em dash where absent.
+5. On a phone browser (`BRAWLER_BALANCE_LAB_ADDR=0.0.0.0:5123`) check two columns fit side by side.
+- Observe: does side-by-side make tradeoffs easier; any editable axis missing or awkward.
+
+## Learnings
+
+- Mistake: the matrix was verified with 3 fighter columns; a later category (9 columns) exposed that `table-layout: fixed` with `width: 100%` silently overrides cell min-widths. Prevention: verify wide layouts with the widest real category and measure column widths, not only position of rows.
+- Sticky positioning on a `colSpan` cell does nothing horizontally; pin an inner element instead.

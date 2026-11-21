@@ -2,13 +2,13 @@
 
 # Questions · BRL-wrer
 
-## q-5axsrx2 · open · blocking · by Boyd
+## q-5axsrx2 · answered · blocking · by Boyd
 
 What should the collect-and-hold mode be called?
 
 "Gem Grab" is another game's mode name, so this mode needs an original name before its key, `GameMode` variant, game-type IDs, and HUD text are fixed. The rules (collect, carry, hold a threshold) don't change. Hot Zone and Heist share the same issue, but they already ship, so renaming them would be a separate ticket if you want one.
 
-- [ ] Shard Rush *(recommended · default if unanswered)*
+- [x] Shard Rush *(recommended · default if unanswered)*
 
   Resource: shards. A short and readable name that fits the arcade tone, and it sits well next to "Wipeout".
 
@@ -20,7 +20,7 @@ What should the collect-and-hold mode be called?
 
   Resource: sparks. Leans towards the toon/HDR glow look, so shards and sparks read well with bloom.
 
-## q-eawv52s · open · blocking · by Boyd
+## q-eawv52s · answered · blocking · by Boyd
 
 Should a carrier stay hidden in concealment (tall grass)?
 
@@ -34,17 +34,17 @@ Should a carrier stay hidden in concealment (tall grass)?
 
   Any carrier is visible. This is the simplest to read, but it makes concealment nearly irrelevant to the mode.
 
-- [ ] No special rule
+- [x] No special rule
 
   Carriers hide like anyone else. This is the cheapest option, but a winning team can stall in the grass during the countdown.
 
-## q-9stt85y · open · by Boyd
+## q-9stt85y · answered · by Boyd
 
 What happens to the hold countdown when the leading team drops below the target?
 
 The spec left this as "cancels or resets according to the authored rule".
 
-- [ ] Reset *(recommended · default if unanswered)*
+- [x] Reset *(recommended · default if unanswered)*
 
   The countdown stops and starts again from the full duration the next time the team reaches the target. Comebacks stay meaningful and the rule is easy to read.
 

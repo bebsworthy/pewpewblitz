@@ -3,9 +3,9 @@ id: BRL-5v3c
 
 title: Tune roster characters in Balance Lab
 
-status: backlog
-closed:
-status_changed: 2026-11-19T17:08:37Z
+status: done
+closed: 2026-11-21T08:23:03Z
+status_changed: 2026-11-21T08:23:03Z
 
 theme: core
 
@@ -19,7 +19,7 @@ related: [BRL-ytx3]
 
 parent:
 
-rank: 10644918
+rank:
 ---
 
 # Description

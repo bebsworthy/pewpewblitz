@@ -3,9 +3,9 @@ id: BRL-wg28
 
 title: 'Rename the game modes to Takedown, Turf Hold, Vault Break, Last Stand'
 
-status: backlog
-closed:
-status_changed: 2026-11-20T18:17:47Z
+status: done
+closed: 2026-11-21T11:09:56Z
+status_changed: 2026-11-21T11:09:56Z
 
 theme:
 
@@ -19,7 +19,7 @@ related: [BRL-5ss9, BRL-wrer]
 
 parent:
 
-rank: 10668323
+rank:
 ---
 
 # Description

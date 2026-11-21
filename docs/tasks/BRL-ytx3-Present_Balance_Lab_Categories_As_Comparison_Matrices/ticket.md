@@ -4,9 +4,9 @@ was: BRL-0109
 
 title: Present Balance Lab categories as comparison matrices
 
-status: backlog
-closed:
-status_changed: 2026-11-12T20:15:05Z
+status: done
+closed: 2026-11-21T09:05:49Z
+status_changed: 2026-11-21T09:05:49Z
 
 theme:
 
@@ -20,7 +20,7 @@ related: [BRL-5v3c]
 
 parent:
 
-rank: 10649599
+rank:
 ---
 
 # Description

@@ -4,9 +4,9 @@ was: BRL-0034
 
 title: Add a second purpose-built Wipeout map
 
-status: backlog
-closed:
-status_changed: 2026-11-20T00:40:07Z
+status: done
+closed: 2026-11-21T09:52:40Z
+status_changed: 2026-11-21T09:52:40Z
 
 theme: core
 
@@ -20,7 +20,9 @@ related: []
 
 parent:
 
-rank: 10654280
+rank:
+
+assignee: 'Boyd (brl-9gqj-wipeout-map-af74bc)'
 ---
 
 # Description
