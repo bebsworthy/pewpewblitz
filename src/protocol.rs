@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 56;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 57;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -384,6 +384,7 @@ impl Serialize for MatchRouteGrant {
                 crate::config::GameMode::TurfHold => 2,
                 crate::config::GameMode::VaultBreak => 3,
                 crate::config::GameMode::Zombie => 4,
+                crate::config::GameMode::ShardRush => 5,
             },
             capability: self.capability.bytes(),
             activation_expiry_unix_ms: self.activation_expiry_unix_ms,
@@ -414,6 +415,7 @@ impl<'de> Deserialize<'de> for MatchRouteGrant {
             2 => crate::config::GameMode::TurfHold,
             3 => crate::config::GameMode::VaultBreak,
             4 => crate::config::GameMode::Zombie,
+            5 => crate::config::GameMode::ShardRush,
             _ => return Err(serde::de::Error::custom("unsupported game mode")),
         };
         let capability = RouteCapability::from_bytes(wire.capability)
@@ -674,6 +676,15 @@ fn register_replicated_components(app: &mut App) {
     app.component::<BoostGrantScope>().replicate_once();
     app.component::<BoostPickupAvailableAtTick>()
         .replicate_once();
+    app.component::<crate::matchplay::ShardRushState>()
+        .replicate();
+    app.component::<crate::matchplay::ShardCarrier>()
+        .replicate();
+    app.component::<crate::matchplay::Shard>().replicate_once();
+    app.component::<crate::matchplay::ShardIdentity>()
+        .replicate_once();
+    app.component::<crate::matchplay::ShardOrigin>()
+        .replicate_once();
     app.component::<SpawnAssignment>().replicate();
     app.component::<PlayerId>().replicate_once();
     app.component::<NetworkEntityId>().replicate_once();
@@ -925,6 +936,8 @@ mod tests {
         assert!(components.is_registered::<MatchClock>());
         assert!(components.is_registered::<TakedownState>());
         assert!(components.is_registered::<TurfHoldState>());
+        assert!(components.is_registered::<crate::matchplay::ShardRushState>());
+        assert!(components.is_registered::<crate::matchplay::ShardCarrier>());
         assert!(components.is_registered::<MatchParticipant>());
         assert!(components.is_registered::<FighterDisplayName>());
         assert!(components.is_registered::<RespawnState>());
@@ -1032,7 +1045,7 @@ mod tests {
     /// `OverBudget`. Only the global handshake guards the new encoding.
     #[test]
     fn point_free_loadouts_are_protocol_55() {
-        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 56);
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 57);
         let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
         let profile = welcome_profile();
         let loadout = catalogs.view().resolve(profile.selection()).unwrap();

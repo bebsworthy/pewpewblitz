@@ -118,18 +118,7 @@ pub(crate) fn plate_content(
             status,
         } => {
             let (left, right) = sides(progress_percent.map(|value| format!("{value}%")), ["", ""]);
-            let (subline, subline_tone) = match status {
-                brawler::matchplay::TurfHoldStatus::Empty => ("ZONE EMPTY", PlateTone::Neutral),
-                brawler::matchplay::TurfHoldStatus::Contested => ("CONTESTED", PlateTone::Warning),
-                brawler::matchplay::TurfHoldStatus::Controlled { team }
-                    if usize::from(team.0) == ally =>
-                {
-                    ("ALLY CONTROL", PlateTone::Ally)
-                }
-                brawler::matchplay::TurfHoldStatus::Controlled { .. } => {
-                    ("ENEMY CONTROL", PlateTone::Enemy)
-                }
-            };
+            let (subline, subline_tone) = turf_hold_subline(status, ally);
             PlateContent {
                 left,
                 right,
@@ -175,12 +164,57 @@ pub(crate) fn plate_content(
                 subline_tone,
             }
         }
+        ModeScoreView::ShardRush {
+            shards,
+            target,
+            hold,
+        } => {
+            let (left, right) = sides(
+                shards.map(|count| format!("{count}/{target}")),
+                ["SHARDS", "SHARDS"],
+            );
+            let (subline, subline_tone) = shard_rush_subline(target, hold, ally);
+            PlateContent {
+                left,
+                right,
+                subline,
+                subline_tone,
+            }
+        }
         ModeScoreView::Syncing => PlateContent {
             left: chip("-".to_string(), "", PlateTone::Ally),
             right: chip("-".to_string(), "", PlateTone::Enemy),
             subline: "SYNCING".to_string(),
             subline_tone: PlateTone::Neutral,
         },
+    }
+}
+
+/// The Turf Hold zone line, relative to the observer's team.
+fn turf_hold_subline(
+    status: brawler::matchplay::TurfHoldStatus,
+    ally: usize,
+) -> (&'static str, PlateTone) {
+    match status {
+        brawler::matchplay::TurfHoldStatus::Empty => ("ZONE EMPTY", PlateTone::Neutral),
+        brawler::matchplay::TurfHoldStatus::Contested => ("CONTESTED", PlateTone::Warning),
+        brawler::matchplay::TurfHoldStatus::Controlled { team } if usize::from(team.0) == ally => {
+            ("ALLY CONTROL", PlateTone::Ally)
+        }
+        brawler::matchplay::TurfHoldStatus::Controlled { .. } => {
+            ("ENEMY CONTROL", PlateTone::Enemy)
+        }
+    }
+}
+
+/// The Shard Rush hold line, relative to the observer's team.
+fn shard_rush_subline(target: u8, hold: Option<(TeamId, u64)>, ally: usize) -> (String, PlateTone) {
+    match hold {
+        Some((team, seconds)) if usize::from(team.0) == ally => {
+            (format!("ALLY HOLD  {seconds}"), PlateTone::Ally)
+        }
+        Some((_, seconds)) => (format!("ENEMY HOLD  {seconds}"), PlateTone::Enemy),
+        None => (format!("HOLD {target} TO WIN"), PlateTone::Neutral),
     }
 }
 

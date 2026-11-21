@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub enum ObjectiveTotals {
     TurfHold { progress: [u16; 2], target: u16 },
     VaultBreak { health: [u16; 2], maximum: [u16; 2] },
+    ShardRush { shards: [u8; 2], target: u8 },
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +30,7 @@ pub(super) fn publish(
             &super::MatchState,
             Option<&super::TurfHoldState>,
             Option<&super::VaultBreakState>,
+            Option<&super::ShardRushState>,
             Option<&ObjectiveResult>,
         ),
         With<super::MatchRoot>,
@@ -39,7 +41,7 @@ pub(super) fn publish(
         &crate::map::DamageableMaximumHealth,
     )>,
 ) {
-    for (entity, state, zone, vault_break, previous) in &roots {
+    for (entity, state, zone, vault_break, shard_rush, previous) in &roots {
         let super::MatchPhase::Completed { result, .. } = state.phase else {
             if previous.is_some() {
                 commands.entity(entity).remove::<ObjectiveResult>();
@@ -53,6 +55,11 @@ pub(super) fn publish(
             ObjectiveTotals::TurfHold {
                 progress: zone.progress_ticks,
                 target: zone.target_progress_ticks,
+            }
+        } else if let Some(shards) = shard_rush.filter(|s| s.match_id == state.match_id) {
+            ObjectiveTotals::ShardRush {
+                shards: shards.team_shards,
+                target: shards.target_shards,
             }
         } else if let Some(vault_break) = vault_break.filter(|h| h.match_id == state.match_id) {
             let mut health = [0; 2];

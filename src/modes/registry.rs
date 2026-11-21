@@ -261,8 +261,8 @@ pub(crate) fn install_configured_server_mode(
 mod tests {
     use super::*;
     use crate::modes::{
-        BuiltInModeRegistrationsPlugin, ModeTopologyPolicy, takedown, turf_hold, vault_break,
-        zombie,
+        BuiltInModeRegistrationsPlugin, ModeTopologyPolicy, shard_rush, takedown, turf_hold,
+        vault_break, zombie,
     };
 
     #[test]
@@ -274,6 +274,7 @@ mod tests {
         let mut reversed = App::new();
         reversed.add_plugins((
             ModeRegistryPlugin,
+            shard_rush::ShardRushModeRegistrationPlugin,
             zombie::ZombieModeRegistrationPlugin,
             vault_break::VaultBreakModeRegistrationPlugin,
             turf_hold::TurfHoldModeRegistrationPlugin,
@@ -471,8 +472,11 @@ mod tests {
             (GameMode::TurfHold, 1_800, None, None),
             (GameMode::VaultBreak, 2_000, None, Some(25)),
             (GameMode::Zombie, 4, None, None),
+            (GameMode::ShardRush, 8, None, None),
         ];
         for (mode, objective_target, takedown_credit, vault_break_critical) in cases {
+            let shard_rush = (mode == GameMode::ShardRush)
+                .then_some(crate::matchplay::ShardRushPolicy::PROCESS_VERIFICATION);
             let mut app = App::new();
             app.insert_resource(MatchLifecycleRules::default())
                 .add_plugins((ModeRegistryPlugin, BuiltInModeRegistrationsPlugin));
@@ -484,6 +488,7 @@ mod tests {
                     objective_target: Some(objective_target),
                     takedown_recent_hostile_damage_credit_ticks: takedown_credit,
                     vault_break_critical_health_percent: vault_break_critical,
+                    shard_rush,
                 },
             );
 
@@ -513,6 +518,10 @@ mod tests {
                 app.is_plugin_added::<ZombieModePlugin>(),
                 mode == GameMode::Zombie
             );
+            assert_eq!(
+                app.is_plugin_added::<crate::matchplay::ShardRushModePlugin>(),
+                mode == GameMode::ShardRush
+            );
             match mode {
                 GameMode::Takedown => assert_eq!(
                     *app.world().resource::<TakedownRules>(),
@@ -537,6 +546,13 @@ mod tests {
                 GameMode::Zombie => assert_eq!(
                     app.world().resource::<ZombieRules>().pressure_stage_count,
                     u8::try_from(objective_target).unwrap()
+                ),
+                GameMode::ShardRush => assert_eq!(
+                    *app.world().resource::<crate::matchplay::ShardRushRules>(),
+                    crate::matchplay::ShardRushRules {
+                        target_shards: u8::try_from(objective_target).unwrap(),
+                        policy: shard_rush.unwrap(),
+                    }
                 ),
             }
 

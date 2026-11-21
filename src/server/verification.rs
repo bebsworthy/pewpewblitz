@@ -217,6 +217,11 @@ pub(super) fn verify_process_match(
             zombie.total_defeated,
             zombie.total_spawned,
         ),
+        crate::matchplay::ModeSummary::ShardRush(shard_rush) => (
+            summary.mode_definition_id.0,
+            u16::from(shard_rush.final_team_shards[0]),
+            u16::from(shard_rush.final_team_shards[1]),
+        ),
     };
     // Canonical map process evidence: exact authored identity and dynamic terminal state.
     let map_dynamic = maps.single().ok().map(|(snapshot, state)| {

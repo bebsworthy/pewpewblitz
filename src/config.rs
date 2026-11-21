@@ -111,14 +111,16 @@ pub enum GameMode {
     TurfHold,
     VaultBreak,
     Zombie,
+    ShardRush,
 }
 
 impl GameMode {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Takedown,
         Self::TurfHold,
         Self::VaultBreak,
         Self::Zombie,
+        Self::ShardRush,
     ];
 
     #[must_use]
@@ -128,6 +130,7 @@ impl GameMode {
             "turf-hold" | "turf_hold" | "turfhold" => Some(Self::TurfHold),
             "vault-break" | "vault_break" | "vaultbreak" => Some(Self::VaultBreak),
             "zombie" => Some(Self::Zombie),
+            "shard-rush" | "shard_rush" | "shardrush" => Some(Self::ShardRush),
             _ => None,
         }
     }
@@ -139,6 +142,7 @@ impl GameMode {
             Self::TurfHold => "turf-hold",
             Self::VaultBreak => "vault-break",
             Self::Zombie => "zombie",
+            Self::ShardRush => "shard-rush",
         }
     }
 }
@@ -193,6 +197,7 @@ pub struct ServerNetworkConfig {
     pub match_completed_input_lock_ticks: Option<u64>,
     pub takedown_recent_hostile_damage_credit_ticks: Option<u64>,
     pub vault_break_critical_health_percent: Option<u8>,
+    pub shard_rush_policy: Option<crate::matchplay::ShardRushPolicy>,
 }
 
 impl Default for ServerNetworkConfig {
@@ -217,6 +222,7 @@ impl Default for ServerNetworkConfig {
             match_completed_input_lock_ticks: None,
             takedown_recent_hostile_damage_credit_ticks: None,
             vault_break_critical_health_percent: None,
+            shard_rush_policy: None,
         }
     }
 }
@@ -242,6 +248,7 @@ impl ServerNetworkConfig {
             self.match_completed_input_lock_ticks.is_some(),
             self.takedown_recent_hostile_damage_credit_ticks.is_some(),
             self.vault_break_critical_health_percent.is_some(),
+            self.shard_rush_policy.is_some(),
         ];
         if match_overrides.iter().any(|present| *present)
             && !match_overrides.iter().all(|present| *present)
@@ -265,6 +272,9 @@ impl ServerNetworkConfig {
             return Err(
                 "resolved Vault Break critical-health percentage must be within 1..=99".to_string(),
             );
+        }
+        if let Some(policy) = self.shard_rush_policy {
+            policy.validate().map_err(str::to_string)?;
         }
         Ok(())
     }
@@ -418,6 +428,8 @@ mod tests {
         assert_eq!(GameMode::parse("koth"), None);
         assert_eq!(GameMode::TurfHold.name(), "turf-hold");
         assert_eq!(GameMode::VaultBreak.name(), "vault-break");
+        assert_eq!(GameMode::parse("Shard_Rush"), Some(GameMode::ShardRush));
+        assert_eq!(GameMode::ShardRush.name(), "shard-rush");
     }
 
     #[test]
@@ -454,6 +466,7 @@ mod tests {
             match_completed_input_lock_ticks: Some(60),
             takedown_recent_hostile_damage_credit_ticks: Some(300),
             vault_break_critical_health_percent: Some(25),
+            shard_rush_policy: Some(crate::matchplay::ShardRushPolicy::PROCESS_VERIFICATION),
             ..ServerNetworkConfig::default()
         };
         assert!(config.validate().is_ok());
@@ -463,6 +476,12 @@ mod tests {
             config
                 .validate()
                 .is_err_and(|error| error.contains("1..=99"))
+        );
+        config.vault_break_critical_health_percent = Some(25);
+        config.shard_rush_policy = None;
+        assert!(
+            config.validate().is_err(),
+            "the Shard Rush policy is part of the complete set"
         );
     }
 

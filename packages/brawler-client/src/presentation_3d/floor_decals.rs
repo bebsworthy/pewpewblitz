@@ -289,7 +289,8 @@ pub(super) fn excluded_decal_cells(
                 (width_cells, height_cells),
                 VAULT_BREAK_SAFE_CLEARANCE_CELLS,
             ),
-            brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
+            brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell }
+            | brawler::map::MapModeAnchorKind::ShardRushSource { center_half_cell } => {
                 if let Some(cell) = dimensions
                     .half_cell_world(center_half_cell)
                     .and_then(|point| dimensions.world_cell(point))

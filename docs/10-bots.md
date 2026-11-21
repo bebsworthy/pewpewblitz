@@ -120,7 +120,11 @@ focused Ticket specification before changing one of those contracts.
   human's choice (BRL-abys).
 - **All Practice-compatible mode goals.** Takedown supplies survival and pressure goals; Turf Hold
   supplies contest and defend goals; Vault Break supplies attack-safe, defend-safe, and lane-pressure
-  goals. Zombie supplies close-range hostile-NPC pressure: the human and friendly bots share team
+  goals. Shard Rush makes every member an objective role. In priority order, a bot: retreats from the
+  nearest threat while it carries shards and is threatened; intercepts the nearest visible enemy
+  carrier; collects the nearest visible shard; escorts an allied carrier; and otherwise contests
+  the source. It fires whenever its aim target is in weapon range. Zombie supplies close-range
+  hostile-NPC pressure: the human and friendly bots share team
   zero, and bots consume live zombies through the same semantic enemy-contact policy used for
   ordinary combat.
 - **Fair current-feature awareness.** Bots respect all concealment sources and reveal rules. They
@@ -330,7 +334,7 @@ enemy—rather than becoming a stringly typed rule language.
   and none gets a terrain, landing or occupancy shortcut. See the
   [supported content matrix](#supported-content-matrix).
 
-- **Mode goals are focused adapters.** Takedown, Turf Hold, and Vault Break produce bounded goal candidates
+- **Mode goals are focused adapters.** Takedown, Turf Hold, Vault Break, and Shard Rush produce bounded goal candidates
   for the common planner rather than scattering mode branches through navigation and combat. An
   objective role retains its zone/safe anchor while opportunistically aiming at visible enemies;
   merely seeing an opponent cannot silently replace the assigned objective.

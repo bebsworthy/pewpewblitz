@@ -45,6 +45,7 @@ pub struct AllocationPolicy {
     pub turf_hold: ModeAllocationPolicy,
     pub vault_break: ModeAllocationPolicy,
     pub zombie: ModeAllocationPolicy,
+    pub shard_rush: ModeAllocationPolicy,
     pub heartbeat_ms: u32,
     pub seed_policy: SeedPolicy,
 }
@@ -67,6 +68,7 @@ impl AllocationPolicy {
             ModeAllocationPolicy::new(8, 2, rules_profile),
             ModeAllocationPolicy::new(9, 2, rules_profile),
             ModeAllocationPolicy::new(13, 1, rules_profile),
+            ModeAllocationPolicy::new(15, 1, rules_profile),
             1_000,
             SeedPolicy::OsRandom,
         )
@@ -78,6 +80,7 @@ impl AllocationPolicy {
         turf_hold: ModeAllocationPolicy,
         vault_break: ModeAllocationPolicy,
         zombie: ModeAllocationPolicy,
+        shard_rush: ModeAllocationPolicy,
         heartbeat_ms: u32,
         seed_policy: SeedPolicy,
     ) -> Self {
@@ -86,6 +89,7 @@ impl AllocationPolicy {
             turf_hold,
             vault_break,
             zombie,
+            shard_rush,
             heartbeat_ms,
             seed_policy,
         }
@@ -96,6 +100,7 @@ impl AllocationPolicy {
         self.turf_hold.validate()?;
         self.vault_break.validate()?;
         self.zombie.validate()?;
+        self.shard_rush.validate()?;
         if self.heartbeat_ms == 0 {
             return Err(CodecError::InvalidValue);
         }
@@ -109,6 +114,7 @@ impl AllocationPolicy {
             GameMode::TurfHold => self.turf_hold,
             GameMode::VaultBreak => self.vault_break,
             GameMode::Zombie => self.zombie,
+            GameMode::ShardRush => self.shard_rush,
         }
     }
 }
@@ -174,6 +180,7 @@ mod tests {
         ModeAllocationPolicy::new(21, 22, 2),
         ModeAllocationPolicy::new(31, 32, 3),
         ModeAllocationPolicy::new(41, 42, 4),
+        ModeAllocationPolicy::new(51, 52, 5),
         1_000,
         SeedPolicy::OsRandom,
     );
@@ -192,6 +199,7 @@ mod tests {
             POLICY.turf_hold,
             POLICY.vault_break,
             POLICY.zombie,
+            POLICY.shard_rush,
             POLICY.heartbeat_ms,
             POLICY.seed_policy,
         );
@@ -227,6 +235,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: crate::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             team_count: 2,
             players_per_team: 2,
             participants: vec![participant, participant],
@@ -267,6 +280,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: crate::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             team_count: 2,
             players_per_team: 1,
             participants: vec![participant(1, 0), participant(2, 1)],
@@ -313,6 +331,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: crate::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             team_count: 2,
             players_per_team: 2,
             participants: vec![human],
@@ -359,6 +382,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: crate::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             team_count: 1,
             players_per_team: 3,
             participants: vec![human],

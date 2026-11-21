@@ -1139,6 +1139,103 @@ fn v10_m02_vault_break_objective_burst_stays_within_fixed_tick_budget() {
     assert_eq!(telemetry.accepted_hits, 0);
 }
 
+fn shard_rush_performance_app() -> App {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::state::app::StatesPlugin,
+        ServerPlugins {
+            tick_duration: SIMULATION_TICK,
+        },
+        GameplayPlugin,
+        GameplayContentPlugin,
+        ProtocolPlugin,
+        AvianNetworkPlugin,
+        ServerAuthoritativeGameplayPlugin,
+        ServerNetworkPlugin,
+    ));
+    app.insert_resource(brawler::server::match_lifecycle_rules_for_profile(
+        brawler::config::MatchRulesProfile::ProcessVerification,
+    ));
+    app.insert_resource(brawler::matchplay::MatchModeSetup {
+        mode_definition_id: brawler::map::SHARD_RUSH_MODE_DEFINITION,
+        rules_revision: brawler::matchplay::SHARD_RUSH_RULES_REVISION,
+    });
+    // The representation ceilings: the largest target and live ground, one spawn per tick, so
+    // the ground fills to its ceiling inside the measured run without completing the match.
+    app.insert_resource(brawler::matchplay::ShardRushRules {
+        target_shards: brawler::matchplay::MAX_SHARD_RUSH_TARGET,
+        policy: brawler::matchplay::ShardRushPolicy {
+            hold_ticks: 720,
+            spawn_interval_ticks: 1,
+            live_shard_ceiling: brawler::matchplay::MAX_SHARD_RUSH_LIVE_CEILING,
+        },
+    });
+    app.insert_resource(brawler::map::ServerMapSelection::preset(
+        brawler::map::PRISM_QUARRY_PRESET,
+    ));
+    app.insert_resource(ServerNetworkConfig {
+        transport: NetworkTransport::Crossbeam,
+        ..default()
+    });
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(SIMULATION_TICK));
+    app.add_plugins(brawler::matchplay::ShardRushModePlugin);
+    app.update();
+    app
+}
+
+/// A full live-shard ceiling around six fighters stays inside the fixed tick, and the ground
+/// never exceeds its authored ceiling.
+#[test]
+fn shard_rush_full_ground_with_six_fighters_stays_within_fixed_tick_budget() {
+    let mut app = shard_rush_performance_app();
+    let match_id = {
+        let world = app.world_mut();
+        let mut roots = world.query_filtered::<&mut MatchState, With<MatchRoot>>();
+        let mut state = roots.single_mut(world).expect("one match root");
+        state.phase = MatchPhase::Active {
+            ends_at_tick: u64::MAX,
+        };
+        state.match_id
+    };
+    let mut owners = Vec::new();
+    for index in 0..6_u16 {
+        let team = TeamId(u8::try_from(index % 2).expect("team fits"));
+        let side = if team.0 == 0 { -1.0 } else { 1.0 };
+        let position = Vec2::new(side * 700.0, -300.0 + 120.0 * f32::from(index / 2));
+        let entity = spawn_m05_fighter(
+            &mut app,
+            50_000 + u64::from(index),
+            1 + index % 4,
+            position,
+            team,
+            false,
+        );
+        app.world_mut().entity_mut(entity).insert((
+            MatchParticipant {
+                match_id,
+                ready: true,
+                restart_ready: false,
+            },
+            MatchMember(match_id),
+            ActiveCombatant,
+        ));
+        owners.push(entity);
+    }
+    app.update();
+    remove_benchmark_actions(&mut app, &owners);
+    fixed_tick_p95(&mut app, "shard-rush-full-ground-six-fighters", 120);
+    let world = app.world_mut();
+    let ground = world
+        .query_filtered::<(), With<brawler::matchplay::Shard>>()
+        .iter(world)
+        .count();
+    assert_eq!(
+        ground,
+        usize::from(brawler::matchplay::MAX_SHARD_RUSH_LIVE_CEILING)
+    );
+}
+
 #[test]
 fn map_dynamic_maximum_state_serialization_stays_bounded() {
     let state = brawler::map::MapDynamicState {

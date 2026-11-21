@@ -731,3 +731,17 @@ drafts move to draft schema 2: a schema-1 draft is rewritten on load (`HotZoneCi
 anchor kinds and the old game-type ID prefixes) and saved back. Match-manifest v5,
 control IPC v7, and the route envelope keep their shapes, but carry the new game-type IDs. Every role
 must be rebuilt.
+
+Protocol 57 adds Shard Rush (BRL-wrer). `GameMode::ShardRush` takes wire index 5 and
+`ObjectiveTotals::ShardRush` carries the final shard totals and target in results. The replicated
+`ShardRushState` and per-fighter `ShardCarrier`, plus the replicate-once `Shard`, `ShardIdentity`,
+and `ShardOrigin` on ground shards, are new registrations, so the protocol-registry fingerprint
+changes. Shard entities use their own network-ID namespace and never put a process-local `Entity`
+on the wire. The `ShardRushSource` map anchor, the Prism Quarry recipe, and the operator catalog's
+schema 7 `mode_policies.shard_rush` policy change the gameplay content fingerprint, while existing
+recipes keep their recipe fingerprints. Control IPC moves to version 8 because `AllocateRequest` gains
+the 5-byte `ShardRushPolicy` (hold ticks, spawn interval ticks, live shard ceiling), which the
+supervisor copies into the match manifest, so the match-role manifest moves to v6. The lobby
+manifest and the route envelope are unchanged. The profile database, Balance Lab persistence, and Map Maker draft schemas are unchanged:
+the new variants are additive and Map Maker does not yet author Shard Rush recipes. Every role must
+be rebuilt.

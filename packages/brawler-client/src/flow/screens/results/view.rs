@@ -321,6 +321,9 @@ impl ResultsPainter<'_> {
                         brawler::matchplay::ObjectiveTotals::VaultBreak { .. } => {
                             "VAULT BREAK".to_owned()
                         }
+                        brawler::matchplay::ObjectiveTotals::ShardRush { .. } => {
+                            "SHARD RUSH".to_owned()
+                        }
                     },
                 )
             },

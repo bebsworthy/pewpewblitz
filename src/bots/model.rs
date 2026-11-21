@@ -46,6 +46,15 @@ pub(super) struct BotPickupView {
     pub position: Vec2,
 }
 
+/// A fighter this bot may see (itself, an ally, or a visible enemy) that carries shards.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct BotShardCarrierView {
+    pub network_id: NetworkEntityId,
+    pub team: TeamId,
+    pub position: Vec2,
+    pub carried: u8,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct BotObservation {
     pub tick: u64,
@@ -59,6 +68,10 @@ pub(super) struct BotObservation {
     pub visible_enemies: Vec<BotFighterView>,
     pub objects: Vec<BotObjectView>,
     pub pickups: Vec<BotPickupView>,
+    /// Uncarried Shard Rush shards in stable shard-ID order; empty in other modes.
+    pub shards: Vec<BotPickupView>,
+    /// Visible Shard Rush carriers in stable network-ID order; empty in other modes.
+    pub shard_carriers: Vec<BotShardCarrierView>,
     pub objective: BotObjectiveView,
     pub weapon_phase: WeaponPhase,
     pub weapon_ammo: u8,
@@ -88,6 +101,9 @@ pub(super) enum BotTactic {
     Retreat,
     CollectPickup,
     Contest,
+    CollectShard,
+    EscortCarrier,
+    InterceptCarrier,
     DefendSafe,
     AttackSafe,
     BreakObject,

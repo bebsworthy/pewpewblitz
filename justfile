@@ -260,3 +260,4 @@ _practice-e2e-matrix:
     ./scripts/e2e-practice.sh vault-break-1v1
     ./scripts/e2e-practice.sh vault-break-2v2
     ./scripts/e2e-practice.sh vault-break-3v3
+    ./scripts/e2e-practice.sh shard-rush-3v3

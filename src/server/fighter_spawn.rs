@@ -95,6 +95,7 @@ pub(super) fn spawn_authoritative_fighter(
     ));
     commands.entity(entity).insert((
         BoostStacks::default(),
+        crate::matchplay::ShardCarrier::default(),
         Replicate::to_clients(NetworkTarget::All),
         InterpolationTarget::to_clients(NetworkTarget::All),
     ));

@@ -123,6 +123,7 @@ const fn mode_label(mode: GameMode) -> &'static str {
         GameMode::TurfHold => "turf-hold",
         GameMode::VaultBreak => "vault-break",
         GameMode::Zombie => "zombie",
+        GameMode::ShardRush => "shard-rush",
     }
 }
 
@@ -438,20 +439,26 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
         } else if argument == "--mode" {
             parsed.mode = match args
                 .next()
-                .ok_or("--mode requires takedown, turf-hold, or vault-break")?
+                .ok_or("--mode requires takedown, turf-hold, vault-break, zombie, or shard-rush")?
                 .as_str()
             {
                 "takedown" => GameMode::Takedown,
                 "turf-hold" => GameMode::TurfHold,
                 "vault-break" => GameMode::VaultBreak,
                 "zombie" => GameMode::Zombie,
-                _ => return Err("--mode requires takedown, turf-hold, or vault-break".into()),
+                "shard-rush" => GameMode::ShardRush,
+                _ => {
+                    return Err(
+                        "--mode requires takedown, turf-hold, vault-break, zombie, or shard-rush"
+                            .into(),
+                    );
+                }
             };
         } else if argument == "--automatic-transition-driver" {
             parsed.automatic_transition_driver = true;
         } else if argument == "--help" || argument == "-h" {
             println!(
-                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH --game-types PATH [--data-directory PATH] [--automatic-transition-driver] [--bind IP:PORT] [--mode <takedown|turf-hold|vault-break>] [--match-rules <production|verification>] [--metrics-file PATH]"
+                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH --game-types PATH [--data-directory PATH] [--automatic-transition-driver] [--bind IP:PORT] [--mode <takedown|turf-hold|vault-break|zombie|shard-rush>] [--match-rules <production|verification>] [--metrics-file PATH]"
             );
             std::process::exit(0);
         } else {

@@ -574,6 +574,7 @@ pub(in crate::flow) fn dashboard_mode_title(
         brawler::lobby::AdvertisedRulesSummary::TurfHold { .. } => "TURF HOLD",
         brawler::lobby::AdvertisedRulesSummary::VaultBreak { .. } => "VAULT BREAK",
         brawler::lobby::AdvertisedRulesSummary::Zombie { .. } => "ZOMBIE",
+        brawler::lobby::AdvertisedRulesSummary::ShardRush { .. } => "SHARD RUSH",
     }
 }
 
@@ -583,6 +584,7 @@ pub(in crate::flow) fn dashboard_badge_index(game: &brawler::lobby::AdvertisedGa
         brawler::lobby::AdvertisedRulesSummary::TurfHold { .. } => 1,
         brawler::lobby::AdvertisedRulesSummary::VaultBreak { .. } => 2,
         brawler::lobby::AdvertisedRulesSummary::Zombie { .. } => 3,
+        brawler::lobby::AdvertisedRulesSummary::ShardRush { .. } => 4,
     }
 }
 

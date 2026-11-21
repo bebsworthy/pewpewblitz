@@ -70,6 +70,8 @@ mod harness;
 mod profile_database_file;
 use harness::*;
 
+#[path = "network/shard_rush.rs"]
+mod shard_rush;
 #[path = "network/turf_hold.rs"]
 mod turf_hold;
 #[path = "network/vault_break.rs"]

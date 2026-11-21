@@ -1,6 +1,9 @@
 use super::{
     diagnostics::{BotDecisionTrace, BotDiagnostics},
-    model::{BotFighterView, BotObjectView, BotObservation, BotPickupView, PracticeBotController},
+    model::{
+        BotFighterView, BotObjectView, BotObservation, BotPickupView, BotShardCarrierView,
+        PracticeBotController,
+    },
     navigation::BotNavigationSnapshot,
     policy,
     profile::{BotCatalogResource, BotProfile},
@@ -21,8 +24,8 @@ use crate::{
         RestorationPickup, ValuableDamageableTarget,
     },
     matchplay::{
-        ActiveCombatant, BotObjectiveView, HostileNpc, MatchPhase, MatchRoot, MatchState,
-        ZombieRules,
+        ActiveCombatant, BotObjectiveView, HostileNpc, MatchPhase, MatchRoot, MatchState, Shard,
+        ShardCarrier, ShardIdentity, ZombieRules,
     },
     movement::{InputFreshness, decoded_input_is_valid},
     protocol::{Fighter, FighterInput, NetworkEntityId},
@@ -72,6 +75,7 @@ struct RawFighterView {
     frozen: bool,
     poisoned: bool,
     burning: bool,
+    carried_shards: u8,
     concealment: ConcealmentSources,
     forced_reveals: Vec<crate::concealment::TeamRevealDeadline>,
     reveal_locked: bool,
@@ -109,6 +113,7 @@ fn capture_observations(
                 Has<Defeated>,
                 Option<&ConcealmentPresentationState>,
                 &crate::combat::ActiveEffects,
+                Option<&ShardCarrier>,
             ),
             With<Fighter>,
         >,
@@ -125,6 +130,7 @@ fn capture_observations(
         Option<&DefendedDamageableObjective>,
     )>,
     pickups: Query<&Position, With<RestorationPickup>>,
+    shards: Query<(&ShardIdentity, &Position), With<Shard>>,
     hostile_npcs: Query<
         (&NetworkEntityId, &TeamId, &Position, &CurrentHealth),
         (With<HostileNpc>, Without<Defeated>),
@@ -167,6 +173,7 @@ fn capture_observations(
                 defeated,
                 concealment,
                 effects,
+                carrier,
             )| {
                 let presentation = concealment.cloned().unwrap_or_default();
                 RawFighterView {
@@ -184,6 +191,7 @@ fn capture_observations(
                     burning: effects
                         .fire
                         .is_some_and(|fire| tick.0 <= fire.expires_at_tick),
+                    carried_shards: carrier.map_or(0, |carrier| carrier.0),
                     concealment: ConcealmentSources {
                         terrain: presentation.inside_concealing_terrain,
                         self_cloak: tick.0 < presentation.self_cloaked_until_tick,
@@ -234,6 +242,16 @@ fn capture_observations(
             .total_cmp(&b.position.x)
             .then_with(|| a.position.y.total_cmp(&b.position.y))
     });
+    let mut shard_views: Vec<_> = shards
+        .iter()
+        .filter(|(identity, _)| identity.match_id == match_state.match_id)
+        .map(|(identity, position)| (identity.shard_id, position.0))
+        .collect();
+    shard_views.sort_by_key(|(shard_id, _)| *shard_id);
+    let shard_views: Vec<_> = shard_views
+        .into_iter()
+        .map(|(_, position)| BotPickupView { position })
+        .collect();
     let match_active = matches!(match_state.phase, MatchPhase::Active { .. });
 
     for (network_id, mut controller) in &mut fighters.p1() {
@@ -257,7 +275,19 @@ fn capture_observations(
         let self_view = public_fighter_view(observer);
         let mut allies = Vec::new();
         let mut visible_enemies = Vec::new();
+        let mut shard_carriers = Vec::new();
+        let carrier_view = |subject: &RawFighterView| {
+            (subject.carried_shards > 0 && subject.active).then_some(BotShardCarrierView {
+                network_id: subject.network_id,
+                team: subject.team,
+                position: subject.position,
+                carried: subject.carried_shards,
+            })
+        };
         for subject in &raw_fighters {
+            if subject.network_id == observer.network_id || subject.team == observer.team {
+                shard_carriers.extend(carrier_view(subject));
+            }
             if subject.network_id == observer.network_id {
                 continue;
             }
@@ -278,6 +308,7 @@ fn capture_observations(
                 reveal_radius: observer.reveal_radius,
             }) {
                 visible_enemies.push(public_fighter_view(subject));
+                shard_carriers.extend(carrier_view(subject));
             }
         }
         visible_enemies.extend(
@@ -314,6 +345,8 @@ fn capture_observations(
             visible_enemies,
             objects: object_views.clone(),
             pickups: pickup_views.clone(),
+            shards: shard_views.clone(),
+            shard_carriers,
             objective: *objective,
             weapon_phase: observer.weapon.phase,
             weapon_ammo: observer.weapon.ammo,

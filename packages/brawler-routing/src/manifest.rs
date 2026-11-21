@@ -47,6 +47,7 @@ pub enum GameMode {
     TurfHold = 2,
     VaultBreak = 3,
     Zombie = 4,
+    ShardRush = 5,
 }
 
 impl TryFrom<u16> for GameMode {
@@ -58,6 +59,7 @@ impl TryFrom<u16> for GameMode {
             2 => Ok(Self::TurfHold),
             3 => Ok(Self::VaultBreak),
             4 => Ok(Self::Zombie),
+            5 => Ok(Self::ShardRush),
             _ => Err(CodecError::InvalidValue),
         }
     }
@@ -85,7 +87,7 @@ impl ManifestCommon {
     fn validate(self, expected_role: WorkerRole) -> Result<(), CodecError> {
         let expected_version = match expected_role {
             WorkerRole::Lobby => 2,
-            WorkerRole::Match => 5,
+            WorkerRole::Match => 6,
         };
         if self.manifest_version != expected_version || self.role != expected_role {
             return Err(CodecError::InvalidValue);
@@ -505,6 +507,36 @@ fn decode_match_bot(decoder: &mut Decoder<'_>) -> Result<MatchManifestBot, Codec
     })
 }
 
+/// Validated Shard Rush operator policy carried with every routed match allocation. Brawler's
+/// mode registration owns the real bounds; routing only rejects zeroed values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShardRushPolicy {
+    pub hold_ticks: u16,
+    pub spawn_interval_ticks: u16,
+    pub live_shard_ceiling: u8,
+}
+
+impl ShardRushPolicy {
+    #[must_use]
+    pub const fn is_valid(self) -> bool {
+        self.hold_ticks != 0 && self.spawn_interval_ticks != 0 && self.live_shard_ceiling != 0
+    }
+
+    pub(crate) fn encode(self, encoder: &mut Encoder) {
+        encoder.put_u16(self.hold_ticks);
+        encoder.put_u16(self.spawn_interval_ticks);
+        encoder.put_u8(self.live_shard_ceiling);
+    }
+
+    pub(crate) fn decode(decoder: &mut Decoder<'_>) -> Result<Self, CodecError> {
+        Ok(Self {
+            hold_ticks: decoder.u16()?,
+            spawn_interval_ticks: decoder.u16()?,
+            live_shard_ceiling: decoder.u8()?,
+        })
+    }
+}
+
 /// A match worker's canonical v1 manifest.
 #[derive(Clone, PartialEq, Eq)]
 pub struct MatchManifestV1 {
@@ -526,6 +558,7 @@ pub struct MatchManifestV1 {
     pub completed_input_lock_ticks: u64,
     pub takedown_recent_hostile_damage_credit_ticks: u64,
     pub vault_break_critical_health_percent: u8,
+    pub shard_rush: ShardRushPolicy,
     pub reserved: u8,
     pub seed: u64,
     pub participants: Vec<MatchManifestParticipant>,
@@ -566,6 +599,7 @@ impl fmt::Debug for MatchManifestV1 {
                 "vault_break_critical_health_percent",
                 &self.vault_break_critical_health_percent,
             )
+            .field("shard_rush", &self.shard_rush)
             .field("reserved", &self.reserved)
             .field("seed", &self.seed)
             .field("participant_count", &self.participants.len())
@@ -611,6 +645,7 @@ impl MatchManifestV1 {
         encoder.put_u64(self.completed_input_lock_ticks);
         encoder.put_u64(self.takedown_recent_hostile_damage_credit_ticks);
         encoder.put_u8(self.vault_break_critical_health_percent);
+        self.shard_rush.encode(&mut encoder);
         encoder.put_u8(self.reserved);
         encoder.put_u64(self.seed);
         encoder.put_u8(u8::try_from(self.participants.len()).map_err(|_| CodecError::Oversize)?);
@@ -674,6 +709,7 @@ impl MatchManifestV1 {
         let completed_input_lock_ticks = decoder.u64()?;
         let takedown_recent_hostile_damage_credit_ticks = decoder.u64()?;
         let vault_break_critical_health_percent = decoder.u8()?;
+        let shard_rush = ShardRushPolicy::decode(&mut decoder)?;
         let reserved = decoder.u8()?;
         let seed = decoder.u64()?;
         let count = usize::from(decoder.u8()?);
@@ -711,6 +747,7 @@ impl MatchManifestV1 {
             completed_input_lock_ticks,
             takedown_recent_hostile_damage_credit_ticks,
             vault_break_critical_health_percent,
+            shard_rush,
             reserved,
             seed,
             participants,
@@ -745,6 +782,7 @@ impl MatchManifestV1 {
             || self.completed_input_lock_ticks == 0
             || self.takedown_recent_hostile_damage_credit_ticks == 0
             || !(1..=99).contains(&self.vault_break_critical_health_percent)
+            || !self.shard_rush.is_valid()
             || self.participants.is_empty()
             || self.participants.len().saturating_add(self.bots.len()) > MAX_PARTICIPANTS
             || self.heartbeat_ms == 0
@@ -794,7 +832,7 @@ mod tests {
     fn match_manifest(participant_count: usize) -> MatchManifestV1 {
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 5,
+                manifest_version: 6,
                 role: WorkerRole::Match,
                 logical_server_id: id128(1),
                 process_id: id128(2),
@@ -825,6 +863,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             reserved: 0,
             seed: 13,
             participants: (1..=u64::try_from(participant_count).unwrap())
@@ -839,7 +882,7 @@ mod tests {
 
     // Common fields through seed, before the participant count byte.
     const PARTICIPANT_COUNT_OFFSET: usize =
-        87 + 8 + 16 + 16 + 2 + 2 + 4 + 8 + 4 + 1 + 2 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 8;
+        87 + 8 + 16 + 16 + 2 + 2 + 4 + 8 + 4 + 1 + 2 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 5 + 1 + 8;
     const ALLOCATION_ID_OFFSET: usize = 87 + 8 + 16;
 
     #[test]
@@ -850,7 +893,7 @@ mod tests {
             MatchManifestV1::decode(&encoded).unwrap(),
             manifest.clone().with_digest().unwrap()
         );
-        assert_eq!(encoded.len(), 402);
+        assert_eq!(encoded.len(), 407);
         assert_eq!(
             &encoded[encoded.len() - 32..],
             &manifest_digest(&encoded[..encoded.len() - 32])

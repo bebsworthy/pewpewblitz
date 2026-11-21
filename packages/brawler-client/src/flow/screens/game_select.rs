@@ -40,6 +40,7 @@ fn mode_index(game: &AdvertisedGameType) -> usize {
         AdvertisedRulesSummary::TurfHold { .. } => 1,
         AdvertisedRulesSummary::VaultBreak { .. } => 2,
         AdvertisedRulesSummary::Zombie { .. } => 3,
+        AdvertisedRulesSummary::ShardRush { .. } => 4,
     }
 }
 fn mode_candidate(
@@ -90,6 +91,17 @@ fn rules_text(game: &AdvertisedGameType) -> String {
             active_limit_ticks,
         } => (
             format!("{pressure_stage_count} pressure stages"),
+            active_limit_ticks,
+        ),
+        AdvertisedRulesSummary::ShardRush {
+            target_shards,
+            hold_ticks,
+            active_limit_ticks,
+        } => (
+            format!(
+                "Hold {target_shards} shards for {} sec",
+                brawler::timing::simulation_whole_seconds(u64::from(hold_ticks))
+            ),
             active_limit_ticks,
         ),
     };
@@ -356,6 +368,7 @@ fn spawn_cards(
         "Hold the zone",
         "Destroy the enemy safe",
         "Survive together",
+        "Collect and hold the shards",
     ];
     parent
         .spawn(Node {
@@ -385,7 +398,7 @@ fn spawn_cards(
                     row,
                     server,
                     Node {
-                        width: percent(if compact { 49.0 } else { 24.0 }),
+                        width: percent(if compact { 32.0 } else { 19.0 }),
                         min_height: px(if compact { 300.0 } else { 440.0 } * factor),
                         padding: UiRect::axes(px(22.0 * factor), px(28.0 * factor)),
                         align_items: AlignItems::Center,

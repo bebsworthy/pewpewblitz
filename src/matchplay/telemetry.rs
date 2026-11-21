@@ -28,6 +28,7 @@ pub enum ModeSummary {
     TurfHold(crate::matchplay::TurfHoldSummary),
     VaultBreak(crate::matchplay::VaultBreakSummary),
     Zombie(crate::matchplay::ZombieSummary),
+    ShardRush(crate::matchplay::ShardRushSummary),
 }
 
 /// Takedown's terminal scores, preserving the pre-M09 report meaning.

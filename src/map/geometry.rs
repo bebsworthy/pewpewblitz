@@ -520,30 +520,28 @@ pub(super) fn validate_fighter_navigation(
     }
 }
 
-pub(super) fn validate_zombie_ingress_access(
+/// Cells whose centres a body of `body_radius` reaches from the first team-0 spawn by
+/// four-neighbour steps, plus the point clearance test the search used.
+fn body_reachable_cells(
     placements: &[MapAssetPlacement],
-    anchors: &[MapModeAnchorPlacement],
     dimensions: MapDimensions,
     catalog: &MapContentCatalog,
     body_radius: f32,
-) -> Result<(), String> {
+) -> Option<(BTreeSet<MapCell>, impl Fn(Vec2) -> bool)> {
     let blocked = blocking_shapes(placements, dimensions, catalog);
-    let point_is_clear = |point: Vec2| {
+    let point_is_clear = move |point: Vec2| {
         dimensions.bounds().contains_with_inset(point, body_radius)
             && blocked
                 .iter()
                 .all(|shape| !circle_overlaps_derived_shape(point, body_radius, *shape))
     };
-    let cell_is_clear = |cell: MapCell| point_is_clear(dimensions.cell_center(cell));
-    let Some(start) = placements.iter().find_map(|placement| {
+    let start = placements.iter().find_map(|placement| {
         matches!(
             placement.parameters,
             MapPlacementParameters::PlayerSpawn { team_slot: 0, .. }
         )
         .then_some(placement.cell)
-    }) else {
-        return Err("Zombie map has no cooperative navigation start".to_string());
-    };
+    })?;
     let mut reached = BTreeSet::from([start]);
     let mut frontier = std::collections::VecDeque::from([start]);
     while let Some(cell) = frontier.pop_front() {
@@ -557,13 +555,34 @@ pub(super) fn validate_zombie_ingress_access(
         .flatten()
         {
             if dimensions.contains(candidate)
-                && cell_is_clear(candidate)
+                && point_is_clear(dimensions.cell_center(candidate))
                 && reached.insert(candidate)
             {
                 frontier.push_back(candidate);
             }
         }
     }
+    Some((reached, point_is_clear))
+}
+
+fn point_connects_to(reached: &BTreeSet<MapCell>, dimensions: MapDimensions, point: Vec2) -> bool {
+    reached.iter().any(|cell| {
+        dimensions.cell_center(*cell).distance_squared(point) <= (MAP_CELL_SIZE_WORLD * 1.6).powi(2)
+    })
+}
+
+pub(super) fn validate_zombie_ingress_access(
+    placements: &[MapAssetPlacement],
+    anchors: &[MapModeAnchorPlacement],
+    dimensions: MapDimensions,
+    catalog: &MapContentCatalog,
+    body_radius: f32,
+) -> Result<(), String> {
+    let Some((reached, point_is_clear)) =
+        body_reachable_cells(placements, dimensions, catalog, body_radius)
+    else {
+        return Err("Zombie map has no cooperative navigation start".to_string());
+    };
     for anchor in anchors {
         let MapModeAnchorKind::ZombieIngress { center_half_cell } = anchor.kind else {
             continue;
@@ -574,12 +593,39 @@ pub(super) fn validate_zombie_ingress_access(
         if !point_is_clear(point) {
             return Err("Zombie ingress lacks hostile-NPC body clearance".to_string());
         }
-        let connected = reached.iter().any(|cell| {
-            dimensions.cell_center(*cell).distance_squared(point)
-                <= (MAP_CELL_SIZE_WORLD * 1.6).powi(2)
-        });
-        if !connected {
+        if !point_connects_to(&reached, dimensions, point) {
             return Err("Zombie ingress is unreachable from cooperative player space".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// The Shard Rush source must leave fighter-body room for the shard fan and be reachable from
+/// spawn space. Fighter navigation already proves every spawn shares one region, so reaching
+/// it from the first spawn reaches it from both teams.
+pub(super) fn validate_shard_source_access(
+    placements: &[MapAssetPlacement],
+    anchors: &[MapModeAnchorPlacement],
+    dimensions: MapDimensions,
+    catalog: &MapContentCatalog,
+) -> Result<(), String> {
+    let Some((reached, point_is_clear)) = body_reachable_cells(
+        placements,
+        dimensions,
+        catalog,
+        crate::builds::MAX_FIGHTER_BODY_RADIUS,
+    ) else {
+        return Err("Shard Rush map has no spawn to reach the source from".to_string());
+    };
+    for anchor in anchors {
+        let MapModeAnchorKind::ShardRushSource { center_half_cell } = anchor.kind else {
+            continue;
+        };
+        let point = dimensions
+            .half_cell_world(center_half_cell)
+            .ok_or_else(|| "Shard Rush source is out of bounds".to_string())?;
+        if !point_is_clear(point) || !point_connects_to(&reached, dimensions, point) {
+            return Err("Shard Rush source is blocked or unreachable from spawns".to_string());
         }
     }
     Ok(())

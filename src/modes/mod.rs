@@ -8,6 +8,7 @@ use crate::{config::GameMode, map::ModeDefinitionId};
 use bevy::prelude::{App, Plugin};
 
 mod registry;
+mod shard_rush;
 mod takedown;
 mod turf_hold;
 mod vault_break;
@@ -34,6 +35,7 @@ pub(crate) enum ModeTopologyPolicy {
     TurfHoldCircle,
     MirroredVaultBreakSafes,
     ZombieIngress,
+    ShardRushSource,
 }
 
 #[cfg(feature = "server")]
@@ -132,6 +134,7 @@ pub(crate) struct ModeInstallInput {
     pub(crate) objective_target: Option<u16>,
     pub(crate) takedown_recent_hostile_damage_credit_ticks: Option<u64>,
     pub(crate) vault_break_critical_health_percent: Option<u8>,
+    pub(crate) shard_rush: Option<crate::matchplay::ShardRushPolicy>,
 }
 
 #[cfg(feature = "server")]
@@ -141,10 +144,12 @@ pub(crate) struct ModeRuleResolveInput {
     pub(crate) capture_seconds: u16,
     pub(crate) safe_health: u16,
     pub(crate) pressure_stages: u8,
+    pub(crate) shards_to_win: u8,
     pub(crate) match_duration_ticks: u64,
     pub(crate) lifecycle: MatchLifecycleRules,
     pub(crate) takedown_recent_hostile_damage_credit_ticks: u64,
     pub(crate) vault_break_critical_health_percent: u8,
+    pub(crate) shard_rush: crate::matchplay::ShardRushPolicy,
 }
 
 #[cfg(feature = "server")]
@@ -152,6 +157,7 @@ pub(crate) struct ModeRuleResolveInput {
 pub(crate) struct ModeOperatorPolicyInput {
     pub(crate) takedown_recent_hostile_damage_credit_ticks: u64,
     pub(crate) vault_break_critical_health_percent: u8,
+    pub(crate) shard_rush: crate::matchplay::ShardRushPolicy,
 }
 
 #[cfg(feature = "server")]
@@ -179,6 +185,7 @@ impl Plugin for BuiltInModeRegistrationsPlugin {
             turf_hold::TurfHoldModeRegistrationPlugin,
             vault_break::VaultBreakModeRegistrationPlugin,
             zombie::ZombieModeRegistrationPlugin,
+            shard_rush::ShardRushModeRegistrationPlugin,
         ));
     }
 }
@@ -189,6 +196,7 @@ pub(crate) fn builtin_mode_catalog() -> &'static ModeCatalog {
         turf_hold::REGISTRATION,
         vault_break::REGISTRATION,
         zombie::REGISTRATION,
+        shard_rush::REGISTRATION,
     ])
 }
 

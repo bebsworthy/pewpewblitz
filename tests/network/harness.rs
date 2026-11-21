@@ -205,12 +205,56 @@ enum HarnessMode {
     Takedown,
     TurfHold,
     VaultBreak,
+    ShardRush,
 }
 
 fn verification_takedown_rules() -> brawler::matchplay::TakedownRules {
     brawler::matchplay::TakedownRules {
         target_score: 10,
         recent_hostile_damage_credit_ticks: 300,
+    }
+}
+
+/// The mode-specific setup, rules, and map selection a harness server installs before its plugins.
+fn insert_mode_resources(server: &mut App, mode: HarnessMode) {
+    match mode {
+        HarnessMode::Takedown => {
+            server.insert_resource(verification_takedown_rules());
+        }
+        HarnessMode::TurfHold => {
+            server
+                .insert_resource(brawler::matchplay::turf_hold_setup_for_composition())
+                .insert_resource(brawler::matchplay::turf_hold_rules_for_profile(
+                    brawler::config::MatchRulesProfile::ProcessVerification,
+                ))
+                .insert_resource(brawler::map::ServerMapSelection::preset(
+                    brawler::map::FEATURE_YARD_TURF_HOLD_PRESET,
+                ));
+        }
+        HarnessMode::VaultBreak => {
+            server
+                .insert_resource(brawler::matchplay::MatchModeSetup {
+                    mode_definition_id: brawler::map::VAULT_BREAK_MODE_DEFINITION,
+                    rules_revision: brawler::matchplay::VAULT_BREAK_RULES_REVISION,
+                })
+                .insert_resource(verification_vault_break_rules())
+                .insert_resource(brawler::map::ServerMapSelection::preset(
+                    brawler::map::FEATURE_YARD_VAULT_BREAK_PRESET,
+                ));
+        }
+        HarnessMode::ShardRush => {
+            server
+                .insert_resource(brawler::matchplay::MatchModeSetup {
+                    mode_definition_id: brawler::map::SHARD_RUSH_MODE_DEFINITION,
+                    rules_revision: brawler::matchplay::SHARD_RUSH_RULES_REVISION,
+                })
+                .insert_resource(brawler::matchplay::shard_rush_rules_for_profile(
+                    brawler::config::MatchRulesProfile::ProcessVerification,
+                ))
+                .insert_resource(brawler::map::ServerMapSelection::preset(
+                    brawler::map::PRISM_QUARRY_PRESET,
+                ));
+        }
     }
 }
 
@@ -313,6 +357,16 @@ impl Harness {
     pub(super) fn new_turf_hold_match(client_count: usize) -> Self {
         let mut harness =
             Self::new_mode_with_options(client_count, None, false, HarnessMode::TurfHold, None);
+        harness
+            .server
+            .world_mut()
+            .remove_resource::<LegacySandboxActivation>();
+        harness
+    }
+
+    pub(super) fn new_shard_rush_match(client_count: usize) -> Self {
+        let mut harness =
+            Self::new_mode_with_options(client_count, None, false, HarnessMode::ShardRush, None);
         harness
             .server
             .world_mut()
@@ -566,7 +620,10 @@ impl Harness {
         server.insert_resource(TestDummyFixture::standard(Vec2::new(0.0, -320.0)));
         server.insert_resource(LegacySandboxActivation);
         let lifecycle = lifecycle_override.unwrap_or_else(|| {
-            if matches!(mode, HarnessMode::TurfHold | HarnessMode::VaultBreak) {
+            if matches!(
+                mode,
+                HarnessMode::TurfHold | HarnessMode::VaultBreak | HarnessMode::ShardRush
+            ) {
                 // Shortened verification deadlines with a 1v1 capacity so deterministic
                 // two-client scenarios can activate without changing rule semantics.
                 brawler::matchplay::MatchLifecycleRules {
@@ -582,32 +639,7 @@ impl Harness {
         server
             .insert_resource(server_config.clone())
             .insert_resource(lifecycle);
-        match mode {
-            HarnessMode::Takedown => {
-                server.insert_resource(verification_takedown_rules());
-            }
-            HarnessMode::TurfHold => {
-                server
-                    .insert_resource(brawler::matchplay::turf_hold_setup_for_composition())
-                    .insert_resource(brawler::matchplay::turf_hold_rules_for_profile(
-                        brawler::config::MatchRulesProfile::ProcessVerification,
-                    ))
-                    .insert_resource(brawler::map::ServerMapSelection::preset(
-                        brawler::map::FEATURE_YARD_TURF_HOLD_PRESET,
-                    ));
-            }
-            HarnessMode::VaultBreak => {
-                server
-                    .insert_resource(brawler::matchplay::MatchModeSetup {
-                        mode_definition_id: brawler::map::VAULT_BREAK_MODE_DEFINITION,
-                        rules_revision: brawler::matchplay::VAULT_BREAK_RULES_REVISION,
-                    })
-                    .insert_resource(verification_vault_break_rules())
-                    .insert_resource(brawler::map::ServerMapSelection::preset(
-                        brawler::map::FEATURE_YARD_VAULT_BREAK_PRESET,
-                    ));
-            }
-        }
+        insert_mode_resources(&mut server, mode);
         server.add_plugins((
             MinimalPlugins,
             StatesPlugin,
@@ -625,6 +657,7 @@ impl Harness {
             HarnessMode::Takedown => server.add_plugins(brawler::matchplay::TakedownModePlugin),
             HarnessMode::TurfHold => server.add_plugins(brawler::matchplay::TurfHoldModePlugin),
             HarnessMode::VaultBreak => server.add_plugins(brawler::matchplay::VaultBreakModePlugin),
+            HarnessMode::ShardRush => server.add_plugins(brawler::matchplay::ShardRushModePlugin),
         };
         server.add_systems(PreUpdate, (blackout_systems(), link_latency_pin()));
         server.add_systems(

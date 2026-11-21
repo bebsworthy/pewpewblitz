@@ -492,7 +492,8 @@ fn spawn_selection(
             brawler::map::MapModeAnchorKind::TurfHoldCircle {
                 center_half_cell, ..
             }
-            | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
+            | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell }
+            | brawler::map::MapModeAnchorKind::ShardRushSource { center_half_cell } => {
                 brawler::map::MapCell::new(center_half_cell.x / 2, center_half_cell.y / 2)
             }
             brawler::map::MapModeAnchorKind::VaultBreakSafe { origin_cell, .. } => origin_cell,
@@ -560,7 +561,8 @@ fn spawn_hover(
         brawler::map::MapModeAnchorKind::TurfHoldCircle {
             center_half_cell, ..
         }
-        | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
+        | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell }
+        | brawler::map::MapModeAnchorKind::ShardRushSource { center_half_cell } => {
             brawler::map::MapCell::new(center_half_cell.x / 2, center_half_cell.y / 2)
         }
         brawler::map::MapModeAnchorKind::VaultBreakSafe { origin_cell, .. } => origin_cell,

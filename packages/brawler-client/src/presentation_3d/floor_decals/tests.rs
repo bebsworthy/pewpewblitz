@@ -156,7 +156,8 @@ fn objective_and_spawn_cells_are_excluded() {
                         .unwrap();
                     assert!(excluded.contains(&center), "{key}");
                 }
-                brawler::map::MapModeAnchorKind::ZombieIngress { .. } => {}
+                brawler::map::MapModeAnchorKind::ZombieIngress { .. }
+                | brawler::map::MapModeAnchorKind::ShardRushSource { .. } => {}
             }
         }
     }

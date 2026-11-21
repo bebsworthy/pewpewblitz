@@ -187,6 +187,11 @@ fn allocation_request(
         completed_input_lock_ticks: 60,
         takedown_recent_hostile_damage_credit_ticks: 300,
         vault_break_critical_health_percent: 25,
+        shard_rush: brawler_routing::ShardRushPolicy {
+            hold_ticks: 720,
+            spawn_interval_ticks: 360,
+            live_shard_ceiling: 12,
+        },
         team_count: 2,
         players_per_team: 1,
         participants: participants.to_vec(),

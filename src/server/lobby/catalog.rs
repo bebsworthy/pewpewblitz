@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 6;
+pub const OPERATOR_CATALOG_SCHEMA_VERSION: u16 = 7;
 pub const MAX_OPERATOR_CATALOG_BYTES: usize = 16 * 1024;
 const MAX_FORMATION_DEADLINE_SECONDS: u16 = 300;
 
@@ -115,6 +115,7 @@ pub(crate) struct ResolvedGameRules {
     pub completed_input_lock_ticks: u64,
     pub takedown_recent_hostile_damage_credit_ticks: u64,
     pub vault_break_critical_health_percent: u8,
+    pub shard_rush: crate::matchplay::ShardRushPolicy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,6 +218,7 @@ struct OperatorCommonLifecyclePolicy {
 struct OperatorModePolicies {
     takedown: OperatorTakedownPolicy,
     vault_break: OperatorVaultBreakPolicy,
+    shard_rush: OperatorShardRushPolicy,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -229,6 +231,32 @@ struct OperatorTakedownPolicy {
 #[serde(deny_unknown_fields)]
 struct OperatorVaultBreakPolicy {
     critical_health_percent: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct OperatorShardRushPolicy {
+    hold_seconds: u16,
+    spawn_interval_seconds: u16,
+    live_shard_ceiling: u8,
+}
+
+impl OperatorShardRushPolicy {
+    fn resolve(self) -> Result<crate::matchplay::ShardRushPolicy, String> {
+        let ticks = |seconds: u16| {
+            crate::timing::simulation_ticks_from_seconds(u64::from(seconds))
+                .and_then(|ticks| u16::try_from(ticks).ok())
+                .filter(|ticks| *ticks > 0)
+                .ok_or_else(|| "Shard Rush policy has invalid timing".to_string())
+        };
+        crate::matchplay::ShardRushPolicy {
+            hold_ticks: ticks(self.hold_seconds)?,
+            spawn_interval_ticks: ticks(self.spawn_interval_seconds)?,
+            live_shard_ceiling: self.live_shard_ceiling,
+        }
+        .validate()
+        .map_err(str::to_string)
+    }
 }
 
 #[derive(Deserialize)]
@@ -249,6 +277,8 @@ struct OperatorGameType {
     safe_health: u16,
     #[serde(default)]
     pressure_stages: u8,
+    #[serde(default)]
+    shards_to_win: u8,
     #[serde(default)]
     community_maps: bool,
     match_duration_seconds: u16,
@@ -299,11 +329,13 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     }
     .validate()
     .map_err(str::to_string)?;
+    let shard_rush_policy = mode_policies.shard_rush.resolve()?;
     let operator_policy = crate::modes::ModeOperatorPolicyInput {
         takedown_recent_hostile_damage_credit_ticks: mode_policies
             .takedown
             .recent_hostile_damage_credit_ticks,
         vault_break_critical_health_percent: mode_policies.vault_break.critical_health_percent,
+        shard_rush: shard_rush_policy,
     };
     for registration in crate::modes::builtin_mode_catalog().registrations() {
         registration
@@ -370,6 +402,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 capture_seconds: entry.capture_seconds,
                 safe_health: entry.safe_health,
                 pressure_stages: entry.pressure_stages,
+                shards_to_win: entry.shards_to_win,
                 match_duration_ticks,
                 lifecycle: entry_lifecycle,
                 takedown_recent_hostile_damage_credit_ticks: mode_policies
@@ -378,6 +411,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 vault_break_critical_health_percent: mode_policies
                     .vault_break
                     .critical_health_percent,
+                shard_rush: shard_rush_policy,
             })
             .map_err(|error| match error {
                 crate::modes::ModeRuleResolutionError::MismatchedObjective => format!(
@@ -482,6 +516,7 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 vault_break_critical_health_percent: mode_policies
                     .vault_break
                     .critical_health_percent,
+                shard_rush: shard_rush_policy,
             },
         );
         advertised.push(AdvertisedGameType {
@@ -620,6 +655,48 @@ mod tests {
         );
     }
 
+    fn production_shard_rush_policy() -> crate::matchplay::ShardRushPolicy {
+        crate::matchplay::shard_rush_rules_for_profile(crate::config::MatchRulesProfile::Production)
+            .policy
+    }
+
+    #[test]
+    fn checked_in_catalog_advertises_shard_rush_on_prism_quarry() {
+        let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
+        let game = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id.as_str() == "shard-rush-3v3")
+            .unwrap();
+        assert_eq!(game.display_name, "Shard Rush 3v3");
+        assert_eq!(
+            game.mode_definition_id,
+            crate::map::SHARD_RUSH_MODE_DEFINITION
+        );
+        assert_eq!(game.map_preset_ids, vec![crate::map::PRISM_QUARRY_PRESET]);
+        assert_eq!((game.team_count, game.players_per_team), (2, 3));
+        assert!(!game.community_maps);
+        assert_eq!(
+            game.rules_summary,
+            AdvertisedRulesSummary::ShardRush {
+                target_shards: 8,
+                hold_ticks: 720,
+                active_limit_ticks: 10_800,
+            }
+        );
+        let rules = catalog.rules(&game.id).unwrap();
+        assert_eq!(rules.objective_target, 8);
+        assert_eq!(
+            rules.shard_rush,
+            crate::matchplay::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            }
+        );
+        assert_eq!(rules.shard_rush, production_shard_rush_policy());
+    }
+
     #[test]
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
@@ -632,7 +709,7 @@ mod tests {
                 .deadlines_from(Duration::from_secs(5)),
             (Duration::from_secs(35), Duration::from_secs(15))
         );
-        assert_eq!(catalog.game_types.len(), 11);
+        assert_eq!(catalog.game_types.len(), 12);
         let takedown_three_vs_three = &catalog.game_types[3];
         assert_eq!(takedown_three_vs_three.display_name, "Takedown 3v3");
         assert_eq!(
@@ -684,6 +761,7 @@ mod tests {
                 completed_input_lock_ticks: 60,
                 takedown_recent_hostile_damage_credit_ticks: 300,
                 vault_break_critical_health_percent: 25,
+                shard_rush: production_shard_rush_policy(),
             })
         );
         let vault_break = catalog
@@ -714,9 +792,9 @@ mod tests {
         assert_eq!(
             catalog.revision.0,
             [
-                0xa5, 0x34, 0xda, 0x9a, 0x41, 0xb4, 0x28, 0x00, 0x28, 0x39, 0x2b, 0xa6, 0x8c, 0xd8,
-                0xcb, 0xdb, 0x0a, 0x39, 0x03, 0x3a, 0x01, 0xa1, 0x46, 0x35, 0x96, 0x01, 0x54, 0x4d,
-                0x44, 0x53, 0xc0, 0x8e,
+                0x6d, 0xe6, 0xe1, 0x05, 0x10, 0x77, 0xcb, 0xd8, 0xea, 0x5a, 0xdb, 0x6d, 0x11, 0xec,
+                0x8f, 0xe2, 0x78, 0x61, 0x18, 0xe8, 0x4d, 0xda, 0xa4, 0xfd, 0x27, 0xdd, 0xf4, 0x9f,
+                0x4e, 0x73, 0x85, 0x8f,
             ]
         );
     }
@@ -808,7 +886,7 @@ mod tests {
     #[test]
     fn catalog_rejects_unknown_fields_modes_maps_objectives_and_unsupported_topology() {
         for invalid in [
-            VALID.replace("schema_version: 6", "schema_version: 6, surprise: true"),
+            VALID.replace("schema_version: 7", "schema_version: 7, surprise: true"),
             VALID.replace(
                 "loading_deadline_seconds: 30",
                 "loading_deadline_seconds: 0",

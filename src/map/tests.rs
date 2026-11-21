@@ -3,7 +3,8 @@ use super::catalog::{
 };
 use super::geometry::{DerivedColliderShape, circle_overlaps_derived_shape};
 use super::resolution::{
-    resolve_grid_recipe, validate_and_resolve_mode_anchors, validate_placement_capacity,
+    ResolvedModeAnchors, resolve_grid_recipe, validate_and_resolve_mode_anchors,
+    validate_placement_capacity,
 };
 use super::*;
 use bevy::prelude::Vec2;
@@ -391,7 +392,12 @@ fn turf_hold_anchor_resolves_half_cell_center_and_radius() {
             radius_half_cells: 7,
         },
     }];
-    let (objective, vault_break_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
+    let ResolvedModeAnchors {
+        objective_zone: objective,
+        vault_break_safes,
+        zombie_ingress,
+        shard_source,
+    } = validate_and_resolve_mode_anchors(
         crate::modes::ModeTopologyPolicy::TurfHoldCircle,
         MapDimensions {
             width: 25,
@@ -404,6 +410,7 @@ fn turf_hold_anchor_resolves_half_cell_center_and_radius() {
 
     assert!(vault_break_safes.is_empty());
     assert!(zombie_ingress.is_empty());
+    assert!(shard_source.is_none());
     assert_eq!(
         objective.unwrap().area,
         NormalizedArea {
@@ -415,7 +422,12 @@ fn turf_hold_anchor_resolves_half_cell_center_and_radius() {
 
 #[test]
 fn anchorless_topology_is_reusable_without_a_built_in_mode_branch() {
-    let (objective, vault_break_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
+    let ResolvedModeAnchors {
+        objective_zone: objective,
+        vault_break_safes,
+        zombie_ingress,
+        shard_source,
+    } = validate_and_resolve_mode_anchors(
         crate::modes::ModeTopologyPolicy::NoAnchors,
         MapDimensions {
             width: 25,
@@ -429,6 +441,7 @@ fn anchorless_topology_is_reusable_without_a_built_in_mode_branch() {
     assert!(objective.is_none());
     assert!(vault_break_safes.is_empty());
     assert!(zombie_ingress.is_empty());
+    assert!(shard_source.is_none());
 }
 
 #[test]

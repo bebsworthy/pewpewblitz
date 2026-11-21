@@ -56,6 +56,7 @@ pub(crate) fn reset_fighter_runtime(commands: &mut Commands, entity: Entity, res
             LinearVelocity::ZERO,
             ActiveEffects::default(),
             super::BoostStacks::default(),
+            super::ShardCarrier::default(),
             crate::movement::InputFreshness::default(),
             CollisionLayers::new(crate::movement::FIGHTER_LAYER, reset.collision_mask),
         ))

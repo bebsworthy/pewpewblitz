@@ -52,7 +52,7 @@ fn resolve_operator_rules(
     if input.kills_to_win != 0
         || input.capture_seconds != 0
         || input.safe_health == 0
-        || input.pressure_stages != 0
+        || (input.pressure_stages != 0 || input.shards_to_win != 0)
     {
         return Err(super::ModeRuleResolutionError::MismatchedObjective);
     }
@@ -117,10 +117,12 @@ mod tests {
             capture_seconds: 0,
             safe_health: 2_000,
             pressure_stages: 0,
+            shards_to_win: 0,
             match_duration_ticks: 10_800,
             lifecycle: crate::matchplay::MatchLifecycleRules::default(),
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: crate::matchplay::ShardRushPolicy::PROCESS_VERIFICATION,
         }
     }
 
@@ -144,6 +146,7 @@ mod tests {
             validate_operator_policy(super::super::ModeOperatorPolicyInput {
                 takedown_recent_hostile_damage_credit_ticks: 300,
                 vault_break_critical_health_percent: 0,
+                shard_rush: crate::matchplay::ShardRushPolicy::PROCESS_VERIFICATION,
             })
             .is_err()
         );

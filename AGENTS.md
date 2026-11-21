@@ -47,7 +47,7 @@ src/                       shared `brawler` crate: gameplay, protocol, headless 
   bin/{server,profile_admin}.rs
   abilities/ builds/ combat/ concealment/ movement/ weapon_parts/ profiles/
   map/  map/runtime/       catalog/resolution/effect tiles; installation, dynamics, object authority
-  modes/                   bounded local registry: Takedown, Turf Hold, Vault Break (+ Zombie)
+  modes/                   bounded local registry: Takedown, Turf Hold, Vault Break, Shard Rush (+ Zombie)
   matchplay/               lifecycle, spawns, per-mode rule plugins
   bots/                    private Practice policy, observations, navigation
   server/                  admission, fighter spawn, lobby, balance_lab, practice, workers

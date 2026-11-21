@@ -81,6 +81,7 @@ fn build_match_manifest(
         takedown_recent_hostile_damage_credit_ticks: request
             .takedown_recent_hostile_damage_credit_ticks,
         vault_break_critical_health_percent: request.vault_break_critical_health_percent,
+        shard_rush: request.shard_rush,
         reserved: 0,
         seed: context.seed,
         participants,
@@ -232,7 +233,7 @@ impl SupervisorRuntime {
         };
         Ok(Some(AllocationLaunchContext {
             common: ManifestCommon {
-                manifest_version: 5,
+                manifest_version: 6,
                 role: WorkerRole::Match,
                 logical_server_id,
                 process_id: identities.process_id,

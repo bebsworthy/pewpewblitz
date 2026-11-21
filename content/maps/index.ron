@@ -85,5 +85,12 @@
             admission_revision: 1,
             document: "builtin/sluicegate-works.ron",
         ),
+        (
+            id: MapPresetId(15),
+            key: "prism-quarry",
+            display_name: "Prism Quarry",
+            admission_revision: 1,
+            document: "builtin/prism-quarry.ron",
+        ),
     ],
 )

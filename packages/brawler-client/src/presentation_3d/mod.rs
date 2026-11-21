@@ -51,6 +51,7 @@ mod map_editor;
 mod map_palette_preview;
 mod object_health;
 pub(crate) mod render_quality;
+mod shard_rush;
 mod toon;
 mod world_look;
 mod zombie;
@@ -272,6 +273,8 @@ pub(crate) struct Material3dAssets {
     /// The primitive weapon of the offscreen brawler preview, toon shaded like imported weapons.
     pub(crate) preview_blaster: Handle<ToonMaterial>,
     pub(crate) pickup_glow: Handle<StandardMaterial>,
+    /// Shard Rush shards, the source ring, and carrier crowns (BRL-wrer).
+    pub(crate) shard_crystal: Handle<StandardMaterial>,
 }
 
 #[derive(Component)]
@@ -492,6 +495,9 @@ impl Plugin for WorldPresentationPlugin {
                     reconcile_dynamic_map_visuals,
                     reconcile_restoration_pickup_visuals,
                     zombie::reconcile_zombie_mode_visuals,
+                    shard_rush::reconcile_shard_visuals,
+                    shard_rush::reconcile_shard_source_visuals,
+                    shard_rush::reconcile_carrier_crowns,
                     reconcile_vault_break_safe_visuals,
                     combat::reconcile_projectile_visuals,
                     combat::reconcile_sentry_visuals,
@@ -1669,6 +1675,11 @@ pub(crate) fn setup_3d_foundation(
         pickup_glow: materials.add(StandardMaterial {
             base_color: Color::LinearRgba(GLOW_PICKUP),
             alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        }),
+        shard_crystal: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.36, 0.9, 1.0),
             unlit: true,
             ..default()
         }),

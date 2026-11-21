@@ -1389,6 +1389,7 @@ fn config_from_manifest(
                 Some(manifest.takedown_recent_hostile_damage_credit_ticks);
             config.vault_break_critical_health_percent =
                 Some(manifest.vault_break_critical_health_percent);
+            config.shard_rush_policy = Some(manifest.shard_rush.into());
             // The manifest whitelist controls who may join this isolated match. Keep the
             // production endpoint capacity because match composition validates it against the
             // selected rules profile's maximum active-fighter capacity, not only this roster's
@@ -1655,6 +1656,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: brawler_routing::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             team_count: 2,
             players_per_team: 2,
             participants: vec![
@@ -2103,7 +2109,7 @@ mod tests {
         };
         MatchManifestV1 {
             common: brawler_routing::ManifestCommon {
-                manifest_version: 5,
+                manifest_version: 6,
                 role: WorkerRole::Match,
                 logical_server_id: brawler_routing::LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(TEST_PROCESS_ID).unwrap(),
@@ -2134,6 +2140,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: brawler_routing::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             reserved: 0,
             seed: 1,
             participants: vec![participant(1), participant(2)],

@@ -53,7 +53,7 @@ pub use ipc::{
 pub use limits::*;
 pub use manifest::{
     GameMode, LobbyManifest, ManifestCommon, MatchBuildSnapshot, MatchDisplayName, MatchManifest,
-    MatchManifestBot, MatchManifestParticipant, MatchManifestV1, WorkerRole,
+    MatchManifestBot, MatchManifestParticipant, MatchManifestV1, ShardRushPolicy, WorkerRole,
     raw_catalog_fingerprint,
 };
 pub use memory::{MemoryBackend, MemoryDuplex};

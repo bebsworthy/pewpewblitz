@@ -377,7 +377,7 @@ overall loading duration, but the lobby remains the sole deadline authority.
 
 For private authored-map Practice, the lobby owns candidate validation and binds the accepted
 recipe bytes, revision, fingerprint, mode and roster to the allocation request. The supervisor
-routes that bounded immutable payload without interpreting map semantics. Match-manifest version 5
+routes that bounded immutable payload without interpreting map semantics. The match manifest (v6)
 requires exactly one map source—a built-in preset or authored recipe—and the worker repeats bounded
 decode, fingerprint and resolver validation before inserting the resulting server map selection.
 Worker failure and cancellation use the same reservation, route-revocation and capacity cleanup as

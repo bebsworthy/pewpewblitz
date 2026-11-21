@@ -141,6 +141,7 @@ pub(crate) fn observe_completed_match(
                     state.mode_definition_id,
                     brawler::map::TURF_HOLD_MODE_DEFINITION
                         | brawler::map::VAULT_BREAK_MODE_DEFINITION
+                        | brawler::map::SHARD_RUSH_MODE_DEFINITION
                 ) =>
             {
                 objective

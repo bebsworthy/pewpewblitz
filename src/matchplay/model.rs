@@ -134,6 +134,7 @@ pub(crate) enum BotObjectiveView {
     Elimination,
     ControlArea { center: Vec2, radius: f32 },
     AttackAndDefend,
+    CollectAndHold { source: Vec2 },
 }
 
 /// Generation-tagged shared match clock published on the match root.

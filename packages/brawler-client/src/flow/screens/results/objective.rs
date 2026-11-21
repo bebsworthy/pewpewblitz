@@ -16,11 +16,16 @@ fn values(totals: ObjectiveTotals, team: usize) -> (&'static str, String, f32) {
         ObjectiveTotals::VaultBreak { health, maximum } => {
             ("IDOL HEALTH", health[team], maximum[team])
         }
+        ObjectiveTotals::ShardRush { shards, target } => {
+            ("SHARDS HELD", u16::from(shards[team]), u16::from(target))
+        }
     };
     let percent = f32::from(current) * 100. / f32::from(maximum.max(1));
     let detail = match totals {
         ObjectiveTotals::TurfHold { .. } => format!("{percent:.1}%"),
-        ObjectiveTotals::VaultBreak { .. } => format!("{current} / {maximum}"),
+        ObjectiveTotals::VaultBreak { .. } | ObjectiveTotals::ShardRush { .. } => {
+            format!("{current} / {maximum}")
+        }
     };
     (label, detail, percent.clamp(0., 100.))
 }

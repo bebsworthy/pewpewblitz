@@ -101,7 +101,8 @@ The supported recipe model expresses:
   definitions composed from registered effect families;
 - the compatible mode definition;
 - typed mode-required anchors: the half-cell-precision Turf Hold circle, two cell-aligned
-  team-owned Vault Break objective anchors, and bounded perimeter ingress points for Zombie.
+  team-owned Vault Break objective anchors, bounded perimeter ingress points for Zombie, and the
+  single half-cell-precision Shard Rush source.
 
 The schema may grow to support additional authored pickups, hazards, concealment regions, movement
 surfaces, and other environment primitives. V10's restoration pickup is instead a runtime entity
@@ -208,6 +209,7 @@ The authoritative mode runtime owns:
 - scoring, victory, timeout, and tie behavior;
 - objective progress and mode-specific timers;
 - Vault Break objective identity, team ownership, health, reset, and threshold/timeout evaluation;
+- Shard Rush source cadence, shard identity, carried counts, drops, and the hold countdown;
 - respawn, elimination, or round policy;
 - mode-specific participant state and outcome summaries.
 
@@ -284,7 +286,7 @@ their intersection and publishes the maximum active-fighter count used by admiss
 capacity checks.
 
 Supported routed product game types include exact 1v1, 2v2, and 3v3 Takedown, Turf Hold, and Vault Break
-matches. The 1v1/2v2 paths retain the **Feature Yard** integration-map family. Its three ordinary
+matches, plus 3v3 Shard Rush. The 1v1/2v2 paths retain the **Feature Yard** integration-map family. Its three ordinary
 recipes share identical geometry and differ only in stable identity, compatible mode, and the typed
 anchors required by that mode. Mirrored tall-grass groups touch contested approaches so the family
 exercises terrain concealment during live mode play rather than on an isolated map. Feature Yard is
@@ -307,6 +309,14 @@ destructible crates and oil barrels. Each flank holds a treasure chest behind a 
 and only one tall-grass patch (16 concealing cells in total, against Verdant's 46). Long trades
 happen across the canals and along the canal-side rows. The `takedown-3v3` game type ("Takedown
 3v3") lists both maps: matchmaking alternates them and Practice lets the player choose.
+
+**Prism Quarry** (BRL-wrer, preset/recipe 15) is the dedicated Shard Rush map: a padded 33×25
+landscape recipe on the facility theme, point-symmetric about its centre. Spawns sit at opposite
+ends behind two-cell shield walls. The one typed `ShardRushSource` anchor marks the open centre,
+ringed by six destructible crates. Walled elbows and a five-cell blocker on each long edge give
+carriers somewhere to retreat to and break line of sight. Two oil barrels sit on the spawn-to-centre
+lines, and four corner sand-and-grass beds offer concealment away from the source. The
+`shard-rush-3v3` game type ("Shard Rush 3v3") lists only this map.
 Ordinary matches are expected to center on 3v3, while the architecture may support larger bounded
 arrangements such as twelve solo fighters, two teams of five, or three teams of three when a concrete
 mode, map, HUD, admission profile, and capacity evidence all allow it. No common subsystem may assume
@@ -319,11 +329,12 @@ Practice fills the human's remaining allied slots with server-hosted bots.
 
 ## Supported modes
 
-The checked-in `config/server/game-types.ron` schema 6 catalog owns operator policy at four levels.
+The checked-in `config/server/game-types.ron` schema 7 catalog owns operator policy at four levels.
 `formation_timing` declares loading and route-grant deadlines, `common_lifecycle` declares
 spawn-protection and completed-match input-lock durations once for every advertised game type,
-`mode_policies` declares Takedown's recent-hostile defeat-credit window and Vault Break's critical-health
-percentage once per mode, and per-game-type entries own topology, map selection, objective target,
+`mode_policies` declares Takedown's recent-hostile defeat-credit window, Vault Break's critical-health
+percentage, and Shard Rush's hold countdown, source spawn interval, and on-ground shard ceiling once
+per mode, and per-game-type entries own topology, map selection, objective target,
 match duration, countdown, and respawn duration. The lobby
 validates this complete policy, incorporates it into the catalog revision, and copies the resolved
 values through allocation and the match manifest; a production worker does not reconstruct them
@@ -372,6 +383,28 @@ consume the exact match policy rather than maintaining a client constant. The sh
 uses team idols fitted inside the authoritative safe footprint; the internal `VaultBreakSafe` identity
 is a mode contract and never implies treasure-chest loot.
 
+### Shard Rush
+
+Shard Rush (BRL-wrer) is a 3v3 collect-and-hold mode. During Active, the server spawns one shard
+every spawn interval (6 s shipped) at a deterministic golden-angle fan around the map's single
+`ShardRushSource` anchor, until the on-ground ceiling (12) is reached. Placement resolves each point
+clear of blocking geometry. Any active fighter that touches a shard collects it, up to the team
+target. The carried count is a public, replicated per-fighter `ShardCarrier` component, and team
+totals live on the replicated `ShardRushState`.
+
+A carrier that is defeated, disconnects, or whose entity is removed scatters every carried shard
+around its last position as dropped shards. Drops ignore the spawn ceiling, so no shard ever leaves
+play. Respawn and restart clear carried counts. Concealment has no special rule: a hidden carrier's
+count is hidden with the fighter, through the same entity visibility as everything else.
+
+A team wins by reaching the target (8 shards shipped) while strictly ahead and then holding the lead
+through the hold countdown (12 s shipped). The countdown is public and resets whenever the leading
+team stops qualifying: it falls below the target, the other team draws level, or the lead changes
+hands. A new qualifying leader starts again from the full hold duration. At the match deadline, the
+team holding more shards wins and equal totals draw, before the common forfeit rules apply. HUD,
+results, the match summary, and Practice bots consume the replicated state and the typed source
+anchor, not map-specific constants.
+
 Together these modes prove that combat, fighter lifecycle, map installation, and common match phases
 are not coupled to one scoring model.
 
@@ -404,10 +437,8 @@ hostiles, total spawns, stack count, and random-drop budget are all explicitly b
 
 These layouts do not become supported rules merely because they can be described. Vault Break is the
 completed V10 proof governed by the
-[damageable world objects and Vault Break specification](./18-damageable-world-objects-and-vault-break.md).
-Other families remain product candidates:
-- **Collect-and-hold (BRL-wrer, name pending):** teams collect and carry a contested resource. It adds spawn cadence, carrier state,
-  drops, visibility pressure, and a threshold/hold win sequence.
+[damageable world objects and Vault Break specification](./18-damageable-world-objects-and-vault-break.md),
+and Shard Rush is the supported collect-and-hold family. Other families remain product candidates:
 - **Last Stand:** solo fighters or teams survive until one remains. It adds elimination, distributed
   spawning, exploration/loot pressure, and a closing playable boundary.
 

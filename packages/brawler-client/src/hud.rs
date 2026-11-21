@@ -93,6 +93,12 @@ pub(crate) enum ModeScoreView {
         last_brawler_standing: bool,
         local_boost_stacks: u8,
     },
+    ShardRush {
+        shards: [u8; 2],
+        target: u8,
+        /// The holding team and whole seconds left on its countdown.
+        hold: Option<(TeamId, u64)>,
+    },
     Syncing,
 }
 
@@ -384,6 +390,7 @@ fn update_readiness_hud(
     matches: Query<(&MatchState, Option<&brawler::matchplay::TakedownState>), With<MatchRoot>>,
     turf_holds: Query<&brawler::matchplay::TurfHoldState, With<MatchRoot>>,
     vault_break_states: Query<&brawler::matchplay::VaultBreakState, With<MatchRoot>>,
+    shard_rush_states: Query<&brawler::matchplay::ShardRushState, With<MatchRoot>>,
     vault_break_safes: Query<(
         &brawler::matchplay::VaultBreakSafe,
         &brawler::combat::CurrentHealth,
@@ -451,6 +458,11 @@ fn update_readiness_hud(
                     .flatten(),
                 vault_break_safes.iter(),
             )
+        } else if state.mode_definition_id == brawler::map::SHARD_RUSH_MODE_DEFINITION {
+            Some(final_shard_rush_line(
+                state,
+                shard_rush_states.iter().next(),
+            ))
         } else {
             final_objective_line(match_state, turf_holds.iter().next())
         }
@@ -491,6 +503,12 @@ fn update_readiness_hud(
                     .flatten(),
                 vault_break_safes.iter(),
                 fighter.map(|(_, team)| *team),
+                clock,
+            ))
+        } else if state.mode_definition_id == brawler::map::SHARD_RUSH_MODE_DEFINITION {
+            Some(build_shard_rush_score_view(
+                state,
+                shard_rush_states.iter().next(),
                 clock,
             ))
         } else {
@@ -717,8 +735,64 @@ pub(crate) fn mode_score_text(view: ModeScoreView) -> String {
                 u16::from(local_boost_stacks) * 5
             )
         }
+        ModeScoreView::ShardRush {
+            shards,
+            target,
+            hold,
+        } => {
+            let hold = hold.map_or_else(
+                || format!("HOLD {target} TO WIN"),
+                |(team, seconds)| format!("T{} HOLDING  {seconds}s", team.0 + 1),
+            );
+            format!("T1  {}  —  {}  T2\n{hold}", shards[0], shards[1])
+        }
         ModeScoreView::Syncing => "SYNCING OBJECTIVE".to_string(),
     }
+}
+
+/// Shard Rush plate facts: held totals plus the holding team's remaining whole seconds.
+pub(crate) fn build_shard_rush_score_view(
+    state: &MatchState,
+    shard_rush: Option<&brawler::matchplay::ShardRushState>,
+    clock: Option<&brawler::matchplay::MatchClock>,
+) -> ModeScoreView {
+    let (Some(shard_rush), Some(clock)) = (shard_rush, clock) else {
+        return ModeScoreView::Syncing;
+    };
+    if shard_rush.match_id != state.match_id || clock.match_id != state.match_id {
+        return ModeScoreView::Syncing;
+    }
+    ModeScoreView::ShardRush {
+        shards: shard_rush.team_shards,
+        target: shard_rush.target_shards,
+        hold: shard_rush.countdown.map(|countdown| {
+            (
+                countdown.team,
+                countdown
+                    .ends_at_tick
+                    .saturating_sub(clock.completed_tick)
+                    .div_ceil(brawler::timing::simulation_ticks_from_seconds(1).unwrap_or(1))
+                    .max(1),
+            )
+        }),
+    }
+}
+
+fn final_shard_rush_line(
+    state: &MatchState,
+    shard_rush: Option<&brawler::matchplay::ShardRushState>,
+) -> String {
+    shard_rush
+        .filter(|shard_rush| shard_rush.match_id == state.match_id)
+        .map_or_else(
+            || "SYNCING OBJECTIVE".to_string(),
+            |shard_rush| {
+                format!(
+                    "FINAL  T1 {} SHARDS  T2 {} SHARDS",
+                    shard_rush.team_shards[0], shard_rush.team_shards[1]
+                )
+            },
+        )
 }
 
 fn build_vault_break_score_view<'a>(

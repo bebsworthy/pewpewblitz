@@ -2,7 +2,7 @@
 
 PewPew Blitz is a server-authoritative top-down arena shooter built around player-authored brawler
 builds, readable combat, meaningful tradeoffs, and short objective matches. The current product
-supports Takedown, Turf Hold, and Vault Break; bounded weapon/build recipes; abilities and passives;
+supports Takedown, Turf Hold, Vault Break, and Shard Rush; bounded weapon/build recipes; abilities and passives;
 destructible and health-bearing map assets; treasure-chest restoration pickups; the consolidated
 Feature Yard test-map family; a dynamically framed 3D presentation; server-local multiplayer; and
 server-hosted Practice matches with active deterministic Pulse/Dash bots.
@@ -63,9 +63,10 @@ manually launched client an explicit data directory.
 
 One client is sufficient for Practice. Multiplayer game types form only their exact advertised
 human roster; the default Feature Yard Takedown 2v2 path therefore requires four clients. The
-catalog exposes exact 1v1, 2v2, and 3v3 Takedown, Turf Hold, and Vault Break entries. The 1v1/2v2 paths use
-Feature Yard; 3v3 uses Verdant Crossfire and Sluicegate Works (Takedown), Switchback Basin (Turf
-Hold), and Powderline Vault (Vault Break).
+catalog exposes exact 1v1, 2v2, and 3v3 Takedown, Turf Hold, and Vault Break entries, plus Shard
+Rush 3v3. The 1v1/2v2 paths use Feature Yard; 3v3 uses Verdant Crossfire and Sluicegate Works
+(Takedown), Switchback Basin (Turf Hold), Powderline Vault (Vault Break), and Prism Quarry (Shard
+Rush).
 
 For the development-only Balance Lab, start the tuning-enabled routed server and one interactive
 client, then use that client to enter Practice:

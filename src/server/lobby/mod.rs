@@ -653,6 +653,7 @@ impl LobbyState {
             takedown_recent_hostile_damage_credit_ticks: rules
                 .takedown_recent_hostile_damage_credit_ticks,
             vault_break_critical_health_percent: rules.vault_break_critical_health_percent,
+            shard_rush: rules.shard_rush.into(),
             team_count: 2,
             players_per_team: 1,
             participants,
@@ -759,6 +760,7 @@ impl LobbyState {
                 takedown_recent_hostile_damage_credit_ticks: rules
                     .takedown_recent_hostile_damage_credit_ticks,
                 vault_break_critical_health_percent: rules.vault_break_critical_health_percent,
+                shard_rush: rules.shard_rush.into(),
                 team_count: reservation.team_count,
                 players_per_team: reservation.players_per_team,
                 participants,
@@ -850,6 +852,7 @@ impl LobbyState {
                 takedown_recent_hostile_damage_credit_ticks: rules
                     .takedown_recent_hostile_damage_credit_ticks,
                 vault_break_critical_health_percent: rules.vault_break_critical_health_percent,
+                shard_rush: rules.shard_rush.into(),
                 team_count: game.team_count,
                 players_per_team: game.players_per_team,
                 participants: vec![human],

@@ -676,6 +676,7 @@ pub fn build_match_worker_app(
     config.takedown_recent_hostile_damage_credit_ticks =
         Some(manifest.takedown_recent_hostile_damage_credit_ticks);
     config.vault_break_critical_health_percent = Some(manifest.vault_break_critical_health_percent);
+    config.shard_rush_policy = Some(manifest.shard_rush.into());
     validate_match_manifest(&config, &manifest)?;
     let participant_count = manifest
         .participants
@@ -802,7 +803,7 @@ mod tests {
             .0;
         MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 5,
+                manifest_version: 6,
                 role: WorkerRole::Match,
                 logical_server_id: LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(2).unwrap(),
@@ -833,6 +834,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: brawler_routing::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             reserved: 0,
             seed: 1,
             participants: {
@@ -1722,6 +1728,11 @@ mod tests {
                 crate::map::ZOMBIE_YARD_PRESET,
                 crate::map::ZOMBIE_YARD_ADMISSION_REVISION,
             ),
+            (
+                GameMode::ShardRush,
+                crate::map::PRISM_QUARRY_PRESET,
+                crate::map::PRISM_QUARRY_ADMISSION_REVISION,
+            ),
         ];
         for (game_mode, map_preset, map_revision) in cases {
             let mut worker = practice_worker_for_mode(game_mode, map_preset, map_revision);
@@ -1858,6 +1869,22 @@ mod tests {
             102,
             safe_positions[&crate::combat::TeamId(0)]
         ));
+
+        let mut shard_rush = practice_worker_for_mode(
+            GameMode::ShardRush,
+            crate::map::PRISM_QUARRY_PRESET,
+            crate::map::PRISM_QUARRY_ADMISSION_REVISION,
+        );
+        activate_bot_worker(&mut shard_rush);
+        let source = shard_rush
+            .world()
+            .resource::<crate::map::ResolvedMap>()
+            .shard_source
+            .expect("Shard Rush worker has its source")
+            .position;
+        drive_bot_schedules(&mut shard_rush, 12);
+        assert!(bot_input_points_toward(&mut shard_rush, 100, source));
+        assert!(bot_input_points_toward(&mut shard_rush, 102, source));
     }
 
     #[test]

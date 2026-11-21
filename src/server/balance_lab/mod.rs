@@ -1235,7 +1235,7 @@ mod tests {
         };
         brawler_routing::MatchManifestV1 {
             common: ManifestCommon {
-                manifest_version: 5,
+                manifest_version: 6,
                 role: WorkerRole::Match,
                 logical_server_id: LogicalServerId::new(1).unwrap(),
                 process_id: ProcessId::new(2).unwrap(),
@@ -1266,6 +1266,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: brawler_routing::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             reserved: 0,
             seed: 1,
             participants: vec![brawler_routing::MatchManifestParticipant {

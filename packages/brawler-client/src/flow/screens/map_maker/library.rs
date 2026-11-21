@@ -911,7 +911,9 @@ fn overview_marks(recipe: &MapRecipe, catalog: &MapContentCatalog) -> Vec<Overvi
                 color: super::palette_color(super::PaletteItem::VaultBreakSafe(team_slot), catalog),
                 round: false,
             }),
-            MapModeAnchorKind::ZombieIngress { .. } => None,
+            MapModeAnchorKind::ZombieIngress { .. } | MapModeAnchorKind::ShardRushSource { .. } => {
+                None
+            }
         });
     filled
         .chain(placements)

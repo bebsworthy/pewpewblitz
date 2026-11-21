@@ -286,7 +286,7 @@ mod retreat {
 mod objectives {
     use super::{
         BehaviorContext, BotIntent, BotRole, BotTactic, CandidateBuffer, OBJECTIVES, Vec2,
-        nearest_enemy, safe_object, turf_hold_hold_point,
+        distance_order, nearest_enemy, safe_object, turf_hold_hold_point,
     };
     use crate::matchplay::BotObjectiveView;
 
@@ -305,8 +305,96 @@ mod objectives {
             (BotRole::Objective, BotObjectiveView::AttackAndDefend) => {
                 attack_safe(context, candidates, base_score);
             }
+            (BotRole::Objective, BotObjectiveView::CollectAndHold { source }) => {
+                shard_rush(context, candidates, base_score, source);
+            }
             _ => {}
         }
+    }
+
+    /// Shard Rush goals in priority order: a threatened carrier falls back, a visible enemy
+    /// carrier is intercepted, the nearest loose shard (source or dropped) is collected, an
+    /// allied carrier is escorted, and otherwise the bot heads to the source.
+    fn shard_rush(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+        source: Vec2,
+    ) {
+        let observation = context.observation;
+        let self_view = observation.self_view;
+        let self_position = self_view.position;
+        let enemy = nearest_enemy(observation);
+        let carriers = &observation.shard_carriers;
+        let carrying = carriers
+            .iter()
+            .any(|carrier| carrier.network_id == self_view.network_id);
+        let enemy_carrier = carriers
+            .iter()
+            .filter(|carrier| carrier.team != self_view.team)
+            .min_by(|a, b| distance_order(self_position, a.position, b.position));
+        let ally_carrier = carriers
+            .iter()
+            .filter(|carrier| {
+                carrier.team == self_view.team && carrier.network_id != self_view.network_id
+            })
+            .min_by(|a, b| distance_order(self_position, a.position, b.position));
+        let shard = observation
+            .shards
+            .iter()
+            .min_by(|a, b| distance_order(self_position, a.position, b.position));
+        let enemy_aim = enemy.map(|enemy| (enemy.position, enemy.velocity));
+        let (tactic, goal, aim, dash) = if let (true, Some(threat)) = (carrying, enemy)
+            && self_position.distance(threat.position) <= observation.weapon_range
+        {
+            let away = (self_position - threat.position)
+                .try_normalize()
+                .unwrap_or(Vec2::X);
+            (
+                BotTactic::Retreat,
+                self_position + away * context.profile.retreat_step_max_world,
+                enemy_aim,
+                true,
+            )
+        } else if let Some(target) = enemy_carrier {
+            let aim = observation
+                .visible_enemies
+                .iter()
+                .find(|enemy| enemy.network_id == target.network_id)
+                .map_or((target.position, Vec2::ZERO), |enemy| {
+                    (enemy.position, enemy.velocity)
+                });
+            (
+                BotTactic::InterceptCarrier,
+                target.position,
+                Some(aim),
+                self_position.distance(target.position) > observation.weapon_range,
+            )
+        } else if let Some(shard) = shard {
+            (BotTactic::CollectShard, shard.position, enemy_aim, false)
+        } else if let Some(ally) = ally_carrier.filter(|_| !carrying) {
+            (BotTactic::EscortCarrier, ally.position, enemy_aim, false)
+        } else {
+            (
+                BotTactic::Contest,
+                source,
+                enemy_aim,
+                self_position.distance(source) > observation.weapon_range,
+            )
+        };
+        candidates.propose(
+            OBJECTIVES.id,
+            base_score,
+            Some(tactic),
+            BotIntent {
+                move_goal: Some(goal),
+                aim_target: aim,
+                fire: aim.is_some_and(|(target, _)| {
+                    self_position.distance(target) <= observation.weapon_range
+                }),
+                dash,
+            },
+        );
     }
 
     fn turf_hold(
@@ -699,6 +787,8 @@ mod tests {
             visible_enemies: Vec::new(),
             objects: Vec::new(),
             pickups: Vec::new(),
+            shards: Vec::new(),
+            shard_carriers: Vec::new(),
             objective: crate::matchplay::BotObjectiveView::Elimination,
             weapon_phase: crate::combat::WeaponPhase::Ready,
             weapon_ammo: 1,

@@ -144,7 +144,7 @@ fn consolidate_match_summary(
             gameplay.turf_hold_longest_control_ticks =
                 Some(turf_hold.longest_consecutive_control_ticks_by_team);
         }
-        ModeSummary::VaultBreak(_) | ModeSummary::Zombie(_) => {}
+        ModeSummary::VaultBreak(_) | ModeSummary::Zombie(_) | ModeSummary::ShardRush(_) => {}
     }
     gameplay.match_active_ticks = summary.active_duration_ticks;
     gameplay.match_respawns = summary.respawns;

@@ -49,9 +49,9 @@ client_two_log=${report_path}.client-2.log
 capture_count=3
 
 case "$game_mode" in
-    takedown | turf-hold | vault-break) ;;
+    takedown | turf-hold | vault-break | shard-rush) ;;
     *)
-        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_MODE must be takedown, turf-hold, or vault-break' >&2
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_MODE must be takedown, turf-hold, vault-break, or shard-rush' >&2
         exit 2
         ;;
 esac
@@ -159,7 +159,13 @@ if [[ "$practice_smoke" == 1 ]]; then
     validate_peer=0
 fi
 if [[ -z "$players_per_team" ]]; then
-    if [[ "$game_mode" == turf-hold ]]; then players_per_team=2; else players_per_team=1; fi
+    if [[ "$game_mode" == turf-hold ]]; then
+        players_per_team=2
+    elif [[ "$game_mode" == shard-rush ]]; then
+        players_per_team=3
+    else
+        players_per_team=1
+    fi
 fi
 # The report fails a window that leaves the measured match (left_match_during_measurement,
 # BRL-rr1x), so every default window must end inside a live match. Vault Break Practice bots break a
@@ -183,6 +189,8 @@ if [[ -z "$game_type" ]]; then
         game_type=turf-hold-2v2
     elif [[ "$game_mode" == vault-break ]]; then
         game_type="vault-break-${players_per_team}v${players_per_team}"
+    elif [[ "$game_mode" == shard-rush ]]; then
+        game_type=shard-rush-3v3
     else
         game_type=takedown-1v1
     fi

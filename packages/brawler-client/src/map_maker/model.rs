@@ -359,7 +359,8 @@ impl MapEditorSession {
                 brawler::map::MapModeAnchorKind::TurfHoldCircle {
                     center_half_cell, ..
                 }
-                | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
+                | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell }
+                | brawler::map::MapModeAnchorKind::ShardRushSource { center_half_cell } => {
                     center_half_cell.x = shift_u16(center_half_cell.x, delta_x * 2)?;
                     center_half_cell.y = shift_u16(center_half_cell.y, delta_y * 2)?;
                 }
@@ -888,7 +889,8 @@ fn anchor_contains_cell(anchor: &brawler::map::MapModeAnchorPlacement, cell: Map
                 && cell.y >= origin_cell.y
                 && cell.y < origin_cell.y.saturating_add(height_cells)
         }
-        brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
+        brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell }
+        | brawler::map::MapModeAnchorKind::ShardRushSource { center_half_cell } => {
             center_half_cell.x / 2 == cell.x && center_half_cell.y / 2 == cell.y
         }
     }
@@ -916,7 +918,8 @@ fn anchor_fits(dimensions: MapDimensions, anchor: &brawler::map::MapModeAnchorPl
             origin_cell.x.saturating_add(width_cells) <= dimensions.width
                 && origin_cell.y.saturating_add(height_cells) <= dimensions.height
         }
-        brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
+        brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell }
+        | brawler::map::MapModeAnchorKind::ShardRushSource { center_half_cell } => {
             center_half_cell.x < dimensions.width.saturating_mul(2)
                 && center_half_cell.y < dimensions.height.saturating_mul(2)
         }

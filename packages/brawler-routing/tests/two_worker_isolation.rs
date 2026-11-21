@@ -138,7 +138,7 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
     };
     let manifest = MatchManifestV1 {
         common: ManifestCommon {
-            manifest_version: 5,
+            manifest_version: 6,
             role: WorkerRole::Match,
             logical_server_id: id128(LOGICAL_SERVER_ID),
             process_id: registration.process_id,
@@ -169,6 +169,11 @@ fn match_spec(worker: u128, mode: &str) -> WorkerLaunchSpec {
         completed_input_lock_ticks: 60,
         takedown_recent_hostile_damage_credit_ticks: 300,
         vault_break_critical_health_percent: 25,
+        shard_rush: brawler_routing::ShardRushPolicy {
+            hold_ticks: 720,
+            spawn_interval_ticks: 360,
+            live_shard_ceiling: 12,
+        },
         reserved: 0,
         seed: worker_u64,
         participants: vec![participant],

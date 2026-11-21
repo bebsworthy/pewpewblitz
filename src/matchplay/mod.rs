@@ -11,6 +11,7 @@ pub use objective_results::ObjectiveResult;
 pub use objective_results::ObjectiveTotals;
 #[cfg(feature = "server")]
 mod server;
+mod shard_rush;
 mod spawns;
 mod takedown;
 mod telemetry;
@@ -44,6 +45,17 @@ pub(crate) use server::{
 pub(crate) use server::{
     NextMatchId, PendingMatchRestartSlot, RestartBuildPolicy, prepare_match_restart,
 };
+#[cfg(feature = "server")]
+pub(crate) use shard_rush::ShardRushTelemetry;
+pub use shard_rush::{
+    MAX_SHARD_RUSH_LIVE_CEILING, MAX_SHARD_RUSH_TARGET, SHARD_BODY_RADIUS, SHARD_NETWORK_NAMESPACE,
+    SHARD_PICKUP_RADIUS, SHARD_RUSH_RULES_REVISION, Shard, ShardCarrier, ShardIdentity,
+    ShardOrigin, ShardRushCountdown, ShardRushPolicy, ShardRushRules, ShardRushState,
+    ShardRushSummary, leading_team as shard_rush_leading_team, shard_rush_rules_for_profile,
+    timeout_result as shard_rush_timeout_result,
+};
+#[cfg(feature = "server")]
+pub use shard_rush::{ShardRushModePlugin, ShardRushSource};
 pub use spawns::{SpawnCandidate, assigned_team, select_spawn};
 #[cfg(feature = "server")]
 pub use takedown::TakedownModePlugin;

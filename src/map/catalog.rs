@@ -44,10 +44,13 @@ pub const ZOMBIE_YARD_PRESET: MapPresetId = MapPresetId(13);
 pub const ZOMBIE_YARD_ADMISSION_REVISION: u16 = 1;
 pub const SLUICEGATE_WORKS_PRESET: MapPresetId = MapPresetId(14);
 pub const SLUICEGATE_WORKS_ADMISSION_REVISION: u16 = 1;
+pub const PRISM_QUARRY_PRESET: MapPresetId = MapPresetId(15);
+pub const PRISM_QUARRY_ADMISSION_REVISION: u16 = 1;
 pub const TAKEDOWN_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
 pub const TURF_HOLD_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
 pub const VAULT_BREAK_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
 pub const ZOMBIE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(5);
+pub const SHARD_RUSH_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(6);
 pub const VAULT_BREAK_SAFE_VISUAL_PROFILE: MapVisualProfileId = MapVisualProfileId(39);
 
 pub const GROUND_ASSET: MapAssetId = MapAssetId(1);
@@ -456,6 +459,10 @@ pub enum MapModeAnchorKind {
         objective_visual_profile_id: MapVisualProfileId,
     },
     ZombieIngress {
+        center_half_cell: MapHalfCellPoint,
+    },
+    /// The single Shard Rush source the server spawns shards around.
+    ShardRushSource {
         center_half_cell: MapHalfCellPoint,
     },
 }

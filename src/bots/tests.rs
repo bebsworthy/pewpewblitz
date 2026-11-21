@@ -1198,6 +1198,8 @@ fn observation(tick: u64) -> BotObservation {
         visible_enemies: Vec::new(),
         objects: Vec::new(),
         pickups: Vec::new(),
+        shards: Vec::new(),
+        shard_carriers: Vec::new(),
         objective: crate::matchplay::BotObjectiveView::Elimination,
         weapon_phase: WeaponPhase::Ready,
         weapon_ammo: 1,
@@ -1231,6 +1233,138 @@ fn sluicegate_works_spawns_reach_the_centre_and_both_flanks() {
     // Centre lane beside the pillar, lower flank by its chest, upper flank by its chest.
     let goals = [(15, 12), (16, 2), (16, 22)]
         .map(|(x, y)| dimensions.cell_center(crate::map::MapCell::new(x, y)));
+    let spawns: Vec<_> = map.spawn_points_by_team.values().flatten().collect();
+    assert_eq!(spawns.len(), 6);
+    for spawn in spawns {
+        for goal in goals {
+            let route = navigation
+                .route(spawn.position, goal, &[], 4_096, 128)
+                .unwrap_or_else(|| panic!("no route from {:?} to {goal:?}", spawn.position));
+            assert_eq!(route.last().copied(), Some(goal));
+        }
+    }
+}
+
+fn shard_rush_choice(observed: &BotObservation) -> (BotTactic, super::model::BotIntent) {
+    let mut state = super::model::BotState::default();
+    let intent = policy::choose_intent(
+        observed,
+        &mut state,
+        BotProfile::embedded().unwrap(),
+        &arbitration_policy(),
+        BotRole::Objective,
+    );
+    (state.tactic, intent)
+}
+
+fn shard_rush_observation() -> BotObservation {
+    let mut observed = observation(10);
+    observed.objective = crate::matchplay::BotObjectiveView::CollectAndHold {
+        source: Vec2::new(400.0, 0.0),
+    };
+    observed
+}
+
+fn carrier(network_id: u64, team: u8, position: Vec2) -> super::model::BotShardCarrierView {
+    super::model::BotShardCarrierView {
+        network_id: crate::protocol::NetworkEntityId(network_id),
+        team: crate::combat::TeamId(team),
+        position,
+        carried: 2,
+    }
+}
+
+/// BRL-wrer: every Shard Rush bot is an objective bot; the goal follows the projection.
+#[test]
+fn shard_rush_bots_collect_recover_escort_and_intercept() {
+    let members = [10, 20, 30].map(|id| BotPlanMember {
+        network_id: crate::protocol::NetworkEntityId(id),
+        team: crate::combat::TeamId(0),
+        objective: crate::matchplay::BotObjectiveView::CollectAndHold { source: Vec2::ZERO },
+    });
+    assert!(
+        assign_roles(&members)
+            .values()
+            .all(|role| *role == BotRole::Objective)
+    );
+
+    // No shard anywhere: head for the source.
+    let mut observed = shard_rush_observation();
+    let (tactic, intent) = shard_rush_choice(&observed);
+    assert_eq!(tactic, BotTactic::Contest);
+    assert_eq!(intent.move_goal, Some(Vec2::new(400.0, 0.0)));
+
+    // A loose (source or dropped) shard: collect the nearest one.
+    observed.shards = vec![
+        super::model::BotPickupView {
+            position: Vec2::new(-300.0, 0.0),
+        },
+        super::model::BotPickupView {
+            position: Vec2::new(50.0, 40.0),
+        },
+    ];
+    let (tactic, intent) = shard_rush_choice(&observed);
+    assert_eq!(tactic, BotTactic::CollectShard);
+    assert_eq!(intent.move_goal, Some(Vec2::new(50.0, 40.0)));
+
+    // With nothing to collect, escort the allied carrier.
+    observed.shards.clear();
+    observed.shard_carriers = vec![carrier(5, 0, Vec2::new(-200.0, 100.0))];
+    let (tactic, intent) = shard_rush_choice(&observed);
+    assert_eq!(tactic, BotTactic::EscortCarrier);
+    assert_eq!(intent.move_goal, Some(Vec2::new(-200.0, 100.0)));
+
+    // A visible enemy carrier outranks loose shards.
+    observed.shards = vec![super::model::BotPickupView {
+        position: Vec2::new(20.0, 0.0),
+    }];
+    let enemy_position = Vec2::new(0.0, 600.0);
+    observed
+        .visible_enemies
+        .push(enemy_at(enemy_position, Vec2::ZERO));
+    observed.shard_carriers.push(carrier(2, 1, enemy_position));
+    let (tactic, intent) = shard_rush_choice(&observed);
+    assert_eq!(tactic, BotTactic::InterceptCarrier);
+    assert_eq!(intent.move_goal, Some(enemy_position));
+    assert_eq!(intent.aim_target.unwrap().0, enemy_position);
+}
+
+#[test]
+fn threatened_shard_carrier_falls_back_from_the_nearest_enemy() {
+    let mut observed = shard_rush_observation();
+    let threat = Vec2::new(60.0, 0.0);
+    observed.visible_enemies.push(enemy_at(threat, Vec2::ZERO));
+    observed.shard_carriers = vec![carrier(1, 0, Vec2::ZERO)];
+    let (tactic, intent) = shard_rush_choice(&observed);
+    assert_eq!(tactic, BotTactic::Retreat);
+    assert!(intent.move_goal.unwrap().x < 0.0);
+    assert_eq!(intent.aim_target.unwrap().0, threat);
+    assert!(intent.fire);
+}
+
+/// BRL-wrer: from every Prism Quarry spawn, Practice navigation reaches the shard source and
+/// both corner grass beds.
+#[test]
+fn prism_quarry_spawns_reach_the_source_and_both_corner_beds() {
+    let catalog = crate::map::MapContentCatalog::embedded().unwrap();
+    let map = catalog
+        .resolve_preset(
+            crate::map::PRISM_QUARRY_PRESET,
+            crate::map::MapInstanceId(1),
+        )
+        .unwrap();
+    let radius = crate::builds::BuildCatalog::embedded()
+        .unwrap()
+        .fighter_body
+        .radius;
+    let navigation = BotNavigationSnapshot::from_map(&map, radius + 1.0, 2_000).unwrap();
+    let dimensions = map.snapshot.dimensions;
+    let source = map.shard_source.expect("Prism Quarry has a shard source");
+    let goals = [
+        source.position,
+        dimensions.cell_center(crate::map::MapCell::new(8, 3)),
+        dimensions.cell_center(crate::map::MapCell::new(24, 21)),
+    ];
     let spawns: Vec<_> = map.spawn_points_by_team.values().flatten().collect();
     assert_eq!(spawns.len(), 6);
     for spawn in spawns {

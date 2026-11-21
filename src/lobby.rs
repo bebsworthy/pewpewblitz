@@ -153,6 +153,11 @@ pub enum AdvertisedRulesSummary {
         pressure_stage_count: u8,
         active_limit_ticks: u64,
     },
+    ShardRush {
+        target_shards: u8,
+        hold_ticks: u16,
+        active_limit_ticks: u64,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -391,6 +396,11 @@ impl AdvertisedGameType {
                 pressure_stage_count,
                 active_limit_ticks,
             } if pressure_stage_count > 0 && active_limit_ticks > 0 => {}
+            AdvertisedRulesSummary::ShardRush {
+                target_shards,
+                hold_ticks,
+                active_limit_ticks,
+            } if target_shards > 0 && hold_ticks > 0 && active_limit_ticks > 0 => {}
             _ => return Err(LobbyModelError::InvalidRules),
         }
         Ok(())
@@ -662,6 +672,16 @@ pub fn canonical_catalog_bytes(
             } => {
                 bytes.push(4);
                 bytes.push(pressure_stage_count);
+                bytes.extend_from_slice(&active_limit_ticks.to_be_bytes());
+            }
+            AdvertisedRulesSummary::ShardRush {
+                target_shards,
+                hold_ticks,
+                active_limit_ticks,
+            } => {
+                bytes.push(5);
+                bytes.push(target_shards);
+                bytes.extend_from_slice(&hold_ticks.to_be_bytes());
                 bytes.extend_from_slice(&active_limit_ticks.to_be_bytes());
             }
         }

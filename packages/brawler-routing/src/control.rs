@@ -336,6 +336,7 @@ pub struct AllocateRequestBody {
     pub completed_input_lock_ticks: u64,
     pub takedown_recent_hostile_damage_credit_ticks: u64,
     pub vault_break_critical_health_percent: u8,
+    pub shard_rush: crate::ShardRushPolicy,
     pub team_count: u8,
     pub players_per_team: u8,
     pub participants: Vec<AllocateParticipant>,
@@ -374,6 +375,7 @@ impl AllocateRequestBody {
             || self.completed_input_lock_ticks == 0
             || self.takedown_recent_hostile_damage_credit_ticks == 0
             || !(1..=99).contains(&self.vault_break_critical_health_percent)
+            || !self.shard_rush.is_valid()
             || self.team_count == 0
             || self.players_per_team == 0
             || self.participants.is_empty()
@@ -1222,6 +1224,7 @@ impl ControlBody {
                 encoder.put_u64(value.completed_input_lock_ticks);
                 encoder.put_u64(value.takedown_recent_hostile_damage_credit_ticks);
                 encoder.put_u8(value.vault_break_critical_health_percent);
+                value.shard_rush.encode(&mut encoder);
                 encoder.put_u8(value.team_count);
                 encoder.put_u8(value.players_per_team);
                 encoder.put_u8(
@@ -1433,6 +1436,7 @@ impl ControlBody {
                 let completed_input_lock_ticks = decoder.u64()?;
                 let takedown_recent_hostile_damage_credit_ticks = decoder.u64()?;
                 let vault_break_critical_health_percent = decoder.u8()?;
+                let shard_rush = crate::ShardRushPolicy::decode(decoder)?;
                 let team_count = decoder.u8()?;
                 let players_per_team = decoder.u8()?;
                 let count = usize::from(decoder.u8()?);
@@ -1468,6 +1472,7 @@ impl ControlBody {
                     completed_input_lock_ticks,
                     takedown_recent_hostile_damage_credit_ticks,
                     vault_break_critical_health_percent,
+                    shard_rush,
                     team_count,
                     players_per_team,
                     participants,
@@ -1979,6 +1984,11 @@ mod tests {
                 completed_input_lock_ticks: 60,
                 takedown_recent_hostile_damage_credit_ticks: 300,
                 vault_break_critical_health_percent: 25,
+                shard_rush: crate::ShardRushPolicy {
+                    hold_ticks: 720,
+                    spawn_interval_ticks: 360,
+                    live_shard_ceiling: 12,
+                },
                 team_count: 2,
                 players_per_team: 1,
                 participants: vec![participant(1), participant(2)],
@@ -2083,6 +2093,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: crate::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             team_count: 2,
             players_per_team: 4,
             participants: (1..=8).map(participant).collect(),
@@ -2093,7 +2108,7 @@ mod tests {
                 .encode()
                 .unwrap()
                 .len(),
-            52 + 532
+            52 + 537
         );
         let granted = AllocationGrantedBody {
             request_id: id64(1),
@@ -2297,6 +2312,11 @@ mod tests {
             completed_input_lock_ticks: 60,
             takedown_recent_hostile_damage_credit_ticks: 300,
             vault_break_critical_health_percent: 25,
+            shard_rush: crate::ShardRushPolicy {
+                hold_ticks: 720,
+                spawn_interval_ticks: 360,
+                live_shard_ceiling: 12,
+            },
             team_count: 1,
             players_per_team: 1,
             participants: vec![participant(3)],

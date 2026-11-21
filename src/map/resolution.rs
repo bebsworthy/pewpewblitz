@@ -3,8 +3,8 @@
 use super::catalog::{MAP_FINGERPRINT_FORMAT_VERSION, MAX_RESOLVED_MAP_SNAPSHOT_BYTES};
 use super::geometry::{
     MapCellRect, merge_cells_to_rectangles, placement_cells, placement_world_center,
-    validate_fighter_navigation, validate_spawn_clearance, validate_vault_break_map_access,
-    validate_zombie_ingress_access,
+    validate_fighter_navigation, validate_shard_source_access, validate_spawn_clearance,
+    validate_vault_break_map_access, validate_zombie_ingress_access,
 };
 use super::{
     MAP_CELL_SIZE_WORLD, MAP_RECIPE_SCHEMA_VERSION, MapAssetId, MapAssetPlacement, MapAssetSlot,
@@ -29,6 +29,7 @@ pub struct ResolvedMap {
     pub objective_zone: Option<ResolvedMapObjective>,
     pub vault_break_safes: Vec<ResolvedVaultBreakSafeAnchor>,
     pub zombie_ingress: Vec<ResolvedZombieIngressAnchor>,
+    pub shard_source: Option<ResolvedShardSourceAnchor>,
     pub effect_tiles: Vec<ResolvedEffectTile>,
     pub effect_tiles_by_cell: BTreeMap<MapCell, ResolvedEffectTile>,
 }
@@ -59,6 +60,13 @@ pub struct ResolvedVaultBreakSafeAnchor {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedZombieIngressAnchor {
+    pub placement_id: MapPlacementId,
+    pub anchor_id: ModeAnchorId,
+    pub position: Vec2,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResolvedShardSourceAnchor {
     pub placement_id: MapPlacementId,
     pub anchor_id: ModeAnchorId,
     pub position: Vec2,
@@ -149,7 +157,12 @@ pub(super) fn resolve_located_grid_recipe(
 
     let mut mode_anchors = recipe.mode_anchors.clone();
     mode_anchors.sort_by_key(|anchor| (anchor.placement_id, anchor.anchor_id));
-    let (objective_zone, vault_break_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
+    let ResolvedModeAnchors {
+        objective_zone,
+        vault_break_safes,
+        zombie_ingress,
+        shard_source,
+    } = validate_and_resolve_mode_anchors(
         topology,
         recipe.dimensions,
         &mode_anchors,
@@ -183,6 +196,7 @@ pub(super) fn resolve_located_grid_recipe(
         objective_zone,
         vault_break_safes,
         zombie_ingress,
+        shard_source,
         effect_tiles: dynamic.effect_tiles,
         effect_tiles_by_cell,
     })
@@ -432,6 +446,8 @@ fn validate_mode_topology(
         validate_vault_break_map_access(placements, mode_anchors, recipe.dimensions, catalog)?;
     } else if topology == ModeTopologyPolicy::ZombieIngress {
         validate_zombie_ingress_access(placements, mode_anchors, recipe.dimensions, catalog, 18.0)?;
+    } else if topology == ModeTopologyPolicy::ShardRushSource {
+        validate_shard_source_access(placements, mode_anchors, recipe.dimensions, catalog)?;
     }
     Ok(())
 }
@@ -641,11 +657,13 @@ fn validate_effect_tile_spawn_safety(
     Ok(())
 }
 
-type ResolvedModeAnchors = (
-    Option<ResolvedMapObjective>,
-    Vec<ResolvedVaultBreakSafeAnchor>,
-    Vec<ResolvedZombieIngressAnchor>,
-);
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct ResolvedModeAnchors {
+    pub(super) objective_zone: Option<ResolvedMapObjective>,
+    pub(super) vault_break_safes: Vec<ResolvedVaultBreakSafeAnchor>,
+    pub(super) zombie_ingress: Vec<ResolvedZombieIngressAnchor>,
+    pub(super) shard_source: Option<ResolvedShardSourceAnchor>,
+}
 
 pub(super) fn validate_and_resolve_mode_anchors(
     topology: ModeTopologyPolicy,
@@ -657,16 +675,32 @@ pub(super) fn validate_and_resolve_mode_anchors(
         ModeTopologyPolicy::NoAnchors => {
             return anchors
                 .is_empty()
-                .then_some((None, Vec::new(), Vec::new()))
+                .then(ResolvedModeAnchors::default)
                 .ok_or_else(|| "anchorless modes cannot contain mode anchors".to_string());
         }
         ModeTopologyPolicy::MirroredVaultBreakSafes => {
-            return resolve_vault_break_safe_anchors(dimensions, anchors, placement_ids)
-                .map(|resolved| (None, resolved, Vec::new()));
+            return resolve_vault_break_safe_anchors(dimensions, anchors, placement_ids).map(
+                |vault_break_safes| ResolvedModeAnchors {
+                    vault_break_safes,
+                    ..ResolvedModeAnchors::default()
+                },
+            );
         }
         ModeTopologyPolicy::ZombieIngress => {
-            return resolve_zombie_ingress_anchors(dimensions, anchors, placement_ids)
-                .map(|resolved| (None, Vec::new(), resolved));
+            return resolve_zombie_ingress_anchors(dimensions, anchors, placement_ids).map(
+                |zombie_ingress| ResolvedModeAnchors {
+                    zombie_ingress,
+                    ..ResolvedModeAnchors::default()
+                },
+            );
+        }
+        ModeTopologyPolicy::ShardRushSource => {
+            return resolve_shard_source_anchor(dimensions, anchors, placement_ids).map(
+                |shard_source| ResolvedModeAnchors {
+                    shard_source: Some(shard_source),
+                    ..ResolvedModeAnchors::default()
+                },
+            );
         }
         ModeTopologyPolicy::TurfHoldCircle => {}
     }
@@ -702,17 +736,43 @@ pub(super) fn validate_and_resolve_mode_anchors(
     {
         return Err("Turf Hold objective does not fit playable bounds".to_string());
     }
-    Ok((
-        Some(ResolvedMapObjective {
+    Ok(ResolvedModeAnchors {
+        objective_zone: Some(ResolvedMapObjective {
             anchor_id: anchor.anchor_id,
             area: super::NormalizedArea {
                 center,
                 shape: MapShape::Circle { radius },
             },
         }),
-        Vec::new(),
-        Vec::new(),
-    ))
+        ..ResolvedModeAnchors::default()
+    })
+}
+
+fn resolve_shard_source_anchor(
+    dimensions: MapDimensions,
+    anchors: &[MapModeAnchorPlacement],
+    placement_ids: &mut BTreeSet<MapPlacementId>,
+) -> Result<ResolvedShardSourceAnchor, String> {
+    let [anchor] = anchors else {
+        return Err("Shard Rush maps require exactly one shard source anchor".to_string());
+    };
+    if anchor.placement_id.0 == 0
+        || anchor.anchor_id.0 == 0
+        || !placement_ids.insert(anchor.placement_id)
+    {
+        return Err("invalid or duplicate mode anchor identity".to_string());
+    }
+    let MapModeAnchorKind::ShardRushSource { center_half_cell } = anchor.kind else {
+        return Err("Shard Rush maps cannot contain non-source anchors".to_string());
+    };
+    let position = dimensions
+        .half_cell_world(center_half_cell)
+        .ok_or_else(|| "Shard Rush source is out of bounds".to_string())?;
+    Ok(ResolvedShardSourceAnchor {
+        placement_id: anchor.placement_id,
+        anchor_id: anchor.anchor_id,
+        position,
+    })
 }
 
 fn resolve_zombie_ingress_anchors(

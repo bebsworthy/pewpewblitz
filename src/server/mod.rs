@@ -1377,6 +1377,7 @@ fn build_authoritative_app(
             Some(rules.takedown_recent_hostile_damage_credit_ticks);
         config.vault_break_critical_health_percent =
             Some(rules.vault_break_critical_health_percent);
+        config.shard_rush_policy = Some(rules.shard_rush);
     }
     let mut lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
     if config.game_mode == crate::config::GameMode::Zombie {
@@ -1447,6 +1448,7 @@ fn build_authoritative_app(
                 takedown_recent_hostile_damage_credit_ticks: config
                     .takedown_recent_hostile_damage_credit_ticks,
                 vault_break_critical_health_percent: config.vault_break_critical_health_percent,
+                shard_rush: config.shard_rush_policy,
             },
         )
     };

@@ -1215,12 +1215,14 @@ fn capture_match_summary(
             Option<&super::TurfHoldState>,
             Option<&super::VaultBreakState>,
             Option<&super::ZombieModeState>,
+            Option<&super::ShardRushState>,
         ),
         With<MatchRoot>,
     >,
     turf_hold_telemetry: Option<ResMut<super::turf_hold::TurfHoldTelemetry>>,
     vault_break_telemetry: Option<Res<super::VaultBreakTelemetry>>,
     zombie_telemetry: Option<Res<super::ZombieTelemetry>>,
+    shard_rush_telemetry: Option<Res<super::ShardRushTelemetry>>,
     vault_break_safes: Query<(
         &super::VaultBreakSafe,
         &crate::combat::CurrentHealth,
@@ -1230,7 +1232,7 @@ fn capture_match_summary(
     weapons: Res<WeaponTelemetry>,
     abilities: Res<crate::abilities::AbilityTelemetry>,
 ) {
-    let Ok((state, takedown, turf_hold, vault_break, zombie)) = roots.single() else {
+    let Ok((state, takedown, turf_hold, vault_break, zombie, shard_rush)) = roots.single() else {
         return;
     };
     match state.phase {
@@ -1281,9 +1283,10 @@ fn capture_match_summary(
                         .map_or(zombie.live_zombies, |telemetry| telemetry.peak_live),
                     pressure_stage_reached: zombie.pressure_stage.saturating_add(1),
                 }),
-                (None, None, None, None) => {
-                    panic!("an installed mode carries its state on the root")
-                }
+                (None, None, None, None) => shard_rush
+                    .zip(shard_rush_telemetry.as_deref())
+                    .map(|(state, telemetry)| ModeSummary::ShardRush(telemetry.summary(state)))
+                    .expect("an installed mode carries its state on the root"),
             };
             telemetry.complete_with_mode(
                 tick.0,

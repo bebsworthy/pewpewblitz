@@ -179,7 +179,8 @@ fn expected_visual_profiles(
                     ..
                 } => Some(objective_visual_profile_id),
                 brawler::map::MapModeAnchorKind::TurfHoldCircle { .. }
-                | brawler::map::MapModeAnchorKind::ZombieIngress { .. } => None,
+                | brawler::map::MapModeAnchorKind::ZombieIngress { .. }
+                | brawler::map::MapModeAnchorKind::ShardRushSource { .. } => None,
             })
     }));
     expected.extend(
@@ -741,8 +742,8 @@ mod grid_catalog_tests {
     fn crossroads_facility_maps_render_only_their_theme_kit() {
         let maps = assert_theme_maps_render_only_their_kit(brawler::map::MapPresentationThemeId(1));
         assert_eq!(
-            maps, 7,
-            "every theme-1 built-in map, including Sluicegate Works, is covered"
+            maps, 8,
+            "every theme-1 built-in map, including Sluicegate Works and Prism Quarry, is covered"
         );
     }
 

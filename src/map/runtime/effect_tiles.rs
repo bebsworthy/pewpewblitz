@@ -314,6 +314,7 @@ mod tests {
             objective_zone: None,
             vault_break_safes: Vec::new(),
             zombie_ingress: Vec::new(),
+            shard_source: None,
             effect_tiles: Vec::new(),
             effect_tiles_by_cell: BTreeMap::new(),
         };

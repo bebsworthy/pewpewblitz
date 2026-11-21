@@ -310,6 +310,11 @@ ICONS = {
         part("ink", circle(43, 50, 5.2), stroke([(53, 45.5), (61.5, 54)], 3.5),
              stroke([(61.5, 45.5), (53, 54)], 3.5),
              stroke([(40, 67), (44, 63.5), (48, 67.5), (52, 63.5), (56, 67.5), (60, 64)], 3)))),
+    "mode-shard-rush": (PENNANT, pennant(
+        part("violet", poly((34, 76), (29, 58), (36, 47), (42, 60), (42, 76)), bands=(2.0, 1.5)),
+        part("violet", poly((58, 76), (58, 60), (64, 47), (71, 58), (66, 76)), bands=(2.0, 1.5)),
+        part("cyan", poly((50, 28), (60, 45), (57, 76), (43, 76), (40, 45))),
+        part("white", poly((50, 34), (54, 45), (50, 52), (46, 45)), bands=(1.0, 0.5)))),
     # Weapon part families (symbolic illustrations, not physical attachments).
     "part-magazine": (PART, [
         part("indigo", poly((41, 12), (83, 12), (77, 74), (65, 88), (35, 88))),

@@ -50,12 +50,13 @@ pub(crate) const PARTS: [&str; 5] = [
 ];
 
 /// Hanging mode pennants (250x310 px), in `AdvertisedRulesSummary` order: Takedown, Turf Hold,
-/// Vault Break, Zombie (BRL-1wms). Names are `mode-<mode key>`.
-pub(crate) const MODE_PENNANTS: [&str; 4] = [
+/// Vault Break, Zombie (BRL-1wms), Shard Rush (BRL-wrer). Names are `mode-<mode key>`.
+pub(crate) const MODE_PENNANTS: [&str; 5] = [
     "mode-takedown",
     "mode-turf-hold",
     "mode-vault-break",
     "mode-zombie",
+    "mode-shard-rush",
 ];
 
 /// The badge of an ultimate family. Icons are selected by advertised semantic family, never by
@@ -152,6 +153,7 @@ mod tests {
             brawler::map::TURF_HOLD_MODE_DEFINITION,
             brawler::map::VAULT_BREAK_MODE_DEFINITION,
             brawler::map::ZOMBIE_MODE_DEFINITION,
+            brawler::map::SHARD_RUSH_MODE_DEFINITION,
         ]) {
             let key = modes
                 .descriptor_for_definition(definition)
