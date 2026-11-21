@@ -483,8 +483,14 @@ impl Harness {
         edit(&mut manifest);
         // The production worker derives its configured mode from the manifest; mirror that for
         // an edit that changed the mode.
-        if manifest.mode == brawler_routing::GameMode::ShardRush {
-            server_config.game_mode = brawler::config::GameMode::ShardRush;
+        match manifest.mode {
+            brawler_routing::GameMode::ShardRush => {
+                server_config.game_mode = brawler::config::GameMode::ShardRush;
+            }
+            brawler_routing::GameMode::LastStand => {
+                server_config.game_mode = brawler::config::GameMode::LastStand;
+            }
+            _ => {}
         }
         let manifest = manifest.with_digest().expect("edited manifest digest");
         let mut server = brawler::server::build_match_worker_app(server_config.clone(), manifest)

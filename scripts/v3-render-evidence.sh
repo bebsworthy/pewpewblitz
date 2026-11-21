@@ -50,8 +50,15 @@ capture_count=3
 
 case "$game_mode" in
     takedown | turf-hold | vault-break | shard-rush) ;;
+    last-stand)
+        # Six solo fighters fill only through Practice bots; there is no two-client smoke.
+        if [[ "$practice_smoke" != 1 ]]; then
+            printf '%s\n' 'brawler render evidence: last-stand requires BRAWLER_RENDER_PRACTICE=1' >&2
+            exit 2
+        fi
+        ;;
     *)
-        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_MODE must be takedown, turf-hold, vault-break, or shard-rush' >&2
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_MODE must be takedown, turf-hold, vault-break, shard-rush, or last-stand' >&2
         exit 2
         ;;
 esac
@@ -172,12 +179,14 @@ fi
 # safe and end the 180 s match as early as 18 s after match-ready (observed 18-23 s with the
 # measured client walking and firing right, and with it aiming elsewhere; some runs last past
 # 40 s). The window is anchored at match readiness and includes the 3 s countdown, so Vault Break
-# Practice defaults to 4 s warmup + 12 s measurement (16 s). Other modes keep 10 s + 30 s.
+# Practice defaults to 4 s warmup + 12 s measurement (16 s). Last Stand Practice rounds with six
+# free-for-all fighters have ended by elimination 42 s after match-ready (BRL-5ss9), so they share
+# the short window. Other modes keep 10 s + 30 s.
 # Explicit durations override both. The client configuration check below rejects a measurement
 # too short for the 1,200-sample gate at the run's cadence with 20% headroom (BRL-vh61): 12 s for
 # the native profile off-screen (paced at 120 Hz, measured 110-114 Hz), 24 s at 60 Hz, 48 s at
 # 30 Hz.
-if [[ "$practice_smoke" == 1 && "$game_mode" == vault-break ]]; then
+if [[ "$practice_smoke" == 1 && ( "$game_mode" == vault-break || "$game_mode" == last-stand ) ]]; then
     warmup_seconds=${warmup_seconds:-4}
     measure_seconds=${measure_seconds:-12}
 else
@@ -191,6 +200,8 @@ if [[ -z "$game_type" ]]; then
         game_type="vault-break-${players_per_team}v${players_per_team}"
     elif [[ "$game_mode" == shard-rush ]]; then
         game_type=shard-rush-3v3
+    elif [[ "$game_mode" == last-stand ]]; then
+        game_type=last-stand-6p
     else
         game_type=takedown-1v1
     fi

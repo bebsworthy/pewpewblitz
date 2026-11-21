@@ -46,6 +46,7 @@ pub struct AllocationPolicy {
     pub vault_break: ModeAllocationPolicy,
     pub zombie: ModeAllocationPolicy,
     pub shard_rush: ModeAllocationPolicy,
+    pub last_stand: ModeAllocationPolicy,
     pub heartbeat_ms: u32,
     pub seed_policy: SeedPolicy,
 }
@@ -63,35 +64,15 @@ impl AllocationPolicy {
     /// ambient environment state.
     #[must_use]
     pub const fn brawler_m01_with_rules_profile(rules_profile: u8) -> Self {
-        Self::new(
-            ModeAllocationPolicy::new(7, 5, rules_profile),
-            ModeAllocationPolicy::new(8, 2, rules_profile),
-            ModeAllocationPolicy::new(9, 2, rules_profile),
-            ModeAllocationPolicy::new(13, 1, rules_profile),
-            ModeAllocationPolicy::new(15, 1, rules_profile),
-            1_000,
-            SeedPolicy::OsRandom,
-        )
-    }
-
-    #[must_use]
-    pub const fn new(
-        takedown: ModeAllocationPolicy,
-        turf_hold: ModeAllocationPolicy,
-        vault_break: ModeAllocationPolicy,
-        zombie: ModeAllocationPolicy,
-        shard_rush: ModeAllocationPolicy,
-        heartbeat_ms: u32,
-        seed_policy: SeedPolicy,
-    ) -> Self {
         Self {
-            takedown,
-            turf_hold,
-            vault_break,
-            zombie,
-            shard_rush,
-            heartbeat_ms,
-            seed_policy,
+            takedown: ModeAllocationPolicy::new(7, 5, rules_profile),
+            turf_hold: ModeAllocationPolicy::new(8, 2, rules_profile),
+            vault_break: ModeAllocationPolicy::new(9, 2, rules_profile),
+            zombie: ModeAllocationPolicy::new(13, 1, rules_profile),
+            shard_rush: ModeAllocationPolicy::new(15, 1, rules_profile),
+            last_stand: ModeAllocationPolicy::new(16, 1, rules_profile),
+            heartbeat_ms: 1_000,
+            seed_policy: SeedPolicy::OsRandom,
         }
     }
 
@@ -101,6 +82,7 @@ impl AllocationPolicy {
         self.vault_break.validate()?;
         self.zombie.validate()?;
         self.shard_rush.validate()?;
+        self.last_stand.validate()?;
         if self.heartbeat_ms == 0 {
             return Err(CodecError::InvalidValue);
         }
@@ -115,6 +97,7 @@ impl AllocationPolicy {
             GameMode::VaultBreak => self.vault_break,
             GameMode::Zombie => self.zombie,
             GameMode::ShardRush => self.shard_rush,
+            GameMode::LastStand => self.last_stand,
         }
     }
 }
@@ -175,15 +158,16 @@ pub fn validate_m01_request(request: &AllocateRequestBody) -> Result<(), CodecEr
 mod tests {
     use super::*;
 
-    const POLICY: AllocationPolicy = AllocationPolicy::new(
-        ModeAllocationPolicy::new(11, 12, 1),
-        ModeAllocationPolicy::new(21, 22, 2),
-        ModeAllocationPolicy::new(31, 32, 3),
-        ModeAllocationPolicy::new(41, 42, 4),
-        ModeAllocationPolicy::new(51, 52, 5),
-        1_000,
-        SeedPolicy::OsRandom,
-    );
+    const POLICY: AllocationPolicy = AllocationPolicy {
+        takedown: ModeAllocationPolicy::new(11, 12, 1),
+        turf_hold: ModeAllocationPolicy::new(21, 22, 2),
+        vault_break: ModeAllocationPolicy::new(31, 32, 3),
+        zombie: ModeAllocationPolicy::new(41, 42, 4),
+        shard_rush: ModeAllocationPolicy::new(51, 52, 5),
+        last_stand: ModeAllocationPolicy::new(61, 62, 6),
+        heartbeat_ms: 1_000,
+        seed_policy: SeedPolicy::OsRandom,
+    };
 
     #[test]
     fn policy_selects_explicit_mode_values() {
@@ -194,15 +178,10 @@ mod tests {
 
     #[test]
     fn policy_rejects_zero_gameplay_values() {
-        let invalid = AllocationPolicy::new(
-            ModeAllocationPolicy::new(0, 12, 1),
-            POLICY.turf_hold,
-            POLICY.vault_break,
-            POLICY.zombie,
-            POLICY.shard_rush,
-            POLICY.heartbeat_ms,
-            POLICY.seed_policy,
-        );
+        let invalid = AllocationPolicy {
+            takedown: ModeAllocationPolicy::new(0, 12, 1),
+            ..POLICY
+        };
         assert_eq!(invalid.validate(), Err(CodecError::InvalidValue));
     }
 

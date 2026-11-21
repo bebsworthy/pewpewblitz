@@ -324,6 +324,9 @@ impl ResultsPainter<'_> {
                         brawler::matchplay::ObjectiveTotals::ShardRush { .. } => {
                             "SHARD RUSH".to_owned()
                         }
+                        brawler::matchplay::ObjectiveTotals::LastStand { fighters, .. } => {
+                            format!("LAST STAND · {fighters} FIGHTERS")
+                        }
                     },
                 )
             },

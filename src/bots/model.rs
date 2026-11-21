@@ -72,6 +72,8 @@ pub(super) struct BotObservation {
     pub shards: Vec<BotPickupView>,
     /// Visible Shard Rush carriers in stable network-ID order; empty in other modes.
     pub shard_carriers: Vec<BotShardCarrierView>,
+    /// Public boost pickups in stable pickup-ID order; empty in modes without boosts.
+    pub boosts: Vec<BotPickupView>,
     pub objective: BotObjectiveView,
     pub weapon_phase: WeaponPhase,
     pub weapon_ammo: u8,
@@ -102,6 +104,7 @@ pub(super) enum BotTactic {
     CollectPickup,
     Contest,
     CollectShard,
+    HoldBoundary,
     EscortCarrier,
     InterceptCarrier,
     DefendSafe,

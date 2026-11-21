@@ -184,9 +184,76 @@ pub(super) struct CameraRigParams<'w> {
     ui_scale: Option<Res<'w, UiScale>>,
 }
 
+/// Fighters the spectator camera may follow, by team slot.
+type SpectatableFighters<'w, 's> = Query<
+    'w,
+    's,
+    (&'static brawler::combat::TeamId, &'static Position),
+    (With<Fighter>, Without<ArenaCamera>),
+>;
+
+/// Replicated facts the camera reads to follow a surviving fighter once the local fighter is out
+/// of a Last Stand round.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct SpectateParams<'w, 's> {
+    roots: Query<
+        'w,
+        's,
+        (
+            &'static brawler::matchplay::MatchState,
+            &'static brawler::matchplay::LastStandState,
+        ),
+        With<brawler::matchplay::MatchRoot>,
+    >,
+    local: Query<'w, 's, &'static brawler::combat::TeamId, (With<Fighter>, With<Controlled>)>,
+    fighters: SpectatableFighters<'w, 's>,
+}
+
+impl SpectateParams<'_, '_> {
+    /// The surviving fighter to follow: the lowest standing team slot, while the local fighter
+    /// holds a Last Stand place and the round is still active.
+    fn target(&self) -> Option<Vec2> {
+        let (state, mode) = self.roots.iter().next()?;
+        if mode.match_id != state.match_id
+            || !matches!(state.phase, brawler::matchplay::MatchPhase::Active { .. })
+        {
+            return None;
+        }
+        spectate_target(
+            &mode.placements,
+            *self.local.iter().next()?,
+            self.fighters
+                .iter()
+                .map(|(team, position)| (*team, position.0)),
+        )
+    }
+}
+
+/// Pure choice of the fighter an eliminated player watches.
+pub(super) fn spectate_target(
+    placements: &[u8],
+    local: brawler::combat::TeamId,
+    fighters: impl IntoIterator<Item = (brawler::combat::TeamId, Vec2)>,
+) -> Option<Vec2> {
+    let placed = |team: brawler::combat::TeamId| {
+        placements
+            .get(usize::from(team.0))
+            .is_some_and(|place| *place != 0)
+    };
+    if !placed(local) {
+        return None;
+    }
+    fighters
+        .into_iter()
+        .filter(|(team, _)| *team != local && !placed(*team))
+        .min_by_key(|(team, _)| team.0)
+        .map(|(_, position)| position)
+}
+
 #[allow(
     clippy::needless_pass_by_value,
     clippy::type_complexity,
+    clippy::too_many_arguments,
     reason = "the camera follows the one controlled replicated fighter"
 )]
 pub(super) fn follow_3d_camera(
@@ -207,6 +274,7 @@ pub(super) fn follow_3d_camera(
         With<ArenaCamera>,
     >,
     mut rig: CameraRigParams,
+    spectate: SpectateParams,
 ) {
     let window = windows.iter().next();
     // The editor frames the arena inside the area its chrome leaves (`frame_map_editor_viewport`).
@@ -250,7 +318,8 @@ pub(super) fn follow_3d_camera(
         }
         return;
     }
-    let controlled = fighters.iter().next();
+    let spectated = spectate.target();
+    let controlled = fighters.iter().next().filter(|_| spectated.is_none());
     let (bounds, fighter) = map.as_ref().map_or_else(
         || {
             let neutral = brawler::map::AxisAlignedMapRect {
@@ -262,16 +331,20 @@ pub(super) fn follow_3d_camera(
         |map| {
             (
                 map.camera_bounds,
-                controlled.map(|(position, _)| position.0),
+                spectated.or_else(|| controlled.map(|(position, _)| position.0)),
             )
         },
     );
     let settings = rig.settings.as_deref().copied().unwrap_or_default();
-    let aim = rig.pending.as_deref().and_then(|pending| {
-        pending
-            .aim_axis
-            .map(|direction| (direction, pending.aim_distance))
-    });
+    let aim = rig
+        .pending
+        .as_deref()
+        .filter(|_| spectated.is_none())
+        .and_then(|pending| {
+            pending
+                .aim_axis
+                .map(|direction| (direction, pending.aim_distance))
+        });
     let reach = controlled
         .and_then(|(_, loadout)| loadout)
         .zip(rig.pending.as_deref())
@@ -491,6 +564,30 @@ pub(super) fn ground_view(aspect: f32) -> GroundView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eliminated_players_follow_the_lowest_standing_fighter() {
+        use brawler::combat::TeamId;
+        let fighters = [
+            (TeamId(0), Vec2::new(0.0, 0.0)),
+            (TeamId(2), Vec2::new(20.0, 0.0)),
+            (TeamId(4), Vec2::new(40.0, 0.0)),
+        ];
+        // Still standing: no spectating.
+        assert_eq!(
+            spectate_target(&[0, 6, 0, 5, 0, 0], TeamId(0), fighters),
+            None
+        );
+        // Placed: follow the lowest-slot fighter that is still standing.
+        assert_eq!(
+            spectate_target(&[4, 6, 0, 5, 0, 0], TeamId(0), fighters),
+            Some(Vec2::new(20.0, 0.0))
+        );
+        assert_eq!(
+            spectate_target(&[4, 6, 3, 5, 0, 0], TeamId(0), fighters),
+            Some(Vec2::new(40.0, 0.0))
+        );
+    }
     use crate::ui;
 
     const EPSILON: f32 = 0.02;

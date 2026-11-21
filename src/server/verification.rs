@@ -222,6 +222,11 @@ pub(super) fn verify_process_match(
             u16::from(shard_rush.final_team_shards[0]),
             u16::from(shard_rush.final_team_shards[1]),
         ),
+        crate::matchplay::ModeSummary::LastStand(last_stand) => (
+            summary.mode_definition_id.0,
+            u16::from(last_stand.survivors),
+            u16::from(last_stand.fighters),
+        ),
     };
     // Canonical map process evidence: exact authored identity and dynamic terminal state.
     let map_dynamic = maps.single().ok().map(|(snapshot, state)| {

@@ -15,6 +15,10 @@ pub(super) const REGISTRATION: ModeRegistration = ModeRegistration {
         compatible_maps: super::CompatibleMapPolicy::ExactModeDefinition,
         default_map_preset: crate::map::ZOMBIE_YARD_PRESET,
         routing_mode: brawler_routing::GameMode::Zombie,
+        default_topology: super::ModeTeamTopology {
+            team_count: 1,
+            maximum_participants_per_team: 3,
+        },
         validate_operator_policy,
         resolve_operator_rules,
         install: install_server,

@@ -210,7 +210,8 @@ pub(super) struct MatchHelloValidationContext<'a> {
     pub(super) match_state: &'a crate::matchplay::MatchState,
     pub(super) active_count: usize,
     pub(super) maximum_clients: usize,
-    pub(super) team_counts: [u8; 2],
+    pub(super) team_counts: crate::matchplay::TeamCounts,
+    pub(super) team_count: u8,
     pub(super) maximum_participants_per_team: u8,
     pub(super) registry_fingerprint: u64,
     pub(super) content_fingerprint: crate::content::GameplayContentFingerprint,
@@ -244,6 +245,7 @@ pub(super) fn validate_match_hello(
         active_count,
         maximum_clients,
         team_counts,
+        team_count,
         maximum_participants_per_team,
         registry_fingerprint,
         content_fingerprint,
@@ -310,6 +312,7 @@ pub(super) fn validate_match_hello(
         MatchJoinSource::Direct {
             assigned_team: crate::matchplay::assigned_team(
                 team_counts,
+                team_count,
                 maximum_participants_per_team,
             )
             .ok_or(MatchJoinRejection::MatchFull)?,
@@ -600,9 +603,9 @@ pub fn validate_match_manifest(
     }
     let mut players = BTreeSet::new();
     let mut clients = BTreeSet::new();
-    let mut teams = [0_usize; 2];
+    let mut teams = [0_usize; crate::matchplay::MAX_MATCH_TEAMS];
     for participant in &manifest.participants {
-        if participant.team > 1 {
+        if usize::from(participant.team) >= teams.len() {
             return Err(MatchWorkerManifestError::InvalidTeam);
         }
         if !crate::lobby::normalize_proposed_display_name(participant.display_name.as_str())
@@ -619,7 +622,7 @@ pub fn validate_match_manifest(
         teams[usize::from(participant.team)] += 1;
     }
     for bot in &manifest.bots {
-        if bot.team > 1 {
+        if usize::from(bot.team) >= teams.len() {
             return Err(MatchWorkerManifestError::InvalidTeam);
         }
         if !crate::lobby::normalize_proposed_display_name(bot.display_name.as_str())
@@ -632,10 +635,13 @@ pub fn validate_match_manifest(
         }
         teams[usize::from(bot.team)] += 1;
     }
-    let topology_valid = if manifest.mode == brawler_routing::GameMode::Zombie {
-        matches!(teams, [2 | 3, 0])
-    } else {
-        matches!(teams, [1, 1] | [2, 2] | [3, 3])
+    let topology_valid = match manifest.mode {
+        brawler_routing::GameMode::Zombie => matches!(teams, [2 | 3, 0, 0, 0, 0, 0]),
+        brawler_routing::GameMode::LastStand => teams == [1; crate::matchplay::MAX_MATCH_TEAMS],
+        _ => matches!(
+            teams,
+            [1, 1, 0, 0, 0, 0] | [2, 2, 0, 0, 0, 0] | [3, 3, 0, 0, 0, 0]
+        ),
     };
     if !topology_valid {
         return Err(MatchWorkerManifestError::ParticipantCapacity);
@@ -682,12 +688,12 @@ pub fn build_match_worker_app(
         .participants
         .len()
         .saturating_add(manifest.bots.len());
-    let players_per_team = u8::try_from(if manifest.mode == brawler_routing::GameMode::Zombie {
-        participant_count
-    } else {
-        participant_count / 2
-    })
-    .map_err(|_| MatchWorkerManifestError::ParticipantCapacity)?;
+    // The manifest's mode fixes the team count; the roster size fixes players per team.
+    let team_count = crate::modes::builtin_mode_catalog()
+        .descriptor_for_mode(config.game_mode)
+        .map_or(2, |mode| mode.server().default_topology.team_count);
+    let players_per_team = u8::try_from(participant_count / usize::from(team_count.max(1)))
+        .map_err(|_| MatchWorkerManifestError::ParticipantCapacity)?;
     let mut app = build_match_worker_graph(config, players_per_team);
     validate_runtime_identity(
         &mut app,
@@ -938,6 +944,7 @@ mod tests {
                 active_count,
                 maximum_clients: 2,
                 team_counts,
+                team_count: 2,
                 maximum_participants_per_team: 1,
                 registry_fingerprint: 17,
                 content_fingerprint: crate::content::GameplayContentFingerprint(19),
@@ -947,37 +954,37 @@ mod tests {
         };
 
         assert_eq!(
-            validate(&hello, &state, 2, [1, 1]),
+            validate(&hello, &state, 2, [1, 1, 0, 0, 0, 0]),
             Some(MatchJoinRejection::ProtocolVersionMismatch)
         );
         hello.protocol_version = crate::protocol::SUPPORTED_PROTOCOL_VERSION;
         assert_eq!(
-            validate(&hello, &state, 2, [1, 1]),
+            validate(&hello, &state, 2, [1, 1, 0, 0, 0, 0]),
             Some(MatchJoinRejection::BuildVersionMismatch)
         );
         hello.build_version = crate::VERSION.to_string();
         assert_eq!(
-            validate(&hello, &state, 2, [1, 1]),
+            validate(&hello, &state, 2, [1, 1, 0, 0, 0, 0]),
             Some(MatchJoinRejection::RegistryMismatch)
         );
         hello.registry_fingerprint = 17;
         assert_eq!(
-            validate(&hello, &state, 2, [1, 1]),
+            validate(&hello, &state, 2, [1, 1, 0, 0, 0, 0]),
             Some(MatchJoinRejection::ContentMismatch)
         );
         hello.content_fingerprint = crate::content::GameplayContentFingerprint(19);
         state.phase = crate::matchplay::MatchPhase::Active { ends_at_tick: 50 };
         assert_eq!(
-            validate(&hello, &state, 2, [1, 1]),
+            validate(&hello, &state, 2, [1, 1, 0, 0, 0, 0]),
             Some(MatchJoinRejection::MatchInProgress)
         );
         state.phase = crate::matchplay::MatchPhase::Waiting;
         assert_eq!(
-            validate(&hello, &state, 2, [1, 1]),
+            validate(&hello, &state, 2, [1, 1, 0, 0, 0, 0]),
             Some(MatchJoinRejection::ServerFull)
         );
         assert_eq!(
-            validate(&hello, &state, 1, [1, 1]),
+            validate(&hello, &state, 1, [1, 1, 0, 0, 0, 0]),
             Some(MatchJoinRejection::MatchFull)
         );
     }
@@ -1000,7 +1007,8 @@ mod tests {
                 match_state: &state,
                 active_count: 2,
                 maximum_clients: 2,
-                team_counts: [1, 1],
+                team_counts: [1, 1, 0, 0, 0, 0],
+                team_count: 2,
                 maximum_participants_per_team: 1,
                 registry_fingerprint: 17,
                 content_fingerprint: crate::content::GameplayContentFingerprint(19),
@@ -1048,7 +1056,8 @@ mod tests {
                     match_state: state,
                     active_count: 4,
                     maximum_clients: 4,
-                    team_counts: [2, 2],
+                    team_counts: [2, 2, 0, 0, 0, 0],
+                    team_count: 2,
                     maximum_participants_per_team: 2,
                     registry_fingerprint: 17,
                     content_fingerprint: crate::content::GameplayContentFingerprint(19),
@@ -1521,6 +1530,14 @@ mod tests {
         value.participants.truncate(1);
         let bot_rows = if game_mode == GameMode::Zombie {
             vec![(100, 0, "Bot 1"), (101, 0, "Bot 2")]
+        } else if game_mode == GameMode::LastStand {
+            vec![
+                (100, 1, "Bot 1"),
+                (101, 2, "Bot 2"),
+                (102, 3, "Bot 3"),
+                (103, 4, "Bot 4"),
+                (104, 5, "Bot 5"),
+            ]
         } else {
             vec![(100, 0, "Bot 1"), (101, 1, "Bot 2"), (102, 1, "Bot 3")]
         };
@@ -1733,13 +1750,22 @@ mod tests {
                 crate::map::PRISM_QUARRY_PRESET,
                 crate::map::PRISM_QUARRY_ADMISSION_REVISION,
             ),
+            (
+                GameMode::LastStand,
+                crate::map::SUNDER_RING_PRESET,
+                crate::map::SUNDER_RING_ADMISSION_REVISION,
+            ),
         ];
         for (game_mode, map_preset, map_revision) in cases {
             let mut worker = practice_worker_for_mode(game_mode, map_preset, map_revision);
             activate_bot_worker(&mut worker);
             drive_bot_schedules(&mut worker, 30);
             let rows = bot_worker_rows(&mut worker);
-            let expected_bot_count = if game_mode == GameMode::Zombie { 2 } else { 3 };
+            let expected_bot_count = match game_mode {
+                GameMode::Zombie => 2,
+                GameMode::LastStand => 5,
+                _ => 3,
+            };
             assert_eq!(
                 rows.len(),
                 expected_bot_count,
@@ -1772,10 +1798,10 @@ mod tests {
                 .map(|(name, _, _, _, _)| name.as_str())
                 .collect::<Vec<_>>();
             names.sort_unstable();
-            let expected_names = if game_mode == GameMode::Zombie {
-                vec!["Bot 1", "Bot 2"]
-            } else {
-                vec!["Bot 1", "Bot 2", "Bot 3"]
+            let expected_names = match game_mode {
+                GameMode::Zombie => vec!["Bot 1", "Bot 2"],
+                GameMode::LastStand => vec!["Bot 1", "Bot 2", "Bot 3", "Bot 4", "Bot 5"],
+                _ => vec!["Bot 1", "Bot 2", "Bot 3"],
             };
             assert_eq!(names, expected_names);
         }

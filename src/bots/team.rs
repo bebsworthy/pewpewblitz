@@ -25,7 +25,10 @@ pub(super) fn assign_roles(members: &[BotPlanMember]) -> BTreeMap<NetworkEntityI
                 Some(BotObjectiveView::AttackAndDefend) if members.len() == 1 => BotRole::Objective,
                 Some(BotObjectiveView::AttackAndDefend) if index == 0 => BotRole::Defender,
                 Some(BotObjectiveView::AttackAndDefend) if index == 1 => BotRole::Objective,
-                Some(BotObjectiveView::CollectAndHold { .. }) => BotRole::Objective,
+                Some(
+                    BotObjectiveView::CollectAndHold { .. }
+                    | BotObjectiveView::SurviveBoundary { .. },
+                ) => BotRole::Objective,
                 _ => BotRole::Pressure,
             };
             roles.insert(member.network_id, role);

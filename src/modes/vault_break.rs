@@ -15,6 +15,7 @@ pub(super) const REGISTRATION: ModeRegistration = ModeRegistration {
         compatible_maps: super::CompatibleMapPolicy::ExactModeDefinition,
         default_map_preset: crate::map::FEATURE_YARD_VAULT_BREAK_PRESET,
         routing_mode: brawler_routing::GameMode::VaultBreak,
+        default_topology: super::ModeTeamTopology::VERSUS,
         validate_operator_policy,
         resolve_operator_rules,
         install: install_server,

@@ -286,7 +286,7 @@ their intersection and publishes the maximum active-fighter count used by admiss
 capacity checks.
 
 Supported routed product game types include exact 1v1, 2v2, and 3v3 Takedown, Turf Hold, and Vault Break
-matches, plus 3v3 Shard Rush. The 1v1/2v2 paths retain the **Feature Yard** integration-map family. Its three ordinary
+matches, 3v3 Shard Rush, and six-fighter solo Last Stand. The 1v1/2v2 paths retain the **Feature Yard** integration-map family. Its three ordinary
 recipes share identical geometry and differ only in stable identity, compatible mode, and the typed
 anchors required by that mode. Mirrored tall-grass groups touch contested approaches so the family
 exercises terrain concealment during live mode play rather than on an isolated map. Feature Yard is
@@ -317,8 +317,19 @@ ringed by six destructible crates. Walled elbows and a five-cell blocker on each
 carriers somewhere to retreat to and break line of sight. Two oil barrels sit on the spawn-to-centre
 lines, and four corner sand-and-grass beds offer concealment away from the source. The
 `shard-rush-3v3` game type ("Shard Rush 3v3") lists only this map.
+
+**Sunder Ring** (BRL-5ss9, preset/recipe 16) is the dedicated Last Stand map: a 33×33 square arena
+mirrored on both axes around its centre, which is also the boundary centre. Six solo spawns (team
+slots 0–5) sit around the outer ring, each at least eight cells from the others and within 1.5 cells
+of the same distance from the centre, so no starting position is closer to the final ring. Short
+shield walls break sight lines between neighbouring spawns, a broken wall ring guards the plaza,
+destructible cover forms a cross at the centre, two oil barrels sit on the north–south axis, and six
+treasure chests (four on the plaza diagonals, two on the axis) give early loot routes. Corner and
+edge sand-and-grass beds offer concealment away from the centre. The `last-stand-6p` game type
+("Sunder Ring Last Stand") lists only this map.
+
 Ordinary matches are expected to center on 3v3, while the architecture may support larger bounded
-arrangements such as twelve solo fighters, two teams of five, or three teams of three when a concrete
+arrangements such as six solo fighters (Last Stand), two teams of five, or three teams of three when a concrete
 mode, map, HUD, admission profile, and capacity evidence all allow it. No common subsystem may assume
 exactly two teams or use one advertised topology as an engine-wide ceiling.
 
@@ -408,6 +419,37 @@ team holding more shards wins and equal totals draw, before the common forfeit r
 results, the match summary, and Practice bots consume the replicated state and the typed source
 anchor, not map-specific constants.
 
+### Last Stand
+
+Last Stand (BRL-5ss9) is six solo fighters with one life each: six teams of one on Sunder Ring, last
+fighter standing wins. The common lifecycle installs an `EliminationLifecycle` marker, so defeated
+fighters never respawn. The fighters standing when the round goes Active form the roster. A fighter
+leaves it when defeated (seen through the tick's defeat facts, before the deferred `Defeated`
+marker) or when its entity leaves the match. Fighters eliminated on the same tick share a place,
+and the place is recorded in the replicated `LastStandState.placements`. When one fighter remains,
+it wins (`TeamVictory`); when the last fighters fall together, the round is a draw. At the deadline,
+every fighter still standing shares first place and the round draws. A routed seat on hold stays in
+the round under bot control until the player rejoins or the hold expires, which eliminates it
+without loot drops.
+
+The playable boundary is a circle around the map centre that starts at the map's half-diagonal, so
+every spawn begins safe. It closes in four phases, scheduled as per-mille of the active round (hold
+then shrink: 70%, 45%, 22%, then 8% of the opening radius, finishing at about 78% of the round).
+Every 30 ticks, each fighter outside the ring takes 30, 45, 70, then 100 neutral environmental damage.
+That damage goes through the combat environment transaction, which ignores spawn protection, and
+combat alone commits health, defeats, and cues. The replicated phase descriptor (centre, radii,
+shrink start and end ticks) lets clients interpolate the ring from the match clock without per-tick
+replication.
+
+Boosts reuse the Zombie stack model (+5% maximum health and damage per stack), capped at six stacks
+per fighter. A destroyed treasure chest drops one public individual boost. A defeated fighter drops
+`clamp(stacks, 1, 2)` individual boosts on distinct free cells next to where it fell. When it fell
+outside the ring, the drops go to the nearest free cells inside the ring instead. When no free cell
+exists, the drop is skipped and counted in telemetry. HUD, results, match summary, and Practice
+bots consume `LastStandState` and the semantic `SurviveBoundary` bot objective, never map constants.
+The boundary schedule and drop rules are code-owned in `LastStandRules::default()`; operator tuning
+is deferred to backlog.
+
 Together these modes prove that combat, fighter lifecycle, map installation, and common match phases
 are not coupled to one scoring model.
 
@@ -441,9 +483,10 @@ hostiles, total spawns, stack count, and random-drop budget are all explicitly b
 These layouts do not become supported rules merely because they can be described. Vault Break is the
 completed V10 proof governed by the
 [damageable world objects and Vault Break specification](./18-damageable-world-objects-and-vault-break.md),
-and Shard Rush is the supported collect-and-hold family. Other families remain product candidates:
-- **Last Stand:** solo fighters or teams survive until one remains. It adds elimination, distributed
-  spawning, exploration/loot pressure, and a closing playable boundary.
+Shard Rush is the supported collect-and-hold family, and solo Last Stand is the supported elimination
+family. Other families remain product candidates:
+- **Team Last Stand:** teams instead of solo fighters survive until one team remains, on the same
+  elimination, distributed-spawn, loot, and closing-boundary rules.
 
 A new mode is introduced as a complete player-visible loop, not as a generic framework exercise. It
 must define its authoritative rules, configuration, map schema, topology, HUD/results facts,

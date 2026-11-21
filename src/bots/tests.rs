@@ -1200,6 +1200,7 @@ fn observation(tick: u64) -> BotObservation {
         pickups: Vec::new(),
         shards: Vec::new(),
         shard_carriers: Vec::new(),
+        boosts: Vec::new(),
         objective: crate::matchplay::BotObjectiveView::Elimination,
         weapon_phase: WeaponPhase::Ready,
         weapon_ammo: 1,
@@ -1375,4 +1376,67 @@ fn prism_quarry_spawns_reach_the_source_and_both_corner_beds() {
             assert_eq!(route.last().copied(), Some(goal));
         }
     }
+}
+
+fn last_stand_observation(position: Vec2) -> BotObservation {
+    let mut observed = observation(10);
+    observed.self_view.position = position;
+    observed.objective = crate::matchplay::BotObjectiveView::SurviveBoundary {
+        center: Vec2::ZERO,
+        radius: 400.0,
+        next_radius: 300.0,
+    };
+    observed
+}
+
+/// BRL-5ss9: every Last Stand bot is an objective bot; leaving the ring outranks a low-health
+/// retreat, drifting inward precedes the shrink, and a safe nearby boost is collected.
+#[test]
+fn last_stand_bots_escape_the_boundary_and_collect_safe_boosts() {
+    let members = [10, 20].map(|id| BotPlanMember {
+        network_id: crate::protocol::NetworkEntityId(id),
+        team: crate::combat::TeamId(u8::try_from(id / 10).unwrap()),
+        objective: crate::matchplay::BotObjectiveView::SurviveBoundary {
+            center: Vec2::ZERO,
+            radius: 400.0,
+            next_radius: 300.0,
+        },
+    });
+    assert!(
+        assign_roles(&members)
+            .values()
+            .all(|role| *role == BotRole::Objective)
+    );
+
+    // Outside and hurt: dash back inside instead of retreating from a nearby enemy.
+    let mut observed = last_stand_observation(Vec2::new(500.0, 0.0));
+    observed.self_view.current_health = 10;
+    observed
+        .visible_enemies
+        .push(enemy_at(Vec2::new(560.0, 0.0), Vec2::ZERO));
+    let (tactic, intent) = shard_rush_choice(&observed);
+    assert_eq!(tactic, BotTactic::HoldBoundary);
+    assert!(intent.dash);
+    assert!(intent.move_goal.unwrap().x < 300.0);
+
+    // Inside the current ring but past the next phase's comfort ring: drift without a dash.
+    let observed = last_stand_observation(Vec2::new(0.0, 280.0));
+    let (tactic, intent) = shard_rush_choice(&observed);
+    assert_eq!(tactic, BotTactic::HoldBoundary);
+    assert!(!intent.dash);
+    assert!(intent.move_goal.unwrap().y < 280.0);
+
+    // Comfortably inside: take the nearby safe boost, ignore one past the comfort ring.
+    let mut observed = last_stand_observation(Vec2::new(0.0, 0.0));
+    observed.boosts = vec![
+        super::model::BotPickupView {
+            position: Vec2::new(0.0, 290.0),
+        },
+        super::model::BotPickupView {
+            position: Vec2::new(60.0, 0.0),
+        },
+    ];
+    let (tactic, intent) = shard_rush_choice(&observed);
+    assert_eq!(tactic, BotTactic::CollectPickup);
+    assert_eq!(intent.move_goal, Some(Vec2::new(60.0, 0.0)));
 }

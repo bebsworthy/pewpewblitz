@@ -648,7 +648,7 @@ fn commit_seat_rejoin(
 
 struct AdmissionBatchState {
     active_count: usize,
-    team_counts: [u8; 2],
+    team_counts: crate::matchplay::TeamCounts,
     living_fighters: Vec<(TeamId, Vec2)>,
     admitted_client_ids: BTreeSet<u64>,
 }
@@ -659,12 +659,14 @@ fn collect_fighter_admission_state(
 ) -> AdmissionBatchState {
     let mut state = AdmissionBatchState {
         active_count: participants.iter().count(),
-        team_counts: [0; 2],
+        team_counts: crate::matchplay::TeamCounts::default(),
         living_fighters: Vec::new(),
         admitted_client_ids: BTreeSet::new(),
     };
     for (team, participant, position) in participants {
-        if participant.match_id == match_state.match_id && team.0 <= 1 {
+        if participant.match_id == match_state.match_id
+            && usize::from(team.0) < crate::matchplay::MAX_MATCH_TEAMS
+        {
             state.team_counts[usize::from(team.0)] =
                 state.team_counts[usize::from(team.0)].saturating_add(1);
             state.living_fighters.push((*team, position.0));
@@ -809,6 +811,7 @@ fn process_client_hellos(
                             active_count: batch.active_count,
                             maximum_clients: config.max_clients,
                             team_counts: batch.team_counts,
+                            team_count: lifecycle_rules.team_count,
                             maximum_participants_per_team: lifecycle_rules
                                 .maximum_participants_per_team,
                             registry_fingerprint: fingerprint.0,
@@ -1349,6 +1352,45 @@ fn build_match_worker_graph(config: ServerNetworkConfig, players_per_team: u8) -
     build_authoritative_app(config, false, Some(players_per_team))
 }
 
+/// The common lifecycle for the configured mode: its registered team topology, then operator
+/// timing overrides, then an exact manifest roster when a routed match supplied one.
+fn configured_lifecycle_rules(
+    config: &ServerNetworkConfig,
+    exact_players_per_team: Option<u8>,
+) -> MatchLifecycleRules {
+    let mut lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
+    let topology = crate::modes::builtin_mode_catalog()
+        .descriptor_for_mode(config.game_mode)
+        .expect("every configured game mode has a registered descriptor")
+        .server()
+        .default_topology;
+    lifecycle.team_count = topology.team_count;
+    lifecycle.maximum_participants_per_team = topology.maximum_participants_per_team;
+    if let Some(ticks) = config.match_duration_ticks {
+        lifecycle.active_limit_ticks = ticks;
+    }
+    if let Some(ticks) = config.match_countdown_ticks {
+        lifecycle.countdown_ticks = ticks;
+    }
+    if let Some(ticks) = config.match_respawn_ticks {
+        lifecycle.respawn_delay_ticks = ticks;
+    }
+    if let Some(ticks) = config.match_spawn_protection_ticks {
+        lifecycle.spawn_protection_ticks = ticks;
+    }
+    if let Some(ticks) = config.match_completed_input_lock_ticks {
+        lifecycle.completed_input_lock_ticks = ticks;
+    }
+    if let Some(players) = exact_players_per_team {
+        lifecycle.minimum_participants_per_team = players;
+        lifecycle.maximum_participants_per_team = players;
+        lifecycle = lifecycle
+            .validate()
+            .expect("validated manifest topology fits lifecycle bounds");
+    }
+    lifecycle
+}
+
 fn build_authoritative_app(
     mut config: ServerNetworkConfig,
     install_terminal_handler: bool,
@@ -1379,32 +1421,7 @@ fn build_authoritative_app(
             Some(rules.vault_break_critical_health_percent);
         config.shard_rush_policy = Some(rules.shard_rush);
     }
-    let mut lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
-    if config.game_mode == crate::config::GameMode::Zombie {
-        lifecycle.team_count = 1;
-    }
-    if let Some(ticks) = config.match_duration_ticks {
-        lifecycle.active_limit_ticks = ticks;
-    }
-    if let Some(ticks) = config.match_countdown_ticks {
-        lifecycle.countdown_ticks = ticks;
-    }
-    if let Some(ticks) = config.match_respawn_ticks {
-        lifecycle.respawn_delay_ticks = ticks;
-    }
-    if let Some(ticks) = config.match_spawn_protection_ticks {
-        lifecycle.spawn_protection_ticks = ticks;
-    }
-    if let Some(ticks) = config.match_completed_input_lock_ticks {
-        lifecycle.completed_input_lock_ticks = ticks;
-    }
-    if let Some(players) = exact_players_per_team {
-        lifecycle.minimum_participants_per_team = players;
-        lifecycle.maximum_participants_per_team = players;
-        lifecycle = lifecycle
-            .validate()
-            .expect("validated manifest topology fits lifecycle bounds");
-    }
+    let lifecycle = configured_lifecycle_rules(&config, exact_players_per_team);
     app.insert_resource(config)
         .insert_resource(lifecycle)
         .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(

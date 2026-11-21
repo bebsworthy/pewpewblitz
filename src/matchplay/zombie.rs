@@ -239,11 +239,11 @@ pub fn effective_maximum_health(base: u16, stacks: BoostStacks) -> u16 {
 
 #[cfg(feature = "server")]
 mod authority {
+    use super::super::boost_pickups::spawn_boost_pickup;
     use super::{
-        BOOST_PICKUP_NETWORK_NAMESPACE, BoostGrantScope, BoostPickup, BoostPickupAvailableAtTick,
-        BoostPickupIdentity, BoostPickupSource, BoostStacks, HOSTILE_NPC_NETWORK_NAMESPACE,
-        HostileNpc, HostileNpcIdentity, IntoScheduleConfigs, MAX_LIVE_BOOST_PICKUPS,
-        ZOMBIE_DEFINITION, ZombieModeState, ZombiePhase, ZombieRules, effective_maximum_health,
+        BoostGrantScope, BoostPickup, BoostPickupSource, BoostStacks,
+        HOSTILE_NPC_NETWORK_NAMESPACE, HostileNpc, HostileNpcIdentity, IntoScheduleConfigs,
+        MAX_LIVE_BOOST_PICKUPS, ZOMBIE_DEFINITION, ZombieModeState, ZombiePhase, ZombieRules,
     };
     use crate::{
         combat::{
@@ -269,19 +269,12 @@ mod authority {
     #[derive(Resource, Default)]
     struct NextZombieIds {
         spawn: u32,
-        pickup: u32,
     }
 
     impl NextZombieIds {
         fn next_spawn(&mut self) -> Option<u32> {
             let value = self.spawn.checked_add(1)?;
             self.spawn = value;
-            Some(value)
-        }
-
-        fn next_pickup(&mut self) -> Option<u32> {
-            let value = self.pickup.checked_add(1)?;
-            self.pickup = value;
             Some(value)
         }
 
@@ -303,12 +296,6 @@ mod authority {
     struct ProcessedZombieDefeats {
         match_id: Option<super::super::MatchId>,
         events: BTreeSet<u64>,
-    }
-
-    #[derive(Resource, Default)]
-    struct ProcessedZombieChests {
-        match_id: Option<super::super::MatchId>,
-        placements: BTreeSet<crate::map::MapPlacementId>,
     }
 
     #[derive(Resource, Default)]
@@ -366,7 +353,12 @@ mod authority {
                 .init_resource::<NextZombieIds>()
                 .init_resource::<PendingZombieMelee>()
                 .init_resource::<ProcessedZombieDefeats>()
-                .init_resource::<ProcessedZombieChests>()
+                .insert_resource(super::super::boost_pickups::BoostPickupRules {
+                    pickup_radius: rules.pickup_radius,
+                    stack_limit: rules.boost_stack_limit,
+                })
+                .init_resource::<super::super::boost_pickups::NextBoostPickupId>()
+                .init_resource::<super::super::boost_pickups::ProcessedChests>()
                 .init_resource::<NextAmbientDropAt>()
                 .init_resource::<ZombieTelemetry>()
                 .add_systems(
@@ -380,7 +372,7 @@ mod authority {
                     (
                         advance_zombie_director,
                         advance_zombie_crowd,
-                        collect_boost_pickups,
+                        super::super::boost_pickups::collect_boost_pickups,
                     )
                         .chain()
                         .after(MatchSet::FighterLifecycle),
@@ -1092,36 +1084,6 @@ mod authority {
         }
     }
 
-    fn spawn_boost_pickup(
-        commands: &mut Commands,
-        ids: &mut NextZombieIds,
-        match_id: super::super::MatchId,
-        source: BoostPickupSource,
-        scope: BoostGrantScope,
-        position: Vec2,
-        tick: u64,
-    ) -> bool {
-        let Some(pickup_id) = ids.next_pickup() else {
-            return false;
-        };
-        let network_id = NetworkEntityId(BOOST_PICKUP_NETWORK_NAMESPACE | u64::from(pickup_id));
-        commands.spawn((
-            BoostPickup,
-            BoostPickupIdentity {
-                match_id,
-                pickup_id,
-            },
-            source,
-            scope,
-            BoostPickupAvailableAtTick(tick.saturating_add(1)),
-            network_id,
-            Position::from_xy(position.x, position.y),
-            Transform::from_translation(position.extend(0.0)),
-            Replicate::to_clients(NetworkTarget::All),
-        ));
-        true
-    }
-
     #[allow(
         clippy::too_many_arguments,
         clippy::needless_pass_by_value,
@@ -1133,10 +1095,10 @@ mod authority {
         mut commands: Commands,
         tick: Res<SimulationTick>,
         rules: Res<ZombieRules>,
-        mut ids: ResMut<NextZombieIds>,
+        mut ids: ResMut<super::super::boost_pickups::NextBoostPickupId>,
         facts: Res<CombatOutcomeFacts>,
         mut processed: ResMut<ProcessedZombieDefeats>,
-        mut processed_chests: ResMut<ProcessedZombieChests>,
+        mut processed_chests: ResMut<super::super::boost_pickups::ProcessedChests>,
         mut next_drop: ResMut<NextAmbientDropAt>,
         mut outcomes: ResMut<ModeRuleOutcome>,
         mut diagnostics: ResMut<MatchOutcomeDiagnostics>,
@@ -1172,46 +1134,26 @@ mod authority {
                 .unwrap_or_default(),
             );
         }
-        if processed_chests.match_id != Some(state.match_id) {
-            processed_chests.match_id = Some(state.match_id);
-            processed_chests.placements.clear();
-        }
-        if let Ok(map_state) = map_facts.states.single() {
-            let terminal = map_state
-                .terminal_states
-                .iter()
-                .map(|transition| transition.placement_id)
-                .collect::<BTreeSet<_>>();
-            for placement in map_facts
-                .resolved
-                .snapshot
-                .placements
-                .iter()
-                .filter(|placement| {
-                    placement.asset_id == crate::map::TREASURE_CHEST_ASSET
-                        && terminal.contains(&placement.placement_id)
-                        && processed_chests.placements.insert(placement.placement_id)
-                })
-            {
-                let scope = if placement.placement_id.0 % 2 == 0 {
-                    BoostGrantScope::Team
-                } else {
-                    BoostGrantScope::Individual
-                };
-                let _ = spawn_boost_pickup(
-                    &mut commands,
-                    &mut ids,
-                    state.match_id,
-                    BoostPickupSource::Chest,
-                    scope,
-                    map_facts
-                        .resolved
-                        .snapshot
-                        .dimensions
-                        .cell_center(placement.cell),
-                    tick.0,
-                );
-            }
+        for (placement_id, position) in processed_chests.newly_destroyed(
+            state.match_id,
+            &map_facts.resolved,
+            map_facts.states.single().ok(),
+        ) {
+            // Zombie alternates team and individual chest grants by placement parity.
+            let scope = if placement_id.0 % 2 == 0 {
+                BoostGrantScope::Team
+            } else {
+                BoostGrantScope::Individual
+            };
+            let _ = spawn_boost_pickup(
+                &mut commands,
+                &mut ids,
+                state.match_id,
+                BoostPickupSource::Chest,
+                scope,
+                position,
+                tick.0,
+            );
         }
         let zombie_by_id = zombies
             .iter()
@@ -1364,115 +1306,6 @@ mod authority {
     }
 
     #[allow(
-        clippy::type_complexity,
-        clippy::needless_pass_by_value,
-        reason = "the Bevy system parameters declare the complete deterministic pickup transaction view"
-    )]
-    fn collect_boost_pickups(
-        mut commands: Commands,
-        tick: Res<SimulationTick>,
-        rules: Res<ZombieRules>,
-        roots: Query<&MatchState, With<MatchRoot>>,
-        pickups: Query<
-            (
-                Entity,
-                &BoostPickupIdentity,
-                &BoostGrantScope,
-                &BoostPickupAvailableAtTick,
-                &Position,
-            ),
-            With<BoostPickup>,
-        >,
-        mut fighters: ParamSet<(
-            Query<
-                (
-                    Entity,
-                    &NetworkEntityId,
-                    &Position,
-                    &BoostStacks,
-                    &MatchParticipant,
-                ),
-                (With<Fighter>, With<ActiveCombatant>, Without<Defeated>),
-            >,
-            Query<
-                (
-                    &mut CurrentHealth,
-                    &mut BoostStacks,
-                    &crate::builds::ResolvedFighterStats,
-                    &MatchParticipant,
-                ),
-                With<Fighter>,
-            >,
-        )>,
-    ) {
-        let Ok(state) = roots.single() else { return };
-        if !matches!(state.phase, MatchPhase::Active { .. }) {
-            return;
-        }
-        let mut ordered = pickups.iter().collect::<Vec<_>>();
-        ordered.sort_by_key(|(_, identity, ..)| identity.pickup_id);
-        for (pickup_entity, identity, scope, available, position) in ordered {
-            if identity.match_id != state.match_id || tick.0 < available.0 {
-                continue;
-            }
-            let (nearby, recipients_to_apply) = {
-                let candidates = fighters.p0();
-                let mut nearby = candidates
-                    .iter()
-                    .filter(|(_, _, candidate_position, _, participant)| {
-                        participant.match_id == state.match_id
-                            && candidate_position.0.distance_squared(position.0)
-                                <= rules.pickup_radius.powi(2)
-                    })
-                    .map(|(entity, network_id, _, stacks, _)| (network_id.0, entity, stacks.0))
-                    .collect::<Vec<_>>();
-                nearby.sort_by_key(|candidate| candidate.0);
-                let recipients = match scope {
-                    BoostGrantScope::Individual => nearby
-                        .iter()
-                        .find(|candidate| candidate.2 < rules.boost_stack_limit)
-                        .map(|candidate| vec![candidate.1])
-                        .unwrap_or_default(),
-                    BoostGrantScope::Team => candidates
-                        .iter()
-                        .filter(|(_, _, _, stacks, participant)| {
-                            participant.match_id == state.match_id
-                                && stacks.0 < rules.boost_stack_limit
-                        })
-                        .map(|(entity, network_id, ..)| (network_id.0, entity))
-                        .collect::<BTreeMap<_, _>>()
-                        .into_values()
-                        .collect(),
-                };
-                (nearby, recipients)
-            };
-            if nearby.is_empty() || recipients_to_apply.is_empty() {
-                continue;
-            }
-            let mut recipients = fighters.p1();
-            for entity in recipients_to_apply {
-                let Ok((mut health, mut stacks, fighter_stats, participant)) =
-                    recipients.get_mut(entity)
-                else {
-                    continue;
-                };
-                if participant.match_id != state.match_id || stacks.0 >= rules.boost_stack_limit {
-                    continue;
-                }
-                let previous_maximum =
-                    effective_maximum_health(fighter_stats.maximum_health, *stacks);
-                stacks.0 = stacks.0.saturating_add(1).min(rules.boost_stack_limit);
-                let new_maximum = effective_maximum_health(fighter_stats.maximum_health, *stacks);
-                health.0 = health
-                    .0
-                    .saturating_add(new_maximum.saturating_sub(previous_maximum))
-                    .min(new_maximum);
-            }
-            commands.entity(pickup_entity).despawn();
-        }
-    }
-
-    #[allow(
         clippy::needless_pass_by_value,
         clippy::type_complexity,
         clippy::too_many_arguments,
@@ -1483,6 +1316,7 @@ mod authority {
         pending: Res<PendingMatchRestart>,
         rules: Res<ZombieRules>,
         mut ids: ResMut<NextZombieIds>,
+        mut pickup_ids: ResMut<super::super::boost_pickups::NextBoostPickupId>,
         mut next_drop: ResMut<NextAmbientDropAt>,
         mut roots: Query<&mut ZombieModeState, With<MatchRoot>>,
         runtime: Query<Entity, Or<(With<HostileNpc>, With<BoostPickup>)>>,
@@ -1496,6 +1330,7 @@ mod authority {
             commands.entity(fighter).insert(BoostStacks(0));
         }
         ids.clear();
+        pickup_ids.clear();
         next_drop.0 = 0;
         if let Ok(mut state) = roots.single_mut() {
             *state = ZombieModeState {

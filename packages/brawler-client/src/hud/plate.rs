@@ -83,6 +83,71 @@ pub(crate) struct PlateState {
     pub(crate) team_strip: Vec<TeamStripRow>,
 }
 
+/// The local fighter's boost stacks and the damage bonus they grant.
+fn boost_chip(stacks: u8) -> PlateChip {
+    PlateChip {
+        value: stacks.to_string(),
+        caption: format!("BOOST +{}%", u16::from(stacks) * 5),
+        tone: PlateTone::Ally,
+    }
+}
+
+/// Zombie plate: own boosts left, live zombies right, the survival or overtime line.
+fn zombie_content(
+    live_zombies: u8,
+    last_brawler_standing: bool,
+    zombie_overtime: bool,
+    boosts: PlateChip,
+) -> PlateContent {
+    let (subline, subline_tone) = if last_brawler_standing {
+        ("LAST BRAWLER STANDING".to_string(), PlateTone::Warning)
+    } else if zombie_overtime {
+        ("CLEAR THE HORDE".to_string(), PlateTone::Warning)
+    } else {
+        (String::new(), PlateTone::Neutral)
+    };
+    PlateContent {
+        left: boosts,
+        right: PlateChip {
+            value: live_zombies.to_string(),
+            caption: "ZOMBIES".to_string(),
+            tone: PlateTone::Enemy,
+        },
+        subline,
+        subline_tone,
+    }
+}
+
+/// Solo Last Stand plate: own boosts left, fighters alive right, the zone or spectating line.
+fn last_stand_content(
+    alive: u8,
+    fighters: u8,
+    zone: super::LastStandZone,
+    local_place: Option<u8>,
+    boosts: PlateChip,
+) -> PlateContent {
+    let (subline, subline_tone) = match (local_place, zone) {
+        (Some(place), _) => (
+            format!("ELIMINATED #{place} · SPECTATING"),
+            PlateTone::Enemy,
+        ),
+        (None, super::LastStandZone::ClosesIn(_)) => {
+            (super::last_stand_zone_label(zone), PlateTone::Neutral)
+        }
+        (None, _) => (super::last_stand_zone_label(zone), PlateTone::Warning),
+    };
+    PlateContent {
+        left: boosts,
+        right: PlateChip {
+            value: format!("{alive}/{fighters}"),
+            caption: "ALIVE".to_string(),
+            tone: PlateTone::Enemy,
+        },
+        subline,
+        subline_tone,
+    }
+}
+
 /// Maps a team-indexed score view onto the observer: own team left, opponent right.
 pub(crate) fn plate_content(
     view: ModeScoreView,
@@ -145,25 +210,12 @@ pub(crate) fn plate_content(
             live_zombies,
             last_brawler_standing,
             local_boost_stacks,
-        } => {
-            let (subline, subline_tone) = if last_brawler_standing {
-                ("LAST BRAWLER STANDING".to_string(), PlateTone::Warning)
-            } else if zombie_overtime {
-                ("CLEAR THE HORDE".to_string(), PlateTone::Warning)
-            } else {
-                (String::new(), PlateTone::Neutral)
-            };
-            PlateContent {
-                left: chip(
-                    local_boost_stacks.to_string(),
-                    &format!("BOOST +{}%", u16::from(local_boost_stacks) * 5),
-                    PlateTone::Ally,
-                ),
-                right: chip(live_zombies.to_string(), "ZOMBIES", PlateTone::Enemy),
-                subline,
-                subline_tone,
-            }
-        }
+        } => zombie_content(
+            live_zombies,
+            last_brawler_standing,
+            zombie_overtime,
+            boost_chip(local_boost_stacks),
+        ),
         ModeScoreView::ShardRush {
             shards,
             target,
@@ -181,6 +233,19 @@ pub(crate) fn plate_content(
                 subline_tone,
             }
         }
+        ModeScoreView::LastStand {
+            alive,
+            fighters,
+            zone,
+            local_place,
+            local_boost_stacks,
+        } => last_stand_content(
+            alive,
+            fighters,
+            zone,
+            local_place,
+            boost_chip(local_boost_stacks),
+        ),
         ModeScoreView::Syncing => PlateContent {
             left: chip("-".to_string(), "", PlateTone::Ally),
             right: chip("-".to_string(), "", PlateTone::Enemy),

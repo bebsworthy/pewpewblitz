@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 57;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 58;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -385,6 +385,7 @@ impl Serialize for MatchRouteGrant {
                 crate::config::GameMode::VaultBreak => 3,
                 crate::config::GameMode::Zombie => 4,
                 crate::config::GameMode::ShardRush => 5,
+                crate::config::GameMode::LastStand => 6,
             },
             capability: self.capability.bytes(),
             activation_expiry_unix_ms: self.activation_expiry_unix_ms,
@@ -416,6 +417,7 @@ impl<'de> Deserialize<'de> for MatchRouteGrant {
             3 => crate::config::GameMode::VaultBreak,
             4 => crate::config::GameMode::Zombie,
             5 => crate::config::GameMode::ShardRush,
+            6 => crate::config::GameMode::LastStand,
             _ => return Err(serde::de::Error::custom("unsupported game mode")),
         };
         let capability = RouteCapability::from_bytes(wire.capability)
@@ -678,6 +680,8 @@ fn register_replicated_components(app: &mut App) {
         .replicate_once();
     app.component::<crate::matchplay::ShardRushState>()
         .replicate();
+    app.component::<crate::matchplay::LastStandState>()
+        .replicate();
     app.component::<crate::matchplay::ShardCarrier>()
         .replicate();
     app.component::<crate::matchplay::Shard>().replicate_once();
@@ -937,6 +941,7 @@ mod tests {
         assert!(components.is_registered::<TakedownState>());
         assert!(components.is_registered::<TurfHoldState>());
         assert!(components.is_registered::<crate::matchplay::ShardRushState>());
+        assert!(components.is_registered::<crate::matchplay::LastStandState>());
         assert!(components.is_registered::<crate::matchplay::ShardCarrier>());
         assert!(components.is_registered::<MatchParticipant>());
         assert!(components.is_registered::<FighterDisplayName>());
@@ -1045,7 +1050,7 @@ mod tests {
     /// `OverBudget`. Only the global handshake guards the new encoding.
     #[test]
     fn point_free_loadouts_are_protocol_55() {
-        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 57);
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 58);
         let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
         let profile = welcome_profile();
         let loadout = catalogs.view().resolve(profile.selection()).unwrap();

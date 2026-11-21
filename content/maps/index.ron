@@ -92,5 +92,12 @@
             admission_revision: 1,
             document: "builtin/prism-quarry.ron",
         ),
+        (
+            id: MapPresetId(16),
+            key: "sunder-ring",
+            display_name: "Sunder Ring",
+            admission_revision: 1,
+            document: "builtin/sunder-ring.ron",
+        ),
     ],
 )

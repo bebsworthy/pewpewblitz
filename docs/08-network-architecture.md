@@ -745,3 +745,18 @@ supervisor copies into the match manifest, so the match-role manifest moves to v
 manifest and the route envelope are unchanged. The profile database, Balance Lab persistence, and Map Maker draft schemas are unchanged:
 the new variants are additive and Map Maker does not yet author Shard Rush recipes. Every role must
 be rebuilt.
+
+Protocol 58 adds solo Last Stand (BRL-5ss9). `GameMode::LastStand` takes wire index 6 (routing
+`GameMode::LastStand` = 6), `AdvertisedRulesSummary::LastStand` takes canonical catalog tag 6, and
+`ObjectiveTotals::LastStand` carries the six final places and the fighter count in results. The
+replicated `LastStandState` on the match root (placements, standing count, and the boundary phase
+descriptor) is a new registration, so the protocol-registry fingerprint changes. Boost pickups keep
+their existing registrations and network-ID namespace. The Sunder Ring recipe and the
+`last-stand-6p` game type change the gameplay content fingerprint and the lobby catalog revision;
+existing recipes keep their recipe fingerprints. Control IPC v8, match manifest v6, the lobby
+manifest, and the route envelope keep their shapes: Last Stand rules are code-owned, so the only
+wire addition is the closed route value. The lobby catalog's `MAX_GAME_TYPES` bound rises from 12
+to 16, because `last-stand-6p` is the thirteenth advertised game type. Match topology may now hold up to six teams
+(`MAX_MATCH_TEAMS`). The profile database, Balance Lab persistence, and Map Maker draft schemas are
+unchanged: the new variants are additive and Map Maker does not yet author Last Stand recipes.
+Every role must be rebuilt.

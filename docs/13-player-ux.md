@@ -390,7 +390,9 @@ The results layout uses shared shell surfaces and preserves readable columns at 
 The in-game HUD and live scoreboard remain separate from this post-match presentation.
 Turf Hold Results shows each team’s final capture progress. Vault Break Results shows each team’s
 remaining idol health as exact current/maximum values and a proportional bar. Shard Rush Results
-shows each team's final held shards against the target (SHARDS HELD). These objective
+shows each team's final held shards against the target (SHARDS HELD). Last Stand Results shows the
+local fighter's place (#n OF 6) and every fighter's finishing place in order; fighters eliminated
+together share a place. These objective
 values and the outcome are captured together by the authority before the routed lobby return;
 Results never reconstructs them from surviving live objective entities.
 
@@ -555,7 +557,11 @@ The persistent in-match HUD (BRL-0155) has no text boxes:
   opponent on the right in enemy red. It shows Takedown kills and target, Turf Hold capture
   percentages and zone control, Vault Break idol health (DEFEND/ATTACK), Shard Rush held shards
   against the target with the hold countdown (ALLY HOLD / ENEMY HOLD seconds, otherwise HOLD n TO
-  WIN), or Zombie boosts and live zombies. In the world, ground shards are bobbing cyan crystals,
+  WIN), Zombie boosts and live zombies, or Last Stand local boosts and fighters still standing
+with the ring status (ZONE CLOSES n, ZONE CLOSING n, FINAL ZONE, or ELIMINATED #n · SPECTATING).
+The Last Stand ring is a flat coral ground ring with a thin white ring at the radius it is closing
+to; both are unlit and stay readable with reduced effects. Once eliminated, the camera follows the
+lowest-slot fighter still standing until the round ends. In the world, ground shards are bobbing cyan crystals,
   the source is a ringed pad, and each carrier wears a ring of up to eight crystals. A teammate strip under it at top left covers Zombie, right of the touch menu button
   when that is shown.
 - Top right: a kill feed (at most four rows for four seconds). It is fed only by the defeat cues the

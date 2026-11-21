@@ -354,11 +354,15 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
         }
         let zombie_topology =
             entry.mode == "zombie" && entry.teams == 1 && matches!(entry.players_per_team, 2..=3);
-        let pvp_topology =
-            entry.mode != "zombie" && entry.teams == 2 && matches!(entry.players_per_team, 1..=3);
-        if !zombie_topology && !pvp_topology {
+        let solo_topology = entry.mode == "last-stand"
+            && entry.teams == crate::matchplay::LAST_STAND_FIGHTERS
+            && entry.players_per_team == 1;
+        let pvp_topology = !matches!(entry.mode.as_str(), "zombie" | "last-stand")
+            && entry.teams == 2
+            && matches!(entry.players_per_team, 1..=3);
+        if !zombie_topology && !solo_topology && !pvp_topology {
             return Err(format!(
-                "game type {} must use exact 1v1, 2v2, 3v3, or Zombie 2-3 player cooperative topology",
+                "game type {} must use exact 1v1, 2v2, 3v3, Zombie 2-3 player cooperative, or Last Stand 6-fighter solo topology",
                 id.as_str()
             ));
         }
@@ -698,6 +702,25 @@ mod tests {
     }
 
     #[test]
+    fn checked_in_catalog_advertises_last_stand_on_sunder_ring() {
+        let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
+        let last_stand = catalog
+            .game_types
+            .iter()
+            .find(|game| game.id.as_str() == "last-stand-6p")
+            .unwrap();
+        assert_eq!((last_stand.team_count, last_stand.players_per_team), (6, 1));
+        assert_eq!(last_stand.map_preset_ids, vec![MapPresetId(16)]);
+        assert_eq!(
+            last_stand.rules_summary,
+            AdvertisedRulesSummary::LastStand {
+                fighters: 6,
+                active_limit_ticks: 10_800,
+            }
+        );
+    }
+
+    #[test]
     fn checked_in_catalog_resolves_to_the_golden_advertisement() {
         let catalog = resolve_operator_catalog(VALID.as_bytes()).unwrap();
         assert_eq!(catalog.server_name, "Local PewPew Blitz");
@@ -709,7 +732,7 @@ mod tests {
                 .deadlines_from(Duration::from_secs(5)),
             (Duration::from_secs(35), Duration::from_secs(15))
         );
-        assert_eq!(catalog.game_types.len(), 12);
+        assert_eq!(catalog.game_types.len(), 13);
         let takedown_three_vs_three = &catalog.game_types[3];
         assert_eq!(takedown_three_vs_three.display_name, "Takedown 3v3");
         assert_eq!(
@@ -792,9 +815,9 @@ mod tests {
         assert_eq!(
             catalog.revision.0,
             [
-                0x6d, 0xe6, 0xe1, 0x05, 0x10, 0x77, 0xcb, 0xd8, 0xea, 0x5a, 0xdb, 0x6d, 0x11, 0xec,
-                0x8f, 0xe2, 0x78, 0x61, 0x18, 0xe8, 0x4d, 0xda, 0xa4, 0xfd, 0x27, 0xdd, 0xf4, 0x9f,
-                0x4e, 0x73, 0x85, 0x8f,
+                0x7c, 0x29, 0x1e, 0xf9, 0xb9, 0x86, 0x63, 0x95, 0xb9, 0x36, 0xdb, 0x0c, 0x3b, 0x30,
+                0x5a, 0x12, 0xd7, 0x2a, 0xc0, 0xe0, 0x8f, 0x76, 0x00, 0x7b, 0xdd, 0x02, 0xdd, 0xad,
+                0xa5, 0xfb, 0xbc, 0xc0,
             ]
         );
     }

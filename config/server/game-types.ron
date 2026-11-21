@@ -36,6 +36,7 @@
     (id: "vault-break-2v2", revision: 3, name: "Feature Yard Vault Break 2v2", mode: "vault-break", maps: ["feature-yard-vault-break"], teams: 2, players_per_team: 2, safe_health: 2000, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
     (id: "vault-break-3v3", revision: 6, name: "Vault Break 3v3", mode: "vault-break", maps: ["powderline-vault"], teams: 2, players_per_team: 3, safe_health: 2000, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
     (id: "shard-rush-3v3", revision: 1, name: "Shard Rush 3v3", mode: "shard-rush", maps: ["prism-quarry"], teams: 2, players_per_team: 3, shards_to_win: 8, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
+    (id: "last-stand-6p", revision: 1, name: "Sunder Ring Last Stand", mode: "last-stand", maps: ["sunder-ring"], teams: 6, players_per_team: 1, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 3),
     (id: "zombie-2p", revision: 1, name: "Zombie Yard Co-op (2 players)", mode: "zombie", maps: ["zombie-yard"], teams: 1, players_per_team: 2, pressure_stages: 4, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 15),
     (id: "zombie-3p", revision: 1, name: "Zombie Yard Co-op (3 players)", mode: "zombie", maps: ["zombie-yard"], teams: 1, players_per_team: 3, pressure_stages: 4, match_duration_seconds: 180, countdown_seconds: 3, respawn_seconds: 15),
   ],

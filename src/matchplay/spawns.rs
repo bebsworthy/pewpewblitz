@@ -4,16 +4,24 @@ use super::MatchId;
 use crate::{combat::TeamId, map::SpawnPointId, protocol::PlayerId};
 use bevy::prelude::Vec2;
 
-/// Deterministically assign one joining fighter to the team with free capacity.
+/// Most teams one match composition may declare: Last Stand's six solo fighters (BRL-5ss9).
+pub const MAX_MATCH_TEAMS: usize = 6;
+
+/// Per-team participant counts indexed by `TeamId`, bounded by [`MAX_MATCH_TEAMS`].
+pub type TeamCounts = [u8; MAX_MATCH_TEAMS];
+
+/// Deterministically assign one joining fighter to the least-filled of the first `team_count`
+/// teams with free capacity; ties go to the lowest team index.
 #[must_use]
-pub fn assigned_team(team_counts: [u8; 2], maximum: u8) -> Option<TeamId> {
-    let available = [team_counts[0] < maximum, team_counts[1] < maximum];
-    match available {
-        [false, false] => None,
-        [true, false] => Some(TeamId(0)),
-        [false, true] => Some(TeamId(1)),
-        [true, true] => Some(TeamId(u8::from(team_counts[1] < team_counts[0]))),
-    }
+pub fn assigned_team(team_counts: TeamCounts, team_count: u8, maximum: u8) -> Option<TeamId> {
+    team_counts
+        .iter()
+        .take(usize::from(team_count))
+        .enumerate()
+        .filter(|(_, count)| **count < maximum)
+        .min_by_key(|(index, count)| (**count, *index))
+        .and_then(|(index, _)| u8::try_from(index).ok())
+        .map(TeamId)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

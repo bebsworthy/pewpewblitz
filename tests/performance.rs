@@ -1236,6 +1236,140 @@ fn shard_rush_full_ground_with_six_fighters_stays_within_fixed_tick_budget() {
     );
 }
 
+/// A Last Stand server on Sunder Ring whose ring closes within a few dozen ticks and pulses
+/// every tick: the worst boundary damage cadence.
+fn last_stand_performance_app() -> App {
+    // Capacity resolves from the lifecycle when the server plugins build.
+    let mut lifecycle = brawler::server::match_lifecycle_rules_for_profile(
+        brawler::config::MatchRulesProfile::ProcessVerification,
+    );
+    lifecycle.team_count = brawler::matchplay::LAST_STAND_FIGHTERS;
+    lifecycle.maximum_participants_per_team = 1;
+    let mut app = App::new();
+    app.insert_resource(lifecycle);
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::state::app::StatesPlugin,
+        ServerPlugins {
+            tick_duration: SIMULATION_TICK,
+        },
+        GameplayPlugin,
+        GameplayContentPlugin,
+        ProtocolPlugin,
+        AvianNetworkPlugin,
+        ServerAuthoritativeGameplayPlugin,
+        ServerNetworkPlugin,
+    ));
+    app.insert_resource(brawler::matchplay::MatchModeSetup {
+        mode_definition_id: brawler::map::LAST_STAND_MODE_DEFINITION,
+        rules_revision: brawler::matchplay::LAST_STAND_RULES_REVISION,
+    });
+    let phase = |radius_percent| brawler::matchplay::BoundaryPhase {
+        hold_permille: 0,
+        shrink_permille: 1,
+        radius_percent,
+        damage_per_pulse: 1,
+    };
+    app.insert_resource(brawler::matchplay::LastStandRules {
+        phases: [phase(4), phase(3), phase(2), phase(1)],
+        pulse_interval_ticks: 1,
+        ..brawler::matchplay::LastStandRules::default()
+    });
+    app.insert_resource(brawler::map::ServerMapSelection::preset(
+        brawler::map::SUNDER_RING_PRESET,
+    ));
+    app.insert_resource(ServerNetworkConfig {
+        transport: NetworkTransport::Crossbeam,
+        ..default()
+    });
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(SIMULATION_TICK));
+    app.add_plugins(brawler::matchplay::LastStandModePlugin);
+    app.update();
+    app
+}
+
+/// Six solo fighters outside a fully closed Last Stand ring take boundary damage every tick
+/// through the combat environment transaction and stay inside the fixed tick.
+#[test]
+fn last_stand_six_fighters_outside_the_ring_stay_within_fixed_tick_budget() {
+    let mut app = last_stand_performance_app();
+    let match_id = {
+        let world = app.world_mut();
+        let now = world.resource::<brawler::timing::SimulationTick>().0;
+        let mut roots = world.query_filtered::<&mut MatchState, With<MatchRoot>>();
+        let mut state = roots.single_mut(world).expect("one match root");
+        // A one-minute round: the ring schedule scales with it and closes within ~15 ticks,
+        // well before the deadline.
+        state.phase = MatchPhase::Active {
+            ends_at_tick: now + 3_600,
+        };
+        state.match_id
+    };
+    let mut owners = Vec::new();
+    for index in 0..6_u16 {
+        let team = TeamId(u8::try_from(index).expect("team fits"));
+        let side = if index % 2 == 0 { -1.0 } else { 1.0 };
+        let position = Vec2::new(side * 700.0, -300.0 + 300.0 * f32::from(index / 2));
+        let entity = spawn_m05_fighter(
+            &mut app,
+            60_000 + u64::from(index),
+            1 + index % 4,
+            position,
+            team,
+            false,
+        );
+        app.world_mut().entity_mut(entity).insert((
+            MatchParticipant {
+                match_id,
+                ready: true,
+                restart_ready: false,
+            },
+            MatchMember(match_id),
+            ActiveCombatant,
+        ));
+        owners.push(entity);
+    }
+    app.update();
+    remove_benchmark_actions(&mut app, &owners);
+    let starting: Vec<u16> = owners
+        .iter()
+        .map(|owner| {
+            app.world()
+                .get::<brawler::combat::CurrentHealth>(*owner)
+                .expect("health")
+                .0
+        })
+        .collect();
+    // Let the ring close so every measured tick pulses all six fighters.
+    for _ in 0..60 {
+        app.update();
+    }
+    fixed_tick_p95(&mut app, "last-stand-six-fighters-outside-ring", 120);
+    let world = app.world_mut();
+    let state = *world
+        .query_filtered::<&brawler::matchplay::LastStandState, With<MatchRoot>>()
+        .single(world)
+        .expect("one Last Stand state");
+    assert!(
+        state.boundary.is_final(),
+        "the measured ring is fully closed: {state:?}"
+    );
+    assert_eq!(
+        state.alive, 6,
+        "one-damage pulses never eliminate during the gate"
+    );
+    for (owner, starting) in owners.into_iter().zip(starting) {
+        let health = world
+            .get::<brawler::combat::CurrentHealth>(owner)
+            .expect("fighter health")
+            .0;
+        assert!(
+            health < starting,
+            "every fighter outside the ring took damage"
+        );
+    }
+}
+
 #[test]
 fn map_dynamic_maximum_state_serialization_stays_bounded() {
     let state = brawler::map::MapDynamicState {

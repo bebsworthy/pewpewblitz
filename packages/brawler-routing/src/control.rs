@@ -393,6 +393,7 @@ impl AllocateRequestBody {
             .ok_or(CodecError::InvalidValue)?;
         let topology_valid = match self.mode {
             GameMode::Zombie => self.team_count == 1 && matches!(self.players_per_team, 2..=3),
+            GameMode::LastStand => self.team_count == 6 && self.players_per_team == 1,
             _ => self.team_count == 2 && matches!(self.players_per_team, 1..=3),
         };
         if !topology_valid || self.participants.len().saturating_add(self.bots.len()) != expected {

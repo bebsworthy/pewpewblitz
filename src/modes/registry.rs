@@ -261,8 +261,8 @@ pub(crate) fn install_configured_server_mode(
 mod tests {
     use super::*;
     use crate::modes::{
-        BuiltInModeRegistrationsPlugin, ModeTopologyPolicy, shard_rush, takedown, turf_hold,
-        vault_break, zombie,
+        BuiltInModeRegistrationsPlugin, ModeTopologyPolicy, last_stand, shard_rush, takedown,
+        turf_hold, vault_break, zombie,
     };
 
     #[test]
@@ -274,6 +274,7 @@ mod tests {
         let mut reversed = App::new();
         reversed.add_plugins((
             ModeRegistryPlugin,
+            last_stand::LastStandModeRegistrationPlugin,
             shard_rush::ShardRushModeRegistrationPlugin,
             zombie::ZombieModeRegistrationPlugin,
             vault_break::VaultBreakModeRegistrationPlugin,
@@ -473,6 +474,7 @@ mod tests {
             (GameMode::VaultBreak, 2_000, None, Some(25)),
             (GameMode::Zombie, 4, None, None),
             (GameMode::ShardRush, 8, None, None),
+            (GameMode::LastStand, 6, None, None),
         ];
         for (mode, objective_target, takedown_credit, vault_break_critical) in cases {
             let shard_rush = (mode == GameMode::ShardRush)
@@ -502,26 +504,16 @@ mod tests {
                 app.world().resource::<ServerMapSelection>().preset_id,
                 Some(registration.server().default_map_preset)
             );
-            assert_eq!(
+            // Exactly the selected mode's rule plugin is installed, in `GameMode::ALL` order.
+            let installed = [
                 app.is_plugin_added::<TakedownModePlugin>(),
-                mode == GameMode::Takedown
-            );
-            assert_eq!(
                 app.is_plugin_added::<TurfHoldModePlugin>(),
-                mode == GameMode::TurfHold
-            );
-            assert_eq!(
                 app.is_plugin_added::<VaultBreakModePlugin>(),
-                mode == GameMode::VaultBreak
-            );
-            assert_eq!(
                 app.is_plugin_added::<ZombieModePlugin>(),
-                mode == GameMode::Zombie
-            );
-            assert_eq!(
                 app.is_plugin_added::<crate::matchplay::ShardRushModePlugin>(),
-                mode == GameMode::ShardRush
-            );
+                app.is_plugin_added::<crate::matchplay::LastStandModePlugin>(),
+            ];
+            assert_eq!(installed, GameMode::ALL.map(|candidate| candidate == mode));
             match mode {
                 GameMode::Takedown => assert_eq!(
                     *app.world().resource::<TakedownRules>(),
@@ -553,6 +545,10 @@ mod tests {
                         target_shards: u8::try_from(objective_target).unwrap(),
                         policy: shard_rush.unwrap(),
                     }
+                ),
+                GameMode::LastStand => assert_eq!(
+                    *app.world().resource::<crate::matchplay::LastStandRules>(),
+                    crate::matchplay::LastStandRules::default()
                 ),
             }
 

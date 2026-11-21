@@ -48,6 +48,7 @@ pub enum GameMode {
     VaultBreak = 3,
     Zombie = 4,
     ShardRush = 5,
+    LastStand = 6,
 }
 
 impl TryFrom<u16> for GameMode {
@@ -60,6 +61,7 @@ impl TryFrom<u16> for GameMode {
             3 => Ok(Self::VaultBreak),
             4 => Ok(Self::Zombie),
             5 => Ok(Self::ShardRush),
+            6 => Ok(Self::LastStand),
             _ => Err(CodecError::InvalidValue),
         }
     }

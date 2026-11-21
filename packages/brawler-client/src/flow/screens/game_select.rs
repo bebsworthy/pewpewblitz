@@ -41,6 +41,7 @@ fn mode_index(game: &AdvertisedGameType) -> usize {
         AdvertisedRulesSummary::VaultBreak { .. } => 2,
         AdvertisedRulesSummary::Zombie { .. } => 3,
         AdvertisedRulesSummary::ShardRush { .. } => 4,
+        AdvertisedRulesSummary::LastStand { .. } => 5,
     }
 }
 fn mode_candidate(
@@ -102,6 +103,13 @@ fn rules_text(game: &AdvertisedGameType) -> String {
                 "Hold {target_shards} shards for {} sec",
                 brawler::timing::simulation_whole_seconds(u64::from(hold_ticks))
             ),
+            active_limit_ticks,
+        ),
+        AdvertisedRulesSummary::LastStand {
+            fighters,
+            active_limit_ticks,
+        } => (
+            format!("{fighters} fighters, one life · last one standing"),
             active_limit_ticks,
         ),
     };

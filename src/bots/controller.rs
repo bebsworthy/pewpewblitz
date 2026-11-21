@@ -130,6 +130,10 @@ fn capture_observations(
         Option<&DefendedDamageableObjective>,
     )>,
     pickups: Query<&Position, With<RestorationPickup>>,
+    boosts: Query<
+        (&crate::matchplay::BoostPickupIdentity, &Position),
+        With<crate::matchplay::BoostPickup>,
+    >,
     shards: Query<(&ShardIdentity, &Position), With<Shard>>,
     hostile_npcs: Query<
         (&NetworkEntityId, &TeamId, &Position, &CurrentHealth),
@@ -252,6 +256,16 @@ fn capture_observations(
         .into_iter()
         .map(|(_, position)| BotPickupView { position })
         .collect();
+    let mut boost_views: Vec<_> = boosts
+        .iter()
+        .filter(|(identity, _)| identity.match_id == match_state.match_id)
+        .map(|(identity, position)| (identity.pickup_id, position.0))
+        .collect();
+    boost_views.sort_by_key(|(pickup_id, _)| *pickup_id);
+    let boost_views: Vec<_> = boost_views
+        .into_iter()
+        .map(|(_, position)| BotPickupView { position })
+        .collect();
     let match_active = matches!(match_state.phase, MatchPhase::Active { .. });
 
     for (network_id, mut controller) in &mut fighters.p1() {
@@ -346,6 +360,7 @@ fn capture_observations(
             objects: object_views.clone(),
             pickups: pickup_views.clone(),
             shards: shard_views.clone(),
+            boosts: boost_views.clone(),
             shard_carriers,
             objective: *objective,
             weapon_phase: observer.weapon.phase,

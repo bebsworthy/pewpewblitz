@@ -70,6 +70,8 @@ mod harness;
 mod profile_database_file;
 use harness::*;
 
+#[path = "network/last_stand.rs"]
+mod last_stand;
 #[path = "network/shard_rush.rs"]
 mod shard_rush;
 #[path = "network/turf_hold.rs"]

@@ -46,6 +46,7 @@ mod fighter_weapons;
 mod floor_decals;
 mod floor_tiles;
 mod hit_feedback;
+mod last_stand;
 mod map;
 mod map_editor;
 mod map_palette_preview;
@@ -498,6 +499,7 @@ impl Plugin for WorldPresentationPlugin {
                     shard_rush::reconcile_shard_visuals,
                     shard_rush::reconcile_shard_source_visuals,
                     shard_rush::reconcile_carrier_crowns,
+                    last_stand::reconcile_boundary_rings,
                     reconcile_vault_break_safe_visuals,
                     combat::reconcile_projectile_visuals,
                     combat::reconcile_sentry_visuals,

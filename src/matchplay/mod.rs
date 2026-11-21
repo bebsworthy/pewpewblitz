@@ -1,6 +1,9 @@
 //! Shared match state and server-authoritative common lifecycle plus installed mode rules.
 
 #[cfg(feature = "server")]
+mod boost_pickups;
+mod last_stand;
+#[cfg(feature = "server")]
 mod lifecycle;
 mod model;
 mod objective_results;
@@ -17,6 +20,15 @@ mod takedown;
 mod telemetry;
 mod zombie;
 
+#[cfg(feature = "server")]
+pub use last_stand::LastStandModePlugin;
+#[cfg(feature = "server")]
+pub(crate) use last_stand::LastStandTelemetry;
+pub use last_stand::{
+    BoundaryPhase, LAST_STAND_BOUNDARY_PHASES, LAST_STAND_FIGHTERS, LAST_STAND_RULES_REVISION,
+    LastStandBoundary, LastStandRules, LastStandState, LastStandSummary, boundary_at,
+    death_drop_count, elimination_result, last_stand_rules_for_profile, rank_eliminations,
+};
 #[cfg(feature = "server")]
 pub use lifecycle::AuthoritativeFighterLifecyclePlugin;
 #[cfg(feature = "server")]
@@ -37,9 +49,9 @@ pub use server::{
 };
 #[cfg(feature = "server")]
 pub(crate) use server::{
-    ConnectedMatchRoster, ModeOutcomeCause, ModeRuleOutcome, PendingMatchRestart,
-    PendingModeRuleOutcome, clear_combat_facts, initialize_match_root, offer_mode_rule_outcome,
-    prepare_mode_rule_facts, record_match_telemetry,
+    ConnectedMatchRoster, EliminationLifecycle, ModeOutcomeCause, ModeRuleOutcome,
+    PendingMatchRestart, PendingModeRuleOutcome, clear_combat_facts, initialize_match_root,
+    offer_mode_rule_outcome, prepare_mode_rule_facts, record_match_telemetry,
 };
 #[cfg(feature = "balance-lab")]
 pub(crate) use server::{
@@ -56,7 +68,7 @@ pub use shard_rush::{
 };
 #[cfg(feature = "server")]
 pub use shard_rush::{ShardRushModePlugin, ShardRushSource};
-pub use spawns::{SpawnCandidate, assigned_team, select_spawn};
+pub use spawns::{MAX_MATCH_TEAMS, SpawnCandidate, TeamCounts, assigned_team, select_spawn};
 #[cfg(feature = "server")]
 pub use takedown::TakedownModePlugin;
 pub use takedown::{
@@ -104,11 +116,13 @@ pub(crate) use zombie::ZOMBIE_DEFINITION;
 pub use zombie::ZombieModePlugin;
 #[cfg(feature = "server")]
 pub(crate) use zombie::ZombieTelemetry;
+#[cfg(feature = "server")]
+pub(crate) use zombie::{BOOST_PICKUP_NETWORK_NAMESPACE, MAX_LIVE_BOOST_PICKUPS};
 pub use zombie::{
     BoostGrantScope, BoostPickup, BoostPickupAvailableAtTick, BoostPickupIdentity,
     BoostPickupSource, BoostStacks, HostileNpc, HostileNpcDefinitionId, HostileNpcIdentity,
-    ZOMBIE_RULES_REVISION, ZombieModeState, ZombiePhase, ZombieRules, ZombieSummary,
-    effective_maximum_health, scale_boosted_value,
+    MAX_BOOST_STACKS, ZOMBIE_RULES_REVISION, ZombieModeState, ZombiePhase, ZombieRules,
+    ZombieSummary, effective_maximum_health, scale_boosted_value,
 };
 
 #[cfg(feature = "server")]

@@ -335,7 +335,7 @@ fn validate_placement_parameters(
                 ordinal,
                 facing_quarter_turns,
             },
-        ) if team_slot <= 1
+        ) if usize::from(team_slot) < crate::matchplay::MAX_MATCH_TEAMS
             && ordinal > 0
             && facing_quarter_turns <= 3
             && spawn_ordinals.insert((team_slot, ordinal)) =>
@@ -428,15 +428,24 @@ fn validate_mode_topology(
             })
             .count()
     };
+    let solo_teams = u8::try_from(crate::matchplay::MAX_MATCH_TEAMS).unwrap_or(u8::MAX);
     if topology == ModeTopologyPolicy::ZombieIngress {
-        if spawn_count(0) < 3 || spawn_count(1) != 0 {
+        if spawn_count(0) < 3 || (1..solo_teams).any(|team| spawn_count(team) != 0) {
             return Err("Zombie maps require one three-slot cooperative spawn family".into());
         }
+    } else if topology == ModeTopologyPolicy::SoloSpawns {
+        if (0..solo_teams).any(|team| spawn_count(team) == 0) {
+            return Err("solo maps require one spawn family per fighter".into());
+        }
+        super::geometry::validate_solo_spawn_separation(placements, recipe.dimensions)?;
     } else {
         for team in 0..=1 {
             if spawn_count(team) < MIN_SPAWNS_PER_TEAM {
                 return Err("grid map lacks spawn capacity".into());
             }
+        }
+        if (2..solo_teams).any(|team| spawn_count(team) != 0) {
+            return Err("two-team maps cannot contain solo spawn families".into());
         }
     }
     validate_spawn_clearance(placements, recipe.dimensions, catalog)?;
@@ -672,7 +681,7 @@ pub(super) fn validate_and_resolve_mode_anchors(
     placement_ids: &mut BTreeSet<MapPlacementId>,
 ) -> Result<ResolvedModeAnchors, String> {
     match topology {
-        ModeTopologyPolicy::NoAnchors => {
+        ModeTopologyPolicy::NoAnchors | ModeTopologyPolicy::SoloSpawns => {
             return anchors
                 .is_empty()
                 .then(ResolvedModeAnchors::default)

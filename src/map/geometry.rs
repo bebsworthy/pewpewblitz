@@ -458,6 +458,54 @@ pub(super) fn validate_spawn_clearance(
     Ok(())
 }
 
+/// Fewest cells between any two solo spawns of different fighters.
+pub(super) const MIN_SOLO_SPAWN_SEPARATION_CELLS: f32 = 8.0;
+/// Largest spread, in cells, between the solo spawn families' distances to the map centre, so
+/// no fighter starts measurably closer to the final convergence.
+pub(super) const MAX_SOLO_SPAWN_CENTER_SPREAD_CELLS: f32 = 1.5;
+
+/// Solo spawns stay apart and equidistant from the centre the Last Stand boundary closes on.
+pub(super) fn validate_solo_spawn_separation(
+    placements: &[MapAssetPlacement],
+    dimensions: MapDimensions,
+) -> Result<(), super::MapRuleRefusal> {
+    let spawns: Vec<_> = placements
+        .iter()
+        .filter_map(|placement| match placement.parameters {
+            MapPlacementParameters::PlayerSpawn { team_slot, .. } => Some((
+                team_slot,
+                placement.placement_id,
+                placement.cell,
+                dimensions.cell_center(placement.cell),
+            )),
+            MapPlacementParameters::None => None,
+        })
+        .collect();
+    let minimum = MIN_SOLO_SPAWN_SEPARATION_CELLS * MAP_CELL_SIZE_WORLD;
+    for (index, (team, id, cell, position)) in spawns.iter().enumerate() {
+        for (other_team, other_id, other_cell, other_position) in &spawns[index + 1..] {
+            if team != other_team && position.distance(*other_position) < minimum {
+                return Err(super::MapRuleRefusal::located(
+                    "solo spawns are too close together",
+                    [*id, *other_id],
+                    [*cell, *other_cell],
+                ));
+            }
+        }
+    }
+    let center = dimensions.bounds().center();
+    let distances: Vec<f32> = spawns
+        .iter()
+        .map(|(_, _, _, position)| position.distance(center))
+        .collect();
+    let nearest = distances.iter().copied().fold(f32::INFINITY, f32::min);
+    let farthest = distances.iter().copied().fold(0.0, f32::max);
+    if farthest - nearest > MAX_SOLO_SPAWN_CENTER_SPREAD_CELLS * MAP_CELL_SIZE_WORLD {
+        return Err("solo spawns are not equidistant from the map centre".into());
+    }
+    Ok(())
+}
+
 pub(super) fn validate_fighter_navigation(
     placements: &[MapAssetPlacement],
     dimensions: MapDimensions,

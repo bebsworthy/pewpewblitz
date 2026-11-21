@@ -123,7 +123,13 @@ focused Ticket specification before changing one of those contracts.
   goals. Shard Rush makes every member an objective role. In priority order, a bot: retreats from the
   nearest threat while it carries shards and is threatened; intercepts the nearest visible enemy
   carrier; collects the nearest visible shard; escorts an allied carrier; and otherwise contests
-  the source. It fires whenever its aim target is in weapon range. Zombie supplies close-range
+  the source. It fires whenever its aim target is in weapon range. Last Stand also makes every bot
+  an objective role over the semantic `SurviveBoundary` projection (centre, current radius, and the
+  radius the phase closes to). A bot outside the ring dashes back in, outranking retreat and
+  healing pickups. A bot past 85% of the closing radius drifts inward ahead of the shrink. A bot
+  comfortably inside collects a public boost pickup within two weapon ranges that also lies inside
+  that comfort ring. Otherwise the ordinary pressure, object, and pickup behaviors fight and break
+  chests. Zombie supplies close-range
   hostile-NPC pressure: the human and friendly bots share team
   zero, and bots consume live zombies through the same semantic enemy-contact policy used for
   ordinary combat.
@@ -334,7 +340,7 @@ enemy—rather than becoming a stringly typed rule language.
   and none gets a terrain, landing or occupancy shortcut. See the
   [supported content matrix](#supported-content-matrix).
 
-- **Mode goals are focused adapters.** Takedown, Turf Hold, Vault Break, and Shard Rush produce bounded goal candidates
+- **Mode goals are focused adapters.** Takedown, Turf Hold, Vault Break, Shard Rush, and Last Stand produce bounded goal candidates
   for the common planner rather than scattering mode branches through navigation and combat. An
   objective role retains its zone/safe anchor while opportunistically aiming at visible enemies;
   merely seeing an opponent cannot silently replace the assigned objective.

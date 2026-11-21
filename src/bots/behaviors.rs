@@ -308,6 +308,16 @@ mod objectives {
             (BotRole::Objective, BotObjectiveView::CollectAndHold { source }) => {
                 shard_rush(context, candidates, base_score, source);
             }
+            (
+                BotRole::Objective,
+                BotObjectiveView::SurviveBoundary {
+                    center,
+                    radius,
+                    next_radius,
+                },
+            ) => {
+                last_stand(context, candidates, base_score, center, radius, next_radius);
+            }
             _ => {}
         }
     }
@@ -395,6 +405,79 @@ mod objectives {
                 dash,
             },
         );
+    }
+
+    /// Score lift that lets leaving the closing boundary outrank retreat and healing pickups:
+    /// standing outside costs more health than any fight in reach.
+    const BOUNDARY_ESCAPE_SCORE_BONUS: u16 = 400;
+    /// Fraction of the phase's target radius a bot keeps as its comfortable ring.
+    const BOUNDARY_COMFORT_FRACTION: f32 = 0.85;
+    /// Boost pickups farther than this many weapon ranges are left to fights and drift.
+    const BOOST_REACH_WEAPON_RANGES: f32 = 2.0;
+
+    /// Last Stand goals in priority order: get back inside the safe ring (dashing when
+    /// outside), drift inward ahead of the shrink, then collect a nearby boost that is safe.
+    /// Inside the comfortable ring with nothing to collect, engagement behaviors decide.
+    fn last_stand(
+        context: &BehaviorContext<'_>,
+        candidates: &mut CandidateBuffer,
+        base_score: u16,
+        center: Vec2,
+        radius: f32,
+        next_radius: f32,
+    ) {
+        let observation = context.observation;
+        let self_position = observation.self_view.position;
+        let distance = self_position.distance(center);
+        let enemy_aim = nearest_enemy(observation).map(|enemy| (enemy.position, enemy.velocity));
+        let fire = enemy_aim
+            .is_some_and(|(target, _)| self_position.distance(target) <= observation.weapon_range);
+        let comfort = next_radius.min(radius) * BOUNDARY_COMFORT_FRACTION;
+        if distance > comfort {
+            let outside = distance > radius;
+            let inward = (center - self_position)
+                .try_normalize()
+                .unwrap_or(Vec2::ZERO);
+            let goal = center - inward * comfort * 0.5;
+            candidates.propose(
+                OBJECTIVES.id,
+                if outside {
+                    base_score.saturating_add(BOUNDARY_ESCAPE_SCORE_BONUS)
+                } else {
+                    base_score
+                },
+                Some(BotTactic::HoldBoundary),
+                BotIntent {
+                    move_goal: Some(goal),
+                    aim_target: enemy_aim,
+                    fire,
+                    dash: outside,
+                },
+            );
+            return;
+        }
+        let reach = observation.weapon_range * BOOST_REACH_WEAPON_RANGES;
+        if let Some(boost) = observation
+            .boosts
+            .iter()
+            .filter(|boost| {
+                boost.position.distance(center) <= comfort
+                    && boost.position.distance(self_position) <= reach
+            })
+            .min_by(|a, b| distance_order(self_position, a.position, b.position))
+        {
+            candidates.propose(
+                OBJECTIVES.id,
+                base_score,
+                Some(BotTactic::CollectPickup),
+                BotIntent {
+                    move_goal: Some(boost.position),
+                    aim_target: enemy_aim,
+                    fire,
+                    dash: false,
+                },
+            );
+        }
     }
 
     fn turf_hold(
@@ -789,6 +872,7 @@ mod tests {
             pickups: Vec::new(),
             shards: Vec::new(),
             shard_carriers: Vec::new(),
+            boosts: Vec::new(),
             objective: crate::matchplay::BotObjectiveView::Elimination,
             weapon_phase: crate::combat::WeaponPhase::Ready,
             weapon_ammo: 1,

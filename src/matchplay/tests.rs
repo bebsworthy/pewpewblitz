@@ -81,11 +81,18 @@ fn rules_reject_zero_invalid_capacity_and_overflow() {
 
 #[test]
 fn team_assignment_balances_and_caps() {
-    assert_eq!(assigned_team([0, 0], 2), Some(TeamId(0)));
-    assert_eq!(assigned_team([1, 0], 2), Some(TeamId(1)));
-    assert_eq!(assigned_team([1, 1], 2), Some(TeamId(0)));
-    assert_eq!(assigned_team([2, 1], 2), Some(TeamId(1)));
-    assert_eq!(assigned_team([2, 2], 2), None);
+    let counts = |a, b| [a, b, 0, 0, 0, 0];
+    assert_eq!(assigned_team(counts(0, 0), 2, 2), Some(TeamId(0)));
+    assert_eq!(assigned_team(counts(1, 0), 2, 2), Some(TeamId(1)));
+    assert_eq!(assigned_team(counts(1, 1), 2, 2), Some(TeamId(0)));
+    assert_eq!(assigned_team(counts(2, 1), 2, 2), Some(TeamId(1)));
+    assert_eq!(assigned_team(counts(2, 2), 2, 2), None);
+    // One cooperative team never spills into an unused second slot.
+    assert_eq!(assigned_team(counts(1, 0), 1, 3), Some(TeamId(0)));
+    assert_eq!(assigned_team(counts(3, 0), 1, 3), None);
+    // Solo topology fills each of six single-fighter teams in order.
+    assert_eq!(assigned_team([1, 1, 0, 1, 0, 0], 6, 1), Some(TeamId(2)));
+    assert_eq!(assigned_team([1; 6], 6, 1), None);
 }
 
 #[test]

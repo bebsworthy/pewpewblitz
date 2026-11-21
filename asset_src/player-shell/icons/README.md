@@ -43,7 +43,8 @@ blob, feather, shield, pulse, target, cycle.
 Weapon part families: part-magazine, part-ammunition, part-barrel, part-chamber, part-element.
 Mode pennants (Dashboard mode button, game selection, match loading): mode-takedown (skull and
 crossbones), mode-turf-hold (flag on a capture zone), mode-vault-break (safe with dial), mode-shard-rush
-(cyan crystal flanked by violet crystals), mode-zombie (green X-eyed head). Names are `mode-<mode key>` so screens resolve them from the mode key.
+(cyan crystal flanked by violet crystals), mode-zombie (green X-eyed head), mode-last-stand (lone fighter with a crown inside a closing coral
+ring). Names are `mode-<mode key>` so screens resolve them from the mode key.
 
 `packages/brawler-client/src/ui/icons.rs` lists the shipped names and its tests check each PNG, size and SVG
 source. Add an icon by defining it in `ICONS` in the script, rebuilding, and adding its name to

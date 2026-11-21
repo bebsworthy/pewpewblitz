@@ -105,7 +105,7 @@ pub fn register_map_runtime(app: &mut App) {
 }
 
 mod dynamics;
-pub(super) mod effect_tiles;
+pub(crate) mod effect_tiles;
 mod installation;
 pub(crate) mod object_authority;
 pub(crate) mod terminal_reactions;

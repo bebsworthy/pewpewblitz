@@ -71,12 +71,14 @@ impl Default for MatchLifecycleRules {
 
 impl MatchLifecycleRules {
     pub fn validate(self) -> Result<Self, &'static str> {
-        if !(1..=2).contains(&self.team_count) {
-            return Err("match lifecycle requires one or two teams");
+        if self.team_count == 0 || usize::from(self.team_count) > super::MAX_MATCH_TEAMS {
+            return Err("match lifecycle requires one to six teams");
         }
         if self.minimum_participants_per_team == 0
             || self.minimum_participants_per_team > self.maximum_participants_per_team
             || self.maximum_participants_per_team > 3
+            || usize::from(self.team_count) * usize::from(self.maximum_participants_per_team)
+                > super::MAX_MATCH_TEAMS
         {
             return Err("invalid match team capacity");
         }
@@ -230,7 +232,7 @@ struct RestartCleanupEpoch(Option<MatchId>);
 #[derive(Resource, Default, Debug)]
 pub(crate) struct ConnectedMatchRoster {
     pub(crate) match_id: Option<MatchId>,
-    pub(crate) counts: [u8; 2],
+    pub(crate) counts: super::TeamCounts,
     pub(crate) ready: bool,
     pub(crate) participants: Vec<MatchParticipantSummary>,
     pub(crate) participant_departed: bool,
@@ -542,7 +544,7 @@ fn refresh_match_roster(
     >,
 ) {
     let Ok(state) = roots.single() else { return };
-    let mut counts = [0_u8; 2];
+    let mut counts = super::TeamCounts::default();
     let mut players = BTreeSet::new();
     let mut connected_network_ids = BTreeSet::new();
     let mut summaries = Vec::new();
@@ -566,7 +568,7 @@ fn refresh_match_roster(
     ) in &participants
     {
         if participant.match_id != state.match_id
-            || team.0 > 1
+            || team.0 >= rules.team_count
             || !participant_is_connected(controlled, routed_seat, held, &links)
         {
             continue;
@@ -736,6 +738,7 @@ fn activate_started_match(
 
 #[must_use]
 pub(crate) fn forfeit_result(counts: [u8; 2]) -> Option<MatchResult> {
+    // Two-team forfeit only; solo modes resolve departures as eliminations in their own rules.
     match (counts[0] == 0, counts[1] == 0) {
         (false, false) => None,
         (true, true) => Some(MatchResult::Draw),
@@ -796,9 +799,13 @@ fn resolve_pregame_outcomes(
         }
         return;
     }
-    if rules.team_count == 2
-        && let Some(result) = forfeit_result(roster.counts)
-    {
+    let forfeit = match rules.team_count {
+        2 => forfeit_result([roster.counts[0], roster.counts[1]]),
+        // Every team departed: there is no one left to win or eliminate.
+        3.. if roster.counts.iter().all(|count| *count == 0) => Some(MatchResult::Draw),
+        _ => None,
+    };
+    if let Some(result) = forfeit {
         // Forfeit has precedence and still takes/discards any same-tick deadline outcome.
         outcomes.clear();
         commit_match_result(
@@ -1122,6 +1129,11 @@ fn consume_mode_rule_outcome(
     );
 }
 
+/// Installed by an elimination mode (Last Stand): a defeated fighter stays defeated for the
+/// rest of the round instead of being scheduled to respawn.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub(crate) struct EliminationLifecycle;
+
 /// Common defeat lifecycle: once deferred `Defeated` markers are visible, schedule respawns
 /// for newly defeated fighters of the still-active current match. Mode plugins never do this.
 #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
@@ -1129,6 +1141,7 @@ fn handle_defeated_respawns(
     mut commands: Commands,
     tick: Res<SimulationTick>,
     rules: Res<MatchLifecycleRules>,
+    elimination: Option<Res<EliminationLifecycle>>,
     roots: Query<&MatchState, With<MatchRoot>>,
     defeated: Query<
         (Entity, &MatchParticipant),
@@ -1141,7 +1154,7 @@ fn handle_defeated_respawns(
     >,
 ) {
     let Ok(state) = roots.single() else { return };
-    if !matches!(state.phase, MatchPhase::Active { .. }) {
+    if elimination.is_some() || !matches!(state.phase, MatchPhase::Active { .. }) {
         return;
     }
     for (entity, participant) in &defeated {
@@ -1216,6 +1229,7 @@ fn capture_match_summary(
             Option<&super::VaultBreakState>,
             Option<&super::ZombieModeState>,
             Option<&super::ShardRushState>,
+            Option<&super::LastStandState>,
         ),
         With<MatchRoot>,
     >,
@@ -1223,6 +1237,7 @@ fn capture_match_summary(
     vault_break_telemetry: Option<Res<super::VaultBreakTelemetry>>,
     zombie_telemetry: Option<Res<super::ZombieTelemetry>>,
     shard_rush_telemetry: Option<Res<super::ShardRushTelemetry>>,
+    last_stand_telemetry: Option<Res<super::LastStandTelemetry>>,
     vault_break_safes: Query<(
         &super::VaultBreakSafe,
         &crate::combat::CurrentHealth,
@@ -1232,7 +1247,9 @@ fn capture_match_summary(
     weapons: Res<WeaponTelemetry>,
     abilities: Res<crate::abilities::AbilityTelemetry>,
 ) {
-    let Ok((state, takedown, turf_hold, vault_break, zombie, shard_rush)) = roots.single() else {
+    let Ok((state, takedown, turf_hold, vault_break, zombie, shard_rush, last_stand)) =
+        roots.single()
+    else {
         return;
     };
     match state.phase {
@@ -1286,6 +1303,13 @@ fn capture_match_summary(
                 (None, None, None, None) => shard_rush
                     .zip(shard_rush_telemetry.as_deref())
                     .map(|(state, telemetry)| ModeSummary::ShardRush(telemetry.summary(state)))
+                    .or_else(|| {
+                        last_stand
+                            .zip(last_stand_telemetry.as_deref())
+                            .map(|(state, telemetry)| {
+                                ModeSummary::LastStand(telemetry.summary(state))
+                            })
+                    })
                     .expect("an installed mode carries its state on the root"),
             };
             telemetry.complete_with_mode(

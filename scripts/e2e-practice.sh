@@ -9,6 +9,7 @@ case "$game_type" in
     turf-hold-1v1 | turf-hold-2v2 | turf-hold-3v3 | \
     vault-break-1v1 | vault-break-2v2 | vault-break-3v3 | \
     shard-rush-3v3 | \
+    last-stand-6p | \
     zombie-2p | zombie-3p) ;;
     *)
         printf '%s\n' 'brawler Practice e2e: expected an advertised game-type ID' >&2

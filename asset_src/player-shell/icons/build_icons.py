@@ -315,6 +315,11 @@ ICONS = {
         part("violet", poly((58, 76), (58, 60), (64, 47), (71, 58), (66, 76)), bands=(2.0, 1.5)),
         part("cyan", poly((50, 28), (60, 45), (57, 76), (43, 76), (40, 45))),
         part("white", poly((50, 34), (54, 45), (50, 52), (46, 45)), bands=(1.0, 0.5)))),
+    "mode-last-stand": (PENNANT, pennant(
+        part("coral", ring(50, 54, 24, 5.5), bands=(2.0, 1.5)),
+        part("yellow", poly((42, 43), (42, 35), (46.5, 39), (50, 33), (53.5, 39), (58, 35), (58, 43)),
+             bands=(1.0, 0.5)),
+        part("white", circle(50, 51, 6.5), rrect(42, 59, 16, 13, 5)))),
     # Weapon part families (symbolic illustrations, not physical attachments).
     "part-magazine": (PART, [
         part("indigo", poly((41, 12), (83, 12), (77, 74), (65, 88), (35, 88))),

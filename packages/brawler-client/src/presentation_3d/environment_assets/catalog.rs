@@ -742,8 +742,9 @@ mod grid_catalog_tests {
     fn crossroads_facility_maps_render_only_their_theme_kit() {
         let maps = assert_theme_maps_render_only_their_kit(brawler::map::MapPresentationThemeId(1));
         assert_eq!(
-            maps, 8,
-            "every theme-1 built-in map, including Sluicegate Works and Prism Quarry, is covered"
+            maps, 9,
+            "every theme-1 built-in map, including Sluicegate Works, Prism Quarry, and Sunder Ring, \
+             is covered"
         );
     }
 

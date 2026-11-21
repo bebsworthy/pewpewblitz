@@ -99,7 +99,23 @@ pub(crate) enum ModeScoreView {
         /// The holding team and whole seconds left on its countdown.
         hold: Option<(TeamId, u64)>,
     },
+    LastStand {
+        alive: u8,
+        fighters: u8,
+        zone: LastStandZone,
+        /// The local fighter's finishing place once it is eliminated.
+        local_place: Option<u8>,
+        local_boost_stacks: u8,
+    },
     Syncing,
+}
+
+/// What the Last Stand ring is doing now, in whole seconds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LastStandZone {
+    ClosesIn(u64),
+    Closing(u64),
+    Final,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -391,6 +407,7 @@ fn update_readiness_hud(
     turf_holds: Query<&brawler::matchplay::TurfHoldState, With<MatchRoot>>,
     vault_break_states: Query<&brawler::matchplay::VaultBreakState, With<MatchRoot>>,
     shard_rush_states: Query<&brawler::matchplay::ShardRushState, With<MatchRoot>>,
+    last_stand_states: Query<&brawler::matchplay::LastStandState, With<MatchRoot>>,
     vault_break_safes: Query<(
         &brawler::matchplay::VaultBreakSafe,
         &brawler::combat::CurrentHealth,
@@ -463,6 +480,12 @@ fn update_readiness_hud(
                 state,
                 shard_rush_states.iter().next(),
             ))
+        } else if state.mode_definition_id == brawler::map::LAST_STAND_MODE_DEFINITION {
+            Some(final_last_stand_line(
+                state,
+                last_stand_states.iter().next(),
+                fighter.map(|(_, team)| *team),
+            ))
         } else {
             final_objective_line(match_state, turf_holds.iter().next())
         }
@@ -510,6 +533,16 @@ fn update_readiness_hud(
                 state,
                 shard_rush_states.iter().next(),
                 clock,
+            ))
+        } else if state.mode_definition_id == brawler::map::LAST_STAND_MODE_DEFINITION {
+            Some(build_last_stand_score_view(
+                state,
+                last_stand_states.iter().next(),
+                clock,
+                fighter.map(|(_, team)| *team),
+                local_player
+                    .and_then(|player| roster_presentation.entries.get(&player))
+                    .map_or(0, |entry| entry.boost_stacks),
             ))
         } else {
             build_mode_score_view(match_state, turf_holds.iter().next(), clock)
@@ -746,8 +779,92 @@ pub(crate) fn mode_score_text(view: ModeScoreView) -> String {
             );
             format!("T1  {}  —  {}  T2\n{hold}", shards[0], shards[1])
         }
+        ModeScoreView::LastStand {
+            alive,
+            fighters,
+            zone,
+            local_place,
+            local_boost_stacks,
+        } => {
+            let status = local_place.map_or_else(
+                || last_stand_zone_label(zone),
+                |place| format!("ELIMINATED #{place}"),
+            );
+            format!(
+                "ALIVE  {alive}/{fighters}  BOOSTS +{}%\n{status}",
+                u16::from(local_boost_stacks) * 5
+            )
+        }
         ModeScoreView::Syncing => "SYNCING OBJECTIVE".to_string(),
     }
+}
+
+pub(crate) fn last_stand_zone_label(zone: LastStandZone) -> String {
+    match zone {
+        LastStandZone::ClosesIn(seconds) => format!("ZONE CLOSES  {seconds}"),
+        LastStandZone::Closing(seconds) => format!("ZONE CLOSING  {seconds}"),
+        LastStandZone::Final => "FINAL ZONE".to_string(),
+    }
+}
+
+/// Last Stand plate facts: standing count, the ring's next deadline, and the local place.
+pub(crate) fn build_last_stand_score_view(
+    state: &MatchState,
+    last_stand: Option<&brawler::matchplay::LastStandState>,
+    clock: Option<&brawler::matchplay::MatchClock>,
+    local_team: Option<TeamId>,
+    local_boost_stacks: u8,
+) -> ModeScoreView {
+    let (Some(last_stand), Some(clock)) = (last_stand, clock) else {
+        return ModeScoreView::Syncing;
+    };
+    if last_stand.match_id != state.match_id || clock.match_id != state.match_id {
+        return ModeScoreView::Syncing;
+    }
+    let second = brawler::timing::simulation_ticks_from_seconds(1).unwrap_or(1);
+    let seconds_until = |tick: u64| {
+        tick.saturating_sub(clock.completed_tick)
+            .div_ceil(second)
+            .max(1)
+    };
+    let boundary = last_stand.boundary;
+    let zone = if boundary.is_final() {
+        LastStandZone::Final
+    } else if clock.completed_tick < boundary.shrink_starts_at_tick {
+        LastStandZone::ClosesIn(seconds_until(boundary.shrink_starts_at_tick))
+    } else {
+        LastStandZone::Closing(seconds_until(boundary.shrink_ends_at_tick))
+    };
+    ModeScoreView::LastStand {
+        alive: last_stand.alive,
+        fighters: last_stand.fighters,
+        zone,
+        local_place: local_team
+            .and_then(|team| last_stand.placements.get(usize::from(team.0)).copied())
+            .filter(|place| *place != 0),
+        local_boost_stacks,
+    }
+}
+
+fn final_last_stand_line(
+    state: &MatchState,
+    last_stand: Option<&brawler::matchplay::LastStandState>,
+    local_team: Option<TeamId>,
+) -> String {
+    last_stand
+        .filter(|last_stand| last_stand.match_id == state.match_id)
+        .map_or_else(
+            || "SYNCING OBJECTIVE".to_string(),
+            |last_stand| {
+                let place = local_team
+                    .and_then(|team| last_stand.placements.get(usize::from(team.0)).copied())
+                    .filter(|place| *place != 0);
+                place.map_or_else(
+                    || format!("FINAL  {} STANDING", last_stand.alive),
+                    |place| format!("FINAL  YOU PLACED #{place} OF {}", last_stand.fighters),
+                )
+            },
+        )
 }
 
 /// Shard Rush plate facts: held totals plus the holding team's remaining whole seconds.

@@ -32,7 +32,7 @@ pub use queue::{
     QueuePoolSnapshot, QueueRejection, QueueRequestId, QueueTicketId, ReservationStarted,
 };
 
-pub const MAX_GAME_TYPES: usize = 12;
+pub const MAX_GAME_TYPES: usize = 16;
 pub const MAX_MAPS_PER_GAME_TYPE: usize = 8;
 pub const MAX_PRACTICE_MAPS: usize = MAX_GAME_TYPES * MAX_MAPS_PER_GAME_TYPE;
 pub const MAX_GAME_TYPE_ID_BYTES: usize = 32;
@@ -156,6 +156,10 @@ pub enum AdvertisedRulesSummary {
     ShardRush {
         target_shards: u8,
         hold_ticks: u16,
+        active_limit_ticks: u64,
+    },
+    LastStand {
+        fighters: u8,
         active_limit_ticks: u64,
     },
 }
@@ -374,6 +378,11 @@ impl AdvertisedGameType {
             AdvertisedRulesSummary::Zombie { .. } => {
                 self.team_count == 1 && matches!(self.players_per_team, 2..=3)
             }
+            AdvertisedRulesSummary::LastStand { fighters, .. } => {
+                fighters == crate::matchplay::LAST_STAND_FIGHTERS
+                    && self.team_count == fighters
+                    && self.players_per_team == 1
+            }
             _ => self.team_count == 2 && matches!(self.players_per_team, 1..=3),
         };
         if !topology_valid {
@@ -401,6 +410,9 @@ impl AdvertisedGameType {
                 hold_ticks,
                 active_limit_ticks,
             } if target_shards > 0 && hold_ticks > 0 && active_limit_ticks > 0 => {}
+            AdvertisedRulesSummary::LastStand {
+                active_limit_ticks, ..
+            } if active_limit_ticks > 0 => {}
             _ => return Err(LobbyModelError::InvalidRules),
         }
         Ok(())
@@ -682,6 +694,14 @@ pub fn canonical_catalog_bytes(
                 bytes.push(5);
                 bytes.push(target_shards);
                 bytes.extend_from_slice(&hold_ticks.to_be_bytes());
+                bytes.extend_from_slice(&active_limit_ticks.to_be_bytes());
+            }
+            AdvertisedRulesSummary::LastStand {
+                fighters,
+                active_limit_ticks,
+            } => {
+                bytes.push(6);
+                bytes.push(fighters);
                 bytes.extend_from_slice(&active_limit_ticks.to_be_bytes());
             }
         }

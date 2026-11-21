@@ -29,6 +29,7 @@ pub enum ModeSummary {
     VaultBreak(crate::matchplay::VaultBreakSummary),
     Zombie(crate::matchplay::ZombieSummary),
     ShardRush(crate::matchplay::ShardRushSummary),
+    LastStand(crate::matchplay::LastStandSummary),
 }
 
 /// Takedown's terminal scores, preserving the pre-M09 report meaning.

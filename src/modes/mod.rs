@@ -7,6 +7,7 @@
 use crate::{config::GameMode, map::ModeDefinitionId};
 use bevy::prelude::{App, Plugin};
 
+mod last_stand;
 mod registry;
 mod shard_rush;
 mod takedown;
@@ -36,6 +37,8 @@ pub(crate) enum ModeTopologyPolicy {
     MirroredVaultBreakSafes,
     ZombieIngress,
     ShardRushSource,
+    /// One spawn family per solo fighter, no mode anchors (Last Stand).
+    SoloSpawns,
 }
 
 #[cfg(feature = "server")]
@@ -51,6 +54,22 @@ impl CompatibleMapPolicy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ModePresentationProjection {
     pub selection_label: &'static str,
+}
+
+#[cfg(feature = "server")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModeTeamTopology {
+    pub(crate) team_count: u8,
+    pub(crate) maximum_participants_per_team: u8,
+}
+
+#[cfg(feature = "server")]
+impl ModeTeamTopology {
+    /// Two opposing teams of up to three.
+    pub(crate) const VERSUS: Self = Self {
+        team_count: 2,
+        maximum_participants_per_team: 3,
+    };
 }
 
 #[cfg(feature = "server")]
@@ -70,6 +89,8 @@ pub(crate) struct ServerModeProjection {
     pub(crate) compatible_maps: CompatibleMapPolicy,
     pub(crate) default_map_preset: MapPresetId,
     pub(crate) routing_mode: brawler_routing::GameMode,
+    /// Team count and per-team ceiling a server composes when no routed manifest fixes them.
+    pub(crate) default_topology: ModeTeamTopology,
     pub(crate) validate_operator_policy: OperatorPolicyValidator,
     pub(crate) resolve_operator_rules: OperatorRuleResolver,
     install: ServerModeInstaller,
@@ -186,6 +207,7 @@ impl Plugin for BuiltInModeRegistrationsPlugin {
             vault_break::VaultBreakModeRegistrationPlugin,
             zombie::ZombieModeRegistrationPlugin,
             shard_rush::ShardRushModeRegistrationPlugin,
+            last_stand::LastStandModeRegistrationPlugin,
         ));
     }
 }
@@ -197,6 +219,7 @@ pub(crate) fn builtin_mode_catalog() -> &'static ModeCatalog {
         vault_break::REGISTRATION,
         zombie::REGISTRATION,
         shard_rush::REGISTRATION,
+        last_stand::REGISTRATION,
     ])
 }
 

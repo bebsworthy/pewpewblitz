@@ -132,9 +132,20 @@ pub struct MatchState {
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub(crate) enum BotObjectiveView {
     Elimination,
-    ControlArea { center: Vec2, radius: f32 },
+    ControlArea {
+        center: Vec2,
+        radius: f32,
+    },
     AttackAndDefend,
-    CollectAndHold { source: Vec2 },
+    CollectAndHold {
+        source: Vec2,
+    },
+    /// Stay inside a shrinking safe circle; `next_radius` is where the current phase ends.
+    SurviveBoundary {
+        center: Vec2,
+        radius: f32,
+        next_radius: f32,
+    },
 }
 
 /// Generation-tagged shared match clock published on the match root.

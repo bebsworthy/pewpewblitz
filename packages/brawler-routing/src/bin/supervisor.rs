@@ -124,6 +124,7 @@ const fn mode_label(mode: GameMode) -> &'static str {
         GameMode::VaultBreak => "vault-break",
         GameMode::Zombie => "zombie",
         GameMode::ShardRush => "shard-rush",
+        GameMode::LastStand => "last-stand",
     }
 }
 
@@ -439,7 +440,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
         } else if argument == "--mode" {
             parsed.mode = match args
                 .next()
-                .ok_or("--mode requires takedown, turf-hold, vault-break, zombie, or shard-rush")?
+                .ok_or("--mode requires takedown, turf-hold, vault-break, zombie, shard-rush, or last-stand")?
                 .as_str()
             {
                 "takedown" => GameMode::Takedown,
@@ -447,9 +448,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
                 "vault-break" => GameMode::VaultBreak,
                 "zombie" => GameMode::Zombie,
                 "shard-rush" => GameMode::ShardRush,
+                "last-stand" => GameMode::LastStand,
                 _ => {
                     return Err(
-                        "--mode requires takedown, turf-hold, vault-break, zombie, or shard-rush"
+                        "--mode requires takedown, turf-hold, vault-break, zombie, shard-rush, or last-stand"
                             .into(),
                     );
                 }

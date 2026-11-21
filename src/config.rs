@@ -112,15 +112,17 @@ pub enum GameMode {
     VaultBreak,
     Zombie,
     ShardRush,
+    LastStand,
 }
 
 impl GameMode {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Takedown,
         Self::TurfHold,
         Self::VaultBreak,
         Self::Zombie,
         Self::ShardRush,
+        Self::LastStand,
     ];
 
     #[must_use]
@@ -131,6 +133,7 @@ impl GameMode {
             "vault-break" | "vault_break" | "vaultbreak" => Some(Self::VaultBreak),
             "zombie" => Some(Self::Zombie),
             "shard-rush" | "shard_rush" | "shardrush" => Some(Self::ShardRush),
+            "last-stand" | "last_stand" | "laststand" => Some(Self::LastStand),
             _ => None,
         }
     }
@@ -143,6 +146,7 @@ impl GameMode {
             Self::VaultBreak => "vault-break",
             Self::Zombie => "zombie",
             Self::ShardRush => "shard-rush",
+            Self::LastStand => "last-stand",
         }
     }
 }
@@ -430,6 +434,8 @@ mod tests {
         assert_eq!(GameMode::VaultBreak.name(), "vault-break");
         assert_eq!(GameMode::parse("Shard_Rush"), Some(GameMode::ShardRush));
         assert_eq!(GameMode::ShardRush.name(), "shard-rush");
+        assert_eq!(GameMode::parse("Last_Stand"), Some(GameMode::LastStand));
+        assert_eq!(GameMode::LastStand.name(), "last-stand");
     }
 
     #[test]

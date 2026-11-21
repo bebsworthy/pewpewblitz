@@ -210,7 +210,7 @@ pub(crate) fn apply_environment_damage_batch(
             lineage_is_current
                 && source.team_id != target.team
                 && source.owner_network_entity_id != target.network_id
-                && source.team_id.0 <= 1
+                && usize::from(source.team_id.0) < crate::matchplay::MAX_MATCH_TEAMS
         });
         let source_team = initiated_source
             .filter(|_| hostile_credit)
