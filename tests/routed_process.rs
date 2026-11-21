@@ -27,6 +27,21 @@ const LOGICAL_SERVER_ID: u128 = 0x4d01;
 const SUPERVISOR_GENERATION: u64 = 0x51;
 const LOBBY_WORKER_ID: u128 = 0x100;
 const LOBBY_PROCESS_ID: u128 = 0x1000;
+/// A Wipeout preset both allocations play.
+const WIPEOUT_MAP_PRESET: u16 = 1;
+
+#[path = "support/profile_database_file.rs"]
+mod profile_database_file;
+use profile_database_file::ProfileDatabaseFile;
+
+/// This test's own lobby profile database: tests in this binary run in parallel, so each names
+/// its path with `test` as well as the process ID (BRL-shwv).
+fn profile_database(test: &str) -> ProfileDatabaseFile {
+    ProfileDatabaseFile::fresh(std::env::temp_dir().join(format!(
+        "brawler-routed-profiles-{}-{test}.sqlite3",
+        std::process::id()
+    )))
+}
 
 fn real_worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_brawler-server"))
@@ -68,7 +83,8 @@ fn quiet(mut spec: WorkerLaunchSpec) -> WorkerLaunchSpec {
     spec
 }
 
-fn lobby_spec() -> WorkerLaunchSpec {
+/// The supervisor relaunches a crashed lobby from this spec, so a restart keeps the same database.
+fn lobby_spec(database: &ProfileDatabaseFile) -> WorkerLaunchSpec {
     let identity = routing_identity().expect("production routing identity is computable");
     let worker_id = WorkerId::new(LOBBY_WORKER_ID).unwrap();
     let process_id = ProcessId::new(LOBBY_PROCESS_ID).unwrap();
@@ -93,13 +109,7 @@ fn lobby_spec() -> WorkerLaunchSpec {
         outstanding_allocations: 2,
         active_matches: 4,
         heartbeat_ms: 1_000,
-        profile_database_path: std::env::temp_dir()
-            .join(format!(
-                "brawler-routed-profiles-{}.sqlite3",
-                std::process::id()
-            ))
-            .to_string_lossy()
-            .into_owned(),
+        profile_database_path: database.path(),
         raw_catalog: include_bytes!("../config/server/game-types.ron").to_vec(),
         raw_catalog_fingerprint: brawler_routing::raw_catalog_fingerprint(include_bytes!(
             "../config/server/game-types.ron"
@@ -147,13 +157,26 @@ fn allocation_request(
             build_snapshot: build.snapshot,
         },
     ];
+    // The match worker admits the preset only at its current admission revision and recipe
+    // fingerprint, so read both from the embedded catalog rather than pinning literals.
+    let catalog = brawler::map::MapContentCatalog::embedded().expect("embedded map catalog loads");
+    let preset = catalog
+        .preset(brawler::map::MapPresetId(WIPEOUT_MAP_PRESET))
+        .expect("the Wipeout test preset exists");
+    let map_recipe_fingerprint = catalog
+        .resolve_preset(preset.id, brawler::map::MapInstanceId(1))
+        .expect("the Wipeout test preset resolves")
+        .snapshot
+        .identity
+        .recipe_fingerprint
+        .0;
     AllocateRequestBody {
         request_id: RequestId::new(request_id).unwrap(),
         lobby_session_id,
         mode: GameMode::Wipeout,
-        map_preset: 1,
-        map_revision: 1,
-        map_recipe_fingerprint: 1,
+        map_preset: WIPEOUT_MAP_PRESET,
+        map_revision: u32::from(preset.admission_revision),
+        map_recipe_fingerprint,
         map_recipe: Vec::new(),
         rules_profile: 1,
         objective_target: 10,
@@ -245,10 +268,12 @@ fn shutdown_and_assert_clean(mut runtime: SupervisorRuntime) {
     reason = "this integration test keeps the full bounded process-isolation evidence sequence together"
 )]
 fn real_bevy_workers_isolate_match_crash_and_cleanup_routes_peers() {
+    // Declared first so it drops last, after the supervisor has stopped the lobby.
+    let database = profile_database("isolate");
     let build = default_build_identity().expect("default build identity is available");
     let mut runtime = runtime();
     let mut events = runtime
-        .spawn_worker(lobby_spec())
+        .spawn_worker(lobby_spec(&database))
         .expect("real lobby worker spawns");
     events = wait_for_ready(
         &mut runtime,
@@ -400,9 +425,11 @@ fn real_bevy_workers_isolate_match_crash_and_cleanup_routes_peers() {
 
 #[test]
 fn real_bevy_lobby_restarts_after_crash_and_cleans_exactly() {
+    // Declared first so it drops last, after the supervisor has stopped the lobby.
+    let database = profile_database("restart");
     let mut runtime = runtime();
     let events = runtime
-        .spawn_worker(lobby_spec())
+        .spawn_worker(lobby_spec(&database))
         .expect("real lobby worker spawns");
     let events = wait_for_ready(
         &mut runtime,

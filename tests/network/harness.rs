@@ -1,54 +1,11 @@
 //! Shared deterministic Crossbeam client/server integration harness.
 
 use super::*;
+use crate::profile_database_file::ProfileDatabaseFile;
 
+/// Numbers each product lobby's profile database within this process (see `ProfileDatabaseFile`).
 static PRODUCT_LOBBY_DATABASE_SEQUENCE: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
-
-/// One product lobby's `SQLite` profile database, fresh for this harness and removed with it.
-///
-/// The path is keyed by process ID and a per-process sequence, and macOS recycles process IDs.
-/// A file left by an earlier run (an older schema, or another test's accounts and maps) would
-/// otherwise be reopened: an old schema panics `initialize_lobby_state` at startup, and old rows
-/// change publishing and queue outcomes (BRL-1chc).
-struct ProfileDatabaseFile(std::path::PathBuf);
-
-impl ProfileDatabaseFile {
-    fn fresh(path: std::path::PathBuf) -> Self {
-        let file = Self(path);
-        for path in file.files() {
-            match std::fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => panic!("remove stale profile database {}: {error}", path.display()),
-            }
-        }
-        file
-    }
-
-    fn path(&self) -> String {
-        self.0.to_string_lossy().into_owned()
-    }
-
-    /// The database and its WAL-mode side files.
-    fn files(&self) -> impl Iterator<Item = std::path::PathBuf> + '_ {
-        ["", "-wal", "-shm"].into_iter().map(|suffix| {
-            let mut path = self.0.clone().into_os_string();
-            path.push(suffix);
-            std::path::PathBuf::from(path)
-        })
-    }
-}
-
-impl Drop for ProfileDatabaseFile {
-    fn drop(&mut self) {
-        // The harness drops its apps first, so the storage executor has joined and closed it.
-        // Never panic here: this also runs while a failed test unwinds.
-        for path in self.files() {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct MismatchedMessage(u8);

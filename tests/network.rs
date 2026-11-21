@@ -66,6 +66,8 @@ use serde::{Deserialize, Serialize};
 
 #[path = "network/harness.rs"]
 mod harness;
+#[path = "support/profile_database_file.rs"]
+mod profile_database_file;
 use harness::*;
 
 #[path = "network/heist.rs"]
