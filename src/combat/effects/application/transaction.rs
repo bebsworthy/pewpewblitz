@@ -10,9 +10,9 @@ use super::{
     TargetGate, TeamId, TestDummyResetDeadline, WeaponPresetId, WeaponRecipeFingerprint,
     WeaponTelemetryRecord, WorldPoint, boost_scaled_immediate_damage, combat_source_allows_target,
     cue_damage_source, effect_allows_target, effect_recipient_scale, finish_attack_delivery,
-    payload_target_gate, plan_damage_application, plan_healing_application, plan_runtime_effects,
-    project_committed_damage, project_committed_defeat, project_committed_healing,
-    teams_are_hostile,
+    non_damage_effect_applies, payload_target_gate, plan_damage_application,
+    plan_healing_application, plan_runtime_effects, project_committed_damage,
+    project_committed_defeat, project_committed_healing, teams_are_hostile,
 };
 use bevy::prelude::*;
 
@@ -480,7 +480,7 @@ pub(in crate::combat::effects) fn plan_composed_records<'a>(
                         }));
                 }
             } else if let PayloadEffectDefinition::Heal { amount, .. } = effect {
-                if target.healing_blocked {
+                if !non_damage_effect_applies(effect, target.defeated, target.healing_blocked) {
                     continue;
                 }
                 let healing =

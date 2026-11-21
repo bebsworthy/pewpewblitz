@@ -410,3 +410,105 @@ fn boost_scaled_lethal_damage_reserves_damage_and_defeat_events() {
         "one boost scales 100 damage to a lethal 105 and must reserve the defeat event",
     );
 }
+
+#[cfg(feature = "server")]
+#[test]
+fn composed_heal_after_same_batch_defeat_is_skipped_without_an_event() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn source(attack_id: u64, owner: u64, team: u8) -> AttackSource {
+        AttackSource {
+            kind: CombatSourceKind::PrimaryWeapon,
+            attack_id: AttackId(attack_id),
+            player_id: PlayerId(owner),
+            owner_network_entity_id: NetworkEntityId(owner),
+            team_id: TeamId(team),
+            recipe_fingerprint: WeaponRecipeFingerprint(1),
+            legacy_compatibility: false,
+            source_preset_id: Some(WeaponPresetId(7)),
+            origin: WorldPoint::from(Vec2::ZERO),
+            facing: 0.0,
+        }
+    }
+    fn payload(
+        source: AttackSource,
+        target: Entity,
+        contact_fraction: f32,
+        effect: PayloadEffectDefinition,
+    ) -> PendingPayload {
+        PendingPayload {
+            source,
+            delivery_index: 0,
+            bundle_index: 0,
+            target,
+            target_network_id: NetworkEntityId(2),
+            position: Vec2::ZERO,
+            engagement_distance: 0.0,
+            delivery_travel: 0.0,
+            contact_fraction,
+            bundle: PayloadBundleDefinition {
+                target: TargetSelection::Direct,
+                effects: vec![effect],
+            },
+        }
+    }
+
+    let mut world = World::new();
+    world.init_resource::<SimulationTick>();
+    world.init_resource::<NextCombatIds>();
+    world.init_resource::<ActiveAttackTrackers>();
+    world.init_resource::<WeaponTelemetry>();
+    world.init_resource::<crate::abilities::AbilityTelemetry>();
+    world.init_resource::<CombatTelemetry>();
+    world.init_resource::<CombatOutbox>();
+    world.init_resource::<CombatWorldEffectFacts>();
+    world.init_resource::<CombatOutcomeFacts>();
+    world.init_resource::<CombatConditionRulesResource>();
+    world.init_resource::<Messages<PendingPayload>>();
+    world.init_resource::<Messages<PendingDelivery>>();
+    // Attacker on team 1, healer and target on team 2; no ControlledBy keeps both connected.
+    world.spawn((Fighter, NetworkEntityId(1), TeamId(1), CurrentHealth(100)));
+    world.spawn((Fighter, NetworkEntityId(3), TeamId(2), CurrentHealth(100)));
+    let target = world
+        .spawn((Fighter, NetworkEntityId(2), TeamId(2), CurrentHealth(10)))
+        .id();
+    // The lethal hit lands first in deterministic batch order; the ally heal lands after it.
+    world.write_message(payload(
+        source(1, 1, 1),
+        target,
+        0.0,
+        PayloadEffectDefinition::Damage {
+            amount: 10,
+            falloff: DamageFalloff::None,
+            recipients: RecipientPolicy::Hostiles,
+        },
+    ));
+    world.write_message(payload(
+        source(2, 3, 2),
+        target,
+        0.5,
+        PayloadEffectDefinition::Heal {
+            amount: 24,
+            recipients: RecipientPolicy::AlliesAndOwner,
+        },
+    ));
+
+    world
+        .run_system_once(resolve_composed_payloads)
+        .expect("payload resolution runs");
+    world.flush();
+
+    assert!(world.get::<Defeated>(target).is_some());
+    assert_eq!(world.get::<CurrentHealth>(target), Some(&CurrentHealth(0)));
+    let cues = &world.resource::<CombatOutbox>().0;
+    assert!(
+        !cues.iter().any(|cue| matches!(
+            cue,
+            CombatCue::EffectApplied {
+                effect: CombatEffectCue::Healing { .. },
+                ..
+            }
+        )),
+        "a heal on a target defeated earlier in the batch neither applies nor emits: {cues:?}"
+    );
+}

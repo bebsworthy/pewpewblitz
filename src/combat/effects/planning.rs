@@ -134,6 +134,20 @@ pub(crate) fn flush_completed_attack_telemetry(
     }
 }
 
+/// Whether a non-damage payload effect still applies to, and so consumes one combat event
+/// for, a target in its simulated batch state. Event reservation and the authoritative
+/// transaction both gate on this predicate so their counts cannot drift: a target defeated
+/// earlier in the batch takes no further effects, and an effect tile that blocks healing
+/// suppresses heals only.
+#[cfg(feature = "server")]
+pub(super) const fn non_damage_effect_applies(
+    effect: PayloadEffectDefinition,
+    defeated: bool,
+    healing_blocked: bool,
+) -> bool {
+    !(defeated || (healing_blocked && matches!(effect, PayloadEffectDefinition::Heal { .. })))
+}
+
 #[cfg(feature = "server")]
 pub(super) fn required_payload_event_count(
     delivery_records: &[PendingDelivery],
@@ -225,19 +239,11 @@ pub(super) fn required_payload_event_count(
                 | PayloadEffectDefinition::Slow { .. }
                 | PayloadEffectDefinition::Cold { .. }
                 | PayloadEffectDefinition::DamageOverTime { .. }
-                | PayloadEffectDefinition::Heal { .. }
-                    if !*defeated =>
-                {
-                    usize::from(
-                        !matches!(effect, PayloadEffectDefinition::Heal { .. })
-                            || !*healing_blocked,
-                    )
-                }
-                PayloadEffectDefinition::Knockback { .. }
-                | PayloadEffectDefinition::Slow { .. }
-                | PayloadEffectDefinition::Cold { .. }
-                | PayloadEffectDefinition::DamageOverTime { .. }
-                | PayloadEffectDefinition::Heal { .. } => 0,
+                | PayloadEffectDefinition::Heal { .. } => usize::from(non_damage_effect_applies(
+                    effect,
+                    *defeated,
+                    *healing_blocked,
+                )),
             };
             required = required.checked_add(event_count)?;
         }

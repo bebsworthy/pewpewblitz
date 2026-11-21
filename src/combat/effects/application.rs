@@ -4,7 +4,8 @@
 //! modules.
 
 use super::planning::{
-    delivery_survives_owner_disconnect, pending_delivery_kind_order, required_payload_event_count,
+    delivery_survives_owner_disconnect, non_damage_effect_applies, pending_delivery_kind_order,
+    required_payload_event_count,
 };
 use super::runtime::{
     PlannedTarget, combat_source_allows_target, cue_damage_source, effect_allows_target,
