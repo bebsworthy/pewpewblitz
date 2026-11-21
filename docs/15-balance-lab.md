@@ -3,8 +3,8 @@
 ## Purpose
 
 Balance Lab is a development-only, server-authoritative tuning console for local Practice matches.
-It edits a complete global-rule, fighter-profile, weapon-base, supported-ultimate, supported-passive,
-map-effect, and world-object tuning snapshot, validates it against concrete engine and wire safety invariants,
+It edits a complete global-rule, roster-character, weapon-base, supported-ultimate,
+supported-passive, map-effect, and world-object tuning snapshot, validates it against concrete engine and wire safety invariants,
 persists accepted tuning locally, and applies it by starting a clean authoritative match epoch. It
 does not modify canonical authored content.
 
@@ -28,7 +28,8 @@ restoration-pickup evolution.
 4. Choose a gameplay category. Subjects are columns and comparable properties are aligned rows;
    unsupported subject/property intersections show an em dash. Edit exact draft values directly in
    the matrix. Scroll horizontally for wide categories; the property and subject headers remain
-   visible. Passives have their own category rather than appearing among Ultimates.
+   visible. Passives have their own category rather than appearing among Ultimates. **Characters**
+   has one column per roster character (see [Roster characters](#roster-characters)).
 5. Focus a value to review its applied value, server default, authoritative range, help, slider
    where applicable, and **Reset to applied** action. A cyan border and **Edited** marker identify
    unapplied changes. A red border and **Default Δ** marker independently identify values that
@@ -49,8 +50,8 @@ recomputes runtime recipe identities for equipped weapon modifiers whose base re
 persisted tuning makes any admitted loadout genuinely invalid, that tuning is ignored for the new
 worker rather than crashing or stranding the client during Match Loading.
 
-The current snapshot schema is version 20, the persistence envelope is version 14, and the
-non-persisted editor-manifest schema is version 13. The server manifest explicitly identifies every
+The current snapshot schema is version 22, the persistence envelope is version 16, and the
+non-persisted editor-manifest schema is version 15. The server manifest explicitly identifies every
 editable numeric path, comparison-row identity, gameplay unit, storage conversion, authoritative
 bound, step, and preferred control. The browser does not infer editability, comparison semantics,
 or limits from serialized field names. Semantic rows align equivalent authored axes even when
@@ -63,9 +64,7 @@ nine parameterized passives (including the Lightweight and Reinforced Frame heal
 scales),
 and the bounded parameters of all eleven tunable ultimates. The comparison workspace presents each
 category as a server-ordered matrix, aligns only fields with the same declared comparison identity,
-and preserves every numeric field exactly once. Character stats are not tunable yet: the shared
-fighter profiles were retired with saved brawlers (BRL-egn6), and per-character editing is
-BRL-5v3c.
+and preserves every editable field exactly once.
 Weapon coverage includes every Sticky Blomb delivery/fuse value and every Splash numeric delivery
 value; ultimate coverage includes every Big Blob parent/secondary value. The **World objects** tab
 exposes one comparison column per authored effect-tile definition and discovers each registered
@@ -81,19 +80,20 @@ treasure-chest/restoration-pickup health,
 restoration, radius, and lifetime are also editable. Structural IDs, terminal
 topology, replacement assets, and pickup visual identity remain locked. Older supported envelopes
 migrate sequentially by filling canonical chest, fighter-recovery, demolition,
-elemental-resistance, elemental-field, Cold-capacity, global condition-rule, and effect-tile
-defaults before validation while retaining existing tuning. The removed full-build workflow is not
+elemental-resistance, elemental-field, Cold-capacity, global condition-rule, effect-tile, and
+roster-character defaults before validation while retaining existing tuning. The removed full-build workflow is not
 a Balance Lab surface. Apply validation
-re-resolves the complete 3×7 fighter-profile/weapon-base matrix, validates the rebuilt map catalog
-and advertised character catalog, and then starts a clean Practice epoch.
+resolves every option combination of every revised character against the revised build, weapon,
+and weapon-part catalogs, validates the rebuilt map catalog, and then starts a clean Practice epoch.
 
 The roster view is also non-persisted and read-only. It is projected from the worker's authoritative
-admission manifest rather than inferred from client state. The routed match snapshot contains each
+admission manifest rather than inferred from client state, and is re-projected after every Apply or
+Restore so it shows the kit the worker actually resolves. The routed match snapshot contains each
 selected character and its chosen ultimate and passive; the card resolves the character's
 signature weapon and presents the canonical aggregate of its authored parts as effective capacity,
 damage, timing, reach, and slow modifiers.
 
-Fighter tuning also exposes health recovery per second and the accepted-attack idle delay. Weapon
+Character tuning also exposes health recovery per second and the accepted-attack idle delay. Weapon
 refill/recharge timing is labeled as recovery for one round or charge. These durations require a
 positive authoritative tick value but have no invented balance ceiling; the exact numeric input
 remains available beyond the editor's ordinary playtest range. Type timing values as ordinary
@@ -162,9 +162,10 @@ the shape variant, map-occlusion rule, two-effect topology, and recipient polici
 Applying an edit starts a clean Practice epoch so in-flight deliveries and active areas cannot mix
 old and new geometry, timing, payload, or capacity rules.
 
-The canonical default fighter starts with `1,000` maximum health, `70` world units/second movement,
-`100 health/second` recovery, and `3.0 seconds` of accepted-attack idle delay. The lightweight and
-reinforced profiles remain independently authored rather than inheriting these values. Canonical
+Canonical character stats are seeded per body in `content/catalogs/characters.ron`: Light `850`
+health and `77` world units/second, Normal `1,000` and `70`, Heavy `1,200` and `63`, each with
+`100 health/second` recovery and `3.0 seconds` of accepted-attack idle delay. Every character is then
+tuned independently; none inherits another's values. Canonical
 weapon recovery per round or charge is `1.0 seconds` for Pulse Sidearm, `1.2 seconds` for Scatter
 Cannon, `1.6 seconds` for Arc Launcher, `1.0 seconds` for Impact Blade, and `1.5 seconds` for Sticky
 Blomb, Spray, and Splash. **Apply & reset match** re-resolves every admitted human and bot, starts a
@@ -176,6 +177,32 @@ Ultimate tuning includes Demolition Strike maximum range and destruction radius.
 quantized to whole-cell-safe 4-world-unit steps and capped at 64 world units. Weapon world-effect
 fields remain available for generic recipe validation, while the built-in Arc Launcher exposes no
 terrain-destruction effect.
+
+## Roster characters
+
+The **Characters** category has one column per roster character, in catalog order (BRL-5v3c). Each
+column edits:
+
+- **Stats:** maximum health, movement speed, health recovery rate, attack-idle delay, reveal
+  proximity, Cold capacity, and Cold, Poison, and Fire resistance.
+- **Signature weapon:** the weapon base and four authored part slots. A slot set to **None** is
+  empty; the snapshot keeps four fixed slots so its topology never changes. The base's own numbers
+  stay under **Weapons**, shared by every character that carries it.
+- **Options:** the two ultimates and two passives players choose between. Each pair must differ.
+
+Weapon base, part, ultimate, and passive cells are choice lists (`select` controls). The manifest
+declares their closed option set; the stored value is the definition's integer ID, so Edited,
+Default Δ, Reset, Copy differences, and server rejections work exactly as for numeric fields.
+Character ID, key, display name, role, and body label stay locked. An unknown reference or a
+duplicate option is rejected with its field path; a combination that does not resolve (for
+example an authored part the chosen base cannot accept) rejects Apply and names the character.
+
+Players and bots were admitted with the canonical options. When a tuned character no longer offers
+an admitted ultimate or passive, the worker gives that player the tuned option in the same slot
+(first or second). Every admitted roster therefore stays resolvable, and option edits never strand
+a join or reject an Apply. The roster panel shows the carried kit. The Brawlers screen and Practice
+bot selection run in the lobby with canonical content, so they keep showing and choosing the
+canonical options; Lab tuning lives only in the Practice worker, like every other category.
 
 ## Validation principle
 
@@ -197,8 +224,9 @@ while Balance Lab uses a wider proven-safe engine ceiling. Expanding a real engi
 updating the affected runtime, wire, client-convergence, and capacity tests together.
 
 Character stats share the authoritative fighter-stat bounds (`validate_fighter_stats`): maximum
-health is a nonzero `u16` and movement speed is finite and greater than zero. Per-character editing
-will expose them under BRL-5v3c.
+health is a nonzero `u16`, movement speed is finite, positive, and at most the engine ceiling,
+recovery, idle delay, and Cold capacity are nonzero, resistances are at most 60%, and reveal
+proximity stays inside the concealment range.
 
 ## Required maintenance contract
 
@@ -235,9 +263,10 @@ partially applied match.
 
 Primary implementation ownership currently lives in `src/server/balance_lab/`, with authored global
 condition tuning in `content/catalogs/combat_conditions.ron`, authored build tuning and shared
-passive/ultimate bounds beside their typed models in `src/builds/`, weapon definitions and shared
+passive/ultimate bounds beside their typed models in `src/builds/`, the roster in
+`content/catalogs/characters.ron` with its Lab projection in `src/server/balance_lab/characters.rs`, weapon definitions and shared
 weapon bounds in `src/combat/definitions/`, and private exhaustive manifest projections in
-`src/server/balance_lab/editor/{passives,weapons,ultimates}.rs`. Effect-tile and object/chest
+`src/server/balance_lab/editor/{characters,passives,weapons,ultimates}.rs`. Effect-tile and object/chest
 definitions remain in `src/map/`, Heist safe rules in `src/matchplay/heist.rs`, and the operator
 application in `tools/balance-lab-web/`.
 

@@ -172,16 +172,18 @@ fn player_view(
     catalogs: LoadoutCatalogs<'_>,
 ) -> Result<PlayerLoadoutView, String> {
     let snapshot = MatchCharacterSnapshot::decode(encoded)?;
+    // Present the kit the worker actually resolves: the admitted pick carried onto tuned options.
+    let pick = snapshot.revised_balance_lab_choice(catalogs.characters);
     let character = catalogs
         .characters
-        .character(snapshot.choice.character_id)
+        .character(pick.character_id)
         .ok_or_else(|| "admitted player references an unknown character".to_string())?;
     let recipe = catalogs
         .characters
-        .loadout_recipe(snapshot.choice, catalogs.parts)
+        .loadout_recipe(pick, catalogs.parts)
         .map_err(|error| format!("admitted player pick is invalid: {error:?}"))?;
     let resolved = catalogs
-        .resolve(snapshot.choice)
+        .resolve(pick)
         .map_err(|error| format!("admitted player pick does not resolve: {error:?}"))?;
     let weapon_base = catalogs
         .weapons
@@ -189,11 +191,11 @@ fn player_view(
         .ok_or_else(|| "admitted player references an unknown weapon base".to_string())?;
     let ultimate = catalogs
         .builds
-        .ultimate(snapshot.choice.ultimate_id)
+        .ultimate(pick.ultimate_id)
         .ok_or_else(|| "admitted player references an unknown ultimate".to_string())?;
     let passive = catalogs
         .builds
-        .passive(snapshot.choice.passive_id)
+        .passive(pick.passive_id)
         .ok_or_else(|| "admitted player references an unknown passive".to_string())?;
     let baseline = character.stats;
     let stats = resolved.fighter_stats;

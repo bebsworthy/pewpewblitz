@@ -1,6 +1,7 @@
 import {
   displayNumber,
   formatFieldNumber,
+  formatFieldValue,
   storedNumber,
 } from "../lib/editorFields";
 import type {
@@ -40,11 +41,13 @@ export function EditorFieldDetail({
         <p className="eyebrow">{field.subjectLabel} · {field.group}</p>
         <h3>{field.label}</h3>
         <p>
-          Applied <strong>{formatFieldNumber(displayNumber(applied, field), field)}</strong>
+          Applied <strong>{formatFieldValue(displayNumber(applied, field), field)}</strong>
           <span aria-hidden="true"> · </span>
-          Default <strong>{formatFieldNumber(displayNumber(baseline, field), field)}</strong>
+          Default <strong>{formatFieldValue(displayNumber(baseline, field), field)}</strong>
           <span aria-hidden="true"> · </span>
-          Range <strong>{rangeStart}–{formatFieldNumber(field.maximum, field)} {field.unit}</strong>
+          {field.control === "select"
+            ? <>Choices <strong>{field.options?.length ?? 0}</strong></>
+            : <>Range <strong>{rangeStart}–{formatFieldNumber(field.maximum, field)} {field.unit}</strong></>}
         </p>
         {field.help && <small>{field.help}</small>}
         {error && <small className="field-detail-error">{error}</small>}

@@ -1,5 +1,6 @@
 //! Development-only, server-authoritative Practice balance tuning.
 
+mod characters;
 mod editor;
 mod http;
 mod persistence;
@@ -38,7 +39,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 21;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 22;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -189,6 +190,7 @@ struct BalanceLabSnapshotV3 {
     weapons: Vec<WeaponPresetTuning>,
     ultimates: Vec<UltimateTuning>,
     passives: Vec<PassiveTuning>,
+    characters: Vec<characters::CharacterTuning>,
     barrel: BarrelTuning,
     chest: ChestTuning,
     effect_tiles: EffectTileTuning,
@@ -238,6 +240,10 @@ impl BalanceLabSnapshotV3 {
                     parameters: passive.parameters,
                 })
                 .collect(),
+            characters: characters::from_catalog(
+                &crate::characters::CharacterCatalog::embedded()
+                    .expect("embedded character catalog is valid"),
+            ),
             barrel: BarrelTuning {
                 damage_profile: *maps
                     .damage_profile(crate::map::MapDamageProfileId(1))
@@ -355,61 +361,58 @@ struct BalanceLabStartupConfig {
     persistence_path: PathBuf,
 }
 
-/// The roster content Balance Lab does not tune (characters and authored weapon parts), paired
-/// with the revised build and weapon catalogs a candidate resolves against.
-struct UntunedRosterContent {
+/// The complete set of catalogs one validated snapshot installs, plus the untuned weapon parts a
+/// roster pick resolves against.
+#[derive(Clone)]
+struct RevisedCatalogs {
+    builds: BuildCatalog,
+    weapons: WeaponCatalog,
+    maps: crate::map::MapContentCatalog,
     characters: crate::characters::CharacterCatalog,
     parts: crate::weapon_parts::WeaponPartCatalog,
 }
 
-impl UntunedRosterContent {
-    fn embedded() -> Result<Self, String> {
-        Ok(Self {
-            characters: crate::characters::CharacterCatalog::embedded()?,
-            parts: crate::weapon_parts::WeaponPartCatalog::embedded()?,
-        })
-    }
-
-    const fn with<'a>(
-        &'a self,
-        builds: &'a BuildCatalog,
-        weapons: &'a WeaponCatalog,
-    ) -> crate::characters::LoadoutCatalogs<'a> {
+impl RevisedCatalogs {
+    const fn loadouts(&self) -> crate::characters::LoadoutCatalogs<'_> {
         crate::characters::LoadoutCatalogs {
             characters: &self.characters,
-            builds,
-            weapons,
+            builds: &self.builds,
+            weapons: &self.weapons,
             parts: &self.parts,
         }
     }
 }
 
-fn projected_player_loadouts(
-    world: &World,
-    builds: &BuildCatalog,
-    weapons: &WeaponCatalog,
-) -> Result<Vec<roster::PlayerLoadoutView>, String> {
-    let manifest = world
+fn admitted_manifest(world: &World) -> Result<&brawler_routing::MatchManifestV1, String> {
+    world
         .resource::<ServerRoleResource>()
         .manifest()
-        .ok_or_else(|| "Practice manifest disappeared during startup".to_string())?;
-    let content = UntunedRosterContent::embedded()?;
-    roster::from_manifest(manifest, content.with(builds, weapons))
+        .ok_or_else(|| "Practice manifest disappeared during startup".to_string())
+}
+
+fn installed_player_loadouts(world: &World) -> Result<Vec<roster::PlayerLoadoutView>, String> {
+    roster::from_manifest(
+        admitted_manifest(world)?,
+        crate::characters::LoadoutCatalogs {
+            characters: &world
+                .resource::<crate::characters::CharacterCatalogResource>()
+                .0,
+            builds: &world.resource::<BuildCatalogResource>().0,
+            weapons: &world.resource::<WeaponCatalogResource>().0,
+            parts: &world
+                .resource::<crate::weapon_parts::WeaponPartCatalogResource>()
+                .0,
+        },
+    )
 }
 
 fn validate_revised_manifest_loadouts(
     world: &World,
-    builds: &BuildCatalog,
-    weapons: &WeaponCatalog,
+    revised: &RevisedCatalogs,
 ) -> Result<(), String> {
-    let manifest = world
-        .resource::<ServerRoleResource>()
-        .manifest()
-        .ok_or_else(|| "Practice manifest disappeared during startup".to_string())?;
-    let content = UntunedRosterContent::embedded()?;
-    for snapshot in manifest_selections(manifest)?.into_values() {
+    for snapshot in manifest_selections(admitted_manifest(world)?)?.into_values() {
         snapshot
-            .resolve_revised_balance_lab_catalogs(content.with(builds, weapons))
+            .resolve_revised_balance_lab_catalogs(revised.loadouts())
             .map_err(|error| {
                 format!("admitted loadout is incompatible with persisted tuning: {error:?}")
             })?;
@@ -425,9 +428,7 @@ fn load_persisted_tuning(
 ) -> (BalanceLabSnapshotV3, BalanceLabRevision) {
     match persistence::load(path, validator) {
         Ok(Some(loaded)) => {
-            if let Err(error) =
-                validate_revised_manifest_loadouts(world, &loaded.builds, &loaded.weapons)
-            {
+            if let Err(error) = validate_revised_manifest_loadouts(world, &loaded.catalogs) {
                 warn!(
                     path = %path.display(),
                     %error,
@@ -435,9 +436,13 @@ fn load_persisted_tuning(
                 );
                 return (baseline.clone(), BalanceLabRevision::default());
             }
-            world.resource_mut::<BuildCatalogResource>().0 = loaded.builds;
-            world.resource_mut::<WeaponCatalogResource>().0 = loaded.weapons;
-            world.resource_mut::<crate::map::MapCatalogResource>().0 = loaded.maps;
+            let catalogs = loaded.catalogs;
+            world.resource_mut::<BuildCatalogResource>().0 = catalogs.builds;
+            world.resource_mut::<WeaponCatalogResource>().0 = catalogs.weapons;
+            world.resource_mut::<crate::map::MapCatalogResource>().0 = catalogs.maps;
+            world
+                .resource_mut::<crate::characters::CharacterCatalogResource>()
+                .0 = catalogs.characters;
             world
                 .resource_mut::<crate::combat::CombatConditionRulesResource>()
                 .0 = loaded.snapshot.condition_rules;
@@ -472,13 +477,10 @@ fn start_balance_lab(world: &mut World) {
     let builds = world.resource::<BuildCatalogResource>().0.clone();
     let weapons = world.resource::<WeaponCatalogResource>().0.clone();
     let maps = world.resource::<crate::map::MapCatalogResource>().0.clone();
-    let player_loadouts = match projected_player_loadouts(world, &builds, &weapons) {
-        Ok(players) => players,
-        Err(error) => {
-            warn!(%error, "Balance Lab ignored: admitted roster could not be presented");
-            return;
-        }
-    };
+    if let Err(error) = installed_player_loadouts(world) {
+        warn!(%error, "Balance Lab ignored: admitted roster could not be presented");
+        return;
+    }
     let mut baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
     baseline.condition_rules = world
         .resource::<crate::combat::CombatConditionRulesResource>()
@@ -498,6 +500,13 @@ fn start_balance_lab(world: &mut World) {
     if let Some(mut rules) = world.get_resource_mut::<crate::matchplay::HeistRules>() {
         install_heist_tuning(&mut rules, &applied);
     }
+    let player_loadouts = match installed_player_loadouts(world) {
+        Ok(players) => players,
+        Err(error) => {
+            warn!(%error, "Balance Lab ignored: admitted roster could not be presented");
+            return;
+        }
+    };
     let state = BalanceLabStateView {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         match_id: config.match_id.to_string(),
@@ -636,11 +645,12 @@ fn validate_snapshot(
     current_builds: &BuildCatalog,
     current_weapons: &WeaponCatalog,
     current_maps: &crate::map::MapContentCatalog,
-) -> Result<(BuildCatalog, WeaponCatalog, crate::map::MapContentCatalog), String> {
+) -> Result<RevisedCatalogs, String> {
     if candidate.schema_version != SNAPSHOT_SCHEMA_VERSION
         || candidate.weapons.len() != baseline.weapons.len()
         || candidate.ultimates.len() != baseline.ultimates.len()
         || candidate.passives.len() != baseline.passives.len()
+        || candidate.characters.len() != baseline.characters.len()
     {
         return Err("unsupported snapshot shape".into());
     }
@@ -679,7 +689,15 @@ fn validate_snapshot(
     apply_ultimate_tuning(candidate, baseline, &mut next_builds)?;
     apply_passive_tuning(candidate, baseline, &mut next_builds)?;
     next_builds.validate()?;
-    validate_character_combinations(&next_builds, &next_weapons)?;
+    let parts = crate::weapon_parts::WeaponPartCatalog::embedded()?;
+    let next_characters = characters::revise(
+        &candidate.characters,
+        &baseline.characters,
+        &crate::characters::CharacterCatalog::embedded()?,
+        &next_builds,
+        &next_weapons,
+        &parts,
+    )?;
     let mut next_maps = current_maps.clone();
     if candidate.barrel.damage_profile.id != baseline.barrel.damage_profile.id
         || candidate.barrel.explosion_profile.id != baseline.barrel.explosion_profile.id
@@ -721,7 +739,13 @@ fn validate_snapshot(
         candidate.chest.pickup_definition;
     candidate.effect_tiles.install(&mut next_maps)?;
     next_maps.validate()?;
-    Ok((next_builds, next_weapons, next_maps))
+    Ok(RevisedCatalogs {
+        builds: next_builds,
+        weapons: next_weapons,
+        maps: next_maps,
+        characters: next_characters,
+        parts,
+    })
 }
 
 fn validate_effect_tile_tuning_topology(
@@ -762,19 +786,6 @@ fn validate_effect_tile_tuning_topology(
         }
     }
     Ok(())
-}
-
-/// Every roster character's every option combination, and every direct-diagnostic pick, still
-/// resolves against the revised catalogs.
-fn validate_character_combinations(
-    builds: &BuildCatalog,
-    weapons: &WeaponCatalog,
-) -> Result<(), String> {
-    let content = UntunedRosterContent::embedded()?;
-    content
-        .characters
-        .validate_references(builds, weapons, &content.parts)
-        .map_err(|error| format!("revised catalogs break a roster character: {error}"))
 }
 
 fn apply_ultimate_tuning(
@@ -1158,6 +1169,34 @@ fn publish_result(
 mod tests {
     use super::*;
 
+    /// The canonical roster and parts paired with test-chosen build and weapon catalogs.
+    pub(super) struct UntunedRosterContent {
+        characters: crate::characters::CharacterCatalog,
+        parts: crate::weapon_parts::WeaponPartCatalog,
+    }
+
+    impl UntunedRosterContent {
+        pub(super) fn embedded() -> Result<Self, String> {
+            Ok(Self {
+                characters: crate::characters::CharacterCatalog::embedded()?,
+                parts: crate::weapon_parts::WeaponPartCatalog::embedded()?,
+            })
+        }
+
+        pub(super) const fn with<'a>(
+            &'a self,
+            builds: &'a BuildCatalog,
+            weapons: &'a WeaponCatalog,
+        ) -> crate::characters::LoadoutCatalogs<'a> {
+            crate::characters::LoadoutCatalogs {
+                characters: &self.characters,
+                builds,
+                weapons,
+                parts: &self.parts,
+            }
+        }
+    }
+
     /// One roster character's default pick, admitted the way the lobby admits it.
     pub(super) fn admitted_character(
         builds: &BuildCatalog,
@@ -1370,8 +1409,9 @@ mod tests {
         candidate
             .effect_tiles
             .set_parameter(3, "interval-ticks", 90);
-        let (_, _, revised_maps) =
-            validate_snapshot(&candidate, &baseline, &builds, &weapons, &maps).unwrap();
+        let revised_maps = validate_snapshot(&candidate, &baseline, &builds, &weapons, &maps)
+            .unwrap()
+            .maps;
         assert_eq!(
             EffectTileTuning::from_catalog(&revised_maps).unwrap(),
             candidate.effect_tiles
@@ -1531,6 +1571,11 @@ mod tests {
         let expected_condition_rules = candidate.condition_rules;
         candidate.weapons[0].recipe.fire_cooldown_ticks += 1;
         candidate.weapons[1].recipe.fire_cooldown_ticks += 1;
+        // Riff (the human) gains health and loses its first ultimate option (Dash, the admitted
+        // pick); Plunk (the bot) loses its first passive option (the admitted pick).
+        candidate.characters[0].stats.maximum_health = 1_337;
+        candidate.characters[0].ultimate_options = [11, 3];
+        candidate.characters[3].passive_options = [6, 2];
 
         let state = Arc::new(Mutex::new(BalanceLabStateView {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
@@ -1584,6 +1629,9 @@ mod tests {
             .insert_resource(BuildCatalogResource(builds))
             .insert_resource(WeaponCatalogResource(weapons))
             .insert_resource(crate::map::MapCatalogResource(maps))
+            .insert_resource(crate::characters::CharacterCatalogResource(
+                crate::characters::CharacterCatalog::embedded().unwrap(),
+            ))
             .insert_resource(resolved_map)
             .insert_resource(crate::combat::CombatConditionRulesResource(
                 baseline.condition_rules,
@@ -1650,13 +1698,27 @@ mod tests {
             .world()
             .get::<crate::builds::ResolvedPassives>(bot)
             .unwrap();
-        assert_eq!(human_after.identity, human_loadout.identity);
-        assert_eq!(bot_after.identity, bot_loadout.identity);
+        // Admitted picks follow their option slot onto the tuned roster (BRL-5v3c).
+        assert_eq!(human_after.ultimate.id, UltimateDefinitionId(11));
+        assert_eq!(human_after.passives, human_loadout.passives);
+        assert_eq!(bot_after.passives[0].id, PassiveDefinitionId(6));
+        assert_eq!(bot_after.ultimate.id, bot_loadout.ultimate.id);
+        assert_eq!(
+            app.world().get::<crate::builds::SelectedBuild>(human),
+            Some(&human_after.identity)
+        );
         assert_eq!(human_passives.passives, human_after.passives);
         assert_eq!(bot_passives.passives, bot_after.passives);
-        // Character stats are not Balance Lab tuning (BRL-5v3c); the re-resolve keeps them.
-        assert_eq!(human_after.fighter_stats, human_loadout.fighter_stats);
-        assert_eq!(bot_after.fighter_stats, bot_loadout.fighter_stats);
+        assert_eq!(human_after.fighter_stats.maximum_health, 1_337);
+        assert_eq!(
+            app.world()
+                .resource::<crate::characters::CharacterCatalogResource>()
+                .0
+                .characters[0]
+                .stats
+                .maximum_health,
+            1_337
+        );
         assert_eq!(
             app.world()
                 .resource::<crate::combat::CombatConditionRulesResource>()
@@ -1673,7 +1735,7 @@ mod tests {
         );
         assert_eq!(
             app.world().get::<CurrentHealth>(human),
-            Some(&CurrentHealth(human_loadout.fighter_stats.maximum_health))
+            Some(&CurrentHealth(1_337))
         );
         assert_eq!(
             app.world().get::<CurrentHealth>(bot),
@@ -1730,6 +1792,9 @@ mod tests {
         );
         let published = state.lock().unwrap();
         assert_eq!(published.revision, BalanceLabRevision(1));
+        let players = serde_json::to_value(&published.players).unwrap();
+        assert_eq!(players[0]["ultimate"]["displayName"], "Big Blob");
+        assert_eq!(players[1]["passives"][0]["displayName"], "Tenacity");
         assert!(published.pending.is_none());
         assert!(matches!(
             published.last_transaction,

@@ -136,7 +136,9 @@ attribute map.
 - one passive definition and its resolved grant.
 
 Each character authors its own stats in `content/catalogs/characters.ron`. The launch roster is
-seeded per body; per-character tuning belongs to Balance Lab character editing (BRL-5v3c):
+seeded per body; operators tune each character's stats, signature weapon base and parts, and
+option lists in the Balance Lab **Characters** category
+([Balance Lab](./15-balance-lab.md#roster-characters)):
 
 | Body | Maximum health | Movement speed (world units/s) | Reveal radius | Recovery (health/s) |
 |---|---:|---:|---:|---:|

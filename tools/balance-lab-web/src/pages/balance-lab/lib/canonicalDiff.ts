@@ -1,5 +1,6 @@
 import {
   displayNumber,
+  formatFieldValue,
   formatNumber,
   pointerPath,
   storedNumber,
@@ -18,6 +19,7 @@ export interface CanonicalDifference {
 
 const sectionLabels: Record<EditorSection, string> = {
   global: "Global",
+  characters: "Characters",
   weapons: "Weapons",
   ultimates: "Ultimates",
   passives: "Passives",
@@ -44,7 +46,9 @@ export function formatCanonicalDifferences(differences: CanonicalDifference[]) {
     const context = [sectionLabels[field.section], field.subjectLabel, field.group, field.label]
       .filter((part, index, all) => index === 0 || part !== all[index - 1])
       .join(" / ");
-    return `- ${context} (${pointerPath(field.path)}): ${formatNumber(serverDefault)} -> ${formatNumber(value)} ${field.unit}`;
+    const before = field.control === "select" ? formatFieldValue(serverDefault, field) : formatNumber(serverDefault);
+    const after = field.control === "select" ? formatFieldValue(value, field) : formatNumber(value);
+    return `- ${context} (${pointerPath(field.path)}): ${before} -> ${after}${field.unit ? ` ${field.unit}` : ""}`;
   });
   return ["Balance Lab changes from server defaults", "", ...lines].join("\n");
 }

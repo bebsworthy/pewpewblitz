@@ -1,8 +1,7 @@
 use super::{
-    BalanceLabRevision, BalanceLabSnapshotV3, BalanceLabValidator, SNAPSHOT_SCHEMA_VERSION,
-    validate_snapshot,
+    BalanceLabRevision, BalanceLabSnapshotV3, BalanceLabValidator, RevisedCatalogs,
+    SNAPSHOT_SCHEMA_VERSION, validate_snapshot,
 };
-use crate::{builds::BuildCatalog, combat::WeaponCatalog};
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -11,7 +10,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 15;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 16;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -25,9 +24,7 @@ struct PersistedBalanceLabV1 {
 pub(super) struct LoadedBalanceLab {
     pub(super) revision: BalanceLabRevision,
     pub(super) snapshot: BalanceLabSnapshotV3,
-    pub(super) builds: BuildCatalog,
-    pub(super) weapons: WeaponCatalog,
-    pub(super) maps: crate::map::MapContentCatalog,
+    pub(super) catalogs: RevisedCatalogs,
 }
 
 #[allow(
@@ -328,8 +325,8 @@ pub(super) fn load(
     {
         // BRL-egn6: stats moved to the character catalog, and the frame passives gained
         // parameters. Shared fighter profiles are dropped; frame passives take canonical values.
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(15);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(21);
         if let Some(snapshot) = value["snapshot"].as_object_mut() {
             snapshot.remove("fighterProfiles");
         }
@@ -348,6 +345,18 @@ pub(super) fn load(
             }
         }
     }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(15)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(21)
+    {
+        // BRL-5v3c: roster characters became tunable; older tuning keeps canonical characters.
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["snapshot"]["characters"] = serde_json::to_value(&validator.baseline.characters)
+            .map_err(|error| format!("canonical character migration failed: {error}"))?;
+    }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
     if persisted.schema_version != PERSISTENCE_SCHEMA_VERSION
@@ -356,7 +365,7 @@ pub(super) fn load(
     {
         return Err("persisted snapshot has an unsupported version or revision".into());
     }
-    let (builds, weapons, maps) = validate_snapshot(
+    let catalogs = validate_snapshot(
         &persisted.snapshot,
         &validator.baseline,
         &validator.builds,
@@ -366,9 +375,7 @@ pub(super) fn load(
     Ok(Some(LoadedBalanceLab {
         revision: BalanceLabRevision(persisted.revision),
         snapshot: persisted.snapshot,
-        builds,
-        weapons,
-        maps,
+        catalogs,
     }))
 }
 
@@ -413,7 +420,7 @@ pub(super) fn clear(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builds::BuildCatalog;
+    use crate::{builds::BuildCatalog, combat::WeaponCatalog};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static PATH_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -481,7 +488,7 @@ mod tests {
         assert_eq!(loaded.snapshot, snapshot);
         assert_eq!(loaded.snapshot.effect_tiles.parameter(3, "damage"), 17);
         assert_eq!(
-            super::super::EffectTileTuning::from_catalog(&loaded.maps).unwrap(),
+            super::super::EffectTileTuning::from_catalog(&loaded.catalogs.maps).unwrap(),
             snapshot.effect_tiles
         );
 
@@ -501,14 +508,15 @@ mod tests {
         let loaded = load(&path, &validator).unwrap().unwrap();
         let mut follow_up = loaded.snapshot;
         follow_up.weapons[1].recipe.fire_cooldown_ticks += 1;
-        let (_, weapons, _) = validate_snapshot(
+        let weapons = validate_snapshot(
             &follow_up,
             &validator.baseline,
-            &loaded.builds,
-            &loaded.weapons,
-            &loaded.maps,
+            &loaded.catalogs.builds,
+            &loaded.catalogs.weapons,
+            &loaded.catalogs.maps,
         )
-        .unwrap();
+        .unwrap()
+        .weapons;
 
         assert_eq!(
             weapons.presets[0].configuration.recipe.fire_cooldown_ticks,
@@ -698,6 +706,48 @@ mod tests {
         assert_eq!(
             loaded.snapshot.weapons[0].recipe.fire_cooldown_ticks,
             snapshot.weapons[0].recipe.fire_cooldown_ticks
+        );
+    }
+
+    #[test]
+    fn version_fifteen_gains_canonical_characters_and_tuned_characters_round_trip() {
+        let root = TestPath::create();
+        let path = root.0.join("session-v15.json");
+        let (validator, mut snapshot) = fixture();
+        snapshot.weapons[0].recipe.fire_cooldown_ticks += 6;
+        save(&path, &snapshot, BalanceLabRevision(15)).unwrap();
+
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["schemaVersion"] = serde_json::json!(15);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(21);
+        value["snapshot"]
+            .as_object_mut()
+            .unwrap()
+            .remove("characters");
+        fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let loaded = load(&path, &validator).unwrap().unwrap();
+        assert_eq!(loaded.snapshot.characters, validator.baseline.characters);
+        assert_eq!(
+            loaded.catalogs.characters,
+            crate::characters::CharacterCatalog::embedded().unwrap()
+        );
+        assert_eq!(
+            loaded.snapshot.weapons[0].recipe.fire_cooldown_ticks,
+            snapshot.weapons[0].recipe.fire_cooldown_ticks
+        );
+
+        let mut tuned = loaded.snapshot;
+        tuned.characters[0].stats.movement_speed = 90.0;
+        tuned.characters[0].weapon_parts = [3, 0, 0, 0];
+        save(&path, &tuned, BalanceLabRevision(16)).unwrap();
+        assert!(fs::metadata(&path).unwrap().len() < MAX_PERSISTED_BYTES);
+        let reloaded = load(&path, &validator).unwrap().unwrap();
+        assert_eq!(reloaded.snapshot, tuned);
+        assert_eq!(
+            reloaded.catalogs.characters.characters[0].weapon.parts,
+            vec![crate::weapon_parts::WeaponPartDefinitionId(3)]
         );
     }
 

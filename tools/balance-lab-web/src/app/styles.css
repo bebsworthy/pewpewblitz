@@ -90,7 +90,7 @@ button:disabled { cursor: not-allowed; opacity: .42; }
 .matrix-cell.invalid { background: #4a1822; box-shadow: inset 0 0 0 2px #ff7186; }
 .matrix-cell.unavailable { color: #49657b; background: #081522; text-align: center; }
 .matrix-input-wrap { display: flex; align-items: center; gap: 5px; }
-.matrix-input-wrap input { min-width: 0; width: 100%; border: 1px solid #31516d; border-radius: 6px; padding: 7px 8px; color: #eaf7ff; background: #071522; }
+.matrix-input-wrap input, .matrix-input-wrap select { min-width: 0; width: 100%; border: 1px solid #31516d; border-radius: 6px; padding: 7px 8px; color: #eaf7ff; background: #071522; }
 .matrix-cell-markers { display: grid; flex: 0 0 auto; gap: 2px; }
 .matrix-cell-markers span { overflow: hidden; width: 7px; height: 7px; border: 1px solid; border-radius: 2px; color: transparent; font-size: 0; }
 .changed-marker { border-color: #5bddff !important; background: #20b9dc; }

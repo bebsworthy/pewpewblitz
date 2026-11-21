@@ -145,6 +145,21 @@ impl CharacterCatalog {
         weapons: &WeaponCatalog,
         parts: &WeaponPartCatalog,
     ) -> Result<(), String> {
+        self.validate_option_combinations(builds, weapons, parts)?;
+        for pick in builds.direct_diagnostic_picks() {
+            self.resolve(*pick, builds, weapons, parts)
+                .map_err(|error| format!("direct diagnostic pick does not resolve: {error:?}"))?;
+        }
+        Ok(())
+    }
+
+    /// Every option combination of every character resolves against these catalogs.
+    pub fn validate_option_combinations(
+        &self,
+        builds: &BuildCatalog,
+        weapons: &WeaponCatalog,
+        parts: &WeaponPartCatalog,
+    ) -> Result<(), String> {
         self.validate()?;
         builds.validate_weapon_references(weapons)?;
         for character in &self.characters {
@@ -161,10 +176,6 @@ impl CharacterCatalog {
                         })?;
                 }
             }
-        }
-        for pick in builds.direct_diagnostic_picks() {
-            self.resolve(*pick, builds, weapons, parts)
-                .map_err(|error| format!("direct diagnostic pick does not resolve: {error:?}"))?;
         }
         Ok(())
     }

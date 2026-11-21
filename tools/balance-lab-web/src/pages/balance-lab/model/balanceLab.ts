@@ -4,6 +4,7 @@ export type EditorPath = (string | number)[];
 
 export type EditorSection =
   | "global"
+  | "characters"
   | "weapons"
   | "ultimates"
   | "passives"
@@ -25,8 +26,15 @@ export interface EditorFieldDescriptor {
   maximum: number;
   minimumExclusive: boolean;
   step: number;
-  control: "number" | "range-and-number";
+  control: "number" | "range-and-number" | "select";
   help?: string;
+  /** The closed set of stored values a `select` control offers. */
+  options?: EditorOption[];
+}
+
+export interface EditorOption {
+  value: number;
+  label: string;
 }
 
 export interface BalanceLabEditorManifest {
@@ -55,6 +63,17 @@ export interface UltimateTuning extends JsonObject {
   displayName: string;
   kind: string;
   parameters: JsonObject;
+}
+
+export interface CharacterTuning extends JsonObject {
+  id: number;
+  key: string;
+  displayName: string;
+  stats: JsonObject;
+  weaponBase: number;
+  weaponParts: number[];
+  ultimateOptions: number[];
+  passiveOptions: number[];
 }
 
 export interface BarrelTuning extends JsonObject {
@@ -108,6 +127,7 @@ export interface BalanceLabSnapshot extends JsonObject {
   conditionRules: CombatConditionRules;
   weapons: WeaponTuning[];
   ultimates: UltimateTuning[];
+  characters: CharacterTuning[];
   barrel: BarrelTuning;
   chest: ChestTuning;
   effectTiles: EffectTileTuning;

@@ -11,6 +11,7 @@ import { EditorMatrix } from "./EditorMatrix";
 
 const sections: { key: EditorSection; label: string }[] = [
   { key: "global", label: "Global" },
+  { key: "characters", label: "Characters" },
   { key: "weapons", label: "Weapons" },
   { key: "ultimates", label: "Ultimates" },
   { key: "passives", label: "Passives" },
@@ -20,6 +21,7 @@ const sections: { key: EditorSection; label: string }[] = [
 
 const sectionHelp: Record<EditorSection, string> = {
   global: "Match-wide authoritative gameplay rules shared by every fighter.",
+  characters: "Compare each roster character's stats, signature weapon, and ultimate and passive options.",
   weapons: "Compare authoritative weapon economy, delivery, payload, and world effects.",
   ultimates: "Compare targeting, timing, deployables, and area rules.",
   passives: "Compare the tunable effects and timings of the roster passives.",

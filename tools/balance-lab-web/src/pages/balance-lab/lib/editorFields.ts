@@ -66,6 +66,11 @@ export function toStoredNumber(display: number, field: EditorFieldDescriptor) {
 
 export function validateDisplayNumber(display: number, field: EditorFieldDescriptor) {
   if (!Number.isFinite(display)) return "Enter a number.";
+  if (field.control === "select") {
+    return field.options?.some((option) => option.value === display)
+      ? null
+      : "Choose one of the offered options.";
+  }
   if (field.minimumExclusive ? display <= field.minimum : display < field.minimum) {
     const relation = field.minimumExclusive ? "greater than" : "at least";
     return `Must be ${relation} ${formatNumber(field.minimum)} ${field.unit}.`;
@@ -94,6 +99,14 @@ export function changedFields(
 
 export function formatNumber(value: number) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(6)));
+}
+
+/** A display value as the operator reads it: the option label for a choice, else the number. */
+export function formatFieldValue(value: number, field: EditorFieldDescriptor) {
+  if (field.control === "select") {
+    return field.options?.find((option) => option.value === value)?.label ?? `#${value}`;
+  }
+  return formatFieldNumber(value, field);
 }
 
 export function formatFieldNumber(value: number, field: EditorFieldDescriptor) {

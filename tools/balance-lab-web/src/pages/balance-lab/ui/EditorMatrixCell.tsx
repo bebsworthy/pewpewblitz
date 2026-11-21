@@ -56,6 +56,22 @@ export function EditorMatrixCell({
       className={`matrix-cell ${changed ? "changed" : ""} ${differsFromDefault ? "non-default" : ""} ${error ? "invalid" : ""} ${selected ? "selected" : ""}`}
     >
       <div className="matrix-input-wrap">
+        {field.control === "select" ? (
+          <select
+            id={id}
+            aria-label={`${field.label}, ${subjectLabel}`}
+            aria-describedby={error ? `${id}-error` : undefined}
+            aria-invalid={Boolean(error)}
+            value={String(display)}
+            disabled={disabled}
+            onFocus={() => onSelect(field)}
+            onChange={(event) => update(event.target.value)}
+          >
+            {field.options?.map((option) => (
+              <option value={option.value} key={option.value}>{option.label}</option>
+            ))}
+          </select>
+        ) : (
         <input
           id={id}
           aria-label={`${field.label}, ${subjectLabel}`}
@@ -70,6 +86,7 @@ export function EditorMatrixCell({
           onFocus={() => onSelect(field)}
           onChange={(event) => update(event.target.value)}
         />
+        )}
         <span className="matrix-cell-markers">
           {changed && <span className="changed-marker" aria-label="Edited since apply" />}
           {differsFromDefault && <span className="default-marker" aria-label="Differs from server default" />}

@@ -29,6 +29,39 @@ impl CharacterChoice {
         }
     }
 
+    /// This choice carried onto a revised definition of the same character: an option the revised
+    /// character no longer offers becomes the revised option in the slot it held in `original`.
+    #[must_use]
+    pub fn carried_by_slot(
+        self,
+        original: &CharacterDefinition,
+        revised: &CharacterDefinition,
+    ) -> Self {
+        let ultimate_id = if revised.ultimate_options.contains(&self.ultimate_id) {
+            self.ultimate_id
+        } else {
+            original
+                .ultimate_options
+                .iter()
+                .position(|id| *id == self.ultimate_id)
+                .map_or(self.ultimate_id, |slot| revised.ultimate_options[slot])
+        };
+        let passive_id = if revised.passive_options.contains(&self.passive_id) {
+            self.passive_id
+        } else {
+            original
+                .passive_options
+                .iter()
+                .position(|id| *id == self.passive_id)
+                .map_or(self.passive_id, |slot| revised.passive_options[slot])
+        };
+        Self {
+            character_id: self.character_id,
+            ultimate_id,
+            passive_id,
+        }
+    }
+
     /// Whether this choice names `character` and one of each of its options.
     #[must_use]
     pub fn is_offered_by(self, character: &CharacterDefinition) -> bool {
@@ -113,6 +146,25 @@ impl CharacterCatalog {
         parts: &WeaponPartCatalog,
     ) -> Result<ResolvedMatchLoadout, BuildResolutionError> {
         crate::builds::resolve_loadout(builds, weapons, self.loadout_recipe(choice, parts)?)
+    }
+
+    /// A pick admitted against the canonical roster, carried onto this Balance Lab-revised roster
+    /// by option slot (BRL-5v3c).
+    #[cfg(feature = "balance-lab")]
+    #[must_use]
+    pub fn carry_balance_lab_choice(&self, choice: CharacterChoice) -> CharacterChoice {
+        static CANONICAL: std::sync::OnceLock<Option<CharacterCatalog>> =
+            std::sync::OnceLock::new();
+        let canonical = CANONICAL.get_or_init(|| CharacterCatalog::embedded().ok());
+        match (
+            canonical
+                .as_ref()
+                .and_then(|catalog| catalog.character(choice.character_id)),
+            self.character(choice.character_id),
+        ) {
+            (Some(original), Some(revised)) => choice.carried_by_slot(original, revised),
+            _ => choice,
+        }
     }
 
     /// Resolve the authored direct-diagnostic pick for one player through the ordinary path.

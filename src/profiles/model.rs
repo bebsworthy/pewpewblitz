@@ -259,6 +259,16 @@ impl MatchCharacterSnapshot {
         self,
         catalogs: crate::characters::LoadoutCatalogs<'_>,
     ) -> Result<crate::builds::ResolvedMatchLoadout, crate::builds::BuildResolutionError> {
-        catalogs.resolve(self.choice)
+        catalogs.resolve(self.revised_balance_lab_choice(catalogs.characters))
+    }
+
+    /// The admitted pick carried onto a Balance Lab-revised roster by option slot.
+    #[cfg(feature = "balance-lab")]
+    #[must_use]
+    pub(crate) fn revised_balance_lab_choice(
+        self,
+        characters: &crate::characters::CharacterCatalog,
+    ) -> CharacterChoice {
+        characters.carry_balance_lab_choice(self.choice)
     }
 }

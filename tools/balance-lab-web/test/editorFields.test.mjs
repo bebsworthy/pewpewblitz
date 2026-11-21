@@ -5,6 +5,7 @@ import {
   displayNumber,
   fieldFromServerError,
   formatFieldNumber,
+  formatFieldValue,
   pathKey,
   readAtPath,
   replaceAtPath,
@@ -120,4 +121,29 @@ test("a field-specific server rejection maps back to its descriptor", () => {
   assert.equal(result?.field, health);
   assert.equal(result?.message, "rejected by server");
   assert.equal(fieldFromServerError("stale applied revision", [health]), null);
+});
+
+const weaponBase = {
+  path: ["characters", 0, "weaponBase"],
+  storageKind: "integer",
+  storageScale: 1,
+  minimum: 1,
+  maximum: 7,
+  minimumExclusive: false,
+  step: 1,
+  control: "select",
+  unit: "",
+  options: [
+    { value: 1, label: "Pulse Sidearm" },
+    { value: 3, label: "Arc Launcher" },
+  ],
+};
+
+test("a choice field accepts only an offered option and formats its label", () => {
+  assert.equal(validateDisplayNumber(3, weaponBase), null);
+  assert.match(validateDisplayNumber(2, weaponBase), /offered options/);
+  assert.equal(toStoredNumber(3, weaponBase), 3);
+  assert.equal(formatFieldValue(1, weaponBase), "Pulse Sidearm");
+  assert.equal(formatFieldValue(9, weaponBase), "#9");
+  assert.equal(formatFieldValue(1.5, range), "1.5");
 });

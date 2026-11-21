@@ -2,8 +2,9 @@
 
 use super::{
     BalanceLabCommand, BalanceLabRevision, BalanceLabRuntime, BalanceLabSnapshotV3,
-    SNAPSHOT_SCHEMA_VERSION, TransactionStatus, install_heist_tuning, manifest_selections,
-    persistence, publish_result, reject, validate_mode_specific_tuning, validate_snapshot,
+    RevisedCatalogs, SNAPSHOT_SCHEMA_VERSION, TransactionStatus, install_heist_tuning,
+    manifest_selections, persistence, publish_result, reject, roster,
+    validate_mode_specific_tuning, validate_snapshot,
 };
 use crate::{
     builds::{
@@ -23,7 +24,10 @@ use crate::{
     server::ServerRoleResource,
     timing::SimulationTick,
 };
-use bevy::{ecs::query::QueryData, prelude::*};
+use bevy::{
+    ecs::{query::QueryData, system::SystemParam},
+    prelude::*,
+};
 
 #[derive(Clone, Copy)]
 enum PersistenceAction {
@@ -42,14 +46,22 @@ struct PreparedBalanceLabTransaction {
     transaction_id: u64,
     candidate: BalanceLabSnapshotV3,
     next_revision: BalanceLabRevision,
-    next_builds: BuildCatalog,
-    next_weapons: WeaponCatalog,
-    next_maps: MapContentCatalog,
+    next: RevisedCatalogs,
+    next_players: Vec<roster::PlayerLoadoutView>,
     next_resolved_map: ResolvedMap,
     resolved_roster: Vec<(Entity, ResolvedMatchLoadout)>,
     previous_match_id: crate::matchplay::MatchId,
     restart_tick: u64,
     persistence_action: PersistenceAction,
+}
+
+/// The installed catalogs one Balance Lab transaction replaces together.
+#[derive(SystemParam)]
+pub(super) struct TunedCatalogResources<'w> {
+    builds: ResMut<'w, BuildCatalogResource>,
+    weapons: ResMut<'w, WeaponCatalogResource>,
+    maps: ResMut<'w, MapCatalogResource>,
+    characters: ResMut<'w, crate::characters::CharacterCatalogResource>,
 }
 
 #[derive(QueryData)]
@@ -129,8 +141,7 @@ fn prepare_transaction(
     if restart.slot().is_some() {
         return Err("another match reset is pending".into());
     }
-    let (next_builds, next_weapons, next_maps) =
-        validate_snapshot(&request.candidate, &runtime.baseline, builds, weapons, maps)?;
+    let next = validate_snapshot(&request.candidate, &runtime.baseline, builds, weapons, maps)?;
     let restore_defaults = matches!(request.persistence_action, PersistenceAction::Clear);
     validate_mode_specific_tuning(
         &request.candidate,
@@ -140,7 +151,6 @@ fn prepare_transaction(
     )
     .map_err(str::to_string)?;
     let selections = manifest_selections(manifest)?;
-    let content = super::UntunedRosterContent::embedded()?;
     let mut instantiated: Vec<_> = identities
         .iter()
         .map(|(entity, player_id)| (player_id.0, entity))
@@ -156,7 +166,7 @@ fn prepare_transaction(
             .get(&player_id)
             .ok_or_else(|| "practice fighter has no admitted build snapshot".to_string())?;
         let loadout = snapshot
-            .resolve_revised_balance_lab_catalogs(content.with(&next_builds, &next_weapons))
+            .resolve_revised_balance_lab_catalogs(next.loadouts())
             .map_err(|_| "revised practice loadout did not resolve".to_string())?;
         resolved_player_ids.push(player_id);
         resolved_roster.push((entity, loadout));
@@ -173,7 +183,9 @@ fn prepare_transaction(
         .identity
         .source_preset_id
         .ok_or_else(|| "authoritative Practice map has no source preset".to_string())?;
-    let next_resolved_map = next_maps
+    let next_players = roster::from_manifest(manifest, next.loadouts())?;
+    let next_resolved_map = next
+        .maps
         .resolve_preset(source_preset_id, resolved_map.snapshot.identity.instance_id)
         .map_err(|error| format!("revised Practice map did not resolve: {error}"))?;
     let next_revision = runtime
@@ -187,9 +199,8 @@ fn prepare_transaction(
         transaction_id: request.transaction_id,
         candidate: request.candidate,
         next_revision,
-        next_builds,
-        next_weapons,
-        next_maps,
+        next,
+        next_players,
         next_resolved_map,
         resolved_roster,
         previous_match_id: state.match_id,
@@ -219,9 +230,7 @@ fn persist_transaction(
 fn commit_transaction(
     prepared: PreparedBalanceLabTransaction,
     runtime: &mut BalanceLabRuntime,
-    builds: &mut BuildCatalogResource,
-    weapons: &mut WeaponCatalogResource,
-    maps: &mut MapCatalogResource,
+    catalogs: &mut TunedCatalogResources,
     resolved_map: &mut ResolvedMap,
     condition_rules: &mut crate::combat::CombatConditionRulesResource,
     heist_rules: Option<&mut crate::matchplay::HeistRules>,
@@ -240,10 +249,11 @@ fn commit_transaction(
         "prevalidated Balance Lab restart slot remains available during atomic commit"
     );
 
-    let next_body = prepared.next_builds.fighter_body;
-    builds.0 = prepared.next_builds;
-    weapons.0 = prepared.next_weapons;
-    maps.0 = prepared.next_maps;
+    let next_body = prepared.next.builds.fighter_body;
+    catalogs.builds.0 = prepared.next.builds;
+    catalogs.weapons.0 = prepared.next.weapons;
+    catalogs.maps.0 = prepared.next.maps;
+    catalogs.characters.0 = prepared.next.characters;
     *resolved_map = prepared.next_resolved_map;
     condition_rules.0 = prepared.candidate.condition_rules;
     if let Some(rules) = heist_rules {
@@ -267,6 +277,9 @@ fn commit_transaction(
     *restart_policy = RestartBuildPolicy::Retain;
     runtime.revision = prepared.next_revision;
     runtime.applied = prepared.candidate;
+    if let Ok(mut state) = runtime.shared_state.lock() {
+        state.players = prepared.next_players;
+    }
     let message = format!("applied revision {}", runtime.revision.0);
     publish_result(
         runtime,
@@ -285,9 +298,7 @@ pub(super) fn apply_balance_lab_transaction(
     mut runtime: Option<ResMut<BalanceLabRuntime>>,
     role: Res<ServerRoleResource>,
     tick: Res<SimulationTick>,
-    mut builds: ResMut<BuildCatalogResource>,
-    mut weapons: ResMut<WeaponCatalogResource>,
-    mut maps: ResMut<MapCatalogResource>,
+    mut catalogs: TunedCatalogResources,
     mut resolved_map: ResMut<ResolvedMap>,
     mut condition_rules: ResMut<crate::combat::CombatConditionRulesResource>,
     mut heist_rules: Option<ResMut<crate::matchplay::HeistRules>>,
@@ -320,9 +331,9 @@ pub(super) fn apply_balance_lab_transaction(
         runtime,
         &role,
         tick.0,
-        &builds.0,
-        &weapons.0,
-        &maps.0,
+        &catalogs.builds.0,
+        &catalogs.weapons.0,
+        &catalogs.maps.0,
         &resolved_map,
         &restart,
         &roots,
@@ -346,9 +357,7 @@ pub(super) fn apply_balance_lab_transaction(
     commit_transaction(
         prepared,
         runtime,
-        &mut builds,
-        &mut weapons,
-        &mut maps,
+        &mut catalogs,
         &mut resolved_map,
         &mut condition_rules,
         heist_rules.as_deref_mut(),
@@ -477,6 +486,18 @@ mod tests {
         ));
     }
 
+    fn install_catalogs(app: &mut App, revised: RevisedCatalogs) {
+        app.insert_resource(BuildCatalogResource(revised.builds))
+            .insert_resource(WeaponCatalogResource(revised.weapons))
+            .insert_resource(MapCatalogResource(revised.maps))
+            .insert_resource(crate::characters::CharacterCatalogResource(
+                revised.characters,
+            ))
+            .insert_resource(crate::weapon_parts::WeaponPartCatalogResource(
+                revised.parts,
+            ));
+    }
+
     impl TransactionFixture {
         fn create(
             persistence_path: PathBuf,
@@ -492,7 +513,7 @@ mod tests {
                 &canonical_maps,
             );
             let applied = applied.unwrap_or_else(|| baseline.clone());
-            let (builds, weapons, maps) = validate_snapshot(
+            let revised = validate_snapshot(
                 &applied,
                 &baseline,
                 &canonical_builds,
@@ -500,21 +521,22 @@ mod tests {
                 &canonical_maps,
             )
             .unwrap();
-            let resolved_map = maps
+            let resolved_map = revised
+                .maps
                 .resolve_preset(
                     crate::map::FEATURE_YARD_WIPEOUT_PRESET,
                     crate::map::MapInstanceId(1),
                 )
                 .unwrap();
-            let roster_content = super::super::UntunedRosterContent::embedded().unwrap();
             let (human_snapshot, _) = admitted_character(&canonical_builds, &canonical_weapons, 1);
             let (bot_snapshot, _) = admitted_character(&canonical_builds, &canonical_weapons, 4);
             let human_loadout = human_snapshot
-                .resolve_revised_balance_lab_catalogs(roster_content.with(&builds, &weapons))
+                .resolve_revised_balance_lab_catalogs(revised.loadouts())
                 .unwrap();
             let bot_loadout = bot_snapshot
-                .resolve_revised_balance_lab_catalogs(roster_content.with(&builds, &weapons))
+                .resolve_revised_balance_lab_catalogs(revised.loadouts())
                 .unwrap();
+            let fighter_body = revised.builds.fighter_body;
             let manifest = practice_manifest(&human_snapshot, &bot_snapshot);
             let state = shared_test_state(&baseline, &applied, &canonical_weapons, revision);
             let (sender, receiver) = mpsc::sync_channel(1);
@@ -531,9 +553,6 @@ mod tests {
             })
             .insert_resource(ServerRoleResource::match_worker(manifest))
             .insert_resource(SimulationTick(50))
-            .insert_resource(BuildCatalogResource(builds.clone()))
-            .insert_resource(WeaponCatalogResource(weapons))
-            .insert_resource(MapCatalogResource(maps))
             .insert_resource(resolved_map)
             .insert_resource(crate::combat::CombatConditionRulesResource(
                 applied.condition_rules,
@@ -545,12 +564,13 @@ mod tests {
             .init_resource::<PendingMatchRestart>()
             .init_resource::<RestartBuildPolicy>()
             .init_resource::<NextMatchId>();
+            install_catalogs(&mut app, revised);
             spawn_test_match_root(&mut app);
             let human = spawn_fighter(
                 &mut app,
                 7,
                 human_loadout,
-                builds.fighter_body,
+                fighter_body,
                 1,
                 WeaponState {
                     ammo: 0,
@@ -563,7 +583,7 @@ mod tests {
                 &mut app,
                 9,
                 bot_loadout,
-                builds.fighter_body,
+                fighter_body,
                 2,
                 WeaponState {
                     ammo: 0,
@@ -884,7 +904,7 @@ mod tests {
             &canonical_weapons,
             &canonical_maps,
         );
-        let (expected_builds, expected_weapons, expected_maps) = validate_snapshot(
+        let expected = validate_snapshot(
             &baseline,
             &baseline,
             &canonical_builds,
@@ -914,12 +934,18 @@ mod tests {
         let runtime = world.resource::<BalanceLabRuntime>();
         assert_eq!(runtime.revision, BalanceLabRevision(4));
         assert_eq!(runtime.applied, fixture.baseline);
-        assert_eq!(world.resource::<BuildCatalogResource>().0, expected_builds);
+        assert_eq!(world.resource::<BuildCatalogResource>().0, expected.builds);
         assert_eq!(
             world.resource::<WeaponCatalogResource>().0,
-            expected_weapons
+            expected.weapons
         );
-        assert_eq!(world.resource::<MapCatalogResource>().0, expected_maps);
+        assert_eq!(world.resource::<MapCatalogResource>().0, expected.maps);
+        assert_eq!(
+            world
+                .resource::<crate::characters::CharacterCatalogResource>()
+                .0,
+            expected.characters
+        );
         assert_eq!(
             world
                 .resource::<crate::combat::CombatConditionRulesResource>()

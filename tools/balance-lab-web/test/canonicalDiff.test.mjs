@@ -42,3 +42,25 @@ test("copied canonical differences are readable and retain their exact paths", (
   assert.match(text, /\/heist\/safe_maximum_health/);
   assert.match(text, /100 -> 125 health/);
 });
+
+test("copied choice differences name the chosen options", () => {
+  const choice = {
+    ...field,
+    path: ["characters", 0, "ultimateOptions", 1],
+    section: "characters",
+    subjectLabel: "Riff",
+    group: "Options",
+    label: "Ultimate option 2",
+    control: "select",
+    unit: "",
+    options: [
+      { value: 3, label: "Reveal Scan" },
+      { value: 11, label: "Big Blob" },
+    ],
+  };
+  const before = { characters: [{ ultimateOptions: [1, 3] }] };
+  const after = { characters: [{ ultimateOptions: [1, 11] }] };
+  const text = formatCanonicalDifferences(canonicalDifferences([choice], after, before));
+  assert.match(text, /Characters \/ Riff \/ Options \/ Ultimate option 2/);
+  assert.match(text, /Reveal Scan -> Big Blob$/m);
+});

@@ -83,7 +83,8 @@ spatial state. A normal enemy observer receives it only when the decision permit
 a terrain constant and not a property of the hidden subject. A larger value is beneficial: it lets
 that observer reveal enemies concealed by terrain or an allied concealment area from farther away.
 
-The base value is authored in each fighter profile alongside maximum health and movement speed. A
+The base value is authored in each roster character's stats alongside maximum health and movement
+speed, and Balance Lab tunes it per character. A
 validated fighter/passive grant or future owned-equipment effect may apply a bounded bonus or malus
 before the match.
 Resolution produces one finite, positive value in `ResolvedFighterStats`; runtime concealment never

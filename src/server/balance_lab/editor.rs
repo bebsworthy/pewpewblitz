@@ -9,7 +9,7 @@ mod passives;
 mod ultimates;
 mod weapons;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 14;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 15;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +38,17 @@ struct EditorFieldDescriptor {
     control: EditorControl,
     #[serde(skip_serializing_if = "Option::is_none")]
     help: Option<String>,
+    /// The closed set of stored values a `select` control offers; empty for numeric controls.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    options: Vec<EditorOption>,
+}
+
+/// One stored value a `select` control offers, such as a definition ID, with its display label.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct EditorOption {
+    value: u16,
+    label: String,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -63,6 +74,7 @@ impl From<usize> for EditorPathSegment {
 #[serde(rename_all = "kebab-case")]
 enum EditorSection {
     Global,
+    Characters,
     Weapons,
     Ultimates,
     Passives,
@@ -82,6 +94,7 @@ enum EditorStorageKind {
 enum EditorControl {
     Number,
     RangeAndNumber,
+    Select,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -208,10 +221,14 @@ macro_rules! path {
     };
 }
 
+// Declared after `path!` so the projection can use it.
+mod characters;
+
 impl BalanceLabEditorManifest {
     pub(super) fn from_catalogs(snapshot: &BalanceLabSnapshotV3, weapons: &WeaponCatalog) -> Self {
         let mut fields = Vec::new();
         add_global_fields(&mut fields);
+        characters::add_fields(&mut fields, snapshot);
         for (index, weapon) in snapshot.weapons.iter().enumerate() {
             weapons::add_fields(&mut fields, index, weapon, weapons);
         }
@@ -407,6 +424,48 @@ fn add_field(
         step: spec.step,
         control: spec.control,
         help: spec.help.map(str::to_string),
+        options: Vec::new(),
+    });
+}
+
+/// A choice among definitions, stored as the chosen definition's integer ID at `path`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one descriptor owns one complete editor contract"
+)]
+fn add_choice_field(
+    fields: &mut Vec<EditorFieldDescriptor>,
+    path: Vec<EditorPathSegment>,
+    section: EditorSection,
+    comparison_key: &str,
+    subject_key: &str,
+    subject_label: &str,
+    group: &str,
+    label: &str,
+    options: Vec<EditorOption>,
+    help: &str,
+) {
+    let values = || options.iter().map(|option| f64::from(option.value));
+    let minimum = values().fold(f64::INFINITY, f64::min);
+    let maximum = values().fold(f64::NEG_INFINITY, f64::max);
+    fields.push(EditorFieldDescriptor {
+        path,
+        section,
+        comparison_key: comparison_key.to_string(),
+        subject_key: subject_key.to_string(),
+        subject_label: subject_label.to_string(),
+        group: group.to_string(),
+        label: label.to_string(),
+        storage_kind: EditorStorageKind::Integer,
+        unit: String::new(),
+        storage_scale: 1.0,
+        minimum,
+        maximum,
+        minimum_exclusive: false,
+        step: 1.0,
+        control: EditorControl::Select,
+        help: Some(help.to_string()),
+        options,
     });
 }
 
@@ -760,7 +819,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
         assert_eq!(manifest.schema_version, EDITOR_SCHEMA_VERSION);
-        assert_eq!(manifest.fields.len(), 193);
+        assert_eq!(manifest.fields.len(), 355);
         let paths: std::collections::HashSet<_> = manifest
             .fields
             .iter()
@@ -815,11 +874,58 @@ mod tests {
     }
 
     #[test]
+    fn character_columns_align_stats_weapon_recipe_and_option_choices() {
+        let (snapshot, weapons) = fixture();
+        let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
+        let character_fields: Vec<_> = manifest
+            .fields
+            .iter()
+            .filter(|field| field.section == EditorSection::Characters)
+            .collect();
+        let character_count = snapshot.characters.len();
+        assert_eq!(character_count, 9);
+        assert_eq!(character_fields.len(), 18 * character_count);
+        assert_eq!(
+            comparison_row_count(&manifest, EditorSection::Characters),
+            18
+        );
+
+        let health = manifest_field_by_path(&manifest, "characters/0/stats/maximum_health");
+        assert_eq!(health.subject_label, "Riff");
+        assert_f64_eq(health.maximum, f64::from(u16::MAX));
+        assert!(health.options.is_empty());
+
+        let base = manifest_field_by_path(&manifest, "characters/1/weaponBase");
+        assert_eq!(base.control, EditorControl::Select);
+        assert_eq!(base.options.len(), snapshot.weapons.len());
+        assert_eq!(base.options[0].label, snapshot.weapons[0].display_name);
+
+        let part = manifest_field_by_path(&manifest, "characters/1/weaponParts/3");
+        assert_eq!(
+            part.options[0],
+            EditorOption {
+                value: 0,
+                label: "None".into()
+            }
+        );
+        assert_f64_eq(part.minimum, 0.0);
+
+        let ultimate = manifest_field_by_path(&manifest, "characters/8/ultimateOptions/1");
+        assert_eq!(ultimate.options.len(), snapshot.ultimates.len());
+        let passive = manifest_field_by_path(&manifest, "characters/8/passiveOptions/0");
+        assert_eq!(passive.options.len(), snapshot.passives.len());
+        let json = serde_json::to_value(passive).unwrap();
+        assert_eq!(json["control"], "select");
+        assert_eq!(json["section"], "characters");
+        assert!(json["options"][0]["label"].is_string());
+    }
+
+    #[test]
     fn audited_semantic_rows_align_weapons_ultimates_and_passives() {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
 
-        assert_eq!(EDITOR_SCHEMA_VERSION, 14);
+        assert_eq!(EDITOR_SCHEMA_VERSION, 15);
         assert_eq!(comparison_row_count(&manifest, EditorSection::Weapons), 29);
         for (key, expected_subjects) in [
             ("economy/ammo_capacity", 7),

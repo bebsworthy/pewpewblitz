@@ -153,3 +153,30 @@ fn practice_bot_rosters_cover_every_character_weapon_and_ultimate_without_repeat
     let all_passives: BTreeSet<_> = builds.passives.iter().map(|passive| passive.id).collect();
     assert_eq!(picked_passives, all_passives);
 }
+
+#[test]
+fn a_choice_carried_onto_revised_options_keeps_its_slot() {
+    let (characters, ..) = embedded();
+    let original = &characters.characters[0];
+    let mut revised = original.clone();
+    let choice = CharacterChoice {
+        character_id: original.id,
+        ultimate_id: original.ultimate_options[0],
+        passive_id: original.passive_options[1],
+    };
+    assert_eq!(choice.carried_by_slot(original, &revised), choice);
+
+    revised.ultimate_options = [
+        crate::builds::UltimateDefinitionId(11),
+        original.ultimate_options[1],
+    ];
+    revised.passive_options = [
+        original.passive_options[1],
+        crate::builds::PassiveDefinitionId(9),
+    ];
+    let carried = choice.carried_by_slot(original, &revised);
+    // The replaced ultimate takes its slot's new option; the passive is still offered (moved).
+    assert_eq!(carried.ultimate_id, crate::builds::UltimateDefinitionId(11));
+    assert_eq!(carried.passive_id, original.passive_options[1]);
+    assert!(carried.is_offered_by(&revised));
+}
