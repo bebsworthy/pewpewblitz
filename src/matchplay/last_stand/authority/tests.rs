@@ -240,6 +240,31 @@ fn the_deadline_draws_and_every_survivor_shares_first_place() {
 }
 
 #[test]
+fn a_defeat_on_the_deadline_tick_keeps_the_draw_standings() {
+    let mut app = app();
+    for team in 0..2 {
+        fighter(&mut app, team, 0);
+    }
+    step(&mut app);
+    app.world_mut().resource_mut::<SimulationTick>().0 = ENDS_AT;
+    defeat(&mut app, 0);
+    step(&mut app);
+    let pending = outcome(&mut app).unwrap();
+    assert_eq!(pending.cause, ModeOutcomeCause::Timeout);
+    assert_eq!(pending.result, MatchResult::Draw);
+    let last = state(&mut app);
+    assert_eq!(last.placements[..2], [1, 1]);
+    assert_eq!(last.alive, 2);
+    assert!(pickups(&mut app).is_empty());
+    assert_eq!(
+        app.world()
+            .resource::<MatchOutcomeDiagnostics>()
+            .duplicate_mode_outcome,
+        0
+    );
+}
+
+#[test]
 fn a_defeat_outside_the_ring_drops_inside_the_ring() {
     let mut app = app();
     let fighters = [0, 1].map(|team| fighter(&mut app, team, 2));

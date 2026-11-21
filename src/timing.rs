@@ -29,6 +29,16 @@ pub const fn simulation_ticks_from_seconds(seconds: u64) -> Option<u64> {
     seconds.checked_mul(SIMULATION_TICK_HZ)
 }
 
+/// Convert a millisecond authored duration to authoritative simulation ticks, only when it is
+/// a whole number of ticks.
+#[must_use]
+pub const fn simulation_ticks_from_millis(millis: u64) -> Option<u64> {
+    match millis.checked_mul(SIMULATION_TICK_HZ) {
+        Some(scaled) if scaled % 1_000 == 0 => Some(scaled / 1_000),
+        _ => None,
+    }
+}
+
 /// Convert authoritative ticks to completed whole seconds for compact presentation.
 #[must_use]
 pub const fn simulation_whole_seconds(ticks: u64) -> u64 {
@@ -61,6 +71,8 @@ mod tests {
     fn shared_conversions_follow_the_authoritative_frequency() {
         assert_eq!(simulation_ticks_from_seconds(0), Some(0));
         assert_eq!(simulation_ticks_from_seconds(3), Some(180));
+        assert_eq!(simulation_ticks_from_millis(500), Some(30));
+        assert_eq!(simulation_ticks_from_millis(10), None);
         assert_eq!(simulation_whole_seconds(179), 2);
         assert!((simulation_seconds_f64(1) - 1.0 / SIMULATION_TICK_HZ_F64).abs() < f64::EPSILON);
         assert_eq!(

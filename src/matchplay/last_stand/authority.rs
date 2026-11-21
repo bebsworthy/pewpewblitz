@@ -553,7 +553,12 @@ fn resolve_eliminations(
     let Ok((state, mut mode)) = roots.single_mut() else {
         return;
     };
-    if !matches!(state.phase, MatchPhase::Active { .. })
+    // At and after the deadline the deadline rule owns the standings, so a same-tick defeat
+    // can never re-rank survivors behind a Draw it already offered.
+    let MatchPhase::Active { ends_at_tick } = state.phase else {
+        return;
+    };
+    if tick.0 >= ends_at_tick
         || roster.match_id != Some(state.match_id)
         || mode.match_id != state.match_id
     {

@@ -33,6 +33,19 @@ pub struct BoundaryPhase {
     pub damage_per_pulse: u16,
 }
 
+/// Outside-zone damage pulses every half second, through `src/timing.rs`.
+const PULSE_INTERVAL_TICKS: u16 = match crate::timing::simulation_ticks_from_millis(500) {
+    Some(ticks) if ticks > 0 && ticks < 1 << 16 => {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "the guard keeps the tick count inside u16"
+        )]
+        let ticks = ticks as u16;
+        ticks
+    }
+    _ => panic!("Last Stand pulse interval must be a whole, nonzero u16 tick count"),
+};
+
 /// Last Stand rules layered on the common `MatchLifecycleRules`.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct LastStandRules {
@@ -74,7 +87,7 @@ impl Default for LastStandRules {
                     damage_per_pulse: 100,
                 },
             ],
-            pulse_interval_ticks: 30,
+            pulse_interval_ticks: PULSE_INTERVAL_TICKS,
             boost_stack_limit: 6,
             pickup_radius: 30.0,
         }
