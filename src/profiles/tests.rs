@@ -153,6 +153,57 @@ fn sqlite_backup_restores_exact_profile() {
     std::fs::remove_file(backup).unwrap();
 }
 
+/// Schema 4 published maps keep their submissions under the renamed game-type IDs (BRL-wg28).
+#[cfg(feature = "server")]
+#[test]
+fn schema_4_published_maps_move_to_the_renamed_game_type_ids() {
+    let database = path("schema-4");
+    {
+        let mut storage = ProfileStorage::open(&database).unwrap();
+        for (index, name) in ["One", "Two", "Three", "Four"].into_iter().enumerate() {
+            let account = AccountId::new(78 + index as u128).unwrap();
+            storage.load_or_create(account).unwrap();
+            assert!(matches!(
+                storage
+                    .submit_published_map(published_submission(account, name, 0), PRE_APPROVAL)
+                    .unwrap(),
+                PublishedMapSubmissionOutcome::Accepted { .. }
+            ));
+        }
+    }
+    {
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "UPDATE published_maps SET game_type_id='wipeout-1v1' WHERE name='One';
+                 UPDATE published_maps SET game_type_id='hot-zone-2v2' WHERE name='Two';
+                 UPDATE published_maps SET game_type_id='heist-3v3' WHERE name='Three';
+                 UPDATE published_maps SET game_type_id='zombie-4' WHERE name='Four';
+                 PRAGMA user_version=4;",
+            )
+            .unwrap();
+    }
+    let mut storage = ProfileStorage::open(&database).unwrap();
+    let mut ids = storage
+        .list_published_maps(None)
+        .unwrap()
+        .into_iter()
+        .map(|record| (record.name, record.game_type_id.as_str().to_owned()))
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(
+        ids,
+        [
+            ("Four".to_owned(), "zombie-4".to_owned()),
+            ("One".to_owned(), "takedown-1v1".to_owned()),
+            ("Three".to_owned(), "vault-break-3v3".to_owned()),
+            ("Two".to_owned(), "turf-hold-2v2".to_owned()),
+        ]
+    );
+    drop(storage);
+    std::fs::remove_file(database).unwrap();
+}
+
 /// Schema 3 (saved brawlers and parts) is retired without migration: its brawler and part tables
 /// go, every account starts at the default pick, and published maps stay.
 #[cfg(feature = "server")]
@@ -340,7 +391,7 @@ fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
             .pragma_update(None, "application_id", 0x4252_574c_i32)
             .unwrap();
         connection
-            .pragma_update(None, "user_version", 5_i32)
+            .pragma_update(None, "user_version", 6_i32)
             .unwrap();
     }
     assert!(ProfileStorage::open(&newer).is_err());
@@ -348,7 +399,7 @@ fn sqlite_rejects_incompatible_or_corrupt_files_without_replacing_them() {
     let version: i32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
     drop(connection);
 
     let corrupt = path("corrupt");
@@ -385,7 +436,7 @@ fn published_submission(
 ) -> PublishedMapSubmission {
     let mut recipe = crate::map::MapContentCatalog::embedded()
         .unwrap()
-        .preset(crate::map::FEATURE_YARD_WIPEOUT_PRESET)
+        .preset(crate::map::FEATURE_YARD_TAKEDOWN_PRESET)
         .unwrap()
         .recipe
         .clone();
@@ -395,7 +446,7 @@ fn published_submission(
         account_id: account,
         author_display_name: "Author".into(),
         name: name.into(),
-        game_type_id: crate::lobby::GameTypeId::new("wipeout-1v1").unwrap(),
+        game_type_id: crate::lobby::GameTypeId::new("takedown-1v1").unwrap(),
         game_type_revision: 3,
         recipe,
         now_unix_ms,

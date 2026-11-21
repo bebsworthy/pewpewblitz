@@ -24,15 +24,15 @@ pub struct MatchOutcomeDiagnostics {
 /// Fully typed mode-specific terminal summary attached to one common match summary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModeSummary {
-    Wipeout(WipeoutSummary),
-    HotZone(crate::matchplay::HotZoneSummary),
-    Heist(crate::matchplay::HeistSummary),
+    Takedown(TakedownSummary),
+    TurfHold(crate::matchplay::TurfHoldSummary),
+    VaultBreak(crate::matchplay::VaultBreakSummary),
     Zombie(crate::matchplay::ZombieSummary),
 }
 
-/// Wipeout's terminal scores, preserving the pre-M09 report meaning.
+/// Takedown's terminal scores, preserving the pre-M09 report meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WipeoutSummary {
+pub struct TakedownSummary {
     pub final_scores: [u16; 2],
     pub target_score: u16,
     pub score_margin: u16,

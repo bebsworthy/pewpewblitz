@@ -78,9 +78,9 @@ fn build_match_manifest(
         respawn_ticks: request.respawn_ticks,
         spawn_protection_ticks: request.spawn_protection_ticks,
         completed_input_lock_ticks: request.completed_input_lock_ticks,
-        wipeout_recent_hostile_damage_credit_ticks: request
-            .wipeout_recent_hostile_damage_credit_ticks,
-        heist_critical_health_percent: request.heist_critical_health_percent,
+        takedown_recent_hostile_damage_credit_ticks: request
+            .takedown_recent_hostile_damage_credit_ticks,
+        vault_break_critical_health_percent: request.vault_break_critical_health_percent,
         reserved: 0,
         seed: context.seed,
         participants,

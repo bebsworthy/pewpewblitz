@@ -49,10 +49,14 @@ pub(crate) const PARTS: [&str; 5] = [
     "part-element",
 ];
 
-/// Hanging mode pennants (250x310 px), in `AdvertisedRulesSummary` order: Wipeout, Hot Zone,
-/// Heist, Zombie (BRL-1wms). Names are `mode-<mode key>`.
-pub(crate) const MODE_PENNANTS: [&str; 4] =
-    ["mode-wipeout", "mode-hot-zone", "mode-heist", "mode-zombie"];
+/// Hanging mode pennants (250x310 px), in `AdvertisedRulesSummary` order: Takedown, Turf Hold,
+/// Vault Break, Zombie (BRL-1wms). Names are `mode-<mode key>`.
+pub(crate) const MODE_PENNANTS: [&str; 4] = [
+    "mode-takedown",
+    "mode-turf-hold",
+    "mode-vault-break",
+    "mode-zombie",
+];
 
 /// The badge of an ultimate family. Icons are selected by advertised semantic family, never by
 /// built-in definition IDs; the brawler screens and the in-match ultimate button share it.
@@ -144,9 +148,9 @@ mod tests {
         brawler::test_app::finalize(&mut app);
         let modes = app.world().resource::<brawler::modes::ModeRegistry>();
         for (pennant, definition) in MODE_PENNANTS.into_iter().zip([
-            brawler::map::WIPEOUT_MODE_DEFINITION,
-            brawler::map::HOT_ZONE_MODE_DEFINITION,
-            brawler::map::HEIST_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
+            brawler::map::TURF_HOLD_MODE_DEFINITION,
+            brawler::map::VAULT_BREAK_MODE_DEFINITION,
             brawler::map::ZOMBIE_MODE_DEFINITION,
         ]) {
             let key = modes
@@ -172,12 +176,12 @@ mod tests {
             "icon-skull",
             "icon-chevron",
             "part-barrel",
-            "wipeout",
-            "hot-zone",
-            "heist",
+            "takedown",
+            "turf-hold",
+            "vault-break",
             "zombie",
-            "game-badge-hot-zone",
-            "game-badge-heist",
+            "game-badge-turf-hold",
+            "game-badge-vault-break",
             "game-badge-zombie",
         ] {
             assert!(

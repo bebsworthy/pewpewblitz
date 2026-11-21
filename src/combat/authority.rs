@@ -123,7 +123,7 @@ pub struct TestDummy {
     pub reset_delay_ticks: u64,
 }
 
-/// Explicit opt-in fixture; production Wipeout composition never inserts it.
+/// Explicit opt-in fixture; production Takedown composition never inserts it.
 #[cfg(feature = "server")]
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct TestDummyFixture {
@@ -424,7 +424,7 @@ pub(super) fn queue_area_payloads(
         ),
         Or<(
             With<crate::map::DamageableWorldObject>,
-            With<crate::matchplay::HeistSafe>,
+            With<crate::matchplay::VaultBreakSafe>,
         )>,
     >,
     disconnected: &HashSet<Entity>,

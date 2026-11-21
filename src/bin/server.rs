@@ -8,7 +8,7 @@ use std::{env, process};
 
 fn usage() {
     eprintln!(
-        "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--mode <wipeout|hot-zone|heist>] [--match-rules <production|verification>]"
+        "usage: brawler-server [--bind <IP:PORT>] [--max-clients <N>] [--handshake-timeout-ms <N>] [--mode <takedown|turf-hold|vault-break>] [--match-rules <production|verification>]"
     );
     eprintln!(
         "       brawler-server lobby-worker --role lobby --logical-server-id <U128> --supervisor-generation <U64> --worker-id <U128> --process-id <U128> --worker-generation <U64> --packet-socket <PATH> --control-socket <PATH>"
@@ -23,7 +23,7 @@ fn usage() {
         "       brawler-server routing-identity   print routed network and content identity as key=value lines"
     );
     eprintln!(
-        "note: --wipeout-rules <production|verification> is a deprecated alias for --match-rules"
+        "note: --takedown-rules <production|verification> is a deprecated alias for --match-rules"
     );
 }
 
@@ -62,7 +62,7 @@ fn parse_args() -> Result<ServerNetworkConfig, String> {
                     .ok_or_else(|| format!("invalid value for {flag}"))?;
                 saw_match_rules = true;
             }
-            "--wipeout-rules" => {
+            "--takedown-rules" => {
                 let value = args
                     .next()
                     .ok_or_else(|| format!("{flag} requires a value"))?;
@@ -79,7 +79,7 @@ fn parse_args() -> Result<ServerNetworkConfig, String> {
     }
     if saw_match_rules && saw_legacy_rules {
         return Err(
-            "--wipeout-rules conflicts with --match-rules; use --match-rules only".to_string(),
+            "--takedown-rules conflicts with --match-rules; use --match-rules only".to_string(),
         );
     }
     config

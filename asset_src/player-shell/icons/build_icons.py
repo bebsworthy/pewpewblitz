@@ -287,19 +287,19 @@ ICONS = {
         part("yellow", arrow_arc(60, 47, 22, 200, 330, 8, 11), bands=THIN),
         part("yellow", arrow_arc(60, 47, 22, 20, 150, 8, 11), bands=THIN))),
     # Mode pennants (BRL-1wms): one hanging-pennant silhouette, the emblem names the mode.
-    "mode-wipeout": (PENNANT, pennant(
+    "mode-takedown": (PENNANT, pennant(
         part("steel", stroke([(33, 42), (67, 76)], 6.5), stroke([(67, 42), (33, 76)], 6.5),
              circle(31, 40, 4.5), circle(69, 40, 4.5), circle(31, 78, 4.5), circle(69, 78, 4.5),
              bands=(2.0, 1.5)),
         part("white", circle(50, 52, 17), rrect(39.5, 58, 21, 17, 5)),
         part("ink", circle(43.5, 53, 5), circle(56.5, 53, 5), poly((50, 59), (46.5, 65), (53.5, 65)),
              stroke([(45.5, 69), (45.5, 75)], 2.5), stroke([(54.5, 69), (54.5, 75)], 2.5)))),
-    "mode-hot-zone": (PENNANT, pennant(
+    "mode-turf-hold": (PENNANT, pennant(
         part("yellow", ellipse(50, 73, 24, 8.5), bands=(3.0, 2.0)),
         part("orange", ellipse(50, 72, 12, 4.2), bands=(1.5, 1.0)),
         part("white", stroke([(45, 72), (45, 33)], 5), bands=(1.5, 1.0)),
         part("coral", poly((47, 31), (72, 39.5), (47, 48)), bands=(3.0, 2.0)))),
-    "mode-heist": (PENNANT, pennant(
+    "mode-vault-break": (PENNANT, pennant(
         part("steel", rrect(32, 69, 9, 9, 2.5), rrect(59, 69, 9, 9, 2.5), bands=(1.5, 1.0)),
         part("steel", rrect(25, 38, 7, 9, 2), rrect(25, 58, 7, 9, 2), bands=(1.0, 1.0)),
         part("white", rrect(29, 32, 44, 40, 7)),

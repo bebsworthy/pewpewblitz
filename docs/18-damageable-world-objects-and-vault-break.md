@@ -1,10 +1,10 @@
-# Damageable world objects and Heist specification
+# Damageable world objects and Vault Break specification
 
 ## Purpose and authority
 
 This document defines PewPew Blitz's server-authoritative contract for health-bearing world
 objects and the first gameplay families built on it: oil barrels, treasure chests with one
-pickable restoration bonus, and the mirrored two-safe Heist mode. It deliberately separates a
+pickable restoration bonus, and the mirrored two-safe Vault Break mode. It deliberately separates a
 reusable damage target from the terminal behavior and match meaning owned by each concrete object.
 
 The [grid map-asset specification](./16-grid-map-asset-system.md) remains authoritative for sparse
@@ -16,7 +16,7 @@ compatibility. The [network architecture](./08-network-architecture.md) owns sta
 and replication. The [V10 roadmap](./implementation/v10/roadmap.md) owns staged delivery.
 
 V9 completed on 2026-08-24. V10 completed with user acceptance on 2026-08-25 after its oil-barrel,
-mirrored Heist, consolidated Feature Yard, treasure-chest, restoration-pickup, feedback, and
+mirrored Vault Break, consolidated Feature Yard, treasure-chest, restoration-pickup, feedback, and
 closeout gates passed. This document remains the accepted version-wide capability boundary.
 
 ## Player-facing outcomes
@@ -26,19 +26,19 @@ V10 delivered three intentionally distinct pieces of gameplay:
 1. **Oil barrel.** A neutral blocking map feature can be damaged by attacks. At zero health it
    explodes once, damages nearby eligible fighters and ordinary damageable objects, and becomes a
    clearly nonblocking terminal placement.
-2. **Heist safe.** Each team has one public durable safe. Players simultaneously attack the enemy
+2. **Vault Break safe.** Each team has one public durable safe. Players simultaneously attack the enemy
    safe and defend their own. Destroying exactly one safe wins immediately; timeout compares the
    remaining safe-health fractions.
 3. **Treasure chest.** A neutral blocking map feature can be damaged by attacks. At zero health it
    disappears once, becomes a clearly nonblocking terminal placement, and drops exactly one public
    restoration pickup that either team may collect.
 
-The treasure chest is never a Heist safe:
+The treasure chest is never a Vault Break safe:
 
 - a chest is an ordinary neutral map-asset placement;
-- a safe is a team-owned, mode-owned objective created from a typed Heist anchor;
+- a safe is a team-owned, mode-owned objective created from a typed Vault Break anchor;
 - a chest drops a pickup and has no match-result meaning;
-- a safe never drops loot and its zero-health transition is consumed only by Heist rules;
+- a safe never drops loot and its zero-health transition is consumed only by Vault Break rules;
 - normal and primitive-fallback presentation must distinguish their silhouette, team ownership,
   health treatment, terminal state, and audio.
 
@@ -92,7 +92,7 @@ extend a central runtime handler table.
 ### Mode objective
 
 A runtime target whose damage eligibility, health, reset, completion, telemetry, and results are
-owned by one mode. A Heist safe shares the damage-receipt mechanics but does not use an environment
+owned by one mode. A Vault Break safe shares the damage-receipt mechanics but does not use an environment
 object's terminal-behavior profile.
 
 ### Pickup
@@ -110,12 +110,12 @@ inventory item, account entitlement, currency, carried objective, or persistent 
 - Replacing `DestroyMap`, changing accepted 32-unit whole-placement destruction, or compatibility
   loading an older map format.
 - Alternating attacker/defender rounds, best-of-series scoring, asymmetric role swaps, payload
-  escort, safe repair, safe healing, safe regeneration, or overtime in the first Heist mode.
+  escort, safe repair, safe healing, safe regeneration, or overtime in the first Vault Break mode.
 - Inventory, rarity, random loot tables, currencies, ownership, purchases, crafting, persistent
   rewards, or chest-opening UI.
 - Physics impulses, movable props, structural collapse, fire propagation, material simulation, or
   unbounded barrel chains.
-- Autonomous sentry objective selection unless the Heist milestone explicitly proves it as a
+- Autonomous sentry objective selection unless the Vault Break milestone explicitly proves it as a
   readable and balanced build behavior. Existing projectiles may still hit an eligible object that
   geometrically intercepts them.
 - Concealed world objects, safes, pickups, or objective health. V10 objects are public facts.
@@ -164,7 +164,7 @@ The implemented Rust ownership preserves this semantic separation. Health is not
 `MapDestructionBehavior`, and attack damage is not represented as a `MapInteractionBehavior`.
 
 In V10, a hit-point object must be indestructible to `DestroyMap`. This prevents a world effect
-from bypassing health, terminal attribution, exact-once explosion/drop behavior, or Heist rules.
+from bypassing health, terminal attribution, exact-once explosion/drop behavior, or Vault Break rules.
 Supporting both mechanisms on one placement requires a later explicit policy and migration.
 
 ### Catalog validation
@@ -180,7 +180,7 @@ The shared headless-safe catalog rejects:
 - explosion radii, damage, target counts, chain counts, or pickup lifetimes outside code-owned
   bounds;
 - a pickup definition with an unsupported effect or a chest with more than one drop;
-- Heist anchors in non-Heist recipes, ordinary environment durability masquerading as a Heist
+- Vault Break anchors in non-Vault Break recipes, ordinary environment durability masquerading as a Vault Break
   objective, or a chest asset used as a safe identity.
 
 Catalog, recipe, content, admission, recovery, and client-visual fingerprints change through the
@@ -194,7 +194,7 @@ V10 promotes exact assets only when their full behavior exists:
 |---|---|---|---|---|
 | Oil barrel | Ordinary `Feature` placement | Blocks players; intercepts eligible projectiles | Environment-object runtime | One explosion, then nonblocking broken/removal state |
 | Treasure chest | Ordinary `Feature` placement | Blocks players; intercepts eligible projectiles | Environment-object runtime | One restoration pickup, then removed state |
-| Heist safe | Typed Heist mode anchor, not an ordinary chest placement | Blocks players; intercepts eligible projectiles | Heist mode | Public destroyed objective state and mode outcome; no loot |
+| Vault Break safe | Typed Vault Break mode anchor, not an ordinary chest placement | Blocks players; intercepts eligible projectiles | Vault Break mode | Public destroyed objective state and mode outcome; no loot |
 
 V10 selected original names, stable IDs, exact footprints, normal/damaged/
 terminal visual profiles, and primitive fallbacks. Placeholder identity cannot erase the chest/safe
@@ -204,7 +204,7 @@ distinction.
 
 ### Shared damageable state
 
-The server creates one runtime entity for each live damageable environment placement and Heist
+The server creates one runtime entity for each live damageable environment placement and Vault Break
 safe. Conceptually, the shared bundle contains:
 
 ```text
@@ -224,7 +224,7 @@ a process-local Bevy `Entity`:
 Map object:
   map_instance_id + map_generation + placement_id
 
-Heist safe:
+Vault Break safe:
   match_id + anchor_id + defending_team
 ```
 
@@ -236,19 +236,19 @@ Default visibility is public to all admitted clients.
 
 V10 does not widen the existing fighter/deployable `CombatOutcomeFacts` stream with environment-
 object or mode-objective targets. Its current consumers own fighter defeat, charge, passive,
-Wipeout/Hot Zone, and match-telemetry assumptions that must remain valid.
+Takedown/Turf Hold, and match-telemetry assumptions that must remain valid.
 
 Object and objective damage instead publishes one dedicated bounded authoritative fact stream with
 stable target identity, target class, source lineage, applied amount, resulting health, terminal
-transition when present, match/map generation, and tick identity. Environment behavior, Heist,
+transition when present, match/map generation, and tick identity. Environment behavior, Vault Break,
 object telemetry, recovery evidence, and public presentation cues consume that stream. Barrel
 secondary damage applied to a fighter or deployable still emits the existing combat outcome fact
 with an environmental source, so fighter lifecycle, concealment reveal, match telemetry, and
 defeat attribution continue through their established owner.
 
 M01 audited every existing combat-outcome reader before introducing the dedicated stream and
-proved that object/safe damage cannot enter fighter damage, defeat, charge, passive, Wipeout, Hot
-Zone, or common match aggregates. A future unification requires an explicit migration of every
+proved that object/safe damage cannot enter fighter damage, defeat, charge, passive, Takedown, Turf
+Hold, or common match aggregates. A future unification requires an explicit migration of every
 reader; shared health alone is not permission to reuse a fighter-centric fact contract.
 
 ### Replication and recovery
@@ -265,7 +265,7 @@ the map's generation/revision state. Late and reconnecting clients therefore rec
 - the placement's committed removed/replacement state with no live object;
 - a bounded syncing state while matching map and object generations arrive.
 
-A Heist safe remains a replicated objective entity in a public destroyed state through match
+A Vault Break safe remains a replicated objective entity in a public destroyed state through match
 completion so world presentation, HUD, results, and late recovery agree. It is restored only by the
 mode restart transaction.
 
@@ -278,7 +278,7 @@ Restart uses the existing synchronous transaction:
 
 ```text
 common prepare
-  -> mode reset: restore both safes and Heist mode facts
+  -> mode reset: restore both safes and Vault Break mode facts
   -> environment reset: restore barrels/chests, remove pickups, reset map terminal states
   -> common commit
 ```
@@ -320,11 +320,11 @@ other target-owned effects do not apply merely because an entity has `CurrentHea
 | Target | Friendly/hostile policy | Damage payload | Status/knockback | Fighter defeat/charge/passive credit |
 |---|---|---|---|---|
 | Neutral barrel/chest | Any valid attacking team | Allowed | Rejected | None |
-| Heist safe | Only the opposing team while the matching match is active | Allowed | Rejected | Objective telemetry only |
+| Vault Break safe | Only the opposing team while the matching match is active | Allowed | Rejected | Objective telemetry only |
 | Destroyed object/safe | No source | Rejected | Rejected | None |
 
 Objective-damage multipliers, per-weapon safe coefficients, safe armor classes, build bonuses, and
-safe-specific critical hits are not introduced in the first Heist slice. The ordinary applied
+safe-specific critical hits are not introduced in the first Vault Break slice. The ordinary applied
 positive damage amount is the objective damage. Balance is achieved first through safe health,
 map access, match duration, respawn cadence, and existing build tradeoffs.
 
@@ -385,7 +385,7 @@ The initial oil-barrel policy is:
 
 - explosion damage may affect fighters, deployables, barrels, and chests in range;
 - it affects all teams, including the initiator and allies;
-- it does not damage a Heist safe in V10;
+- it does not damage a Vault Break safe in V10;
 - hostile fighter defeat may credit the valid initiating team for ordinary mode score and summary
   attribution, but never grants weapon contact, ultimate charge, passive triggers, or weapon-
   specific damage/defeat credit;
@@ -464,11 +464,11 @@ Presentation and audio are authored separately and validated through playtest. C
 explicit ordered `FixedPostUpdate` health mutation; presentation and overlap detection never form
 a second fighter-health writer.
 
-## Heist mode
+## Vault Break mode
 
 ### Mode structure
 
-The first Heist mode is one simultaneous mirrored round:
+The first Vault Break mode is one simultaneous mirrored round:
 
 - teams `0` and `1` each own one durable safe;
 - both safes are active and publicly visible for the whole active phase;
@@ -478,16 +478,16 @@ The first Heist mode is one simultaneous mirrored round:
 - there is no attacker/defender role swap, intermission, aggregate round score, repair, overtime, or
   sudden-death rule.
 
-`HeistModePlugin` owns validated `HeistRules`, objective installation from the resolved map,
+`VaultBreakModePlugin` owns validated `VaultBreakRules`, objective installation from the resolved map,
 objective damage eligibility, threshold/timeout evaluation, restart, telemetry, summary, and
 results. It does not own ordinary attack acceptance or duplicate map geometry.
 
-### Typed Heist-safe anchors
+### Typed Vault Break-safe anchors
 
-`MapModeAnchorKind` gains one concrete Heist-safe anchor shape. Conceptually:
+`MapModeAnchorKind` gains one concrete Vault Break-safe anchor shape. Conceptually:
 
 ```rust
-HeistSafe {
+VaultBreakSafe {
     team_slot: u8,
     origin_cell: MapCell,
     footprint_cells: MapFootprint,
@@ -496,11 +496,11 @@ HeistSafe {
 }
 ```
 
-The exact field placement may use a bounded server-known Heist objective profile instead of placing
+The exact field placement may use a bounded server-known Vault Break objective profile instead of placing
 all constants inline. In either form, the recipe describes position, orientation, team association,
-and stable anchor identity only. `HeistRules` owns maximum health and match behavior.
+and stable anchor identity only. `VaultBreakRules` owns maximum health and match behavior.
 
-A Heist recipe must contain exactly two unique safe anchors, one for each team. Anchor reservations
+A Vault Break recipe must contain exactly two unique safe anchors, one for each team. Anchor reservations
 participate in the feature-slot occupancy validator so an ordinary chest, barrel, wall, decoration,
 spawn, or second safe cannot overlap the objective footprint. The safe is not represented by the
 treasure-chest asset ID or terminal behavior.
@@ -515,17 +515,17 @@ Validation also proves:
 - safe-to-spawn distances, lane widths, cover, and objective surroundings meet bounded
   mode-specific constraints for every advertised 1v1/2v2/3v3 topology;
 - no barrel/chest terminal transition can invalidate required objective access;
-- the map contains no Hot Zone anchor or unsupported mode anchor.
+- the map contains no Turf Hold anchor or unsupported mode anchor.
 
 ### Objective state and replication
 
 Each safe is a replicated public objective entity with stable match/anchor/team identity,
 maximum/current health, terminal state, authoritative pose, collision, and network identity. The
-match root carries a replicated generation-tagged `HeistState` that identifies the two anchors and
+match root carries a replicated generation-tagged `VaultBreakState` that identifies the two anchors and
 their expected match/rules generation; current health has one canonical writer on the safe entities
 rather than a duplicated mutable copy on the root.
 
-HUD and presentation enter `SYNCING OBJECTIVE` unless the `MatchState`, `MatchClock`, `HeistState`,
+HUD and presentation enter `SYNCING OBJECTIVE` unless the `MatchState`, `MatchClock`, `VaultBreakState`,
 both safe entities, and resolved map generation agree. They never display cached health from a
 previous match, map, reconnect, or restart generation.
 
@@ -557,7 +557,7 @@ facts cannot offer a second or wrong-generation outcome.
 
 During active play the common objective HUD displays both team-colored safe health values and
 percentages, clear local `DEFEND` and enemy `ATTACK` labels, remaining match time, and a syncing
-state for incomplete generations. It does not reuse a chest pickup label or Wipeout kill score.
+state for incomplete generations. It does not reuse a chest pickup label or Takedown kill score.
 
 World presentation includes:
 
@@ -568,7 +568,7 @@ World presentation includes:
 - no loot glow, pickup burst, opening animation, or chest audio vocabulary.
 
 The completed overlay and results identify threshold, timeout, draw, or forfeit correctly. The
-typed `HeistSummary` records at minimum final/max safe health, objective damage by team and source
+typed `VaultBreakSummary` records at minimum final/max safe health, objective damage by team and source
 family, first objective-damage ticks, destroying source when present, simultaneous destruction,
 timeout margin, and participant objective damage. Common fighter damage, defeat, respawn, build,
 ability, movement, and disconnect telemetry remains available without counting safe damage as
@@ -576,18 +576,18 @@ fighter damage or weapon charge.
 
 ### Routing, admission, and product flow
 
-Heist is a complete routed product mode:
+Vault Break is a complete routed product mode:
 
 - routing, server config, lobby catalog, queue advertisements, worker manifests, admission,
   fingerprints, game-type summaries, Dashboard selection, practice, and E2E scripts recognize one
-  stable Heist mode identity;
-- the lobby admits only a Heist game type whose selected map resolves exactly two valid safe
+  stable Vault Break mode identity;
+- the lobby admits only a Vault Break game type whose selected map resolves exactly two valid safe
   anchors and compatible team capacity;
-- the selected Heist registration validates and projects its rules, then installs `HeistModePlugin`
+- the selected Vault Break registration validates and projects its rules, then installs `VaultBreakModePlugin`
   during application construction; mode/map/rules mismatches are rejected before gameplay;
 - client flow, HUD, audio, results, replay/requeue, reconnect, and shutdown dispatch explicitly on
-  Heist rather than treating every non-Wipeout mode as Hot Zone;
-- Wipeout and Hot Zone retain their current behavior and mixed-worker operation.
+  Vault Break rather than treating every non-Takedown mode as Turf Hold;
+- Takedown and Turf Hold retain their current behavior and mixed-worker operation.
 
 ## Presentation and readability contracts
 
@@ -614,7 +614,7 @@ The Balance Lab exposes only values owned by completed V10 behavior:
 
 - barrel maximum health, explosion radius/damage, maximum targets, and maximum chain reactions;
 - chest maximum health, restoration amount, and pickup radius/lifetime;
-- Heist safe maximum health; match duration, countdown, respawn delay, and topology remain owned by
+- Vault Break safe maximum health; match duration, countdown, respawn delay, and topology remain owned by
   the advertised game-type configuration rather than this Balance Lab snapshot;
 - later tuning values only after their behavior is implemented.
 
@@ -652,7 +652,7 @@ Balance evidence must answer:
   reactions, secondary damage, ability observation, mode evaluation, lifecycle, concealment
   resolution/observer decisions, publication, and tick-finalize order;
 - duplicate/stale/wrong-match payload, terminal, pickup, recovery, and outcome facts are rejected;
-- existing fighter charge, passive, Wipeout, Hot Zone, defeat, and common match-telemetry readers
+- existing fighter charge, passive, Takedown, Turf Hold, defeat, and common match-telemetry readers
   remain unchanged by object/safe facts, while barrel damage to fighters remains visible to their
   established combat-outcome readers;
 - zero damage, rejected attacks, friendly-safe contact, non-damage effects, pre-match and completed-
@@ -666,9 +666,9 @@ Balance evidence must answer:
   requeue, and process recovery;
 - clients cannot author health, damage, explosion, pickup, safe, score, or result state;
 - concealed-attacker and per-observer cue tests retain V9 privacy while public object state agrees;
-- routed Heist 1v1, 2v2, and 3v3 cover threshold, timeout, simultaneous draw, forfeit, restart, and
+- routed Vault Break 1v1, 2v2, and 3v3 cover threshold, timeout, simultaneous draw, forfeit, restart, and
   fresh-lobby requeue;
-- heterogeneous Wipeout, Hot Zone, and Heist workers can run concurrently without mode dispatch or
+- heterogeneous Takedown, Turf Hold, and Vault Break workers can run concurrently without mode dispatch or
   report-schema confusion;
 - barrel and chest scenarios exercise straight, lobbed, melee, ultimate, deployable interception,
   environmental chain, and pickup collection as supported by their accepted policies.
@@ -719,7 +719,7 @@ src/combat/
   outcomes.rs           existing fighter/deployable facts; environmental fighter damage only
 
 src/matchplay/
-  heist.rs              rules, safe ownership, outcome, restart, telemetry
+  Vault Break.rs              rules, safe ownership, outcome, restart, telemetry
 
 packages/brawler-client/src/presentation_3d/
   map/object presentation plus focused object_health.rs projection from replicated state
@@ -737,14 +737,14 @@ view and queues use one local `SystemParam` without creating a new plugin or cra
 - Additional pickups, random loot, weighted tables, carried bonuses, temporary buffs, inventories,
   account rewards, currencies, rarity, or chest ownership.
 - Safe repair/healing, objective armor/multipliers, objective-specific build parts, barrel damage to
-  safes, overtime, asymmetric Heist, alternating rounds, or tournaments.
+  safes, overtime, asymmetric Vault Break, alternating rounds, or tournaments.
 - Movable/physics props, damage states for ordinary walls, repairable objects, hazards with lasting
   fields, fire propagation, elemental interactions, structural collapse, or material simulation.
 - Generic interaction prompts, switches, doors, teleporters, launchers, healing pads, or behavior
   scripting.
 - Concealed objects/pickups/objectives, spectator-specific objective permissions, replay, or kill
   cam.
-- More Heist maps or object content beyond the accepted Feature Yard slice unless a later content
+- More Vault Break maps or object content beyond the accepted Feature Yard slice unless a later content
   Ticket deliberately owns and playtests them.
 
 ## Implementation and closeout sources
@@ -763,7 +763,7 @@ Local, version-pinned sources inspected while preparing and implementing this co
   connection-specific observer decisions, cue privacy, public entities, and replication ordering;
 - `src/profiles/catalog.rs` and `packages/brawler-client/src/profile.rs` for the bounded server-advertised brawler
   catalog and authoritative resolved maximum-health source used by restoration pickups;
-- `src/gameplay.rs`, `src/matchplay/mod.rs`, `hot_zone.rs`, `wipeout.rs`, `heist.rs`, `server.rs`, and
+- `src/gameplay.rs`, `src/matchplay/mod.rs`, `turf_hold.rs`, `takedown.rs`, `vault_break.rs`, `server.rs`, and
   `telemetry.rs` for fixed-post ordering, restart transactions, mode-owned state, deadline/
   threshold precedence, summaries, and result publication;
 - `src/protocol.rs`, `src/server/admission.rs`, `src/server/lobby/catalog.rs`, and routed game-mode

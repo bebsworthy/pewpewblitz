@@ -1,45 +1,45 @@
-//! Heist-owned mode registration, authored-rule resolution, and server composition.
+//! Vault Break-owned mode registration, authored-rule resolution, and server composition.
 
 use super::{ModeRegistration, ModeTopologyPolicy};
-use crate::{config::GameMode, map::HEIST_MODE_DEFINITION};
+use crate::{config::GameMode, map::VAULT_BREAK_MODE_DEFINITION};
 use bevy::prelude::{App, Plugin};
 
 pub(super) const REGISTRATION: ModeRegistration = ModeRegistration {
-    configured_mode: Some(GameMode::Heist),
-    key: "heist",
-    definition_id: HEIST_MODE_DEFINITION,
-    topology: ModeTopologyPolicy::MirroredHeistSafes,
+    configured_mode: Some(GameMode::VaultBreak),
+    key: "vault-break",
+    definition_id: VAULT_BREAK_MODE_DEFINITION,
+    topology: ModeTopologyPolicy::MirroredVaultBreakSafes,
     #[cfg(feature = "server")]
     server: Some(super::ServerModeProjection {
-        rules_revision: crate::matchplay::HEIST_RULES_REVISION,
+        rules_revision: crate::matchplay::VAULT_BREAK_RULES_REVISION,
         compatible_maps: super::CompatibleMapPolicy::ExactModeDefinition,
-        default_map_preset: crate::map::FEATURE_YARD_HEIST_PRESET,
-        routing_mode: brawler_routing::GameMode::Heist,
+        default_map_preset: crate::map::FEATURE_YARD_VAULT_BREAK_PRESET,
+        routing_mode: brawler_routing::GameMode::VaultBreak,
         validate_operator_policy,
         resolve_operator_rules,
         install: install_server,
     }),
     #[cfg(feature = "client")]
     presentation: Some(super::ModePresentationProjection {
-        selection_label: "Heist",
+        selection_label: "Vault Break",
     }),
 };
 
-pub(super) struct HeistModeRegistrationPlugin;
+pub(super) struct VaultBreakModeRegistrationPlugin;
 
-impl Plugin for HeistModeRegistrationPlugin {
+impl Plugin for VaultBreakModeRegistrationPlugin {
     fn build(&self, app: &mut App) {
         use super::registry::ModeRegistrationAppExt as _;
         app.try_register_mode(REGISTRATION)
-            .expect("Heist mode registration is unique and bounded");
+            .expect("Vault Break mode registration is unique and bounded");
     }
 }
 
 #[cfg(feature = "server")]
 fn validate_operator_policy(input: super::ModeOperatorPolicyInput) -> Result<(), &'static str> {
-    crate::matchplay::HeistRules {
+    crate::matchplay::VaultBreakRules {
         safe_maximum_health: 1,
-        critical_health_percent: input.heist_critical_health_percent,
+        critical_health_percent: input.vault_break_critical_health_percent,
     }
     .validate()
     .map(|_| ())
@@ -57,15 +57,15 @@ fn resolve_operator_rules(
         return Err(super::ModeRuleResolutionError::MismatchedObjective);
     }
     let safe_maximum_health = input.safe_health;
-    crate::matchplay::HeistRules {
+    crate::matchplay::VaultBreakRules {
         safe_maximum_health,
-        critical_health_percent: input.heist_critical_health_percent,
+        critical_health_percent: input.vault_break_critical_health_percent,
     }
     .validate()
     .map_err(super::ModeRuleResolutionError::InvalidObjective)?;
     Ok(super::ResolvedModeRuleProjection {
         objective_target: safe_maximum_health,
-        rules_summary: crate::lobby::AdvertisedRulesSummary::Heist {
+        rules_summary: crate::lobby::AdvertisedRulesSummary::VaultBreak {
             safe_maximum_health,
             active_limit_ticks: input.match_duration_ticks,
         },
@@ -76,24 +76,27 @@ fn resolve_operator_rules(
 fn install_server(app: &mut App, registration: &ModeRegistration, input: super::ModeInstallInput) {
     use crate::{
         map::ServerMapSelection,
-        matchplay::{HeistModePlugin, HeistRules, MatchModeSetup},
+        matchplay::{MatchModeSetup, VaultBreakModePlugin, VaultBreakRules},
     };
-    let rules = match (input.objective_target, input.heist_critical_health_percent) {
-        (Some(safe_maximum_health), Some(critical_health_percent)) => HeistRules {
+    let rules = match (
+        input.objective_target,
+        input.vault_break_critical_health_percent,
+    ) {
+        (Some(safe_maximum_health), Some(critical_health_percent)) => VaultBreakRules {
             safe_maximum_health,
             critical_health_percent,
         },
         (None, None) if input.profile == crate::config::MatchRulesProfile::ProcessVerification => {
-            HeistRules {
+            VaultBreakRules {
                 safe_maximum_health: 2_000,
                 critical_health_percent: 25,
             }
         }
-        _ => panic!("production Heist requires one complete authored policy"),
+        _ => panic!("production Vault Break requires one complete authored policy"),
     };
     let rules = rules
         .validate()
-        .expect("validated manifest Heist objective");
+        .expect("validated manifest Vault Break objective");
     let server = registration.server();
     app.insert_resource(MatchModeSetup {
         mode_definition_id: registration.definition_id,
@@ -101,7 +104,7 @@ fn install_server(app: &mut App, registration: &ModeRegistration, input: super::
     })
     .insert_resource(rules)
     .insert_resource(ServerMapSelection::preset(server.default_map_preset))
-    .add_plugins(HeistModePlugin);
+    .add_plugins(VaultBreakModePlugin);
 }
 
 #[cfg(all(test, feature = "server"))]
@@ -116,8 +119,8 @@ mod tests {
             pressure_stages: 0,
             match_duration_ticks: 10_800,
             lifecycle: crate::matchplay::MatchLifecycleRules::default(),
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
         }
     }
 
@@ -127,7 +130,7 @@ mod tests {
             resolve_operator_rules(input()).unwrap(),
             super::super::ResolvedModeRuleProjection {
                 objective_target: 2_000,
-                rules_summary: crate::lobby::AdvertisedRulesSummary::Heist {
+                rules_summary: crate::lobby::AdvertisedRulesSummary::VaultBreak {
                     safe_maximum_health: 2_000,
                     active_limit_ticks: 10_800,
                 },
@@ -136,11 +139,11 @@ mod tests {
     }
 
     #[test]
-    fn operator_policy_validation_is_owned_by_heist_registration() {
+    fn operator_policy_validation_is_owned_by_vault_break_registration() {
         assert!(
             validate_operator_policy(super::super::ModeOperatorPolicyInput {
-                wipeout_recent_hostile_damage_credit_ticks: 300,
-                heist_critical_health_percent: 0,
+                takedown_recent_hostile_damage_credit_ticks: 300,
+                vault_break_critical_health_percent: 0,
             })
             .is_err()
         );

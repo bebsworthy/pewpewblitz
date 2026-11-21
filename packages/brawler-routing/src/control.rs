@@ -334,8 +334,8 @@ pub struct AllocateRequestBody {
     pub respawn_ticks: u64,
     pub spawn_protection_ticks: u64,
     pub completed_input_lock_ticks: u64,
-    pub wipeout_recent_hostile_damage_credit_ticks: u64,
-    pub heist_critical_health_percent: u8,
+    pub takedown_recent_hostile_damage_credit_ticks: u64,
+    pub vault_break_critical_health_percent: u8,
     pub team_count: u8,
     pub players_per_team: u8,
     pub participants: Vec<AllocateParticipant>,
@@ -372,8 +372,8 @@ impl AllocateRequestBody {
             || self.respawn_ticks == 0
             || self.spawn_protection_ticks == 0
             || self.completed_input_lock_ticks == 0
-            || self.wipeout_recent_hostile_damage_credit_ticks == 0
-            || !(1..=99).contains(&self.heist_critical_health_percent)
+            || self.takedown_recent_hostile_damage_credit_ticks == 0
+            || !(1..=99).contains(&self.vault_break_critical_health_percent)
             || self.team_count == 0
             || self.players_per_team == 0
             || self.participants.is_empty()
@@ -1220,8 +1220,8 @@ impl ControlBody {
                 encoder.put_u64(value.respawn_ticks);
                 encoder.put_u64(value.spawn_protection_ticks);
                 encoder.put_u64(value.completed_input_lock_ticks);
-                encoder.put_u64(value.wipeout_recent_hostile_damage_credit_ticks);
-                encoder.put_u8(value.heist_critical_health_percent);
+                encoder.put_u64(value.takedown_recent_hostile_damage_credit_ticks);
+                encoder.put_u8(value.vault_break_critical_health_percent);
                 encoder.put_u8(value.team_count);
                 encoder.put_u8(value.players_per_team);
                 encoder.put_u8(
@@ -1431,8 +1431,8 @@ impl ControlBody {
                 let respawn_ticks = decoder.u64()?;
                 let spawn_protection_ticks = decoder.u64()?;
                 let completed_input_lock_ticks = decoder.u64()?;
-                let wipeout_recent_hostile_damage_credit_ticks = decoder.u64()?;
-                let heist_critical_health_percent = decoder.u8()?;
+                let takedown_recent_hostile_damage_credit_ticks = decoder.u64()?;
+                let vault_break_critical_health_percent = decoder.u8()?;
                 let team_count = decoder.u8()?;
                 let players_per_team = decoder.u8()?;
                 let count = usize::from(decoder.u8()?);
@@ -1466,8 +1466,8 @@ impl ControlBody {
                     respawn_ticks,
                     spawn_protection_ticks,
                     completed_input_lock_ticks,
-                    wipeout_recent_hostile_damage_credit_ticks,
-                    heist_critical_health_percent,
+                    takedown_recent_hostile_damage_credit_ticks,
+                    vault_break_critical_health_percent,
                     team_count,
                     players_per_team,
                     participants,
@@ -1965,7 +1965,7 @@ mod tests {
             ControlBody::AllocateRequest(AllocateRequestBody {
                 request_id: id64(1),
                 lobby_session_id: id128(2),
-                mode: GameMode::Wipeout,
+                mode: GameMode::Takedown,
                 map_preset: 1,
                 map_revision: 1,
                 map_recipe_fingerprint: 1,
@@ -1977,8 +1977,8 @@ mod tests {
                 respawn_ticks: 180,
                 spawn_protection_ticks: 90,
                 completed_input_lock_ticks: 60,
-                wipeout_recent_hostile_damage_credit_ticks: 300,
-                heist_critical_health_percent: 25,
+                takedown_recent_hostile_damage_credit_ticks: 300,
+                vault_break_critical_health_percent: 25,
                 team_count: 2,
                 players_per_team: 1,
                 participants: vec![participant(1), participant(2)],
@@ -2069,7 +2069,7 @@ mod tests {
         let request = AllocateRequestBody {
             request_id: id64(1),
             lobby_session_id: id128(2),
-            mode: GameMode::HotZone,
+            mode: GameMode::TurfHold,
             map_preset: 1,
             map_revision: 1,
             map_recipe_fingerprint: 1,
@@ -2081,8 +2081,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             team_count: 2,
             players_per_team: 4,
             participants: (1..=8).map(participant).collect(),
@@ -2283,7 +2283,7 @@ mod tests {
         let request = AllocateRequestBody {
             request_id: id64(1),
             lobby_session_id: id128(2),
-            mode: GameMode::Wipeout,
+            mode: GameMode::Takedown,
             map_preset: 1,
             map_revision: 1,
             map_recipe_fingerprint: 1,
@@ -2295,8 +2295,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             team_count: 1,
             players_per_team: 1,
             participants: vec![participant(3)],

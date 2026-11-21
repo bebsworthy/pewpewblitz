@@ -70,10 +70,10 @@ mod harness;
 mod profile_database_file;
 use harness::*;
 
-#[path = "network/heist.rs"]
-mod heist;
-#[path = "network/hot_zone.rs"]
-mod hot_zone;
+#[path = "network/turf_hold.rs"]
+mod turf_hold;
+#[path = "network/vault_break.rs"]
+mod vault_break;
 
 #[path = "network/builds.rs"]
 mod builds;

@@ -1,5 +1,5 @@
 //! Bounded scoring snapshot: player attribution and team totals travel together.
-use super::WipeoutState;
+use super::TakedownState;
 use crate::{
     combat::TeamId,
     protocol::{NetworkEntityId, PlayerId},
@@ -7,7 +7,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct WipeoutPlayerStats {
+pub struct TakedownPlayerStats {
     pub player_id: PlayerId,
     pub network_id: NetworkEntityId,
     pub team: TeamId,
@@ -16,9 +16,9 @@ pub struct WipeoutPlayerStats {
     pub deaths: u16,
 }
 
-impl WipeoutState {
+impl TakedownState {
     #[cfg(feature = "server")]
-    pub(super) fn remember_player(&mut self, player: WipeoutPlayerStats) {
+    pub(super) fn remember_player(&mut self, player: TakedownPlayerStats) {
         if self
             .players
             .iter()
@@ -57,7 +57,7 @@ impl WipeoutState {
     reason = "Bevy roster projection queries"
 )]
 pub(super) fn remember_roster(
-    mut roots: bevy::prelude::Query<(&crate::matchplay::MatchState, &mut WipeoutState)>,
+    mut roots: bevy::prelude::Query<(&crate::matchplay::MatchState, &mut TakedownState)>,
     fighters: bevy::prelude::Query<
         (
             &PlayerId,
@@ -85,7 +85,7 @@ pub(super) fn remember_roster(
             {
                 continue;
             }
-            scores.remember_player(WipeoutPlayerStats {
+            scores.remember_player(TakedownPlayerStats {
                 player_id: *player_id,
                 network_id: *network_id,
                 team: *team,
@@ -100,7 +100,7 @@ pub(super) fn remember_roster(
 
 #[cfg(feature = "server")]
 pub(super) fn publish_completion(
-    mut roots: bevy::prelude::Query<(&crate::matchplay::MatchState, &mut WipeoutState)>,
+    mut roots: bevy::prelude::Query<(&crate::matchplay::MatchState, &mut TakedownState)>,
 ) {
     for (state, mut scores) in &mut roots {
         if let crate::matchplay::MatchPhase::Completed { result, .. } = state.phase

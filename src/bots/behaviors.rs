@@ -286,7 +286,7 @@ mod retreat {
 mod objectives {
     use super::{
         BehaviorContext, BotIntent, BotRole, BotTactic, CandidateBuffer, OBJECTIVES, Vec2,
-        hot_zone_hold_point, nearest_enemy, safe_object,
+        nearest_enemy, safe_object, turf_hold_hold_point,
     };
     use crate::matchplay::BotObjectiveView;
 
@@ -297,7 +297,7 @@ mod objectives {
     ) {
         match (context.role, context.observation.objective) {
             (BotRole::Objective, BotObjectiveView::ControlArea { center, radius }) => {
-                hot_zone(context, candidates, base_score, center, radius);
+                turf_hold(context, candidates, base_score, center, radius);
             }
             (BotRole::Defender, BotObjectiveView::AttackAndDefend) => {
                 defend_safe(context, candidates, base_score);
@@ -309,7 +309,7 @@ mod objectives {
         }
     }
 
-    fn hot_zone(
+    fn turf_hold(
         context: &BehaviorContext<'_>,
         candidates: &mut CandidateBuffer,
         base_score: u16,
@@ -318,11 +318,11 @@ mod objectives {
     ) {
         let observation = context.observation;
         let enemy = nearest_enemy(observation);
-        let hold = hot_zone_hold_point(
+        let hold = turf_hold_hold_point(
             center,
             radius,
             observation.self_view.network_id.0,
-            context.profile.hot_zone_hold_radius_fraction,
+            context.profile.turf_hold_hold_radius_fraction,
         );
         candidates.propose(
             OBJECTIVES.id,
@@ -336,7 +336,7 @@ mod objectives {
                         <= observation.weapon_range
                 }),
                 dash: observation.self_view.position.distance(center)
-                    > radius * context.profile.hot_zone_dash_radius_fraction,
+                    > radius * context.profile.turf_hold_dash_radius_fraction,
             },
         );
     }
@@ -616,7 +616,7 @@ fn safe_object(
     })
 }
 
-fn hot_zone_hold_point(
+fn turf_hold_hold_point(
     center: Vec2,
     radius: f32,
     stable_id: u64,

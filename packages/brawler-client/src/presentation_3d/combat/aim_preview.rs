@@ -72,7 +72,7 @@ type SafeAimQuery<'w, 's> = Query<
     (
         &'static Position,
         &'static Rotation,
-        &'static brawler::matchplay::HeistSafe,
+        &'static brawler::matchplay::VaultBreakSafe,
         &'static brawler::combat::CurrentHealth,
     ),
 >;
@@ -281,12 +281,12 @@ fn append_nonfighter_aim_blockers(
     for (position, rotation, safe, health) in safes.iter() {
         if health.0 > 0 {
             blockers.push(AimTraceDynamicBlocker {
-                class: AimTraceBlockerClass::HeistSafe,
+                class: AimTraceBlockerClass::VaultBreakSafe,
                 stable_id: (safe.match_id.0 << 32) | u128::from(safe.anchor_id.0),
                 position: position.0,
                 rotation: rotation.as_radians(),
                 shape: brawler::map::MapShape::Rectangle {
-                    half_extents: brawler::matchplay::HEIST_SAFE_HALF_EXTENTS,
+                    half_extents: brawler::matchplay::VAULT_BREAK_SAFE_HALF_EXTENTS,
                 },
             });
         }

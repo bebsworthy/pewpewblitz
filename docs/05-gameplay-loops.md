@@ -123,9 +123,9 @@ spectating, round, or results behavior when that mode is introduced.
 
 Combat creates temporary advantages; a mode explains how those advantages become victory.
 
-- In Wipeout, teams convert favorable fights into defeats and score while managing re-entry timing.
-- In Hot Zone, teams convert space and survival into uncontested or favorable objective occupancy.
-- In Heist, teams convert pressure and lane control into damage on the opposing durable objective
+- In Takedown, teams convert favorable fights into defeats and score while managing re-entry timing.
+- In Turf Hold, teams convert space and survival into uncontested or favorable objective occupancy.
+- In Vault Break, teams convert pressure and lane control into damage on the opposing durable objective
   while defending their own.
 - Future modes may convert pressure into carried resources, territory, rounds, or survival, but
   each must define one readable conversion loop.
@@ -225,7 +225,7 @@ Build feedback should emphasize decisions rather than only aggregate power. Usef
 - Did the selected mode or map expose a weakness that another character or option could address?
 
 Practice is the fastest experimentation path. Server-hosted deterministic bots already exercise
-movement, weapon range, pressure, Wipeout/Hot Zone/Heist objectives, and selected typed capabilities
+movement, weapon range, pressure, Takedown/Turf Hold/Vault Break objectives, and selected typed capabilities
 through ordinary input intent. Broader build coverage, difficulty profiles, and richer tactics remain
 separate product slices rather than alternate gameplay authority.
 

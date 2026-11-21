@@ -260,7 +260,7 @@ pub(crate) fn advance_sticky_attachments(
             Without<crate::abilities::Sentry>,
             Without<crate::matchplay::HostileNpc>,
             Without<crate::map::DamageableWorldObject>,
-            Without<crate::matchplay::HeistSafe>,
+            Without<crate::matchplay::VaultBreakSafe>,
         ),
     >,
     fighters: Query<
@@ -347,7 +347,7 @@ pub(crate) fn detonate_sticky_blobs(
         ),
         Or<(
             With<crate::map::DamageableWorldObject>,
-            With<crate::matchplay::HeistSafe>,
+            With<crate::matchplay::VaultBreakSafe>,
         )>,
     >,
     disconnected: Query<Entity, (With<LinkOf>, With<lightyear::prelude::Disconnected>)>,

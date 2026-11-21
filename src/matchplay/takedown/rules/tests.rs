@@ -1,5 +1,5 @@
 use super::*;
-use crate::matchplay::{MatchResult, WIPEOUT_RULES_REVISION};
+use crate::matchplay::{MatchResult, TAKEDOWN_RULES_REVISION};
 use crate::{
     combat::{AttackId, CombatEventId, CombatOutcomeFact, CombatSourceKind},
     matchplay::{FighterDisplayName, MatchId, MatchParticipant},
@@ -28,7 +28,7 @@ fn fact(event: u64, source: Option<(u64, u8)>, kind: CombatOutcomeKind) -> Comba
 fn app() -> (App, Entity, Entity) {
     let mut app = App::new();
     app.insert_resource(SimulationTick(1))
-        .init_resource::<WipeoutRules>()
+        .init_resource::<TakedownRules>()
         .init_resource::<CombatOutcomeFacts>()
         .init_resource::<ScoredCombatEvents>()
         .init_resource::<MatchOutcomeDiagnostics>()
@@ -37,7 +37,7 @@ fn app() -> (App, Entity, Entity) {
             Update,
             (
                 statistics::remember_roster,
-                resolve_wipeout_scoring,
+                resolve_takedown_scoring,
                 statistics::publish_completion,
             )
                 .chain(),
@@ -48,11 +48,11 @@ fn app() -> (App, Entity, Entity) {
             MatchRoot,
             MatchState {
                 match_id: MatchId(1),
-                mode_definition_id: WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: TAKEDOWN_MODE_DEFINITION,
                 phase: MatchPhase::Active { ends_at_tick: 100 },
-                rules_revision: WIPEOUT_RULES_REVISION,
+                rules_revision: TAKEDOWN_RULES_REVISION,
             },
-            WipeoutState {
+            TakedownState {
                 target_score: 10,
                 ..default()
             },
@@ -89,7 +89,7 @@ fn kills_deaths_and_team_score_share_duplicate_and_stale_validation() {
     stale.tick = 0;
     app.world_mut().resource_mut::<CombatOutcomeFacts>().0 = vec![defeat, defeat, stale];
     app.update();
-    let scores = app.world().get::<WipeoutState>(root).unwrap();
+    let scores = app.world().get::<TakedownState>(root).unwrap();
     assert_eq!(scores.team_scores, [1, 0]);
     assert_eq!(
         scores
@@ -114,7 +114,7 @@ fn neutral_death_retains_recent_attacker_credit_after_departure() {
     app.world_mut().resource_mut::<CombatOutcomeFacts>().0 =
         vec![fact(2, None, CombatOutcomeKind::Defeat)];
     app.update();
-    let scores = app.world().get::<WipeoutState>(root).unwrap();
+    let scores = app.world().get::<TakedownState>(root).unwrap();
     assert_eq!(scores.team_scores, [1, 0]);
     assert_eq!(scores.players[0].as_ref().unwrap().kills, 1);
     assert_eq!(scores.players[1].as_ref().unwrap().deaths, 1);
@@ -124,7 +124,7 @@ fn neutral_death_retains_recent_attacker_credit_after_departure() {
         result: MatchResult::TeamVictory { team: TeamId(0) },
     };
     app.update();
-    let scores = app.world().get::<WipeoutState>(root).unwrap();
+    let scores = app.world().get::<TakedownState>(root).unwrap();
     assert_eq!(
         scores.completed_result,
         Some(MatchResult::TeamVictory { team: TeamId(0) })
@@ -137,7 +137,7 @@ fn uncredited_environment_death_counts_only_a_death() {
     app.world_mut().resource_mut::<CombatOutcomeFacts>().0 =
         vec![fact(1, None, CombatOutcomeKind::Defeat)];
     app.update();
-    let scores = app.world().get::<WipeoutState>(root).unwrap();
+    let scores = app.world().get::<TakedownState>(root).unwrap();
     assert_eq!(scores.team_scores, [0, 0]);
     assert_eq!(scores.players[1].as_ref().unwrap().deaths, 1);
 }

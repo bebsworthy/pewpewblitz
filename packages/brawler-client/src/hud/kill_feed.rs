@@ -590,7 +590,7 @@ mod tests {
                 brawler::matchplay::MatchRoot,
                 brawler::matchplay::MatchState {
                     match_id: MatchId(1),
-                    mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+                    mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
                     phase: MatchPhase::Active { ends_at_tick: 600 },
                     rules_revision: 1,
                 },
@@ -711,7 +711,7 @@ mod tests {
             brawler::matchplay::MatchRoot,
             brawler::matchplay::MatchState {
                 match_id: MatchId(1),
-                mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
                 phase: MatchPhase::Active { ends_at_tick: 600 },
                 rules_revision: 1,
             },

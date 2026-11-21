@@ -1,6 +1,6 @@
 (
-    recipe_id: MapRecipeId(9), revision: 2, recipe_version: 5,
-    mode_definition_id: ModeDefinitionId(4), presentation_theme_id: MapPresentationThemeId(1),
+    recipe_id: MapRecipeId(8), revision: 2, recipe_version: 5,
+    mode_definition_id: ModeDefinitionId(3), presentation_theme_id: MapPresentationThemeId(1),
     dimensions: (width: 64, height: 40), default_surface_asset_id: MapAssetId(1),
     placements: [
         (placement_id: MapPlacementId(200), cell: (x: 20, y: 8), asset_id: MapAssetId(9), quarter_turns: 0, parameters: None),
@@ -46,8 +46,5 @@
         (first_placement_id: MapPlacementId(524), min: (x: 26, y: 18), width: 2, height: 2, asset_id: MapAssetId(8), quarter_turns: 0),
         (first_placement_id: MapPlacementId(536), min: (x: 36, y: 18), width: 2, height: 2, asset_id: MapAssetId(8), quarter_turns: 0),
     ],
-    mode_anchors: [
-        (placement_id: MapPlacementId(1200), anchor_id: ModeAnchorId(1), kind: HeistSafe(team_slot: 0, origin_cell: (x: 3, y: 19), width_cells: 3, height_cells: 2, quarter_turns: 0, objective_visual_profile_id: MapVisualProfileId(39))),
-        (placement_id: MapPlacementId(1201), anchor_id: ModeAnchorId(2), kind: HeistSafe(team_slot: 1, origin_cell: (x: 58, y: 19), width_cells: 3, height_cells: 2, quarter_turns: 2, objective_visual_profile_id: MapVisualProfileId(39))),
-    ],
+    mode_anchors: [(placement_id: MapPlacementId(1200), anchor_id: ModeAnchorId(1), kind: TurfHoldCircle(center_half_cell: (x: 64, y: 40), radius_half_cells: 10))],
 )

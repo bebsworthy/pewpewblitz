@@ -460,7 +460,7 @@ pub fn perimeter_visual_shapes(bounds: AxisAlignedMapRect) -> [(Vec2, Vec2); 4] 
 mod tests {
     use super::*;
     use crate::map::{
-        BARREL_WOOD_DEBRIS_ASSET, FEATURE_YARD_WIPEOUT_PRESET, MapContentPlugin, MapPresetId,
+        BARREL_WOOD_DEBRIS_ASSET, FEATURE_YARD_TAKEDOWN_PRESET, MapContentPlugin, MapPresetId,
     };
 
     fn snapshot(instance: u64) -> ResolvedMapSnapshot {
@@ -475,7 +475,7 @@ mod tests {
     fn an_authored_snapshot_without_preset_provenance_is_re_resolved_exactly() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let mut recipe = catalog
-            .preset(FEATURE_YARD_WIPEOUT_PRESET)
+            .preset(FEATURE_YARD_TAKEDOWN_PRESET)
             .unwrap()
             .recipe
             .clone();
@@ -571,7 +571,7 @@ mod tests {
     fn world_object_readiness_requires_exact_live_generation_and_accepts_terminal_absence() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let resolved = catalog
-            .resolve_preset(FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(5))
+            .resolve_preset(FEATURE_YARD_TAKEDOWN_PRESET, MapInstanceId(5))
             .unwrap();
         let snapshot = resolved.snapshot.clone();
         let mut app = App::new();

@@ -113,8 +113,8 @@ pub(crate) struct ResolvedGameRules {
     pub respawn_ticks: u64,
     pub spawn_protection_ticks: u64,
     pub completed_input_lock_ticks: u64,
-    pub wipeout_recent_hostile_damage_credit_ticks: u64,
-    pub heist_critical_health_percent: u8,
+    pub takedown_recent_hostile_damage_credit_ticks: u64,
+    pub vault_break_critical_health_percent: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -215,19 +215,19 @@ struct OperatorCommonLifecyclePolicy {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct OperatorModePolicies {
-    wipeout: OperatorWipeoutPolicy,
-    heist: OperatorHeistPolicy,
+    takedown: OperatorTakedownPolicy,
+    vault_break: OperatorVaultBreakPolicy,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct OperatorWipeoutPolicy {
+struct OperatorTakedownPolicy {
     recent_hostile_damage_credit_ticks: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct OperatorHeistPolicy {
+struct OperatorVaultBreakPolicy {
     critical_health_percent: u8,
 }
 
@@ -300,10 +300,10 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
     .validate()
     .map_err(str::to_string)?;
     let operator_policy = crate::modes::ModeOperatorPolicyInput {
-        wipeout_recent_hostile_damage_credit_ticks: mode_policies
-            .wipeout
+        takedown_recent_hostile_damage_credit_ticks: mode_policies
+            .takedown
             .recent_hostile_damage_credit_ticks,
-        heist_critical_health_percent: mode_policies.heist.critical_health_percent,
+        vault_break_critical_health_percent: mode_policies.vault_break.critical_health_percent,
     };
     for registration in crate::modes::builtin_mode_catalog().registrations() {
         registration
@@ -372,10 +372,12 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 pressure_stages: entry.pressure_stages,
                 match_duration_ticks,
                 lifecycle: entry_lifecycle,
-                wipeout_recent_hostile_damage_credit_ticks: mode_policies
-                    .wipeout
+                takedown_recent_hostile_damage_credit_ticks: mode_policies
+                    .takedown
                     .recent_hostile_damage_credit_ticks,
-                heist_critical_health_percent: mode_policies.heist.critical_health_percent,
+                vault_break_critical_health_percent: mode_policies
+                    .vault_break
+                    .critical_health_percent,
             })
             .map_err(|error| match error {
                 crate::modes::ModeRuleResolutionError::MismatchedObjective => format!(
@@ -394,9 +396,9 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
             })?;
         let supports_authoring = matches!(
             mode.definition_id,
-            crate::map::WIPEOUT_MODE_DEFINITION
-                | crate::map::HOT_ZONE_MODE_DEFINITION
-                | crate::map::HEIST_MODE_DEFINITION
+            crate::map::TAKEDOWN_MODE_DEFINITION
+                | crate::map::TURF_HOLD_MODE_DEFINITION
+                | crate::map::VAULT_BREAK_MODE_DEFINITION
         );
         if entry.community_maps && !supports_authoring {
             return Err(format!(
@@ -474,10 +476,12 @@ pub(crate) fn resolve_operator_catalog(bytes: &[u8]) -> Result<ResolvedLobbyCata
                 respawn_ticks,
                 spawn_protection_ticks: common_lifecycle.spawn_protection_ticks,
                 completed_input_lock_ticks: common_lifecycle.completed_input_lock_ticks,
-                wipeout_recent_hostile_damage_credit_ticks: mode_policies
-                    .wipeout
+                takedown_recent_hostile_damage_credit_ticks: mode_policies
+                    .takedown
                     .recent_hostile_damage_credit_ticks,
-                heist_critical_health_percent: mode_policies.heist.critical_health_percent,
+                vault_break_critical_health_percent: mode_policies
+                    .vault_break
+                    .critical_health_percent,
             },
         );
         advertised.push(AdvertisedGameType {
@@ -607,7 +611,7 @@ mod tests {
         let game = catalog
             .game_types
             .iter()
-            .find(|g| g.id.as_str() == "wipeout-3v3")
+            .find(|g| g.id.as_str() == "takedown-3v3")
             .unwrap();
         assert_eq!(game.map_preset_ids, vec![MapPresetId(10), MapPresetId(14)]);
         assert_eq!(
@@ -629,48 +633,48 @@ mod tests {
             (Duration::from_secs(35), Duration::from_secs(15))
         );
         assert_eq!(catalog.game_types.len(), 11);
-        let wipeout_three_vs_three = &catalog.game_types[3];
-        assert_eq!(wipeout_three_vs_three.display_name, "Wipeout 3v3");
+        let takedown_three_vs_three = &catalog.game_types[3];
+        assert_eq!(takedown_three_vs_three.display_name, "Takedown 3v3");
         assert_eq!(
-            wipeout_three_vs_three.map_preset_ids,
+            takedown_three_vs_three.map_preset_ids,
             vec![MapPresetId(10), MapPresetId(14)]
         );
-        assert_eq!(wipeout_three_vs_three.configuration_revision, 5);
-        let hot_zone_one_vs_one = &catalog.game_types[4];
-        assert_eq!(hot_zone_one_vs_one.id.as_str(), "hot-zone-1v1");
+        assert_eq!(takedown_three_vs_three.configuration_revision, 5);
+        let turf_hold_one_vs_one = &catalog.game_types[4];
+        assert_eq!(turf_hold_one_vs_one.id.as_str(), "turf-hold-1v1");
         assert_eq!(
-            hot_zone_one_vs_one.display_name,
-            "Feature Yard Hot Zone 1v1"
+            turf_hold_one_vs_one.display_name,
+            "Feature Yard Turf Hold 1v1"
         );
-        assert_eq!(hot_zone_one_vs_one.map_preset_ids, vec![MapPresetId(8)]);
-        assert_eq!(hot_zone_one_vs_one.players_per_team, 1);
-        let hot_zone_three_vs_three = catalog
+        assert_eq!(turf_hold_one_vs_one.map_preset_ids, vec![MapPresetId(8)]);
+        assert_eq!(turf_hold_one_vs_one.players_per_team, 1);
+        let turf_hold_three_vs_three = catalog
             .game_types
             .iter()
-            .find(|game| game.id.as_str() == "hot-zone-3v3")
+            .find(|game| game.id.as_str() == "turf-hold-3v3")
             .unwrap();
-        assert_eq!(hot_zone_three_vs_three.configuration_revision, 5);
+        assert_eq!(turf_hold_three_vs_three.configuration_revision, 5);
         assert_eq!(
-            hot_zone_three_vs_three.map_preset_ids,
+            turf_hold_three_vs_three.map_preset_ids,
             vec![MapPresetId(11)]
         );
-        let wipeout_two_vs_two = catalog
+        let takedown_two_vs_two = catalog
             .game_types
             .iter()
-            .find(|game| game.id.as_str() == "wipeout-2v2")
+            .find(|game| game.id.as_str() == "takedown-2v2")
             .unwrap();
-        assert_eq!(wipeout_two_vs_two.configuration_revision, 3);
-        assert_eq!(wipeout_two_vs_two.map_preset_ids, vec![MapPresetId(7)]);
-        assert_eq!(wipeout_two_vs_two.players_per_team, 2);
+        assert_eq!(takedown_two_vs_two.configuration_revision, 3);
+        assert_eq!(takedown_two_vs_two.map_preset_ids, vec![MapPresetId(7)]);
+        assert_eq!(takedown_two_vs_two.players_per_team, 2);
         assert_eq!(
-            wipeout_two_vs_two.rules_summary,
-            AdvertisedRulesSummary::Wipeout {
+            takedown_two_vs_two.rules_summary,
+            AdvertisedRulesSummary::Takedown {
                 target_score: 10,
                 active_limit_ticks: MatchLifecycleRules::default().active_limit_ticks,
             }
         );
         assert_eq!(
-            catalog.rules(&wipeout_two_vs_two.id),
+            catalog.rules(&takedown_two_vs_two.id),
             Some(ResolvedGameRules {
                 objective_target: 10,
                 match_duration_ticks: 10_800,
@@ -678,20 +682,20 @@ mod tests {
                 respawn_ticks: 180,
                 spawn_protection_ticks: 90,
                 completed_input_lock_ticks: 60,
-                wipeout_recent_hostile_damage_credit_ticks: 300,
-                heist_critical_health_percent: 25,
+                takedown_recent_hostile_damage_credit_ticks: 300,
+                vault_break_critical_health_percent: 25,
             })
         );
-        let heist = catalog
+        let vault_break = catalog
             .game_types
             .iter()
-            .filter(|game| game.mode_definition_id == crate::map::HEIST_MODE_DEFINITION)
+            .filter(|game| game.mode_definition_id == crate::map::VAULT_BREAK_MODE_DEFINITION)
             .collect::<Vec<_>>();
-        assert_eq!(heist.len(), 3);
-        assert_eq!(heist[0].map_preset_ids, vec![MapPresetId(9)]);
-        assert_eq!(heist[2].players_per_team, 3);
-        assert_eq!(heist[2].configuration_revision, 6);
-        assert_eq!(heist[2].map_preset_ids, vec![MapPresetId(12)]);
+        assert_eq!(vault_break.len(), 3);
+        assert_eq!(vault_break[0].map_preset_ids, vec![MapPresetId(9)]);
+        assert_eq!(vault_break[2].players_per_team, 3);
+        assert_eq!(vault_break[2].configuration_revision, 6);
+        assert_eq!(vault_break[2].map_preset_ids, vec![MapPresetId(12)]);
         let zombie_three_player = catalog
             .game_types
             .iter()
@@ -710,9 +714,9 @@ mod tests {
         assert_eq!(
             catalog.revision.0,
             [
-                0x68, 0x3e, 0x13, 0x2e, 0x8d, 0xac, 0xde, 0x27, 0xe5, 0xf4, 0xac, 0x96, 0xc4, 0x2f,
-                0xa2, 0x58, 0x57, 0xf6, 0x0c, 0x76, 0x62, 0x11, 0x65, 0x92, 0x22, 0x53, 0x89, 0x1a,
-                0xa3, 0x3b, 0x25, 0xcb,
+                0xa5, 0x34, 0xda, 0x9a, 0x41, 0xb4, 0x28, 0x00, 0x28, 0x39, 0x2b, 0xa6, 0x8c, 0xd8,
+                0xcb, 0xdb, 0x0a, 0x39, 0x03, 0x3a, 0x01, 0xa1, 0x46, 0x35, 0x96, 0x01, 0x54, 0x4d,
+                0x44, 0x53, 0xc0, 0x8e,
             ]
         );
     }
@@ -733,12 +737,12 @@ mod tests {
             .replace("critical_health_percent: 25", "critical_health_percent: 26");
         let changed = resolve_operator_catalog(changed_source.as_bytes()).unwrap();
         let rules = changed
-            .first_rules_for_mode(crate::map::WIPEOUT_MODE_DEFINITION)
+            .first_rules_for_mode(crate::map::TAKEDOWN_MODE_DEFINITION)
             .unwrap();
 
         assert_eq!(rules.spawn_protection_ticks, 91);
-        assert_eq!(rules.wipeout_recent_hostile_damage_credit_ticks, 301);
-        assert_eq!(rules.heist_critical_health_percent, 26);
+        assert_eq!(rules.takedown_recent_hostile_damage_credit_ticks, 301);
+        assert_eq!(rules.vault_break_critical_health_percent, 26);
         assert_eq!(changed.revision, baseline.revision);
         assert_ne!(changed.policy_revision, baseline.policy_revision);
         assert_eq!(changed.formation_timing().loading_deadline_millis(), 31_000);
@@ -762,7 +766,7 @@ mod tests {
                 .filter(|game| game.community_maps)
                 .map(|game| game.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["wipeout-1v1"]
+            vec!["takedown-1v1"]
         );
 
         let start = VALID.find("  map_publishing:").unwrap();
@@ -819,8 +823,8 @@ mod tests {
             ),
             VALID.replace("grant_deadline_seconds: 10", "grant_deadline_seconds: 0"),
             VALID.replace("grant_deadline_seconds: 10", "grant_deadline_seconds: 31"),
-            VALID.replace("mode: \"wipeout\"", "mode: \"unknown\""),
-            VALID.replace("feature-yard-wipeout\"", "missing-map\""),
+            VALID.replace("mode: \"takedown\"", "mode: \"unknown\""),
+            VALID.replace("feature-yard-takedown\"", "missing-map\""),
             VALID.replace("players_per_team: 2", "players_per_team: 4"),
             VALID.replace("kills_to_win: 10", "kills_to_win: 0"),
             VALID.replace("capture_seconds: 30", "kills_to_win: 10"),
@@ -853,30 +857,30 @@ mod tests {
                 "recent_hostile_damage_credit_ticks: 300",
                 "recent_hostile_damage_credit_ticks: 0",
             )
-            .replace("mode: \"wipeout\"", "mode: \"unknown\"");
+            .replace("mode: \"takedown\"", "mode: \"unknown\"");
         assert_eq!(
             resolve_operator_catalog(invalid_policy_and_mode.as_bytes()).unwrap_err(),
-            "Wipeout score target and hostile-credit window must be nonzero"
+            "Takedown score target and hostile-credit window must be nonzero"
         );
 
-        let invalid_heist_policy_and_entry = VALID
+        let invalid_vault_break_policy_and_entry = VALID
             .replace(
                 "critical_health_percent: 25",
                 "critical_health_percent: 100",
             )
             .replace("kills_to_win: 10", "kills_to_win: 0");
         assert_eq!(
-            resolve_operator_catalog(invalid_heist_policy_and_entry.as_bytes()).unwrap_err(),
-            "Heist critical-health percentage must be within 1..=99"
+            resolve_operator_catalog(invalid_vault_break_policy_and_entry.as_bytes()).unwrap_err(),
+            "Vault Break critical-health percentage must be within 1..=99"
         );
     }
 
     #[test]
     fn mode_owned_rule_errors_keep_operator_facing_context() {
-        let unknown_mode = VALID.replacen("mode: \"wipeout\"", "mode: \"unknown\"", 1);
+        let unknown_mode = VALID.replacen("mode: \"takedown\"", "mode: \"unknown\"", 1);
         assert_eq!(
             resolve_operator_catalog(unknown_mode.as_bytes()).unwrap_err(),
-            "game type wipeout-2v2 has an unknown mode or mismatched objective"
+            "game type takedown-2v2 has an unknown mode or mismatched objective"
         );
 
         let mismatched_objective = VALID.replacen(
@@ -886,7 +890,7 @@ mod tests {
         );
         assert_eq!(
             resolve_operator_catalog(mismatched_objective.as_bytes()).unwrap_err(),
-            "game type hot-zone-2v2 has an unknown mode or mismatched objective"
+            "game type turf-hold-2v2 has an unknown mode or mismatched objective"
         );
     }
 
@@ -899,11 +903,11 @@ mod tests {
 
     #[test]
     fn catalog_rejects_duplicate_ids_and_maps_as_one_unit() {
-        let duplicate_id = VALID.replace("hot-zone-2v2", "wipeout-2v2");
+        let duplicate_id = VALID.replace("turf-hold-2v2", "takedown-2v2");
         assert!(resolve_operator_catalog(duplicate_id.as_bytes()).is_err());
         let duplicate_map = VALID.replace(
-            "maps: [\"feature-yard-wipeout\"]",
-            "maps: [\"feature-yard-wipeout\", \"feature-yard-wipeout\"]",
+            "maps: [\"feature-yard-takedown\"]",
+            "maps: [\"feature-yard-takedown\", \"feature-yard-takedown\"]",
         );
         assert!(resolve_operator_catalog(duplicate_map.as_bytes()).is_err());
     }

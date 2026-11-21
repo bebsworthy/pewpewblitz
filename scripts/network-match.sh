@@ -9,15 +9,15 @@ if [[ "$target_dir" != /* ]]; then
 fi
 network_addr="${BRAWLER_NETWORK_ADDR:-127.0.0.1:5200}"
 match_rules="${BRAWLER_NETWORK_MATCH_RULES:-verification}"
-game_mode="${BRAWLER_NETWORK_GAME_MODE:-wipeout}"
+game_mode="${BRAWLER_NETWORK_GAME_MODE:-takedown}"
 simulation_ticks="${BRAWLER_NETWORK_SIMULATION_TICKS:-6000}"
 match_timeout_seconds="${BRAWLER_NETWORK_MATCH_TIMEOUT_SECONDS:-90}"
 if [[ "$match_rules" != "verification" && "$match_rules" != "production" ]]; then
     printf 'brawler match: BRAWLER_NETWORK_MATCH_RULES must be verification or production\n' >&2
     exit 2
 fi
-if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" && "$game_mode" != "heist" ]]; then
-    printf 'brawler match: BRAWLER_NETWORK_GAME_MODE must be wipeout, hot-zone, or heist\n' >&2
+if [[ "$game_mode" != "takedown" && "$game_mode" != "turf-hold" && "$game_mode" != "vault-break" ]]; then
+    printf 'brawler match: BRAWLER_NETWORK_GAME_MODE must be takedown, turf-hold, or vault-break\n' >&2
     exit 2
 fi
 if [[ ! "$simulation_ticks" =~ ^[1-9][0-9]*$ || ! "$match_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then

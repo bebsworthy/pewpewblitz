@@ -6,17 +6,17 @@ use std::time::Duration;
 
 fn game() -> brawler::lobby::AdvertisedGameType {
     brawler::lobby::AdvertisedGameType {
-        id: brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
+        id: brawler::lobby::GameTypeId::new("takedown-2v2").unwrap(),
         configuration_revision: 1,
-        display_name: "Wipeout 2v2".to_string(),
-        mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+        display_name: "Takedown 2v2".to_string(),
+        mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
         map_preset_ids: vec![brawler::map::MapPresetId(1)],
         practice_map_preset_ids: vec![brawler::map::MapPresetId(1)],
         map_authoring_limits: Some(brawler::map::AUTHORING_LIMITS),
         community_maps: false,
         team_count: 2,
         players_per_team: 2,
-        rules_summary: brawler::lobby::AdvertisedRulesSummary::Wipeout {
+        rules_summary: brawler::lobby::AdvertisedRulesSummary::Takedown {
             target_score: 10,
             active_limit_ticks: 1_000,
         },
@@ -26,22 +26,22 @@ fn game() -> brawler::lobby::AdvertisedGameType {
 #[cfg(feature = "automation")]
 #[test]
 fn automation_can_target_an_exact_game_instead_of_the_first_matching_roster() {
-    let wipeout = game();
-    let mut hot_zone = wipeout.clone();
-    hot_zone.id = brawler::lobby::GameTypeId::new("hot-zone-2v2").unwrap();
-    hot_zone.mode_definition_id = brawler::map::HOT_ZONE_MODE_DEFINITION;
-    let games = [wipeout, hot_zone];
+    let takedown = game();
+    let mut turf_hold = takedown.clone();
+    turf_hold.id = brawler::lobby::GameTypeId::new("turf-hold-2v2").unwrap();
+    turf_hold.mode_definition_id = brawler::map::TURF_HOLD_MODE_DEFINITION;
+    let games = [takedown, turf_hold];
     assert_eq!(
         automation_game_type(&games, 2, None).unwrap().id.as_str(),
-        "wipeout-2v2"
+        "takedown-2v2"
     );
-    let requested = brawler::lobby::GameTypeId::new("hot-zone-2v2").unwrap();
+    let requested = brawler::lobby::GameTypeId::new("turf-hold-2v2").unwrap();
     assert_eq!(
         automation_game_type(&games, 2, Some(&requested))
             .unwrap()
             .id
             .as_str(),
-        "hot-zone-2v2"
+        "turf-hold-2v2"
     );
 }
 
@@ -70,7 +70,7 @@ fn snapshot(revision: u64, queued: u16) -> brawler::lobby::QueuePoolSnapshot {
         state_revision: revision,
         formation_availability: brawler::lobby::FormationAvailability::Available,
         pools: vec![brawler::lobby::QueuePoolRow {
-            game_type_id: brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
+            game_type_id: brawler::lobby::GameTypeId::new("takedown-2v2").unwrap(),
             game_type_configuration_revision: 1,
             queued,
             formation_size: 4,
@@ -102,7 +102,7 @@ fn practice_request_is_single_flight_and_rejection_clears_it() {
     model.bind_generation(7);
     let selected = super::super::flow::SelectedGameType {
         catalog_revision: Some(brawler::lobby::CatalogRevision([1; 32])),
-        game_type_id: Some(brawler::lobby::GameTypeId::new("hot-zone-3v3").unwrap()),
+        game_type_id: Some(brawler::lobby::GameTypeId::new("turf-hold-3v3").unwrap()),
         configuration_revision: Some(1),
     };
     let revision = brawler::profiles::ProfileRevision::INITIAL;
@@ -110,7 +110,7 @@ fn practice_request_is_single_flight_and_rejection_clears_it() {
     assert!(model.pending());
     assert!(!model.start(&selected, revision));
     let request = model.outbound.pop_front().unwrap();
-    assert_eq!(request.game_type_id.as_str(), "hot-zone-3v3");
+    assert_eq!(request.game_type_id.as_str(), "turf-hold-3v3");
     model.accept_rejection(
         request.request_id,
         brawler::lobby::PracticeStartRejection::CapacityUnavailable,
@@ -124,14 +124,14 @@ fn practice_request_is_single_flight_and_rejection_clears_it() {
 
 #[test]
 fn cancelled_match_start_clears_loading_and_returns_to_game_select_observation() {
-    let joined = joined_membership("wipeout-2v2", 7);
+    let joined = joined_membership("takedown-2v2", 7);
     let reservation_id = brawler::lobby::MatchReservationId::new(11).unwrap();
     let mut model = ClientMatchLoadingModel {
         active: Some(brawler::lobby::ReservationStarted {
             reservation_id,
             ticket_id: Some(joined.ticket_id),
             game_type_id: joined.game_type_id,
-            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
             map_preset_id: Some(brawler::map::MapPresetId(1)),
             map_recipe_id: brawler::map::MapRecipeId(1),
             map_recipe_revision: 1,
@@ -170,7 +170,7 @@ fn cancelled_match_start_clears_loading_and_returns_to_game_select_observation()
 
 #[test]
 fn fresh_lobby_generation_discards_completed_match_loading_state() {
-    let joined = joined_membership("wipeout-2v2", 7);
+    let joined = joined_membership("takedown-2v2", 7);
     let mut model = ClientMatchLoadingModel {
         lobby_generation: Some(1),
         expected_sequence: 4,
@@ -178,7 +178,7 @@ fn fresh_lobby_generation_discards_completed_match_loading_state() {
             reservation_id: brawler::lobby::MatchReservationId::new(11).unwrap(),
             ticket_id: Some(joined.ticket_id),
             game_type_id: joined.game_type_id,
-            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
             map_preset_id: Some(brawler::map::MapPresetId(1)),
             map_recipe_id: brawler::map::MapRecipeId(1),
             map_recipe_revision: 1,
@@ -231,7 +231,7 @@ fn pending_timeout_retry_keeps_request_and_rate_limit_try_again_changes_it() {
     };
     let selected = super::super::flow::SelectedGameType {
         catalog_revision: Some(brawler::lobby::CatalogRevision([1; 32])),
-        game_type_id: Some(brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
+        game_type_id: Some(brawler::lobby::GameTypeId::new("takedown-2v2").unwrap()),
         configuration_revision: Some(1),
     };
     assert!(model.start_join(
@@ -313,7 +313,7 @@ fn late_outcome_remains_authoritative_after_timeout_notice() {
     };
     let selected = super::super::flow::SelectedGameType {
         catalog_revision: Some(brawler::lobby::CatalogRevision([1; 32])),
-        game_type_id: Some(brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
+        game_type_id: Some(brawler::lobby::GameTypeId::new("takedown-2v2").unwrap()),
         configuration_revision: Some(1),
     };
     assert!(model.start_join(
@@ -327,7 +327,7 @@ fn late_outcome_remains_authoritative_after_timeout_notice() {
     model.accept_outcome(
         brawler::lobby::QueueCommandOutcome {
             request_id,
-            decision: brawler::lobby::QueueDecision::Joined(joined_membership("wipeout-2v2", 9)),
+            decision: brawler::lobby::QueueDecision::Joined(joined_membership("takedown-2v2", 9)),
         },
         Duration::from_secs(11),
     );
@@ -347,7 +347,7 @@ fn joined_outcome_must_match_the_frozen_join_target() {
     };
     let selected = super::super::flow::SelectedGameType {
         catalog_revision: Some(brawler::lobby::CatalogRevision([1; 32])),
-        game_type_id: Some(brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap()),
+        game_type_id: Some(brawler::lobby::GameTypeId::new("takedown-2v2").unwrap()),
         configuration_revision: Some(1),
     };
     assert!(model.start_join(
@@ -360,7 +360,7 @@ fn joined_outcome_must_match_the_frozen_join_target() {
     model.accept_outcome(
         brawler::lobby::QueueCommandOutcome {
             request_id,
-            decision: brawler::lobby::QueueDecision::Joined(joined_membership("hot-zone-2v2", 9)),
+            decision: brawler::lobby::QueueDecision::Joined(joined_membership("turf-hold-2v2", 9)),
         },
         Duration::ZERO,
     );
@@ -377,7 +377,7 @@ fn joined_outcome_must_match_the_frozen_join_target() {
 
 #[test]
 fn joined_outcome_cannot_replace_membership_while_cancel_is_pending() {
-    let current = joined_membership("wipeout-2v2", 8);
+    let current = joined_membership("takedown-2v2", 8);
     let mut model = ClientQueueModel {
         generation: Some(1),
         membership: Some(current.clone()),
@@ -389,7 +389,7 @@ fn joined_outcome_cannot_replace_membership_while_cancel_is_pending() {
     model.accept_outcome(
         brawler::lobby::QueueCommandOutcome {
             request_id,
-            decision: brawler::lobby::QueueDecision::Joined(joined_membership("wipeout-2v2", 9)),
+            decision: brawler::lobby::QueueDecision::Joined(joined_membership("takedown-2v2", 9)),
         },
         Duration::ZERO,
     );
@@ -401,7 +401,7 @@ fn joined_outcome_cannot_replace_membership_while_cancel_is_pending() {
 
 #[test]
 fn practice_selection_survives_replay_but_cannot_leak_to_another_game() {
-    let game = brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap();
+    let game = brawler::lobby::GameTypeId::new("takedown-2v2").unwrap();
     let mut model = ClientPracticeModel::default();
     model.bind_generation(1);
     model.selected_map = Some((game.clone(), brawler::map::MapPresetId(10)));
@@ -423,7 +423,7 @@ fn practice_selection_survives_replay_but_cannot_leak_to_another_game() {
         Some(brawler::map::MapPresetId(10))
     );
     model.bind_generation(3);
-    selected.game_type_id = Some(brawler::lobby::GameTypeId::new("heist-2v2").unwrap());
+    selected.game_type_id = Some(brawler::lobby::GameTypeId::new("vault-break-2v2").unwrap());
     assert!(model.start(&selected, brawler::profiles::ProfileRevision::INITIAL));
     assert_eq!(model.pending.as_ref().unwrap().map_preset_id, None);
 }
@@ -446,7 +446,7 @@ fn published_maps_keep_one_request_in_flight_and_the_last_server_listing() {
     let map = PublishedMapSummary {
         published_map_id: PublishedMapId::new(1).unwrap(),
         name: "Yard".to_string(),
-        game_type_id: brawler::lobby::GameTypeId::new("wipeout-1v1").unwrap(),
+        game_type_id: brawler::lobby::GameTypeId::new("takedown-1v1").unwrap(),
         listing: PublishedMapListing::Pending,
     };
     let reply = |id: u64, result| PublishedMapsReply {
@@ -502,7 +502,7 @@ fn map_publish_allows_one_request_per_lobby_generation_and_reports_its_outcome_o
         draft_id: 3,
         recipe: brawler::map::MapContentCatalog::embedded()
             .unwrap()
-            .preset(brawler::map::FEATURE_YARD_WIPEOUT_PRESET)
+            .preset(brawler::map::FEATURE_YARD_TAKEDOWN_PRESET)
             .unwrap()
             .recipe
             .clone(),

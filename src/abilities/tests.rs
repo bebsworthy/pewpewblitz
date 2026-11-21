@@ -604,12 +604,12 @@ fn sentry_objective_fallback_is_stable_and_does_not_replace_fighter_priority() {
         matchplay::MatchId,
     };
 
-    let farther = DamageableTargetIdentity::HeistSafe {
+    let farther = DamageableTargetIdentity::VaultBreakSafe {
         match_id: MatchId(7),
         anchor_id: ModeAnchorId(9),
         defending_team: TeamId(1),
     };
-    let stable_tie_winner = DamageableTargetIdentity::HeistSafe {
+    let stable_tie_winner = DamageableTargetIdentity::VaultBreakSafe {
         match_id: MatchId(7),
         anchor_id: ModeAnchorId(3),
         defending_team: TeamId(1),
@@ -1174,7 +1174,7 @@ fn sentry_prefers_fighters_then_fires_only_at_a_live_hostile_objective() {
             DamageableLifeState, DamageableTargetIdentity, MapDynamicGeneration, MapInstanceId,
             ModeAnchorId,
         },
-        matchplay::{HeistSafe, MatchId},
+        matchplay::{MatchId, VaultBreakSafe},
     };
     use avian2d::prelude::Position;
     use bevy::prelude::*;
@@ -1189,7 +1189,7 @@ fn sentry_prefers_fighters_then_fires_only_at_a_live_hostile_objective() {
     let sentry_entity =
         spawn_characterized_sentry(&mut app, tuning, sentry::SentryRuntime::new(0, 6, 30), 720);
     let fighter = spawn_sentry_target(&mut app, NetworkEntityId(2), Vec2::new(100.0, 0.0));
-    let objective = DamageableTargetIdentity::HeistSafe {
+    let objective = DamageableTargetIdentity::VaultBreakSafe {
         match_id: MatchId(11),
         anchor_id: ModeAnchorId(4),
         defending_team: TeamId(1),
@@ -1199,7 +1199,7 @@ fn sentry_prefers_fighters_then_fires_only_at_a_live_hostile_objective() {
         .spawn((
             Position(Vec2::new(80.0, 0.0)),
             objective,
-            HeistSafe {
+            VaultBreakSafe {
                 match_id: MatchId(11),
                 anchor_id: ModeAnchorId(4),
                 defending_team: TeamId(1),
@@ -1797,7 +1797,7 @@ fn production_ability_sets_have_an_explicit_authority_and_outcome_order() {
         trace.0.push("ability observers");
     }
     fn outcomes(mut trace: ResMut<Trace>) {
-        trace.0.push("wipeout outcomes");
+        trace.0.push("takedown outcomes");
     }
     #[allow(clippy::needless_pass_by_value)]
     fn finalize(tick: Res<crate::timing::SimulationTick>, mut trace: ResMut<Trace>) {
@@ -1844,7 +1844,7 @@ fn production_ability_sets_have_an_explicit_authority_and_outcome_order() {
             "primary fire",
             "damage",
             "ability observers",
-            "wipeout outcomes",
+            "takedown outcomes",
             "finalize",
         ]
     );

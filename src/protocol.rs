@@ -34,8 +34,8 @@ use crate::map::{
 use crate::matchplay::{
     BoostGrantScope, BoostPickup, BoostPickupAvailableAtTick, BoostPickupIdentity,
     BoostPickupSource, BoostStacks, FighterDisplayName, HostileNpc, HostileNpcDefinitionId,
-    HostileNpcIdentity, HotZoneState, MatchClock, MatchParticipant, MatchRoot as MatchRootMarker,
-    MatchState, PublicParticipantState, RespawnState, SpawnProtection, WipeoutState,
+    HostileNpcIdentity, MatchClock, MatchParticipant, MatchRoot as MatchRootMarker, MatchState,
+    PublicParticipantState, RespawnState, SpawnProtection, TakedownState, TurfHoldState,
     ZombieModeState, ZombiePhase,
 };
 use crate::timing::SIMULATION_TICK;
@@ -44,7 +44,7 @@ use crate::timing::SIMULATION_TICK;
 pub const NETWORK_PROTOCOL_ID: u64 = 0x4252_4157_4c45_5241;
 
 /// Brawler-level compatibility version exchanged after Netcode connects.
-pub const SUPPORTED_PROTOCOL_VERSION: u16 = 55;
+pub const SUPPORTED_PROTOCOL_VERSION: u16 = 56;
 
 /// Development-only key for local loopback sessions. This is not authentication.
 pub const DEVELOPMENT_PRIVATE_KEY: [u8; 32] = [0x42; 32];
@@ -380,9 +380,9 @@ impl Serialize for MatchRouteGrant {
             route_id: self.route_id.get(),
             peer_id: self.peer_id.get(),
             game_mode: match self.game_mode {
-                crate::config::GameMode::Wipeout => 1,
-                crate::config::GameMode::HotZone => 2,
-                crate::config::GameMode::Heist => 3,
+                crate::config::GameMode::Takedown => 1,
+                crate::config::GameMode::TurfHold => 2,
+                crate::config::GameMode::VaultBreak => 3,
                 crate::config::GameMode::Zombie => 4,
             },
             capability: self.capability.bytes(),
@@ -410,9 +410,9 @@ impl<'de> Deserialize<'de> for MatchRouteGrant {
         let peer_id = PeerId::new(wire.peer_id)
             .ok_or_else(|| serde::de::Error::custom("peer ID must be nonzero"))?;
         let game_mode = match wire.game_mode {
-            1 => crate::config::GameMode::Wipeout,
-            2 => crate::config::GameMode::HotZone,
-            3 => crate::config::GameMode::Heist,
+            1 => crate::config::GameMode::Takedown,
+            2 => crate::config::GameMode::TurfHold,
+            3 => crate::config::GameMode::VaultBreak,
             4 => crate::config::GameMode::Zombie,
             _ => return Err(serde::de::Error::custom("unsupported game mode")),
         };
@@ -619,12 +619,14 @@ fn register_replicated_components(app: &mut App) {
     app.component::<MatchRootMarker>().replicate_once();
     app.component::<MatchState>().replicate();
     app.component::<MatchClock>().replicate();
-    app.component::<WipeoutState>().replicate();
+    app.component::<TakedownState>().replicate();
     app.component::<crate::matchplay::ObjectiveResult>()
         .replicate();
-    app.component::<HotZoneState>().replicate();
-    app.component::<crate::matchplay::HeistState>().replicate();
-    app.component::<crate::matchplay::HeistSafe>().replicate();
+    app.component::<TurfHoldState>().replicate();
+    app.component::<crate::matchplay::VaultBreakState>()
+        .replicate();
+    app.component::<crate::matchplay::VaultBreakSafe>()
+        .replicate();
     app.component::<MatchParticipant>().replicate();
     app.component::<FighterDisplayName>().replicate_once();
     app.component::<PublicParticipantState>().replicate();
@@ -775,7 +777,7 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<crate::map::PickupCue>()
             .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<crate::matchplay::HeistObjectiveCue>()
+        app.register_message::<crate::matchplay::VaultBreakObjectiveCue>()
             .add_direction(NetworkDirection::ServerToClient);
         app.add_channel::<CombatChannel>(ChannelSettings {
             mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
@@ -921,8 +923,8 @@ mod tests {
         assert!(components.is_registered::<MatchRootMarker>());
         assert!(components.is_registered::<MatchState>());
         assert!(components.is_registered::<MatchClock>());
-        assert!(components.is_registered::<WipeoutState>());
-        assert!(components.is_registered::<HotZoneState>());
+        assert!(components.is_registered::<TakedownState>());
+        assert!(components.is_registered::<TurfHoldState>());
         assert!(components.is_registered::<MatchParticipant>());
         assert!(components.is_registered::<FighterDisplayName>());
         assert!(components.is_registered::<RespawnState>());
@@ -1030,7 +1032,7 @@ mod tests {
     /// `OverBudget`. Only the global handshake guards the new encoding.
     #[test]
     fn point_free_loadouts_are_protocol_55() {
-        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 55);
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 56);
         let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
         let profile = welcome_profile();
         let loadout = catalogs.view().resolve(profile.selection()).unwrap();
@@ -1129,9 +1131,9 @@ mod tests {
     #[test]
     fn lobby_welcome_decoder_rejects_collection_and_normalization_overruns() {
         let game_type = crate::lobby::AdvertisedGameType {
-            id: crate::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
+            id: crate::lobby::GameTypeId::new("takedown-2v2").unwrap(),
             configuration_revision: 1,
-            display_name: "Wipeout 2v2".to_string(),
+            display_name: "Takedown 2v2".to_string(),
             mode_definition_id: crate::map::ModeDefinitionId(2),
             map_preset_ids: vec![crate::map::MapPresetId(1)],
             practice_map_preset_ids: vec![crate::map::MapPresetId(1)],
@@ -1139,7 +1141,7 @@ mod tests {
             community_maps: false,
             team_count: 2,
             players_per_team: 2,
-            rules_summary: crate::lobby::AdvertisedRulesSummary::Wipeout {
+            rules_summary: crate::lobby::AdvertisedRulesSummary::Takedown {
                 target_score: 10,
                 active_limit_ticks: 10_800,
             },
@@ -1216,7 +1218,7 @@ mod tests {
             match_id: MatchId::new(3).expect("nonzero match ID"),
             route_id: RouteId::new(4).expect("nonzero route ID"),
             peer_id: PeerId::new(5).expect("nonzero peer ID"),
-            game_mode: crate::config::GameMode::HotZone,
+            game_mode: crate::config::GameMode::TurfHold,
             capability: RouteCapability::from_bytes([0xa5; RouteCapability::BYTES])
                 .expect("nonzero capability"),
             activation_expiry_unix_ms: 1_700_000_000_000,
@@ -1239,7 +1241,7 @@ mod tests {
             match_id: MatchId::new(3).unwrap(),
             route_id: RouteId::new(4).unwrap(),
             peer_id: PeerId::new(5).unwrap(),
-            game_mode: crate::config::GameMode::Wipeout,
+            game_mode: crate::config::GameMode::Takedown,
             capability: RouteCapability::from_bytes([0xa5; RouteCapability::BYTES]).unwrap(),
             activation_expiry_unix_ms: 3,
             route_expiry_unix_ms: 2,
@@ -1269,7 +1271,7 @@ mod tests {
             match_id: MatchId::new(13).expect("nonzero match ID"),
             route_id: RouteId::new(14).expect("nonzero route ID"),
             peer_id: PeerId::new(15).expect("nonzero peer ID"),
-            game_mode: crate::config::GameMode::Wipeout,
+            game_mode: crate::config::GameMode::Takedown,
             capability: RouteCapability::from_bytes([0x7a; RouteCapability::BYTES])
                 .expect("nonzero capability"),
             activation_expiry_unix_ms: 1,

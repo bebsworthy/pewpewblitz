@@ -174,7 +174,7 @@ fn map_cover_destruction_converges_for_connected_and_late_joining_clients() {
 fn feature_yard_barrier_replacement_converges_for_connected_and_late_joining_clients() {
     let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
     let resolved = catalog
-        .resolve_preset(brawler::map::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+        .resolve_preset(brawler::map::FEATURE_YARD_TAKEDOWN_PRESET, MapInstanceId(1))
         .unwrap();
     let placement = resolved
         .dynamic_placements
@@ -213,17 +213,17 @@ fn feature_yard_barrier_replacement_converges_for_connected_and_late_joining_cli
 }
 
 #[test]
-fn hot_zone_and_ashen_snapshots_converge_from_canonical_content() {
-    let mut hot_zone = Harness::new_hot_zone_match(1);
-    hot_zone.step_until(|harness| {
+fn turf_hold_and_ashen_snapshots_converge_from_canonical_content() {
+    let mut turf_hold = Harness::new_turf_hold_match(1);
+    turf_hold.step_until(|harness| {
         harness.client_is_active(0) && client_grid_state(harness, 0).is_some()
     });
-    let (hot_zone_snapshot, _) = client_grid_state(&mut hot_zone, 0).unwrap();
+    let (turf_hold_snapshot, _) = client_grid_state(&mut turf_hold, 0).unwrap();
     assert_eq!(
-        hot_zone_snapshot.identity.source_preset_id,
-        Some(brawler::map::FEATURE_YARD_HOT_ZONE_PRESET)
+        turf_hold_snapshot.identity.source_preset_id,
+        Some(brawler::map::FEATURE_YARD_TURF_HOLD_PRESET)
     );
-    assert_eq!(hot_zone_snapshot.mode_anchors.len(), 1);
+    assert_eq!(turf_hold_snapshot.mode_anchors.len(), 1);
 
     let mut ashen = Harness::new_ashen_court(1);
     ashen.step_until(|harness| {

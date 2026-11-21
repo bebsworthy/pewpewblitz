@@ -322,7 +322,7 @@ bypasses the rig.
 Hit feedback (`presentation_3d/hit_feedback.rs`, tuned by the client-only
 `assets/catalogs/hit_feedback.ron`) reads only authoritative replicated cues: fighter and deployable
 damage and healing (`DamageApplied`, healing `EffectApplied`), damageable-object damage
-(`WorldObjectCue::Damaged`), and Heist idol damage. Each damaging hit gives its target's presentation
+(`WorldObjectCue::Damaged`), and Vault Break idol damage. Each damaging hit gives its target's presentation
 root a brief white flash (about 80 ms) derived from whatever material it currently shows, so a
 concealed translucent ally flashes translucent; ground team rings never flash. Each hit or heal also
 feeds a fixed, bounded pool of world-anchored Lilita One numbers drawn above the overhead plates:
@@ -404,7 +404,7 @@ opacity (validated: density at most 0.4, opacity at most 0.6, tints at most 20% 
 floor's brightest tone). Placement is a pure function of the map's recipe ID and each cell, so a map
 always gets the same decals in every match and in the Map Maker preview. Only open cells that touch a
 static wall or the arena edge are candidates; cells under any placement (effect tiles, water, cover,
-foliage, spawns), the Hot Zone circle plus half a cell, Heist safes with their two-cell attack
+foliage, spawns), the Turf Hold circle plus half a cell, Vault Break safes with their two-cell attack
 sectors, and Zombie ingresses are excluded, decals keep at least one empty cell between each other,
 and a map has at most 160. Every decal fits inside its own cell with its top edge turned toward the
 wall. All of a map's decals are one mesh drawn with one lit, alpha-blended toon material over the
@@ -444,7 +444,7 @@ Grounding (`presentation_3d/contact_shadow.rs`, tuned by the client-only
 `assets/catalogs/contact_shadows.ron`) is a hybrid. Static walls and indestructible blockers are
 grounded by the floor's baked corner darkening. Every other object that stands on the floor gets
 one soft blob contact shadow: fighters and zombies, straight projectiles (including local cosmetic
-shots), sentries, Heist idols, destructible and damageable map objects, and static non-blocking
+shots), sentries, Vault Break idols, destructible and damageable map objects, and static non-blocking
 props such as concealing foliage and decorations. Lobbed projectiles keep their height-scaled
 ground shadow, and pickups keep their ground glow. Effect tiles, water, markers, and visual profiles
 marked `flat` in `map_asset_visuals.ron` (floor details, rubble, debris) get none. The blob is a
@@ -459,7 +459,7 @@ disables MSAA, and costs a full-screen pass for little gain under the high gamep
 `High` tier the arena directional light also casts real shadows (BRL-0180): one shadow cascade,
 derived in `camera.rs` from the gameplay framing, spans the whole visible ground (about 480-700
 view units) plus one cell, so walls, props, foliage, and fighters shadow the floor away from the
-camera. Effect tiles, the Hot Zone, relationship rings, and the aim lane are unlit and never
+camera. Effect tiles, the Turf Hold, relationship rings, and the aim lane are unlit and never
 receive shadows, so cast shadows add depth without darkening gameplay signals. `Medium` and `Low`
 skip the shadow pass and rely on contact shadows alone. The map editor's zoomed-out camera can sit
 beyond the cascade, where its view simply loses cast shadows.
@@ -494,10 +494,10 @@ barriers use normal or rubble replacement visuals. Imported and primitive fallba
 communicate the same walkability, concealment boundary, and destruction state. The accepted 32-unit
 destruction granularity must never leave a smaller visual or collision speck.
 
-V10's Feature Yard family reuses one normalized geometry across Wipeout, Hot Zone, and Heist while
+V10's Feature Yard family reuses one normalized geometry across Takedown, Turf Hold, and Vault Break while
 presenting only the active mode's objective. Damageable barrels and chests reconcile replicated
 health and terminal state; a destroyed chest disappears and its public restoration pickup uses a
-distinct potion silhouette and glow. Heist presents each typed safe objective as a team idol and
+distinct potion silhouette and glow. Vault Break presents each typed safe objective as a team idol and
 pedestal fitted inside the authoritative footprint. Imported and primitive paths preserve object
 class, collision footprint, team ownership, damaged-only versus persistent health treatment, and
 terminal/pickup readability.
@@ -627,7 +627,7 @@ assignment.
   thicker rim. Overlapping parts never stack translucency, and all colors stay below the bloom
   knee;
 - objective boundaries remain precise and cannot depend on a decorative model or decal;
-- Heist idols show persistent public team/objective health, while neutral barrels and chests show
+- Vault Break idols show persistent public team/objective health, while neutral barrels and chests show
   compact health only when damaged; the idol, chest, barrel, and restoration pickup remain
   unmistakable at gameplay scale;
 - destroyed chests disappear, pickups remain visibly available until authoritative collection or
@@ -673,7 +673,7 @@ it does not replace these ownership and cleanup paths:
 
 | Path | Input and owner | Current materialization | Lifetime and recovery |
 | --- | --- | --- | --- |
-| Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Heist cues | One recipe root with up to eight combined children: ordered mesh layers plus zero to two optional decorative GPU-particle layers; every particle layer has an authored bounded profile and a shaped retained mesh | Root lifetime is the maximum mesh or particle lifetime, or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
+| Catalogued transients | Feature-owned `VfxRequest` from combat, world-object, pickup, and Vault Break cues | One recipe root with up to eight combined children: ordered mesh layers plus zero to two optional decorative GPU-particle layers; every particle layer has an authored bounded profile and a shaped retained mesh | Root lifetime is the maximum mesh or particle lifetime, or the authoritative Reveal Scan deadline; oldest-first total and per-recipe eviction; reduced recipe |
 | Straight/lobbed projectile | Replicated projectile, body/flight, `AttackDelivery`, and `ReplicatedAttackSource` | Exact projectile body; Neutral straight shots wrap a dimensional nucleus in one animated comet wake, Cold adds slow crystal fins, Fire adds fast trailing lobes, Poison leaves a bubbly wake, and Restoration carries a rotating vitality spark; lobbed flight also has a projected shadow and fixed landing marker, while Fire may emit lingering world-space smoke; the nucleus, wake, and plain/lobbed body carry the observer-relative weapon team tint (ally blue / enemy red) | Root follows the replicated owner and disappears with it; lob height and all flight aids derive from replicated launch/landing facts and disappear with the root |
 | Elemental/concealment field | Replicated field state | Subtle fill plus exact bright boundary; Cold uses slow crystalline perimeter motion. Normal Fire uses a retained ember ground underlay plus a procedural material for a coherent turbulent circumference and layered heat bands. Normal Poison uses animated cellular contamination with perimeter bubbles; Normal Restoration uses curved, offset vitality ripples with petal markers and no cardinal-spoke icon. Pattern and motion identify type; selected native filaments, crystals, bubbles, petals, or ripple arcs carry a restrained ally-blue or enemy-red accent. Neutral leaves the pattern untinted. Reduced/primitive variants preserve the same type-pattern/team-accent separation with bounded mesh cues | Recreated after late join from public state; owner removal is cleanup truth |
 | Persistent Splash | Replicated shape, facing, effects, and deadlines | Exact circle or oriented rectangle fill and boundary; circular Cold/Fire areas reuse the elemental area style | Recreated after late join; geometry remains fixed; owner removal is cleanup truth |
@@ -693,7 +693,7 @@ authoritative radii do not expose a coarse polygonal silhouette.
 Neutral transient recipes separately cover straight-shot launch/impact, melee sweep/contact,
 damage, defeat, reset, sentry fire/cleanup, concealment activation/interruption, Reveal, and
 demolition. World feedback recipes cover local world-object damage, restoration-pickup
-spawn/collection/expiry, and escalating Heist safe damage/critical/destruction. These semantic
+spawn/collection/expiry, and escalating Vault Break safe damage/critical/destruction. These semantic
 outcomes do not share one generic flash: normal variants layer compact cores, exact or expressive
 ground geometry, timed echoes, and at most the bounded decorative particles required by the event;
 reduced and primitive variants preserve a complete mesh-only silhouette. Pickup expiry deliberately
@@ -944,7 +944,7 @@ theme's prop): every imported default is the original kit piece of its native th
 rejects an imported default outside the kit directories, so no third-party environment pack ships
 (BRL-0188). Wall, cover, and wall-top colours stay clear of the effect-tile hues (speed cyan, slow
 violet, damage red). Every presentation site that knows the
-map (static and dynamic map assets, Heist safes, restoration pickups, Map Maker markers and palette
+map (static and dynamic map assets, Vault Break safes, restoration pickups, Map Maker markers and palette
 previews) resolves through the theme. Imported scenes load and admit once per GLB path. Every
 kit builder shares one kit contract module (`asset_src/environment/kit_common.py`).
 Asset paths, transforms, and fallbacks remain client-only and do not contribute renderer
@@ -1004,7 +1004,7 @@ The asset boundary has these distinct sources:
 
 Transient VFX uses a strict client-only schema-5 recipe catalog and a sealed request registry. Feature
 plugins translate their owned gameplay facts into validated semantic request keys such as
-`combat.muzzle`, `world-object.explosion`, or `heist.critical`; these producers do not select
+`combat.muzzle`, `world-object.explosion`, or `vault-break.critical`; these producers do not select
 meshes, materials, renderer families, reduced-effects policy, or resolved lifetimes. During plugin
 finalization the registry requires exact agreement between bounded producer registrations and
 authored request mappings, including authoritative-radius and deadline capabilities. Unknown,
@@ -1161,7 +1161,7 @@ native runs paced at 120 Hz sample at about 110-114 Hz. `scripts/v3-render-evide
 planned client command line with `--check-config` (validate, then exit) after building and before
 starting the routed topology, so a short `BRAWLER_RENDER_MEASURE_SECONDS`, including one too short
 for a 30 Hz `BRAWLER_RENDER_PEER_PROFILE`, fails in seconds. Its defaults pass the gate: 10 s
-warm-up + 30 s measurement, and 4 s + 12 s for Heist Practice, whose bots can end the match about
+warm-up + 30 s measurement, and 4 s + 12 s for Vault Break Practice, whose bots can end the match about
 18 s after match readiness. The check changes no report field, so schema 10 and earlier reports
 read as before.
 

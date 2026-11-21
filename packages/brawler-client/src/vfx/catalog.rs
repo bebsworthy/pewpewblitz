@@ -672,9 +672,9 @@ mod tests {
         ("combat.impact", "impact"),
         ("combat.muzzle", "muzzle"),
         ("combat.reset", "reset"),
-        ("heist.critical", "heist_critical"),
-        ("heist.damaged", "heist_damage"),
-        ("heist.destroyed", "heist_destroyed"),
+        ("vault-break.critical", "vault_break_critical"),
+        ("vault-break.damaged", "vault_break_damage"),
+        ("vault-break.destroyed", "vault_break_destroyed"),
         ("pickup.collected", "pickup_collect"),
         ("pickup.expired", "pickup_expire"),
         ("pickup.spawned", "pickup_spawn"),
@@ -1072,9 +1072,9 @@ mod tests {
             ("pickup.spawned", 4, 1),
             ("pickup.collected", 4, 1),
             ("pickup.expired", 3, 0),
-            ("heist.damaged", 3, 1),
-            ("heist.critical", 4, 1),
-            ("heist.destroyed", 4, 1),
+            ("vault-break.damaged", 3, 1),
+            ("vault-break.critical", 4, 1),
+            ("vault-break.destroyed", 4, 1),
         ] {
             let normal = catalog.resolve(key, &signature, false, false).unwrap();
             let reduced = catalog.resolve(key, &signature, true, false).unwrap();

@@ -327,7 +327,7 @@ pub struct ClientMatchResultContext {
     pub game_type_id: Option<brawler::lobby::GameTypeId>,
     pub game_name: Option<String>,
     pub(crate) final_score: Option<hud::ModeScoreView>,
-    pub(crate) wipeout: Option<brawler::matchplay::WipeoutState>,
+    pub(crate) takedown: Option<brawler::matchplay::TakedownState>,
     pub(crate) objective: Option<brawler::matchplay::ObjectiveResult>,
     pub(crate) local_player: Option<PlayerId>,
     /// The community map credit its reservation carried (BRL-1sgj); `None` for a built-in map.

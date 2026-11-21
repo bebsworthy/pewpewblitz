@@ -101,8 +101,8 @@ mod tests {
             pressure_stages: 6,
             match_duration_ticks: 14_400,
             lifecycle: crate::matchplay::MatchLifecycleRules::default(),
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
         })
         .unwrap();
 
@@ -125,8 +125,8 @@ mod tests {
             pressure_stages: 4,
             match_duration_ticks: 10_800,
             lifecycle: crate::matchplay::MatchLifecycleRules::default(),
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
         })
         .unwrap_err();
 

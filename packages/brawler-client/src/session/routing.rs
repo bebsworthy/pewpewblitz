@@ -116,8 +116,8 @@ pub(crate) fn observe_completed_match(
     roots: Query<
         (
             &MatchState,
-            Option<&brawler::matchplay::WipeoutState>,
-            Option<&brawler::matchplay::HotZoneState>,
+            Option<&brawler::matchplay::TakedownState>,
+            Option<&brawler::matchplay::TurfHoldState>,
             Option<&brawler::matchplay::MatchClock>,
             Option<&brawler::matchplay::ObjectiveResult>,
         ),
@@ -134,12 +134,13 @@ pub(crate) fn observe_completed_match(
     {
         return;
     }
-    let Some((result, final_score, wipeout, objective)) = roots.iter().find_map(
-        |(state, wipeout, hot_zone, clock, objective)| match state.phase {
+    let Some((result, final_score, takedown, objective)) = roots.iter().find_map(
+        |(state, takedown, turf_hold, clock, objective)| match state.phase {
             MatchPhase::Completed { result, .. }
                 if matches!(
                     state.mode_definition_id,
-                    brawler::map::HOT_ZONE_MODE_DEFINITION | brawler::map::HEIST_MODE_DEFINITION
+                    brawler::map::TURF_HOLD_MODE_DEFINITION
+                        | brawler::map::VAULT_BREAK_MODE_DEFINITION
                 ) =>
             {
                 objective
@@ -147,17 +148,17 @@ pub(crate) fn observe_completed_match(
                     .map(|o| (result, None, None, Some(*o)))
             }
             MatchPhase::Completed { result, .. }
-                if state.mode_definition_id != brawler::map::WIPEOUT_MODE_DEFINITION
-                    || wipeout.is_some_and(|scores| {
+                if state.mode_definition_id != brawler::map::TAKEDOWN_MODE_DEFINITION
+                    || takedown.is_some_and(|scores| {
                         scores.match_id == Some(state.match_id)
                             && scores.completed_result == Some(result)
                     }) =>
             {
                 Some((
                     result,
-                    hud::build_mode_score_view(Some((state, wipeout)), hot_zone, clock)
+                    hud::build_mode_score_view(Some((state, takedown)), turf_hold, clock)
                         .filter(|score| !matches!(score, hud::ModeScoreView::Syncing)),
-                    wipeout.cloned(),
+                    takedown.cloned(),
                     None,
                 ))
             }
@@ -184,7 +185,7 @@ pub(crate) fn observe_completed_match(
             _ => None,
         });
         let local_team = local_player.and_then(|local_player| {
-            wipeout
+            takedown
                 .as_ref()
                 .and_then(|scores| {
                     scores
@@ -210,7 +211,7 @@ pub(crate) fn observe_completed_match(
             game_type_id,
             game_name: None,
             final_score,
-            wipeout,
+            takedown,
             objective,
             local_player,
             // The reservation that started this match credits its community map (BRL-1sgj).
@@ -554,7 +555,7 @@ mod transition_tests {
             match_id: MatchId::new(3).unwrap(),
             route_id: RouteId::new(4).unwrap(),
             peer_id: PeerId::new(5).unwrap(),
-            game_mode: brawler::config::GameMode::Wipeout,
+            game_mode: brawler::config::GameMode::Takedown,
             capability: brawler::protocol::RouteCapability::from_bytes([7; 32]).unwrap(),
             activation_expiry_unix_ms: 10,
             route_expiry_unix_ms: 20,

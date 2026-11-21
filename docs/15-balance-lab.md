@@ -13,7 +13,7 @@ Use [Weapons and abilities](./03-weapons-and-abilities.md) and
 [V6 roadmap](./implementation/v6/roadmap.md) and
 [milestone](./implementation/v6/milestone-01.md) retain the original implementation history and
 evidence. The completed [V10 roadmap](./implementation/v10/roadmap.md) and
-[M03 closeout](./implementation/v10/milestone-03.md) record the barrel, Heist-objective, chest, and
+[M03 closeout](./implementation/v10/milestone-03.md) record the barrel, Vault Break-objective, chest, and
 restoration-pickup evolution.
 
 ## Operator workflow
@@ -56,8 +56,8 @@ recomputes runtime recipe identities for equipped weapon modifiers whose base re
 persisted tuning makes any admitted loadout genuinely invalid, that tuning is ignored for the new
 worker rather than crashing or stranding the client during Match Loading.
 
-The current snapshot schema is version 22, the persistence envelope is version 16, and the
-non-persisted editor-manifest schema is version 15. The server manifest explicitly identifies every
+The current snapshot schema is version 23, the persistence envelope is version 17, and the
+non-persisted editor-manifest schema is version 16. The server manifest explicitly identifies every
 editable numeric path, comparison-row identity, gameplay unit, storage conversion, authoritative
 bound, step, and preferred control. The browser does not infer editability, comparison semantics,
 or limits from serialized field names. Semantic rows align equivalent authored axes even when
@@ -81,7 +81,7 @@ enters the snapshot/editor matrix; stable IDs, family references, and parameter 
 locked during a tuning transaction. Damage values are consumed from the rebuilt map catalog by
 authoritative grouped pulses, while movement edits drive authoritative locomotion through resolved
 occupancy. Oil-barrel
-health/explosion tuning, Heist safe health, and
+health/explosion tuning, Vault Break safe health, and
 treasure-chest/restoration-pickup health,
 restoration, radius, and lifetime are also editable. Structural IDs, terminal
 topology, replacement assets, and pickup visual identity remain locked. Older supported envelopes
@@ -273,7 +273,7 @@ passive/ultimate bounds beside their typed models in `src/builds/`, the roster i
 `content/catalogs/characters.ron` with its Lab projection in `src/server/balance_lab/characters.rs`, weapon definitions and shared
 weapon bounds in `src/combat/definitions/`, and private exhaustive manifest projections in
 `src/server/balance_lab/editor/{characters,passives,weapons,ultimates}.rs`. Effect-tile and object/chest
-definitions remain in `src/map/`, Heist safe rules in `src/matchplay/heist.rs`, and the operator
+definitions remain in `src/map/`, Vault Break safe rules in `src/matchplay/vault_break.rs`, and the operator
 application in `tools/balance-lab-web/`.
 
 Elemental field timing, range, radius, and effect strength are part of the editable ultimate
@@ -287,7 +287,7 @@ The service is compiled only by the `balance-lab` feature, binds to loopback, an
 for the canonical local Practice formation. One Practice worker owns the endpoint at a time. Drafts
 do not mutate simulation until explicit apply. Remote access, authentication, canonical-content
 export, hot/live apply, charts, balancing advice, new ability definitions, passives, and broad
-match-rule tuning beyond the explicit Global-tab sections and Heist safe health are outside the current tool. Apply remains an explicit
-clean-epoch transaction. A persisted Heist safe value is installed into a new Heist worker, remains
-unchanged during unrelated Wipeout/Hot Zone edits, and can be cleared from every Practice mode
+match-rule tuning beyond the explicit Global-tab sections and Vault Break safe health are outside the current tool. Apply remains an explicit
+clean-epoch transaction. A persisted Vault Break safe value is installed into a new Vault Break worker, remains
+unchanged during unrelated Takedown/Turf Hold edits, and can be cleared from every Practice mode
 through **Restore canonical defaults**.

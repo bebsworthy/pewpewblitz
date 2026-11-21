@@ -144,9 +144,9 @@ pub fn validate_authored_recipe(
 ) -> Result<ResolvedMap, AuthoringRecipeError> {
     if !matches!(
         expected_mode,
-        super::WIPEOUT_MODE_DEFINITION
-            | super::HOT_ZONE_MODE_DEFINITION
-            | super::HEIST_MODE_DEFINITION
+        super::TAKEDOWN_MODE_DEFINITION
+            | super::TURF_HOLD_MODE_DEFINITION
+            | super::VAULT_BREAK_MODE_DEFINITION
     ) || recipe.mode_definition_id != expected_mode
     {
         return Err(AuthoringRecipeError::UnsupportedMode);

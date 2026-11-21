@@ -2,7 +2,7 @@
 set -euo pipefail
 
 network_addr="${BRAWLER_NETWORK_ADDR:-127.0.0.1:5000}"
-game_mode="${BRAWLER_NETWORK_GAME_MODE:-wipeout}"
+game_mode="${BRAWLER_NETWORK_GAME_MODE:-takedown}"
 headless="${BRAWLER_NETWORK_HEADLESS:-0}"
 windowed_combat_demo="${BRAWLER_NETWORK_WINDOWED_COMBAT_DEMO:-0}"
 windowed_controller_demo="${BRAWLER_NETWORK_WINDOWED_CONTROLLER_DEMO:-0}"
@@ -50,8 +50,8 @@ if [[ "$headless" != "0" && "$headless" != "1" ]]; then
     printf 'brawler network: BRAWLER_NETWORK_HEADLESS must be 0 or 1\n' >&2
     exit 2
 fi
-if [[ "$game_mode" != "wipeout" && "$game_mode" != "hot-zone" && "$game_mode" != "heist" ]]; then
-    printf 'brawler network: BRAWLER_NETWORK_GAME_MODE must be wipeout, hot-zone, or heist\n' >&2
+if [[ "$game_mode" != "takedown" && "$game_mode" != "turf-hold" && "$game_mode" != "vault-break" ]]; then
+    printf 'brawler network: BRAWLER_NETWORK_GAME_MODE must be takedown, turf-hold, or vault-break\n' >&2
     exit 2
 fi
 if [[ "$windowed_combat_demo" != "0" && "$windowed_combat_demo" != "1" ]]; then

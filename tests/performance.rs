@@ -41,10 +41,10 @@ fn performance_app() -> App {
         AvianNetworkPlugin,
         ServerAuthoritativeGameplayPlugin,
         ServerNetworkPlugin,
-        brawler::matchplay::WipeoutModePlugin,
+        brawler::matchplay::TakedownModePlugin,
     ));
     app.insert_resource(brawler::matchplay::MatchLifecycleRules::default());
-    app.insert_resource(brawler::matchplay::WipeoutRules {
+    app.insert_resource(brawler::matchplay::TakedownRules {
         target_score: 10,
         recent_hostile_damage_credit_ticks: 300,
     });
@@ -850,9 +850,9 @@ fn m05_combined_worst_case_fixed_tick_stays_within_budget() {
     );
 }
 
-/// Hot Zone composition used by the M09 objective benchmarks: the same server graph with
-/// the Hot Zone map/mode/rules installed instead of Wipeout.
-fn hot_zone_performance_app() -> App {
+/// Turf Hold composition used by the M09 objective benchmarks: the same server graph with
+/// the Turf Hold map/mode/rules installed instead of Takedown.
+fn turf_hold_performance_app() -> App {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -870,31 +870,31 @@ fn hot_zone_performance_app() -> App {
     app.insert_resource(brawler::server::match_lifecycle_rules_for_profile(
         brawler::config::MatchRulesProfile::ProcessVerification,
     ));
-    app.insert_resource(brawler::matchplay::hot_zone_setup_for_composition());
+    app.insert_resource(brawler::matchplay::turf_hold_setup_for_composition());
     // Production target progress keeps a 120-tick controlled window below threshold so
     // the per-tick delta can be measured without completing the match mid-run.
-    app.insert_resource(brawler::matchplay::hot_zone_rules_for_profile(
+    app.insert_resource(brawler::matchplay::turf_hold_rules_for_profile(
         brawler::config::MatchRulesProfile::Production,
     ));
     app.insert_resource(brawler::map::ServerMapSelection::preset(
-        brawler::map::FEATURE_YARD_HOT_ZONE_PRESET,
+        brawler::map::FEATURE_YARD_TURF_HOLD_PRESET,
     ));
     app.insert_resource(ServerNetworkConfig {
         transport: NetworkTransport::Crossbeam,
         ..default()
     });
     app.insert_resource(TimeUpdateStrategy::ManualDuration(SIMULATION_TICK));
-    app.add_plugins(brawler::matchplay::HotZoneModePlugin);
+    app.add_plugins(brawler::matchplay::TurfHoldModePlugin);
     app.update();
     app
 }
 
-fn hot_zone_progress(app: &mut App) -> [u16; 2] {
+fn turf_hold_progress(app: &mut App) -> [u16; 2] {
     let world = app.world_mut();
-    let mut roots = world.query_filtered::<&brawler::matchplay::HotZoneState, With<MatchRoot>>();
+    let mut roots = world.query_filtered::<&brawler::matchplay::TurfHoldState, With<MatchRoot>>();
     roots
         .single(world)
-        .expect("one hot zone state")
+        .expect("one turf hold state")
         .progress_ticks
 }
 
@@ -902,8 +902,8 @@ fn hot_zone_progress(app: &mut App) -> [u16; 2] {
 /// participant capacity, proving evaluation correctness under load: exactly one progress
 /// unit per controlled tick, none when empty or contested.
 #[test]
-fn m09_hot_zone_objective_states_stay_within_fixed_tick_budget() {
-    let mut app = hot_zone_performance_app();
+fn m09_turf_hold_objective_states_stay_within_fixed_tick_budget() {
+    let mut app = turf_hold_performance_app();
     let match_id = {
         let world = app.world_mut();
         let mut roots = world.query_filtered::<&mut MatchState, With<MatchRoot>>();
@@ -949,8 +949,8 @@ fn m09_hot_zone_objective_states_stay_within_fixed_tick_budget() {
     );
 
     // Empty zone: nobody advances.
-    fixed_tick_p95(&mut app, "m09-hot-zone-empty", 120);
-    assert_eq!(hot_zone_progress(&mut app), [0, 0]);
+    fixed_tick_p95(&mut app, "m09-turf-hold-empty", 120);
+    assert_eq!(turf_hold_progress(&mut app), [0, 0]);
 
     // Controlled zone: two team-1 fighters inside advance exactly one unit per tick.
     for (index, (entity, _)) in owners[0..2].iter().enumerate() {
@@ -960,9 +960,9 @@ fn m09_hot_zone_objective_states_stay_within_fixed_tick_budget() {
             .insert(Position::from_xy(0.0, -100.0 - 20.0 * offset));
     }
     app.update();
-    let before = hot_zone_progress(&mut app);
-    fixed_tick_p95(&mut app, "m09-hot-zone-controlled", 120);
-    let after = hot_zone_progress(&mut app);
+    let before = turf_hold_progress(&mut app);
+    fixed_tick_p95(&mut app, "m09-turf-hold-controlled", 120);
+    let after = turf_hold_progress(&mut app);
     assert_eq!(
         after[0] - before[0],
         120,
@@ -978,13 +978,13 @@ fn m09_hot_zone_objective_states_stay_within_fixed_tick_budget() {
             .insert(Position::from_xy(0.0, 100.0 + 20.0 * offset));
     }
     app.update();
-    let before = hot_zone_progress(&mut app);
-    fixed_tick_p95(&mut app, "m09-hot-zone-contested", 120);
-    let after = hot_zone_progress(&mut app);
+    let before = turf_hold_progress(&mut app);
+    fixed_tick_p95(&mut app, "m09-turf-hold-contested", 120);
+    let after = turf_hold_progress(&mut app);
     assert_eq!(after, before, "contested time advances neither team");
 }
 
-fn heist_performance_app() -> App {
+fn vault_break_performance_app() -> App {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -1003,22 +1003,22 @@ fn heist_performance_app() -> App {
         brawler::config::MatchRulesProfile::ProcessVerification,
     ));
     app.insert_resource(brawler::matchplay::MatchModeSetup {
-        mode_definition_id: brawler::map::HEIST_MODE_DEFINITION,
-        rules_revision: brawler::matchplay::HEIST_RULES_REVISION,
+        mode_definition_id: brawler::map::VAULT_BREAK_MODE_DEFINITION,
+        rules_revision: brawler::matchplay::VAULT_BREAK_RULES_REVISION,
     });
-    app.insert_resource(brawler::matchplay::HeistRules {
+    app.insert_resource(brawler::matchplay::VaultBreakRules {
         safe_maximum_health: 2_000,
         critical_health_percent: 25,
     });
     app.insert_resource(brawler::map::ServerMapSelection::preset(
-        brawler::map::FEATURE_YARD_HEIST_PRESET,
+        brawler::map::FEATURE_YARD_VAULT_BREAK_PRESET,
     ));
     app.insert_resource(ServerNetworkConfig {
         transport: NetworkTransport::Crossbeam,
         ..default()
     });
     app.insert_resource(TimeUpdateStrategy::ManualDuration(SIMULATION_TICK));
-    app.add_plugins(brawler::matchplay::HeistModePlugin);
+    app.add_plugins(brawler::matchplay::VaultBreakModePlugin);
     app.update();
     app
 }
@@ -1031,8 +1031,8 @@ fn heist_performance_app() -> App {
     clippy::too_many_lines,
     reason = "the performance test keeps setup, bounded burst measurement, and telemetry assertions in one scenario"
 )]
-fn v10_m02_heist_objective_burst_stays_within_fixed_tick_budget() {
-    let mut app = heist_performance_app();
+fn v10_m02_vault_break_objective_burst_stays_within_fixed_tick_budget() {
+    let mut app = vault_break_performance_app();
     let match_id = {
         let world = app.world_mut();
         let mut roots = world.query_filtered::<&mut MatchState, With<MatchRoot>>();
@@ -1093,7 +1093,7 @@ fn v10_m02_heist_objective_burst_stays_within_fixed_tick_budget() {
             .find(|target| {
                 matches!(
                     target,
-                    brawler::map::DamageableTargetIdentity::HeistSafe {
+                    brawler::map::DamageableTargetIdentity::VaultBreakSafe {
                         defending_team: TeamId(0),
                         ..
                     }
@@ -1129,9 +1129,11 @@ fn v10_m02_heist_objective_burst_stays_within_fixed_tick_budget() {
     }
     samples.sort_unstable();
     let p95 = samples[(samples.len() * 95) / 100];
-    println!("v10-m02-heist-65-objective-hits: p95={p95:?}");
+    println!("v10-m02-vault-break-65-objective-hits: p95={p95:?}");
     assert!(p95 < SIMULATION_TICK);
-    let telemetry = app.world().resource::<brawler::matchplay::HeistTelemetry>();
+    let telemetry = app
+        .world()
+        .resource::<brawler::matchplay::VaultBreakTelemetry>();
     assert_eq!(telemetry.capacity_rejections, 120);
     assert_eq!(telemetry.invalid_rejections, 64 * 120);
     assert_eq!(telemetry.accepted_hits, 0);

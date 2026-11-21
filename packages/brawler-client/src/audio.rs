@@ -60,7 +60,7 @@ mod tests {
             assert!(registry.contains(cue_key));
         }
         assert_eq!(registry.producer_rank("combat"), Some(10));
-        assert_eq!(registry.producer_rank("hot-zone"), Some(70));
+        assert_eq!(registry.producer_rank("turf-hold"), Some(70));
         assert_eq!(registry.producer_rank("pickup"), Some(80));
         assert_eq!(registry.producer_rank("ui"), Some(90));
     }

@@ -19,7 +19,7 @@ pub enum DamageableTargetIdentity {
         generation: MapDynamicGeneration,
         placement_id: MapPlacementId,
     },
-    HeistSafe {
+    VaultBreakSafe {
         match_id: crate::matchplay::MatchId,
         anchor_id: super::ModeAnchorId,
         defending_team: crate::combat::TeamId,
@@ -34,7 +34,7 @@ impl DamageableTargetIdentity {
                 generation,
                 placement_id,
             } => (0, generation.generation as u128, placement_id.0),
-            Self::HeistSafe {
+            Self::VaultBreakSafe {
                 match_id,
                 anchor_id,
                 ..
@@ -46,7 +46,7 @@ impl DamageableTargetIdentity {
     pub const fn placement_id(self) -> MapPlacementId {
         match self {
             Self::MapObject { placement_id, .. } => placement_id,
-            Self::HeistSafe { .. } => panic!("Heist safe has no map placement ID"),
+            Self::VaultBreakSafe { .. } => panic!("Vault Break safe has no map placement ID"),
         }
     }
 
@@ -54,7 +54,9 @@ impl DamageableTargetIdentity {
     pub const fn generation(self) -> MapDynamicGeneration {
         match self {
             Self::MapObject { generation, .. } => generation,
-            Self::HeistSafe { .. } => panic!("Heist safe has no map dynamic generation identity"),
+            Self::VaultBreakSafe { .. } => {
+                panic!("Vault Break safe has no map dynamic generation identity")
+            }
         }
     }
 }

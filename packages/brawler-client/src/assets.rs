@@ -131,9 +131,9 @@ impl ClientAssetHandles {
         states.extend(
             [
                 ("ui.shell_logo", &self.dashboard_logo),
-                ("ui.badge_wipeout", &self.dashboard_badges[0]),
-                ("ui.badge_hot_zone", &self.dashboard_badges[1]),
-                ("ui.badge_heist", &self.dashboard_badges[2]),
+                ("ui.badge_takedown", &self.dashboard_badges[0]),
+                ("ui.badge_turf_hold", &self.dashboard_badges[1]),
+                ("ui.badge_vault_break", &self.dashboard_badges[2]),
                 ("ui.badge_zombie", &self.dashboard_badges[3]),
                 ("ui.pewpew_blitz_loading_logo", &self.loading_logo),
                 ("ui.identity_panel", &self.dashboard_identity_panel),

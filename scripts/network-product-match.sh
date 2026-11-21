@@ -156,7 +156,7 @@ fi
 # The requeue smoke plays a real match to its authoritative end, so its default watchdog follows
 # the game type's authored timing instead of the fast Active-only bound (BRL-cb3x).
 if [ "$requeue_smoke" = 1 ]; then
-    game_type=${game_type:-wipeout-1v1}
+    game_type=${game_type:-takedown-1v1}
     if [ -z "$timeout_seconds" ]; then
         timeout_seconds=$(e2e_requeue_timeout_seconds "$project_dir" "$game_type") || {
             echo "brawler product match: config/server/game-types.ron has no complete timing for $game_type" >&2
@@ -297,7 +297,7 @@ while [ "$index" -le "$client_count" ]; do
                     --auto-connect \
                     --headless \
                     "$match_flag" \
-                    --product-game-type "${game_type:-wipeout-1v1}" \
+                    --product-game-type "${game_type:-takedown-1v1}" \
                     "$role_flag" "$cue_dir/leave" \
                     --character "$first_character" &
             else
@@ -308,7 +308,7 @@ while [ "$index" -le "$client_count" ]; do
                     --auto-connect \
                     --headless \
                     "$match_flag" \
-                    --product-game-type "${game_type:-wipeout-1v1}" \
+                    --product-game-type "${game_type:-takedown-1v1}" \
                     "$role_flag" "$cue_dir/leave" \
                     --exit-after-lobby-return \
                     --character "$first_character" &
@@ -412,7 +412,7 @@ supervisor_pid=
 if [ "$headless" = 1 ]; then
     roster_count=$((client_count / roster_size))
     if [ "$rejoin_smoke" = completed ]; then
-        echo "brawler product match: ${game_type:-wipeout-1v1} completed by forfeit while a seat was held, and that player rejoined it for its Results"
+        echo "brawler product match: ${game_type:-takedown-1v1} completed by forfeit while a seat was held, and that player rejoined it for its Results"
     elif [ "$rejoin_smoke" = 1 ]; then
         echo "brawler product match: Practice $game_type rejoined the same running match after an outage beyond the session bound"
     elif [ "$network_change_smoke" = 1 ]; then

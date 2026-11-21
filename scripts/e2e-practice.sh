@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-game_type=${1:-wipeout-1v1}
+game_type=${1:-takedown-1v1}
 # Optional built-in map preset ID; Practice otherwise starts the game type's first map.
 map_preset=${2:-}
 case "$game_type" in
-    wipeout-1v1 | wipeout-2v2 | wipeout-3v3 | \
-    hot-zone-1v1 | hot-zone-2v2 | hot-zone-3v3 | \
-    heist-1v1 | heist-2v2 | heist-3v3 | \
+    takedown-1v1 | takedown-2v2 | takedown-3v3 | \
+    turf-hold-1v1 | turf-hold-2v2 | turf-hold-3v3 | \
+    vault-break-1v1 | vault-break-2v2 | vault-break-3v3 | \
     zombie-2p | zombie-3p) ;;
     *)
         printf '%s\n' 'brawler Practice e2e: expected an advertised game-type ID' >&2

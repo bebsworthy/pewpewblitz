@@ -28,12 +28,12 @@ pub const ASHEN_COURT_ADMISSION_REVISION: u16 = 2;
 pub(super) const TIDAL_GARDEN_PRESET: MapPresetId = MapPresetId(4);
 #[cfg(test)]
 pub(super) const BARREL_YARD_PRESET: MapPresetId = MapPresetId(5);
-pub const FEATURE_YARD_WIPEOUT_PRESET: MapPresetId = MapPresetId(7);
-pub const FEATURE_YARD_WIPEOUT_ADMISSION_REVISION: u16 = 5;
-pub const FEATURE_YARD_HOT_ZONE_PRESET: MapPresetId = MapPresetId(8);
-pub const FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION: u16 = 2;
-pub const FEATURE_YARD_HEIST_PRESET: MapPresetId = MapPresetId(9);
-pub const FEATURE_YARD_HEIST_ADMISSION_REVISION: u16 = 2;
+pub const FEATURE_YARD_TAKEDOWN_PRESET: MapPresetId = MapPresetId(7);
+pub const FEATURE_YARD_TAKEDOWN_ADMISSION_REVISION: u16 = 5;
+pub const FEATURE_YARD_TURF_HOLD_PRESET: MapPresetId = MapPresetId(8);
+pub const FEATURE_YARD_TURF_HOLD_ADMISSION_REVISION: u16 = 2;
+pub const FEATURE_YARD_VAULT_BREAK_PRESET: MapPresetId = MapPresetId(9);
+pub const FEATURE_YARD_VAULT_BREAK_ADMISSION_REVISION: u16 = 2;
 pub const VERDANT_CROSSFIRE_PRESET: MapPresetId = MapPresetId(10);
 pub const VERDANT_CROSSFIRE_ADMISSION_REVISION: u16 = 2;
 pub const SWITCHBACK_BASIN_PRESET: MapPresetId = MapPresetId(11);
@@ -44,11 +44,11 @@ pub const ZOMBIE_YARD_PRESET: MapPresetId = MapPresetId(13);
 pub const ZOMBIE_YARD_ADMISSION_REVISION: u16 = 1;
 pub const SLUICEGATE_WORKS_PRESET: MapPresetId = MapPresetId(14);
 pub const SLUICEGATE_WORKS_ADMISSION_REVISION: u16 = 1;
-pub const WIPEOUT_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
-pub const HOT_ZONE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
-pub const HEIST_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
+pub const TAKEDOWN_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(2);
+pub const TURF_HOLD_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(3);
+pub const VAULT_BREAK_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(4);
 pub const ZOMBIE_MODE_DEFINITION: ModeDefinitionId = ModeDefinitionId(5);
-pub const HEIST_SAFE_VISUAL_PROFILE: MapVisualProfileId = MapVisualProfileId(39);
+pub const VAULT_BREAK_SAFE_VISUAL_PROFILE: MapVisualProfileId = MapVisualProfileId(39);
 
 pub const GROUND_ASSET: MapAssetId = MapAssetId(1);
 pub const WALL_ARENA_ASSET: MapAssetId = MapAssetId(2);
@@ -443,11 +443,11 @@ pub struct MapHalfCellPoint {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub enum MapModeAnchorKind {
-    HotZoneCircle {
+    TurfHoldCircle {
         center_half_cell: MapHalfCellPoint,
         radius_half_cells: u16,
     },
-    HeistSafe {
+    VaultBreakSafe {
         team_slot: u8,
         origin_cell: MapCell,
         width_cells: u16,

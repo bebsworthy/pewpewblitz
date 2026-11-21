@@ -175,7 +175,7 @@
         (first_placement_id: MapPlacementId(7018), min: (x: 18, y: 2), width: 3, height: 1, asset_id: MapAssetId(33), quarter_turns: 0),
     ],
     mode_anchors: [
-        (placement_id: MapPlacementId(9500), anchor_id: ModeAnchorId(1), kind: HeistSafe(team_slot: 0, origin_cell: (x: 11, y: 5), width_cells: 3, height_cells: 2, quarter_turns: 1, objective_visual_profile_id: MapVisualProfileId(39))),
-        (placement_id: MapPlacementId(9501), anchor_id: ModeAnchorId(2), kind: HeistSafe(team_slot: 1, origin_cell: (x: 11, y: 30), width_cells: 3, height_cells: 2, quarter_turns: 3, objective_visual_profile_id: MapVisualProfileId(39))),
+        (placement_id: MapPlacementId(9500), anchor_id: ModeAnchorId(1), kind: VaultBreakSafe(team_slot: 0, origin_cell: (x: 11, y: 5), width_cells: 3, height_cells: 2, quarter_turns: 1, objective_visual_profile_id: MapVisualProfileId(39))),
+        (placement_id: MapPlacementId(9501), anchor_id: ModeAnchorId(2), kind: VaultBreakSafe(team_slot: 1, origin_cell: (x: 11, y: 30), width_cells: 3, height_cells: 2, quarter_turns: 3, objective_visual_profile_id: MapVisualProfileId(39))),
     ],
 )

@@ -649,7 +649,7 @@ mod tests {
         // No fixed step on a fast frame, several on a slow one.
         for (step, slow) in [(Duration::ZERO, false), (tick * 3, true)] {
             let mut app =
-                hud::screen_tests::hud_app(914, 411, brawler::map::WIPEOUT_MODE_DEFINITION);
+                hud::screen_tests::hud_app(914, 411, brawler::map::TAKEDOWN_MODE_DEFINITION);
             app.insert_resource(TimeUpdateStrategy::ManualDuration(step))
                 .insert_resource(ClientPlayableGate(true))
                 .init_resource::<MatchMenuState>()

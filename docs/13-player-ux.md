@@ -381,13 +381,13 @@ admission request. Multiplayer replay enters Queue; practice replay requests a n
 reservation. If exact replay is unavailable, Results keeps the outcome visible, disables replay
 with a factual reason, and leaves Dashboard available.
 
-Wipeout Results shows one score per team and a player breakdown of kills and deaths, with the local
+Takedown Results shows one score per team and a player breakdown of kills and deaths, with the local
 player highlighted. Counters come from the server's scoring transaction, including recent hostile
 damage credit for environmental defeats. Uncredited deaths still count as deaths. The bounded
 roster retains departed players; the final snapshot survives the routed return to the lobby.
 The results layout uses shared shell surfaces and preserves readable columns at compact sizes.
 The in-game HUD and live scoreboard remain separate from this post-match presentation.
-Hot Zone Results shows each team’s final capture progress. Heist Results shows each team’s
+Turf Hold Results shows each team’s final capture progress. Vault Break Results shows each team’s
 remaining idol health as exact current/maximum values and a proportional bar. These objective
 values and the outcome are captured together by the authority before the routed lobby return;
 Results never reconstructs them from surviving live objective entities.
@@ -550,8 +550,8 @@ exactly its touch square.
 The persistent in-match HUD (BRL-0155) has no text boxes:
 
 - Top center: a score and timer plate. The observer's team is on the left in ally blue and the
-  opponent on the right in enemy red. It shows Wipeout kills and target, Hot Zone capture
-  percentages and zone control, Heist idol health (DEFEND/ATTACK), or Zombie boosts and live
+  opponent on the right in enemy red. It shows Takedown kills and target, Turf Hold capture
+  percentages and zone control, Vault Break idol health (DEFEND/ATTACK), or Zombie boosts and live
   zombies. A teammate strip under it at top left covers Zombie, right of the touch menu button
   when that is shown.
 - Top right: a kill feed (at most four rows for four seconds). It is fed only by the defeat cues the

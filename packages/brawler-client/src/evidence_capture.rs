@@ -438,13 +438,13 @@ fn collect_match_snapshot(world: &mut World) -> Option<Value> {
         .query_filtered::<(
             &MatchState,
             Option<&brawler::matchplay::MatchClock>,
-            Option<&brawler::matchplay::WipeoutState>,
-            Option<&brawler::matchplay::HotZoneState>,
-            Option<&brawler::matchplay::HeistState>,
+            Option<&brawler::matchplay::TakedownState>,
+            Option<&brawler::matchplay::TurfHoldState>,
+            Option<&brawler::matchplay::VaultBreakState>,
         ), With<MatchRoot>>()
         .iter(world)
         .next()
-        .map(|(state, clock, wipeout, hot_zone, heist)| {
+        .map(|(state, clock, takedown, turf_hold, vault_break)| {
             json!({
                 "state": {
                     "match_id": state.match_id.to_string(),
@@ -456,28 +456,28 @@ fn collect_match_snapshot(world: &mut World) -> Option<Value> {
                     "match_id": clock.match_id.to_string(),
                     "completed_tick": clock.completed_tick,
                 })),
-                "wipeout": wipeout.map(|wipeout| json!({
-                    "match_id": wipeout.match_id.map(|match_id| match_id.to_string()),
-                    "players": evidence_field("wipeout.players", &wipeout.players),
-                    "completed_result": evidence_field("wipeout.completed_result", &wipeout.completed_result),
-                    "team_scores": wipeout.team_scores,
-                    "target_score": wipeout.target_score,
+                "takedown": takedown.map(|takedown| json!({
+                    "match_id": takedown.match_id.map(|match_id| match_id.to_string()),
+                    "players": evidence_field("takedown.players", &takedown.players),
+                    "completed_result": evidence_field("takedown.completed_result", &takedown.completed_result),
+                    "team_scores": takedown.team_scores,
+                    "target_score": takedown.target_score,
                 })),
-                "hot_zone": hot_zone.map(|hot_zone| json!({
-                    "match_id": hot_zone.match_id.to_string(),
-                    "zone_anchor_id": evidence_field("hot_zone.zone_anchor_id", &hot_zone.zone_anchor_id),
-                    "occupants": hot_zone.occupants,
-                    "status": evidence_field("hot_zone.status", &hot_zone.status),
-                    "progress_ticks": hot_zone.progress_ticks,
-                    "target_progress_ticks": hot_zone.target_progress_ticks,
-                    "next_evaluation_tick": hot_zone.next_evaluation_tick,
+                "turf_hold": turf_hold.map(|turf_hold| json!({
+                    "match_id": turf_hold.match_id.to_string(),
+                    "zone_anchor_id": evidence_field("turf_hold.zone_anchor_id", &turf_hold.zone_anchor_id),
+                    "occupants": turf_hold.occupants,
+                    "status": evidence_field("turf_hold.status", &turf_hold.status),
+                    "progress_ticks": turf_hold.progress_ticks,
+                    "target_progress_ticks": turf_hold.target_progress_ticks,
+                    "next_evaluation_tick": turf_hold.next_evaluation_tick,
                 })),
-                "heist": heist.map(|heist| json!({
-                    "match_id": heist.match_id.to_string(),
-                    "rules_revision": heist.rules_revision,
-                    "generation": evidence_field("heist.generation", &heist.generation),
-                    "safes": evidence_field("heist.safes", &heist.safes),
-                    "completion": evidence_field("heist.completion", &heist.completion),
+                "vault_break": vault_break.map(|vault_break| json!({
+                    "match_id": vault_break.match_id.to_string(),
+                    "rules_revision": vault_break.rules_revision,
+                    "generation": evidence_field("vault_break.generation", &vault_break.generation),
+                    "safes": evidence_field("vault_break.safes", &vault_break.safes),
+                    "completion": evidence_field("vault_break.completion", &vault_break.completion),
                 })),
             })
         })
@@ -513,12 +513,12 @@ fn collect_damageable_target_identity(identity: &brawler::map::DamageableTargetI
                 "placement_id": placement_id,
             },
         }),
-        brawler::map::DamageableTargetIdentity::HeistSafe {
+        brawler::map::DamageableTargetIdentity::VaultBreakSafe {
             match_id,
             anchor_id,
             defending_team,
         } => json!({
-            "HeistSafe": {
+            "VaultBreakSafe": {
                 "match_id": match_id.to_string(),
                 "anchor_id": anchor_id,
                 "defending_team": defending_team,
@@ -676,12 +676,12 @@ fn collect_damageable_object_snapshots(world: &mut World) -> Vec<Value> {
 fn collect_objective_snapshots(world: &mut World) -> Vec<Value> {
     let mut objectives = world
         .query_filtered::<(
-            &brawler::matchplay::HeistSafe,
+            &brawler::matchplay::VaultBreakSafe,
             &Position,
             &brawler::combat::CurrentHealth,
             &brawler::map::DamageableMaximumHealth,
             &brawler::map::DamageableLifeState,
-        ), With<brawler::matchplay::HeistSafe>>()
+        ), With<brawler::matchplay::VaultBreakSafe>>()
         .iter(world)
         .map(|(identity, position, health, maximum, life)| {
             json!({
@@ -841,7 +841,7 @@ mod tests {
             map_instance_id: brawler::map::MapInstanceId(7),
             generation: 3,
         };
-        let safe = brawler::matchplay::HeistSafeIdentity {
+        let safe = brawler::matchplay::VaultBreakSafeIdentity {
             anchor_id: brawler::map::ModeAnchorId(11),
             defending_team: brawler::combat::TeamId(0),
         };
@@ -850,7 +850,7 @@ mod tests {
             MatchRoot,
             MatchState {
                 match_id,
-                mode_definition_id: brawler::map::HEIST_MODE_DEFINITION,
+                mode_definition_id: brawler::map::VAULT_BREAK_MODE_DEFINITION,
                 phase: brawler::matchplay::MatchPhase::Active { ends_at_tick: 900 },
                 rules_revision: 1,
             },
@@ -858,22 +858,22 @@ mod tests {
                 match_id,
                 completed_tick: 42,
             },
-            brawler::matchplay::HotZoneState {
+            brawler::matchplay::TurfHoldState {
                 match_id,
                 zone_anchor_id: brawler::map::ModeAnchorId(5),
                 occupants: [1, 0],
-                status: brawler::matchplay::HotZoneStatus::Controlled {
+                status: brawler::matchplay::TurfHoldStatus::Controlled {
                     team: brawler::combat::TeamId(0),
                 },
                 progress_ticks: [12, 0],
                 target_progress_ticks: 1_800,
                 next_evaluation_tick: 43,
             },
-            brawler::matchplay::WipeoutState {
+            brawler::matchplay::TakedownState {
                 match_id: Some(match_id),
                 ..default()
             },
-            brawler::matchplay::HeistState {
+            brawler::matchplay::VaultBreakState {
                 match_id,
                 rules_revision: 1,
                 generation,
@@ -887,9 +887,9 @@ mod tests {
         let expected = Value::String(u128::MAX.to_string());
         assert_eq!(snapshot["state"]["match_id"], expected);
         assert_eq!(snapshot["clock"]["match_id"], expected);
-        assert_eq!(snapshot["hot_zone"]["match_id"], expected);
-        assert_eq!(snapshot["heist"]["match_id"], expected);
-        assert_eq!(snapshot["wipeout"]["match_id"], expected);
+        assert_eq!(snapshot["turf_hold"]["match_id"], expected);
+        assert_eq!(snapshot["vault_break"]["match_id"], expected);
+        assert_eq!(snapshot["takedown"]["match_id"], expected);
 
         let participant = collect_match_participant(&MatchParticipant {
             match_id,
@@ -909,13 +909,13 @@ mod tests {
         assert_eq!(sentry["match_id"], expected);
 
         let objective = collect_damageable_target_identity(
-            &brawler::map::DamageableTargetIdentity::HeistSafe {
+            &brawler::map::DamageableTargetIdentity::VaultBreakSafe {
                 match_id,
                 anchor_id: brawler::map::ModeAnchorId(6),
                 defending_team: brawler::combat::TeamId(1),
             },
         );
-        assert_eq!(objective["HeistSafe"]["match_id"], expected);
+        assert_eq!(objective["VaultBreakSafe"]["match_id"], expected);
 
         serde_json::to_vec_pretty(&snapshot).expect("wide-ID snapshot must serialize");
     }

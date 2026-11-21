@@ -1,4 +1,4 @@
-//! Deterministic Hot Zone authority, progress, recovery, and restart network scenarios.
+//! Deterministic Turf Hold authority, progress, recovery, and restart network scenarios.
 
 use super::*;
 
@@ -8,20 +8,20 @@ fn server_match(harness: &mut Harness) -> MatchState {
     *query.single(world).expect("one server match")
 }
 
-fn server_hot_zone(harness: &mut Harness) -> brawler::matchplay::HotZoneState {
+fn server_turf_hold(harness: &mut Harness) -> brawler::matchplay::TurfHoldState {
     let world = harness.server.world_mut();
     let mut query =
-        world.query_filtered::<&brawler::matchplay::HotZoneState, With<MatchRootMarker>>();
-    *query.single(world).expect("one server hot zone state")
+        world.query_filtered::<&brawler::matchplay::TurfHoldState, With<MatchRootMarker>>();
+    *query.single(world).expect("one server turf hold state")
 }
 
-fn client_hot_zone(
+fn client_turf_hold(
     harness: &mut Harness,
     index: usize,
-) -> Option<brawler::matchplay::HotZoneState> {
+) -> Option<brawler::matchplay::TurfHoldState> {
     let world = harness.clients[index].world_mut();
     let mut query =
-        world.query_filtered::<&brawler::matchplay::HotZoneState, With<MatchRootMarker>>();
+        world.query_filtered::<&brawler::matchplay::TurfHoldState, With<MatchRootMarker>>();
     query.iter(world).next().copied()
 }
 
@@ -113,7 +113,7 @@ fn release_into_zone(harness: &mut Harness, index: usize, player: PlayerId) {
     // to route around the staging cover and enter the zone.
     for _ in 0..800 {
         step_toward(harness, index, player, Vec2::ZERO);
-        let occupants = server_hot_zone(harness).occupants;
+        let occupants = server_turf_hold(harness).occupants;
         if occupants[index.min(1)] > 0 {
             harness.set_controlled_input(index, FighterInput::default());
             return;
@@ -124,7 +124,7 @@ fn release_into_zone(harness: &mut Harness, index: usize, player: PlayerId) {
 
 fn release_both_into_zone(harness: &mut Harness, players: [PlayerId; 2]) {
     for _ in 0..800 {
-        let occupants = server_hot_zone(harness).occupants;
+        let occupants = server_turf_hold(harness).occupants;
         if occupants == [1, 1] {
             for index in 0..2 {
                 harness.set_controlled_input(index, FighterInput::default());
@@ -144,7 +144,7 @@ fn release_both_into_zone(harness: &mut Harness, players: [PlayerId; 2]) {
     }
     panic!(
         "staged fighters never contested the objective; occupants={:?}, positions={:?}",
-        server_hot_zone(harness).occupants,
+        server_turf_hold(harness).occupants,
         players.map(|player| server_position(harness, player))
     );
 }
@@ -155,10 +155,10 @@ fn force_deadline_with_progress(harness: &mut Harness, progress: [u16; 2]) {
     let tick = harness.server_simulation_tick();
     let world = harness.server.world_mut();
     let mut roots =
-        world.query_filtered::<&mut brawler::matchplay::HotZoneState, With<MatchRootMarker>>();
-    let mut hot_zone = roots.single_mut(world).unwrap();
-    hot_zone.progress_ticks = progress;
-    hot_zone.next_evaluation_tick = tick + 4;
+        world.query_filtered::<&mut brawler::matchplay::TurfHoldState, With<MatchRootMarker>>();
+    let mut turf_hold = roots.single_mut(world).unwrap();
+    turf_hold.progress_ticks = progress;
+    turf_hold.next_evaluation_tick = tick + 4;
     drop(roots);
     let mut states = world.query_filtered::<&mut MatchState, With<MatchRootMarker>>();
     let mut state = states.single_mut(world).unwrap();
@@ -196,23 +196,23 @@ fn restart_after_completion(harness: &mut Harness, request_base: u64) {
 }
 
 #[test]
-fn hot_zone_unopposed_control_completes_threshold_and_converges() {
-    let mut harness = Harness::new_hot_zone_match(2);
+fn turf_hold_unopposed_control_completes_threshold_and_converges() {
+    let mut harness = Harness::new_turf_hold_match(2);
     select_ready_and_activate(&mut harness, 10);
 
     let player = stage_outside_zone(&mut harness, 0);
     release_into_zone(&mut harness, 0, player);
-    assert_eq!(server_hot_zone(&mut harness).progress_ticks[0], 1);
+    assert_eq!(server_turf_hold(&mut harness).progress_ticks[0], 1);
 
     // Control alone advances one progress unit per eligible tick.
     step_until_budget(&mut harness, 200, |harness| {
         matches!(server_match(harness).phase, MatchPhase::Completed { .. })
     });
 
-    let hot_zone = server_hot_zone(&mut harness);
-    assert_eq!(hot_zone.target_progress_ticks, 30);
-    assert_eq!(hot_zone.progress_ticks, [30, 0]);
-    assert_eq!(hot_zone.occupants, [1, 0]);
+    let turf_hold = server_turf_hold(&mut harness);
+    assert_eq!(turf_hold.target_progress_ticks, 30);
+    assert_eq!(turf_hold.progress_ticks, [30, 0]);
+    assert_eq!(turf_hold.occupants, [1, 0]);
     assert_eq!(
         phase_result(&server_match(&mut harness)),
         Some(brawler::matchplay::MatchResult::TeamVictory { team: TeamId(0) })
@@ -221,20 +221,20 @@ fn hot_zone_unopposed_control_completes_threshold_and_converges() {
     // Both clients converge on the same durable objective generation and totals.
     step_until_budget(&mut harness, 240, |harness| {
         (0..2).all(|index| {
-            client_hot_zone(harness, index).is_some_and(|state| state.progress_ticks == [30, 0])
+            client_turf_hold(harness, index).is_some_and(|state| state.progress_ticks == [30, 0])
         })
     });
     for index in 0..2 {
-        let client_state = client_hot_zone(&mut harness, index).unwrap();
-        assert_eq!(client_state.match_id, hot_zone.match_id);
-        assert_eq!(client_state.zone_anchor_id, hot_zone.zone_anchor_id);
-        assert_eq!(client_state.status, hot_zone.status);
+        let client_state = client_turf_hold(&mut harness, index).unwrap();
+        assert_eq!(client_state.match_id, turf_hold.match_id);
+        assert_eq!(client_state.zone_anchor_id, turf_hold.zone_anchor_id);
+        assert_eq!(client_state.status, turf_hold.status);
     }
 }
 
 #[test]
-fn hot_zone_contested_control_advances_neither_team() {
-    let mut harness = Harness::new_hot_zone_match(2);
+fn turf_hold_contested_control_advances_neither_team() {
+    let mut harness = Harness::new_turf_hold_match(2);
     select_ready_and_activate(&mut harness, 10);
 
     let players = [
@@ -244,22 +244,22 @@ fn hot_zone_contested_control_advances_neither_team() {
     // Release both from symmetric staging points; neither side can accumulate the short
     // verification threshold before the other arrives.
     release_both_into_zone(&mut harness, players);
-    let contested = server_hot_zone(&mut harness);
+    let contested = server_turf_hold(&mut harness);
     assert_eq!(contested.occupants, [1, 1]);
     assert_eq!(
         contested.status,
-        brawler::matchplay::HotZoneStatus::Contested
+        brawler::matchplay::TurfHoldStatus::Contested
     );
 
     let frozen = contested.progress_ticks;
     for _ in 0..120 {
         harness.step();
     }
-    let after = server_hot_zone(&mut harness);
+    let after = server_turf_hold(&mut harness);
     assert_eq!(after.occupants, [1, 1]);
     assert_eq!(
         after.status,
-        brawler::matchplay::HotZoneStatus::Contested,
+        brawler::matchplay::TurfHoldStatus::Contested,
         "contested time does not advance either side"
     );
     assert_eq!(after.progress_ticks, frozen);
@@ -271,8 +271,8 @@ fn hot_zone_contested_control_advances_neither_team() {
 }
 
 #[test]
-fn hot_zone_timeout_leader_tie_and_recovered_threshold_use_precedence() {
-    let mut harness = Harness::new_hot_zone_match(2);
+fn turf_hold_timeout_leader_tie_and_recovered_threshold_use_precedence() {
+    let mut harness = Harness::new_turf_hold_match(2);
     let diagnostics =
         brawler::testing::capture_expected_late_input_diagnostics(&mut harness.server);
     select_ready_and_activate(&mut harness, 10);
@@ -286,7 +286,7 @@ fn hot_zone_timeout_leader_tie_and_recovered_threshold_use_precedence() {
         phase_result(&server_match(&mut harness)),
         Some(brawler::matchplay::MatchResult::TeamVictory { team: TeamId(0) })
     );
-    assert_eq!(server_hot_zone(&mut harness).progress_ticks, [7, 5]);
+    assert_eq!(server_turf_hold(&mut harness).progress_ticks, [7, 5]);
 
     // Restart, then inject an exact tie: the timeout comparison draws.
     restart_after_completion(&mut harness, 20);
@@ -308,7 +308,7 @@ fn hot_zone_timeout_leader_tie_and_recovered_threshold_use_precedence() {
     step_until_budget(&mut harness, 40, |harness| {
         matches!(server_match(harness).phase, MatchPhase::Completed { .. })
     });
-    assert_eq!(server_hot_zone(&mut harness).progress_ticks, [30, 30]);
+    assert_eq!(server_turf_hold(&mut harness).progress_ticks, [30, 30]);
     assert_eq!(
         phase_result(&server_match(&mut harness)),
         Some(brawler::matchplay::MatchResult::Draw)
@@ -320,8 +320,8 @@ fn hot_zone_timeout_leader_tie_and_recovered_threshold_use_precedence() {
 }
 
 #[test]
-fn hot_zone_restart_resets_state_in_place_and_converges() {
-    let mut harness = Harness::new_hot_zone_match(2);
+fn turf_hold_restart_resets_state_in_place_and_converges() {
+    let mut harness = Harness::new_turf_hold_match(2);
     let diagnostics =
         brawler::testing::capture_expected_late_input_diagnostics(&mut harness.server);
     select_ready_and_activate(&mut harness, 10);
@@ -331,46 +331,46 @@ fn hot_zone_restart_resets_state_in_place_and_converges() {
         matches!(server_match(harness).phase, MatchPhase::Completed { .. })
     });
     let completed = server_match(&mut harness);
-    let previous_anchor = server_hot_zone(&mut harness).zone_anchor_id;
+    let previous_anchor = server_turf_hold(&mut harness).zone_anchor_id;
 
     restart_after_completion(&mut harness, 20);
     let restarted = server_match(&mut harness);
     assert_ne!(restarted.match_id, completed.match_id);
-    let hot_zone = server_hot_zone(&mut harness);
-    assert_eq!(hot_zone.match_id, restarted.match_id);
-    assert_eq!(hot_zone.progress_ticks, [0, 0]);
-    assert_eq!(hot_zone.occupants, [0, 0]);
-    assert_eq!(hot_zone.status, brawler::matchplay::HotZoneStatus::Empty);
+    let turf_hold = server_turf_hold(&mut harness);
+    assert_eq!(turf_hold.match_id, restarted.match_id);
+    assert_eq!(turf_hold.progress_ticks, [0, 0]);
+    assert_eq!(turf_hold.occupants, [0, 0]);
+    assert_eq!(turf_hold.status, brawler::matchplay::TurfHoldStatus::Empty);
     assert_eq!(
-        hot_zone.next_evaluation_tick,
-        brawler::matchplay::HotZoneState::UNINITIALIZED_EVALUATION_TICK
+        turf_hold.next_evaluation_tick,
+        brawler::matchplay::TurfHoldState::UNINITIALIZED_EVALUATION_TICK
     );
-    assert_eq!(hot_zone.zone_anchor_id, previous_anchor);
+    assert_eq!(turf_hold.zone_anchor_id, previous_anchor);
 
     step_until_budget(&mut harness, 240, |harness| {
         (0..2).all(|index| {
-            client_hot_zone(harness, index).is_some_and(|state| state.progress_ticks == [0, 0])
+            client_turf_hold(harness, index).is_some_and(|state| state.progress_ticks == [0, 0])
         })
     });
     assert!(
         diagnostics.finish() > 0,
-        "hot-zone restart did not exercise expected late-input corrections"
+        "turf-hold restart did not exercise expected late-input corrections"
     );
 }
 
 #[test]
-fn hot_zone_client_forgery_cannot_mutate_authority_and_clock_generation_recovers() {
-    let mut harness = Harness::new_hot_zone_match(2);
+fn turf_hold_client_forgery_cannot_mutate_authority_and_clock_generation_recovers() {
+    let mut harness = Harness::new_turf_hold_match(2);
     select_ready_and_activate(&mut harness, 10);
 
     // Forge client-owned objective state and a stale clock generation.
     {
         let world = harness.clients[0].world_mut();
         let mut zones =
-            world.query_filtered::<&mut brawler::matchplay::HotZoneState, With<MatchRootMarker>>();
+            world.query_filtered::<&mut brawler::matchplay::TurfHoldState, With<MatchRootMarker>>();
         if let Some(mut zone) = zones.iter_mut(world).next() {
             zone.progress_ticks = [29, 29];
-            zone.status = brawler::matchplay::HotZoneStatus::Contested;
+            zone.status = brawler::matchplay::TurfHoldStatus::Contested;
         }
         let mut clocks =
             world.query_filtered::<&mut brawler::matchplay::MatchClock, With<MatchRootMarker>>();
@@ -381,16 +381,16 @@ fn hot_zone_client_forgery_cannot_mutate_authority_and_clock_generation_recovers
     for _ in 0..30 {
         harness.step();
     }
-    let authoritative = server_hot_zone(&mut harness);
+    let authoritative = server_turf_hold(&mut harness);
     assert_eq!(authoritative.progress_ticks, [0, 0]);
     assert_eq!(
         authoritative.status,
-        brawler::matchplay::HotZoneStatus::Empty
+        brawler::matchplay::TurfHoldStatus::Empty
     );
 
     // The client converges back to the authoritative durable state and clock generation.
     step_until_budget(&mut harness, 240, |harness| {
-        client_hot_zone(harness, 0)
+        client_turf_hold(harness, 0)
             .is_some_and(|state| state.progress_ticks == authoritative.progress_ticks)
     });
     let world = harness.clients[0].world_mut();
@@ -405,8 +405,8 @@ fn hot_zone_client_forgery_cannot_mutate_authority_and_clock_generation_recovers
 /// Three clients keep both teams connected after one disconnect, so the lingering
 /// disconnected fighter inside the zone loses occupancy without resolving a forfeit.
 #[test]
-fn hot_zone_disconnected_fighter_inside_zone_loses_occupancy_while_active() {
-    let mut harness = Harness::new_hot_zone_match(3);
+fn turf_hold_disconnected_fighter_inside_zone_loses_occupancy_while_active() {
+    let mut harness = Harness::new_turf_hold_match(3);
     harness.step_until(|harness| (0..3).all(|index| harness.client_is_active(index)));
     harness.step_until(|harness| (0..3).all(|index| harness.loadout_is_ready(index)));
     let waiting = server_match(&mut harness);
@@ -426,7 +426,7 @@ fn hot_zone_disconnected_fighter_inside_zone_loses_occupancy_while_active() {
 
     let player = stage_outside_zone(&mut harness, 0);
     release_into_zone(&mut harness, 0, player);
-    assert_eq!(server_hot_zone(&mut harness).occupants, [1, 0]);
+    assert_eq!(server_turf_hold(&mut harness).occupants, [1, 0]);
 
     // Disconnect only this fighter's link; its team keeps another connected participant,
     // so the match stays active and occupancy must drop through roster membership alone.
@@ -434,22 +434,22 @@ fn hot_zone_disconnected_fighter_inside_zone_loses_occupancy_while_active() {
         entity: harness.client_entities[0],
     });
     step_until_budget(&mut harness, 40, |harness| {
-        server_hot_zone(harness).occupants == [0, 0]
+        server_turf_hold(harness).occupants == [0, 0]
     });
     assert!(matches!(
         server_match(&mut harness).phase,
         MatchPhase::Active { .. }
     ));
-    let frozen = server_hot_zone(&mut harness).progress_ticks;
+    let frozen = server_turf_hold(&mut harness).progress_ticks;
     for _ in 0..60 {
         harness.step();
     }
-    assert_eq!(server_hot_zone(&mut harness).progress_ticks, frozen);
+    assert_eq!(server_turf_hold(&mut harness).progress_ticks, frozen);
 }
 
 #[test]
-fn hot_zone_packet_impairment_and_duplicate_input_cannot_double_advance_progress() {
-    let mut harness = Harness::new_hot_zone_match(2);
+fn turf_hold_packet_impairment_and_duplicate_input_cannot_double_advance_progress() {
+    let mut harness = Harness::new_turf_hold_match(2);
     select_ready_and_activate(&mut harness, 10);
     let player = stage_outside_zone(&mut harness, 0);
     release_into_zone(&mut harness, 0, player);
@@ -469,15 +469,15 @@ fn hot_zone_packet_impairment_and_duplicate_input_cannot_double_advance_progress
             forged,
         );
     }
-    let before = server_hot_zone(&mut harness).progress_ticks;
+    let before = server_turf_hold(&mut harness).progress_ticks;
     let start_tick = harness.server_simulation_tick();
     for _ in 0..60 {
         harness.step();
     }
     let elapsed = harness.server_simulation_tick().saturating_sub(start_tick);
-    let after = server_hot_zone(&mut harness).progress_ticks;
+    let after = server_turf_hold(&mut harness).progress_ticks;
     // One unit per server tick until the verification threshold completes the match.
-    let remaining = u64::from(server_hot_zone(&mut harness).target_progress_ticks - before[0]);
+    let remaining = u64::from(server_turf_hold(&mut harness).target_progress_ticks - before[0]);
     assert_eq!(
         u64::from(after[0] - before[0]),
         elapsed.min(remaining),

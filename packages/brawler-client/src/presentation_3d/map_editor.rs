@@ -489,13 +489,13 @@ fn spawn_selection(
         .filter(|anchor| preview.selected.contains(&anchor.placement_id))
     {
         let cell = match anchor.kind {
-            brawler::map::MapModeAnchorKind::HotZoneCircle {
+            brawler::map::MapModeAnchorKind::TurfHoldCircle {
                 center_half_cell, ..
             }
             | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
                 brawler::map::MapCell::new(center_half_cell.x / 2, center_half_cell.y / 2)
             }
-            brawler::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => origin_cell,
+            brawler::map::MapModeAnchorKind::VaultBreakSafe { origin_cell, .. } => origin_cell,
         };
         selected_cells.push(cell);
         let center = preview.snapshot.dimensions.cell_center(cell);
@@ -557,13 +557,13 @@ fn spawn_hover(
         return;
     };
     let cell = match anchor.kind {
-        brawler::map::MapModeAnchorKind::HotZoneCircle {
+        brawler::map::MapModeAnchorKind::TurfHoldCircle {
             center_half_cell, ..
         }
         | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
             brawler::map::MapCell::new(center_half_cell.x / 2, center_half_cell.y / 2)
         }
-        brawler::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => origin_cell,
+        brawler::map::MapModeAnchorKind::VaultBreakSafe { origin_cell, .. } => origin_cell,
     };
     spawn_outline(
         commands,

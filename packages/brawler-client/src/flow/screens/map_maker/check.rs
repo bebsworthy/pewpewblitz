@@ -4,9 +4,9 @@
 
 use super::PaletteItem;
 use brawler::map::{
-    HEIST_MODE_DEFINITION, HOT_ZONE_MODE_DEFINITION, MIN_SPAWNS_PER_TEAM, MapCell,
-    MapContentCatalog, MapInstanceId, MapModeAnchorKind, MapPlacementId, MapPlacementParameters,
-    MapRecipe, validate_authored_recipe,
+    MIN_SPAWNS_PER_TEAM, MapCell, MapContentCatalog, MapInstanceId, MapModeAnchorKind,
+    MapPlacementId, MapPlacementParameters, MapRecipe, TURF_HOLD_MODE_DEFINITION,
+    VAULT_BREAK_MODE_DEFINITION, validate_authored_recipe,
 };
 
 /// One countable requirement of the draft's mode.
@@ -39,9 +39,9 @@ impl Requirement {
         let name = match self.fix {
             PaletteItem::Spawn(0) => "Team A spawn",
             PaletteItem::Spawn(_) => "Team B spawn",
-            PaletteItem::HotZone => "capture zone",
-            PaletteItem::HeistSafe(0) => "Team A safe",
-            PaletteItem::HeistSafe(_) => "Team B safe",
+            PaletteItem::TurfHold => "capture zone",
+            PaletteItem::VaultBreakSafe(0) => "Team A safe",
+            PaletteItem::VaultBreakSafe(_) => "Team B safe",
             PaletteItem::Asset(_) => "asset",
         };
         if self.have > self.need && self.exact {
@@ -122,21 +122,21 @@ pub(super) fn map_check(recipe: &MapRecipe, catalog: &MapContentCatalog) -> MapC
         },
     ];
     let mode = recipe.mode_definition_id;
-    if mode == HOT_ZONE_MODE_DEFINITION {
+    if mode == TURF_HOLD_MODE_DEFINITION {
         let zones = recipe
             .mode_anchors
             .iter()
-            .filter(|anchor| matches!(anchor.kind, MapModeAnchorKind::HotZoneCircle { .. }))
+            .filter(|anchor| matches!(anchor.kind, MapModeAnchorKind::TurfHoldCircle { .. }))
             .count();
         requirements.push(Requirement {
             subject: "Capture zone",
             have: zones,
             need: 1,
             exact: true,
-            fix: PaletteItem::HotZone,
+            fix: PaletteItem::TurfHold,
         });
     }
-    if mode == HEIST_MODE_DEFINITION {
+    if mode == VAULT_BREAK_MODE_DEFINITION {
         for (team, subject) in [(0, "Team A safe"), (1, "Team B safe")] {
             let safes = recipe
                 .mode_anchors
@@ -144,7 +144,7 @@ pub(super) fn map_check(recipe: &MapRecipe, catalog: &MapContentCatalog) -> MapC
                 .filter(|anchor| {
                     matches!(
                         anchor.kind,
-                        MapModeAnchorKind::HeistSafe { team_slot, .. } if team_slot == team
+                        MapModeAnchorKind::VaultBreakSafe { team_slot, .. } if team_slot == team
                     )
                 })
                 .count();
@@ -153,7 +153,7 @@ pub(super) fn map_check(recipe: &MapRecipe, catalog: &MapContentCatalog) -> MapC
                 have: safes,
                 need: 1,
                 exact: true,
-                fix: PaletteItem::HeistSafe(team),
+                fix: PaletteItem::VaultBreakSafe(team),
             });
         }
     }
@@ -217,9 +217,12 @@ mod tests {
     }
 
     #[test]
-    fn a_blank_hot_zone_draft_lists_every_missing_requirement() {
+    fn a_blank_turf_hold_draft_lists_every_missing_requirement() {
         let catalog = MapContentCatalog::embedded().unwrap();
-        let check = map_check(&session(HOT_ZONE_MODE_DEFINITION).document.recipe, &catalog);
+        let check = map_check(
+            &session(TURF_HOLD_MODE_DEFINITION).document.recipe,
+            &catalog,
+        );
         let headlines: Vec<_> = check
             .requirements
             .iter()
@@ -241,7 +244,7 @@ mod tests {
     #[test]
     fn counts_follow_placements_and_the_validator_decides_readiness() {
         let catalog = MapContentCatalog::embedded().unwrap();
-        let mut session = session(brawler::map::WIPEOUT_MODE_DEFINITION);
+        let mut session = session(brawler::map::TAKEDOWN_MODE_DEFINITION);
         for (team, x) in [(0, 4), (1, 26)] {
             for y in [4, 11, 18] {
                 session

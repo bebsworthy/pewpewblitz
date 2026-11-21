@@ -22,7 +22,7 @@ const PROFILES: [(&str, usize); 3] = [("local", 0), ("rtt-60ms", 4), ("rtt-120ms
 /// Displacement that counts as visibly moved.
 const VISIBLE_DELTA_UNITS: f32 = 0.5;
 
-/// Two clients in an active Wipeout match; client 0 is measured with the given delay.
+/// Two clients in an active Takedown match; client 0 is measured with the given delay.
 fn joined_harness(delay: usize) -> Harness {
     let mut harness = activated_harness(delay, walk(Vec2::X));
     harness.set_controlled_input(0, FighterInput::default());
@@ -33,7 +33,7 @@ fn joined_harness(delay: usize) -> Harness {
     harness
 }
 
-/// Two clients readied into a Wipeout match, returned on the first step on which the server
+/// Two clients readied into a Takedown match, returned on the first step on which the server
 /// match is `Active`. Client 0 holds `held` from before readying (with the given delay).
 fn activated_harness(delay: usize, held: FighterInput) -> Harness {
     let mut harness = Harness::new_match(2);

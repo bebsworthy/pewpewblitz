@@ -527,7 +527,7 @@ mod tests {
         ));
         world.spawn(crate::matchplay::MatchState {
             match_id: crate::matchplay::MatchId(7),
-            mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: crate::map::TAKEDOWN_MODE_DEFINITION,
             phase: crate::matchplay::MatchPhase::Active { ends_at_tick: 999 },
             rules_revision: 1,
         });

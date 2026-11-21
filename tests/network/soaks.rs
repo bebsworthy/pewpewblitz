@@ -7,7 +7,7 @@
 
 use super::harness::Harness;
 use bevy::prelude::{With, Without};
-use brawler::matchplay::{MatchPhase, MatchRoot as MatchRootMarker, MatchState, WipeoutState};
+use brawler::matchplay::{MatchPhase, MatchRoot as MatchRootMarker, MatchState, TakedownState};
 use brawler::protocol::{MatchCommand, MatchCommandRequest};
 use brawler::testing::TestDummy;
 
@@ -95,24 +95,24 @@ fn server_bounds(harness: &mut Harness) -> ServerBounds {
     }
 }
 
-/// Complete the active Wipeout match by installing the target score authoritatively.
-fn force_wipeout_completion(harness: &mut Harness) {
+/// Complete the active Takedown match by installing the target score authoritatively.
+fn force_takedown_completion(harness: &mut Harness) {
     let world = harness.server.world_mut();
-    let mut query = world.query_filtered::<&mut WipeoutState, With<MatchRootMarker>>();
-    let mut state = query.single_mut(world).expect("one wipeout state");
+    let mut query = world.query_filtered::<&mut TakedownState, With<MatchRootMarker>>();
+    let mut state = query.single_mut(world).expect("one takedown state");
     state.team_scores[0] = state.target_score.max(1);
 }
 
-/// Complete the active Hot Zone match by installing the target progress authoritatively.
-fn force_hot_zone_completion(harness: &mut Harness) {
+/// Complete the active Turf Hold match by installing the target progress authoritatively.
+fn force_turf_hold_completion(harness: &mut Harness) {
     let world = harness.server.world_mut();
     let mut query =
-        world.query_filtered::<&mut brawler::matchplay::HotZoneState, With<MatchRootMarker>>();
-    let mut state = query.single_mut(world).expect("one hot zone state");
+        world.query_filtered::<&mut brawler::matchplay::TurfHoldState, With<MatchRootMarker>>();
+    let mut state = query.single_mut(world).expect("one turf hold state");
     state.progress_ticks[0] = state.target_progress_ticks.max(1);
 }
 
-fn run_match_soak(harness: &mut Harness, clients: usize, hot_zone: bool) {
+fn run_match_soak(harness: &mut Harness, clients: usize, turf_hold: bool) {
     let started = std::time::Instant::now();
     let mut sequence = 10_u64;
     harness.step_until(|harness| {
@@ -127,10 +127,10 @@ fn run_match_soak(harness: &mut Harness, clients: usize, hot_zone: bool) {
             ready_participants(harness, clients, &mut sequence);
         }
         let _active = server_match(harness);
-        if hot_zone {
-            force_hot_zone_completion(harness);
+        if turf_hold {
+            force_turf_hold_completion(harness);
         } else {
-            force_wipeout_completion(harness);
+            force_takedown_completion(harness);
         }
         step_until_labelled(harness, "forced completion", |harness| {
             matches!(server_match(harness).phase, MatchPhase::Completed { .. })
@@ -200,36 +200,36 @@ fn run_match_soak(harness: &mut Harness, clients: usize, hot_zone: bool) {
         // Client headless automation re-arms readiness and restart after each completed
         // match, so the next round begins by waiting for Active again.
         let _ = round;
-        let _ = hot_zone;
+        let _ = turf_hold;
     }
     println!(
         "{MATCH_SOAK_ROUNDS} authoritative {} matches completed and restarted in {:.1}s",
-        if hot_zone { "hot-zone" } else { "wipeout" },
+        if turf_hold { "turf-hold" } else { "takedown" },
         started.elapsed().as_secs_f32()
     );
 }
 
 #[test]
-fn wipeout_twenty_five_match_restart_soak_retains_bounded_state() {
+fn takedown_twenty_five_match_restart_soak_retains_bounded_state() {
     let mut harness = Harness::new_match(2);
     let diagnostics =
         brawler::testing::capture_expected_late_input_diagnostics(&mut harness.server);
     run_match_soak(&mut harness, 2, false);
     assert!(
         diagnostics.finish() > 0,
-        "wipeout soak did not exercise the expected late-input correction path"
+        "takedown soak did not exercise the expected late-input correction path"
     );
 }
 
 #[test]
-fn hot_zone_twenty_five_match_restart_soak_retains_bounded_state() {
-    let mut harness = Harness::new_hot_zone_match(2);
+fn turf_hold_twenty_five_match_restart_soak_retains_bounded_state() {
+    let mut harness = Harness::new_turf_hold_match(2);
     let diagnostics =
         brawler::testing::capture_expected_late_input_diagnostics(&mut harness.server);
     run_match_soak(&mut harness, 2, true);
     assert!(
         diagnostics.finish() > 0,
-        "hot-zone soak did not exercise the expected late-input correction path"
+        "turf-hold soak did not exercise the expected late-input correction path"
     );
 }
 
@@ -281,7 +281,7 @@ fn reconnect_soak_alternates_disconnect_and_clean_new_sessions() {
 
         // Complete and restart from the remaining client so the waiting phase can admit
         // a fresh session in the next cycle.
-        force_wipeout_completion(&mut harness);
+        force_takedown_completion(&mut harness);
         step_until_labelled(&mut harness, "forced completion", |harness| {
             matches!(server_match(harness).phase, MatchPhase::Completed { .. })
         });

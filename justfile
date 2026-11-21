@@ -62,7 +62,7 @@ zombie-e2e players="2":
     ./scripts/e2e-zombie.sh {{players}}
 
 # Run one exact real-process Practice game with one human and manifest bots; `map` picks a built-in map preset ID.
-practice-e2e game_type="wipeout-1v1" map="":
+practice-e2e game_type="takedown-1v1" map="":
     ./scripts/e2e-practice.sh {{game_type}} {{map}}
 
 # Publish a map from one client, approve it with the operator CLI, and play it in a routed 1v1 queue match.
@@ -70,7 +70,7 @@ published-map-e2e:
     ./scripts/e2e-published-map.sh
 
 # Keep one routed Practice match session alive across two 4 s outages: to a new client source port, then back to the original.
-network-change-e2e game_type="wipeout-1v1":
+network-change-e2e game_type="takedown-1v1":
     ./scripts/e2e-network-change.sh {{game_type}}
 
 # Reach the lobby welcome on the first attempt through a proxy that delays every supervisor-to-client datagram.
@@ -78,11 +78,11 @@ slow-link-e2e delay_ms="1500":
     ./scripts/e2e-slow-link.sh {{delay_ms}}
 
 # Lose one routed Practice match session beyond the 10 s session bound, then rejoin the same fighter in the still-running match.
-rejoin-e2e game_type="wipeout-1v1":
+rejoin-e2e game_type="takedown-1v1":
     ./scripts/e2e-rejoin.sh {{game_type}}
 
 # Complete a PvP 1v1 match by forfeit while one player's seat is held, then require that player to rejoin it for its Results.
-completed-rejoin-e2e game_type="wipeout-1v1":
+completed-rejoin-e2e game_type="takedown-1v1":
     ./scripts/e2e-completed-rejoin.sh {{game_type}}
 
 # Record one bounded routed release-client render report plus paired PNG/JSON captures at 1280x720.
@@ -250,13 +250,13 @@ _e2e-matrix:
     ./scripts/e2e.sh 6
 
 _practice-e2e-matrix:
-    ./scripts/e2e-practice.sh wipeout-1v1
-    ./scripts/e2e-practice.sh wipeout-2v2
-    ./scripts/e2e-practice.sh wipeout-3v3
-    ./scripts/e2e-practice.sh wipeout-3v3 14
-    ./scripts/e2e-practice.sh hot-zone-1v1
-    ./scripts/e2e-practice.sh hot-zone-2v2
-    ./scripts/e2e-practice.sh hot-zone-3v3
-    ./scripts/e2e-practice.sh heist-1v1
-    ./scripts/e2e-practice.sh heist-2v2
-    ./scripts/e2e-practice.sh heist-3v3
+    ./scripts/e2e-practice.sh takedown-1v1
+    ./scripts/e2e-practice.sh takedown-2v2
+    ./scripts/e2e-practice.sh takedown-3v3
+    ./scripts/e2e-practice.sh takedown-3v3 14
+    ./scripts/e2e-practice.sh turf-hold-1v1
+    ./scripts/e2e-practice.sh turf-hold-2v2
+    ./scripts/e2e-practice.sh turf-hold-3v3
+    ./scripts/e2e-practice.sh vault-break-1v1
+    ./scripts/e2e-practice.sh vault-break-2v2
+    ./scripts/e2e-practice.sh vault-break-3v3

@@ -708,11 +708,12 @@ mod tests {
     };
     use crate::vfx::{
         COMBAT_IMPACT_VFX, COMBAT_MUZZLE_VFX, COMBAT_RESET_VFX, COMBAT_VFX_PRODUCER_RANK,
-        CombatVfxProducerPlugin, ELEMENTAL_FIELD_VFX, HEIST_DAMAGED_VFX, HEIST_VFX_PRODUCER_RANK,
-        HeistVfxProducerPlugin, PICKUP_COLLECTED_VFX, PICKUP_VFX_PRODUCER_RANK,
-        PickupVfxProducerPlugin, REVEAL_SCAN_VFX, VfxDeadline, VfxRegistryPlugin,
-        VfxRequestCapabilities, VfxRequestKey, VfxRequestOrder, VfxRequestRegistration,
-        WORLD_OBJECT_DAMAGED_VFX, WORLD_OBJECT_VFX_PRODUCER_RANK, WorldObjectVfxProducerPlugin,
+        CombatVfxProducerPlugin, ELEMENTAL_FIELD_VFX, PICKUP_COLLECTED_VFX,
+        PICKUP_VFX_PRODUCER_RANK, PickupVfxProducerPlugin, REVEAL_SCAN_VFX,
+        VAULT_BREAK_DAMAGED_VFX, VAULT_BREAK_VFX_PRODUCER_RANK, VaultBreakVfxProducerPlugin,
+        VfxDeadline, VfxRegistryPlugin, VfxRequestCapabilities, VfxRequestKey, VfxRequestOrder,
+        VfxRequestRegistration, WORLD_OBJECT_DAMAGED_VFX, WORLD_OBJECT_VFX_PRODUCER_RANK,
+        WorldObjectVfxProducerPlugin,
     };
 
     pub(super) fn registry() -> VfxRegistry {
@@ -721,7 +722,7 @@ mod tests {
             CombatVfxProducerPlugin,
             WorldObjectVfxProducerPlugin,
             PickupVfxProducerPlugin,
-            HeistVfxProducerPlugin,
+            VaultBreakVfxProducerPlugin,
         ));
         brawler::test_app::finalize(&mut app);
         app.world().resource::<VfxRegistry>().clone()
@@ -898,7 +899,7 @@ mod tests {
     #[test]
     fn effect_allocation_preserves_cross_family_message_order() {
         let mut app = effect_allocation_app();
-        for label in ["combat", "world-object", "pickup", "heist"] {
+        for label in ["combat", "world-object", "pickup", "vault-break"] {
             app.world_mut()
                 .write_message(pending_effect(label, Duration::from_millis(100)));
         }
@@ -917,7 +918,7 @@ mod tests {
                 .into_iter()
                 .map(|(_, name)| name)
                 .collect::<Vec<_>>(),
-            ["combat", "world-object", "pickup", "heist"]
+            ["combat", "world-object", "pickup", "vault-break"]
         );
     }
 
@@ -935,7 +936,12 @@ mod tests {
             .unwrap()
         };
         let ordered = ordered_vfx_requests([
-            request(HEIST_DAMAGED_VFX, HEIST_VFX_PRODUCER_RANK, 2, "heist"),
+            request(
+                VAULT_BREAK_DAMAGED_VFX,
+                VAULT_BREAK_VFX_PRODUCER_RANK,
+                2,
+                "vault-break",
+            ),
             request(
                 COMBAT_IMPACT_VFX,
                 COMBAT_VFX_PRODUCER_RANK,
@@ -967,7 +973,7 @@ mod tests {
                 (COMBAT_IMPACT_VFX, 9),
                 (WORLD_OBJECT_DAMAGED_VFX, 5),
                 (PICKUP_COLLECTED_VFX, 1),
-                (HEIST_DAMAGED_VFX, 2),
+                (VAULT_BREAK_DAMAGED_VFX, 2),
             ]
         );
     }

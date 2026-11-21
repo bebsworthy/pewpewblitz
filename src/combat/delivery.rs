@@ -105,7 +105,7 @@ pub(super) fn queue_damageable_target(
 ) {
     match request.target {
         crate::map::DamageableTargetIdentity::MapObject { .. } => world.0.push(request),
-        crate::map::DamageableTargetIdentity::HeistSafe { .. } => {
+        crate::map::DamageableTargetIdentity::VaultBreakSafe { .. } => {
             objectives
                 .0
                 .push(crate::matchplay::PendingModeObjectiveDamage {
@@ -320,7 +320,7 @@ pub(super) fn resolve_melee_attacks(
         ),
         Or<(
             With<crate::map::DamageableWorldObject>,
-            With<crate::matchplay::HeistSafe>,
+            With<crate::matchplay::VaultBreakSafe>,
         )>,
     >,
     spatial_query: avian2d::prelude::SpatialQuery,
@@ -644,7 +644,7 @@ mod tests {
             },
             placement_id: MapPlacementId(12),
         };
-        let safe_target = DamageableTargetIdentity::HeistSafe {
+        let safe_target = DamageableTargetIdentity::VaultBreakSafe {
             match_id: MatchId(13),
             anchor_id: ModeAnchorId(4),
             defending_team: TeamId(1),

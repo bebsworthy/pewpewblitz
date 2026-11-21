@@ -48,7 +48,7 @@ fn place(
 }
 
 /// Placement is deterministic per map, sparse, wall-adjacent, and never on a placement, an
-/// effect tile, water, a spawn, the Hot Zone, a Heist safe, or a Zombie ingress.
+/// effect tile, water, a spawn, the Turf Hold, a Vault Break safe, or a Zombie ingress.
 #[test]
 fn decals_are_deterministic_wall_adjacent_and_avoid_surfaces_and_objectives() {
     let catalog = shared_catalog();
@@ -75,7 +75,7 @@ fn decals_are_deterministic_wall_adjacent_and_avoid_surfaces_and_objectives() {
             })
             .flatten()
             .collect();
-        let hot_zone = hot_zone_visual_geometry(snapshot);
+        let turf_hold = turf_hold_visual_geometry(snapshot);
         for decal in &placed {
             let cell = decal.cell;
             assert!(snapshot.dimensions.contains(cell), "{key}");
@@ -91,12 +91,12 @@ fn decals_are_deterministic_wall_adjacent_and_avoid_surfaces_and_objectives() {
                 neighbour.is_none_or(|neighbour| occluders.contains(&neighbour)),
                 "{key} decal {cell:?} faces open floor"
             );
-            if let Some((center, radius)) = hot_zone {
+            if let Some((center, radius)) = turf_hold {
                 let min = snapshot.dimensions.cell_min(cell);
                 let max = min + Vec2::splat(brawler::map::MAP_CELL_SIZE_WORLD);
                 assert!(
                     center.clamp(min, max).distance(center) >= radius,
-                    "{key} decal {cell:?} inside the Hot Zone"
+                    "{key} decal {cell:?} inside the Turf Hold"
                 );
             }
             // Every corner stays inside the decal's own cell.
@@ -121,13 +121,13 @@ fn decals_are_deterministic_wall_adjacent_and_avoid_surfaces_and_objectives() {
     }
 }
 
-/// Spawns, Heist safes (with their attack sectors), and the Hot Zone are excluded where the
+/// Spawns, Vault Break safes (with their attack sectors), and the Turf Hold are excluded where the
 /// built-in maps have them.
 #[test]
 fn objective_and_spawn_cells_are_excluded() {
     let catalog = shared_catalog();
-    let mut saw_heist = false;
-    let mut saw_hot_zone = false;
+    let mut saw_vault_break = false;
+    let mut saw_turf_hold = false;
     for (key, snapshot) in built_in_snapshots(&catalog) {
         let excluded = excluded_decal_cells(&snapshot, &catalog);
         for placement in &snapshot.placements {
@@ -139,16 +139,16 @@ fn objective_and_spawn_cells_are_excluded() {
         }
         for anchor in &snapshot.mode_anchors {
             match anchor.kind {
-                brawler::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => {
-                    saw_heist = true;
+                brawler::map::MapModeAnchorKind::VaultBreakSafe { origin_cell, .. } => {
+                    saw_vault_break = true;
                     let sector = brawler::map::MapCell::new(origin_cell.x - 2, origin_cell.y);
                     assert!(excluded.contains(&origin_cell), "{key}");
                     assert!(excluded.contains(&sector), "{key}");
                 }
-                brawler::map::MapModeAnchorKind::HotZoneCircle {
+                brawler::map::MapModeAnchorKind::TurfHoldCircle {
                     center_half_cell, ..
                 } => {
-                    saw_hot_zone = true;
+                    saw_turf_hold = true;
                     let center = snapshot
                         .dimensions
                         .half_cell_world(center_half_cell)
@@ -160,7 +160,7 @@ fn objective_and_spawn_cells_are_excluded() {
             }
         }
     }
-    assert!(saw_heist && saw_hot_zone);
+    assert!(saw_vault_break && saw_turf_hold);
 }
 
 #[test]

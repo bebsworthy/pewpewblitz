@@ -226,7 +226,7 @@ mod tests {
         let mut map = crate::map::MapCatalogResource::from_world(app.world_mut())
             .0
             .resolve_preset(
-                crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+                crate::map::FEATURE_YARD_TAKEDOWN_PRESET,
                 crate::map::MapInstanceId(3),
             )
             .unwrap();
@@ -301,7 +301,7 @@ mod tests {
                 catalog_schema_version: 8,
                 recipe_schema_version: 5,
                 presentation_theme_id: crate::map::MapPresentationThemeId(1),
-                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: crate::map::TAKEDOWN_MODE_DEFINITION,
                 dimensions,
                 default_surface_asset_id: crate::map::GROUND_ASSET,
                 placements: Vec::new(),
@@ -312,7 +312,7 @@ mod tests {
             dynamic_placements: Vec::new(),
             player_only_surface_rects: Vec::new(),
             objective_zone: None,
-            heist_safes: Vec::new(),
+            vault_break_safes: Vec::new(),
             zombie_ingress: Vec::new(),
             effect_tiles: Vec::new(),
             effect_tiles_by_cell: BTreeMap::new(),
@@ -338,7 +338,7 @@ mod tests {
             .resource::<crate::map::MapCatalogResource>()
             .0
             .resolve_preset(
-                crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+                crate::map::FEATURE_YARD_TAKEDOWN_PRESET,
                 crate::map::MapInstanceId(3),
             )
             .unwrap();
@@ -369,7 +369,7 @@ mod tests {
             .id();
         app.world_mut().spawn(crate::matchplay::MatchState {
             match_id: crate::matchplay::MatchId(1),
-            mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: crate::map::TAKEDOWN_MODE_DEFINITION,
             phase: crate::matchplay::MatchPhase::Active { ends_at_tick: 999 },
             rules_revision: 1,
         });

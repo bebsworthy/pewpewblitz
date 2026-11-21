@@ -294,9 +294,10 @@ reject malformed advertisements, but they never define content legality.
 
 The established match path does not require accounts or persistence and must stay isolated from
 them. Profile persistence is transactional SQLite with WAL, versioned schemas, an operator backup
-command, and a tested restore path (schema 4: `profiles` with the selected character and
+command, and a tested restore path (schema 5: `profiles` with the selected character and
 `character_choices`; opening a schema-3 database drops the retired brawler and part tables and keeps
-published maps; older schemas fail closed). Storage unavailability fails fast. Corruption preserves
+published maps; opening a schema-4 database renames stored published-map game-type IDs to the
+BRL-wg28 mode names; older schemas fail closed). Storage unavailability fails fast. Corruption preserves
 the database for recovery, rejects unsafe records, reports the fault, and never silently resets
 owned data. The supervisor may supply the database path but cannot open profile data, and match
 workers receive only immutable admitted loadouts. Progression, currency, loot, unlocks, and

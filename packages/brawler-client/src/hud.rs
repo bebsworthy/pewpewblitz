@@ -44,7 +44,7 @@ const HUD_Z_INDEX: i32 = 150;
 pub(crate) struct HudRoot;
 
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) enum ClientHeistReadiness {
+pub(crate) enum ClientVaultBreakReadiness {
     #[default]
     Waiting,
     Ready,
@@ -52,7 +52,7 @@ pub(crate) enum ClientHeistReadiness {
 }
 
 #[derive(Resource, Default)]
-struct SeenHeistObjectiveCueIds(std::collections::VecDeque<brawler::combat::CombatEventId>);
+struct SeenVaultBreakObjectiveCueIds(std::collections::VecDeque<brawler::combat::CombatEventId>);
 
 #[derive(Component)]
 struct CountdownHudText;
@@ -75,15 +75,15 @@ struct CachedRosterEntry {
 /// Small presentation-only dispatch for the one shared top-right objective slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ModeScoreView {
-    Wipeout {
+    Takedown {
         scores: [u16; 2],
         target: u16,
     },
-    HotZone {
+    TurfHold {
         progress_percent: [u8; 2],
-        status: brawler::matchplay::HotZoneStatus,
+        status: brawler::matchplay::TurfHoldStatus,
     },
-    Heist {
+    VaultBreak {
         health: [u16; 2],
         maximum: [u16; 2],
         local_team: Option<TeamId>,
@@ -145,9 +145,9 @@ impl Plugin for ClientReadinessHudPlugin {
     fn build(&self, app: &mut App) {
         ui::touch_target::add_touch_targets(app);
         app.init_resource::<MatchRosterPresentation>()
-            .init_resource::<ClientHeistReadiness>()
-            .init_resource::<SeenHeistObjectiveCueIds>()
-            .add_message::<brawler::matchplay::ReceivedHeistObjectiveCue>()
+            .init_resource::<ClientVaultBreakReadiness>()
+            .init_resource::<SeenVaultBreakObjectiveCueIds>()
+            .add_message::<brawler::matchplay::ReceivedVaultBreakObjectiveCue>()
             .init_resource::<PlateState>()
             .init_resource::<ScoreboardState>()
             .init_resource::<kill_feed::KillFeed>()
@@ -157,15 +157,15 @@ impl Plugin for ClientReadinessHudPlugin {
             .add_systems(
                 Update,
                 (
-                    converge_heist_readiness,
-                    receive_heist_objective_cues,
+                    converge_vault_break_readiness,
+                    receive_vault_break_objective_cues,
                     (
                         update_readiness_hud,
                         plate::present_plate,
                         scoreboard::present_scoreboard,
                     )
                         .chain()
-                        .after(converge_heist_readiness),
+                        .after(converge_vault_break_readiness),
                     plate::place_team_strip,
                     (kill_feed::collect_kill_feed, kill_feed::present_kill_feed)
                         .chain()
@@ -183,8 +183,8 @@ impl Plugin for ClientReadinessHudPlugin {
 }
 
 #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
-fn converge_heist_readiness(
-    matches: Query<(&MatchState, Option<&brawler::matchplay::HeistState>), With<MatchRoot>>,
+fn converge_vault_break_readiness(
+    matches: Query<(&MatchState, Option<&brawler::matchplay::VaultBreakState>), With<MatchRoot>>,
     maps: Query<
         (
             &brawler::map::ResolvedMapSnapshot,
@@ -193,48 +193,49 @@ fn converge_heist_readiness(
         With<brawler::map::MapRoot>,
     >,
     safes: Query<(
-        &brawler::matchplay::HeistSafe,
+        &brawler::matchplay::VaultBreakSafe,
         &brawler::map::DamageableTargetIdentity,
         &brawler::combat::CurrentHealth,
         &brawler::map::DamageableMaximumHealth,
         &brawler::map::DamageableLifeState,
     )>,
-    mut readiness: ResMut<ClientHeistReadiness>,
+    mut readiness: ResMut<ClientVaultBreakReadiness>,
 ) {
-    let Ok((state, heist)) = matches.single() else {
-        *readiness = ClientHeistReadiness::Waiting;
+    let Ok((state, vault_break)) = matches.single() else {
+        *readiness = ClientVaultBreakReadiness::Waiting;
         return;
     };
-    if state.mode_definition_id != brawler::map::HEIST_MODE_DEFINITION {
-        *readiness = ClientHeistReadiness::Ready;
+    if state.mode_definition_id != brawler::map::VAULT_BREAK_MODE_DEFINITION {
+        *readiness = ClientVaultBreakReadiness::Ready;
         return;
     }
-    let Some(heist) = heist else {
-        *readiness = ClientHeistReadiness::Waiting;
+    let Some(vault_break) = vault_break else {
+        *readiness = ClientVaultBreakReadiness::Waiting;
         return;
     };
     let Ok((snapshot, map_state)) = maps.single() else {
-        *readiness = ClientHeistReadiness::Waiting;
+        *readiness = ClientVaultBreakReadiness::Waiting;
         return;
     };
     let generation = map_state.generation_id();
-    if heist.match_id != state.match_id
-        || heist.generation != generation
+    if vault_break.match_id != state.match_id
+        || vault_break.generation != generation
         || snapshot.identity.instance_id != generation.map_instance_id
-        || snapshot.mode_definition_id != brawler::map::HEIST_MODE_DEFINITION
+        || snapshot.mode_definition_id != brawler::map::VAULT_BREAK_MODE_DEFINITION
     {
-        *readiness =
-            ClientHeistReadiness::Invalid("Heist root and map generations disagree".to_string());
+        *readiness = ClientVaultBreakReadiness::Invalid(
+            "Vault Break root and map generations disagree".to_string(),
+        );
         return;
     }
-    let expected: std::collections::BTreeSet<_> = heist
+    let expected: std::collections::BTreeSet<_> = vault_break
         .safes
         .iter()
         .map(|safe| (safe.anchor_id, safe.defending_team))
         .collect();
-    if expected.len() != brawler::matchplay::HEIST_SAFE_COUNT {
-        *readiness = ClientHeistReadiness::Invalid(
-            "Heist root does not declare two unique safes".to_string(),
+    if expected.len() != brawler::matchplay::VAULT_BREAK_SAFE_COUNT {
+        *readiness = ClientVaultBreakReadiness::Invalid(
+            "Vault Break root does not declare two unique safes".to_string(),
         );
         return;
     }
@@ -244,7 +245,7 @@ fn converge_heist_readiness(
             continue;
         }
         if *identity
-            != (brawler::map::DamageableTargetIdentity::HeistSafe {
+            != (brawler::map::DamageableTargetIdentity::VaultBreakSafe {
                 match_id: state.match_id,
                 anchor_id: safe.anchor_id,
                 defending_team: safe.defending_team,
@@ -254,35 +255,37 @@ fn converge_heist_readiness(
             || (health.0 == 0)
                 != matches!(*life, brawler::map::DamageableLifeState::TerminalCommitted)
         {
-            *readiness = ClientHeistReadiness::Invalid(
-                "replicated Heist safe state is inconsistent".to_string(),
+            *readiness = ClientVaultBreakReadiness::Invalid(
+                "replicated Vault Break safe state is inconsistent".to_string(),
             );
             return;
         }
         if !actual.insert((safe.anchor_id, safe.defending_team)) {
-            *readiness = ClientHeistReadiness::Invalid(
-                "replicated Heist safes contain a duplicate identity".to_string(),
+            *readiness = ClientVaultBreakReadiness::Invalid(
+                "replicated Vault Break safes contain a duplicate identity".to_string(),
             );
             return;
         }
     }
     *readiness = if actual == expected {
-        ClientHeistReadiness::Ready
+        ClientVaultBreakReadiness::Ready
     } else if actual.is_subset(&expected) {
-        ClientHeistReadiness::Waiting
+        ClientVaultBreakReadiness::Waiting
     } else {
-        ClientHeistReadiness::Invalid("replicated Heist safes do not match the root".to_string())
+        ClientVaultBreakReadiness::Invalid(
+            "replicated Vault Break safes do not match the root".to_string(),
+        )
     };
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn receive_heist_objective_cues(
+fn receive_vault_break_objective_cues(
     mut receivers: Query<
-        Option<&mut MessageReceiver<brawler::matchplay::HeistObjectiveCue>>,
+        Option<&mut MessageReceiver<brawler::matchplay::VaultBreakObjectiveCue>>,
         With<Client>,
     >,
-    mut output: MessageWriter<brawler::matchplay::ReceivedHeistObjectiveCue>,
-    mut seen: ResMut<SeenHeistObjectiveCueIds>,
+    mut output: MessageWriter<brawler::matchplay::ReceivedVaultBreakObjectiveCue>,
+    mut seen: ResMut<SeenVaultBreakObjectiveCueIds>,
 ) {
     for receiver in &mut receivers {
         let Some(mut receiver) = receiver else {
@@ -292,11 +295,11 @@ fn receive_heist_objective_cues(
             if seen.0.contains(&cue.event_id) {
                 continue;
             }
-            if seen.0.len() >= brawler::matchplay::MAX_HEIST_OBJECTIVE_CUES {
+            if seen.0.len() >= brawler::matchplay::MAX_VAULT_BREAK_OBJECTIVE_CUES {
                 seen.0.pop_front();
             }
             seen.0.push_back(cue.event_id);
-            output.write(brawler::matchplay::ReceivedHeistObjectiveCue(cue));
+            output.write(brawler::matchplay::ReceivedVaultBreakObjectiveCue(cue));
         }
     }
 }
@@ -378,17 +381,17 @@ fn spawn_readiness_hud(mut commands: Commands, asset_server: Option<Res<AssetSer
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn update_readiness_hud(
     controlled: Query<(&PlayerId, &TeamId), (With<Fighter>, With<Controlled>)>,
-    matches: Query<(&MatchState, Option<&brawler::matchplay::WipeoutState>), With<MatchRoot>>,
-    hot_zones: Query<&brawler::matchplay::HotZoneState, With<MatchRoot>>,
-    heist_states: Query<&brawler::matchplay::HeistState, With<MatchRoot>>,
-    heist_safes: Query<(
-        &brawler::matchplay::HeistSafe,
+    matches: Query<(&MatchState, Option<&brawler::matchplay::TakedownState>), With<MatchRoot>>,
+    turf_holds: Query<&brawler::matchplay::TurfHoldState, With<MatchRoot>>,
+    vault_break_states: Query<&brawler::matchplay::VaultBreakState, With<MatchRoot>>,
+    vault_break_safes: Query<(
+        &brawler::matchplay::VaultBreakSafe,
         &brawler::combat::CurrentHealth,
         &brawler::map::DamageableMaximumHealth,
     )>,
     clocks: Query<&brawler::matchplay::MatchClock, With<MatchRoot>>,
     participants: Query<&brawler::matchplay::PublicParticipantState>,
-    heist_readiness: Res<ClientHeistReadiness>,
+    vault_break_readiness: Res<ClientVaultBreakReadiness>,
     mut roster_presentation: ResMut<MatchRosterPresentation>,
     zombie: ZombieHudFacts,
     mut plate_state: ResMut<PlateState>,
@@ -440,16 +443,16 @@ fn update_readiness_hud(
         }
     }
     let final_line = match_state.and_then(|(state, _)| {
-        if state.mode_definition_id == brawler::map::HEIST_MODE_DEFINITION {
-            final_heist_objective_line(
+        if state.mode_definition_id == brawler::map::VAULT_BREAK_MODE_DEFINITION {
+            final_vault_break_objective_line(
                 state,
-                matches!(*heist_readiness, ClientHeistReadiness::Ready)
-                    .then(|| heist_states.iter().next())
+                matches!(*vault_break_readiness, ClientVaultBreakReadiness::Ready)
+                    .then(|| vault_break_states.iter().next())
                     .flatten(),
-                heist_safes.iter(),
+                vault_break_safes.iter(),
             )
         } else {
-            final_objective_line(match_state, hot_zones.iter().next())
+            final_objective_line(match_state, turf_holds.iter().next())
         }
     });
     for (mut text, mut visibility) in &mut phase_overlay {
@@ -480,18 +483,18 @@ fn update_readiness_hud(
                         .and_then(|player| roster_presentation.entries.get(&player))
                         .map_or(0, |entry| entry.boost_stacks),
                 })
-        } else if state.mode_definition_id == brawler::map::HEIST_MODE_DEFINITION {
-            Some(build_heist_score_view(
+        } else if state.mode_definition_id == brawler::map::VAULT_BREAK_MODE_DEFINITION {
+            Some(build_vault_break_score_view(
                 state,
-                matches!(*heist_readiness, ClientHeistReadiness::Ready)
-                    .then(|| heist_states.iter().next())
+                matches!(*vault_break_readiness, ClientVaultBreakReadiness::Ready)
+                    .then(|| vault_break_states.iter().next())
                     .flatten(),
-                heist_safes.iter(),
+                vault_break_safes.iter(),
                 fighter.map(|(_, team)| *team),
                 clock,
             ))
         } else {
-            build_mode_score_view(match_state, hot_zones.iter().next(), clock)
+            build_mode_score_view(match_state, turf_holds.iter().next(), clock)
         }
     });
     let match_hud_phase = match_state.is_some_and(|(state, _)| {
@@ -614,37 +617,37 @@ fn match_deadline_tick(
 }
 
 pub(crate) fn build_mode_score_view(
-    state: Option<(&MatchState, Option<&brawler::matchplay::WipeoutState>)>,
-    hot_zone: Option<&brawler::matchplay::HotZoneState>,
+    state: Option<(&MatchState, Option<&brawler::matchplay::TakedownState>)>,
+    turf_hold: Option<&brawler::matchplay::TurfHoldState>,
     clock: Option<&brawler::matchplay::MatchClock>,
 ) -> Option<ModeScoreView> {
-    let (state, wipeout) = state?;
+    let (state, takedown) = state?;
     if clock.is_none_or(|clock| clock.match_id != state.match_id) {
         return Some(ModeScoreView::Syncing);
     }
     match state.mode_definition_id {
-        brawler::map::WIPEOUT_MODE_DEFINITION => Some(wipeout.map_or(
+        brawler::map::TAKEDOWN_MODE_DEFINITION => Some(takedown.map_or(
             ModeScoreView::Syncing,
-            |wipeout| ModeScoreView::Wipeout {
-                scores: wipeout.team_scores,
-                target: wipeout.target_score,
+            |takedown| ModeScoreView::Takedown {
+                scores: takedown.team_scores,
+                target: takedown.target_score,
             },
         )),
-        brawler::map::HOT_ZONE_MODE_DEFINITION => Some(
-            hot_zone
-                .filter(|hot_zone| hot_zone.match_id == state.match_id)
-                .map_or(ModeScoreView::Syncing, |hot_zone| {
+        brawler::map::TURF_HOLD_MODE_DEFINITION => Some(
+            turf_hold
+                .filter(|turf_hold| turf_hold.match_id == state.match_id)
+                .map_or(ModeScoreView::Syncing, |turf_hold| {
                     let percent = |progress: u16| {
                         let value = u32::from(progress) * 100
-                            / u32::from(hot_zone.target_progress_ticks.max(1));
+                            / u32::from(turf_hold.target_progress_ticks.max(1));
                         u8::try_from(value.min(100)).unwrap_or(100)
                     };
-                    ModeScoreView::HotZone {
+                    ModeScoreView::TurfHold {
                         progress_percent: [
-                            percent(hot_zone.progress_ticks[0]),
-                            percent(hot_zone.progress_ticks[1]),
+                            percent(turf_hold.progress_ticks[0]),
+                            percent(turf_hold.progress_ticks[1]),
                         ],
-                        status: hot_zone.status,
+                        status: turf_hold.status,
                     }
                 }),
         ),
@@ -654,17 +657,17 @@ pub(crate) fn build_mode_score_view(
 
 pub(crate) fn mode_score_text(view: ModeScoreView) -> String {
     match view {
-        ModeScoreView::Wipeout { scores, target } => {
+        ModeScoreView::Takedown { scores, target } => {
             format!("T1  {}  —  {}  T2\nFIRST TO {target}", scores[0], scores[1])
         }
-        ModeScoreView::HotZone {
+        ModeScoreView::TurfHold {
             progress_percent,
             status,
         } => {
             let status = match status {
-                brawler::matchplay::HotZoneStatus::Empty => "EMPTY".to_string(),
-                brawler::matchplay::HotZoneStatus::Contested => "CONTESTED".to_string(),
-                brawler::matchplay::HotZoneStatus::Controlled { team } => {
+                brawler::matchplay::TurfHoldStatus::Empty => "EMPTY".to_string(),
+                brawler::matchplay::TurfHoldStatus::Contested => "CONTESTED".to_string(),
+                brawler::matchplay::TurfHoldStatus::Controlled { team } => {
                     format!("T{} CONTROL", team.0 + 1)
                 }
             };
@@ -673,7 +676,7 @@ pub(crate) fn mode_score_text(view: ModeScoreView) -> String {
                 progress_percent[0], progress_percent[1]
             )
         }
-        ModeScoreView::Heist {
+        ModeScoreView::VaultBreak {
             health,
             maximum,
             local_team,
@@ -718,12 +721,12 @@ pub(crate) fn mode_score_text(view: ModeScoreView) -> String {
     }
 }
 
-fn build_heist_score_view<'a>(
+fn build_vault_break_score_view<'a>(
     state: &MatchState,
-    heist: Option<&brawler::matchplay::HeistState>,
+    vault_break: Option<&brawler::matchplay::VaultBreakState>,
     safes: impl Iterator<
         Item = (
-            &'a brawler::matchplay::HeistSafe,
+            &'a brawler::matchplay::VaultBreakSafe,
             &'a brawler::combat::CurrentHealth,
             &'a brawler::map::DamageableMaximumHealth,
         ),
@@ -732,7 +735,7 @@ fn build_heist_score_view<'a>(
     clock: Option<&brawler::matchplay::MatchClock>,
 ) -> ModeScoreView {
     if clock.is_none_or(|clock| clock.match_id != state.match_id)
-        || heist.is_none_or(|heist| heist.match_id != state.match_id)
+        || vault_break.is_none_or(|vault_break| vault_break.match_id != state.match_id)
     {
         return ModeScoreView::Syncing;
     }
@@ -752,7 +755,7 @@ fn build_heist_score_view<'a>(
         maximum[index] = max.0;
     }
     if seen.into_iter().all(|value| value) {
-        ModeScoreView::Heist {
+        ModeScoreView::VaultBreak {
             health,
             maximum,
             local_team,
@@ -839,34 +842,34 @@ fn sync_roster_and_collect_phase_facts<'a>(
 
 /// The mode-specific final objective line for the completed overlay, or a syncing label.
 fn final_objective_line(
-    state: Option<(&MatchState, Option<&brawler::matchplay::WipeoutState>)>,
-    hot_zone: Option<&brawler::matchplay::HotZoneState>,
+    state: Option<(&MatchState, Option<&brawler::matchplay::TakedownState>)>,
+    turf_hold: Option<&brawler::matchplay::TurfHoldState>,
 ) -> Option<String> {
-    let (state, wipeout) = state?;
+    let (state, takedown) = state?;
     Some(match state.mode_definition_id {
-        brawler::map::WIPEOUT_MODE_DEFINITION => wipeout.map_or_else(
+        brawler::map::TAKEDOWN_MODE_DEFINITION => takedown.map_or_else(
             || "FINAL  SYNCING".to_string(),
-            |wipeout| {
+            |takedown| {
                 format!(
                     "FINAL  {} - {}  |  MARGIN {}",
-                    wipeout.team_scores[0],
-                    wipeout.team_scores[1],
-                    wipeout.team_scores[0].abs_diff(wipeout.team_scores[1])
+                    takedown.team_scores[0],
+                    takedown.team_scores[1],
+                    takedown.team_scores[0].abs_diff(takedown.team_scores[1])
                 )
             },
         ),
-        brawler::map::HOT_ZONE_MODE_DEFINITION => hot_zone
-            .filter(|hot_zone| hot_zone.match_id == state.match_id)
+        brawler::map::TURF_HOLD_MODE_DEFINITION => turf_hold
+            .filter(|turf_hold| turf_hold.match_id == state.match_id)
             .map_or_else(
                 || "SYNCING OBJECTIVE".to_string(),
-                |hot_zone| {
+                |turf_hold| {
                     let percent = |progress: u16| {
-                        u32::from(progress) * 100 / u32::from(hot_zone.target_progress_ticks)
+                        u32::from(progress) * 100 / u32::from(turf_hold.target_progress_ticks)
                     };
                     format!(
                         "FINAL  T1 {}%  T2 {}%",
-                        percent(hot_zone.progress_ticks[0]),
-                        percent(hot_zone.progress_ticks[1]),
+                        percent(turf_hold.progress_ticks[0]),
+                        percent(turf_hold.progress_ticks[1]),
                     )
                 },
             ),
@@ -874,18 +877,18 @@ fn final_objective_line(
     })
 }
 
-fn final_heist_objective_line<'a>(
+fn final_vault_break_objective_line<'a>(
     state: &MatchState,
-    heist: Option<&brawler::matchplay::HeistState>,
+    vault_break: Option<&brawler::matchplay::VaultBreakState>,
     safes: impl Iterator<
         Item = (
-            &'a brawler::matchplay::HeistSafe,
+            &'a brawler::matchplay::VaultBreakSafe,
             &'a brawler::combat::CurrentHealth,
             &'a brawler::map::DamageableMaximumHealth,
         ),
     >,
 ) -> Option<String> {
-    let heist = heist.filter(|heist| heist.match_id == state.match_id)?;
+    let vault_break = vault_break.filter(|vault_break| vault_break.match_id == state.match_id)?;
     let mut health = [0; 2];
     let mut maximum = [0; 2];
     let mut seen = [false; 2];
@@ -903,13 +906,13 @@ fn final_heist_objective_line<'a>(
     if !seen.into_iter().all(|value| value) {
         return Some("SYNCING OBJECTIVE".to_string());
     }
-    let cause = match heist.completion {
-        Some(brawler::matchplay::HeistCompletion::SafeDestroyed {
+    let cause = match vault_break.completion {
+        Some(brawler::matchplay::VaultBreakCompletion::SafeDestroyed {
             destroyed_teams: [true, true],
         }) => "BOTH IDOLS DESTROYED — DRAW",
-        Some(brawler::matchplay::HeistCompletion::SafeDestroyed { .. }) => "IDOL DESTROYED",
-        Some(brawler::matchplay::HeistCompletion::Timeout { .. }) => "TIME EXPIRED",
-        None => "HEIST COMPLETE",
+        Some(brawler::matchplay::VaultBreakCompletion::SafeDestroyed { .. }) => "IDOL DESTROYED",
+        Some(brawler::matchplay::VaultBreakCompletion::Timeout { .. }) => "TIME EXPIRED",
+        None => "VAULT BREAK COMPLETE",
     };
     Some(format!(
         "{cause}\nFINAL  T1 {}/{}  T2 {}/{}",
@@ -1074,7 +1077,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<MatchRosterPresentation>()
-            .init_resource::<ClientHeistReadiness>()
+            .init_resource::<ClientVaultBreakReadiness>()
             .init_resource::<PlateState>()
             .init_resource::<ScoreboardState>()
             .add_systems(Update, update_readiness_hud);
@@ -1091,7 +1094,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<MatchRosterPresentation>()
-            .init_resource::<ClientHeistReadiness>()
+            .init_resource::<ClientVaultBreakReadiness>()
             .init_resource::<PlateState>()
             .init_resource::<ScoreboardState>()
             .add_systems(Update, update_readiness_hud);
@@ -1102,11 +1105,11 @@ mod tests {
                 MatchRoot,
                 MatchState {
                     match_id,
-                    mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+                    mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
                     phase: MatchPhase::Active { ends_at_tick: 600 },
                     rules_revision: 1,
                 },
-                brawler::matchplay::WipeoutState {
+                brawler::matchplay::TakedownState {
                     team_scores: [2, 1],
                     target_score: 10,
                     ..default()
@@ -1272,7 +1275,7 @@ mod tests {
     fn countdown_label_uses_authoritative_deadline_and_hides_outside_countdown() {
         let mut state = MatchState {
             match_id: brawler::matchplay::MatchId(1),
-            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
             phase: MatchPhase::Countdown {
                 starts_at_tick: 180,
             },
@@ -1296,14 +1299,14 @@ mod tests {
 
     #[test]
     fn mode_score_views_are_generation_safe_and_mode_specific() {
-        let wipeout_state = brawler::matchplay::WipeoutState {
+        let takedown_state = brawler::matchplay::TakedownState {
             team_scores: [3, 2],
             target_score: 5,
             ..default()
         };
         let mut state = MatchState {
             match_id: brawler::matchplay::MatchId(7),
-            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
             phase: MatchPhase::Active { ends_at_tick: 600 },
             rules_revision: 1,
         };
@@ -1312,35 +1315,35 @@ mod tests {
             completed_tick: 10,
         };
         assert_eq!(
-            build_mode_score_view(Some((&state, Some(&wipeout_state))), None, Some(&clock)),
-            Some(ModeScoreView::Wipeout {
+            build_mode_score_view(Some((&state, Some(&takedown_state))), None, Some(&clock)),
+            Some(ModeScoreView::Takedown {
                 scores: [3, 2],
                 target: 5,
             })
         );
         assert_eq!(
-            mode_score_text(ModeScoreView::Wipeout {
+            mode_score_text(ModeScoreView::Takedown {
                 scores: [3, 2],
                 target: 5,
             }),
             "T1  3  —  2  T2\nFIRST TO 5"
         );
 
-        state.mode_definition_id = brawler::map::HOT_ZONE_MODE_DEFINITION;
-        let hot_zone = brawler::matchplay::HotZoneState {
+        state.mode_definition_id = brawler::map::TURF_HOLD_MODE_DEFINITION;
+        let turf_hold = brawler::matchplay::TurfHoldState {
             match_id: state.match_id,
             zone_anchor_id: brawler::map::ModeAnchorId(1),
             occupants: [1, 0],
-            status: brawler::matchplay::HotZoneStatus::Controlled { team: TeamId(0) },
+            status: brawler::matchplay::TurfHoldStatus::Controlled { team: TeamId(0) },
             progress_ticks: [30, 15],
             target_progress_ticks: 60,
             next_evaluation_tick: 11,
         };
         assert_eq!(
-            build_mode_score_view(Some((&state, None)), Some(&hot_zone), Some(&clock)),
-            Some(ModeScoreView::HotZone {
+            build_mode_score_view(Some((&state, None)), Some(&turf_hold), Some(&clock)),
+            Some(ModeScoreView::TurfHold {
                 progress_percent: [50, 25],
-                status: brawler::matchplay::HotZoneStatus::Controlled { team: TeamId(0) },
+                status: brawler::matchplay::TurfHoldStatus::Controlled { team: TeamId(0) },
             })
         );
         let stale_clock = brawler::matchplay::MatchClock {
@@ -1348,7 +1351,7 @@ mod tests {
             ..clock
         };
         assert_eq!(
-            build_mode_score_view(Some((&state, None)), Some(&hot_zone), Some(&stale_clock)),
+            build_mode_score_view(Some((&state, None)), Some(&turf_hold), Some(&stale_clock)),
             Some(ModeScoreView::Syncing)
         );
     }
@@ -1357,11 +1360,11 @@ mod tests {
     fn phase_overlay_explains_ready_and_completed_restart_states() {
         let mut state = MatchState {
             match_id: brawler::matchplay::MatchId(1),
-            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
             phase: MatchPhase::Waiting,
             rules_revision: 1,
         };
-        let wipeout_state = brawler::matchplay::WipeoutState {
+        let takedown_state = brawler::matchplay::TakedownState {
             team_scores: [3, 1],
             target_score: 10,
             ..default()
@@ -1372,7 +1375,7 @@ mod tests {
         );
         let waiting = phase_overlay_label(
             Some(state),
-            final_objective_line(Some((&state, Some(&wipeout_state))), None).as_deref(),
+            final_objective_line(Some((&state, Some(&takedown_state))), None).as_deref(),
             Some(0),
             4,
             2,
@@ -1395,7 +1398,7 @@ mod tests {
         };
         let locked = phase_overlay_label(
             Some(state),
-            final_objective_line(Some((&state, Some(&wipeout_state))), None).as_deref(),
+            final_objective_line(Some((&state, Some(&takedown_state))), None).as_deref(),
             Some(100),
             4,
             4,
@@ -1426,10 +1429,10 @@ mod tests {
         assert!(syncing.contains("SYNCING"));
     }
     #[test]
-    fn hot_zone_completed_overlay_shows_final_percentages() {
+    fn turf_hold_completed_overlay_shows_final_percentages() {
         let state = MatchState {
             match_id: brawler::matchplay::MatchId(1),
-            mode_definition_id: brawler::map::HOT_ZONE_MODE_DEFINITION,
+            mode_definition_id: brawler::map::TURF_HOLD_MODE_DEFINITION,
             phase: MatchPhase::Completed {
                 completed_at_tick: 100,
                 restart_unlocked_at_tick: 160,
@@ -1437,18 +1440,18 @@ mod tests {
             },
             rules_revision: 1,
         };
-        let hot_zone = brawler::matchplay::HotZoneState {
+        let turf_hold = brawler::matchplay::TurfHoldState {
             match_id: brawler::matchplay::MatchId(1),
             zone_anchor_id: brawler::map::ModeAnchorId(1),
             occupants: [1, 0],
-            status: brawler::matchplay::HotZoneStatus::Controlled { team: TeamId(0) },
+            status: brawler::matchplay::TurfHoldStatus::Controlled { team: TeamId(0) },
             progress_ticks: [15, 3],
             target_progress_ticks: 30,
             next_evaluation_tick: 100,
         };
         let label = phase_overlay_label(
             Some(state),
-            final_objective_line(Some((&state, None)), Some(&hot_zone)).as_deref(),
+            final_objective_line(Some((&state, None)), Some(&turf_hold)).as_deref(),
             Some(100),
             2,
             2,
@@ -1461,9 +1464,9 @@ mod tests {
         assert!(label.contains("TEAM 1 WINS"));
         assert!(label.contains("FINAL  T1 50%  T2 10%"));
 
-        let mismatched = brawler::matchplay::HotZoneState {
+        let mismatched = brawler::matchplay::TurfHoldState {
             match_id: brawler::matchplay::MatchId(9),
-            ..hot_zone
+            ..turf_hold
         };
         let syncing = phase_overlay_label(
             Some(state),
@@ -1481,11 +1484,11 @@ mod tests {
     }
 
     #[test]
-    fn heist_readiness_requires_matching_root_map_generation_and_two_safes() {
+    fn vault_break_readiness_requires_matching_root_map_generation_and_two_safes() {
         let resolved = brawler::map::MapContentCatalog::embedded()
             .unwrap()
             .resolve_preset(
-                brawler::map::FEATURE_YARD_HEIST_PRESET,
+                brawler::map::FEATURE_YARD_VAULT_BREAK_PRESET,
                 brawler::map::MapInstanceId(9),
             )
             .unwrap();
@@ -1495,29 +1498,29 @@ mod tests {
         };
         let match_id = brawler::matchplay::MatchId(7);
         let safes = [
-            brawler::matchplay::HeistSafeIdentity {
+            brawler::matchplay::VaultBreakSafeIdentity {
                 anchor_id: brawler::map::ModeAnchorId(1),
                 defending_team: TeamId(0),
             },
-            brawler::matchplay::HeistSafeIdentity {
+            brawler::matchplay::VaultBreakSafeIdentity {
                 anchor_id: brawler::map::ModeAnchorId(2),
                 defending_team: TeamId(1),
             },
         ];
         let mut app = App::new();
-        app.init_resource::<ClientHeistReadiness>()
-            .add_systems(Update, converge_heist_readiness);
+        app.init_resource::<ClientVaultBreakReadiness>()
+            .add_systems(Update, converge_vault_break_readiness);
         app.world_mut().spawn((
             MatchRoot,
             MatchState {
                 match_id,
-                mode_definition_id: brawler::map::HEIST_MODE_DEFINITION,
+                mode_definition_id: brawler::map::VAULT_BREAK_MODE_DEFINITION,
                 phase: MatchPhase::Waiting,
                 rules_revision: 1,
             },
-            brawler::matchplay::HeistState {
+            brawler::matchplay::VaultBreakState {
                 match_id,
-                rules_revision: brawler::matchplay::HEIST_RULES_REVISION,
+                rules_revision: brawler::matchplay::VAULT_BREAK_RULES_REVISION,
                 generation,
                 critical_health_percent: 25,
                 safes,
@@ -1536,19 +1539,19 @@ mod tests {
         ));
         app.update();
         assert_eq!(
-            *app.world().resource::<ClientHeistReadiness>(),
-            ClientHeistReadiness::Waiting
+            *app.world().resource::<ClientVaultBreakReadiness>(),
+            ClientVaultBreakReadiness::Waiting
         );
 
         for safe in safes {
             app.world_mut().spawn((
-                brawler::matchplay::HeistSafe {
+                brawler::matchplay::VaultBreakSafe {
                     match_id,
                     anchor_id: safe.anchor_id,
                     defending_team: safe.defending_team,
                     generation,
                 },
-                brawler::map::DamageableTargetIdentity::HeistSafe {
+                brawler::map::DamageableTargetIdentity::VaultBreakSafe {
                     match_id,
                     anchor_id: safe.anchor_id,
                     defending_team: safe.defending_team,
@@ -1560,13 +1563,14 @@ mod tests {
         }
         app.update();
         assert_eq!(
-            *app.world().resource::<ClientHeistReadiness>(),
-            ClientHeistReadiness::Ready
+            *app.world().resource::<ClientVaultBreakReadiness>(),
+            ClientVaultBreakReadiness::Ready
         );
 
         let entity = {
             let world = app.world_mut();
-            let mut query = world.query_filtered::<Entity, With<brawler::matchplay::HeistSafe>>();
+            let mut query =
+                world.query_filtered::<Entity, With<brawler::matchplay::VaultBreakSafe>>();
             query.iter(world).next().unwrap()
         };
         app.world_mut()
@@ -1574,8 +1578,8 @@ mod tests {
             .insert(brawler::combat::CurrentHealth(2_001));
         app.update();
         assert!(matches!(
-            *app.world().resource::<ClientHeistReadiness>(),
-            ClientHeistReadiness::Invalid(_)
+            *app.world().resource::<ClientVaultBreakReadiness>(),
+            ClientVaultBreakReadiness::Invalid(_)
         ));
     }
 }

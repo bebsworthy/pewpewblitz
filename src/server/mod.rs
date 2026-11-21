@@ -1373,9 +1373,10 @@ fn build_authoritative_app(
         config.match_respawn_ticks = Some(rules.respawn_ticks);
         config.match_spawn_protection_ticks = Some(rules.spawn_protection_ticks);
         config.match_completed_input_lock_ticks = Some(rules.completed_input_lock_ticks);
-        config.wipeout_recent_hostile_damage_credit_ticks =
-            Some(rules.wipeout_recent_hostile_damage_credit_ticks);
-        config.heist_critical_health_percent = Some(rules.heist_critical_health_percent);
+        config.takedown_recent_hostile_damage_credit_ticks =
+            Some(rules.takedown_recent_hostile_damage_credit_ticks);
+        config.vault_break_critical_health_percent =
+            Some(rules.vault_break_critical_health_percent);
     }
     let mut lifecycle = match_lifecycle_rules_for_profile(config.match_rules_profile);
     if config.game_mode == crate::config::GameMode::Zombie {
@@ -1443,9 +1444,9 @@ fn build_authoritative_app(
             crate::modes::ModeInstallInput {
                 profile: config.match_rules_profile,
                 objective_target: config.match_objective_target,
-                wipeout_recent_hostile_damage_credit_ticks: config
-                    .wipeout_recent_hostile_damage_credit_ticks,
-                heist_critical_health_percent: config.heist_critical_health_percent,
+                takedown_recent_hostile_damage_credit_ticks: config
+                    .takedown_recent_hostile_damage_credit_ticks,
+                vault_break_critical_health_percent: config.vault_break_critical_health_percent,
             },
         )
     };

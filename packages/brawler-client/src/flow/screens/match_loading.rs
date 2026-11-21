@@ -68,7 +68,7 @@ pub(in crate::flow) fn spawn_match_loading(
         .next()
         .unwrap_or("MATCH")
         .to_uppercase();
-    let badge = mode.map_or("wipeout", |m| m.key);
+    let badge = mode.map_or("takedown", |m| m.key);
     let factor = (width / 1600.0).min(height / 900.0).clamp(0.5, 1.25);
     let view = LoadingView {
         assets: assets.as_deref(),

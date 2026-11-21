@@ -3,17 +3,17 @@
 use super::catalog::{MAP_FINGERPRINT_FORMAT_VERSION, MAX_RESOLVED_MAP_SNAPSHOT_BYTES};
 use super::geometry::{
     MapCellRect, merge_cells_to_rectangles, placement_cells, placement_world_center,
-    validate_fighter_navigation, validate_heist_map_access, validate_spawn_clearance,
+    validate_fighter_navigation, validate_spawn_clearance, validate_vault_break_map_access,
     validate_zombie_ingress_access,
 };
 use super::{
-    HEIST_SAFE_VISUAL_PROFILE, MAP_CELL_SIZE_WORLD, MAP_RECIPE_SCHEMA_VERSION, MapAssetId,
-    MapAssetPlacement, MapAssetSlot, MapCell, MapColliderShape, MapConcealmentBehavior,
-    MapContentCatalog, MapDestructionBehavior, MapDimensions, MapDurabilityBehavior, MapInstanceId,
-    MapModeAnchorKind, MapModeAnchorPlacement, MapPlacementId, MapPlacementParameterKind,
-    MapPlacementParameters, MapPresetId, MapRecipe, MapRecipeFingerprint, MapShape,
-    MapVisualProfileId, ModeAnchorId, PlayerCollision, ProjectileCollision, ResolvedEffectTile,
-    ResolvedMapIdentity, ResolvedMapSnapshot, SpawnPointId, TeamSpawnPoint,
+    MAP_CELL_SIZE_WORLD, MAP_RECIPE_SCHEMA_VERSION, MapAssetId, MapAssetPlacement, MapAssetSlot,
+    MapCell, MapColliderShape, MapConcealmentBehavior, MapContentCatalog, MapDestructionBehavior,
+    MapDimensions, MapDurabilityBehavior, MapInstanceId, MapModeAnchorKind, MapModeAnchorPlacement,
+    MapPlacementId, MapPlacementParameterKind, MapPlacementParameters, MapPresetId, MapRecipe,
+    MapRecipeFingerprint, MapShape, MapVisualProfileId, ModeAnchorId, PlayerCollision,
+    ProjectileCollision, ResolvedEffectTile, ResolvedMapIdentity, ResolvedMapSnapshot,
+    SpawnPointId, TeamSpawnPoint, VAULT_BREAK_SAFE_VISUAL_PROFILE,
 };
 use crate::modes::ModeTopologyPolicy;
 use bevy::prelude::{Resource, Vec2};
@@ -27,7 +27,7 @@ pub struct ResolvedMap {
     pub dynamic_placements: Vec<MapAssetPlacement>,
     pub player_only_surface_rects: Vec<MapCellRect>,
     pub objective_zone: Option<ResolvedMapObjective>,
-    pub heist_safes: Vec<ResolvedHeistSafeAnchor>,
+    pub vault_break_safes: Vec<ResolvedVaultBreakSafeAnchor>,
     pub zombie_ingress: Vec<ResolvedZombieIngressAnchor>,
     pub effect_tiles: Vec<ResolvedEffectTile>,
     pub effect_tiles_by_cell: BTreeMap<MapCell, ResolvedEffectTile>,
@@ -47,7 +47,7 @@ pub struct ResolvedMapObjective {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ResolvedHeistSafeAnchor {
+pub struct ResolvedVaultBreakSafeAnchor {
     pub placement_id: MapPlacementId,
     pub anchor_id: ModeAnchorId,
     pub defending_team: crate::combat::TeamId,
@@ -149,7 +149,7 @@ pub(super) fn resolve_located_grid_recipe(
 
     let mut mode_anchors = recipe.mode_anchors.clone();
     mode_anchors.sort_by_key(|anchor| (anchor.placement_id, anchor.anchor_id));
-    let (objective_zone, heist_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
+    let (objective_zone, vault_break_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
         topology,
         recipe.dimensions,
         &mode_anchors,
@@ -181,7 +181,7 @@ pub(super) fn resolve_located_grid_recipe(
         dynamic_placements: dynamic.dynamic_placements,
         player_only_surface_rects: dynamic.player_only_surface_rects,
         objective_zone,
-        heist_safes,
+        vault_break_safes,
         zombie_ingress,
         effect_tiles: dynamic.effect_tiles,
         effect_tiles_by_cell,
@@ -428,8 +428,8 @@ fn validate_mode_topology(
     validate_spawn_clearance(placements, recipe.dimensions, catalog)?;
     validate_effect_tile_spawn_safety(placements, catalog)?;
     validate_fighter_navigation(placements, recipe.dimensions, catalog)?;
-    if topology == ModeTopologyPolicy::MirroredHeistSafes {
-        validate_heist_map_access(placements, mode_anchors, recipe.dimensions, catalog)?;
+    if topology == ModeTopologyPolicy::MirroredVaultBreakSafes {
+        validate_vault_break_map_access(placements, mode_anchors, recipe.dimensions, catalog)?;
     } else if topology == ModeTopologyPolicy::ZombieIngress {
         validate_zombie_ingress_access(placements, mode_anchors, recipe.dimensions, catalog, 18.0)?;
     }
@@ -643,7 +643,7 @@ fn validate_effect_tile_spawn_safety(
 
 type ResolvedModeAnchors = (
     Option<ResolvedMapObjective>,
-    Vec<ResolvedHeistSafeAnchor>,
+    Vec<ResolvedVaultBreakSafeAnchor>,
     Vec<ResolvedZombieIngressAnchor>,
 );
 
@@ -660,15 +660,15 @@ pub(super) fn validate_and_resolve_mode_anchors(
                 .then_some((None, Vec::new(), Vec::new()))
                 .ok_or_else(|| "anchorless modes cannot contain mode anchors".to_string());
         }
-        ModeTopologyPolicy::MirroredHeistSafes => {
-            return resolve_heist_safe_anchors(dimensions, anchors, placement_ids)
+        ModeTopologyPolicy::MirroredVaultBreakSafes => {
+            return resolve_vault_break_safe_anchors(dimensions, anchors, placement_ids)
                 .map(|resolved| (None, resolved, Vec::new()));
         }
         ModeTopologyPolicy::ZombieIngress => {
             return resolve_zombie_ingress_anchors(dimensions, anchors, placement_ids)
                 .map(|resolved| (None, Vec::new(), resolved));
         }
-        ModeTopologyPolicy::HotZoneCircle => {}
+        ModeTopologyPolicy::TurfHoldCircle => {}
     }
     if anchors.len() != 1 {
         return Err("zone modes require exactly one objective anchor".to_string());
@@ -680,19 +680,19 @@ pub(super) fn validate_and_resolve_mode_anchors(
     {
         return Err("invalid or duplicate mode anchor identity".to_string());
     }
-    let MapModeAnchorKind::HotZoneCircle {
+    let MapModeAnchorKind::TurfHoldCircle {
         center_half_cell,
         radius_half_cells,
     } = anchor.kind
     else {
-        return Err("Hot Zone maps cannot contain non-zone anchors".to_string());
+        return Err("Turf Hold maps cannot contain non-zone anchors".to_string());
     };
     if radius_half_cells == 0 || radius_half_cells > 64 {
-        return Err("invalid Hot Zone objective radius".to_string());
+        return Err("invalid Turf Hold objective radius".to_string());
     }
     let center = dimensions
         .half_cell_world(center_half_cell)
-        .ok_or_else(|| "Hot Zone objective center is out of bounds".to_string())?;
+        .ok_or_else(|| "Turf Hold objective center is out of bounds".to_string())?;
     let radius = f32::from(radius_half_cells) * (MAP_CELL_SIZE_WORLD * 0.5);
     let bounds = dimensions.bounds();
     if center.x - radius < bounds.min.x
@@ -700,7 +700,7 @@ pub(super) fn validate_and_resolve_mode_anchors(
         || center.y - radius < bounds.min.y
         || center.y + radius > bounds.max.y
     {
-        return Err("Hot Zone objective does not fit playable bounds".to_string());
+        return Err("Turf Hold objective does not fit playable bounds".to_string());
     }
     Ok((
         Some(ResolvedMapObjective {
@@ -762,13 +762,13 @@ fn resolve_zombie_ingress_anchors(
     Ok(resolved)
 }
 
-fn resolve_heist_safe_anchors(
+fn resolve_vault_break_safe_anchors(
     dimensions: MapDimensions,
     anchors: &[MapModeAnchorPlacement],
     placement_ids: &mut BTreeSet<MapPlacementId>,
-) -> Result<Vec<ResolvedHeistSafeAnchor>, String> {
+) -> Result<Vec<ResolvedVaultBreakSafeAnchor>, String> {
     if anchors.len() != 2 {
-        return Err("Heist maps require exactly two safe anchors".to_string());
+        return Err("Vault Break maps require exactly two safe anchors".to_string());
     }
     let mut teams = BTreeSet::new();
     let mut resolved = Vec::with_capacity(2);
@@ -779,7 +779,7 @@ fn resolve_heist_safe_anchors(
         {
             return Err("invalid or duplicate mode anchor identity".to_string());
         }
-        let MapModeAnchorKind::HeistSafe {
+        let MapModeAnchorKind::VaultBreakSafe {
             team_slot,
             origin_cell,
             width_cells,
@@ -788,23 +788,23 @@ fn resolve_heist_safe_anchors(
             objective_visual_profile_id,
         } = anchor.kind
         else {
-            return Err("Heist maps cannot contain non-safe anchors".to_string());
+            return Err("Vault Break maps cannot contain non-safe anchors".to_string());
         };
         if team_slot > 1
             || !teams.insert(team_slot)
             || width_cells != 3
             || height_cells != 2
             || quarter_turns > 3
-            || objective_visual_profile_id != HEIST_SAFE_VISUAL_PROFILE
+            || objective_visual_profile_id != VAULT_BREAK_SAFE_VISUAL_PROFILE
             || origin_cell.x < 2
             || origin_cell.y < 2
             || origin_cell.x.saturating_add(width_cells).saturating_add(2) > dimensions.width
             || origin_cell.y.saturating_add(height_cells).saturating_add(2) > dimensions.height
         {
-            return Err("invalid Heist safe anchor topology".to_string());
+            return Err("invalid Vault Break safe anchor topology".to_string());
         }
         let size = Vec2::new(f32::from(width_cells), f32::from(height_cells)) * MAP_CELL_SIZE_WORLD;
-        resolved.push(ResolvedHeistSafeAnchor {
+        resolved.push(ResolvedVaultBreakSafeAnchor {
             placement_id: anchor.placement_id,
             anchor_id: anchor.anchor_id,
             defending_team: crate::combat::TeamId(team_slot),

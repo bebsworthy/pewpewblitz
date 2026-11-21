@@ -67,7 +67,7 @@ piece; Exact pieces fill exactly one cell.
 | `seagrass-bush.glb` | 33 (tall grass) | chunky seagrass bush; sways in game | Contained 0.96 | 780 |
 | `lifeguard-fence.glb` | 34 (breakable barrier, 2x1) | red and white barricade, driftwood posts | Contained 0.95 | 748 |
 | `scallop-shell.glb` | 36 (seashell) | cream and pink scallop | Contained 0.62 | 352 |
-| `sea-vault.glb` | 39 (Heist safe) | iron sea vault, brass porthole dial | Contained 0.96 | 916 |
+| `sea-vault.glb` | 39 (Vault Break safe) | iron sea vault, brass porthole dial | Contained 0.96 | 916 |
 | `pickup.glb` | 42 (restoration pickup) | green canister, white cross, rope ring | Contained 0.55 | 544 |
 
 Water, rubble, effect tiles, and the arena border stay generated from the theme palette; the

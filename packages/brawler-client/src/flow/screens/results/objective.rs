@@ -10,15 +10,17 @@ use brawler::matchplay::ObjectiveTotals;
 
 fn values(totals: ObjectiveTotals, team: usize) -> (&'static str, String, f32) {
     let (label, current, maximum) = match totals {
-        ObjectiveTotals::HotZone { progress, target } => {
+        ObjectiveTotals::TurfHold { progress, target } => {
             ("CAPTURE PROGRESS", progress[team], target)
         }
-        ObjectiveTotals::Heist { health, maximum } => ("IDOL HEALTH", health[team], maximum[team]),
+        ObjectiveTotals::VaultBreak { health, maximum } => {
+            ("IDOL HEALTH", health[team], maximum[team])
+        }
     };
     let percent = f32::from(current) * 100. / f32::from(maximum.max(1));
     let detail = match totals {
-        ObjectiveTotals::HotZone { .. } => format!("{percent:.1}%"),
-        ObjectiveTotals::Heist { .. } => format!("{current} / {maximum}"),
+        ObjectiveTotals::TurfHold { .. } => format!("{percent:.1}%"),
+        ObjectiveTotals::VaultBreak { .. } => format!("{current} / {maximum}"),
     };
     (label, detail, percent.clamp(0., 100.))
 }
@@ -131,10 +133,10 @@ impl ResultsPainter<'_> {
 mod tests {
     use super::*;
     #[test]
-    fn objective_values_keep_exact_heist_health_and_capture_progress() {
+    fn objective_values_keep_exact_vault_break_health_and_capture_progress() {
         assert_eq!(
             values(
-                ObjectiveTotals::Heist {
+                ObjectiveTotals::VaultBreak {
                     health: [0, 731],
                     maximum: [2000, 2000]
                 },
@@ -145,7 +147,7 @@ mod tests {
         );
         assert_eq!(
             values(
-                ObjectiveTotals::HotZone {
+                ObjectiveTotals::TurfHold {
                     progress: [1800, 927],
                     target: 1800
                 },
@@ -156,7 +158,7 @@ mod tests {
         );
         assert_eq!(
             values(
-                ObjectiveTotals::HotZone {
+                ObjectiveTotals::TurfHold {
                     progress: [1800, 927],
                     target: 1800
                 },

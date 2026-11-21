@@ -14,8 +14,8 @@ fn match_id_preserves_full_u128_through_format_parse_and_serde() {
 
 #[test]
 fn neutral_default_rules_are_valid_composition_scaffolding() {
-    let wipeout = WipeoutRules::default().validate().unwrap();
-    assert_eq!(wipeout.target_score, 10);
+    let takedown = TakedownRules::default().validate().unwrap();
+    assert_eq!(takedown.target_score, 10);
     #[cfg(feature = "server")]
     {
         let lifecycle = MatchLifecycleRules::default().validate().unwrap();
@@ -26,17 +26,17 @@ fn neutral_default_rules_are_valid_composition_scaffolding() {
         assert_eq!(lifecycle.respawn_delay_ticks, 180);
         assert_eq!(lifecycle.spawn_protection_ticks, 1);
         assert_eq!(lifecycle.completed_input_lock_ticks, 1);
-        let hot_zone = HotZoneRules::default().validate_with(&lifecycle).unwrap();
-        assert_eq!(hot_zone.target_progress_ticks, 1_800);
+        let turf_hold = TurfHoldRules::default().validate_with(&lifecycle).unwrap();
+        assert_eq!(turf_hold.target_progress_ticks, 1_800);
     }
 }
 
 #[test]
 fn rules_reject_zero_invalid_capacity_and_overflow() {
     assert!(
-        WipeoutRules {
+        TakedownRules {
             target_score: 0,
-            ..WipeoutRules::default()
+            ..TakedownRules::default()
         }
         .validate()
         .is_err()
@@ -63,14 +63,14 @@ fn rules_reject_zero_invalid_capacity_and_overflow() {
         );
         let lifecycle = MatchLifecycleRules::default();
         assert!(
-            HotZoneRules {
+            TurfHoldRules {
                 target_progress_ticks: 1
             }
             .validate_with(&lifecycle)
             .is_err()
         );
         assert!(
-            HotZoneRules {
+            TurfHoldRules {
                 target_progress_ticks: 20_000,
             }
             .validate_with(&lifecycle)
@@ -395,8 +395,8 @@ fn match_telemetry_is_bounded_and_derives_tick_metrics() {
     }
     telemetry.complete_with_mode(
         160,
-        crate::map::WIPEOUT_MODE_DEFINITION,
-        ModeSummary::Wipeout(WipeoutSummary {
+        crate::map::TAKEDOWN_MODE_DEFINITION,
+        ModeSummary::Takedown(TakedownSummary {
             final_scores: [1, 0],
             target_score: 10,
             score_margin: 1,
@@ -414,7 +414,7 @@ fn match_telemetry_is_bounded_and_derives_tick_metrics() {
     assert_eq!(summary.applied_damage_by_distance, [15, 0, 0]);
     assert_eq!(
         summary.mode_summary,
-        ModeSummary::Wipeout(WipeoutSummary {
+        ModeSummary::Takedown(TakedownSummary {
             final_scores: [1, 0],
             target_score: 10,
             score_margin: 1,
@@ -425,8 +425,8 @@ fn match_telemetry_is_bounded_and_derives_tick_metrics() {
     telemetry.begin(MatchId(8), 200);
     telemetry.complete_with_mode(
         200,
-        crate::map::WIPEOUT_MODE_DEFINITION,
-        ModeSummary::Wipeout(WipeoutSummary {
+        crate::map::TAKEDOWN_MODE_DEFINITION,
+        ModeSummary::Takedown(TakedownSummary {
             final_scores: [0, 0],
             target_score: 10,
             score_margin: 0,
@@ -466,8 +466,8 @@ fn match_summary_archives_only_weapon_deltas_for_the_active_match() {
     aggregate.attacks_with_hostile_contact += 3;
     telemetry.complete_with_mode(
         20,
-        crate::map::WIPEOUT_MODE_DEFINITION,
-        ModeSummary::Wipeout(WipeoutSummary {
+        crate::map::TAKEDOWN_MODE_DEFINITION,
+        ModeSummary::Takedown(TakedownSummary {
             final_scores: [0, 0],
             target_score: 10,
             score_margin: 0,
@@ -593,8 +593,8 @@ fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() 
     }
     telemetry.complete_with_mode(
         180,
-        crate::map::WIPEOUT_MODE_DEFINITION,
-        ModeSummary::Wipeout(WipeoutSummary {
+        crate::map::TAKEDOWN_MODE_DEFINITION,
+        ModeSummary::Takedown(TakedownSummary {
             final_scores: [2, 0],
             target_score: 10,
             score_margin: 2,
@@ -621,8 +621,8 @@ fn telemetry_handles_multiple_lives_incomplete_fights_rates_and_summary_drops() 
     telemetry.begin(MatchId(12), 200);
     telemetry.complete_with_mode(
         200,
-        crate::map::WIPEOUT_MODE_DEFINITION,
-        ModeSummary::Wipeout(WipeoutSummary {
+        crate::map::TAKEDOWN_MODE_DEFINITION,
+        ModeSummary::Takedown(TakedownSummary {
             final_scores: [0, 0],
             target_score: 10,
             score_margin: 0,
@@ -750,7 +750,7 @@ mod capacity_composition_tests {
         let catalog = MapContentCatalog::embedded().expect("embedded map catalog");
         let resolved = catalog
             .resolve_preset(MapPresetId(1), MapInstanceId(1))
-            .expect("built-in wipeout preset resolves");
+            .expect("built-in takedown preset resolves");
         SpawnPointCatalog(resolved.spawn_points_by_team)
     }
 
@@ -763,7 +763,7 @@ mod capacity_composition_tests {
     fn production_capacity_satisfies_the_builtin_map() {
         production_capacity()
             .validate_against_spawn_catalog(&embedded_spawns())
-            .expect("the built-in wipeout map serves the production profile");
+            .expect("the built-in takedown map serves the production profile");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-// Sluicegate Works (BRL-9gqj): landscape 3v3 Wipeout, point-symmetric about the centre cell.
+// Sluicegate Works (BRL-9gqj): landscape 3v3 Takedown, point-symmetric about the centre cell.
 // Every non-spawn placement has a twin at (32 - x, 24 - y); see the BRL-9gqj spec for the rationale.
 (
     recipe_id: MapRecipeId(14),

@@ -112,8 +112,8 @@ pub(crate) struct BotProfile {
     pub retreat_step_min_world: f32,
     pub retreat_step_max_world: f32,
     pub retreat_dash_range_fraction: f32,
-    pub hot_zone_dash_radius_fraction: f32,
-    pub hot_zone_hold_radius_fraction: f32,
+    pub turf_hold_dash_radius_fraction: f32,
+    pub turf_hold_hold_radius_fraction: f32,
     pub standoff_arrival_fraction: f32,
     pub attack_safe_dash_range_fraction: f32,
     pub defend_anchor_range_fraction: f32,
@@ -177,8 +177,8 @@ impl BotProfile {
             self.retreat_health_fraction,
             self.restoration_health_fraction,
             self.retreat_dash_range_fraction,
-            self.hot_zone_dash_radius_fraction,
-            self.hot_zone_hold_radius_fraction,
+            self.turf_hold_dash_radius_fraction,
+            self.turf_hold_hold_radius_fraction,
             self.standoff_arrival_fraction,
             self.attack_safe_dash_range_fraction,
             self.defend_anchor_range_fraction,
@@ -204,8 +204,8 @@ impl BotProfile {
             || !(0.0..1.0).contains(&self.retreat_health_fraction)
             || !(0.0..=1.0).contains(&self.restoration_health_fraction)
             || !(0.0..=1.0).contains(&self.retreat_dash_range_fraction)
-            || self.hot_zone_dash_radius_fraction < 1.0
-            || !(0.0..=1.0).contains(&self.hot_zone_hold_radius_fraction)
+            || self.turf_hold_dash_radius_fraction < 1.0
+            || !(0.0..=1.0).contains(&self.turf_hold_hold_radius_fraction)
             || self.standoff_arrival_fraction < 1.0
             || self.attack_safe_dash_range_fraction < 1.0
             || !(0.0..=1.0).contains(&self.defend_anchor_range_fraction)

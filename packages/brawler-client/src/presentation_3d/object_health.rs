@@ -12,7 +12,7 @@ enum DamageableObjectHealthKey {
         generation: u64,
         placement_id: brawler::map::MapPlacementId,
     },
-    HeistSafe {
+    VaultBreakSafe {
         match_id: brawler::matchplay::MatchId,
         anchor_id: brawler::map::ModeAnchorId,
     },
@@ -101,7 +101,7 @@ pub(super) fn project_damageable_object_health_ui(
     mut commands: Commands,
     mut index: ResMut<DamageableObjectHealthUiIndex>,
     cameras: Query<(&Camera, &GlobalTransform), With<ArenaCamera>>,
-    heist_readiness: Res<hud::ClientHeistReadiness>,
+    vault_break_readiness: Res<hud::ClientVaultBreakReadiness>,
     objects: Query<
         (
             &brawler::map::DamageableTargetIdentity,
@@ -111,7 +111,7 @@ pub(super) fn project_damageable_object_health_ui(
         With<brawler::map::DamageableWorldObject>,
     >,
     safes: Query<(
-        &brawler::matchplay::HeistSafe,
+        &brawler::matchplay::VaultBreakSafe,
         &Position,
         &brawler::combat::CurrentHealth,
         &brawler::map::DamageableMaximumHealth,
@@ -160,13 +160,16 @@ pub(super) fn project_damageable_object_health_ui(
                 .map(|fraction| (key, (transform.translation(), *fraction)))
         })
         .collect();
-    if matches!(*heist_readiness, hud::ClientHeistReadiness::Ready) {
+    if matches!(
+        *vault_break_readiness,
+        hud::ClientVaultBreakReadiness::Ready
+    ) {
         for (safe, position, health, maximum) in &safes {
             if maximum.0 == 0 {
                 continue;
             }
             desired.insert(
-                DamageableObjectHealthKey::HeistSafe {
+                DamageableObjectHealthKey::VaultBreakSafe {
                     match_id: safe.match_id,
                     anchor_id: safe.anchor_id,
                 },

@@ -570,18 +570,18 @@ pub(in crate::flow) fn dashboard_mode_title(
     game: &brawler::lobby::AdvertisedGameType,
 ) -> &'static str {
     match game.rules_summary {
-        brawler::lobby::AdvertisedRulesSummary::Wipeout { .. } => "WIPEOUT",
-        brawler::lobby::AdvertisedRulesSummary::HotZone { .. } => "HOT ZONE",
-        brawler::lobby::AdvertisedRulesSummary::Heist { .. } => "HEIST",
+        brawler::lobby::AdvertisedRulesSummary::Takedown { .. } => "TAKEDOWN",
+        brawler::lobby::AdvertisedRulesSummary::TurfHold { .. } => "TURF HOLD",
+        brawler::lobby::AdvertisedRulesSummary::VaultBreak { .. } => "VAULT BREAK",
         brawler::lobby::AdvertisedRulesSummary::Zombie { .. } => "ZOMBIE",
     }
 }
 
 pub(in crate::flow) fn dashboard_badge_index(game: &brawler::lobby::AdvertisedGameType) -> usize {
     match game.rules_summary {
-        brawler::lobby::AdvertisedRulesSummary::Wipeout { .. } => 0,
-        brawler::lobby::AdvertisedRulesSummary::HotZone { .. } => 1,
-        brawler::lobby::AdvertisedRulesSummary::Heist { .. } => 2,
+        brawler::lobby::AdvertisedRulesSummary::Takedown { .. } => 0,
+        brawler::lobby::AdvertisedRulesSummary::TurfHold { .. } => 1,
+        brawler::lobby::AdvertisedRulesSummary::VaultBreak { .. } => 2,
         brawler::lobby::AdvertisedRulesSummary::Zombie { .. } => 3,
     }
 }

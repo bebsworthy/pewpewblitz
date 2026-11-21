@@ -750,8 +750,8 @@ fn footprint(item: PaletteItem, catalog: &MapContentCatalog) -> (u8, u8) {
             (asset.footprint_cells.width, asset.footprint_cells.height)
         }),
         PaletteItem::Spawn(_) => (1, 1),
-        PaletteItem::HotZone => (3, 3),
-        PaletteItem::HeistSafe(_) => (3, 2),
+        PaletteItem::TurfHold => (3, 3),
+        PaletteItem::VaultBreakSafe(_) => (3, 2),
     }
 }
 
@@ -1097,7 +1097,7 @@ pub(super) fn chip_hint(
             .asset(id)
             .is_some_and(|asset| asset.slot != MapAssetSlot::Surface),
         PaletteItem::Spawn(_) => true,
-        PaletteItem::HotZone | PaletteItem::HeistSafe(_) => false,
+        PaletteItem::TurfHold | PaletteItem::VaultBreakSafe(_) => false,
     });
     match (compact, rotates) {
         (true, _) => format!("{category} · tap to change"),
@@ -1233,13 +1233,13 @@ pub(super) fn selection_toolbar_position(
             .iter()
             .filter(|anchor| selection.contains(&anchor.placement_id))
             .map(|anchor| match anchor.kind {
-                brawler::map::MapModeAnchorKind::HotZoneCircle {
+                brawler::map::MapModeAnchorKind::TurfHoldCircle {
                     center_half_cell, ..
                 }
                 | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
                     MapCell::new(center_half_cell.x / 2, center_half_cell.y / 2)
                 }
-                brawler::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => origin_cell,
+                brawler::map::MapModeAnchorKind::VaultBreakSafe { origin_cell, .. } => origin_cell,
             }),
     );
     let min_x = cells.iter().map(|cell| cell.x).min()?;

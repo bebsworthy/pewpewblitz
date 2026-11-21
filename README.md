@@ -2,7 +2,7 @@
 
 PewPew Blitz is a server-authoritative top-down arena shooter built around player-authored brawler
 builds, readable combat, meaningful tradeoffs, and short objective matches. The current product
-supports Wipeout, Hot Zone, and Heist; bounded weapon/build recipes; abilities and passives;
+supports Takedown, Turf Hold, and Vault Break; bounded weapon/build recipes; abilities and passives;
 destructible and health-bearing map assets; treasure-chest restoration pickups; the consolidated
 Feature Yard test-map family; a dynamically framed 3D presentation; server-local multiplayer; and
 server-hosted Practice matches with active deterministic Pulse/Dash bots.
@@ -62,10 +62,10 @@ command therefore preserves N independent local identities without concurrent wr
 manually launched client an explicit data directory.
 
 One client is sufficient for Practice. Multiplayer game types form only their exact advertised
-human roster; the default Feature Yard Wipeout 2v2 path therefore requires four clients. The
-catalog exposes exact 1v1, 2v2, and 3v3 Wipeout, Hot Zone, and Heist entries. The 1v1/2v2 paths use
-Feature Yard; 3v3 uses Verdant Crossfire and Sluicegate Works (Wipeout), Switchback Basin (Hot
-Zone), and Powderline Vault (Heist).
+human roster; the default Feature Yard Takedown 2v2 path therefore requires four clients. The
+catalog exposes exact 1v1, 2v2, and 3v3 Takedown, Turf Hold, and Vault Break entries. The 1v1/2v2 paths use
+Feature Yard; 3v3 uses Verdant Crossfire and Sluicegate Works (Takedown), Switchback Basin (Turf
+Hold), and Powderline Vault (Vault Break).
 
 For the development-only Balance Lab, start the tuning-enabled routed server and one interactive
 client, then use that client to enter Practice:
@@ -142,9 +142,9 @@ Run `just` to list the supported everyday surface.
 | `just lint` | Run formatting, Clippy, role isolation (including the player-client automation exclusion), renderer/map-boundary checks, the authored e2e weapon and requeue-timing check, and Balance Lab web checks |
 | `just test` | Run deterministic routing, client, server, Balance Lab, network, and performance suites |
 | `just e2e [2, 4, or 6]` | Run the real-process 1v1, 2v2, or 3v3 product path; default is 2 |
-| `BRAWLER_PRODUCT_PLAYERS_PER_TEAM=1 BRAWLER_PRODUCT_REQUEUE_SMOKE=1 ./scripts/network-product-match.sh` | Play one real `wipeout-1v1` (or `BRAWLER_PRODUCT_GAME_TYPE`) match to its authoritative end, return both clients to a fresh lobby, and queue again; the watchdog defaults to the game type's authored formation, countdown, and duration plus 60 s, and a failure names the lifecycle phase each client reached (BRL-cb3x) |
+| `BRAWLER_PRODUCT_PLAYERS_PER_TEAM=1 BRAWLER_PRODUCT_REQUEUE_SMOKE=1 ./scripts/network-product-match.sh` | Play one real `takedown-1v1` (or `BRAWLER_PRODUCT_GAME_TYPE`) match to its authoritative end, return both clients to a fresh lobby, and queue again; the watchdog defaults to the game type's authored formation, countdown, and duration plus 60 s, and a failure names the lifecycle phase each client reached (BRL-cb3x) |
 | `just published-map-e2e` | Publish a map from one headless client, approve it with `brawler-profile-admin`, and load it in a routed 1v1 queue match for two clients |
-| `just practice-e2e [game type] [map preset ID]` | Run one exact real-process Practice match with one human and server-filled bots; default is `wipeout-1v1` on its first map |
+| `just practice-e2e [game type] [map preset ID]` | Run one exact real-process Practice match with one human and server-filled bots; default is `takedown-1v1` on its first map |
 | `just network-change-e2e [game type]` | Keep one routed Practice match session alive across two 4 s outages: to a new client source port, then back to the original (BRL-g57a, BRL-sqz0) |
 | `just slow-link-e2e [delay ms]` | Reach the lobby welcome on the first connect attempt through a UDP proxy that delays every supervisor-to-client datagram; default is 1500 (BRL-jx6p) |
 | `just v3-render-evidence [path]` | Record the bounded native release render report; the historical recipe name is retained |
@@ -282,12 +282,12 @@ server-authoritative Practice match from the Dashboard, open the match menu thro
 pause request every input device uses, and leave the match afterwards (`results` first plays again
 from Results). For them `scripts/shell-capture.sh` restarts its scratch supervisor on a capture
 catalog whose matches last `BRAWLER_SHELL_CAPTURE_MATCH_SECONDS` (default 30) so Results arrives on
-the authoritative time limit; `BRAWLER_SHELL_CAPTURE_GAME_TYPE=<id>` (for example `heist-3v3`) keeps
+the authoritative time limit; `BRAWLER_SHELL_CAPTURE_GAME_TYPE=<id>` (for example `vault-break-3v3`) keeps
 only that game type, which Practice then plays. The published-map routes use the same capture
 catalog (which also drops the publish cooldown) and headless fixture clients:
 `map-library-published` shows My Maps' Published view over the capture account's own maps in every
 state, and `results-published` shows Results credited to an approved community map; run it with
-`BRAWLER_SHELL_CAPTURE_GAME_TYPE=wipeout-1v1` (BRL-s3dh, BRL-1sgj).
+`BRAWLER_SHELL_CAPTURE_GAME_TYPE=takedown-1v1` (BRL-s3dh, BRL-1sgj).
 
 Scripted captures render off-screen (BRL-g7ny): `just shell-capture` and
 `scripts/v3-render-evidence.sh` pass the automation client's `--offscreen`, a UI gallery run with
@@ -347,7 +347,7 @@ mutable object families retain their tighter independent limits. Extreme-density
 lookup optimization are deferred until measured content requires them.
 
 The product catalog currently presents one shared **Feature Yard** integration-map family through
-separate Wipeout, Hot Zone, and Heist recipes. Those recipes intentionally reuse identical geometry
+separate Takedown, Turf Hold, and Vault Break recipes. Those recipes intentionally reuse identical geometry
 while retaining mode-specific validation and do not claim release-map balance or fun.
 
 Build-embedded, headless-safe gameplay definitions live under
@@ -366,7 +366,7 @@ feature graph.
 Map recipes reference stable `MapAssetId`s rather than client asset paths. The server derives
 surfaces, collision, destruction, damageable-object durability, spawns, and typed mode anchors from
 shared gameplay profiles and lowers them into a resolved authoritative snapshot. Runtime barrels,
-chests, restoration pickups, and Heist objectives remain server-owned and replicate stable current
+chests, restoration pickups, and Vault Break objectives remain server-owned and replicate stable current
 state; the client maps stable visual IDs through
 [`assets/catalogs/`](assets/catalogs/) to art under [`assets/brawler/`](assets/brawler/). Exact source
 and CC0 provenance live in [`assets/manifest.ron`](assets/manifest.ron), with retained license texts

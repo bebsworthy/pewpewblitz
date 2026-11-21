@@ -586,18 +586,18 @@ pub(super) fn validate_zombie_ingress_access(
 }
 
 #[derive(Clone)]
-struct HeistSafeAccessGeometry {
+struct VaultBreakSafeAccessGeometry {
     team_slot: u8,
     footprint: BTreeSet<MapCell>,
     shape: DerivedColliderShape,
     sectors: [Vec<MapCell>; 4],
 }
 
-fn heist_safe_access_geometry(
+fn vault_break_safe_access_geometry(
     anchor: &MapModeAnchorPlacement,
     dimensions: MapDimensions,
-) -> Result<HeistSafeAccessGeometry, String> {
-    let MapModeAnchorKind::HeistSafe {
+) -> Result<VaultBreakSafeAccessGeometry, String> {
+    let MapModeAnchorKind::VaultBreakSafe {
         team_slot,
         origin_cell,
         width_cells,
@@ -605,7 +605,7 @@ fn heist_safe_access_geometry(
         ..
     } = anchor.kind
     else {
-        return Err("Heist maps cannot contain non-safe anchors".to_string());
+        return Err("Vault Break maps cannot contain non-safe anchors".to_string());
     };
     let footprint = (0..height_cells)
         .flat_map(|y| {
@@ -616,21 +616,21 @@ fn heist_safe_access_geometry(
     let left_x = origin_cell
         .x
         .checked_sub(2)
-        .ok_or_else(|| "Heist safe lacks a left attack sector".to_string())?;
+        .ok_or_else(|| "Vault Break safe lacks a left attack sector".to_string())?;
     let bottom_y = origin_cell
         .y
         .checked_sub(2)
-        .ok_or_else(|| "Heist safe lacks a lower attack sector".to_string())?;
+        .ok_or_else(|| "Vault Break safe lacks a lower attack sector".to_string())?;
     let right_x = origin_cell
         .x
         .checked_add(width_cells)
         .and_then(|value| value.checked_add(1))
-        .ok_or_else(|| "Heist safe right attack sector overflows".to_string())?;
+        .ok_or_else(|| "Vault Break safe right attack sector overflows".to_string())?;
     let top_y = origin_cell
         .y
         .checked_add(height_cells)
         .and_then(|value| value.checked_add(1))
-        .ok_or_else(|| "Heist safe upper attack sector overflows".to_string())?;
+        .ok_or_else(|| "Vault Break safe upper attack sector overflows".to_string())?;
     let vertical = |x| {
         (0..height_cells)
             .map(|y| MapCell::new(x, origin_cell.y + y))
@@ -641,7 +641,7 @@ fn heist_safe_access_geometry(
             .map(|x| MapCell::new(origin_cell.x + x, y))
             .collect::<Vec<_>>()
     };
-    Ok(HeistSafeAccessGeometry {
+    Ok(VaultBreakSafeAccessGeometry {
         team_slot,
         footprint,
         shape: DerivedColliderShape::Rectangle {
@@ -681,7 +681,7 @@ fn reachable_clear_cells(
     reached
 }
 
-pub(super) fn validate_heist_map_access(
+pub(super) fn validate_vault_break_map_access(
     placements: &[MapAssetPlacement],
     anchors: &[MapModeAnchorPlacement],
     dimensions: MapDimensions,
@@ -689,14 +689,14 @@ pub(super) fn validate_heist_map_access(
 ) -> Result<(), String> {
     let mut safes = Vec::with_capacity(2);
     for anchor in anchors {
-        safes.push(heist_safe_access_geometry(anchor, dimensions)?);
+        safes.push(vault_break_safe_access_geometry(anchor, dimensions)?);
     }
     safes.sort_by_key(|safe| safe.team_slot);
     if safes.len() != 2 || safes[0].team_slot != 0 || safes[1].team_slot != 1 {
-        return Err("Heist safe access requires exact team slots 0 and 1".to_string());
+        return Err("Vault Break safe access requires exact team slots 0 and 1".to_string());
     }
     if !safes[0].footprint.is_disjoint(&safes[1].footprint) {
-        return Err("Heist safe reservations overlap".to_string());
+        return Err("Vault Break safe reservations overlap".to_string());
     }
     for placement in placements {
         let asset = catalog
@@ -711,7 +711,7 @@ pub(super) fn validate_heist_map_access(
             .iter()
             .any(|safe| cells.iter().any(|cell| safe.footprint.contains(cell)))
         {
-            return Err("Heist safe reservation overlaps a map placement".to_string());
+            return Err("Vault Break safe reservation overlaps a map placement".to_string());
         }
     }
 
@@ -742,7 +742,7 @@ pub(super) fn validate_heist_map_access(
             })
             .count();
         if open_sectors < 2 {
-            return Err("Heist safe exposes fewer than two legal attack sectors".to_string());
+            return Err("Vault Break safe exposes fewer than two legal attack sectors".to_string());
         }
     }
 
@@ -757,7 +757,7 @@ pub(super) fn validate_heist_map_access(
         .collect::<Vec<_>>();
     for (spawn_team, spawn) in spawns {
         if !center_is_clear(spawn) {
-            return Err("Heist spawn is not fighter-radius navigable".to_string());
+            return Err("Vault Break spawn is not fighter-radius navigable".to_string());
         }
         let reached = reachable_clear_cells(spawn, &center_is_clear);
         for safe in &safes {
@@ -773,7 +773,7 @@ pub(super) fn validate_heist_map_access(
                     "attack"
                 };
                 return Err(format!(
-                    "Heist spawn cannot reach its required {relation} ring"
+                    "Vault Break spawn cannot reach its required {relation} ring"
                 ));
             }
         }

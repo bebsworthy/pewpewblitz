@@ -9,7 +9,7 @@ mod passives;
 mod ultimates;
 mod weapons;
 
-pub(super) const EDITOR_SCHEMA_VERSION: u16 = 15;
+pub(super) const EDITOR_SCHEMA_VERSION: u16 = 16;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -524,11 +524,11 @@ fn add_world_fields(fields: &mut Vec<EditorFieldDescriptor>) {
     add_chest_fields(fields);
     add_field(
         fields,
-        path!["heist", "safeMaximumHealth"],
+        path!["vaultBreak", "safeMaximumHealth"],
         EditorSection::Modes,
         "safeMaximumHealth",
-        "heist",
-        "Heist",
+        "vault-break",
+        "Vault Break",
         "Safe",
         "Maximum health",
         NumberSpec::integer(100, 20_000, "health"),
@@ -925,7 +925,7 @@ mod tests {
         let (snapshot, weapons) = fixture();
         let manifest = BalanceLabEditorManifest::from_catalogs(&snapshot, &weapons);
 
-        assert_eq!(EDITOR_SCHEMA_VERSION, 15);
+        assert_eq!(EDITOR_SCHEMA_VERSION, 16);
         assert_eq!(comparison_row_count(&manifest, EditorSection::Weapons), 29);
         for (key, expected_subjects) in [
             ("economy/ammo_capacity", 7),

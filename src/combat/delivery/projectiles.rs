@@ -46,7 +46,7 @@ type ObjectSweepQuery<'w, 's> = Query<
     ),
     Or<(
         With<crate::map::DamageableWorldObject>,
-        With<crate::matchplay::HeistSafe>,
+        With<crate::matchplay::VaultBreakSafe>,
     )>,
 >;
 

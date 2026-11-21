@@ -10,7 +10,7 @@ mod signature;
 pub(crate) const SENTRY_MUZZLE_PRESENTATION_OFFSET: f32 = 47.0;
 
 pub(crate) use producers::{
-    CombatVfxProducerPlugin, HeistVfxProducerPlugin, PickupVfxProducerPlugin, VfxRequestSet,
+    CombatVfxProducerPlugin, PickupVfxProducerPlugin, VaultBreakVfxProducerPlugin, VfxRequestSet,
     WorldObjectVfxProducerPlugin,
 };
 
@@ -29,10 +29,11 @@ pub(crate) use registry::{
 pub(crate) use request::{
     COMBAT_DAMAGE_VFX, COMBAT_IMPACT_VFX, COMBAT_MUZZLE_VFX, COMBAT_RESET_VFX,
     COMBAT_VFX_PRODUCER_RANK, DEMOLITION_STRIKE_VFX, ELEMENTAL_FIELD_VFX, FORCED_REVEAL_VFX,
-    HEIST_CRITICAL_VFX, HEIST_DAMAGED_VFX, HEIST_DESTROYED_VFX, HEIST_VFX_PRODUCER_RANK,
     PICKUP_COLLECTED_VFX, PICKUP_EXPIRED_VFX, PICKUP_SPAWNED_VFX, PICKUP_VFX_PRODUCER_RANK,
-    REVEAL_SCAN_VFX, SELF_CLOAK_VFX, VfxDeadline, VfxRequest, VfxRequestKey, VfxRequestOrder,
-    WORLD_OBJECT_DAMAGED_VFX, WORLD_OBJECT_EXPLOSION_VFX, WORLD_OBJECT_VFX_PRODUCER_RANK,
+    REVEAL_SCAN_VFX, SELF_CLOAK_VFX, VAULT_BREAK_CRITICAL_VFX, VAULT_BREAK_DAMAGED_VFX,
+    VAULT_BREAK_DESTROYED_VFX, VAULT_BREAK_VFX_PRODUCER_RANK, VfxDeadline, VfxRequest,
+    VfxRequestKey, VfxRequestOrder, WORLD_OBJECT_DAMAGED_VFX, WORLD_OBJECT_EXPLOSION_VFX,
+    WORLD_OBJECT_VFX_PRODUCER_RANK,
 };
 pub(crate) use signature::{
     CombatVisualSignature, VfxAccent, VfxAuthoritativeTiming, VfxCarrier, VfxContextOverride,

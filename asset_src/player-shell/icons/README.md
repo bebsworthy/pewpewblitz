@@ -41,8 +41,8 @@ symmetry, fit, search, rotate, duplicate.
 Ultimate/passive families: dash, sentry, cloak, scan, field, blast, cold, fire, poison, heal,
 blob, feather, shield, pulse, target, cycle.
 Weapon part families: part-magazine, part-ammunition, part-barrel, part-chamber, part-element.
-Mode pennants (Dashboard mode button, game selection, match loading): mode-wipeout (skull and
-crossbones), mode-hot-zone (flag on a capture zone), mode-heist (safe with dial), mode-zombie
+Mode pennants (Dashboard mode button, game selection, match loading): mode-takedown (skull and
+crossbones), mode-turf-hold (flag on a capture zone), mode-vault-break (safe with dial), mode-zombie
 (green X-eyed head). Names are `mode-<mode key>` so screens resolve them from the mode key.
 
 `packages/brawler-client/src/ui/icons.rs` lists the shipped names and its tests check each PNG, size and SVG
@@ -51,6 +51,6 @@ source. Add an icon by defining it in `ICONS` in the script, rebuilding, and add
 
 Retired by this set: the Pillow `details/build_art.py` pictograms, the Sharp-exported shell
 `icon-*` and `part-*` artwork, six unused Kenney Game Icons, and (BRL-1wms) the Sharp-exported
-mode pennants `shell/{wipeout,hot-zone,heist,zombie}.png` and `shell/game-badge-*.png` with
+mode pennants `shell/{takedown,turf-hold,vault-break,zombie}.png` and `shell/game-badge-*.png` with
 their SVGs and `export-badges.cjs`. The logo and panel chrome are separate artwork (see
 `../README.md`).

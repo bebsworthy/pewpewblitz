@@ -40,14 +40,14 @@ presentation IDs.
 
 Each map recipe targets one mode definition because its spawns and objective anchors must satisfy a
 specific schema. A visual arena, map-asset arrangement, or presentation theme may be reused
-across several recipes, but a Wipeout-compatible recipe and a Hot Zone-compatible recipe remain
+across several recipes, but a Takedown-compatible recipe and a Turf Hold-compatible recipe remain
 independently validated documents. Selecting a map therefore means selecting a compatible recipe,
 not attaching arbitrary rules to an unvalidated scene.
 
 Built-in and future player-authored recipes use the same parser, validator, resolver, and runtime
 installation path. Systems must not branch on a built-in map's identity.
 
-Map Maker admits private player-authored recipes for Wipeout, Hot Zone, and Heist Practice. A
+Map Maker admits private player-authored recipes for Takedown, Turf Hold, and Vault Break Practice. A
 candidate has no fabricated preset identity: its resolved snapshot records `source_preset_id: None`.
 The connected lobby validates the exact mode and roster and accepts one immutable recipe revision
 and fingerprint before worker allocation. Runtime destruction, pickups, scoring, and other match
@@ -58,7 +58,7 @@ provenance and use their existing pools.
 
 A player can publish a saved Map Maker draft to the routed server they are connected to (BRL-w9z1).
 The server operator opts a game type in with `community_maps: true` in
-`config/server/game-types.ron`; `wipeout-1v1` is opted in on the checked-in server. Publish targets
+`config/server/game-types.ron`; `takedown-1v1` is opted in on the checked-in server. Publish targets
 the draft's intended game type when it takes community maps, otherwise the first opted-in game type
 of the draft's mode.
 
@@ -100,8 +100,8 @@ The supported recipe model expresses:
 - one-cell non-colliding effect-tile features whose gameplay profiles reference stable tile
   definitions composed from registered effect families;
 - the compatible mode definition;
-- typed mode-required anchors: the half-cell-precision Hot Zone circle, two cell-aligned
-  team-owned Heist objective anchors, and bounded perimeter ingress points for Zombie.
+- typed mode-required anchors: the half-cell-precision Turf Hold circle, two cell-aligned
+  team-owned Vault Break objective anchors, and bounded perimeter ingress points for Zombie.
 
 The schema may grow to support additional authored pickups, hazards, concealment regions, movement
 surfaces, and other environment primitives. V10's restoration pickup is instead a runtime entity
@@ -180,7 +180,7 @@ An envisioned map builder may let a player:
 - validate and playtest a candidate recipe before saving or publishing it.
 
 It does not accept Rust, scripts, systems, arbitrary component data, new game modes, unrestricted
-assets, network references, or executable objective logic. Choosing Wipeout, Hot Zone, Heist, or
+assets, network references, or executable objective logic. Choosing Takedown, Turf Hold, Vault Break, or
 another supported mode selects developer-authored rules and a validation schema; the player authors
 only a compatible layout.
 
@@ -207,7 +207,7 @@ The authoritative mode runtime owns:
 - match phase and transition rules;
 - scoring, victory, timeout, and tie behavior;
 - objective progress and mode-specific timers;
-- Heist objective identity, team ownership, health, reset, and threshold/timeout evaluation;
+- Vault Break objective identity, team ownership, health, reset, and threshold/timeout evaluation;
 - respawn, elimination, or round policy;
 - mode-specific participant state and outcome summaries.
 
@@ -283,21 +283,21 @@ compatible team slots, spawn capacity, playable space, and required anchors. Res
 their intersection and publishes the maximum active-fighter count used by admission and subsystem
 capacity checks.
 
-Supported routed product game types include exact 1v1, 2v2, and 3v3 Wipeout, Hot Zone, and Heist
+Supported routed product game types include exact 1v1, 2v2, and 3v3 Takedown, Turf Hold, and Vault Break
 matches. The 1v1/2v2 paths retain the **Feature Yard** integration-map family. Its three ordinary
 recipes share identical geometry and differ only in stable identity, compatible mode, and the typed
 anchors required by that mode. Mirrored tall-grass groups touch contested approaches so the family
 exercises terrain concealment during live mode play rather than on an isolated map. Feature Yard is
 functional test content, not a fun, balanced, or release-ready map claim.
 
-The 3v3 paths instead advertise **Verdant Crossfire** and **Sluicegate Works** for Wipeout,
-**Switchback Basin** for Hot Zone, and **Powderline Vault** for Heist. Verdant Crossfire, Switchback
+The 3v3 paths instead advertise **Verdant Crossfire** and **Sluicegate Works** for Takedown,
+**Switchback Basin** for Turf Hold, and **Powderline Vault** for Vault Break. Verdant Crossfire, Switchback
 Basin, and Powderline Vault are independent padded 25×37 portrait sparse recipes with three safe
 spawns per team and mode-owned objective topology. Their first-pass layouts preserve the supplied
 references' lanes, blocker silhouettes, concealment groups, and objective positions using existing
 Brawler assets; final geometry and presentation remain subject to native playtest feedback.
 
-Sluicegate Works (BRL-9gqj) is the deliberately different second Wipeout layout: a padded 33×25
+Sluicegate Works (BRL-9gqj) is the deliberately different second Takedown layout: a padded 33×25
 landscape recipe on the facility theme, point-symmetric about its centre so neither side owns a
 route advantage. Its spawns sit 26 cells apart (Verdant's are 32) behind three-cell shield walls
 with exits up, down, and ahead. Two water canals, which block movement but not projectiles, split
@@ -305,7 +305,7 @@ it into a centre lane and two flanks. Each canal has one bridge offset toward on
 ends near each base. The centre lane is a close-range brawl around a wall pillar ringed by
 destructible crates and oil barrels. Each flank holds a treasure chest behind a guard wall
 and only one tall-grass patch (16 concealing cells in total, against Verdant's 46). Long trades
-happen across the canals and along the canal-side rows. The `wipeout-3v3` game type ("Wipeout
+happen across the canals and along the canal-side rows. The `takedown-3v3` game type ("Takedown
 3v3") lists both maps: matchmaking alternates them and Practice lets the player choose.
 Ordinary matches are expected to center on 3v3, while the architecture may support larger bounded
 arrangements such as twelve solo fighters, two teams of five, or three teams of three when a concrete
@@ -322,7 +322,7 @@ Practice fills the human's remaining allied slots with server-hosted bots.
 The checked-in `config/server/game-types.ron` schema 6 catalog owns operator policy at four levels.
 `formation_timing` declares loading and route-grant deadlines, `common_lifecycle` declares
 spawn-protection and completed-match input-lock durations once for every advertised game type,
-`mode_policies` declares Wipeout's recent-hostile defeat-credit window and Heist's critical-health
+`mode_policies` declares Takedown's recent-hostile defeat-credit window and Vault Break's critical-health
 percentage once per mode, and per-game-type entries own topology, map selection, objective target,
 match duration, countdown, and respawn duration. The lobby
 validates this complete policy, incorporates it into the catalog revision, and copies the resolved
@@ -330,24 +330,24 @@ values through allocation and the match manifest; a production worker does not r
 from mode defaults. The shortened process-verification profile remains an explicit test/operator
 override rather than a production balance source.
 
-### Wipeout
+### Takedown
 
-Wipeout is a team elimination-score mode. An enemy defeat grants a point; the first team to the
+Takedown is a team elimination-score mode. An enemy defeat grants a point; the first team to the
 target wins, or the leading team wins when time expires. Fighters normally re-enter after a
 server-owned respawn delay.
 
 A neutral environment defeat, including a Damage tile pulse, credits the most recent qualifying
-hostile fighter that damaged the target within the catalog-authored Wipeout credit window (300
-simulation ticks in the checked-in policy). This bounded memory is owned by the active Wipeout
+hostile fighter that damaged the target within the catalog-authored Takedown credit window (300
+simulation ticks in the checked-in policy). This bounded memory is owned by the active Takedown
 match; direct hostile attribution takes precedence, and self, allied, stale, wrong-match, or absent
 sources never earn credit.
 
 Its map schema requires compatible team spawns and safe re-entry space but no objective geometry.
 Its runtime owns scores, timeout resolution, respawn policy, victory, and the match summary.
 
-### Hot Zone
+### Turf Hold
 
-Hot Zone is a spatial-control mode. Teams contest one or more capture areas. Server-owned progress
+Turf Hold is a spatial-control mode. Teams contest one or more capture areas. Server-owned progress
 advances according to occupancy and contest rules; the first team to complete the requirement wins,
 or timeout rules resolve the result.
 
@@ -357,9 +357,9 @@ resolution, victory, and the match summary. The 240-world-unit near-zone expansi
 classification only: it does not affect capture, movement, damage, targeting, or any other
 authoritative gameplay outcome, so it is intentionally not part of the balance-policy catalog.
 
-### Heist
+### Vault Break
 
-Heist is a simultaneous mirrored attack-and-defense mode. Each team owns one public durable
+Vault Break is a simultaneous mirrored attack-and-defense mode. Each team owns one public durable
 objective and may damage only the opposing objective. Destroying exactly one objective wins;
 same-tick destruction draws; timeout compares exact remaining-health fractions before applying the
 common draw/forfeit rules.
@@ -367,9 +367,9 @@ common draw/forfeit rules.
 Its map schema requires exactly two typed team-objective anchors, compatible spawns, and validated
 attack/defense access. Its runtime owns objective health and team policy, threshold and timeout
 evaluation, the catalog-authored critical-health percentage, reset, results, and the match summary.
-The authority copies that threshold into replicated `HeistState`, so HUD and world presentation
+The authority copies that threshold into replicated `VaultBreakState`, so HUD and world presentation
 consume the exact match policy rather than maintaining a client constant. The shipped presentation
-uses team idols fitted inside the authoritative safe footprint; the internal `HeistSafe` identity
+uses team idols fitted inside the authoritative safe footprint; the internal `VaultBreakSafe` identity
 is a mode contract and never implies treasure-chest loot.
 
 Together these modes prove that combat, fighter lifecycle, map installation, and common match phases
@@ -402,13 +402,13 @@ hostiles, total spawns, stack count, and random-drop budget are all explicitly b
 
 ## Envisioned mode families
 
-These layouts do not become supported rules merely because they can be described. Heist is the
+These layouts do not become supported rules merely because they can be described. Vault Break is the
 completed V10 proof governed by the
-[damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md).
+[damageable world objects and Vault Break specification](./18-damageable-world-objects-and-vault-break.md).
 Other families remain product candidates:
-- **Gem Grab:** teams collect and carry a contested resource. It adds spawn cadence, carrier state,
+- **Collect-and-hold (BRL-wrer, name pending):** teams collect and carry a contested resource. It adds spawn cadence, carrier state,
   drops, visibility pressure, and a threshold/hold win sequence.
-- **Showdown:** solo fighters or teams survive until one remains. It adds elimination, distributed
+- **Last Stand:** solo fighters or teams survive until one remains. It adds elimination, distributed
   spawning, exploration/loot pressure, and a closing playable boundary.
 
 A new mode is introduced as a complete player-visible loop, not as a generic framework exercise. It

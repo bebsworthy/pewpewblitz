@@ -17,12 +17,12 @@ pub(crate) struct AudioProducersPlugin;
 impl Plugin for AudioProducersPlugin {
     fn build(&self, app: &mut App) {
         combat::register(app);
-        matchplay::register_heist(app);
+        matchplay::register_vault_break(app);
         ability::register_ability(app);
         ability::register_reload(app);
         session::register(app);
         matchplay::register_common(app);
-        matchplay::register_hot_zone(app);
+        matchplay::register_turf_hold(app);
         pickup::register(app);
         ui::register(app);
 
@@ -30,12 +30,12 @@ impl Plugin for AudioProducersPlugin {
             Update,
             (
                 combat::produce_combat_audio_requests,
-                matchplay::produce_heist_audio_requests,
+                matchplay::produce_vault_break_audio_requests,
                 ability::produce_ability_audio_requests,
                 ability::produce_reload_audio_requests,
                 session::produce_session_audio_requests,
                 matchplay::produce_match_audio_requests,
-                matchplay::produce_hot_zone_audio_requests,
+                matchplay::produce_turf_hold_audio_requests,
                 pickup::produce_pickup_audio_requests,
                 ui::produce_ui_audio_requests,
             )
@@ -75,7 +75,7 @@ mod tests {
             registry::AudioRegistryPlugin,
             request::{AudioRequest, cue_keys},
         },
-        hud::ClientHeistReadiness,
+        hud::ClientVaultBreakReadiness,
     };
     use brawler::{
         builds::{AbilityPhase, AbilityState},
@@ -84,11 +84,12 @@ mod tests {
             WeaponState, WorldPoint,
         },
         map::{
-            ClientMapReadiness, DamageableTargetIdentity, ModeAnchorId, WIPEOUT_MODE_DEFINITION,
+            ClientMapReadiness, DamageableTargetIdentity, ModeAnchorId, TAKEDOWN_MODE_DEFINITION,
         },
         matchplay::{
-            HeistObjectiveCue, HeistObjectiveCueKind, HotZoneState, HotZoneStatus, MatchId,
-            MatchPhase, MatchRoot, MatchState, ReceivedHeistObjectiveCue, WipeoutState,
+            MatchId, MatchPhase, MatchRoot, MatchState, ReceivedVaultBreakObjectiveCue,
+            TakedownState, TurfHoldState, TurfHoldStatus, VaultBreakObjectiveCue,
+            VaultBreakObjectiveCueKind,
         },
         protocol::{Fighter, NetworkEntityId},
     };
@@ -115,13 +116,13 @@ mod tests {
         })
     }
 
-    fn heist_cue() -> ReceivedHeistObjectiveCue {
-        ReceivedHeistObjectiveCue(HeistObjectiveCue {
+    fn vault_break_cue() -> ReceivedVaultBreakObjectiveCue {
+        ReceivedVaultBreakObjectiveCue(VaultBreakObjectiveCue {
             event_id: CombatEventId(20),
             tick: 100,
             attack_id: AttackId(21),
             source_subject: None,
-            target: DamageableTargetIdentity::HeistSafe {
+            target: DamageableTargetIdentity::VaultBreakSafe {
                 match_id: MatchId(1),
                 anchor_id: ModeAnchorId(2),
                 defending_team: brawler::combat::TeamId(1),
@@ -130,7 +131,7 @@ mod tests {
             amount: 1,
             health_after: 9,
             maximum_health: 10,
-            kind: HeistObjectiveCueKind::Damaged,
+            kind: VaultBreakObjectiveCueKind::Damaged,
         })
     }
 
@@ -138,9 +139,9 @@ mod tests {
     fn built_in_chain_emits_before_same_frame_consumer_in_preserved_order() {
         let mut app = App::new();
         app.add_message::<DeduplicatedCombatCue>()
-            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<ReceivedVaultBreakObjectiveCue>()
             .add_message::<AudioRequest>()
-            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientVaultBreakReadiness::Ready)
             .insert_resource(ClientPlayableGate(false))
             .insert_resource(ClientMapReadiness::Ready)
             .init_resource::<ObservedRequests>()
@@ -163,20 +164,20 @@ mod tests {
                 MatchRoot,
                 MatchState {
                     match_id: MatchId(1),
-                    mode_definition_id: WIPEOUT_MODE_DEFINITION,
+                    mode_definition_id: TAKEDOWN_MODE_DEFINITION,
                     phase: MatchPhase::Active { ends_at_tick: 200 },
                     rules_revision: 1,
                 },
-                WipeoutState {
+                TakedownState {
                     team_scores: [0, 0],
                     target_score: 10,
                     ..default()
                 },
-                HotZoneState {
+                TurfHoldState {
                     match_id: MatchId(1),
                     zone_anchor_id: ModeAnchorId(3),
                     occupants: [0, 0],
-                    status: HotZoneStatus::Empty,
+                    status: TurfHoldStatus::Empty,
                     progress_ticks: [0, 0],
                     target_progress_ticks: 100,
                     next_evaluation_tick: 101,
@@ -190,7 +191,7 @@ mod tests {
         app.world_mut().resource_mut::<ObservedRequests>().0.clear();
 
         app.world_mut().write_message(combat_cue());
-        app.world_mut().write_message(heist_cue());
+        app.world_mut().write_message(vault_break_cue());
         app.world_mut().resource_mut::<ClientPlayableGate>().0 = true;
         app.world_mut()
             .entity_mut(fighter)
@@ -204,14 +205,14 @@ mod tests {
             .ammo = 2;
         app.world_mut()
             .entity_mut(match_root)
-            .get_mut::<WipeoutState>()
+            .get_mut::<TakedownState>()
             .unwrap()
             .team_scores = [1, 0];
         app.world_mut()
             .entity_mut(match_root)
-            .get_mut::<HotZoneState>()
+            .get_mut::<TurfHoldState>()
             .unwrap()
-            .status = HotZoneStatus::Controlled {
+            .status = TurfHoldStatus::Controlled {
             team: brawler::combat::TeamId(0),
         };
 
@@ -258,9 +259,9 @@ mod tests {
         };
         let mut app = App::new();
         app.add_message::<DeduplicatedCombatCue>()
-            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<ReceivedVaultBreakObjectiveCue>()
             .add_message::<AudioRequest>()
-            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientVaultBreakReadiness::Ready)
             .insert_resource(ClientPlayableGate(false))
             .insert_resource(ClientMapReadiness::Ready)
             .init_resource::<LocalAttackLedger>()
@@ -347,9 +348,9 @@ mod tests {
         use brawler::builds::UltimateKind;
         let mut app = App::new();
         app.add_message::<DeduplicatedCombatCue>()
-            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<ReceivedVaultBreakObjectiveCue>()
             .add_message::<AudioRequest>()
-            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientVaultBreakReadiness::Ready)
             .insert_resource(ClientPlayableGate(false))
             .insert_resource(ClientMapReadiness::Ready)
             .init_resource::<LocalAttackLedger>()
@@ -451,9 +452,9 @@ mod tests {
         use brawler::builds::UltimateKind;
         let mut app = App::new();
         app.add_message::<DeduplicatedCombatCue>()
-            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<ReceivedVaultBreakObjectiveCue>()
             .add_message::<AudioRequest>()
-            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientVaultBreakReadiness::Ready)
             .insert_resource(ClientPlayableGate(false))
             .insert_resource(ClientMapReadiness::Ready)
             .init_resource::<LocalAttackLedger>()
@@ -544,9 +545,9 @@ mod tests {
         use brawler::builds::{AbilityPhase, AbilityState, UltimateKind};
         let mut app = App::new();
         app.add_message::<DeduplicatedCombatCue>()
-            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<ReceivedVaultBreakObjectiveCue>()
             .add_message::<AudioRequest>()
-            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientVaultBreakReadiness::Ready)
             .insert_resource(ClientPlayableGate(false))
             .insert_resource(ClientMapReadiness::Ready)
             .init_resource::<LocalAttackLedger>()
@@ -636,9 +637,9 @@ mod tests {
         use crate::ui::{press::ReleaseActivation, surface::Surface};
         let mut app = App::new();
         app.add_message::<DeduplicatedCombatCue>()
-            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<ReceivedVaultBreakObjectiveCue>()
             .add_message::<AudioRequest>()
-            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientVaultBreakReadiness::Ready)
             .insert_resource(ClientPlayableGate(false))
             .insert_resource(ClientMapReadiness::Ready)
             .init_resource::<ObservedRequests>()
@@ -678,9 +679,9 @@ mod tests {
         let mut app = App::new();
         let start = Instant::now();
         app.add_message::<DeduplicatedCombatCue>()
-            .add_message::<ReceivedHeistObjectiveCue>()
+            .add_message::<ReceivedVaultBreakObjectiveCue>()
             .add_message::<AudioRequest>()
-            .insert_resource(ClientHeistReadiness::Ready)
+            .insert_resource(ClientVaultBreakReadiness::Ready)
             .insert_resource(ClientPlayableGate(false))
             .insert_resource(ClientMapReadiness::Ready)
             .insert_resource(Time::<Real>::new(start))

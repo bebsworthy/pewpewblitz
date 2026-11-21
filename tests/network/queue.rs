@@ -70,7 +70,7 @@ fn queue_command_before_lobby_welcome_cannot_create_membership() {
         request_id: brawler::lobby::QueueRequestId::new(1).unwrap(),
         command: brawler::lobby::QueueCommand::Join(brawler::lobby::QueueJoinCommand {
             catalog_revision: brawler::lobby::CatalogRevision([1; 32]),
-            game_type_id: brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
+            game_type_id: brawler::lobby::GameTypeId::new("takedown-2v2").unwrap(),
             game_type_configuration_revision: 1,
             profile_revision: brawler::profiles::ProfileRevision::INITIAL,
         }),
@@ -187,7 +187,7 @@ fn practice_request_bypasses_queue_and_starts_one_human_three_v_three_reservatio
     let game = lobby
         .game_types
         .iter()
-        .find(|game| game.id.as_str() == "hot-zone-3v3")
+        .find(|game| game.id.as_str() == "turf-hold-3v3")
         .unwrap();
     let selected = brawler_client::SelectedGameType {
         catalog_revision: Some(lobby.catalog_revision),
@@ -429,8 +429,8 @@ fn a_handed_off_lobby_session_closing_first_does_not_remove_the_other_participan
         .unwrap()
         .game_types
         .iter()
-        .position(|game| game.id.as_str() == "wipeout-1v1")
-        .expect("the 1v1 Wipeout game is advertised");
+        .position(|game| game.id.as_str() == "takedown-1v1")
+        .expect("the 1v1 Takedown game is advertised");
     start_product_join(&mut harness, 0, game_index);
     start_product_join(&mut harness, 1, game_index);
     grant_pending_allocation(&mut harness, 2);

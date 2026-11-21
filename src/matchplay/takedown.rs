@@ -1,24 +1,24 @@
-//! Server-authoritative Wipeout scoring rules, state, and mode plugin.
+//! Server-authoritative Takedown scoring rules, state, and mode plugin.
 
 mod statistics;
-pub use statistics::WipeoutPlayerStats;
+pub use statistics::TakedownPlayerStats;
 
 use super::MatchResult;
 use crate::combat::TeamId;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Composed revision of the validated common lifecycle plus Wipeout rules for this state shape.
-pub const WIPEOUT_RULES_REVISION: u16 = 4;
+/// Composed revision of the validated common lifecycle plus Takedown rules for this state shape.
+pub const TAKEDOWN_RULES_REVISION: u16 = 4;
 
-/// Wipeout-specific scoring rules layered on the common `MatchLifecycleRules`.
+/// Takedown-specific scoring rules layered on the common `MatchLifecycleRules`.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WipeoutRules {
+pub struct TakedownRules {
     pub target_score: u16,
     pub recent_hostile_damage_credit_ticks: u64,
 }
 
-impl Default for WipeoutRules {
+impl Default for TakedownRules {
     fn default() -> Self {
         Self {
             target_score: 10,
@@ -29,20 +29,20 @@ impl Default for WipeoutRules {
     }
 }
 
-impl WipeoutRules {
+impl TakedownRules {
     pub fn validate(self) -> Result<Self, &'static str> {
         if self.target_score == 0 || self.recent_hostile_damage_credit_ticks == 0 {
-            return Err("Wipeout score target and hostile-credit window must be nonzero");
+            return Err("Takedown score target and hostile-credit window must be nonzero");
         }
         Ok(self)
     }
 }
 
-/// Durable replicated Wipeout scoring state, present on the match root only for Wipeout.
+/// Durable replicated Takedown scoring state, present on the match root only for Takedown.
 #[derive(Component, Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
-pub struct WipeoutState {
+pub struct TakedownState {
     pub match_id: Option<super::MatchId>,
-    pub players: [Option<WipeoutPlayerStats>; brawler_routing::MAX_PARTICIPANTS],
+    pub players: [Option<TakedownPlayerStats>; brawler_routing::MAX_PARTICIPANTS],
     /// Completion marker in the same replicated value as the final scoring snapshot.
     pub completed_result: Option<MatchResult>,
     pub team_scores: [u16; 2],
@@ -73,7 +73,7 @@ pub fn timeout_result(scores: [u16; 2]) -> MatchResult {
 #[cfg(feature = "server")]
 mod rules {
     use super::{
-        IntoScheduleConfigs, TeamId, WipeoutRules, WipeoutState, score_result, statistics,
+        IntoScheduleConfigs, TakedownRules, TakedownState, TeamId, score_result, statistics,
         timeout_result,
     };
     use crate::matchplay::{
@@ -83,7 +83,7 @@ mod rules {
     };
     use crate::{
         combat::{CombatOutcomeFacts, CombatOutcomeKind},
-        map::WIPEOUT_MODE_DEFINITION,
+        map::TAKEDOWN_MODE_DEFINITION,
         matchplay::MatchModeSetup,
         protocol::{Fighter, NetworkEntityId},
         timing::SimulationTick,
@@ -106,9 +106,9 @@ mod rules {
         recent_hostile_damage: BTreeMap<NetworkEntityId, RecentHostileDamageCredit>,
     }
 
-    pub struct WipeoutModePlugin;
+    pub struct TakedownModePlugin;
 
-    impl Plugin for WipeoutModePlugin {
+    impl Plugin for TakedownModePlugin {
         fn build(&self, app: &mut App) {
             let setup = app
                 .world()
@@ -116,25 +116,25 @@ mod rules {
                 .copied()
                 .unwrap_or_default();
             assert_eq!(
-                setup.mode_definition_id, WIPEOUT_MODE_DEFINITION,
-                "WipeoutModePlugin requires a Wipeout match mode setup"
+                setup.mode_definition_id, TAKEDOWN_MODE_DEFINITION,
+                "TakedownModePlugin requires a Takedown match mode setup"
             );
             app.init_resource::<ScoredCombatEvents>()
                 .add_systems(
                     Startup,
-                    initialize_wipeout_state.after(super::super::server::initialize_match_root),
+                    initialize_takedown_state.after(super::super::server::initialize_match_root),
                 )
                 .add_systems(
                     FixedUpdate,
-                    resolve_wipeout_deadline.in_set(MatchSet::DeadlineRules),
+                    resolve_takedown_deadline.in_set(MatchSet::DeadlineRules),
                 )
                 .add_systems(
                     FixedUpdate,
-                    reset_wipeout_state_on_restart.in_set(MatchRestartSet::ModeReset),
+                    reset_takedown_state_on_restart.in_set(MatchRestartSet::ModeReset),
                 )
                 .add_systems(
                     FixedPostUpdate,
-                    (statistics::remember_roster, resolve_wipeout_scoring)
+                    (statistics::remember_roster, resolve_takedown_scoring)
                         .chain()
                         .in_set(MatchSet::ModeRules)
                         .after(prepare_mode_rule_facts),
@@ -149,16 +149,16 @@ mod rules {
     }
 
     #[allow(clippy::needless_pass_by_value)]
-    fn initialize_wipeout_state(
+    fn initialize_takedown_state(
         mut commands: Commands,
-        rules: Res<WipeoutRules>,
+        rules: Res<TakedownRules>,
         roots: Query<Entity, With<MatchRoot>>,
     ) {
         let Ok(root) = roots.single() else {
             return;
         };
         commands.entity(root).insert((
-            WipeoutState {
+            TakedownState {
                 team_scores: [0, 0],
                 target_score: rules.target_score,
                 ..default()
@@ -170,13 +170,13 @@ mod rules {
     /// Deadline rule: at or after `ends_at_tick`, recognize an already-present threshold state
     /// (recovered or injected) and otherwise resolve the timeout comparison.
     #[allow(clippy::needless_pass_by_value)]
-    fn resolve_wipeout_deadline(
+    fn resolve_takedown_deadline(
         tick: Res<SimulationTick>,
-        roots: Query<(&MatchState, &WipeoutState), With<MatchRoot>>,
+        roots: Query<(&MatchState, &TakedownState), With<MatchRoot>>,
         mut outcomes: ResMut<ModeRuleOutcome>,
         mut diagnostics: ResMut<MatchOutcomeDiagnostics>,
     ) {
-        let Ok((state, wipeout)) = roots.single() else {
+        let Ok((state, takedown)) = roots.single() else {
             return;
         };
         let MatchPhase::Active { ends_at_tick } = state.phase else {
@@ -185,11 +185,11 @@ mod rules {
         if tick.0 < ends_at_tick {
             return;
         }
-        let (cause, result) = match score_result(wipeout.team_scores, wipeout.target_score) {
+        let (cause, result) = match score_result(takedown.team_scores, takedown.target_score) {
             Some(result) => (ModeOutcomeCause::Threshold, result),
             None => (
                 ModeOutcomeCause::Timeout,
-                timeout_result(wipeout.team_scores),
+                timeout_result(takedown.team_scores),
             ),
         };
         offer_mode_rule_outcome(
@@ -204,21 +204,21 @@ mod rules {
         );
     }
 
-    fn reset_wipeout_state_on_restart(
+    fn reset_takedown_state_on_restart(
         restart: Option<Res<crate::matchplay::server::PendingMatchRestart>>,
-        mut roots: Query<&mut WipeoutState, With<MatchRoot>>,
+        mut roots: Query<&mut TakedownState, With<MatchRoot>>,
         mut scored_events: ResMut<ScoredCombatEvents>,
     ) {
         if restart.is_none_or(|restart| restart.slot().is_none()) {
             return;
         }
-        let Ok(mut wipeout) = roots.single_mut() else {
+        let Ok(mut takedown) = roots.single_mut() else {
             return;
         };
-        wipeout.team_scores = [0, 0];
-        wipeout.players = Default::default();
-        wipeout.completed_result = None;
-        wipeout.match_id = None;
+        takedown.team_scores = [0, 0];
+        takedown.players = Default::default();
+        takedown.completed_result = None;
+        takedown.match_id = None;
         scored_events.ids.clear();
         scored_events.recent_hostile_damage.clear();
         scored_events.match_id = None;
@@ -231,17 +231,17 @@ mod rules {
         clippy::too_many_arguments,
         clippy::type_complexity
     )]
-    fn resolve_wipeout_scoring(
+    fn resolve_takedown_scoring(
         tick: Res<SimulationTick>,
-        rules: Res<WipeoutRules>,
-        mut roots: Query<(&MatchState, &mut WipeoutState), With<MatchRoot>>,
+        rules: Res<TakedownRules>,
+        mut roots: Query<(&MatchState, &mut TakedownState), With<MatchRoot>>,
         facts: Res<CombatOutcomeFacts>,
         mut scored_events: ResMut<ScoredCombatEvents>,
         mut diagnostics: ResMut<MatchOutcomeDiagnostics>,
         mut outcomes: ResMut<ModeRuleOutcome>,
         participants: Query<(&NetworkEntityId, &TeamId, &MatchParticipantView), With<Fighter>>,
     ) {
-        let Ok((state, mut wipeout)) = roots.single_mut() else {
+        let Ok((state, mut takedown)) = roots.single_mut() else {
             return;
         };
         if !matches!(state.phase, MatchPhase::Active { .. }) {
@@ -316,16 +316,16 @@ mod rules {
             } else {
                 recent_credit.map(|credit| credit.source_network_id)
             };
-            wipeout.record_defeat(fact.target_network_id, credited_source, credited_team);
+            takedown.record_defeat(fact.target_network_id, credited_source, credited_team);
             apply_credited_score(
-                &mut wipeout,
+                &mut takedown,
                 fact,
                 *target_team,
                 credited_team,
                 &mut diagnostics,
             );
         }
-        if let Some(result) = score_result(wipeout.team_scores, wipeout.target_score) {
+        if let Some(result) = score_result(takedown.team_scores, takedown.target_score) {
             offer_mode_rule_outcome(
                 &mut outcomes,
                 &mut diagnostics,
@@ -340,7 +340,7 @@ mod rules {
     }
 
     fn apply_credited_score(
-        wipeout: &mut WipeoutState,
+        takedown: &mut TakedownState,
         fact: &crate::combat::CombatOutcomeFact,
         target_team: TeamId,
         credited_team: Option<TeamId>,
@@ -348,7 +348,7 @@ mod rules {
     ) {
         if let Some(source_team) = credited_team {
             let index = usize::from(source_team.0);
-            wipeout.team_scores[index] = wipeout.team_scores[index].saturating_add(1);
+            takedown.team_scores[index] = takedown.team_scores[index].saturating_add(1);
         } else if fact
             .source_network_id
             .is_some_and(|source| source != fact.target_network_id)
@@ -437,7 +437,7 @@ mod rules {
 }
 
 #[cfg(feature = "server")]
-pub use rules::WipeoutModePlugin;
+pub use rules::TakedownModePlugin;
 #[cfg(all(feature = "server", test))]
 pub(crate) use rules::{credited_defeat_team, credited_defeat_team_with_recent};
 
@@ -446,20 +446,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wipeout_rules_require_a_nonzero_target() {
-        assert!(WipeoutRules::default().validate().is_ok());
+    fn takedown_rules_require_a_nonzero_target() {
+        assert!(TakedownRules::default().validate().is_ok());
         assert!(
-            WipeoutRules {
+            TakedownRules {
                 target_score: 0,
-                ..WipeoutRules::default()
+                ..TakedownRules::default()
             }
             .validate()
             .is_err_and(|error| error.contains("nonzero"))
         );
         assert!(
-            WipeoutRules {
+            TakedownRules {
                 recent_hostile_damage_credit_ticks: 0,
-                ..WipeoutRules::default()
+                ..TakedownRules::default()
             }
             .validate()
             .is_err_and(|error| error.contains("nonzero"))

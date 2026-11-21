@@ -1,15 +1,15 @@
 //! Feature-owned gameplay-fact to semantic-VFX request adapters.
 
 mod combat;
-mod heist;
 mod pickups;
+mod vault_break;
 mod world_objects;
 
 use bevy::prelude::SystemSet;
 
 pub(crate) use combat::CombatVfxProducerPlugin;
-pub(crate) use heist::HeistVfxProducerPlugin;
 pub(crate) use pickups::PickupVfxProducerPlugin;
+pub(crate) use vault_break::VaultBreakVfxProducerPlugin;
 pub(crate) use world_objects::WorldObjectVfxProducerPlugin;
 
 /// All feature-owned request producers run before renderer materialization.
@@ -57,15 +57,15 @@ mod tests {
     fn producer_set_runs_before_a_same_frame_request_consumer() {
         let mut app = App::new();
         app.add_message::<brawler::combat::client::DeduplicatedCombatCue>()
-            .add_message::<brawler::matchplay::ReceivedHeistObjectiveCue>()
-            .insert_resource(crate::hud::ClientHeistReadiness::default())
+            .add_message::<brawler::matchplay::ReceivedVaultBreakObjectiveCue>()
+            .insert_resource(crate::hud::ClientVaultBreakReadiness::default())
             .init_resource::<ObservedRequests>()
             .add_plugins(VfxRegistryPlugin)
             .add_plugins((
                 CombatVfxProducerPlugin,
                 WorldObjectVfxProducerPlugin,
                 PickupVfxProducerPlugin,
-                HeistVfxProducerPlugin,
+                VaultBreakVfxProducerPlugin,
             ))
             .add_systems(Update, synthetic_producer.in_set(VfxRequestSet))
             .add_systems(Update, observe_requests.after(VfxRequestSet));

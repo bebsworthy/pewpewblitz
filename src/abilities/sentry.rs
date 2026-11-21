@@ -842,7 +842,7 @@ struct SentryObjectiveTargetView {
     entity: Entity,
     position: Vec2,
     identity: crate::map::DamageableTargetIdentity,
-    safe: crate::matchplay::HeistSafe,
+    safe: crate::matchplay::VaultBreakSafe,
     health: u16,
     life: crate::map::DamageableLifeState,
 }
@@ -979,11 +979,11 @@ fn index_sentry_objective_targets(
             Entity,
             &avian2d::prelude::Position,
             &crate::map::DamageableTargetIdentity,
-            &crate::matchplay::HeistSafe,
+            &crate::matchplay::VaultBreakSafe,
             &crate::combat::CurrentHealth,
             &crate::map::DamageableLifeState,
         ),
-        With<crate::matchplay::HeistSafe>,
+        With<crate::matchplay::VaultBreakSafe>,
     >,
 ) -> Vec<SentryObjectiveTargetView> {
     objectives
@@ -1344,11 +1344,11 @@ pub(crate) fn tick_sentries(
             Entity,
             &avian2d::prelude::Position,
             &crate::map::DamageableTargetIdentity,
-            &crate::matchplay::HeistSafe,
+            &crate::matchplay::VaultBreakSafe,
             &crate::combat::CurrentHealth,
             &crate::map::DamageableLifeState,
         ),
-        With<crate::matchplay::HeistSafe>,
+        With<crate::matchplay::VaultBreakSafe>,
     >,
     owners: Query<
         (

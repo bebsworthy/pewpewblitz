@@ -295,7 +295,7 @@ candidate sets. It does not retain a second public 8-unit map-authoring grid. If
 work remains useful internally during migration, it is an implementation detail and cannot appear
 in recipes, shared IDs, recovery schemas, or authoring terminology at V8 closeout.
 
-The completed V10 [damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md)
+The completed V10 [damageable world objects and Vault Break specification](./18-damageable-world-objects-and-vault-break.md)
 adds ordinary attack durability as a separate profile/runtime axis. It does not reinterpret these
 V8 destruction variants: a V10 hit-point placement is immune to `DestroyMap`, carries durable
 partial health, and commits one compatible terminal placement outcome only when its health reaches
@@ -411,7 +411,7 @@ host them later, but names in an example do not create unsupported runtime behav
 implements one exact treasure-chest terminal that creates one server-owned restoration pickup;
 neither is a generic `MapInteractionBehavior`. This does not promote the other interaction
 families. See the completed [V10 roadmap](./implementation/v10/roadmap.md) and
-[damageable-object specification](./18-damageable-world-objects-and-heist.md).
+[damageable-object specification](./18-damageable-world-objects-and-vault-break.md).
 
 ## Client visual catalog
 
@@ -530,9 +530,9 @@ the Match Loading credit.
 
 Ordinary surface, feature, decoration, spawn, and damageable-object placements remain aligned to
 integer cells. Geometric mode anchors may use integer half-cell units: `(2x + 1, 2y + 1)` names the
-center of cell `(x, y)`, while even coordinates name grid vertices. Hot Zone centers and radii use
+center of cell `(x, y)`, while even coordinates name grid vertices. Turf Hold centers and radii use
 that representation, preserving exact half-cell geometry without serialized floats or permitting
-arbitrary offsets for ordinary assets. Heist safe footprints remain cell-aligned. Team spawn areas
+arbitrary offsets for ordinary assets. Vault Break safe footprints remain cell-aligned. Team spawn areas
 disappear; spawn capacity comes from placed spawn assets. An area mode anchor remains a dedicated
 typed layout fact because the selected mode owns its meaning and scoring.
 
@@ -554,7 +554,7 @@ covers:
 - spawn count, team topology, capacity, clearance, and terrain-aware reachability;
 - required mode anchors, objective access, and mode compatibility;
 - mode topology projected by the selected mode registration rather than map-side branches over
-  concrete Wipeout, Hot Zone, or Heist implementations;
+  concrete Takedown, Turf Hold, or Vault Break implementations;
 - deterministic canonical order and fingerprints;
 - client visual coverage through a build/test-time cross-catalog audit, without loading client files
   in the server runtime.
@@ -653,8 +653,8 @@ implements them; presentation never becomes an authority dependency.
 
 V8 converts, rather than compatibility-loads:
 
-- Crossroads Facility Wipeout;
-- Crossroads Facility Hot Zone;
+- Crossroads Facility Takedown;
+- Crossroads Facility Turf Hold;
 - Ashen Court;
 - every shared map object and visual actually referenced after conversion;
 - both current presentation themes;
@@ -682,10 +682,10 @@ least one deliberately small reference-inspired proof layout to demonstrate irre
 vegetation, corners, default ground, and sparse authoring; it does not copy the drawings as shipped
 maps or claim their art/layout as original content.
 
-V10 M02b later consolidated the product-visible proofs into Feature Yard. Wipeout, Hot Zone, and
-Heist each retain a complete independently validated recipe, but their dimensions, theme, surface,
+V10 M02b later consolidated the product-visible proofs into Feature Yard. Takedown, Turf Hold, and
+Vault Break each retain a complete independently validated recipe, but their dimensions, theme, surface,
 placements, filled rectangles, and spawn geometry are identical. Mode anchors remain recipe-owned:
-Wipeout has none, Hot Zone has one capture circle, and Heist has two team idols. Older built-ins are
+Takedown has none, Turf Hold has one capture circle, and Vault Break has two team idols. Older built-ins are
 not advertised; they remain embedded only where a focused regression still proves a named catalog,
 conversion, density, presentation-theme, or negative-validation contract.
 
@@ -729,7 +729,7 @@ V8 verification must include:
   asset;
 - interaction lifecycle tests before any interactive asset ships;
 - spawn safety, reachability, objective accessibility, topology, and map-capacity tests;
-- separate-App authority/replication tests and routed 1v1, 2v2, and 3v3 Wipeout/Hot Zone E2E;
+- separate-App authority/replication tests and routed 1v1, 2v2, and 3v3 Takedown/Turf Hold E2E;
 - client/server role-specific compilation proving no rendering or client asset dependency enters the
   server feature graph;
 - primitive fallback and imported-asset native rendering for every converted built-in map;

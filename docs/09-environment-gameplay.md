@@ -27,11 +27,11 @@ provides:
 - exact profile-owned rectangle/circle collision independent of authoring footprints;
 - explicit destructible map-asset cells with whole-cell removal or bounded replacement;
 - server-owned map installation, placement mutation, restart, recovery, and teardown;
-- mode-owned Hot Zone objective occupancy, progress, and scoring derived from a map anchor;
+- mode-owned Turf Hold objective occupancy, progress, and scoring derived from a map anchor;
 - V9 observer-specific concealment from tall grass, Self Cloak, and public allied fields, with
   proximity, attack/damage, and Reveal Scan outcomes enforced before replication;
 - V10 health-bearing oil barrels and treasure chests, exact-once explosion/drop terminals, public
-  restoration pickups, and mirrored Heist objectives through explicit target and mode ownership;
+  restoration pickups, and mirrored Vault Break objectives through explicit target and mode ownership;
 - one-cell authored Speed, Slow, and periodic neutral Damage effect tiles projected into focused
   movement, damage, healing-block, bot-traversal, spawn-clearance, and presentation capabilities;
 - client-owned visual profiles, themes, imported scenes, primitives, generated meshes,
@@ -157,11 +157,11 @@ turning, momentum, or add forced displacement. They should not collapse these di
 into one ambiguous speed multiplier.
 
 V10 completed the first environmental damage capability through its oil-barrel slice. Its
-[damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md)
+[damageable world objects and Vault Break specification](./18-damageable-world-objects-and-vault-break.md)
 resolved `M08-ENV-SOURCE` in the [V1 backlog](./implementation/v1/roadmap.md#v1-backlog) so
 outcomes preserve the immediate object cause and bounded initiating-player lineage rather than
 appearing as unattributed map damage. The same completed version added one exact chest/restoration-
-pickup behavior and kept Heist objective meaning in mode ownership. See the completed
+pickup behavior and kept Vault Break objective meaning in mode ownership. See the completed
 [V10 roadmap](./implementation/v10/roadmap.md) for delivery and closeout evidence.
 
 ## Concealment gameplay model

@@ -117,7 +117,7 @@ fn server_config_rejects_unbounded_values() {
 }
 
 #[test]
-fn production_startup_instantiates_wipeout_map_and_match_without_practice_dummy() {
+fn production_startup_instantiates_takedown_map_and_match_without_practice_dummy() {
     let mut app = build_app_with_config(ServerNetworkConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         ..default()
@@ -138,11 +138,11 @@ fn shortened_rules_require_the_explicit_verification_profile() {
     assert_eq!(lifecycle.minimum_participants_per_team, 1);
     assert_eq!(lifecycle.active_limit_ticks, 3_600);
     assert_eq!(lifecycle.countdown_ticks, 30);
-    let wipeout = crate::modes::wipeout_rules_for_profile(MatchRulesProfile::ProcessVerification);
-    assert_eq!(wipeout.target_score, 10);
-    let hot_zone =
-        crate::matchplay::hot_zone_rules_for_profile(MatchRulesProfile::ProcessVerification);
-    assert_eq!(hot_zone.target_progress_ticks, 30);
+    let takedown = crate::modes::takedown_rules_for_profile(MatchRulesProfile::ProcessVerification);
+    assert_eq!(takedown.target_score, 10);
+    let turf_hold =
+        crate::matchplay::turf_hold_rules_for_profile(MatchRulesProfile::ProcessVerification);
+    assert_eq!(turf_hold.target_progress_ticks, 30);
 }
 
 #[test]

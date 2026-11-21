@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # BRL-w9z1 routed publish-to-rotation check. Headless client A publishes a copy of the
-# wipeout-1v1 built-in map to a fresh routed server, the operator CLI approves it, and two exact
+# takedown-1v1 built-in map to a fresh routed server, the operator CLI approves it, and two exact
 # 1v1 queue matches follow: the first plays the built-in map, the second the published map, which
 # both clients must load (and see credited on Match Loading) before the match reaches Active.
 # Then (BRL-s3dh) client B cannot withdraw client A's map, client A lists it as approved and in
 # rotation and withdraws it, and the operator CLI shows it removed.
 
-game_type=wipeout-1v1
+game_type=takedown-1v1
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 

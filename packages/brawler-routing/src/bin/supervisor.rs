@@ -119,9 +119,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 const fn mode_label(mode: GameMode) -> &'static str {
     match mode {
-        GameMode::Wipeout => "wipeout",
-        GameMode::HotZone => "hot-zone",
-        GameMode::Heist => "heist",
+        GameMode::Takedown => "takedown",
+        GameMode::TurfHold => "turf-hold",
+        GameMode::VaultBreak => "vault-break",
         GameMode::Zombie => "zombie",
     }
 }
@@ -381,7 +381,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
         metrics_file: None,
         game_types: None,
         rules_profile: 1,
-        mode: GameMode::Wipeout,
+        mode: GameMode::Takedown,
         automatic_transition_driver: false,
         data_directory: PathBuf::from("data/server"),
     };
@@ -438,20 +438,20 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Arguments, Box<d
         } else if argument == "--mode" {
             parsed.mode = match args
                 .next()
-                .ok_or("--mode requires wipeout, hot-zone, or heist")?
+                .ok_or("--mode requires takedown, turf-hold, or vault-break")?
                 .as_str()
             {
-                "wipeout" => GameMode::Wipeout,
-                "hot-zone" => GameMode::HotZone,
-                "heist" => GameMode::Heist,
+                "takedown" => GameMode::Takedown,
+                "turf-hold" => GameMode::TurfHold,
+                "vault-break" => GameMode::VaultBreak,
                 "zombie" => GameMode::Zombie,
-                _ => return Err("--mode requires wipeout, hot-zone, or heist".into()),
+                _ => return Err("--mode requires takedown, turf-hold, or vault-break".into()),
             };
         } else if argument == "--automatic-transition-driver" {
             parsed.automatic_transition_driver = true;
         } else if argument == "--help" || argument == "-h" {
             println!(
-                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH --game-types PATH [--data-directory PATH] [--automatic-transition-driver] [--bind IP:PORT] [--mode <wipeout|hot-zone|heist>] [--match-rules <production|verification>] [--metrics-file PATH]"
+                "Usage: brawler-supervisor --network-protocol N --protocol-registry-fingerprint N --content-fingerprint N --worker-executable PATH --game-types PATH [--data-directory PATH] [--automatic-transition-driver] [--bind IP:PORT] [--mode <takedown|turf-hold|vault-break>] [--match-rules <production|verification>] [--metrics-file PATH]"
             );
             std::process::exit(0);
         } else {

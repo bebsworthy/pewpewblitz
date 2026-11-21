@@ -106,11 +106,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=("wipeout", "hot-zone", "heist", "both", "all", "crash-restart"),
-        default=os.environ.get("BRAWLER_ROUTED_EVIDENCE_MODE", "wipeout"),
+        choices=("takedown", "turf-hold", "vault-break", "both", "all", "crash-restart"),
+        default=os.environ.get("BRAWLER_ROUTED_EVIDENCE_MODE", "takedown"),
         help=(
             "evidence profile: one gameplay mode, both legacy modes, all modes, or the "
-            "production-worker crash/restart process test (default: wipeout)"
+            "production-worker crash/restart process test (default: takedown)"
         ),
     )
     parser.add_argument(
@@ -1335,9 +1335,9 @@ def main() -> int:
         return 0 if summary["status"] == "pass" else 1
 
     if args.mode == "both":
-        modes = ("wipeout", "hot-zone")
+        modes = ("takedown", "turf-hold")
     elif args.mode == "all":
-        modes = ("wipeout", "hot-zone", "heist")
+        modes = ("takedown", "turf-hold", "vault-break")
     else:
         modes = (args.mode,)
     cycles: list[dict[str, Any]] = []

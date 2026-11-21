@@ -201,7 +201,7 @@ class PairedEvidenceTests(unittest.TestCase):
                         "run_id=pair-1",
                         "scenario_id=pair-1",
                         "scenario_revision=1",
-                        "mode=wipeout",
+                        "mode=takedown",
                         "rules_profile=verification",
                         "network_profile=paired-m01-movement",
                         "protocol_version=1",

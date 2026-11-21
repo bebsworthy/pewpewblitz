@@ -39,15 +39,15 @@ fn canonical_fighter_fits_a_one_cell_passage_with_safety_margin() {
     );
 }
 
-fn assert_feature_yard_effect_tiles(resolved_wipeout: &ResolvedMap) {
-    assert_eq!(resolved_wipeout.effect_tiles.len(), 92);
+fn assert_feature_yard_effect_tiles(resolved_takedown: &ResolvedMap) {
+    assert_eq!(resolved_takedown.effect_tiles.len(), 92);
     for (definition_id, expected_count) in [
         (EffectTileDefinitionId(1), 36),
         (EffectTileDefinitionId(2), 36),
         (EffectTileDefinitionId(3), 20),
     ] {
         assert_eq!(
-            resolved_wipeout
+            resolved_takedown
                 .effect_tiles
                 .iter()
                 .filter(|tile| tile.definition_id == definition_id)
@@ -69,7 +69,7 @@ fn assert_feature_yard_effect_tiles(resolved_wipeout: &ResolvedMap) {
     ] {
         for y in min_y..min_y + 3 {
             for x in min_x..min_x + 3 {
-                assert!(resolved_wipeout.effect_tiles.iter().any(|tile| {
+                assert!(resolved_takedown.effect_tiles.iter().any(|tile| {
                     tile.definition_id == definition_id && tile.cell == MapCell::new(x, y)
                 }));
             }
@@ -77,7 +77,7 @@ fn assert_feature_yard_effect_tiles(resolved_wipeout: &ResolvedMap) {
     }
     for cell in [MapCell::new(31, 19), MapCell::new(32, 20)] {
         assert!(
-            resolved_wipeout.effect_tiles.iter().any(|tile| {
+            resolved_takedown.effect_tiles.iter().any(|tile| {
                 tile.definition_id == EffectTileDefinitionId(3) && tile.cell == cell
             })
         );
@@ -87,18 +87,27 @@ fn assert_feature_yard_effect_tiles(resolved_wipeout: &ResolvedMap) {
 #[test]
 fn feature_yard_variants_share_geometry_and_own_only_legal_mode_anchors() {
     let catalog = MapContentCatalog::embedded().unwrap();
-    let wipeout = &catalog.preset(FEATURE_YARD_WIPEOUT_PRESET).unwrap().recipe;
-    let hot_zone = &catalog.preset(FEATURE_YARD_HOT_ZONE_PRESET).unwrap().recipe;
-    let heist = &catalog.preset(FEATURE_YARD_HEIST_PRESET).unwrap().recipe;
+    let takedown = &catalog.preset(FEATURE_YARD_TAKEDOWN_PRESET).unwrap().recipe;
+    let turf_hold = &catalog
+        .preset(FEATURE_YARD_TURF_HOLD_PRESET)
+        .unwrap()
+        .recipe;
+    let vault_break = &catalog
+        .preset(FEATURE_YARD_VAULT_BREAK_PRESET)
+        .unwrap()
+        .recipe;
 
-    for variant in [hot_zone, heist] {
-        assert_eq!(variant.presentation_theme_id, wipeout.presentation_theme_id);
-        assert_eq!(variant.dimensions, wipeout.dimensions);
+    for variant in [turf_hold, vault_break] {
+        assert_eq!(
+            variant.presentation_theme_id,
+            takedown.presentation_theme_id
+        );
+        assert_eq!(variant.dimensions, takedown.dimensions);
         assert_eq!(
             variant.default_surface_asset_id,
-            wipeout.default_surface_asset_id
+            takedown.default_surface_asset_id
         );
-        let wipeout_structural: Vec<_> = wipeout
+        let takedown_structural: Vec<_> = takedown
             .placements
             .iter()
             .filter(|placement| {
@@ -110,35 +119,35 @@ fn feature_yard_variants_share_geometry_and_own_only_legal_mode_anchors() {
             .collect();
         assert_eq!(
             variant.placements.iter().collect::<Vec<_>>(),
-            wipeout_structural
+            takedown_structural
         );
-        assert_eq!(variant.filled_rects, wipeout.filled_rects);
+        assert_eq!(variant.filled_rects, takedown.filled_rects);
     }
-    assert_eq!(wipeout.mode_definition_id, WIPEOUT_MODE_DEFINITION);
-    assert!(wipeout.mode_anchors.is_empty());
-    let resolved_wipeout = catalog
-        .resolve_preset(FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+    assert_eq!(takedown.mode_definition_id, TAKEDOWN_MODE_DEFINITION);
+    assert!(takedown.mode_anchors.is_empty());
+    let resolved_takedown = catalog
+        .resolve_preset(FEATURE_YARD_TAKEDOWN_PRESET, MapInstanceId(1))
         .unwrap();
-    assert_feature_yard_effect_tiles(&resolved_wipeout);
-    assert_eq!(hot_zone.mode_definition_id, HOT_ZONE_MODE_DEFINITION);
-    assert_eq!(hot_zone.mode_anchors.len(), 1);
+    assert_feature_yard_effect_tiles(&resolved_takedown);
+    assert_eq!(turf_hold.mode_definition_id, TURF_HOLD_MODE_DEFINITION);
+    assert_eq!(turf_hold.mode_anchors.len(), 1);
     assert!(matches!(
-        hot_zone.mode_anchors[0].kind,
-        MapModeAnchorKind::HotZoneCircle { .. }
+        turf_hold.mode_anchors[0].kind,
+        MapModeAnchorKind::TurfHoldCircle { .. }
     ));
-    assert_eq!(heist.mode_definition_id, HEIST_MODE_DEFINITION);
-    assert_eq!(heist.mode_anchors.len(), 2);
+    assert_eq!(vault_break.mode_definition_id, VAULT_BREAK_MODE_DEFINITION);
+    assert_eq!(vault_break.mode_anchors.len(), 2);
     assert!(
-        heist
+        vault_break
             .mode_anchors
             .iter()
-            .all(|anchor| matches!(anchor.kind, MapModeAnchorKind::HeistSafe { .. }))
+            .all(|anchor| matches!(anchor.kind, MapModeAnchorKind::VaultBreakSafe { .. }))
     );
 
     for preset in [
-        FEATURE_YARD_WIPEOUT_PRESET,
-        FEATURE_YARD_HOT_ZONE_PRESET,
-        FEATURE_YARD_HEIST_PRESET,
+        FEATURE_YARD_TAKEDOWN_PRESET,
+        FEATURE_YARD_TURF_HOLD_PRESET,
+        FEATURE_YARD_VAULT_BREAK_PRESET,
     ] {
         let resolved = catalog.resolve_preset(preset, MapInstanceId(1)).unwrap();
         assert!(
@@ -154,7 +163,7 @@ fn feature_yard_variants_share_geometry_and_own_only_legal_mode_anchors() {
 fn feature_yard_contains_every_completed_map_capability_with_bounded_terminal_states() {
     let catalog = MapContentCatalog::embedded().unwrap();
     let resolved = catalog
-        .resolve_preset(FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+        .resolve_preset(FEATURE_YARD_TAKEDOWN_PRESET, MapInstanceId(1))
         .unwrap();
     let count = |asset_id| {
         resolved
@@ -373,17 +382,17 @@ fn world_cell_round_trips_centers_and_keeps_max_edges_exclusive() {
 }
 
 #[test]
-fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
+fn turf_hold_anchor_resolves_half_cell_center_and_radius() {
     let anchors = [MapModeAnchorPlacement {
         placement_id: MapPlacementId(1),
         anchor_id: ModeAnchorId(1),
-        kind: MapModeAnchorKind::HotZoneCircle {
+        kind: MapModeAnchorKind::TurfHoldCircle {
             center_half_cell: MapHalfCellPoint { x: 25, y: 37 },
             radius_half_cells: 7,
         },
     }];
-    let (objective, heist_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
-        crate::modes::ModeTopologyPolicy::HotZoneCircle,
+    let (objective, vault_break_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
+        crate::modes::ModeTopologyPolicy::TurfHoldCircle,
         MapDimensions {
             width: 25,
             height: 37,
@@ -393,7 +402,7 @@ fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
     )
     .unwrap();
 
-    assert!(heist_safes.is_empty());
+    assert!(vault_break_safes.is_empty());
     assert!(zombie_ingress.is_empty());
     assert_eq!(
         objective.unwrap().area,
@@ -406,7 +415,7 @@ fn hot_zone_anchor_resolves_half_cell_center_and_radius() {
 
 #[test]
 fn anchorless_topology_is_reusable_without_a_built_in_mode_branch() {
-    let (objective, heist_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
+    let (objective, vault_break_safes, zombie_ingress) = validate_and_resolve_mode_anchors(
         crate::modes::ModeTopologyPolicy::NoAnchors,
         MapDimensions {
             width: 25,
@@ -418,24 +427,24 @@ fn anchorless_topology_is_reusable_without_a_built_in_mode_branch() {
     .unwrap();
 
     assert!(objective.is_none());
-    assert!(heist_safes.is_empty());
+    assert!(vault_break_safes.is_empty());
     assert!(zombie_ingress.is_empty());
 }
 
 #[test]
 fn proper_three_vs_three_maps_resolve_exact_mode_topology() {
     let catalog = MapContentCatalog::embedded().unwrap();
-    let wipeout = catalog
+    let takedown = catalog
         .resolve_preset(VERDANT_CROSSFIRE_PRESET, MapInstanceId(10))
         .unwrap();
-    let hot_zone = catalog
+    let turf_hold = catalog
         .resolve_preset(SWITCHBACK_BASIN_PRESET, MapInstanceId(11))
         .unwrap();
-    let heist = catalog
+    let vault_break = catalog
         .resolve_preset(POWDERLINE_VAULT_PRESET, MapInstanceId(12))
         .unwrap();
 
-    for resolved in [&wipeout, &hot_zone, &heist] {
+    for resolved in [&takedown, &turf_hold, &vault_break] {
         assert_eq!(
             resolved.snapshot.dimensions,
             MapDimensions {
@@ -459,40 +468,52 @@ fn proper_three_vs_three_maps_resolve_exact_mode_topology() {
         );
     }
 
-    assert_eq!(wipeout.snapshot.mode_definition_id, WIPEOUT_MODE_DEFINITION);
-    assert_eq!(wipeout.snapshot.identity.recipe_revision, 2);
-    assert!(wipeout.objective_zone.is_none());
-    assert!(wipeout.heist_safes.is_empty());
+    assert_eq!(
+        takedown.snapshot.mode_definition_id,
+        TAKEDOWN_MODE_DEFINITION
+    );
+    assert_eq!(takedown.snapshot.identity.recipe_revision, 2);
+    assert!(takedown.objective_zone.is_none());
+    assert!(takedown.vault_break_safes.is_empty());
 
     assert_eq!(
-        hot_zone.snapshot.mode_definition_id,
-        HOT_ZONE_MODE_DEFINITION
+        turf_hold.snapshot.mode_definition_id,
+        TURF_HOLD_MODE_DEFINITION
     );
-    assert_eq!(hot_zone.snapshot.identity.recipe_revision, 2);
+    assert_eq!(turf_hold.snapshot.identity.recipe_revision, 2);
     assert_eq!(
-        hot_zone.objective_zone.unwrap().area,
+        turf_hold.objective_zone.unwrap().area,
         NormalizedArea {
             center: Vec2::ZERO,
             shape: MapShape::Circle { radius: 112.0 },
         }
     );
-    assert!(hot_zone.heist_safes.is_empty());
+    assert!(turf_hold.vault_break_safes.is_empty());
 
-    assert_eq!(heist.snapshot.mode_definition_id, HEIST_MODE_DEFINITION);
-    assert_eq!(heist.snapshot.identity.recipe_revision, 3);
-    assert!(heist.objective_zone.is_none());
-    assert_eq!(heist.heist_safes.len(), 2);
     assert_eq!(
-        heist.heist_safes[0].defending_team,
+        vault_break.snapshot.mode_definition_id,
+        VAULT_BREAK_MODE_DEFINITION
+    );
+    assert_eq!(vault_break.snapshot.identity.recipe_revision, 3);
+    assert!(vault_break.objective_zone.is_none());
+    assert_eq!(vault_break.vault_break_safes.len(), 2);
+    assert_eq!(
+        vault_break.vault_break_safes[0].defending_team,
         crate::combat::TeamId(0)
     );
     assert_eq!(
-        heist.heist_safes[1].defending_team,
+        vault_break.vault_break_safes[1].defending_team,
         crate::combat::TeamId(1)
     );
-    assert_eq!(heist.heist_safes[0].center, Vec2::new(0.0, -400.0));
-    assert_eq!(heist.heist_safes[1].center, Vec2::new(0.0, 400.0));
-    let cactus_cells = heist
+    assert_eq!(
+        vault_break.vault_break_safes[0].center,
+        Vec2::new(0.0, -400.0)
+    );
+    assert_eq!(
+        vault_break.vault_break_safes[1].center,
+        Vec2::new(0.0, 400.0)
+    );
+    let cactus_cells = vault_break
         .snapshot
         .placements
         .iter()
@@ -512,10 +533,10 @@ fn proper_three_vs_three_maps_resolve_exact_mode_topology() {
     );
 }
 
-/// BRL-9gqj: the second advertised 3v3 Wipeout map is a landscape, point-symmetric layout built
+/// BRL-9gqj: the second advertised 3v3 Takedown map is a landscape, point-symmetric layout built
 /// from canals, destructible centre crates, barrels, flank chests, and only two grass patches.
 #[test]
-fn sluicegate_works_resolves_a_point_symmetric_landscape_wipeout_layout() {
+fn sluicegate_works_resolves_a_point_symmetric_landscape_takedown_layout() {
     let catalog = MapContentCatalog::embedded().unwrap();
     let map = catalog
         .resolve_preset(SLUICEGATE_WORKS_PRESET, MapInstanceId(14))
@@ -531,13 +552,13 @@ fn sluicegate_works_resolves_a_point_symmetric_landscape_wipeout_layout() {
             height: 25,
         }
     );
-    assert_eq!(map.snapshot.mode_definition_id, WIPEOUT_MODE_DEFINITION);
+    assert_eq!(map.snapshot.mode_definition_id, TAKEDOWN_MODE_DEFINITION);
     assert_ne!(
         map.snapshot.presentation_theme_id,
         verdant.snapshot.presentation_theme_id
     );
     assert!(map.objective_zone.is_none());
-    assert!(map.heist_safes.is_empty());
+    assert!(map.vault_break_safes.is_empty());
     assert!(map.zombie_ingress.is_empty());
     assert_eq!(map.spawn_points_by_team.len(), 2);
     assert!(
@@ -626,7 +647,7 @@ fn zombie_yard_resolves_cooperative_spawns_and_perimeter_ingress() {
     assert_eq!(zombie.spawn_points_by_team.get(&0).unwrap().len(), 3);
     assert_eq!(zombie.zombie_ingress.len(), 8);
     assert!(zombie.objective_zone.is_none());
-    assert!(zombie.heist_safes.is_empty());
+    assert!(zombie.vault_break_safes.is_empty());
     assert!(zombie.zombie_ingress.iter().all(|anchor| {
         let half_width = f32::from(zombie.snapshot.dimensions.width) * MAP_CELL_SIZE_WORLD * 0.5;
         let half_height = f32::from(zombie.snapshot.dimensions.height) * MAP_CELL_SIZE_WORLD * 0.5;
@@ -638,19 +659,19 @@ fn zombie_yard_resolves_cooperative_spawns_and_perimeter_ingress() {
 #[test]
 fn proper_three_vs_three_maps_resolve_their_wall_and_cover_variants() {
     let catalog = MapContentCatalog::embedded().unwrap();
-    let wipeout = catalog
+    let takedown = catalog
         .resolve_preset(VERDANT_CROSSFIRE_PRESET, MapInstanceId(10))
         .unwrap();
-    let hot_zone = catalog
+    let turf_hold = catalog
         .resolve_preset(SWITCHBACK_BASIN_PRESET, MapInstanceId(11))
         .unwrap();
-    let heist = catalog
+    let vault_break = catalog
         .resolve_preset(POWDERLINE_VAULT_PRESET, MapInstanceId(12))
         .unwrap();
 
     for asset_id in [GREEN_SYMBOL_WALL_ASSET, YELLOW_STRIPED_COVER_ASSET] {
         assert!(
-            wipeout
+            takedown
                 .snapshot
                 .placements
                 .iter()
@@ -659,7 +680,7 @@ fn proper_three_vs_three_maps_resolve_their_wall_and_cover_variants() {
     }
     for asset_id in [RED_BRICK_WALL_ASSET, GREEN_STRIPED_COVER_ASSET] {
         assert!(
-            hot_zone
+            turf_hold
                 .snapshot
                 .placements
                 .iter()
@@ -668,7 +689,7 @@ fn proper_three_vs_three_maps_resolve_their_wall_and_cover_variants() {
     }
 
     let cells_for_asset = |asset_id| {
-        heist
+        vault_break
             .snapshot
             .placements
             .iter()
@@ -690,7 +711,7 @@ fn proper_three_vs_three_maps_resolve_their_wall_and_cover_variants() {
     assert_eq!(cells_for_asset(WOOD_WALL_ASSET), expected_wood_cells);
     assert!(!cells_for_asset(RED_BRICK_WALL_ASSET).is_empty());
     assert!(!cells_for_asset(YELLOW_STRIPED_COVER_ASSET).is_empty());
-    for resolved in [&wipeout, &hot_zone, &heist] {
+    for resolved in [&takedown, &turf_hold, &vault_break] {
         assert!(resolved.snapshot.placements.iter().all(|placement| {
             !matches!(
                 placement.asset_id,
@@ -860,10 +881,10 @@ fn tidal_garden_resolves_exact_authored_counts_and_mirrored_footprints() {
 }
 
 #[test]
-fn feature_yard_hot_zone_preserves_exact_objective_and_shared_topology() {
+fn feature_yard_turf_hold_preserves_exact_objective_and_shared_topology() {
     let catalog = MapContentCatalog::embedded().unwrap();
     let resolved = catalog
-        .resolve_preset(FEATURE_YARD_HOT_ZONE_PRESET, MapInstanceId(9))
+        .resolve_preset(FEATURE_YARD_TURF_HOLD_PRESET, MapInstanceId(9))
         .unwrap();
     assert_eq!(
         resolved.snapshot.dimensions,
@@ -902,30 +923,38 @@ fn feature_yard_hot_zone_preserves_exact_objective_and_shared_topology() {
 }
 
 #[test]
-fn feature_yard_resolves_exact_mirrored_heist_safe_anchors() {
+fn feature_yard_resolves_exact_mirrored_vault_break_safe_anchors() {
     let catalog = MapContentCatalog::embedded().unwrap();
     let resolved = catalog
-        .resolve_preset(FEATURE_YARD_HEIST_PRESET, MapInstanceId(10))
+        .resolve_preset(FEATURE_YARD_VAULT_BREAK_PRESET, MapInstanceId(10))
         .unwrap();
-    assert_eq!(resolved.snapshot.mode_definition_id, HEIST_MODE_DEFINITION);
-    assert!(resolved.objective_zone.is_none());
-    assert_eq!(resolved.heist_safes.len(), 2);
-    assert_eq!(resolved.heist_safes[0].anchor_id, ModeAnchorId(1));
     assert_eq!(
-        resolved.heist_safes[0].defending_team,
+        resolved.snapshot.mode_definition_id,
+        VAULT_BREAK_MODE_DEFINITION
+    );
+    assert!(resolved.objective_zone.is_none());
+    assert_eq!(resolved.vault_break_safes.len(), 2);
+    assert_eq!(resolved.vault_break_safes[0].anchor_id, ModeAnchorId(1));
+    assert_eq!(
+        resolved.vault_break_safes[0].defending_team,
         crate::combat::TeamId(0)
     );
-    assert_eq!(resolved.heist_safes[1].anchor_id, ModeAnchorId(2));
+    assert_eq!(resolved.vault_break_safes[1].anchor_id, ModeAnchorId(2));
     assert_eq!(
-        resolved.heist_safes[1].defending_team,
+        resolved.vault_break_safes[1].defending_team,
         crate::combat::TeamId(1)
     );
-    assert_eq!(resolved.heist_safes[0].half_extents, Vec2::new(48.0, 32.0));
-    assert!(
-        (resolved.heist_safes[0].center.x + resolved.heist_safes[1].center.x).abs() < f32::EPSILON
+    assert_eq!(
+        resolved.vault_break_safes[0].half_extents,
+        Vec2::new(48.0, 32.0)
     );
     assert!(
-        (resolved.heist_safes[0].center.y - resolved.heist_safes[1].center.y).abs() < f32::EPSILON
+        (resolved.vault_break_safes[0].center.x + resolved.vault_break_safes[1].center.x).abs()
+            < f32::EPSILON
+    );
+    assert!(
+        (resolved.vault_break_safes[0].center.y - resolved.vault_break_safes[1].center.y).abs()
+            < f32::EPSILON
     );
     assert_eq!(resolved.dynamic_placements.len(), 14);
     assert!(
@@ -942,7 +971,7 @@ fn feature_yard_rejects_safe_overlap_wrong_visual_and_sealed_access() {
     let recipe = catalog
         .presets
         .iter()
-        .find(|preset| preset.id == FEATURE_YARD_HEIST_PRESET)
+        .find(|preset| preset.id == FEATURE_YARD_VAULT_BREAK_PRESET)
         .unwrap()
         .recipe
         .clone();
@@ -958,7 +987,7 @@ fn feature_yard_rejects_safe_overlap_wrong_visual_and_sealed_access() {
     assert!(
         resolve_grid_recipe(
             &overlap,
-            Some(FEATURE_YARD_HEIST_PRESET),
+            Some(FEATURE_YARD_VAULT_BREAK_PRESET),
             MapInstanceId(1),
             &catalog
         )
@@ -967,7 +996,7 @@ fn feature_yard_rejects_safe_overlap_wrong_visual_and_sealed_access() {
     );
 
     let mut wrong_visual = recipe.clone();
-    let MapModeAnchorKind::HeistSafe {
+    let MapModeAnchorKind::VaultBreakSafe {
         ref mut objective_visual_profile_id,
         ..
     } = wrong_visual.mode_anchors[0].kind
@@ -978,7 +1007,7 @@ fn feature_yard_rejects_safe_overlap_wrong_visual_and_sealed_access() {
     assert!(
         resolve_grid_recipe(
             &wrong_visual,
-            Some(FEATURE_YARD_HEIST_PRESET),
+            Some(FEATURE_YARD_VAULT_BREAK_PRESET),
             MapInstanceId(1),
             &catalog
         )
@@ -1010,7 +1039,7 @@ fn feature_yard_rejects_safe_overlap_wrong_visual_and_sealed_access() {
     assert!(
         resolve_grid_recipe(
             &sealed,
-            Some(FEATURE_YARD_HEIST_PRESET),
+            Some(FEATURE_YARD_VAULT_BREAK_PRESET),
             MapInstanceId(1),
             &catalog
         )
@@ -1095,31 +1124,31 @@ fn catalog_rejects_false_collider_profiles_and_bad_mode_anchors() {
     inert_collider.gameplay_profiles[0].collider_shape = MapColliderShape::FootprintRectangle;
     assert!(inert_collider.validate().is_err());
 
-    let hot_zone = catalog
-        .preset(FEATURE_YARD_HOT_ZONE_PRESET)
+    let turf_hold = catalog
+        .preset(FEATURE_YARD_TURF_HOLD_PRESET)
         .unwrap()
         .recipe
         .clone();
-    let mut missing = hot_zone.clone();
+    let mut missing = turf_hold.clone();
     missing.mode_anchors.clear();
     assert!(
         resolve_grid_recipe(
             &missing,
-            Some(FEATURE_YARD_HOT_ZONE_PRESET),
+            Some(FEATURE_YARD_TURF_HOLD_PRESET),
             MapInstanceId(1),
             &catalog
         )
         .is_err()
     );
-    let mut outside = hot_zone;
-    outside.mode_anchors[0].kind = MapModeAnchorKind::HotZoneCircle {
+    let mut outside = turf_hold;
+    outside.mode_anchors[0].kind = MapModeAnchorKind::TurfHoldCircle {
         center_half_cell: MapHalfCellPoint { x: 0, y: 0 },
         radius_half_cells: 10,
     };
     assert!(
         resolve_grid_recipe(
             &outside,
-            Some(FEATURE_YARD_HOT_ZONE_PRESET),
+            Some(FEATURE_YARD_TURF_HOLD_PRESET),
             MapInstanceId(1),
             &catalog
         )
@@ -1226,7 +1255,7 @@ fn effect_tiles_accept_bounded_authored_values_and_reject_unsafe_values_and_spaw
     let preset = unsafe_spawn
         .presets
         .iter_mut()
-        .find(|preset| preset.id == FEATURE_YARD_WIPEOUT_PRESET)
+        .find(|preset| preset.id == FEATURE_YARD_TAKEDOWN_PRESET)
         .unwrap();
     let damage_tile = preset
         .recipe
@@ -1237,7 +1266,7 @@ fn effect_tiles_accept_bounded_authored_values_and_reject_unsafe_values_and_spaw
     damage_tile.cell = MapCell::new(9, 10);
     assert!(
         unsafe_spawn
-            .resolve_preset(FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+            .resolve_preset(FEATURE_YARD_TAKEDOWN_PRESET, MapInstanceId(1))
             .is_err_and(|error| error.contains("spawn safety"))
     );
 }
@@ -1247,7 +1276,7 @@ fn effect_tiles_accept_bounded_authored_values_and_reject_unsafe_values_and_spaw
 #[test]
 fn authored_rule_refusals_locate_the_refused_placements_and_cells() {
     let catalog = MapContentCatalog::embedded().unwrap();
-    let preset = catalog.preset(FEATURE_YARD_WIPEOUT_PRESET).unwrap();
+    let preset = catalog.preset(FEATURE_YARD_TAKEDOWN_PRESET).unwrap();
     let mode = preset.recipe.mode_definition_id;
     let validate = |recipe: &MapRecipe| {
         validate_authored_recipe(recipe, mode, &catalog, MapInstanceId(1)).unwrap_err()
@@ -1521,8 +1550,8 @@ fn converted_map_wire_payloads_stay_bounded() {
     let catalog = MapContentCatalog::embedded().unwrap();
     for (preset_id, recipe_source) in [
         (
-            FEATURE_YARD_HOT_ZONE_PRESET,
-            include_str!("../../content/maps/builtin/feature-yard-hot-zone.ron"),
+            FEATURE_YARD_TURF_HOLD_PRESET,
+            include_str!("../../content/maps/builtin/feature-yard-turf-hold.ron"),
         ),
         (
             ASHEN_COURT_PRESET,

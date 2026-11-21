@@ -226,16 +226,16 @@ pub(in crate::flow) struct MapMakerRoot {
 enum PaletteItem {
     Asset(MapAssetId),
     Spawn(u8),
-    HotZone,
-    HeistSafe(u8),
+    TurfHold,
+    VaultBreakSafe(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MapPaletteVisual {
     Asset(MapAssetId),
     Spawn(u8),
-    HotZone,
-    HeistSafe(u8),
+    TurfHold,
+    VaultBreakSafe(u8),
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -250,8 +250,8 @@ impl From<PaletteItem> for MapPaletteVisual {
         match value {
             PaletteItem::Asset(id) => Self::Asset(id),
             PaletteItem::Spawn(team) => Self::Spawn(team),
-            PaletteItem::HotZone => Self::HotZone,
-            PaletteItem::HeistSafe(team) => Self::HeistSafe(team),
+            PaletteItem::TurfHold => Self::TurfHold,
+            PaletteItem::VaultBreakSafe(team) => Self::VaultBreakSafe(team),
         }
     }
 }
@@ -373,8 +373,8 @@ fn preview_place_item(
     match item {
         PaletteItem::Asset(id) => session.place(catalog, id, cell, quarter_turns),
         PaletteItem::Spawn(team) => session.place_spawn(catalog, cell, team, quarter_turns),
-        PaletteItem::HotZone => session.place_hot_zone(cell),
-        PaletteItem::HeistSafe(team) => session.place_heist_safe(cell, team),
+        PaletteItem::TurfHold => session.place_turf_hold(cell),
+        PaletteItem::VaultBreakSafe(team) => session.place_vault_break_safe(cell, team),
     }
 }
 
@@ -1106,9 +1106,9 @@ pub(in crate::flow) fn observe_map_publish_outcome(
 fn supported_mode(mode: brawler::map::ModeDefinitionId) -> bool {
     matches!(
         mode,
-        brawler::map::WIPEOUT_MODE_DEFINITION
-            | brawler::map::HOT_ZONE_MODE_DEFINITION
-            | brawler::map::HEIST_MODE_DEFINITION
+        brawler::map::TAKEDOWN_MODE_DEFINITION
+            | brawler::map::TURF_HOLD_MODE_DEFINITION
+            | brawler::map::VAULT_BREAK_MODE_DEFINITION
     )
 }
 
@@ -1374,11 +1374,14 @@ fn palette(
         .map(|asset| PaletteItem::Asset(asset.id))
         .collect::<Vec<_>>();
     items.extend([PaletteItem::Spawn(0), PaletteItem::Spawn(1)]);
-    if mode == brawler::map::HOT_ZONE_MODE_DEFINITION {
-        items.push(PaletteItem::HotZone);
+    if mode == brawler::map::TURF_HOLD_MODE_DEFINITION {
+        items.push(PaletteItem::TurfHold);
     }
-    if mode == brawler::map::HEIST_MODE_DEFINITION {
-        items.extend([PaletteItem::HeistSafe(0), PaletteItem::HeistSafe(1)]);
+    if mode == brawler::map::VAULT_BREAK_MODE_DEFINITION {
+        items.extend([
+            PaletteItem::VaultBreakSafe(0),
+            PaletteItem::VaultBreakSafe(1),
+        ]);
     }
     items
 }
@@ -1539,8 +1542,8 @@ fn place_current(catalog: &brawler::map::MapContentCatalog, runtime: &mut MapMak
     let result = match item {
         PaletteItem::Asset(id) => session.place(catalog, id, cursor, rotation),
         PaletteItem::Spawn(team) => session.place_spawn(catalog, cursor, team, rotation),
-        PaletteItem::HotZone => session.place_hot_zone(cursor),
-        PaletteItem::HeistSafe(team) => session.place_heist_safe(cursor, team),
+        PaletteItem::TurfHold => session.place_turf_hold(cursor),
+        PaletteItem::VaultBreakSafe(team) => session.place_vault_break_safe(cursor, team),
     };
     runtime.status = result.err();
     runtime.clear_armed = false;
@@ -2125,9 +2128,9 @@ fn palette_label(item: Option<PaletteItem>, catalog: &brawler::map::MapContentCa
             }),
         Some(PaletteItem::Spawn(0)) => "Team A Spawn".to_string(),
         Some(PaletteItem::Spawn(_)) => "Team B Spawn".to_string(),
-        Some(PaletteItem::HotZone) => "Capture Zone".to_string(),
-        Some(PaletteItem::HeistSafe(0)) => "Team A Safe".to_string(),
-        Some(PaletteItem::HeistSafe(_)) => "Team B Safe".to_string(),
+        Some(PaletteItem::TurfHold) => "Capture Zone".to_string(),
+        Some(PaletteItem::VaultBreakSafe(0)) => "Team A Safe".to_string(),
+        Some(PaletteItem::VaultBreakSafe(_)) => "Team B Safe".to_string(),
         None => "No asset selected".to_string(),
     }
 }
@@ -2141,9 +2144,9 @@ fn palette_color(item: PaletteItem, catalog: &brawler::map::MapContentCatalog) -
     match item {
         PaletteItem::Spawn(0) => TEAM_A,
         PaletteItem::Spawn(_) => TEAM_B,
-        PaletteItem::HeistSafe(0) => TEAM_A.darker(0.15),
-        PaletteItem::HeistSafe(_) => TEAM_B.darker(0.15),
-        PaletteItem::HotZone => PLAY_HIGHLIGHT,
+        PaletteItem::VaultBreakSafe(0) => TEAM_A.darker(0.15),
+        PaletteItem::VaultBreakSafe(_) => TEAM_B.darker(0.15),
+        PaletteItem::TurfHold => PLAY_HIGHLIGHT,
         PaletteItem::Asset(_) => match palette_category(item, catalog) {
             PaletteCategory::Ground => Color::srgb(0.62, 0.56, 0.42),
             PaletteCategory::CoverObjects => Color::srgb(0.42, 0.48, 0.58),
@@ -2228,7 +2231,7 @@ mod tests {
             palette_query: "wall".to_string(),
             ..MapMakerRuntime::default()
         };
-        let mode = brawler::map::WIPEOUT_MODE_DEFINITION;
+        let mode = brawler::map::TAKEDOWN_MODE_DEFINITION;
         let team_b = palette(&catalog, mode)
             .iter()
             .position(|item| *item == PaletteItem::Spawn(1))
@@ -2244,7 +2247,7 @@ mod tests {
         );
     }
 
-    /// A Wipeout draft with three spawns per team, so only the rule under test refuses it.
+    /// A Takedown draft with three spawns per team, so only the rule under test refuses it.
     fn spawned_session(catalog: &brawler::map::MapContentCatalog) -> MapEditorSession {
         let mut session = MapEditorSession::open(blank_feedback_document());
         for (team, x) in [(0, 4), (1, 26)] {
@@ -2405,7 +2408,7 @@ mod tests {
         let document = MapDraftDocument::blank(
             MapDraftId(1),
             "Camera",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             brawler::map::MapDimensions {
                 width: 32,
                 height: 24,
@@ -2780,7 +2783,7 @@ mod tests {
             ..MapMakerRuntime::default()
         };
         let visible: Vec<usize> =
-            visible_palette_entries(&catalog, &runtime, brawler::map::WIPEOUT_MODE_DEFINITION)
+            visible_palette_entries(&catalog, &runtime, brawler::map::TAKEDOWN_MODE_DEFINITION)
                 .into_iter()
                 .map(|(index, _)| index)
                 .collect();
@@ -2891,7 +2894,7 @@ mod tests {
         };
 
         assert!(
-            selected_palette_item(&catalog, &runtime, brawler::map::WIPEOUT_MODE_DEFINITION,)
+            selected_palette_item(&catalog, &runtime, brawler::map::TAKEDOWN_MODE_DEFINITION,)
                 .is_none()
         );
     }
@@ -2914,7 +2917,7 @@ mod tests {
         MapDraftDocument::blank(
             MapDraftId(1),
             "Sounds",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             brawler::map::MapDimensions {
                 width: 32,
                 height: 24,

@@ -14,7 +14,7 @@ use brawler_client::local_attack::{LocalAttackLedger, LocalAttackStats};
 /// (label, receive-delay ticks): local, ~60 ms RTT, ~120 ms RTT.
 const PROFILES: [(&str, usize); 3] = [("local", 0), ("rtt-60ms", 4), ("rtt-120ms", 7)];
 
-/// Two clients in an active Wipeout match with settled prediction; client 0 has the delay.
+/// Two clients in an active Takedown match with settled prediction; client 0 has the delay.
 fn active_harness(delay: usize) -> Harness {
     active_harness_with(delay, |_| {})
 }

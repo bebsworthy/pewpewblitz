@@ -12,7 +12,7 @@
 # data with a capture catalog: a copy of config/server/game-types.ron whose matches last
 # ${BRAWLER_SHELL_CAPTURE_MATCH_SECONDS:-30} s, so Results arrives on the authoritative time limit.
 # BRAWLER_SHELL_CAPTURE_GAME_TYPE=<id> keeps only that game type, which Practice then selects
-# (for example hot-zone-3v3 or heist-3v3 Results). Each live route leaves its match afterwards;
+# (for example turf-hold-3v3 or vault-break-3v3 Results). Each live route leaves its match afterwards;
 # `results` first plays again from Results to exercise the replay path.
 #
 # Published-map routes (BRL-s3dh, BRL-1sgj) also use the capture catalog, which drops the publish
@@ -21,7 +21,7 @@
 # them approved, rejected, withdrawn and pending. Before `results-published` a fixture account
 # publishes one map, the CLI approves it, a fixture 1v1 match uses up the built-in rotation slot,
 # and a fixture opponent joins the capture client's 1v1 queue match on the community map and
-# leaves at Active. Run it with BRAWLER_SHELL_CAPTURE_GAME_TYPE=wipeout-1v1 so the capture client
+# leaves at Active. Run it with BRAWLER_SHELL_CAPTURE_GAME_TYPE=takedown-1v1 so the capture client
 # queues the game type that takes community maps.
 #
 # usage: scripts/shell-capture.sh [route|all] [WIDTHxHEIGHT|all]
@@ -156,7 +156,7 @@ start_supervisor() {
         --worker-executable "$target_dir/debug/brawler-server" \
         --game-types "$1" \
         --data-directory "$run_dir/server-data" \
-        --mode wipeout \
+        --mode takedown \
         --match-rules production \
         --bind "$bind_addr" >>"$run_dir/supervisor.log" 2>&1 &
     supervisor_pid=$!
@@ -205,11 +205,11 @@ maps_admin() {
     "$target_dir"/debug/brawler-profile-admin maps "$@" --database "$run_dir/server-data/profiles.sqlite3"
 }
 
-# Publishes one copy of the wipeout-1v1 built-in map; prints the server-assigned ID.
+# Publishes one copy of the takedown-1v1 built-in map; prints the server-assigned ID.
 publish_fixture() {
     local label=$1 name=$2
     shift 2
-    fixture_client "$label" --product-game-type wipeout-1v1 --product-publish-map-smoke \
+    fixture_client "$label" --product-game-type takedown-1v1 --product-publish-map-smoke \
         --publish-map-name "$name" "$@" || return 1
     awk '/brawler-client published-map id=/ { sub(/.*id=/, ""); print $1; exit }' "$run_dir/$label.log"
 }
@@ -251,7 +251,7 @@ prepare_map_library_published() {
     sleep 6
 }
 
-# BRL-1sgj: an approved community map holds the next wipeout-1v1 rotation slot, and a fixture
+# BRL-1sgj: an approved community map holds the next takedown-1v1 rotation slot, and a fixture
 # opponent waits in that queue for the capture client.
 prepare_results_published() {
     local published
@@ -260,16 +260,16 @@ prepare_results_published() {
     maps_admin approve "$published" >/dev/null || fixture_failed "approve"
     sleep 6
     # A built-in 1v1 match takes rotation slot 0; both fixture clients leave at Active.
-    fixture_client burn-a --client-id 7312 --product-game-type wipeout-1v1 \
+    fixture_client burn-a --client-id 7312 --product-game-type takedown-1v1 \
         --product-match-smoke-1v1 --character 1 &
     local burn_a=$!
     sleep 2
-    fixture_client burn-b --client-id 7313 --product-game-type wipeout-1v1 \
+    fixture_client burn-b --client-id 7313 --product-game-type takedown-1v1 \
         --product-match-smoke-1v1 --character 1 || fixture_failed "built-in slot"
     wait "$burn_a" || fixture_failed "built-in slot"
     # The opponent for the community match: it leaves once the match is Active.
     "$target_dir"/release/brawler-client --server "$bind_addr" --transport routed-udp \
-        --auto-connect --headless --client-id 7314 --product-game-type wipeout-1v1 \
+        --auto-connect --headless --client-id 7314 --product-game-type takedown-1v1 \
         --product-match-smoke-1v1 --character 1 --expect-published-map \
         >"$run_dir/opponent.log" 2>&1 &
     opponent_pid=$!

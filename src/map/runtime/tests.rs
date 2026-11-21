@@ -23,7 +23,10 @@ fn invalid_installation_preserves_the_existing_map_root() {
         .world()
         .resource::<MapCatalogResource>()
         .0
-        .resolve_preset(super::super::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(99))
+        .resolve_preset(
+            super::super::FEATURE_YARD_TAKEDOWN_PRESET,
+            MapInstanceId(99),
+        )
         .unwrap();
     resolved.dynamic_placements[0].asset_id = MapAssetId(u16::MAX);
 
@@ -80,7 +83,10 @@ fn barrel_test_app() -> (App, Entity) {
         .world()
         .resource::<MapCatalogResource>()
         .0
-        .resolve_preset(super::super::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(11))
+        .resolve_preset(
+            super::super::FEATURE_YARD_TAKEDOWN_PRESET,
+            MapInstanceId(11),
+        )
         .unwrap();
     let snapshot = resolved.snapshot.clone();
     let root = app
@@ -227,7 +233,7 @@ fn radius_brush_removes_whole_grid_cells_and_restart_restores_them() {
         .world()
         .resource::<MapCatalogResource>()
         .0
-        .resolve_preset(super::super::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+        .resolve_preset(super::super::FEATURE_YARD_TAKEDOWN_PRESET, MapInstanceId(1))
         .unwrap();
     // Install directly without Lightyear replication in this focused rule test.
     let snapshot = resolved.snapshot.clone();
@@ -329,7 +335,7 @@ fn one_hit_replaces_an_entire_rotated_barrier_and_restart_restores_it() {
         .init_resource::<MapCatalogResource>();
     let catalog = app.world().resource::<MapCatalogResource>().0.clone();
     let resolved = catalog
-        .resolve_preset(super::super::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(2))
+        .resolve_preset(super::super::FEATURE_YARD_TAKEDOWN_PRESET, MapInstanceId(2))
         .unwrap();
     let snapshot = resolved.snapshot.clone();
     let target = resolved

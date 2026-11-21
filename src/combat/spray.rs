@@ -147,7 +147,7 @@ fn spray_candidates(
         ),
         Or<(
             With<crate::map::DamageableWorldObject>,
-            With<crate::matchplay::HeistSafe>,
+            With<crate::matchplay::VaultBreakSafe>,
         )>,
     >,
     spatial_query: &avian2d::prelude::SpatialQuery,
@@ -351,7 +351,7 @@ pub(super) fn advance_cone_sprays(
         ),
         Or<(
             With<crate::map::DamageableWorldObject>,
-            With<crate::matchplay::HeistSafe>,
+            With<crate::matchplay::VaultBreakSafe>,
         )>,
     >,
     mut sprays: Query<(Entity, &ConeSprayState, &mut ConeSprayRuntime)>,

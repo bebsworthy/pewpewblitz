@@ -1,37 +1,37 @@
-//! Hot Zone-owned mode registration, authored-rule resolution, and server composition.
+//! Turf Hold-owned mode registration, authored-rule resolution, and server composition.
 
 use super::{ModeRegistration, ModeTopologyPolicy};
-use crate::{config::GameMode, map::HOT_ZONE_MODE_DEFINITION};
+use crate::{config::GameMode, map::TURF_HOLD_MODE_DEFINITION};
 use bevy::prelude::{App, Plugin};
 
 pub(super) const REGISTRATION: ModeRegistration = ModeRegistration {
-    configured_mode: Some(GameMode::HotZone),
-    key: "hot-zone",
-    definition_id: HOT_ZONE_MODE_DEFINITION,
-    topology: ModeTopologyPolicy::HotZoneCircle,
+    configured_mode: Some(GameMode::TurfHold),
+    key: "turf-hold",
+    definition_id: TURF_HOLD_MODE_DEFINITION,
+    topology: ModeTopologyPolicy::TurfHoldCircle,
     #[cfg(feature = "server")]
     server: Some(super::ServerModeProjection {
-        rules_revision: crate::matchplay::HOT_ZONE_RULES_REVISION,
+        rules_revision: crate::matchplay::TURF_HOLD_RULES_REVISION,
         compatible_maps: super::CompatibleMapPolicy::ExactModeDefinition,
-        default_map_preset: crate::map::FEATURE_YARD_HOT_ZONE_PRESET,
-        routing_mode: brawler_routing::GameMode::HotZone,
+        default_map_preset: crate::map::FEATURE_YARD_TURF_HOLD_PRESET,
+        routing_mode: brawler_routing::GameMode::TurfHold,
         validate_operator_policy,
         resolve_operator_rules,
         install: install_server,
     }),
     #[cfg(feature = "client")]
     presentation: Some(super::ModePresentationProjection {
-        selection_label: "Hot Zone",
+        selection_label: "Turf Hold",
     }),
 };
 
-pub(super) struct HotZoneModeRegistrationPlugin;
+pub(super) struct TurfHoldModeRegistrationPlugin;
 
-impl Plugin for HotZoneModeRegistrationPlugin {
+impl Plugin for TurfHoldModeRegistrationPlugin {
     fn build(&self, app: &mut App) {
         use super::registry::ModeRegistrationAppExt as _;
         app.try_register_mode(REGISTRATION)
-            .expect("Hot Zone mode registration is unique and bounded");
+            .expect("Turf Hold mode registration is unique and bounded");
     }
 }
 
@@ -59,14 +59,14 @@ fn resolve_operator_rules(
                 u16::try_from(ticks)
                     .map_err(|_| super::ModeRuleResolutionError::CaptureDurationTooLong)
             })?;
-    crate::matchplay::HotZoneRules {
+    crate::matchplay::TurfHoldRules {
         target_progress_ticks,
     }
     .validate_with(&input.lifecycle)
     .map_err(super::ModeRuleResolutionError::InvalidObjective)?;
     Ok(super::ResolvedModeRuleProjection {
         objective_target: target_progress_ticks,
-        rules_summary: crate::lobby::AdvertisedRulesSummary::HotZone {
+        rules_summary: crate::lobby::AdvertisedRulesSummary::TurfHold {
             target_progress_ticks,
             active_limit_ticks: input.match_duration_ticks,
         },
@@ -78,26 +78,26 @@ fn install_server(app: &mut App, registration: &ModeRegistration, input: super::
     use crate::{
         map::ServerMapSelection,
         matchplay::{
-            HotZoneModePlugin, HotZoneRules, MatchLifecycleRules, MatchModeSetup,
-            hot_zone_rules_for_profile,
+            MatchLifecycleRules, MatchModeSetup, TurfHoldModePlugin, TurfHoldRules,
+            turf_hold_rules_for_profile,
         },
     };
     let rules = input.objective_target.map_or_else(
         || match input.profile {
             crate::config::MatchRulesProfile::ProcessVerification => {
-                hot_zone_rules_for_profile(input.profile)
+                turf_hold_rules_for_profile(input.profile)
             }
             crate::config::MatchRulesProfile::Production => {
-                panic!("production Hot Zone requires an authored objective target")
+                panic!("production Turf Hold requires an authored objective target")
             }
         },
-        |target_progress_ticks| HotZoneRules {
+        |target_progress_ticks| TurfHoldRules {
             target_progress_ticks,
         },
     );
     let rules = rules
         .validate_with(app.world().resource::<MatchLifecycleRules>())
-        .expect("validated manifest Hot Zone objective");
+        .expect("validated manifest Turf Hold objective");
     let server = registration.server();
     app.insert_resource(MatchModeSetup {
         mode_definition_id: registration.definition_id,
@@ -105,7 +105,7 @@ fn install_server(app: &mut App, registration: &ModeRegistration, input: super::
     })
     .insert_resource(rules)
     .insert_resource(ServerMapSelection::preset(server.default_map_preset))
-    .add_plugins(HotZoneModePlugin);
+    .add_plugins(TurfHoldModePlugin);
 }
 
 #[cfg(all(test, feature = "server"))]
@@ -120,8 +120,8 @@ mod tests {
             pressure_stages: 0,
             match_duration_ticks: 10_800,
             lifecycle: crate::matchplay::MatchLifecycleRules::default(),
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
         }
     }
 
@@ -131,7 +131,7 @@ mod tests {
             resolve_operator_rules(input()).unwrap(),
             super::super::ResolvedModeRuleProjection {
                 objective_target: 1_800,
-                rules_summary: crate::lobby::AdvertisedRulesSummary::HotZone {
+                rules_summary: crate::lobby::AdvertisedRulesSummary::TurfHold {
                     target_progress_ticks: 1_800,
                     active_limit_ticks: 10_800,
                 },

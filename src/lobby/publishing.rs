@@ -324,7 +324,7 @@ mod tests {
         let row = |reason: &str| PublishedMapSummary {
             published_map_id: PublishedMapId::new(1).unwrap(),
             name: "Yard".to_string(),
-            game_type_id: GameTypeId::new("wipeout-1v1").unwrap(),
+            game_type_id: GameTypeId::new("takedown-1v1").unwrap(),
             listing: PublishedMapListing::Rejected {
                 reason: reason.to_string(),
             },

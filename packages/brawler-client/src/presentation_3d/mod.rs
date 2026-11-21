@@ -106,7 +106,7 @@ const STRAIGHT_PROJECTILE_CATCH_UP_MULTIPLIER: f32 = 3.0;
 const FIGHTER_RECOIL_SECONDS: f32 = 0.09;
 /// Peak backward offset of that kick, in world units (a tenth of a map cell).
 const FIGHTER_RECOIL_DISTANCE: f32 = brawler::map::MAP_CELL_SIZE_WORLD * 0.1;
-const HOT_ZONE_RING_WIDTH: f32 = 10.0;
+const TURF_HOLD_RING_WIDTH: f32 = 10.0;
 const GROUND_AREA_HEIGHT: f32 = 1.0;
 // The direction arrow is a flat UI marker rather than body geometry. Keep its tip inside the
 // fighter's one-cell allocation while extending it beyond the exact collision ring.
@@ -118,8 +118,8 @@ const KENNEY_CHARACTER_SOURCE_PLANAR_RADIUS: f32 = 0.420_55;
 const KENNEY_CHARACTER_HEIGHT_WORLD_SCALE: f32 = 64.0;
 /// Visual height that projected overhead UI and hit numbers anchor to (the Riff fighter).
 const FIGHTER_VISUAL_HEIGHT_WORLD: f32 = fighter_character::RIFF_VISUAL_HEIGHT_WORLD;
-const HEIST_IDOL_FOOTPRINT_WIDTH: f32 = 96.0;
-const HEIST_IDOL_FOOTPRINT_DEPTH: f32 = 64.0;
+const VAULT_BREAK_IDOL_FOOTPRINT_WIDTH: f32 = 96.0;
+const VAULT_BREAK_IDOL_FOOTPRINT_DEPTH: f32 = 64.0;
 // HDR glow colors (linear, max channel above the bloom threshold). Unlit materials ignore
 // `emissive`, so unlit glows carry their HDR value in `base_color`.
 /// Max-channel HDR value of a projectile nucleus glow. The hue is the observer-relative rim colour
@@ -492,7 +492,7 @@ impl Plugin for WorldPresentationPlugin {
                     reconcile_dynamic_map_visuals,
                     reconcile_restoration_pickup_visuals,
                     zombie::reconcile_zombie_mode_visuals,
-                    reconcile_heist_safe_visuals,
+                    reconcile_vault_break_safe_visuals,
                     combat::reconcile_projectile_visuals,
                     combat::reconcile_sentry_visuals,
                     combat::reconcile_concealment_field_visuals,
@@ -532,7 +532,7 @@ impl Plugin for WorldPresentationPlugin {
             .add_systems(
                 Update,
                 (
-                    update_heist_safe_status_visuals,
+                    update_vault_break_safe_status_visuals,
                     update_damageable_map_visuals,
                     combat::update_fighter_concealment_visuals::<StandardMaterial>,
                     combat::update_fighter_concealment_visuals::<ToonMaterial>,
@@ -653,33 +653,33 @@ struct RestorationPickupVisual {
 }
 
 #[derive(Component)]
-struct HeistSafeVisual {
+struct VaultBreakSafeVisual {
     owner: Entity,
 }
 
 #[derive(Component)]
-struct HeistSafeStatusVisual {
+struct VaultBreakSafeStatusVisual {
     owner: Entity,
     team_material: Handle<StandardMaterial>,
 }
 
-struct HeistSafeVisualAssets<'a> {
+struct VaultBreakSafeVisualAssets<'a> {
     primitives: &'a Primitive3dAssets,
     materials: &'a Material3dAssets,
     imported_core: Option<environment_assets::FittedEnvironmentScene>,
 }
 
-fn spawn_heist_safe_visual(
+fn spawn_vault_break_safe_visual(
     commands: &mut Commands,
     owner: Entity,
     position: Vec2,
     vertical_scale: f32,
     team_material: &Handle<StandardMaterial>,
-    assets: &HeistSafeVisualAssets<'_>,
+    assets: &VaultBreakSafeVisualAssets<'_>,
 ) {
     let root = commands
         .spawn((
-            HeistSafeVisual { owner },
+            VaultBreakSafeVisual { owner },
             Transform {
                 translation: ground_position(position),
                 scale: Vec3::new(1.0, vertical_scale, 1.0),
@@ -687,9 +687,12 @@ fn spawn_heist_safe_visual(
             },
             Visibility::default(),
             contact_shadow::GroundContactShadow::prop(
-                Vec2::new(HEIST_IDOL_FOOTPRINT_WIDTH, HEIST_IDOL_FOOTPRINT_DEPTH) * 0.5,
+                Vec2::new(
+                    VAULT_BREAK_IDOL_FOOTPRINT_WIDTH,
+                    VAULT_BREAK_IDOL_FOOTPRINT_DEPTH,
+                ) * 0.5,
             ),
-            Name::new("Heist team idol"),
+            Name::new("Vault Break team idol"),
         ))
         .id();
     commands.entity(root).with_children(|parent| {
@@ -697,9 +700,9 @@ fn spawn_heist_safe_visual(
             Mesh3d(assets.primitives.unit_cuboid.clone()),
             MeshMaterial3d(assets.materials.neutral.clone()),
             Transform::from_xyz(0.0, 8.0, 0.0).with_scale(Vec3::new(
-                HEIST_IDOL_FOOTPRINT_WIDTH,
+                VAULT_BREAK_IDOL_FOOTPRINT_WIDTH,
                 16.0,
-                HEIST_IDOL_FOOTPRINT_DEPTH,
+                VAULT_BREAK_IDOL_FOOTPRINT_DEPTH,
             )),
         ));
         if let Some(fitted) = assets.imported_core.as_ref() {
@@ -709,24 +712,24 @@ fn spawn_heist_safe_visual(
                 ToonScene,
                 WorldAssetRoot(fitted.scene.clone()),
                 transform,
-                Name::new("imported Heist team idol"),
+                Name::new("imported Vault Break team idol"),
             ));
         } else {
             parent.spawn((
                 Mesh3d(assets.primitives.unit_cuboid.clone()),
                 MeshMaterial3d(assets.materials.neutral.clone()),
                 Transform::from_xyz(0.0, 54.0, 0.0).with_scale(Vec3::new(32.0, 64.0, 32.0)),
-                Name::new("primitive Heist idol body"),
+                Name::new("primitive Vault Break idol body"),
             ));
             parent.spawn((
                 Mesh3d(assets.primitives.effect_sphere.clone()),
                 MeshMaterial3d(assets.materials.neutral.clone()),
                 Transform::from_xyz(0.0, 102.0, 0.0).with_scale(Vec3::splat(20.0)),
-                Name::new("primitive Heist idol head"),
+                Name::new("primitive Vault Break idol head"),
             ));
         }
         parent.spawn((
-            HeistSafeStatusVisual {
+            VaultBreakSafeStatusVisual {
                 owner,
                 team_material: team_material.clone(),
             },
@@ -742,22 +745,27 @@ fn spawn_heist_safe_visual(
     clippy::too_many_arguments,
     reason = "Bevy injects the asset, readiness, safe, and visual state owned by this reconciliation phase"
 )]
-fn reconcile_heist_safe_visuals(
+fn reconcile_vault_break_safe_visuals(
     mut commands: Commands,
     primitives: Res<Primitive3dAssets>,
     materials: Res<Material3dAssets>,
     visual_catalog: Option<Res<environment_assets::MapVisualCatalog>>,
     imported: Option<Res<environment_assets::EnvironmentImportedScenes>>,
-    readiness: Res<hud::ClientHeistReadiness>,
+    readiness: Res<hud::ClientVaultBreakReadiness>,
     accepted: Option<Res<brawler::map::PresentedMap>>,
     map_snapshots: Query<&brawler::map::ResolvedMapSnapshot, With<brawler::map::MapRoot>>,
     safes: Query<(
         Entity,
-        &brawler::matchplay::HeistSafe,
+        &brawler::matchplay::VaultBreakSafe,
         &Position,
         &brawler::map::DamageableLifeState,
     )>,
-    mut visuals: Query<(Entity, &HeistSafeVisual, &mut Transform, &mut Visibility)>,
+    mut visuals: Query<(
+        Entity,
+        &VaultBreakSafeVisual,
+        &mut Transform,
+        &mut Visibility,
+    )>,
 ) {
     let mut existing = std::collections::BTreeSet::new();
     for (visual_entity, visual, mut transform, mut visibility) in &mut visuals {
@@ -766,7 +774,7 @@ fn reconcile_heist_safe_visuals(
             continue;
         };
         existing.insert(visual.owner);
-        *visibility = if matches!(*readiness, hud::ClientHeistReadiness::Ready) {
+        *visibility = if matches!(*readiness, hud::ClientVaultBreakReadiness::Ready) {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -778,7 +786,7 @@ fn reconcile_heist_safe_visuals(
             0.35
         };
     }
-    if !matches!(*readiness, hud::ClientHeistReadiness::Ready) {
+    if !matches!(*readiness, hud::ClientVaultBreakReadiness::Ready) {
         return;
     }
     for (owner, safe, position, life) in &safes {
@@ -792,17 +800,24 @@ fn reconcile_heist_safe_visuals(
         };
         let theme = accepted_map_theme(accepted.as_deref(), &map_snapshots);
         let profile = visual_catalog.as_deref().and_then(|catalog| {
-            resolve_map_visual(catalog, brawler::map::HEIST_SAFE_VISUAL_PROFILE, theme)
+            resolve_map_visual(
+                catalog,
+                brawler::map::VAULT_BREAK_SAFE_VISUAL_PROFILE,
+                theme,
+            )
         });
         let imported_core = profile.and_then(|profile| {
             imported.as_deref().and_then(|scenes| {
                 scenes.fitted(
                     profile,
-                    Vec2::new(HEIST_IDOL_FOOTPRINT_WIDTH, HEIST_IDOL_FOOTPRINT_DEPTH),
+                    Vec2::new(
+                        VAULT_BREAK_IDOL_FOOTPRINT_WIDTH,
+                        VAULT_BREAK_IDOL_FOOTPRINT_DEPTH,
+                    ),
                 )
             })
         });
-        spawn_heist_safe_visual(
+        spawn_vault_break_safe_visual(
             &mut commands,
             owner,
             position.0,
@@ -812,7 +827,7 @@ fn reconcile_heist_safe_visuals(
                 0.35
             },
             &team_material,
-            &HeistSafeVisualAssets {
+            &VaultBreakSafeVisualAssets {
                 primitives: &primitives,
                 materials: &materials,
                 imported_core,
@@ -826,23 +841,25 @@ fn reconcile_heist_safe_visuals(
     clippy::type_complexity,
     reason = "Bevy system parameters are injected by value"
 )]
-fn update_heist_safe_status_visuals(
+fn update_vault_break_safe_status_visuals(
     materials: Res<Material3dAssets>,
-    heist: Query<Ref<brawler::matchplay::HeistState>, With<MatchRoot>>,
+    vault_break: Query<Ref<brawler::matchplay::VaultBreakState>, With<MatchRoot>>,
     safes: Query<
         (
             Ref<brawler::combat::CurrentHealth>,
             Ref<brawler::map::DamageableMaximumHealth>,
             Ref<brawler::map::DamageableLifeState>,
         ),
-        With<brawler::matchplay::HeistSafe>,
+        With<brawler::matchplay::VaultBreakSafe>,
     >,
     mut status_visuals: Query<(
-        Ref<HeistSafeStatusVisual>,
+        Ref<VaultBreakSafeStatusVisual>,
         &mut MeshMaterial3d<StandardMaterial>,
     )>,
 ) {
-    let Ok(heist) = heist.single() else { return };
+    let Ok(vault_break) = vault_break.single() else {
+        return;
+    };
     for (status, mut material) in &mut status_visuals {
         let Ok((health, maximum, life)) = safes.get(status.owner) else {
             continue;
@@ -851,13 +868,13 @@ fn update_heist_safe_status_visuals(
             && !health.is_changed()
             && !maximum.is_changed()
             && !life.is_changed()
-            && !heist.is_changed()
+            && !vault_break.is_changed()
         {
             continue;
         }
         let critical = maximum.0 > 0
             && u32::from(health.0) * 100
-                <= u32::from(maximum.0) * u32::from(heist.critical_health_percent);
+                <= u32::from(maximum.0) * u32::from(vault_break.critical_health_percent);
         material.0 =
             if critical || matches!(*life, brawler::map::DamageableLifeState::TerminalCommitted) {
                 materials.effect_damage.clone()
@@ -2135,7 +2152,7 @@ fn materialize_map_static_visuals(
         marker,
         snapshot.dimensions.bounds(),
     );
-    materialize_hot_zone_objective(commands, meshes, presentation_materials, marker, snapshot);
+    materialize_turf_hold_objective(commands, meshes, presentation_materials, marker, snapshot);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2178,7 +2195,7 @@ fn materialize_map_editor_markers(
     }
 
     for anchor in &snapshot.mode_anchors {
-        let brawler::map::MapModeAnchorKind::HeistSafe {
+        let brawler::map::MapModeAnchorKind::VaultBreakSafe {
             team_slot,
             origin_cell,
             width_cells,
@@ -2206,7 +2223,7 @@ fn materialize_map_editor_markers(
                 marker,
                 Transform::from_translation(ground_position(center)),
                 Visibility::default(),
-                Name::new("Map Maker Heist safe"),
+                Name::new("Map Maker Vault Break safe"),
             ))
             .id();
         commands.entity(root).with_children(|parent| {
@@ -2229,7 +2246,7 @@ fn materialize_map_editor_markers(
                     ToonScene,
                     WorldAssetRoot(fitted.scene),
                     fitted.transform,
-                    Name::new("Map Maker imported Heist safe"),
+                    Name::new("Map Maker imported Vault Break safe"),
                 ));
             }
         });
@@ -2314,9 +2331,9 @@ fn spawn_imported_map_asset(
     }
 }
 
-fn hot_zone_visual_geometry(snapshot: &brawler::map::ResolvedMapSnapshot) -> Option<(Vec2, f32)> {
+fn turf_hold_visual_geometry(snapshot: &brawler::map::ResolvedMapSnapshot) -> Option<(Vec2, f32)> {
     snapshot.mode_anchors.iter().find_map(|anchor| {
-        let brawler::map::MapModeAnchorKind::HotZoneCircle {
+        let brawler::map::MapModeAnchorKind::TurfHoldCircle {
             center_half_cell,
             radius_half_cells,
         } = anchor.kind
@@ -2335,14 +2352,14 @@ fn hot_zone_visual_geometry(snapshot: &brawler::map::ResolvedMapSnapshot) -> Opt
     })
 }
 
-fn materialize_hot_zone_objective(
+fn materialize_turf_hold_objective(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &Material3dAssets,
     marker: brawler::map::MapPresentationMember,
     snapshot: &brawler::map::ResolvedMapSnapshot,
 ) {
-    let Some((center, radius)) = hot_zone_visual_geometry(snapshot) else {
+    let Some((center, radius)) = turf_hold_visual_geometry(snapshot) else {
         return;
     };
     let rotation = Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2);
@@ -2360,11 +2377,11 @@ fn materialize_hot_zone_objective(
             rotation,
             ..default()
         },
-        Name::new("Hot Zone objective fill"),
+        Name::new("Turf Hold objective fill"),
     ));
     let boundary_mesh = meshes.add(Annulus::new(
-        (radius - HOT_ZONE_RING_WIDTH * 0.5).max(0.0),
-        radius + HOT_ZONE_RING_WIDTH * 0.5,
+        (radius - TURF_HOLD_RING_WIDTH * 0.5).max(0.0),
+        radius + TURF_HOLD_RING_WIDTH * 0.5,
     ));
     commands.spawn((
         marker,
@@ -2379,7 +2396,7 @@ fn materialize_hot_zone_objective(
             rotation,
             ..default()
         },
-        Name::new("Hot Zone objective boundary"),
+        Name::new("Turf Hold objective boundary"),
     ));
 }
 
@@ -2679,27 +2696,27 @@ fn catch_up_projectile_position(
 }
 
 fn tint_3d_zone(
-    roots: Query<(&MatchState, &brawler::matchplay::HotZoneState), With<MatchRoot>>,
+    roots: Query<(&MatchState, &brawler::matchplay::TurfHoldState), With<MatchRoot>>,
     fills: Query<&MeshMaterial3d<StandardMaterial>, With<V3ZoneFill>>,
     boundaries: Query<&MeshMaterial3d<StandardMaterial>, With<V3ZoneBoundary>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let Ok((state, hot_zone)) = roots.single() else {
+    let Ok((state, turf_hold)) = roots.single() else {
         return;
     };
-    if state.match_id != hot_zone.match_id {
+    if state.match_id != turf_hold.match_id {
         return;
     }
-    let (fill, boundary) = match hot_zone.status {
-        brawler::matchplay::HotZoneStatus::Empty => (
+    let (fill, boundary) = match turf_hold.status {
+        brawler::matchplay::TurfHoldStatus::Empty => (
             Color::srgba(0.2, 0.5, 0.95, 0.30),
             Color::srgb(1.0, 0.82, 0.2),
         ),
-        brawler::matchplay::HotZoneStatus::Contested => (
+        brawler::matchplay::TurfHoldStatus::Contested => (
             Color::srgba(0.95, 0.2, 0.45, 0.32),
             Color::srgb(1.0, 0.35, 0.6),
         ),
-        brawler::matchplay::HotZoneStatus::Controlled { team } => {
+        brawler::matchplay::TurfHoldStatus::Controlled { team } => {
             let color = if team.0 == 1 {
                 Color::srgb(1.0, 0.42, 0.12)
             } else {
@@ -2812,17 +2829,17 @@ mod tests {
     }
 
     #[test]
-    fn feature_yard_hot_zone_anchor_materializes_at_exact_world_scale() {
+    fn feature_yard_turf_hold_anchor_materializes_at_exact_world_scale() {
         let resolved = brawler::map::MapContentCatalog::embedded()
             .unwrap()
             .resolve_preset(
-                brawler::map::FEATURE_YARD_HOT_ZONE_PRESET,
+                brawler::map::FEATURE_YARD_TURF_HOLD_PRESET,
                 brawler::map::MapInstanceId(1),
             )
             .unwrap();
 
         assert_eq!(
-            hot_zone_visual_geometry(&resolved.snapshot),
+            turf_hold_visual_geometry(&resolved.snapshot),
             Some((Vec2::ZERO, 5.0 * brawler::map::MAP_CELL_SIZE_WORLD))
         );
     }
@@ -2838,7 +2855,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            hot_zone_visual_geometry(&resolved.snapshot),
+            turf_hold_visual_geometry(&resolved.snapshot),
             Some((Vec2::ZERO, 3.5 * brawler::map::MAP_CELL_SIZE_WORLD))
         );
     }
@@ -2961,22 +2978,26 @@ mod tests {
     }
 
     #[test]
-    fn heist_idol_presentation_stays_inside_authoritative_footprint() {
+    fn vault_break_idol_presentation_stays_inside_authoritative_footprint() {
         let resolved = brawler::map::MapContentCatalog::embedded()
             .unwrap()
             .resolve_preset(
-                brawler::map::FEATURE_YARD_HEIST_PRESET,
+                brawler::map::FEATURE_YARD_VAULT_BREAK_PRESET,
                 brawler::map::MapInstanceId(1),
             )
             .unwrap();
-        let safe = resolved.heist_safes.first().unwrap();
-        assert!((safe.half_extents.x * 2.0 - HEIST_IDOL_FOOTPRINT_WIDTH).abs() <= f32::EPSILON);
-        assert!((safe.half_extents.y * 2.0 - HEIST_IDOL_FOOTPRINT_DEPTH).abs() <= f32::EPSILON);
+        let safe = resolved.vault_break_safes.first().unwrap();
+        assert!(
+            (safe.half_extents.x * 2.0 - VAULT_BREAK_IDOL_FOOTPRINT_WIDTH).abs() <= f32::EPSILON
+        );
+        assert!(
+            (safe.half_extents.y * 2.0 - VAULT_BREAK_IDOL_FOOTPRINT_DEPTH).abs() <= f32::EPSILON
+        );
 
         let catalog = brawler::map::MapContentCatalog::embedded().unwrap();
         let visuals = environment_assets::MapVisualCatalog::embedded(&catalog).unwrap();
         let profile = visuals
-            .profile(brawler::map::HEIST_SAFE_VISUAL_PROFILE)
+            .profile(brawler::map::VAULT_BREAK_SAFE_VISUAL_PROFILE)
             .unwrap();
         assert_eq!(
             profile.fitting,

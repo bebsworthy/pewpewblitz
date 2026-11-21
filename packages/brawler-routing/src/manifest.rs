@@ -43,9 +43,9 @@ impl TryFrom<u8> for WorkerRole {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum GameMode {
-    Wipeout = 1,
-    HotZone = 2,
-    Heist = 3,
+    Takedown = 1,
+    TurfHold = 2,
+    VaultBreak = 3,
     Zombie = 4,
 }
 
@@ -54,9 +54,9 @@ impl TryFrom<u16> for GameMode {
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         match value {
-            1 => Ok(Self::Wipeout),
-            2 => Ok(Self::HotZone),
-            3 => Ok(Self::Heist),
+            1 => Ok(Self::Takedown),
+            2 => Ok(Self::TurfHold),
+            3 => Ok(Self::VaultBreak),
             4 => Ok(Self::Zombie),
             _ => Err(CodecError::InvalidValue),
         }
@@ -524,8 +524,8 @@ pub struct MatchManifestV1 {
     pub respawn_ticks: u64,
     pub spawn_protection_ticks: u64,
     pub completed_input_lock_ticks: u64,
-    pub wipeout_recent_hostile_damage_credit_ticks: u64,
-    pub heist_critical_health_percent: u8,
+    pub takedown_recent_hostile_damage_credit_ticks: u64,
+    pub vault_break_critical_health_percent: u8,
     pub reserved: u8,
     pub seed: u64,
     pub participants: Vec<MatchManifestParticipant>,
@@ -559,12 +559,12 @@ impl fmt::Debug for MatchManifestV1 {
                 &self.completed_input_lock_ticks,
             )
             .field(
-                "wipeout_recent_hostile_damage_credit_ticks",
-                &self.wipeout_recent_hostile_damage_credit_ticks,
+                "takedown_recent_hostile_damage_credit_ticks",
+                &self.takedown_recent_hostile_damage_credit_ticks,
             )
             .field(
-                "heist_critical_health_percent",
-                &self.heist_critical_health_percent,
+                "vault_break_critical_health_percent",
+                &self.vault_break_critical_health_percent,
             )
             .field("reserved", &self.reserved)
             .field("seed", &self.seed)
@@ -609,8 +609,8 @@ impl MatchManifestV1 {
         encoder.put_u64(self.respawn_ticks);
         encoder.put_u64(self.spawn_protection_ticks);
         encoder.put_u64(self.completed_input_lock_ticks);
-        encoder.put_u64(self.wipeout_recent_hostile_damage_credit_ticks);
-        encoder.put_u8(self.heist_critical_health_percent);
+        encoder.put_u64(self.takedown_recent_hostile_damage_credit_ticks);
+        encoder.put_u8(self.vault_break_critical_health_percent);
         encoder.put_u8(self.reserved);
         encoder.put_u64(self.seed);
         encoder.put_u8(u8::try_from(self.participants.len()).map_err(|_| CodecError::Oversize)?);
@@ -672,8 +672,8 @@ impl MatchManifestV1 {
         let respawn_ticks = decoder.u64()?;
         let spawn_protection_ticks = decoder.u64()?;
         let completed_input_lock_ticks = decoder.u64()?;
-        let wipeout_recent_hostile_damage_credit_ticks = decoder.u64()?;
-        let heist_critical_health_percent = decoder.u8()?;
+        let takedown_recent_hostile_damage_credit_ticks = decoder.u64()?;
+        let vault_break_critical_health_percent = decoder.u8()?;
         let reserved = decoder.u8()?;
         let seed = decoder.u64()?;
         let count = usize::from(decoder.u8()?);
@@ -709,8 +709,8 @@ impl MatchManifestV1 {
             respawn_ticks,
             spawn_protection_ticks,
             completed_input_lock_ticks,
-            wipeout_recent_hostile_damage_credit_ticks,
-            heist_critical_health_percent,
+            takedown_recent_hostile_damage_credit_ticks,
+            vault_break_critical_health_percent,
             reserved,
             seed,
             participants,
@@ -743,8 +743,8 @@ impl MatchManifestV1 {
             || self.respawn_ticks == 0
             || self.spawn_protection_ticks == 0
             || self.completed_input_lock_ticks == 0
-            || self.wipeout_recent_hostile_damage_credit_ticks == 0
-            || !(1..=99).contains(&self.heist_critical_health_percent)
+            || self.takedown_recent_hostile_damage_credit_ticks == 0
+            || !(1..=99).contains(&self.vault_break_critical_health_percent)
             || self.participants.is_empty()
             || self.participants.len().saturating_add(self.bots.len()) > MAX_PARTICIPANTS
             || self.heartbeat_ms == 0
@@ -811,7 +811,7 @@ mod tests {
             request_id: RequestId::new(15).unwrap(),
             match_id: id128(8),
             allocation_id: AllocationId::new(9).unwrap(),
-            mode: GameMode::HotZone,
+            mode: GameMode::TurfHold,
             map_preset: 10,
             map_revision: 11,
             map_recipe_fingerprint: 1,
@@ -823,8 +823,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             reserved: 0,
             seed: 13,
             participants: (1..=u64::try_from(participant_count).unwrap())

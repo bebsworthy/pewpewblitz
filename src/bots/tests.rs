@@ -226,7 +226,7 @@ fn authored_tile_multipliers_drive_costs_and_the_admissible_heuristic() {
     let catalog = crate::map::MapContentCatalog::embedded().unwrap();
     let mut map = catalog
         .resolve_preset(
-            crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+            crate::map::FEATURE_YARD_TAKEDOWN_PRESET,
             crate::map::MapInstanceId(1),
         )
         .unwrap();
@@ -256,7 +256,7 @@ fn delayed_observation_never_selects_a_newer_tick() {
 }
 
 #[test]
-fn team_roles_are_stable_and_single_heist_bot_attacks() {
+fn team_roles_are_stable_and_single_vault_break_bot_attacks() {
     use crate::{combat::TeamId, protocol::NetworkEntityId};
     let members = [
         BotPlanMember {
@@ -284,7 +284,7 @@ fn team_roles_are_stable_and_single_heist_bot_attacks() {
 }
 
 #[test]
-fn hot_zone_objective_keeps_contesting_when_an_enemy_is_visible() {
+fn turf_hold_objective_keeps_contesting_when_an_enemy_is_visible() {
     let mut observed = observation(10);
     observed.self_view.position = Vec2::new(-700.0, 0.0);
     observed.objective = crate::matchplay::BotObjectiveView::ControlArea {
@@ -318,7 +318,7 @@ fn hot_zone_objective_keeps_contesting_when_an_enemy_is_visible() {
 }
 
 #[test]
-fn nondefault_hot_zone_hold_fraction_changes_the_policy_goal() {
+fn nondefault_turf_hold_hold_fraction_changes_the_policy_goal() {
     let mut observed = observation(10);
     observed.self_view.position = Vec2::new(-700.0, 0.0);
     observed.objective = crate::matchplay::BotObjectiveView::ControlArea {
@@ -327,7 +327,7 @@ fn nondefault_hot_zone_hold_fraction_changes_the_policy_goal() {
     };
     let baseline = BotProfile::embedded().unwrap();
     let mut tuned = baseline;
-    tuned.hot_zone_hold_radius_fraction = 0.8;
+    tuned.turf_hold_hold_radius_fraction = 0.8;
 
     let baseline_goal = policy::choose_intent(
         &observed,
@@ -478,7 +478,7 @@ fn healing_weapon_targets_an_injured_ally() {
 }
 
 #[test]
-fn heist_attacker_targets_the_hostile_safe_despite_visible_enemies() {
+fn vault_break_attacker_targets_the_hostile_safe_despite_visible_enemies() {
     use crate::{
         combat::TeamId,
         map::{DamageableTargetIdentity, ModeAnchorId},
@@ -505,7 +505,7 @@ fn heist_attacker_targets_the_hostile_safe_despite_visible_enemies() {
         (2, TeamId(1), Vec2::new(900.0, 0.0)),
     ] {
         observed.objects.push(super::model::BotObjectView {
-            identity: DamageableTargetIdentity::HeistSafe {
+            identity: DamageableTargetIdentity::VaultBreakSafe {
                 match_id: MatchId(1),
                 anchor_id: ModeAnchorId(anchor),
                 defending_team: team,

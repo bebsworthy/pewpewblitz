@@ -340,7 +340,7 @@ fn feedback_app() -> App {
         .init_resource::<HitFlashMaterials>()
         .init_resource::<HitFlashMaterials<ToonMaterial>>()
         .add_message::<DeduplicatedCombatCue>()
-        .add_message::<brawler::matchplay::ReceivedHeistObjectiveCue>()
+        .add_message::<brawler::matchplay::ReceivedVaultBreakObjectiveCue>()
         .add_systems(
             Update,
             (

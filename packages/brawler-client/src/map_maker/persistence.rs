@@ -127,7 +127,7 @@ mod tests {
         let document = MapDraftDocument::blank(
             MapDraftId(1),
             "First Arena",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             MapDimensions {
                 width: 32,
                 height: 24,

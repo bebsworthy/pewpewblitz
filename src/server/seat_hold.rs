@@ -664,7 +664,7 @@ mod tests {
         );
         gate.completed = Some(MatchState {
             match_id: crate::matchplay::MatchId(4),
-            mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: crate::map::TAKEDOWN_MODE_DEFINITION,
             phase: MatchPhase::Completed {
                 completed_at_tick: 50,
                 restart_unlocked_at_tick: 60,

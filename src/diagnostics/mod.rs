@@ -238,18 +238,18 @@ pub struct GameplayAggregatesV1 {
     /// Stable authored mode-definition ID of the latest completed match. `None` while
     /// the process completed no match.
     pub mode_definition_id: Option<u16>,
-    /// Wipeout terminal scores (`None` unless the completed match was Wipeout).
-    pub wipeout_final_scores: Option<[u16; 2]>,
-    pub wipeout_target_score: Option<u16>,
-    pub wipeout_score_margin: Option<u16>,
-    /// Hot Zone terminal state and objective-behavior counters (`None` unless the
-    /// completed match was Hot Zone).
-    pub hot_zone_final_progress: Option<[u16; 2]>,
-    pub hot_zone_target_progress_ticks: Option<u16>,
-    pub hot_zone_controlled_ticks: Option<[u64; 2]>,
-    pub hot_zone_contested_ticks: Option<u64>,
-    pub hot_zone_control_gained_transitions: Option<[u32; 2]>,
-    pub hot_zone_longest_control_ticks: Option<[u64; 2]>,
+    /// Takedown terminal scores (`None` unless the completed match was Takedown).
+    pub takedown_final_scores: Option<[u16; 2]>,
+    pub takedown_target_score: Option<u16>,
+    pub takedown_score_margin: Option<u16>,
+    /// Turf Hold terminal state and objective-behavior counters (`None` unless the
+    /// completed match was Turf Hold).
+    pub turf_hold_final_progress: Option<[u16; 2]>,
+    pub turf_hold_target_progress_ticks: Option<u16>,
+    pub turf_hold_controlled_ticks: Option<[u64; 2]>,
+    pub turf_hold_contested_ticks: Option<u64>,
+    pub turf_hold_control_gained_transitions: Option<[u32; 2]>,
+    pub turf_hold_longest_control_ticks: Option<[u64; 2]>,
     pub ability_attempts: u64,
     pub ability_accepts: u64,
     pub dash_uses: u64,
@@ -278,8 +278,8 @@ impl GameplayAggregatesV1 {
                 || self.match_active_ticks != 0
                 || self.match_respawns != 0
                 || self.mode_definition_id.is_some()
-                || self.wipeout_fields_some()
-                || self.hot_zone_fields_some()
+                || self.takedown_fields_some()
+                || self.turf_hold_fields_some()
             {
                 return Err(
                     "closeout gameplay aggregates reference a match the process did not complete"
@@ -321,66 +321,67 @@ impl GameplayAggregatesV1 {
         Ok(())
     }
 
-    fn wipeout_fields_some(&self) -> bool {
-        self.wipeout_final_scores.is_some()
-            || self.wipeout_target_score.is_some()
-            || self.wipeout_score_margin.is_some()
+    fn takedown_fields_some(&self) -> bool {
+        self.takedown_final_scores.is_some()
+            || self.takedown_target_score.is_some()
+            || self.takedown_score_margin.is_some()
     }
 
-    fn hot_zone_fields_some(&self) -> bool {
-        self.hot_zone_final_progress.is_some()
-            || self.hot_zone_target_progress_ticks.is_some()
-            || self.hot_zone_controlled_ticks.is_some()
-            || self.hot_zone_contested_ticks.is_some()
-            || self.hot_zone_control_gained_transitions.is_some()
-            || self.hot_zone_longest_control_ticks.is_some()
+    fn turf_hold_fields_some(&self) -> bool {
+        self.turf_hold_final_progress.is_some()
+            || self.turf_hold_target_progress_ticks.is_some()
+            || self.turf_hold_controlled_ticks.is_some()
+            || self.turf_hold_contested_ticks.is_some()
+            || self.turf_hold_control_gained_transitions.is_some()
+            || self.turf_hold_longest_control_ticks.is_some()
     }
 
     /// Exactly one mode variant may carry fields, and it must be complete and internally
     /// consistent with the summary it claims to be.
     fn validate_mode_summary(&self) -> Result<(), String> {
         match self.mode_definition_id {
-            Some(id) if id == crate::map::WIPEOUT_MODE_DEFINITION.0 => {
+            Some(id) if id == crate::map::TAKEDOWN_MODE_DEFINITION.0 => {
                 let (Some(scores), Some(_), Some(margin)) = (
-                    self.wipeout_final_scores,
-                    self.wipeout_target_score,
-                    self.wipeout_score_margin,
+                    self.takedown_final_scores,
+                    self.takedown_target_score,
+                    self.takedown_score_margin,
                 ) else {
-                    return Err("closeout wipeout mode aggregates are incomplete".to_string());
+                    return Err("closeout takedown mode aggregates are incomplete".to_string());
                 };
-                if self.hot_zone_fields_some() {
+                if self.turf_hold_fields_some() {
                     return Err(
-                        "closeout wipeout mode aggregates carry hot-zone fields".to_string()
+                        "closeout takedown mode aggregates carry turf-hold fields".to_string()
                     );
                 }
                 if margin != scores[0].abs_diff(scores[1]) {
                     return Err(
-                        "closeout wipeout score margin does not match the final scores".to_string(),
+                        "closeout takedown score margin does not match the final scores"
+                            .to_string(),
                     );
                 }
             }
-            Some(id) if id == crate::map::HOT_ZONE_MODE_DEFINITION.0 => {
+            Some(id) if id == crate::map::TURF_HOLD_MODE_DEFINITION.0 => {
                 let (Some(progress), Some(target), Some(_), Some(_), Some(_), Some(_)) = (
-                    self.hot_zone_final_progress,
-                    self.hot_zone_target_progress_ticks,
-                    self.hot_zone_controlled_ticks,
-                    self.hot_zone_contested_ticks,
-                    self.hot_zone_control_gained_transitions,
-                    self.hot_zone_longest_control_ticks,
+                    self.turf_hold_final_progress,
+                    self.turf_hold_target_progress_ticks,
+                    self.turf_hold_controlled_ticks,
+                    self.turf_hold_contested_ticks,
+                    self.turf_hold_control_gained_transitions,
+                    self.turf_hold_longest_control_ticks,
                 ) else {
-                    return Err("closeout hot-zone mode aggregates are incomplete".to_string());
+                    return Err("closeout turf-hold mode aggregates are incomplete".to_string());
                 };
-                if self.wipeout_fields_some() {
+                if self.takedown_fields_some() {
                     return Err(
-                        "closeout hot-zone mode aggregates carry wipeout fields".to_string()
+                        "closeout turf-hold mode aggregates carry takedown fields".to_string()
                     );
                 }
                 if progress[0] > target || progress[1] > target {
-                    return Err("closeout hot-zone final progress exceeds the target".to_string());
+                    return Err("closeout turf-hold final progress exceeds the target".to_string());
                 }
             }
             None => {
-                if self.wipeout_fields_some() || self.hot_zone_fields_some() {
+                if self.takedown_fields_some() || self.turf_hold_fields_some() {
                     return Err(
                         "closeout mode aggregates carry fields without a mode identity".to_string(),
                     );
@@ -422,40 +423,40 @@ impl GameplayAggregatesV1 {
                 render_optional_u16(self.mode_definition_id)
             ),
             format!(
-                "wipeout_final_scores={}",
-                render_u16_pair(self.wipeout_final_scores)
+                "takedown_final_scores={}",
+                render_u16_pair(self.takedown_final_scores)
             ),
             format!(
-                "wipeout_target_score={}",
-                render_optional_u16(self.wipeout_target_score)
+                "takedown_target_score={}",
+                render_optional_u16(self.takedown_target_score)
             ),
             format!(
-                "wipeout_score_margin={}",
-                render_optional_u16(self.wipeout_score_margin)
+                "takedown_score_margin={}",
+                render_optional_u16(self.takedown_score_margin)
             ),
             format!(
-                "hot_zone_final_progress={}",
-                render_u16_pair(self.hot_zone_final_progress)
+                "turf_hold_final_progress={}",
+                render_u16_pair(self.turf_hold_final_progress)
             ),
             format!(
-                "hot_zone_target_progress_ticks={}",
-                render_optional_u16(self.hot_zone_target_progress_ticks)
+                "turf_hold_target_progress_ticks={}",
+                render_optional_u16(self.turf_hold_target_progress_ticks)
             ),
             format!(
-                "hot_zone_controlled_ticks={}",
-                render_u64_pair(self.hot_zone_controlled_ticks)
+                "turf_hold_controlled_ticks={}",
+                render_u64_pair(self.turf_hold_controlled_ticks)
             ),
             format!(
-                "hot_zone_contested_ticks={}",
-                render_optional_u64(self.hot_zone_contested_ticks)
+                "turf_hold_contested_ticks={}",
+                render_optional_u64(self.turf_hold_contested_ticks)
             ),
             format!(
-                "hot_zone_control_gained_transitions={}",
-                render_u32_pair(self.hot_zone_control_gained_transitions)
+                "turf_hold_control_gained_transitions={}",
+                render_u32_pair(self.turf_hold_control_gained_transitions)
             ),
             format!(
-                "hot_zone_longest_control_ticks={}",
-                render_u64_pair(self.hot_zone_longest_control_ticks)
+                "turf_hold_longest_control_ticks={}",
+                render_u64_pair(self.turf_hold_longest_control_ticks)
             ),
             format!("match_active_ticks={}", self.match_active_ticks),
             format!("match_respawns={}", self.match_respawns),
@@ -503,33 +504,37 @@ impl GameplayAggregatesV1 {
                 label => Some(label.to_string()),
             },
             mode_definition_id: parse_optional_field(lines, "mode_definition_id", "u16")?,
-            wipeout_final_scores: parse_optional_pair(lines, "wipeout_final_scores", "u16")?,
-            wipeout_target_score: parse_optional_field(lines, "wipeout_target_score", "u16")?,
-            wipeout_score_margin: parse_optional_field(lines, "wipeout_score_margin", "u16")?,
-            hot_zone_final_progress: parse_optional_pair(lines, "hot_zone_final_progress", "u16")?,
-            hot_zone_target_progress_ticks: parse_optional_field(
+            takedown_final_scores: parse_optional_pair(lines, "takedown_final_scores", "u16")?,
+            takedown_target_score: parse_optional_field(lines, "takedown_target_score", "u16")?,
+            takedown_score_margin: parse_optional_field(lines, "takedown_score_margin", "u16")?,
+            turf_hold_final_progress: parse_optional_pair(
                 lines,
-                "hot_zone_target_progress_ticks",
+                "turf_hold_final_progress",
                 "u16",
             )?,
-            hot_zone_controlled_ticks: parse_optional_pair(
+            turf_hold_target_progress_ticks: parse_optional_field(
                 lines,
-                "hot_zone_controlled_ticks",
+                "turf_hold_target_progress_ticks",
+                "u16",
+            )?,
+            turf_hold_controlled_ticks: parse_optional_pair(
+                lines,
+                "turf_hold_controlled_ticks",
                 "u64",
             )?,
-            hot_zone_contested_ticks: parse_optional_field(
+            turf_hold_contested_ticks: parse_optional_field(
                 lines,
-                "hot_zone_contested_ticks",
+                "turf_hold_contested_ticks",
                 "u64",
             )?,
-            hot_zone_control_gained_transitions: parse_optional_pair(
+            turf_hold_control_gained_transitions: parse_optional_pair(
                 lines,
-                "hot_zone_control_gained_transitions",
+                "turf_hold_control_gained_transitions",
                 "u32",
             )?,
-            hot_zone_longest_control_ticks: parse_optional_pair(
+            turf_hold_longest_control_ticks: parse_optional_pair(
                 lines,
-                "hot_zone_longest_control_ticks",
+                "turf_hold_longest_control_ticks",
                 "u64",
             )?,
             match_active_ticks: parse_typed_field(lines, "match_active_ticks", "u64")?,
@@ -783,15 +788,15 @@ const REPORT_REQUIRED_KEYS: [&str; 77] = [
     "matches_completed",
     "match_result",
     "mode_definition_id",
-    "wipeout_final_scores",
-    "wipeout_target_score",
-    "wipeout_score_margin",
-    "hot_zone_final_progress",
-    "hot_zone_target_progress_ticks",
-    "hot_zone_controlled_ticks",
-    "hot_zone_contested_ticks",
-    "hot_zone_control_gained_transitions",
-    "hot_zone_longest_control_ticks",
+    "takedown_final_scores",
+    "takedown_target_score",
+    "takedown_score_margin",
+    "turf_hold_final_progress",
+    "turf_hold_target_progress_ticks",
+    "turf_hold_controlled_ticks",
+    "turf_hold_contested_ticks",
+    "turf_hold_control_gained_transitions",
+    "turf_hold_longest_control_ticks",
     "match_active_ticks",
     "match_respawns",
     "team_a_defeats",

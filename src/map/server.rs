@@ -1,7 +1,7 @@
 //! Authoritative map resolution, instantiation, and exact-generation lifecycle.
 
 use super::{
-    AxisAlignedMapRect, FEATURE_YARD_WIPEOUT_PRESET, MapCatalogResource, MapInstanceId,
+    AxisAlignedMapRect, FEATURE_YARD_TAKEDOWN_PRESET, MapCatalogResource, MapInstanceId,
     MapInstanceMember, MapPresetId, MapRecipe, MapRoot, PlayableBounds, ResolvedMap,
     SpawnPointCatalog, install_resolved_map, register_map_runtime,
 };
@@ -26,7 +26,7 @@ pub struct ServerMapSelection {
 impl Default for ServerMapSelection {
     fn default() -> Self {
         Self {
-            preset_id: Some(FEATURE_YARD_WIPEOUT_PRESET),
+            preset_id: Some(FEATURE_YARD_TAKEDOWN_PRESET),
             authored_recipe: None,
         }
     }

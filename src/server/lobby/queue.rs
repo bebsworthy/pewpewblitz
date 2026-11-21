@@ -1713,13 +1713,13 @@ mod tests {
         let catalog = catalog();
         let maps = crate::map::MapContentCatalog::embedded().unwrap();
         let mut rotation = super::super::CommunityMapRotation::default();
-        let mut stale = published_record(&catalog, "wipeout-1v1", 9);
+        let mut stale = published_record(&catalog, "takedown-1v1", 9);
         stale.game_type_revision += 1;
         rotation.replace_from_records(
             vec![
-                published_record(&catalog, "wipeout-1v1", 4),
+                published_record(&catalog, "takedown-1v1", 4),
                 // Game types without the operator flag never take community maps.
-                published_record(&catalog, "wipeout-2v2", 5),
+                published_record(&catalog, "takedown-2v2", 5),
                 // A configuration change suspends the map from rotation without deleting it.
                 stale,
             ],
@@ -1729,7 +1729,7 @@ mod tests {
         let pool = catalog
             .game_types
             .iter()
-            .position(|game| game.id.as_str() == "wipeout-1v1")
+            .position(|game| game.id.as_str() == "takedown-1v1")
             .unwrap();
         let game_id = catalog.game_types[pool].id.clone();
         assert_eq!(rotation.maps_for(&game_id).len(), 1);
@@ -1780,7 +1780,7 @@ mod tests {
         let pool = catalog
             .game_types
             .iter()
-            .position(|game| game.id.as_str() == "hot-zone-3v3")
+            .position(|game| game.id.as_str() == "turf-hold-3v3")
             .unwrap();
         for value in 1..=6 {
             let player = session(value);

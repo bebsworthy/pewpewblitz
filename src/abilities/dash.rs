@@ -164,7 +164,7 @@ pub(crate) fn activate_dash(
         ),
         bevy::prelude::Or<(
             bevy::prelude::With<crate::map::DamageableWorldObject>,
-            bevy::prelude::With<crate::matchplay::HeistSafe>,
+            bevy::prelude::With<crate::matchplay::VaultBreakSafe>,
         )>,
     >,
     mut fighters: bevy::prelude::Query<
@@ -354,7 +354,7 @@ pub(crate) fn activate_dash(
                         effect_index: 0,
                     });
                 }
-                crate::map::DamageableTargetIdentity::HeistSafe { .. } => {
+                crate::map::DamageableTargetIdentity::VaultBreakSafe { .. } => {
                     objective_pending
                         .0
                         .push(crate::matchplay::PendingModeObjectiveDamage {

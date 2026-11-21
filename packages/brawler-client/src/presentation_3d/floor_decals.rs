@@ -3,7 +3,7 @@
 //! Each theme authors a small decal set in `assets/catalogs/map_presentation_themes.ron`. Placement
 //! is a pure, deterministic function of the map (seeded by its recipe ID and the cell): only open
 //! floor cells that touch a static wall or the arena edge are candidates, and cells holding any
-//! placement (water, effect tiles, cover, foliage, spawns), the Hot Zone circle, Heist safes and
+//! placement (water, effect tiles, cover, foliage, spawns), the Turf Hold circle, Vault Break safes and
 //! their attack sectors, and Zombie ingresses are excluded. Every decal stays inside its one
 //! authoritative cell, so it can never overlap a neighbouring surface. All decals of a map form one
 //! mesh drawn with one lit, alpha-blended toon material over the generated atlas
@@ -13,7 +13,7 @@
 
 use super::{
     GeneratedMapMesh, Indices, NotShadowCaster, PrimitiveTopology, RenderAssetUsages, ToonMaterial,
-    floor_tiles, ground_position, hot_zone_visual_geometry, map, render_quality,
+    floor_tiles, ground_position, map, render_quality, turf_hold_visual_geometry,
 };
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -34,12 +34,12 @@ pub(super) const FLOOR_DECAL_DEPTH_BIAS: f32 = -16.0;
 pub(super) const MAX_FLOOR_DECALS: usize = 160;
 /// Accepted decals keep this Chebyshev cell distance from each other, so they never clump.
 const MIN_DECAL_SPACING_CELLS: u16 = 2;
-/// Cells around a Heist safe footprint (its attack sectors) that stay clear.
-const HEIST_SAFE_CLEARANCE_CELLS: u16 = 2;
+/// Cells around a Vault Break safe footprint (its attack sectors) that stay clear.
+const VAULT_BREAK_SAFE_CLEARANCE_CELLS: u16 = 2;
 /// Cells around a Zombie ingress that stay clear.
 const ZOMBIE_INGRESS_CLEARANCE_CELLS: u16 = 2;
-/// Extra clearance beyond the Hot Zone radius, in cells.
-const HOT_ZONE_CLEARANCE_CELLS: f32 = 0.5;
+/// Extra clearance beyond the Turf Hold radius, in cells.
+const TURF_HOLD_CLEARANCE_CELLS: f32 = 0.5;
 /// Decal side as a fraction of the cell (it always fits inside the cell).
 const MIN_DECAL_SCALE: f32 = 0.78;
 const MAX_DECAL_SCALE: f32 = 0.98;
@@ -277,7 +277,7 @@ pub(super) fn excluded_decal_cells(
         .collect();
     for anchor in &snapshot.mode_anchors {
         match anchor.kind {
-            brawler::map::MapModeAnchorKind::HeistSafe {
+            brawler::map::MapModeAnchorKind::VaultBreakSafe {
                 origin_cell,
                 width_cells,
                 height_cells,
@@ -287,7 +287,7 @@ pub(super) fn excluded_decal_cells(
                 dimensions,
                 origin_cell,
                 (width_cells, height_cells),
-                HEIST_SAFE_CLEARANCE_CELLS,
+                VAULT_BREAK_SAFE_CLEARANCE_CELLS,
             ),
             brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
                 if let Some(cell) = dimensions
@@ -303,11 +303,11 @@ pub(super) fn excluded_decal_cells(
                     );
                 }
             }
-            brawler::map::MapModeAnchorKind::HotZoneCircle { .. } => {}
+            brawler::map::MapModeAnchorKind::TurfHoldCircle { .. } => {}
         }
     }
-    if let Some((center, radius)) = hot_zone_visual_geometry(snapshot) {
-        let reach = radius + HOT_ZONE_CLEARANCE_CELLS * brawler::map::MAP_CELL_SIZE_WORLD;
+    if let Some((center, radius)) = turf_hold_visual_geometry(snapshot) {
+        let reach = radius + TURF_HOLD_CLEARANCE_CELLS * brawler::map::MAP_CELL_SIZE_WORLD;
         for y in 0..dimensions.height {
             for x in 0..dimensions.width {
                 let cell = brawler::map::MapCell::new(x, y);

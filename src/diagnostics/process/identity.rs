@@ -23,7 +23,7 @@ impl RunManifestV1 {
             protocol_version: crate::protocol::SUPPORTED_PROTOCOL_VERSION,
             registry_fingerprint: 0,
             content_fingerprint: 0,
-            mode: env_identity("BRAWLER_DIAGNOSTICS_MODE", "wipeout"),
+            mode: env_identity("BRAWLER_DIAGNOSTICS_MODE", "takedown"),
             rules_profile: env_identity("BRAWLER_DIAGNOSTICS_RULES_PROFILE", "production"),
             network_profile: env_identity("BRAWLER_NETWORK_PROFILE", "local"),
             render_profile: env_identity("BRAWLER_RENDER_PROFILE", "native"),

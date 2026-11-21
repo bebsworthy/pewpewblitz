@@ -15,7 +15,7 @@ Current work lives in Ticket (project `BRL`), never in version or milestone file
 | Doc map, product intent, non-goals | `docs/README.md`, `docs/00-product-direction.md` |
 | Bevy/ECS, authority, schedules, protocol compatibility, registry and content fingerprints | `docs/01-engine-decision.md`, `docs/08-network-architecture.md` |
 | Fighter definitions, resolved loadouts, combat transactions, extension rules | `docs/02-fighter-model.md`, `docs/03-weapons-and-abilities.md` |
-| Maps, effect tiles, modes, world objects | `docs/04-maps-and-game-modes.md`, `docs/16-grid-map-asset-system.md`, `docs/18-damageable-world-objects-and-heist.md` |
+| Maps, effect tiles, modes, world objects | `docs/04-maps-and-game-modes.md`, `docs/16-grid-map-asset-system.md`, `docs/18-damageable-world-objects-and-vault-break.md` |
 | Practice bots, perception, concealment | `docs/10-bots.md`, `docs/17-concealment.md` |
 | Renderer, audio/VFX boundaries, assets, degradation | `docs/11-art-and-presentation-direction.md` |
 | Player flow, routed processes, Balance Lab | `docs/13-player-ux.md`, `docs/14-multiplayer-server-architecture.md`, `docs/15-balance-lab.md` |
@@ -47,7 +47,7 @@ src/                       shared `brawler` crate: gameplay, protocol, headless 
   bin/{server,profile_admin}.rs
   abilities/ builds/ combat/ concealment/ movement/ weapon_parts/ profiles/
   map/  map/runtime/       catalog/resolution/effect tiles; installation, dynamics, object authority
-  modes/                   bounded local registry: Wipeout, Hot Zone, Heist (+ Zombie)
+  modes/                   bounded local registry: Takedown, Turf Hold, Vault Break (+ Zombie)
   matchplay/               lifecycle, spawns, per-mode rule plugins
   bots/                    private Practice policy, observations, navigation
   server/                  admission, fighter spawn, lobby, balance_lab, practice, workers

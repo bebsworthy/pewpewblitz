@@ -104,7 +104,7 @@ pub(crate) fn plate_content(
         )
     };
     match view {
-        ModeScoreView::Wipeout { scores, target } => {
+        ModeScoreView::Takedown { scores, target } => {
             let (left, right) = sides(scores.map(|score| score.to_string()), ["", ""]);
             PlateContent {
                 left,
@@ -113,20 +113,20 @@ pub(crate) fn plate_content(
                 subline_tone: PlateTone::Neutral,
             }
         }
-        ModeScoreView::HotZone {
+        ModeScoreView::TurfHold {
             progress_percent,
             status,
         } => {
             let (left, right) = sides(progress_percent.map(|value| format!("{value}%")), ["", ""]);
             let (subline, subline_tone) = match status {
-                brawler::matchplay::HotZoneStatus::Empty => ("ZONE EMPTY", PlateTone::Neutral),
-                brawler::matchplay::HotZoneStatus::Contested => ("CONTESTED", PlateTone::Warning),
-                brawler::matchplay::HotZoneStatus::Controlled { team }
+                brawler::matchplay::TurfHoldStatus::Empty => ("ZONE EMPTY", PlateTone::Neutral),
+                brawler::matchplay::TurfHoldStatus::Contested => ("CONTESTED", PlateTone::Warning),
+                brawler::matchplay::TurfHoldStatus::Controlled { team }
                     if usize::from(team.0) == ally =>
                 {
                     ("ALLY CONTROL", PlateTone::Ally)
                 }
-                brawler::matchplay::HotZoneStatus::Controlled { .. } => {
+                brawler::matchplay::TurfHoldStatus::Controlled { .. } => {
                     ("ENEMY CONTROL", PlateTone::Enemy)
                 }
             };
@@ -137,7 +137,7 @@ pub(crate) fn plate_content(
                 subline_tone,
             }
         }
-        ModeScoreView::Heist {
+        ModeScoreView::VaultBreak {
             health, maximum, ..
         } => {
             let percent = |team: usize| {
@@ -547,11 +547,11 @@ pub(super) fn present_plate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use brawler::matchplay::HotZoneStatus;
+    use brawler::matchplay::TurfHoldStatus;
 
     #[test]
     fn own_team_is_always_on_the_left_in_ally_colors() {
-        let view = ModeScoreView::Wipeout {
+        let view = ModeScoreView::Takedown {
             scores: [3, 7],
             target: 10,
         };
@@ -571,12 +571,12 @@ mod tests {
     }
 
     #[test]
-    fn hot_zone_control_reads_relative_to_the_observer() {
-        let view = |status| ModeScoreView::HotZone {
+    fn turf_hold_control_reads_relative_to_the_observer() {
+        let view = |status| ModeScoreView::TurfHold {
             progress_percent: [40, 15],
             status,
         };
-        let controlled = view(HotZoneStatus::Controlled { team: TeamId(1) });
+        let controlled = view(TurfHoldStatus::Controlled { team: TeamId(1) });
         let mine = plate_content(controlled, Some(TeamId(1)), false);
         assert_eq!(
             (mine.left.value.as_str(), mine.subline.as_str()),
@@ -588,14 +588,14 @@ mod tests {
             (theirs.subline.as_str(), theirs.subline_tone),
             ("ENEMY CONTROL", PlateTone::Enemy)
         );
-        let contested = plate_content(view(HotZoneStatus::Contested), None, false);
+        let contested = plate_content(view(TurfHoldStatus::Contested), None, false);
         assert_eq!(contested.subline_tone, PlateTone::Warning);
     }
 
     #[test]
-    fn heist_and_zombie_show_their_objective_state() {
-        let heist = plate_content(
-            ModeScoreView::Heist {
+    fn vault_break_and_zombie_show_their_objective_state() {
+        let vault_break = plate_content(
+            ModeScoreView::VaultBreak {
                 health: [500, 250],
                 maximum: [1000, 1000],
                 local_team: Some(TeamId(1)),
@@ -604,11 +604,17 @@ mod tests {
             false,
         );
         assert_eq!(
-            (heist.left.value.as_str(), heist.left.caption.as_str()),
+            (
+                vault_break.left.value.as_str(),
+                vault_break.left.caption.as_str()
+            ),
             ("25%", "DEFEND")
         );
         assert_eq!(
-            (heist.right.value.as_str(), heist.right.caption.as_str()),
+            (
+                vault_break.right.value.as_str(),
+                vault_break.right.caption.as_str()
+            ),
             ("50%", "ATTACK")
         );
         let zombie = |last, overtime| {

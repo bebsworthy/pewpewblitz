@@ -80,7 +80,7 @@ fn allocation_request() -> AllocateRequestBody {
     AllocateRequestBody {
         request_id: id64(501),
         lobby_session_id,
-        mode: GameMode::Wipeout,
+        mode: GameMode::Takedown,
         map_preset: 1,
         map_revision: 1,
         map_recipe_fingerprint: 1,
@@ -92,8 +92,8 @@ fn allocation_request() -> AllocateRequestBody {
         respawn_ticks: 180,
         spawn_protection_ticks: 90,
         completed_input_lock_ticks: 60,
-        wipeout_recent_hostile_damage_credit_ticks: 300,
-        heist_critical_health_percent: 25,
+        takedown_recent_hostile_damage_credit_ticks: 300,
+        vault_break_critical_health_percent: 25,
         team_count: 2,
         players_per_team: 2,
         participants: vec![

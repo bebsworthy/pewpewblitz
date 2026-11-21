@@ -7,9 +7,9 @@ server-hosted Practice matches with inert `Bot N` roster fillers; V11 promoted t
 roster fighters into active deterministic controllers that perceive, decide, navigate, and produce
 ordinary validated input.
 
-The gameplay foundation has grown since that deferral. Wipeout, Hot Zone, and Heist now expose
+The gameplay foundation has grown since that deferral. Takedown, Turf Hold, and Vault Break now expose
 authoritative mode state; maps are resolved from sparse assets; concealment and observer-specific
-reveal are authoritative; and V10 supplies damageable barrels and Heist safes, with treasure chests
+reveal are authoritative; and V10 supplies damageable barrels and Vault Break safes, with treasure chests
 and restoration pickups now completed. The playable implementation deliberately supports these
 current facts rather than using the V2-era nearest-target sketch.
 
@@ -118,8 +118,8 @@ focused Ticket specification before changing one of those contracts.
   the ordinary character path. One roster never repeats a character, and any 18 consecutive seeds
   give even a lone 1v1 bot every character with both of its ultimates. The pick never reads the
   human's choice (BRL-abys).
-- **All Practice-compatible mode goals.** Wipeout supplies survival and pressure goals; Hot Zone
-  supplies contest and defend goals; Heist supplies attack-safe, defend-safe, and lane-pressure
+- **All Practice-compatible mode goals.** Takedown supplies survival and pressure goals; Turf Hold
+  supplies contest and defend goals; Vault Break supplies attack-safe, defend-safe, and lane-pressure
   goals. Zombie supplies close-range hostile-NPC pressure: the human and friendly bots share team
   zero, and bots consume live zombies through the same semantic enemy-contact policy used for
   ordinary combat.
@@ -167,7 +167,7 @@ canonical** `BotObservation` from an allowlist of policy-eligible facts:
 - policy-visible fighters with stable ID, team, pose, public combat state, and observation tick;
 - policy-visible deployables and, only when a supported behavior needs them, bounded projectile
   facts with stable identity, public owner/trajectory data, pose, and observation tick;
-- public Heist-safe, damageable-object, and chest/pickup facts needed by a supported goal;
+- public Vault Break-safe, damageable-object, and chest/pickup facts needed by a supported goal;
 - the shared static navigation revision plus delayed dynamic-blocker facts; and
 - explicit completeness, observation-age, and controller-life-generation indicators.
 
@@ -330,7 +330,7 @@ enemy—rather than becoming a stringly typed rule language.
   and none gets a terrain, landing or occupancy shortcut. See the
   [supported content matrix](#supported-content-matrix).
 
-- **Mode goals are focused adapters.** Wipeout, Hot Zone, and Heist produce bounded goal candidates
+- **Mode goals are focused adapters.** Takedown, Turf Hold, and Vault Break produce bounded goal candidates
   for the common planner rather than scattering mode branches through navigation and combat. An
   objective role retains its zone/safe anchor while opportunistically aiming at visible enemies;
   merely seeing an opponent cannot silently replace the assigned objective.
@@ -501,7 +501,7 @@ The playable bot slice is protected by:
   diagonal corner cutting, route smoothing, stuck recovery, and navigation-revision invalidation;
 - budget tests for stable queued/incremental path work, safe exhaustion, bounded retained search
   state, and no fixed-tick spike at the maximum declared supported topology;
-- focused Wipeout, Hot Zone, and Heist goal/role/reservation tests, including safe attack/defense;
+- focused Takedown, Turf Hold, and Vault Break goal/role/reservation tests, including safe attack/defense;
 - representative loadout tests for predictive but imperfect Pulse aim, range control, primary
   fire, bounded Dash engage/escape/traversal behavior, lob-over-cover fire, empty-weapon spacing,
   and Sentry, Reveal Scan, and Concealment Field use;

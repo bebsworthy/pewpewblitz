@@ -174,11 +174,11 @@ fn expected_visual_profiles(
             .mode_anchors
             .iter()
             .filter_map(|anchor| match anchor.kind {
-                brawler::map::MapModeAnchorKind::HeistSafe {
+                brawler::map::MapModeAnchorKind::VaultBreakSafe {
                     objective_visual_profile_id,
                     ..
                 } => Some(objective_visual_profile_id),
-                brawler::map::MapModeAnchorKind::HotZoneCircle { .. }
+                brawler::map::MapModeAnchorKind::TurfHoldCircle { .. }
                 | brawler::map::MapModeAnchorKind::ZombieIngress { .. } => None,
             })
     }));
@@ -660,7 +660,7 @@ mod grid_catalog_tests {
                 .mode_anchors
                 .iter()
                 .filter_map(|anchor| match anchor.kind {
-                    brawler::map::MapModeAnchorKind::HeistSafe {
+                    brawler::map::MapModeAnchorKind::VaultBreakSafe {
                         objective_visual_profile_id,
                         ..
                     } => Some(objective_visual_profile_id),

@@ -34,7 +34,7 @@ for client_count in 2 4 6; do
     done
 done
 
-game_type=wipeout-1v1
+game_type=takedown-1v1
 timeout=$(e2e_requeue_timeout_seconds "$project_dir" "$game_type") ||
     fail "config/server/game-types.ron has no complete timing for $game_type"
 duration=$(e2e_game_types_field "$project_dir" "$game_type" match_duration_seconds)

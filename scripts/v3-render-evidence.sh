@@ -16,7 +16,7 @@ case "$bind_addr" in
         exit 2
         ;;
 esac
-game_mode=${BRAWLER_RENDER_MODE:-wipeout}
+game_mode=${BRAWLER_RENDER_MODE:-takedown}
 players_per_team=${BRAWLER_RENDER_PLAYERS_PER_TEAM:-}
 game_type=${BRAWLER_RENDER_GAME_TYPE:-}
 timeout_seconds=${BRAWLER_RENDER_TIMEOUT_SECONDS:-75}
@@ -49,9 +49,9 @@ client_two_log=${report_path}.client-2.log
 capture_count=3
 
 case "$game_mode" in
-    wipeout | hot-zone | heist) ;;
+    takedown | turf-hold | vault-break) ;;
     *)
-        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_MODE must be wipeout, hot-zone, or heist' >&2
+        printf '%s\n' 'brawler render evidence: BRAWLER_RENDER_MODE must be takedown, turf-hold, or vault-break' >&2
         exit 2
         ;;
 esac
@@ -159,19 +159,19 @@ if [[ "$practice_smoke" == 1 ]]; then
     validate_peer=0
 fi
 if [[ -z "$players_per_team" ]]; then
-    if [[ "$game_mode" == hot-zone ]]; then players_per_team=2; else players_per_team=1; fi
+    if [[ "$game_mode" == turf-hold ]]; then players_per_team=2; else players_per_team=1; fi
 fi
 # The report fails a window that leaves the measured match (left_match_during_measurement,
-# BRL-rr1x), so every default window must end inside a live match. Heist Practice bots break a
+# BRL-rr1x), so every default window must end inside a live match. Vault Break Practice bots break a
 # safe and end the 180 s match as early as 18 s after match-ready (observed 18-23 s with the
 # measured client walking and firing right, and with it aiming elsewhere; some runs last past
-# 40 s). The window is anchored at match readiness and includes the 3 s countdown, so Heist
+# 40 s). The window is anchored at match readiness and includes the 3 s countdown, so Vault Break
 # Practice defaults to 4 s warmup + 12 s measurement (16 s). Other modes keep 10 s + 30 s.
 # Explicit durations override both. The client configuration check below rejects a measurement
 # too short for the 1,200-sample gate at the run's cadence with 20% headroom (BRL-vh61): 12 s for
 # the native profile off-screen (paced at 120 Hz, measured 110-114 Hz), 24 s at 60 Hz, 48 s at
 # 30 Hz.
-if [[ "$practice_smoke" == 1 && "$game_mode" == heist ]]; then
+if [[ "$practice_smoke" == 1 && "$game_mode" == vault-break ]]; then
     warmup_seconds=${warmup_seconds:-4}
     measure_seconds=${measure_seconds:-12}
 else
@@ -179,12 +179,12 @@ else
     measure_seconds=${measure_seconds:-30}
 fi
 if [[ -z "$game_type" ]]; then
-    if [[ "$game_mode" == hot-zone ]]; then
-        game_type=hot-zone-2v2
-    elif [[ "$game_mode" == heist ]]; then
-        game_type="heist-${players_per_team}v${players_per_team}"
+    if [[ "$game_mode" == turf-hold ]]; then
+        game_type=turf-hold-2v2
+    elif [[ "$game_mode" == vault-break ]]; then
+        game_type="vault-break-${players_per_team}v${players_per_team}"
     else
-        game_type=wipeout-1v1
+        game_type=takedown-1v1
     fi
 fi
 case "$players_per_team" in

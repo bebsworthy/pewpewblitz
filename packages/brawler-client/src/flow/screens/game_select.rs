@@ -36,9 +36,9 @@ pub(in crate::flow) struct RenderedSelection {
 
 fn mode_index(game: &AdvertisedGameType) -> usize {
     match game.rules_summary {
-        AdvertisedRulesSummary::Wipeout { .. } => 0,
-        AdvertisedRulesSummary::HotZone { .. } => 1,
-        AdvertisedRulesSummary::Heist { .. } => 2,
+        AdvertisedRulesSummary::Takedown { .. } => 0,
+        AdvertisedRulesSummary::TurfHold { .. } => 1,
+        AdvertisedRulesSummary::VaultBreak { .. } => 2,
         AdvertisedRulesSummary::Zombie { .. } => 3,
     }
 }
@@ -61,14 +61,14 @@ fn mode_candidate(
 }
 fn rules_text(game: &AdvertisedGameType) -> String {
     let (objective, ticks) = match game.rules_summary {
-        AdvertisedRulesSummary::Wipeout {
+        AdvertisedRulesSummary::Takedown {
             target_score,
             active_limit_ticks,
         } => (
             format!("First to {target_score} eliminations"),
             active_limit_ticks,
         ),
-        AdvertisedRulesSummary::HotZone {
+        AdvertisedRulesSummary::TurfHold {
             target_progress_ticks,
             active_limit_ticks,
         } => (
@@ -78,7 +78,7 @@ fn rules_text(game: &AdvertisedGameType) -> String {
             ),
             active_limit_ticks,
         ),
-        AdvertisedRulesSummary::Heist {
+        AdvertisedRulesSummary::VaultBreak {
             safe_maximum_health,
             active_limit_ticks,
         } => (
@@ -666,7 +666,7 @@ mod tests {
             configuration_revision: 1,
             display_name: format!("Mode {mode}"),
             mode_definition_id: if mode == 0 {
-                brawler::map::WIPEOUT_MODE_DEFINITION
+                brawler::map::TAKEDOWN_MODE_DEFINITION
             } else {
                 brawler::map::ZOMBIE_MODE_DEFINITION
             },
@@ -677,7 +677,7 @@ mod tests {
             team_count: if mode == 0 { 2 } else { 1 },
             players_per_team: size,
             rules_summary: if mode == 0 {
-                AdvertisedRulesSummary::Wipeout {
+                AdvertisedRulesSummary::Takedown {
                     target_score: 10,
                     active_limit_ticks: 10800,
                 }

@@ -10,7 +10,7 @@ use super::{
     MatchClock, MatchId, MatchMember, MatchOutcomeDiagnostics, MatchParticipant,
     MatchParticipantSummary, MatchPhase, MatchRestartSet, MatchResult, MatchRoot, MatchSet,
     MatchState, MatchTelemetry, MatchTelemetryContext, ModeSummary, ResolvedMatchCapacity,
-    RespawnState, SpawnCandidate, SpawnProtection, WipeoutState, WipeoutSummary,
+    RespawnState, SpawnCandidate, SpawnProtection, TakedownState, TakedownSummary,
     complete_fighter_lifecycle, configure_match_schedule, reset_fighter_runtime, select_spawn,
 };
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
         MeleeAttack, PendingDelivery, PendingPayload, ResolvedWeapon, SpawnState, TeamId,
         WeaponTelemetry,
     },
-    map::{MapStartupSet, ResolvedMap, SpawnPointCatalog, WIPEOUT_MODE_DEFINITION},
+    map::{MapStartupSet, ResolvedMap, SpawnPointCatalog, TAKEDOWN_MODE_DEFINITION},
     protocol::{Fighter, FighterInput, NetworkEntityId, PlayerId},
     timing::SimulationTick,
 };
@@ -124,8 +124,8 @@ pub struct MatchModeSetup {
 impl Default for MatchModeSetup {
     fn default() -> Self {
         Self {
-            mode_definition_id: WIPEOUT_MODE_DEFINITION,
-            rules_revision: super::WIPEOUT_RULES_REVISION,
+            mode_definition_id: TAKEDOWN_MODE_DEFINITION,
+            rules_revision: super::TAKEDOWN_RULES_REVISION,
         }
     }
 }
@@ -226,7 +226,7 @@ struct KnownMatchRoster {
 struct RestartCleanupEpoch(Option<MatchId>);
 
 /// Fixed-tick snapshot of the accepted, currently connected participant set for the root
-/// match. Forfeit resolution and Hot Zone occupancy both read this same snapshot.
+/// match. Forfeit resolution and Turf Hold occupancy both read this same snapshot.
 #[derive(Resource, Default, Debug)]
 pub(crate) struct ConnectedMatchRoster {
     pub(crate) match_id: Option<MatchId>,
@@ -317,7 +317,7 @@ fn register_match_outcome_pipeline(app: &mut App) {
 }
 
 /// The common authoritative match lifecycle plugin. Compose with exactly one installed mode
-/// plugin (`WipeoutModePlugin` or `HotZoneModePlugin`).
+/// plugin (`TakedownModePlugin` or `TurfHoldModePlugin`).
 pub struct AuthoritativeMatchPlugin;
 
 impl Plugin for AuthoritativeMatchPlugin {
@@ -1211,18 +1211,18 @@ fn capture_match_summary(
     roots: Query<
         (
             &MatchState,
-            Option<&WipeoutState>,
-            Option<&super::HotZoneState>,
-            Option<&super::HeistState>,
+            Option<&TakedownState>,
+            Option<&super::TurfHoldState>,
+            Option<&super::VaultBreakState>,
             Option<&super::ZombieModeState>,
         ),
         With<MatchRoot>,
     >,
-    hot_zone_telemetry: Option<ResMut<super::hot_zone::HotZoneTelemetry>>,
-    heist_telemetry: Option<Res<super::HeistTelemetry>>,
+    turf_hold_telemetry: Option<ResMut<super::turf_hold::TurfHoldTelemetry>>,
+    vault_break_telemetry: Option<Res<super::VaultBreakTelemetry>>,
     zombie_telemetry: Option<Res<super::ZombieTelemetry>>,
-    heist_safes: Query<(
-        &super::HeistSafe,
+    vault_break_safes: Query<(
+        &super::VaultBreakSafe,
         &crate::combat::CurrentHealth,
         &crate::map::DamageableMaximumHealth,
     )>,
@@ -1230,45 +1230,45 @@ fn capture_match_summary(
     weapons: Res<WeaponTelemetry>,
     abilities: Res<crate::abilities::AbilityTelemetry>,
 ) {
-    let Ok((state, wipeout, hot_zone, heist, zombie)) = roots.single() else {
+    let Ok((state, takedown, turf_hold, vault_break, zombie)) = roots.single() else {
         return;
     };
     match state.phase {
         MatchPhase::Active { .. } => telemetry.begin(state.match_id, tick.0),
         MatchPhase::Completed { result, .. } => {
-            let mode_summary = match (wipeout, hot_zone, heist, zombie) {
-                (Some(wipeout), _, _, _) => ModeSummary::Wipeout(WipeoutSummary {
-                    final_scores: wipeout.team_scores,
-                    target_score: wipeout.target_score,
-                    score_margin: wipeout.team_scores[0].abs_diff(wipeout.team_scores[1]),
+            let mode_summary = match (takedown, turf_hold, vault_break, zombie) {
+                (Some(takedown), _, _, _) => ModeSummary::Takedown(TakedownSummary {
+                    final_scores: takedown.team_scores,
+                    target_score: takedown.target_score,
+                    score_margin: takedown.team_scores[0].abs_diff(takedown.team_scores[1]),
                 }),
-                (None, Some(hot_zone), _, _) => hot_zone_telemetry
-                    .map(|telemetry| ModeSummary::HotZone(telemetry.summary(hot_zone)))
-                    .expect("an installed Hot Zone match carries its telemetry"),
-                (None, None, Some(heist), _) => {
+                (None, Some(turf_hold), _, _) => turf_hold_telemetry
+                    .map(|telemetry| ModeSummary::TurfHold(telemetry.summary(turf_hold)))
+                    .expect("an installed Turf Hold match carries its telemetry"),
+                (None, None, Some(vault_break), _) => {
                     let mut final_health = [0; 2];
                     let mut maximum_health = [0; 2];
-                    for (safe, health, maximum) in &heist_safes {
+                    for (safe, health, maximum) in &vault_break_safes {
                         if safe.match_id == state.match_id && safe.defending_team.0 <= 1 {
                             let index = usize::from(safe.defending_team.0);
                             final_health[index] = health.0;
                             maximum_health[index] = maximum.0;
                         }
                     }
-                    ModeSummary::Heist(super::HeistSummary {
+                    ModeSummary::VaultBreak(super::VaultBreakSummary {
                         final_health,
                         maximum_health,
-                        completion: heist.completion,
-                        accepted_hits: heist_telemetry
+                        completion: vault_break.completion,
+                        accepted_hits: vault_break_telemetry
                             .as_deref()
                             .map_or(0, |telemetry| telemetry.accepted_hits),
-                        applied_damage: heist_telemetry
+                        applied_damage: vault_break_telemetry
                             .as_deref()
                             .map_or(0, |telemetry| telemetry.applied_damage),
-                        first_damage_tick: heist_telemetry
+                        first_damage_tick: vault_break_telemetry
                             .as_deref()
                             .map_or([None; 2], |telemetry| telemetry.first_damage_tick),
-                        destroyed_at_tick: heist_telemetry
+                        destroyed_at_tick: vault_break_telemetry
                             .as_deref()
                             .map_or([None; 2], |telemetry| telemetry.destroyed_at_tick),
                     })

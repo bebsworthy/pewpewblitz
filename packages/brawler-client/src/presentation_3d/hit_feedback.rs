@@ -2,7 +2,7 @@
 //! damage/healing numbers, including healing recovered outside healing cues (`recovery`).
 //!
 //! Every flash and number comes from an authoritative replicated cue (`DeduplicatedCombatCue`,
-//! `ReceivedWorldObjectCues`, `ReceivedHeistObjectiveCue`); nothing here computes damage or writes
+//! `ReceivedWorldObjectCues`, `ReceivedVaultBreakObjectiveCue`); nothing here computes damage or writes
 //! gameplay state. The server already withholds cues about fighters concealed from this observer.
 //! As a fail-closed second gate, a cue whose target is not replicated to this observer produces
 //! neither a flash nor a number. Defeat feedback stays on the shared VFX/audio request path
@@ -10,10 +10,10 @@
 
 use super::{
     ArenaCamera, CameraUpdateSystems, ClientShellSettings, CombatVisualOwner, Controlled,
-    DynamicMapVisual, FIGHTER_VISUAL_HEIGHT_WORLD, Fighter, HeistSafeVisual, NetworkEntityId,
-    ShadedMaterial, ToonMaterial, UiSystems, V3FighterVisual, WorldPresentationSet, combat,
-    ground_position, ui, update_damageable_map_visuals, update_heist_safe_status_visuals, vfx,
-    zombie,
+    DynamicMapVisual, FIGHTER_VISUAL_HEIGHT_WORLD, Fighter, NetworkEntityId, ShadedMaterial,
+    ToonMaterial, UiSystems, V3FighterVisual, VaultBreakSafeVisual, WorldPresentationSet, combat,
+    ground_position, ui, update_damageable_map_visuals, update_vault_break_safe_status_visuals,
+    vfx, zombie,
 };
 use bevy::prelude::*;
 use brawler::combat::client::DeduplicatedCombatCue;
@@ -324,7 +324,7 @@ pub(super) fn combat_cue_hit_feedback(
     })
 }
 
-/// Maps damage to a damageable world object or Heist idol to hit feedback. The object must be
+/// Maps damage to a damageable world object or Vault Break idol to hit feedback. The object must be
 /// replicated to this observer.
 pub(super) fn object_damage_hit_feedback(
     target: brawler::map::DamageableTargetIdentity,
@@ -363,7 +363,7 @@ pub(super) struct HitFeedbackRoots<'w, 's> {
     combat: CombatHitRoots<'w, 's>,
     zombies: Query<'w, 's, (Entity, &'static zombie::ZombieVisual)>,
     map_objects: Query<'w, 's, (Entity, &'static DynamicMapVisual)>,
-    heist_safes: Query<'w, 's, (Entity, &'static HeistSafeVisual)>,
+    vault_break_safes: Query<'w, 's, (Entity, &'static VaultBreakSafeVisual)>,
     identities: Query<'w, 's, &'static brawler::map::DamageableTargetIdentity>,
     transforms: Query<'w, 's, &'static GlobalTransform>,
 }
@@ -383,7 +383,7 @@ impl HitFeedbackRoots<'_, '_> {
                 .filter_map(|(root, visual)| (visual.owner == subject).then_some(root)),
         );
         roots.extend(
-            self.heist_safes
+            self.vault_break_safes
                 .iter()
                 .filter_map(|(root, visual)| (visual.owner == subject).then_some(root)),
         );
@@ -434,7 +434,7 @@ pub(super) fn collect_hit_feedback(
     settings: Option<Res<ClientShellSettings>>,
     mut book: ResMut<FloatingNumberBook>,
     mut cues: MessageReader<DeduplicatedCombatCue>,
-    mut heist_cues: MessageReader<brawler::matchplay::ReceivedHeistObjectiveCue>,
+    mut vault_break_cues: MessageReader<brawler::matchplay::ReceivedVaultBreakObjectiveCue>,
     world_objects: Option<Res<brawler::map::ReceivedWorldObjectCues>>,
     mut seen_world_objects: Local<std::collections::VecDeque<brawler::combat::CombatEventId>>,
     local: Query<&NetworkEntityId, (With<Fighter>, With<Controlled>)>,
@@ -492,7 +492,7 @@ pub(super) fn collect_hit_feedback(
             ));
         }
     }
-    for brawler::matchplay::ReceivedHeistObjectiveCue(cue) in heist_cues.read() {
+    for brawler::matchplay::ReceivedVaultBreakObjectiveCue(cue) in vault_break_cues.read() {
         events.extend(object_damage_hit_feedback(
             cue.target,
             cue.source_subject,
@@ -535,7 +535,7 @@ pub(super) fn install(app: &mut App) {
         .init_resource::<HitFlashMaterials<ToonMaterial>>()
         .init_resource::<HealthRecoveryLedger>()
         .add_message::<DeduplicatedCombatCue>()
-        .add_message::<brawler::matchplay::ReceivedHeistObjectiveCue>()
+        .add_message::<brawler::matchplay::ReceivedVaultBreakObjectiveCue>()
         .add_systems(
             Update,
             (
@@ -558,7 +558,7 @@ pub(super) fn install(app: &mut App) {
                     .after(combat::update_fighter_concealment_visuals::<StandardMaterial>)
                     .after(combat::update_fighter_concealment_visuals::<ToonMaterial>)
                     .after(update_damageable_map_visuals)
-                    .after(update_heist_safe_status_visuals)
+                    .after(update_vault_break_safe_status_visuals)
                     .in_set(WorldPresentationSet::Animate),
             ),
         )

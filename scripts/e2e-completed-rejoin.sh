@@ -8,11 +8,11 @@ set -euo pipefail
 # the completed match, captures the forfeit result with its own team as the winner, and returns
 # to a fresh lobby.
 
-game_type=${1:-wipeout-1v1}
+game_type=${1:-takedown-1v1}
 case "$game_type" in
-    wipeout-1v1) ;;
+    takedown-1v1) ;;
     *)
-        printf '%s\n' 'brawler completed rejoin e2e: only wipeout-1v1 is rehearsed' >&2
+        printf '%s\n' 'brawler completed rejoin e2e: only takedown-1v1 is rehearsed' >&2
         exit 2
         ;;
 esac

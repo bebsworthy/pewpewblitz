@@ -13,7 +13,7 @@ window_dir=${BRAWLER_ROUTED_WINDOW_DIR:-}
 worker_features=${BRAWLER_ROUTED_SERVER_FEATURES:-server}
 # brawler-client package features; shared-crate features are spelled `brawler/<feature>`.
 client_features=${BRAWLER_ROUTED_CLIENT_FEATURES:-automation}
-game_mode=${BRAWLER_ROUTED_GAME_MODE:-wipeout}
+game_mode=${BRAWLER_ROUTED_GAME_MODE:-takedown}
 match_rules=${BRAWLER_ROUTED_MATCH_RULES:-}
 simulation_ticks=${BRAWLER_ROUTED_SIMULATION_TICKS:-4000}
 if [ -z "$match_rules" ]; then
@@ -33,9 +33,9 @@ case "$match_rules" in
         ;;
 esac
 case "$game_mode" in
-    wipeout | hot-zone | heist) ;;
+    takedown | turf-hold | vault-break) ;;
     *)
-        echo "brawler routed network: game mode must be wipeout, hot-zone, or heist" >&2
+        echo "brawler routed network: game mode must be takedown, turf-hold, or vault-break" >&2
         exit 2
         ;;
 esac

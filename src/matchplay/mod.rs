@@ -1,43 +1,21 @@
 //! Shared match state and server-authoritative common lifecycle plus installed mode rules.
 
-mod heist;
-mod hot_zone;
 #[cfg(feature = "server")]
 mod lifecycle;
 mod model;
 mod objective_results;
+mod turf_hold;
+mod vault_break;
 pub use objective_results::ObjectiveResult;
 #[cfg(feature = "client")]
 pub use objective_results::ObjectiveTotals;
 #[cfg(feature = "server")]
 mod server;
 mod spawns;
+mod takedown;
 mod telemetry;
-mod wipeout;
 mod zombie;
 
-#[cfg(feature = "client")]
-pub use heist::ReceivedHeistObjectiveCue;
-pub use heist::{
-    HEIST_RULES_REVISION, HEIST_SAFE_COUNT, HEIST_SAFE_HALF_EXTENTS, HeistCompletion,
-    HeistHealthComparison, HeistObjectiveCue, HeistObjectiveCueKind, HeistRules, HeistSafe,
-    HeistSafeIdentity, HeistState, HeistSummary, MAX_HEIST_OBJECTIVE_CUES, destroyed_safe_result,
-    objective_cue_kind, remaining_health_comparison, timeout_result as heist_timeout_result,
-};
-#[cfg(feature = "server")]
-pub use heist::{
-    HeistModePlugin, HeistTelemetry, PendingModeObjectiveDamage, PendingModeObjectiveDamages,
-};
-#[cfg(feature = "server")]
-pub use hot_zone::HotZoneModePlugin;
-#[cfg(feature = "server")]
-pub(crate) use hot_zone::ResolvedObjectiveZone;
-#[cfg(feature = "server")]
-pub use hot_zone::hot_zone_setup_for_composition;
-pub use hot_zone::{
-    HOT_ZONE_NEAR_COMBAT_EXPANSION, HOT_ZONE_RULES_REVISION, HotZoneRules, HotZoneState,
-    HotZoneStatus, HotZoneSummary, hot_zone_rules_for_profile,
-};
 #[cfg(feature = "server")]
 pub use lifecycle::AuthoritativeFighterLifecyclePlugin;
 #[cfg(feature = "server")]
@@ -68,19 +46,43 @@ pub(crate) use server::{
 };
 pub use spawns::{SpawnCandidate, assigned_team, select_spawn};
 #[cfg(feature = "server")]
-pub(crate) use telemetry::MatchTelemetryContext;
-pub use telemetry::{
-    MatchOutcomeDiagnostics, MatchParticipantSummary, MatchSummary, MatchTelemetry, ModeSummary,
-    WipeoutSummary,
-};
-#[cfg(feature = "server")]
-pub use wipeout::WipeoutModePlugin;
-pub use wipeout::{
-    WIPEOUT_RULES_REVISION, WipeoutPlayerStats, WipeoutRules, WipeoutState, score_result,
+pub use takedown::TakedownModePlugin;
+pub use takedown::{
+    TAKEDOWN_RULES_REVISION, TakedownPlayerStats, TakedownRules, TakedownState, score_result,
     timeout_result,
 };
 #[cfg(all(feature = "server", test))]
-pub(crate) use wipeout::{credited_defeat_team, credited_defeat_team_with_recent};
+pub(crate) use takedown::{credited_defeat_team, credited_defeat_team_with_recent};
+#[cfg(feature = "server")]
+pub(crate) use telemetry::MatchTelemetryContext;
+pub use telemetry::{
+    MatchOutcomeDiagnostics, MatchParticipantSummary, MatchSummary, MatchTelemetry, ModeSummary,
+    TakedownSummary,
+};
+#[cfg(feature = "server")]
+pub(crate) use turf_hold::ResolvedObjectiveZone;
+#[cfg(feature = "server")]
+pub use turf_hold::TurfHoldModePlugin;
+#[cfg(feature = "server")]
+pub use turf_hold::turf_hold_setup_for_composition;
+pub use turf_hold::{
+    TURF_HOLD_NEAR_COMBAT_EXPANSION, TURF_HOLD_RULES_REVISION, TurfHoldRules, TurfHoldState,
+    TurfHoldStatus, TurfHoldSummary, turf_hold_rules_for_profile,
+};
+#[cfg(feature = "client")]
+pub use vault_break::ReceivedVaultBreakObjectiveCue;
+pub use vault_break::{
+    MAX_VAULT_BREAK_OBJECTIVE_CUES, VAULT_BREAK_RULES_REVISION, VAULT_BREAK_SAFE_COUNT,
+    VAULT_BREAK_SAFE_HALF_EXTENTS, VaultBreakCompletion, VaultBreakHealthComparison,
+    VaultBreakObjectiveCue, VaultBreakObjectiveCueKind, VaultBreakRules, VaultBreakSafe,
+    VaultBreakSafeIdentity, VaultBreakState, VaultBreakSummary, destroyed_safe_result,
+    objective_cue_kind, remaining_health_comparison, timeout_result as vault_break_timeout_result,
+};
+#[cfg(feature = "server")]
+pub use vault_break::{
+    PendingModeObjectiveDamage, PendingModeObjectiveDamages, VaultBreakModePlugin,
+    VaultBreakTelemetry,
+};
 #[allow(
     unused_imports,
     reason = "client-only role builds retain the shared HostileNpc source conversion contract"

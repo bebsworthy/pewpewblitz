@@ -679,7 +679,7 @@ mod tests {
     #[test]
     fn the_render_evidence_launcher_defaults_reach_the_sample_gate_off_screen() {
         let native = profiled(RenderProfile::Native);
-        // scripts/v3-render-evidence.sh: 10 s + 30 s, and Heist Practice 4 s + 12 s.
+        // scripts/v3-render-evidence.sh: 10 s + 30 s, and Vault Break Practice 4 s + 12 s.
         assert!(render_report_lasting(30, true).validate(&native).is_ok());
         assert!(render_report_lasting(12, true).validate(&native).is_ok());
         assert_eq!(
@@ -718,7 +718,9 @@ mod tests {
     fn explicit_product_game_type_is_scoped_to_match_automation() {
         let mut network = headless();
         let mut config = ClientAutomationConfig {
-            product_match_game_type: Some(brawler::lobby::GameTypeId::new("hot-zone-2v2").unwrap()),
+            product_match_game_type: Some(
+                brawler::lobby::GameTypeId::new("turf-hold-2v2").unwrap(),
+            ),
             ..ClientAutomationConfig::default()
         };
         assert!(config.validate(&network).is_err());

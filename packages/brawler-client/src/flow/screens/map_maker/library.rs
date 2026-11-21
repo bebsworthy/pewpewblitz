@@ -826,10 +826,10 @@ pub(super) fn pennant_icon(parent: &mut ChildSpawnerCommands, kit: &Kit, key: &s
 /// The draft's mode name and pennant icon.
 pub(super) fn mode_identity(mode: brawler::map::ModeDefinitionId) -> (&'static str, &'static str) {
     match mode {
-        brawler::map::HOT_ZONE_MODE_DEFINITION => ("Hot Zone", "mode-hot-zone"),
-        brawler::map::HEIST_MODE_DEFINITION => ("Heist", "mode-heist"),
+        brawler::map::TURF_HOLD_MODE_DEFINITION => ("Turf Hold", "mode-turf-hold"),
+        brawler::map::VAULT_BREAK_MODE_DEFINITION => ("Vault Break", "mode-vault-break"),
         brawler::map::ZOMBIE_MODE_DEFINITION => ("Zombie", "mode-zombie"),
-        _ => ("Wipeout", "mode-wipeout"),
+        _ => ("Takedown", "mode-takedown"),
     }
 }
 
@@ -884,7 +884,7 @@ fn overview_marks(recipe: &MapRecipe, catalog: &MapContentCatalog) -> Vec<Overvi
         .mode_anchors
         .iter()
         .filter_map(|anchor| match anchor.kind {
-            MapModeAnchorKind::HotZoneCircle {
+            MapModeAnchorKind::TurfHoldCircle {
                 center_half_cell,
                 radius_half_cells,
             } => {
@@ -899,7 +899,7 @@ fn overview_marks(recipe: &MapRecipe, catalog: &MapContentCatalog) -> Vec<Overvi
                     round: true,
                 })
             }
-            MapModeAnchorKind::HeistSafe {
+            MapModeAnchorKind::VaultBreakSafe {
                 team_slot,
                 origin_cell,
                 width_cells,
@@ -908,7 +908,7 @@ fn overview_marks(recipe: &MapRecipe, catalog: &MapContentCatalog) -> Vec<Overvi
             } => Some(OverviewMark {
                 min: (origin_cell.x, origin_cell.y),
                 size: (width_cells, height_cells),
-                color: super::palette_color(super::PaletteItem::HeistSafe(team_slot), catalog),
+                color: super::palette_color(super::PaletteItem::VaultBreakSafe(team_slot), catalog),
                 round: false,
             }),
             MapModeAnchorKind::ZombieIngress { .. } => None,

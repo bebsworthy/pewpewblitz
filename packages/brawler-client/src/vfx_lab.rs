@@ -6,7 +6,7 @@ use super::{
         CaptureFeedback, ClientEvidenceCapturePlugin, current_unix_millis,
         request_custom_evidence_capture,
     },
-    hud::ClientHeistReadiness,
+    hud::ClientVaultBreakReadiness,
     presentation_3d::{
         CombatEffect3d, ImportedWorldFallbackPolicy, MAX_ACTIVE_PARTICLE_EMITTERS,
         Material3dAssets, PendingCombatEffect, Primitive3dAssets,
@@ -481,7 +481,7 @@ fn apply_world_feedback_signature(
         key,
         crate::vfx::WORLD_OBJECT_DAMAGED_VFX
             | crate::vfx::WORLD_OBJECT_EXPLOSION_VFX
-            | crate::vfx::HEIST_DAMAGED_VFX
+            | crate::vfx::VAULT_BREAK_DAMAGED_VFX
     ) {
         (
             crate::vfx::VfxPhase::Impact,
@@ -491,14 +491,14 @@ fn apply_world_feedback_signature(
                 crate::vfx::VfxAccent::Neutral
             },
         )
-    } else if key == crate::vfx::HEIST_CRITICAL_VFX {
+    } else if key == crate::vfx::VAULT_BREAK_CRITICAL_VFX {
         (
             crate::vfx::VfxPhase::Interruption,
             crate::vfx::VfxAccent::Neutral,
         )
     } else if matches!(
         key,
-        crate::vfx::HEIST_DESTROYED_VFX | crate::vfx::PICKUP_EXPIRED_VFX
+        crate::vfx::VAULT_BREAK_DESTROYED_VFX | crate::vfx::PICKUP_EXPIRED_VFX
     ) {
         (
             crate::vfx::VfxPhase::Expiry,
@@ -766,8 +766,8 @@ pub fn build_vfx_lab_app(config: VfxLabConfig) -> App {
     }
     app.add_plugins(brawler::content::GameplayContentPlugin)
         .add_message::<brawler::combat::client::DeduplicatedCombatCue>()
-        .add_message::<brawler::matchplay::ReceivedHeistObjectiveCue>()
-        .insert_resource(ClientHeistReadiness::default())
+        .add_message::<brawler::matchplay::ReceivedVaultBreakObjectiveCue>()
+        .insert_resource(ClientVaultBreakReadiness::default())
         .add_plugins(ProductionVfxPlugin)
         .add_plugins(VfxParticleAdapterPlugin)
         .add_plugins(VfxLabLifecyclePresentationPlugin)
@@ -2135,26 +2135,26 @@ fn world_feedback_guide(key: VfxRequestKey) -> Option<WorldFeedbackGuide> {
             meaning: "The green boundary, floor glow, and small core contract toward the authoritative pickup position. The quiet particle-free collapse distinguishes expiry from collection.",
             style: "EXPIRY removes energy inward with no celebratory burst, reading clearly as a missed pickup.",
         })
-    } else if key == crate::vfx::HEIST_DAMAGED_VFX {
+    } else if key == crate::vfx::VAULT_BREAK_DAMAGED_VFX {
         Some(WorldFeedbackGuide {
-            style_label: "HEIST HIT",
-            subject: "HEIST SAFE DAMAGED",
+            style_label: "VAULT BREAK HIT",
+            subject: "VAULT BREAK SAFE DAMAGED",
             meaning: "A compact structural flash and fracture mark one authoritative safe hit. It stays local so repeated damage does not resemble the critical or destroyed cues.",
-            style: "HEIST HIT stays close to the safe: contact core, demolition fracture, soft echo, and bounded sparks.",
+            style: "VAULT BREAK HIT stays close to the safe: contact core, demolition fracture, soft echo, and bounded sparks.",
         })
-    } else if key == crate::vfx::HEIST_CRITICAL_VFX {
+    } else if key == crate::vfx::VAULT_BREAK_CRITICAL_VFX {
         Some(WorldFeedbackGuide {
-            style_label: "HEIST CRITICAL",
-            subject: "HEIST SAFE ENTERED CRITICAL HEALTH",
+            style_label: "VAULT BREAK CRITICAL",
+            subject: "VAULT BREAK SAFE ENTERED CRITICAL HEALTH",
             meaning: "The larger translucent floor, structural break, hot core, and ring mark the authoritative critical threshold. This is a one-time warning, not a retained health overlay.",
             style: "CRITICAL escalates the safe's damage language with a wider demolition pulse and hot sparks while remaining smaller than terminal destruction.",
         })
-    } else if key == crate::vfx::HEIST_DESTROYED_VFX {
+    } else if key == crate::vfx::VAULT_BREAK_DESTROYED_VFX {
         Some(WorldFeedbackGuide {
-            style_label: "HEIST DESTROYED",
-            subject: "HEIST SAFE DESTROYED",
+            style_label: "VAULT BREAK DESTROYED",
+            subject: "VAULT BREAK SAFE DESTROYED",
             meaning: "The broad floor release, fracture, hot core, and demolition ring mark the authoritative terminal safe event. Match outcome remains server-owned.",
-            style: "DESTROYED is the largest Heist response: broad outward collapse geometry and hot debris establish terminal weight.",
+            style: "DESTROYED is the largest Vault Break response: broad outward collapse geometry and hot debris establish terminal weight.",
         })
     } else {
         None
@@ -2757,12 +2757,12 @@ mod tests {
                 crate::vfx::VfxAccent::Neutral,
             ),
             (
-                crate::vfx::HEIST_CRITICAL_VFX,
+                crate::vfx::VAULT_BREAK_CRITICAL_VFX,
                 crate::vfx::VfxPhase::Interruption,
                 crate::vfx::VfxAccent::Neutral,
             ),
             (
-                crate::vfx::HEIST_DESTROYED_VFX,
+                crate::vfx::VAULT_BREAK_DESTROYED_VFX,
                 crate::vfx::VfxPhase::Expiry,
                 crate::vfx::VfxAccent::Neutral,
             ),
@@ -2803,8 +2803,8 @@ mod tests {
 
     #[test]
     fn world_feedback_guides_name_the_actual_event_and_fixed_controls() {
-        let guide = world_feedback_guide(crate::vfx::HEIST_DESTROYED_VFX).unwrap();
-        assert_eq!(guide.subject, "HEIST SAFE DESTROYED");
+        let guide = world_feedback_guide(crate::vfx::VAULT_BREAK_DESTROYED_VFX).unwrap();
+        assert_eq!(guide.subject, "VAULT BREAK SAFE DESTROYED");
         assert!(guide.meaning.contains("authoritative terminal safe event"));
 
         let guide = world_feedback_guide(crate::vfx::PICKUP_EXPIRED_VFX).unwrap();

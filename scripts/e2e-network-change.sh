@@ -7,6 +7,6 @@ set -euo pipefail
 # -> Wi-Fi flap). The run passes only if the same match session (no fresh lobby or match handoff)
 # keeps receiving authoritative ticks after each change.
 
-game_type=${1:-wipeout-1v1}
+game_type=${1:-takedown-1v1}
 export BRAWLER_PRODUCT_NETWORK_CHANGE_SMOKE=1
 exec "$(dirname -- "$0")/e2e-practice.sh" "$game_type"

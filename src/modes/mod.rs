@@ -7,10 +7,10 @@
 use crate::{config::GameMode, map::ModeDefinitionId};
 use bevy::prelude::{App, Plugin};
 
-mod heist;
-mod hot_zone;
 mod registry;
-mod wipeout;
+mod takedown;
+mod turf_hold;
+mod vault_break;
 mod zombie;
 
 #[cfg(feature = "client")]
@@ -31,8 +31,8 @@ pub(crate) enum CompatibleMapPolicy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ModeTopologyPolicy {
     NoAnchors,
-    HotZoneCircle,
-    MirroredHeistSafes,
+    TurfHoldCircle,
+    MirroredVaultBreakSafes,
     ZombieIngress,
 }
 
@@ -130,8 +130,8 @@ impl ModeRegistration {
 pub(crate) struct ModeInstallInput {
     pub(crate) profile: MatchRulesProfile,
     pub(crate) objective_target: Option<u16>,
-    pub(crate) wipeout_recent_hostile_damage_credit_ticks: Option<u64>,
-    pub(crate) heist_critical_health_percent: Option<u8>,
+    pub(crate) takedown_recent_hostile_damage_credit_ticks: Option<u64>,
+    pub(crate) vault_break_critical_health_percent: Option<u8>,
 }
 
 #[cfg(feature = "server")]
@@ -143,15 +143,15 @@ pub(crate) struct ModeRuleResolveInput {
     pub(crate) pressure_stages: u8,
     pub(crate) match_duration_ticks: u64,
     pub(crate) lifecycle: MatchLifecycleRules,
-    pub(crate) wipeout_recent_hostile_damage_credit_ticks: u64,
-    pub(crate) heist_critical_health_percent: u8,
+    pub(crate) takedown_recent_hostile_damage_credit_ticks: u64,
+    pub(crate) vault_break_critical_health_percent: u8,
 }
 
 #[cfg(feature = "server")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ModeOperatorPolicyInput {
-    pub(crate) wipeout_recent_hostile_damage_credit_ticks: u64,
-    pub(crate) heist_critical_health_percent: u8,
+    pub(crate) takedown_recent_hostile_damage_credit_ticks: u64,
+    pub(crate) vault_break_critical_health_percent: u8,
 }
 
 #[cfg(feature = "server")]
@@ -175,9 +175,9 @@ pub struct BuiltInModeRegistrationsPlugin;
 impl Plugin for BuiltInModeRegistrationsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            wipeout::WipeoutModeRegistrationPlugin,
-            hot_zone::HotZoneModeRegistrationPlugin,
-            heist::HeistModeRegistrationPlugin,
+            takedown::TakedownModeRegistrationPlugin,
+            turf_hold::TurfHoldModeRegistrationPlugin,
+            vault_break::VaultBreakModeRegistrationPlugin,
             zombie::ZombieModeRegistrationPlugin,
         ));
     }
@@ -185,15 +185,15 @@ impl Plugin for BuiltInModeRegistrationsPlugin {
 
 pub(crate) fn builtin_mode_catalog() -> &'static ModeCatalog {
     registry::builtin_catalog([
-        wipeout::REGISTRATION,
-        hot_zone::REGISTRATION,
-        heist::REGISTRATION,
+        takedown::REGISTRATION,
+        turf_hold::REGISTRATION,
+        vault_break::REGISTRATION,
         zombie::REGISTRATION,
     ])
 }
 
 #[cfg(all(test, feature = "server"))]
-pub(crate) use wipeout::wipeout_rules_for_profile;
+pub(crate) use takedown::takedown_rules_for_profile;
 
 #[cfg(test)]
 mod tests {

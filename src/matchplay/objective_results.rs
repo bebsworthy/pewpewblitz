@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ObjectiveTotals {
-    HotZone { progress: [u16; 2], target: u16 },
-    Heist { health: [u16; 2], maximum: [u16; 2] },
+    TurfHold { progress: [u16; 2], target: u16 },
+    VaultBreak { health: [u16; 2], maximum: [u16; 2] },
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,19 +27,19 @@ pub(super) fn publish(
         (
             Entity,
             &super::MatchState,
-            Option<&super::HotZoneState>,
-            Option<&super::HeistState>,
+            Option<&super::TurfHoldState>,
+            Option<&super::VaultBreakState>,
             Option<&ObjectiveResult>,
         ),
         With<super::MatchRoot>,
     >,
     safes: Query<(
-        &super::HeistSafe,
+        &super::VaultBreakSafe,
         &crate::combat::CurrentHealth,
         &crate::map::DamageableMaximumHealth,
     )>,
 ) {
-    for (entity, state, zone, heist, previous) in &roots {
+    for (entity, state, zone, vault_break, previous) in &roots {
         let super::MatchPhase::Completed { result, .. } = state.phase else {
             if previous.is_some() {
                 commands.entity(entity).remove::<ObjectiveResult>();
@@ -50,22 +50,22 @@ pub(super) fn publish(
             continue;
         }
         let totals = if let Some(zone) = zone.filter(|z| z.match_id == state.match_id) {
-            ObjectiveTotals::HotZone {
+            ObjectiveTotals::TurfHold {
                 progress: zone.progress_ticks,
                 target: zone.target_progress_ticks,
             }
-        } else if let Some(heist) = heist.filter(|h| h.match_id == state.match_id) {
+        } else if let Some(vault_break) = vault_break.filter(|h| h.match_id == state.match_id) {
             let mut health = [0; 2];
             let mut maximum = [0; 2];
             let mut seen = [false; 2];
             for (safe, current, max) in &safes {
                 if safe.match_id != state.match_id
-                    || safe.generation != heist.generation
+                    || safe.generation != vault_break.generation
                     || safe.defending_team.0 > 1
                 {
                     continue;
                 }
-                if !heist.safes.iter().any(|s| {
+                if !vault_break.safes.iter().any(|s| {
                     s.anchor_id == safe.anchor_id && s.defending_team == safe.defending_team
                 }) {
                     continue;
@@ -82,7 +82,7 @@ pub(super) fn publish(
             if !seen.into_iter().all(|s| s) || maximum.contains(&0) {
                 continue;
             }
-            ObjectiveTotals::Heist { health, maximum }
+            ObjectiveTotals::VaultBreak { health, maximum }
         } else {
             continue;
         };
@@ -97,7 +97,7 @@ pub(super) fn publish(
 #[cfg(all(test, feature = "server"))]
 mod tests {
     use super::*;
-    use crate::matchplay::{HotZoneState, HotZoneStatus, MatchPhase, MatchRoot, MatchState};
+    use crate::matchplay::{MatchPhase, MatchRoot, MatchState, TurfHoldState, TurfHoldStatus};
     #[test]
     fn captures_final_objective_once_and_clears_it_on_restart() {
         let mut app = App::new();
@@ -108,7 +108,7 @@ mod tests {
                 MatchRoot,
                 MatchState {
                     match_id: MatchId(7),
-                    mode_definition_id: crate::map::HOT_ZONE_MODE_DEFINITION,
+                    mode_definition_id: crate::map::TURF_HOLD_MODE_DEFINITION,
                     phase: MatchPhase::Completed {
                         completed_at_tick: 10,
                         restart_unlocked_at_tick: 20,
@@ -116,11 +116,11 @@ mod tests {
                     },
                     rules_revision: 2,
                 },
-                HotZoneState {
+                TurfHoldState {
                     match_id: MatchId(8),
                     zone_anchor_id: crate::map::ModeAnchorId(1),
                     occupants: [0; 2],
-                    status: HotZoneStatus::Empty,
+                    status: TurfHoldStatus::Empty,
                     progress_ticks: [27, 27],
                     target_progress_ticks: 100,
                     next_evaluation_tick: 11,
@@ -130,20 +130,20 @@ mod tests {
         app.update();
         assert!(app.world().get::<ObjectiveResult>(root).is_none());
         app.world_mut()
-            .get_mut::<HotZoneState>(root)
+            .get_mut::<TurfHoldState>(root)
             .unwrap()
             .match_id = MatchId(7);
         app.update();
         let final_value = *app.world().get::<ObjectiveResult>(root).unwrap();
         assert_eq!(
             final_value.totals,
-            ObjectiveTotals::HotZone {
+            ObjectiveTotals::TurfHold {
                 progress: [27, 27],
                 target: 100
             }
         );
         app.world_mut()
-            .get_mut::<HotZoneState>(root)
+            .get_mut::<TurfHoldState>(root)
             .unwrap()
             .progress_ticks = [0; 2];
         app.update();
@@ -157,11 +157,11 @@ mod tests {
         assert!(app.world().get::<ObjectiveResult>(root).is_none());
     }
     #[test]
-    fn heist_snapshot_requires_both_matching_idols() {
+    fn vault_break_snapshot_requires_both_matching_idols() {
         use crate::{
             combat::{CurrentHealth, TeamId},
             map::{DamageableMaximumHealth, MapDynamicGeneration, MapInstanceId, ModeAnchorId},
-            matchplay::{HeistSafe, HeistSafeIdentity, HeistState},
+            matchplay::{VaultBreakSafe, VaultBreakSafeIdentity, VaultBreakState},
         };
         let mut app = App::new();
         app.add_systems(Update, publish);
@@ -169,7 +169,7 @@ mod tests {
             map_instance_id: MapInstanceId(9),
             generation: 1,
         };
-        let identities = [0, 1].map(|t| HeistSafeIdentity {
+        let identities = [0, 1].map(|t| VaultBreakSafeIdentity {
             anchor_id: ModeAnchorId(t + 1),
             defending_team: TeamId(u8::try_from(t).unwrap()),
         });
@@ -179,7 +179,7 @@ mod tests {
                 MatchRoot,
                 MatchState {
                     match_id: MatchId(7),
-                    mode_definition_id: crate::map::HEIST_MODE_DEFINITION,
+                    mode_definition_id: crate::map::VAULT_BREAK_MODE_DEFINITION,
                     phase: MatchPhase::Completed {
                         completed_at_tick: 10,
                         restart_unlocked_at_tick: 20,
@@ -187,7 +187,7 @@ mod tests {
                     },
                     rules_revision: 2,
                 },
-                HeistState {
+                VaultBreakState {
                     match_id: MatchId(7),
                     rules_revision: 2,
                     generation,
@@ -201,7 +201,7 @@ mod tests {
             app.update();
             assert!(app.world().get::<ObjectiveResult>(root).is_none());
             app.world_mut().spawn((
-                HeistSafe {
+                VaultBreakSafe {
                     match_id: MatchId(7),
                     anchor_id: identity.anchor_id,
                     defending_team: identity.defending_team,
@@ -214,7 +214,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().get::<ObjectiveResult>(root).unwrap().totals,
-            ObjectiveTotals::Heist {
+            ObjectiveTotals::VaultBreak {
                 health: [731, 0],
                 maximum: [2000; 2]
             }

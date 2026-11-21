@@ -159,7 +159,7 @@ fn spawn_visual(
                 layer,
             ));
         }
-        MapPaletteVisual::HotZone => {
+        MapPaletteVisual::TurfHold => {
             commands.spawn((
                 PalettePreviewOwned { host },
                 Mesh3d(primitives.area_ring.clone()),
@@ -169,7 +169,7 @@ fn spawn_visual(
                 layer,
             ));
         }
-        MapPaletteVisual::HeistSafe(team) => {
+        MapPaletteVisual::VaultBreakSafe(team) => {
             commands.spawn((
                 PalettePreviewOwned { host },
                 Mesh3d(primitives.unit_cuboid.clone()),

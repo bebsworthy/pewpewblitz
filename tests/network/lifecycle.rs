@@ -388,7 +388,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
     server
         .insert_resource(server_config)
         .insert_resource(brawler::matchplay::MatchLifecycleRules::default())
-        .insert_resource(brawler::matchplay::WipeoutRules {
+        .insert_resource(brawler::matchplay::TakedownRules {
             target_score: 10,
             recent_hostile_damage_credit_ticks: 300,
         })
@@ -404,7 +404,7 @@ fn real_udp_loopback_moves_and_replicates_authoritative_pose() {
             AvianNetworkPlugin,
             ServerAuthoritativeGameplayPlugin,
             ServerNetworkPlugin,
-            brawler::matchplay::WipeoutModePlugin,
+            brawler::matchplay::TakedownModePlugin,
         ));
     server.finish();
     server.cleanup();

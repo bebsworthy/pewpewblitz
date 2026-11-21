@@ -650,9 +650,9 @@ impl LobbyState {
             respawn_ticks: rules.respawn_ticks,
             spawn_protection_ticks: rules.spawn_protection_ticks,
             completed_input_lock_ticks: rules.completed_input_lock_ticks,
-            wipeout_recent_hostile_damage_credit_ticks: rules
-                .wipeout_recent_hostile_damage_credit_ticks,
-            heist_critical_health_percent: rules.heist_critical_health_percent,
+            takedown_recent_hostile_damage_credit_ticks: rules
+                .takedown_recent_hostile_damage_credit_ticks,
+            vault_break_critical_health_percent: rules.vault_break_critical_health_percent,
             team_count: 2,
             players_per_team: 1,
             participants,
@@ -756,9 +756,9 @@ impl LobbyState {
                 respawn_ticks: rules.respawn_ticks,
                 spawn_protection_ticks: rules.spawn_protection_ticks,
                 completed_input_lock_ticks: rules.completed_input_lock_ticks,
-                wipeout_recent_hostile_damage_credit_ticks: rules
-                    .wipeout_recent_hostile_damage_credit_ticks,
-                heist_critical_health_percent: rules.heist_critical_health_percent,
+                takedown_recent_hostile_damage_credit_ticks: rules
+                    .takedown_recent_hostile_damage_credit_ticks,
+                vault_break_critical_health_percent: rules.vault_break_critical_health_percent,
                 team_count: reservation.team_count,
                 players_per_team: reservation.players_per_team,
                 participants,
@@ -847,9 +847,9 @@ impl LobbyState {
                 respawn_ticks: rules.respawn_ticks,
                 spawn_protection_ticks: rules.spawn_protection_ticks,
                 completed_input_lock_ticks: rules.completed_input_lock_ticks,
-                wipeout_recent_hostile_damage_credit_ticks: rules
-                    .wipeout_recent_hostile_damage_credit_ticks,
-                heist_critical_health_percent: rules.heist_critical_health_percent,
+                takedown_recent_hostile_damage_credit_ticks: rules
+                    .takedown_recent_hostile_damage_credit_ticks,
+                vault_break_critical_health_percent: rules.vault_break_critical_health_percent,
                 team_count: game.team_count,
                 players_per_team: game.players_per_team,
                 participants: vec![human],
@@ -2515,7 +2515,7 @@ mod tests {
     fn state() -> LobbyState {
         LobbyState::with_id_source(
             manifest(),
-            GameMode::Wipeout,
+            GameMode::Takedown,
             build(),
             DeterministicSessionIds { next: 1 },
         )
@@ -2583,17 +2583,17 @@ mod tests {
         }
         // Explicit Practice selection can leave this game's multiplayer pool.
         let mut explicit = command.clone();
-        explicit.map_preset_id = Some(crate::map::FEATURE_YARD_HOT_ZONE_PRESET);
+        explicit.map_preset_id = Some(crate::map::FEATURE_YARD_TURF_HOLD_PRESET);
         let started = lobby
             .create_practice_request(session, &explicit, catalog, snapshot, accepted)
             .unwrap();
         assert_eq!(
             started.map_preset_id,
-            Some(crate::map::FEATURE_YARD_HOT_ZONE_PRESET)
+            Some(crate::map::FEATURE_YARD_TURF_HOLD_PRESET)
         );
         assert_eq!(
             lobby.pending.as_ref().unwrap().body.map_preset,
-            crate::map::FEATURE_YARD_HOT_ZONE_PRESET.0
+            crate::map::FEATURE_YARD_TURF_HOLD_PRESET.0
         );
         lobby.pending = None;
     }
@@ -2620,7 +2620,7 @@ mod tests {
         let game = catalog
             .game_types
             .iter()
-            .find(|game| game.id.as_str() == "hot-zone-3v3")
+            .find(|game| game.id.as_str() == "turf-hold-3v3")
             .unwrap();
         let catalogs = crate::characters::EmbeddedLoadoutCatalogs::load().unwrap();
         let command = crate::lobby::PracticeStartRequest {

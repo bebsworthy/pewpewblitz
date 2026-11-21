@@ -10,7 +10,7 @@ use std::{
     path::Path,
 };
 
-const PERSISTENCE_SCHEMA_VERSION: u16 = 16;
+const PERSISTENCE_SCHEMA_VERSION: u16 = 17;
 const MAX_PERSISTED_BYTES: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -352,10 +352,25 @@ pub(super) fn load(
         && value["snapshot"]["schemaVersion"].as_u64() == Some(21)
     {
         // BRL-5v3c: roster characters became tunable; older tuning keeps canonical characters.
-        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
-        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        value["schemaVersion"] = serde_json::json!(16);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(22);
         value["snapshot"]["characters"] = serde_json::to_value(&validator.baseline.characters)
             .map_err(|error| format!("canonical character migration failed: {error}"))?;
+    }
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        == Some(16)
+        && value["snapshot"]["schemaVersion"].as_u64() == Some(22)
+    {
+        // BRL-wg28: Heist became Vault Break; its tuning keeps its values under the new key.
+        value["schemaVersion"] = serde_json::json!(PERSISTENCE_SCHEMA_VERSION);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(SNAPSHOT_SCHEMA_VERSION);
+        if let Some(snapshot) = value["snapshot"].as_object_mut()
+            && let Some(tuning) = snapshot.remove("heist")
+        {
+            snapshot.insert("vaultBreak".to_owned(), tuning);
+        }
     }
     let persisted = serde_json::from_value::<PersistedBalanceLabV1>(value)
         .map_err(|error| format!("persisted snapshot JSON was rejected: {error}"))?;
@@ -464,7 +479,7 @@ mod tests {
         let root = TestPath::create();
         let path = root.0.join("session-v1.json");
         let (validator, mut snapshot) = fixture();
-        snapshot.heist.safe_maximum_health = 2_750;
+        snapshot.vault_break.safe_maximum_health = 2_750;
         snapshot.effect_tiles.set_parameter(3, "damage", 17);
         snapshot.ultimate_charge.dealt_damage_multiplier += 1;
         let crate::builds::UltimateParameters::Sentry {
@@ -707,6 +722,31 @@ mod tests {
             loaded.snapshot.weapons[0].recipe.fire_cooldown_ticks,
             snapshot.weapons[0].recipe.fire_cooldown_ticks
         );
+    }
+
+    #[test]
+    fn version_sixteen_heist_tuning_moves_to_vault_break() {
+        let root = TestPath::create();
+        let path = root.0.join("session-v16.json");
+        let (validator, mut snapshot) = fixture();
+        snapshot.vault_break.safe_maximum_health = 3_100;
+        save(&path, &snapshot, BalanceLabRevision(16)).unwrap();
+
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["schemaVersion"] = serde_json::json!(16);
+        value["snapshot"]["schemaVersion"] = serde_json::json!(22);
+        let tuning = value["snapshot"]
+            .as_object_mut()
+            .unwrap()
+            .remove("vaultBreak")
+            .unwrap();
+        value["snapshot"]["heist"] = tuning;
+        fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let loaded = load(&path, &validator).unwrap().unwrap();
+        assert_eq!(loaded.snapshot.schema_version, SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(loaded.snapshot.vault_break.safe_maximum_health, 3_100);
     }
 
     #[test]

@@ -238,7 +238,7 @@ keeps its session connected, for at most the 10 s routed session bound after the
 held seat the `Result` goes out on the completion frame, as before; at worst it follows completion
 by about 70 s. Because the allocation has not ended, the supervisor and lobby carry the rejoin
 unchanged, and the worker admits the rebound held seat in `Completed`: the rejoined client
-receives the replicated completed state and shows that match's Results (score, Wipeout stats
+receives the replicated completed state and shows that match's Results (score, Takedown stats
 board, objective result) through the ordinary completed-match path; the client captures that
 result only once its join outcome has arrived, because the completed snapshot can precede it and
 the Results need the local player. When the root first becomes

@@ -1679,7 +1679,7 @@ fn routed_grant_is_bound_to_the_current_session_and_accepted_once() {
         match_id: MatchId::new(3).expect("non-zero match ID"),
         route_id: RouteId::new(4).expect("non-zero route ID"),
         peer_id: PeerId::new(5).expect("non-zero peer ID"),
-        game_mode: GameMode::Wipeout,
+        game_mode: GameMode::Takedown,
         capability: RouteCapability::from_bytes([7; RouteCapability::BYTES])
             .expect("non-zero route capability"),
         activation_expiry_unix_ms: 10,
@@ -1736,7 +1736,7 @@ fn a_completed_snapshot_before_the_join_outcome_waits_for_the_local_player() {
         MatchRoot,
         MatchState {
             match_id: brawler::matchplay::MatchId(9),
-            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
             phase: MatchPhase::Completed {
                 completed_at_tick: 12,
                 restart_unlocked_at_tick: 72,
@@ -1744,7 +1744,7 @@ fn a_completed_snapshot_before_the_join_outcome_waits_for_the_local_player() {
             },
             rules_revision: 1,
         },
-        brawler::matchplay::WipeoutState {
+        brawler::matchplay::TakedownState {
             match_id: Some(brawler::matchplay::MatchId(9)),
             completed_result: Some(result),
             ..default()
@@ -1825,8 +1825,8 @@ fn a_completed_match_keeps_its_reservation_map_credit_for_results() {
     let started = brawler::lobby::ReservationStarted {
         reservation_id: brawler::lobby::MatchReservationId::new(9).unwrap(),
         ticket_id: None,
-        game_type_id: brawler::lobby::GameTypeId::new("wipeout-1v1").unwrap(),
-        mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+        game_type_id: brawler::lobby::GameTypeId::new("takedown-1v1").unwrap(),
+        mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
         map_preset_id: None,
         map_recipe_id: brawler::map::MapRecipeId(brawler::lobby::PUBLISHED_MAP_RECIPE_ID_BASE + 6),
         map_recipe_revision: 1,
@@ -1900,7 +1900,7 @@ fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
             MatchRoot,
             MatchState {
                 match_id: brawler::matchplay::MatchId(9),
-                mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
                 phase: MatchPhase::Completed {
                     completed_at_tick: 12,
                     restart_unlocked_at_tick: 72,
@@ -1918,7 +1918,7 @@ fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
     );
     app.world_mut()
         .entity_mut(root)
-        .insert(brawler::matchplay::WipeoutState {
+        .insert(brawler::matchplay::TakedownState {
             match_id: Some(brawler::matchplay::MatchId(9)),
             ..default()
         });
@@ -1930,7 +1930,7 @@ fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
     );
     app.world_mut()
         .entity_mut(root)
-        .get_mut::<brawler::matchplay::WipeoutState>()
+        .get_mut::<brawler::matchplay::TakedownState>()
         .unwrap()
         .completed_result = Some(brawler::matchplay::MatchResult::Draw);
     app.world_mut().spawn((
@@ -1945,9 +1945,9 @@ fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
         },
     ));
     app.world_mut()
-        .get_mut::<brawler::matchplay::WipeoutState>(root)
+        .get_mut::<brawler::matchplay::TakedownState>(root)
         .unwrap()
-        .players[0] = Some(brawler::matchplay::WipeoutPlayerStats {
+        .players[0] = Some(brawler::matchplay::TakedownPlayerStats {
         player_id: PlayerId(4),
         network_id: NetworkEntityId(40),
         team: brawler::combat::TeamId(1),
@@ -1970,7 +1970,7 @@ fn replicated_completed_match_requests_fresh_lobby_without_terminal_exit() {
     assert_eq!(context.result, brawler::matchplay::MatchResult::Draw);
     assert_eq!(context.local_player, Some(PlayerId(4)));
     assert_eq!(context.local_team, Some(brawler::combat::TeamId(1)));
-    let player = context.wipeout.as_ref().unwrap().players[0]
+    let player = context.takedown.as_ref().unwrap().players[0]
         .as_ref()
         .unwrap();
     assert_eq!(
@@ -2034,15 +2034,15 @@ fn objective_results_wait_for_matching_snapshot_and_retain_totals() {
     use brawler::matchplay::{MatchId, MatchResult, ObjectiveResult, ObjectiveTotals};
     for (mode, totals) in [
         (
-            brawler::map::HOT_ZONE_MODE_DEFINITION,
-            ObjectiveTotals::HotZone {
+            brawler::map::TURF_HOLD_MODE_DEFINITION,
+            ObjectiveTotals::TurfHold {
                 progress: [100, 43],
                 target: 100,
             },
         ),
         (
-            brawler::map::HEIST_MODE_DEFINITION,
-            ObjectiveTotals::Heist {
+            brawler::map::VAULT_BREAK_MODE_DEFINITION,
+            ObjectiveTotals::VaultBreak {
                 health: [731, 0],
                 maximum: [2000; 2],
             },

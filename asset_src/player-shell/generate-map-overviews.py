@@ -57,11 +57,11 @@ def overview(key):
         shapes.append(f'<rect x="{x}" y="{h-y-ah}" width="{aw}" height="{ah}" fill="{color(name)}"{stroke}/>')
         canvas.fill_rect(x,h-y-ah,aw,ah,color(name))
         if stroke:canvas.stroke_rect(x,h-y-ah,aw,ah,.06,'#29444b',.25)
-    for m in re.finditer(r'HotZoneCircle\(center_half_cell: \(x: (\d+), y: (\d+)\), radius_half_cells: (\d+)\)', src):
+    for m in re.finditer(r'TurfHoldCircle\(center_half_cell: \(x: (\d+), y: (\d+)\), radius_half_cells: (\d+)\)', src):
         x,y,r=map(int,m.groups())
         shapes.append(f'<circle cx="{x/2}" cy="{h-y/2}" r="{r/2}" fill="#ff9a31" fill-opacity=".3" stroke="#fff4dd" stroke-width=".2"/>')
         canvas.circle(x/2,h-y/2,r/2,'#ff9a31',.3,'#fff4dd',.2)
-    for m in re.finditer(r'HeistSafe\(team_slot: (\d+), origin_cell: \(x: (\d+), y: (\d+)\), width_cells: (\d+), height_cells: (\d+), quarter_turns: (\d+)', src):
+    for m in re.finditer(r'VaultBreakSafe\(team_slot: (\d+), origin_cell: \(x: (\d+), y: (\d+)\), width_cells: (\d+), height_cells: (\d+), quarter_turns: (\d+)', src):
         team,x,y,sw,sh,q=map(int,m.groups())
         if q%2: sw,sh=sh,sw
         c='#38a9dd' if team==0 else '#e16a62'
@@ -74,4 +74,4 @@ def overview(key):
     print(key, w,h,'expanded placements:',len(cells))
     return w,h,body
 
-for key in ["feature-yard-wipeout", "feature-yard-hot-zone", "feature-yard-heist", "verdant-crossfire", "sluicegate-works", "switchback-basin", "powderline-vault", "zombie-yard"]: overview(key)
+for key in ["feature-yard-takedown", "feature-yard-turf-hold", "feature-yard-vault-break", "verdant-crossfire", "sluicegate-works", "switchback-basin", "powderline-vault", "zombie-yard"]: overview(key)

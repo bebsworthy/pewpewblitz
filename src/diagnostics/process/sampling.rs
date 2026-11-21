@@ -119,7 +119,7 @@ pub(in crate::diagnostics) fn observe_gameplay_aggregates(
 
 /// Fold the latest completed match summary's mode, ability, and weapon aggregates into
 /// the gameplay block. The mode identity and its typed summary ride along so closeouts
-/// carry the objective evidence (Wipeout scores, Hot Zone terminal state) the match
+/// carry the objective evidence (Takedown scores, Turf Hold terminal state) the match
 /// telemetry already owns. Weapon aggregates are summed across every preset that fought.
 fn consolidate_match_summary(
     summary: &crate::matchplay::MatchSummary,
@@ -129,22 +129,22 @@ fn consolidate_match_summary(
     gameplay.match_result = Some(summary.result.report_label());
     gameplay.mode_definition_id = Some(summary.mode_definition_id.0);
     match summary.mode_summary {
-        ModeSummary::Wipeout(wipeout) => {
-            gameplay.wipeout_final_scores = Some(wipeout.final_scores);
-            gameplay.wipeout_target_score = Some(wipeout.target_score);
-            gameplay.wipeout_score_margin = Some(wipeout.score_margin);
+        ModeSummary::Takedown(takedown) => {
+            gameplay.takedown_final_scores = Some(takedown.final_scores);
+            gameplay.takedown_target_score = Some(takedown.target_score);
+            gameplay.takedown_score_margin = Some(takedown.score_margin);
         }
-        ModeSummary::HotZone(hot_zone) => {
-            gameplay.hot_zone_final_progress = Some(hot_zone.final_progress_ticks);
-            gameplay.hot_zone_target_progress_ticks = Some(hot_zone.target_progress_ticks);
-            gameplay.hot_zone_controlled_ticks = Some(hot_zone.controlled_ticks_by_team);
-            gameplay.hot_zone_contested_ticks = Some(hot_zone.contested_ticks);
-            gameplay.hot_zone_control_gained_transitions =
-                Some(hot_zone.control_gained_transitions_by_team);
-            gameplay.hot_zone_longest_control_ticks =
-                Some(hot_zone.longest_consecutive_control_ticks_by_team);
+        ModeSummary::TurfHold(turf_hold) => {
+            gameplay.turf_hold_final_progress = Some(turf_hold.final_progress_ticks);
+            gameplay.turf_hold_target_progress_ticks = Some(turf_hold.target_progress_ticks);
+            gameplay.turf_hold_controlled_ticks = Some(turf_hold.controlled_ticks_by_team);
+            gameplay.turf_hold_contested_ticks = Some(turf_hold.contested_ticks);
+            gameplay.turf_hold_control_gained_transitions =
+                Some(turf_hold.control_gained_transitions_by_team);
+            gameplay.turf_hold_longest_control_ticks =
+                Some(turf_hold.longest_consecutive_control_ticks_by_team);
         }
-        ModeSummary::Heist(_) | ModeSummary::Zombie(_) => {}
+        ModeSummary::VaultBreak(_) | ModeSummary::Zombie(_) => {}
     }
     gameplay.match_active_ticks = summary.active_duration_ticks;
     gameplay.match_respawns = summary.respawns;

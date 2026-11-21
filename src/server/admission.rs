@@ -673,9 +673,9 @@ pub fn build_match_worker_app(
     config.match_respawn_ticks = Some(manifest.respawn_ticks);
     config.match_spawn_protection_ticks = Some(manifest.spawn_protection_ticks);
     config.match_completed_input_lock_ticks = Some(manifest.completed_input_lock_ticks);
-    config.wipeout_recent_hostile_damage_credit_ticks =
-        Some(manifest.wipeout_recent_hostile_damage_credit_ticks);
-    config.heist_critical_health_percent = Some(manifest.heist_critical_health_percent);
+    config.takedown_recent_hostile_damage_credit_ticks =
+        Some(manifest.takedown_recent_hostile_damage_credit_ticks);
+    config.vault_break_critical_health_percent = Some(manifest.vault_break_critical_health_percent);
     validate_match_manifest(&config, &manifest)?;
     let participant_count = manifest
         .participants
@@ -819,7 +819,7 @@ mod tests {
             request_id: brawler_routing::RequestId::new(3).unwrap(),
             match_id: MatchId::new(4).unwrap(),
             allocation_id: AllocationId::new(5).unwrap(),
-            mode: brawler_routing::GameMode::Wipeout,
+            mode: brawler_routing::GameMode::Takedown,
             map_preset,
             map_revision: u32::from(map_revision),
             map_recipe_fingerprint,
@@ -831,8 +831,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             reserved: 0,
             seed: 1,
             participants: {
@@ -1257,14 +1257,14 @@ mod tests {
     }
 
     #[test]
-    fn manifest_admission_accepts_feature_yard_wipeout_through_the_grid_catalog() {
+    fn manifest_admission_accepts_feature_yard_takedown_through_the_grid_catalog() {
         let config = ServerNetworkConfig::default();
         let catalog = MapContentCatalog::embedded().unwrap();
         let mut value = manifest();
-        value.map_preset = crate::map::FEATURE_YARD_WIPEOUT_PRESET.0;
-        value.map_revision = u32::from(crate::map::FEATURE_YARD_WIPEOUT_ADMISSION_REVISION);
+        value.map_preset = crate::map::FEATURE_YARD_TAKEDOWN_PRESET.0;
+        value.map_revision = u32::from(crate::map::FEATURE_YARD_TAKEDOWN_ADMISSION_REVISION);
         value.map_recipe_fingerprint = catalog
-            .resolve_preset(crate::map::FEATURE_YARD_WIPEOUT_PRESET, MapInstanceId(1))
+            .resolve_preset(crate::map::FEATURE_YARD_TAKEDOWN_PRESET, MapInstanceId(1))
             .unwrap()
             .snapshot
             .identity
@@ -1274,12 +1274,12 @@ mod tests {
     }
 
     #[test]
-    fn manifest_admission_accepts_hidden_ashen_and_feature_yard_hot_zone_presets() {
+    fn manifest_admission_accepts_hidden_ashen_and_feature_yard_turf_hold_presets() {
         let catalog = MapContentCatalog::embedded().unwrap();
-        let mut wipeout = manifest();
-        wipeout.map_preset = crate::map::ASHEN_COURT_PRESET.0;
-        wipeout.map_revision = u32::from(crate::map::ASHEN_COURT_ADMISSION_REVISION);
-        wipeout.map_recipe_fingerprint = catalog
+        let mut takedown = manifest();
+        takedown.map_preset = crate::map::ASHEN_COURT_PRESET.0;
+        takedown.map_revision = u32::from(crate::map::ASHEN_COURT_ADMISSION_REVISION);
+        takedown.map_recipe_fingerprint = catalog
             .resolve_preset(crate::map::ASHEN_COURT_PRESET, MapInstanceId(1))
             .unwrap()
             .snapshot
@@ -1289,28 +1289,28 @@ mod tests {
         assert!(
             validate_manifest_map_against_catalog(
                 &ServerNetworkConfig::default(),
-                &wipeout,
+                &takedown,
                 &catalog
             )
             .is_ok()
         );
 
-        let mut hot_zone = wipeout;
-        hot_zone.mode = brawler_routing::GameMode::HotZone;
-        hot_zone.map_preset = crate::map::FEATURE_YARD_HOT_ZONE_PRESET.0;
-        hot_zone.map_revision = u32::from(crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION);
-        hot_zone.map_recipe_fingerprint = catalog
-            .resolve_preset(crate::map::FEATURE_YARD_HOT_ZONE_PRESET, MapInstanceId(1))
+        let mut turf_hold = takedown;
+        turf_hold.mode = brawler_routing::GameMode::TurfHold;
+        turf_hold.map_preset = crate::map::FEATURE_YARD_TURF_HOLD_PRESET.0;
+        turf_hold.map_revision = u32::from(crate::map::FEATURE_YARD_TURF_HOLD_ADMISSION_REVISION);
+        turf_hold.map_recipe_fingerprint = catalog
+            .resolve_preset(crate::map::FEATURE_YARD_TURF_HOLD_PRESET, MapInstanceId(1))
             .unwrap()
             .snapshot
             .identity
             .recipe_fingerprint
             .0;
         let config = ServerNetworkConfig {
-            game_mode: GameMode::HotZone,
+            game_mode: GameMode::TurfHold,
             ..default()
         };
-        assert!(validate_manifest_map_against_catalog(&config, &hot_zone, &catalog).is_ok());
+        assert!(validate_manifest_map_against_catalog(&config, &turf_hold, &catalog).is_ok());
     }
 
     #[test]
@@ -1318,26 +1318,26 @@ mod tests {
         let catalog = MapContentCatalog::embedded().unwrap();
         for (game_mode, routing_mode, preset, revision) in [
             (
-                GameMode::Wipeout,
-                brawler_routing::GameMode::Wipeout,
+                GameMode::Takedown,
+                brawler_routing::GameMode::Takedown,
                 crate::map::VERDANT_CROSSFIRE_PRESET,
                 crate::map::VERDANT_CROSSFIRE_ADMISSION_REVISION,
             ),
             (
-                GameMode::Wipeout,
-                brawler_routing::GameMode::Wipeout,
+                GameMode::Takedown,
+                brawler_routing::GameMode::Takedown,
                 crate::map::SLUICEGATE_WORKS_PRESET,
                 crate::map::SLUICEGATE_WORKS_ADMISSION_REVISION,
             ),
             (
-                GameMode::HotZone,
-                brawler_routing::GameMode::HotZone,
+                GameMode::TurfHold,
+                brawler_routing::GameMode::TurfHold,
                 crate::map::SWITCHBACK_BASIN_PRESET,
                 crate::map::SWITCHBACK_BASIN_ADMISSION_REVISION,
             ),
             (
-                GameMode::Heist,
-                brawler_routing::GameMode::Heist,
+                GameMode::VaultBreak,
+                brawler_routing::GameMode::VaultBreak,
                 crate::map::POWDERLINE_VAULT_PRESET,
                 crate::map::POWDERLINE_VAULT_ADMISSION_REVISION,
             ),
@@ -1365,7 +1365,7 @@ mod tests {
     fn manifest_admission_revalidates_an_immutable_authored_recipe_without_preset_provenance() {
         let catalog = MapContentCatalog::embedded().unwrap();
         let mut recipe = catalog
-            .preset(crate::map::FEATURE_YARD_WIPEOUT_PRESET)
+            .preset(crate::map::FEATURE_YARD_TAKEDOWN_PRESET)
             .unwrap()
             .recipe
             .clone();
@@ -1373,7 +1373,7 @@ mod tests {
         recipe.revision = 9;
         let resolved = crate::map::validate_authored_recipe(
             &recipe,
-            crate::map::WIPEOUT_MODE_DEFINITION,
+            crate::map::TAKEDOWN_MODE_DEFINITION,
             &catalog,
             MapInstanceId(1),
         )
@@ -1440,8 +1440,8 @@ mod tests {
         value.respawn_ticks = 120;
         value.spawn_protection_ticks = 91;
         value.completed_input_lock_ticks = 61;
-        value.wipeout_recent_hostile_damage_credit_ticks = 301;
-        value.heist_critical_health_percent = 26;
+        value.takedown_recent_hostile_damage_credit_ticks = 301;
+        value.vault_break_critical_health_percent = 26;
         let mut worker = build_match_worker_app(config, value.clone()).unwrap();
         crate::test_app::finalize(&mut worker);
         assert_eq!(
@@ -1455,9 +1455,9 @@ mod tests {
         assert!(!worker.is_plugin_added::<TerminalCtrlCHandlerPlugin>());
         assert!(worker.is_plugin_added::<crate::server::ServerAuthoritativeGameplayPlugin>());
         assert!(worker.is_plugin_added::<crate::server::RoutedWorkerPlugin>());
-        let wipeout = worker.world().resource::<crate::matchplay::WipeoutRules>();
-        assert_eq!(wipeout.target_score, 1);
-        assert_eq!(wipeout.recent_hostile_damage_credit_ticks, 301);
+        let takedown = worker.world().resource::<crate::matchplay::TakedownRules>();
+        assert_eq!(takedown.target_score, 1);
+        assert_eq!(takedown.recent_hostile_damage_credit_ticks, 301);
         let lifecycle = worker
             .world()
             .resource::<crate::matchplay::MatchLifecycleRules>();
@@ -1470,7 +1470,7 @@ mod tests {
             worker
                 .world()
                 .resource::<ServerNetworkConfig>()
-                .heist_critical_health_percent,
+                .vault_break_critical_health_percent,
             Some(26)
         );
         worker.update();
@@ -1703,19 +1703,19 @@ mod tests {
     fn match_workers_control_manifest_bots_in_every_practice_mode() {
         let cases = [
             (
-                GameMode::Wipeout,
-                crate::map::FEATURE_YARD_WIPEOUT_PRESET,
-                crate::map::FEATURE_YARD_WIPEOUT_ADMISSION_REVISION,
+                GameMode::Takedown,
+                crate::map::FEATURE_YARD_TAKEDOWN_PRESET,
+                crate::map::FEATURE_YARD_TAKEDOWN_ADMISSION_REVISION,
             ),
             (
-                GameMode::HotZone,
-                crate::map::FEATURE_YARD_HOT_ZONE_PRESET,
-                crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION,
+                GameMode::TurfHold,
+                crate::map::FEATURE_YARD_TURF_HOLD_PRESET,
+                crate::map::FEATURE_YARD_TURF_HOLD_ADMISSION_REVISION,
             ),
             (
-                GameMode::Heist,
-                crate::map::FEATURE_YARD_HEIST_PRESET,
-                crate::map::FEATURE_YARD_HEIST_ADMISSION_REVISION,
+                GameMode::VaultBreak,
+                crate::map::FEATURE_YARD_VAULT_BREAK_PRESET,
+                crate::map::FEATURE_YARD_VAULT_BREAK_ADMISSION_REVISION,
             ),
             (
                 GameMode::Zombie,
@@ -1812,46 +1812,49 @@ mod tests {
     }
 
     #[test]
-    fn objective_bots_emit_hot_zone_and_heist_directed_input_in_real_schedules() {
-        let mut hot_zone = practice_worker_for_mode(
-            GameMode::HotZone,
-            crate::map::FEATURE_YARD_HOT_ZONE_PRESET,
-            crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION,
+    fn objective_bots_emit_turf_hold_and_vault_break_directed_input_in_real_schedules() {
+        let mut turf_hold = practice_worker_for_mode(
+            GameMode::TurfHold,
+            crate::map::FEATURE_YARD_TURF_HOLD_PRESET,
+            crate::map::FEATURE_YARD_TURF_HOLD_ADMISSION_REVISION,
         );
-        activate_bot_worker(&mut hot_zone);
-        let zone_center = hot_zone
+        activate_bot_worker(&mut turf_hold);
+        let zone_center = turf_hold
             .world()
             .resource::<crate::map::ResolvedMap>()
             .objective_zone
-            .expect("Hot Zone worker has its objective")
+            .expect("Turf Hold worker has its objective")
             .area
             .center;
-        drive_bot_schedules(&mut hot_zone, 12);
-        assert!(bot_input_points_toward(&mut hot_zone, 100, zone_center));
-        assert!(bot_input_points_toward(&mut hot_zone, 102, zone_center));
+        drive_bot_schedules(&mut turf_hold, 12);
+        assert!(bot_input_points_toward(&mut turf_hold, 100, zone_center));
+        assert!(bot_input_points_toward(&mut turf_hold, 102, zone_center));
 
-        let mut heist = practice_worker_for_mode(
-            GameMode::Heist,
-            crate::map::FEATURE_YARD_HEIST_PRESET,
-            crate::map::FEATURE_YARD_HEIST_ADMISSION_REVISION,
+        let mut vault_break = practice_worker_for_mode(
+            GameMode::VaultBreak,
+            crate::map::FEATURE_YARD_VAULT_BREAK_PRESET,
+            crate::map::FEATURE_YARD_VAULT_BREAK_ADMISSION_REVISION,
         );
-        activate_bot_worker(&mut heist);
+        activate_bot_worker(&mut vault_break);
         let safe_positions = {
-            let world = heist.world_mut();
+            let world = vault_break.world_mut();
             world
-                .query::<(&crate::matchplay::HeistSafe, &avian2d::prelude::Position)>()
+                .query::<(
+                    &crate::matchplay::VaultBreakSafe,
+                    &avian2d::prelude::Position,
+                )>()
                 .iter(world)
                 .map(|(safe, position)| (safe.defending_team, position.0))
                 .collect::<BTreeMap<_, _>>()
         };
-        drive_bot_schedules(&mut heist, 12);
+        drive_bot_schedules(&mut vault_break, 12);
         assert!(bot_input_points_toward(
-            &mut heist,
+            &mut vault_break,
             100,
             safe_positions[&crate::combat::TeamId(1)]
         ));
         assert!(bot_input_points_toward(
-            &mut heist,
+            &mut vault_break,
             102,
             safe_positions[&crate::combat::TeamId(0)]
         ));
@@ -1878,18 +1881,18 @@ mod tests {
     fn supervisor_m01_policy_matches_server_admission_constants() {
         let policy = brawler_routing::AllocationPolicy::brawler_m01();
         assert_eq!(
-            policy.for_mode(brawler_routing::GameMode::Wipeout),
+            policy.for_mode(brawler_routing::GameMode::Takedown),
             brawler_routing::ModeAllocationPolicy::new(
-                crate::map::FEATURE_YARD_WIPEOUT_PRESET.0,
-                crate::map::FEATURE_YARD_WIPEOUT_ADMISSION_REVISION,
+                crate::map::FEATURE_YARD_TAKEDOWN_PRESET.0,
+                crate::map::FEATURE_YARD_TAKEDOWN_ADMISSION_REVISION,
                 expected_rules_profile(MatchRulesProfile::Production),
             )
         );
         assert_eq!(
-            policy.for_mode(brawler_routing::GameMode::HotZone),
+            policy.for_mode(brawler_routing::GameMode::TurfHold),
             brawler_routing::ModeAllocationPolicy::new(
-                crate::map::FEATURE_YARD_HOT_ZONE_PRESET.0,
-                crate::map::FEATURE_YARD_HOT_ZONE_ADMISSION_REVISION,
+                crate::map::FEATURE_YARD_TURF_HOLD_PRESET.0,
+                crate::map::FEATURE_YARD_TURF_HOLD_ADMISSION_REVISION,
                 expected_rules_profile(MatchRulesProfile::Production),
             )
         );

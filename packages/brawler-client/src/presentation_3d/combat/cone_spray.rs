@@ -194,7 +194,7 @@ pub(in super::super) fn update_cone_spray_visuals(
     safes: Query<(
         &Position,
         &Rotation,
-        &brawler::matchplay::HeistSafe,
+        &brawler::matchplay::VaultBreakSafe,
         &brawler::combat::CurrentHealth,
     )>,
     mut surfaces: Query<(&ConeSpraySurfaceVisual3d, &mut Visibility, &Mesh3d)>,
@@ -209,12 +209,12 @@ pub(in super::super) fn update_cone_spray_visuals(
         .iter()
         .filter(|(_, _, _, health)| health.0 > 0)
         .map(|(position, rotation, safe, _)| AimTraceDynamicBlocker {
-            class: AimTraceBlockerClass::HeistSafe,
+            class: AimTraceBlockerClass::VaultBreakSafe,
             stable_id: (safe.match_id.0 << 32) | u128::from(safe.anchor_id.0),
             position: position.0,
             rotation: rotation.as_radians(),
             shape: brawler::map::MapShape::Rectangle {
-                half_extents: brawler::matchplay::HEIST_SAFE_HALF_EXTENTS,
+                half_extents: brawler::matchplay::VAULT_BREAK_SAFE_HALF_EXTENTS,
             },
         })
         .collect::<Vec<_>>();

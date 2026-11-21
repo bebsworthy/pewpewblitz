@@ -4,9 +4,10 @@ use bevy::prelude::{App, IntoScheduleConfigs, Plugin, Resource, Update};
 use std::collections::BTreeSet;
 
 use super::{
-    CombatVfxProducerPlugin, HeistVfxProducerPlugin, PickupVfxProducerPlugin, ResolvedVfxRecipe,
-    VfxMeshLayer, VfxParticleLayer, VfxRequest, VfxRequestKey, VfxSignatureCache, VfxSignatureSet,
-    WorldObjectVfxProducerPlugin, catalog::VfxCatalog, update_vfx_signature_cache,
+    CombatVfxProducerPlugin, PickupVfxProducerPlugin, ResolvedVfxRecipe,
+    VaultBreakVfxProducerPlugin, VfxMeshLayer, VfxParticleLayer, VfxRequest, VfxRequestKey,
+    VfxSignatureCache, VfxSignatureSet, WorldObjectVfxProducerPlugin, catalog::VfxCatalog,
+    update_vfx_signature_cache,
 };
 
 pub(crate) const MAX_VFX_REQUEST_REGISTRATIONS: usize = 64;
@@ -300,7 +301,7 @@ impl Plugin for ProductionVfxPlugin {
                 CombatVfxProducerPlugin,
                 WorldObjectVfxProducerPlugin,
                 PickupVfxProducerPlugin,
-                HeistVfxProducerPlugin,
+                VaultBreakVfxProducerPlugin,
             ));
     }
 }
@@ -648,18 +649,18 @@ mod tests {
                 VfxRequestCapabilities::NONE,
             ),
             (
-                HEIST_DAMAGED_VFX,
-                HEIST_VFX_PRODUCER_RANK,
+                VAULT_BREAK_DAMAGED_VFX,
+                VAULT_BREAK_VFX_PRODUCER_RANK,
                 VfxRequestCapabilities::NONE,
             ),
             (
-                HEIST_CRITICAL_VFX,
-                HEIST_VFX_PRODUCER_RANK,
+                VAULT_BREAK_CRITICAL_VFX,
+                VAULT_BREAK_VFX_PRODUCER_RANK,
                 VfxRequestCapabilities::NONE,
             ),
             (
-                HEIST_DESTROYED_VFX,
-                HEIST_VFX_PRODUCER_RANK,
+                VAULT_BREAK_DESTROYED_VFX,
+                VAULT_BREAK_VFX_PRODUCER_RANK,
                 VfxRequestCapabilities::NONE,
             ),
         ] {

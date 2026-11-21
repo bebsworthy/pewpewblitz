@@ -39,7 +39,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 22;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 23;
 const ENV_ENABLED: &str = "BRAWLER_BALANCE_LAB";
 const ENV_ASSETS: &str = "BRAWLER_BALANCE_LAB_ASSETS";
 const ENV_ADDRESS: &str = "BRAWLER_BALANCE_LAB_ADDR";
@@ -103,7 +103,7 @@ struct BarrelTuning {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct HeistTuning {
+struct VaultBreakTuning {
     safe_maximum_health: u16,
 }
 
@@ -194,7 +194,7 @@ struct BalanceLabSnapshotV3 {
     barrel: BarrelTuning,
     chest: ChestTuning,
     effect_tiles: EffectTileTuning,
-    heist: HeistTuning,
+    vault_break: VaultBreakTuning,
 }
 
 impl BalanceLabSnapshotV3 {
@@ -262,8 +262,9 @@ impl BalanceLabSnapshotV3 {
             },
             effect_tiles: EffectTileTuning::from_catalog(maps)
                 .expect("embedded effect-tile profiles are complete and unique"),
-            heist: HeistTuning {
-                safe_maximum_health: crate::matchplay::HeistRules::default().safe_maximum_health,
+            vault_break: VaultBreakTuning {
+                safe_maximum_health: crate::matchplay::VaultBreakRules::default()
+                    .safe_maximum_health,
             },
         }
     }
@@ -485,8 +486,8 @@ fn start_balance_lab(world: &mut World) {
     baseline.condition_rules = world
         .resource::<crate::combat::CombatConditionRulesResource>()
         .0;
-    if let Some(rules) = world.get_resource::<crate::matchplay::HeistRules>() {
-        baseline.heist.safe_maximum_health = rules.safe_maximum_health;
+    if let Some(rules) = world.get_resource::<crate::matchplay::VaultBreakRules>() {
+        baseline.vault_break.safe_maximum_health = rules.safe_maximum_health;
     }
     let editor_manifest = editor::BalanceLabEditorManifest::from_catalogs(&baseline, &weapons);
     let validator = BalanceLabValidator {
@@ -497,8 +498,8 @@ fn start_balance_lab(world: &mut World) {
     };
     let (applied, revision) =
         load_persisted_tuning(world, &config.persistence_path, &validator, &baseline);
-    if let Some(mut rules) = world.get_resource_mut::<crate::matchplay::HeistRules>() {
-        install_heist_tuning(&mut rules, &applied);
+    if let Some(mut rules) = world.get_resource_mut::<crate::matchplay::VaultBreakRules>() {
+        install_vault_break_tuning(&mut rules, &applied);
     }
     let player_loadouts = match installed_player_loadouts(world) {
         Ok(players) => players,
@@ -596,8 +597,11 @@ fn configured_address() -> Result<SocketAddr, String> {
     Ok(address)
 }
 
-fn install_heist_tuning(rules: &mut crate::matchplay::HeistRules, snapshot: &BalanceLabSnapshotV3) {
-    rules.safe_maximum_health = snapshot.heist.safe_maximum_health;
+fn install_vault_break_tuning(
+    rules: &mut crate::matchplay::VaultBreakRules,
+    snapshot: &BalanceLabSnapshotV3,
+) {
+    rules.safe_maximum_health = snapshot.vault_break.safe_maximum_health;
 }
 
 fn validate_mode_specific_tuning(
@@ -607,10 +611,12 @@ fn validate_mode_specific_tuning(
     restore_defaults: bool,
 ) -> Result<(), &'static str> {
     if !restore_defaults
-        && candidate.heist != applied.heist
-        && mode_definition_id != crate::map::HEIST_MODE_DEFINITION
+        && candidate.vault_break != applied.vault_break
+        && mode_definition_id != crate::map::VAULT_BREAK_MODE_DEFINITION
     {
-        return Err("field /heist/safeMaximumHealth: Heist tuning requires a Heist Practice match");
+        return Err(
+            "field /vaultBreak/safeMaximumHealth: Vault Break tuning requires a Vault Break Practice match",
+        );
     }
     Ok(())
 }
@@ -659,8 +665,8 @@ fn validate_snapshot(
         .effect_tiles
         .validate_with_registry(&current_maps.effect_tile_family_registry)?;
     validate_effect_tile_tuning_topology(&candidate.effect_tiles, &baseline.effect_tiles)?;
-    if !(100..=20_000).contains(&candidate.heist.safe_maximum_health) {
-        return Err("Heist safe maximum health must be within 100..=20000".into());
+    if !(100..=20_000).contains(&candidate.vault_break.safe_maximum_health) {
+        return Err("Vault Break safe maximum health must be within 100..=20000".into());
     }
     let mut next_weapons = current_weapons.clone();
     for (expected, supplied) in baseline.weapons.iter().zip(&candidate.weapons) {
@@ -1246,7 +1252,7 @@ mod tests {
             request_id: RequestId::new(4).unwrap(),
             match_id: brawler_routing::MatchId::new(40).unwrap(),
             allocation_id: AllocationId::new(5).unwrap(),
-            mode: brawler_routing::GameMode::Wipeout,
+            mode: brawler_routing::GameMode::Takedown,
             map_preset: 1,
             map_revision: 1,
             map_recipe_fingerprint: 1,
@@ -1258,8 +1264,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             reserved: 0,
             seed: 1,
             participants: vec![brawler_routing::MatchManifestParticipant {
@@ -1324,7 +1330,7 @@ mod tests {
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let mut numeric = baseline.clone();
         numeric.weapons[0].recipe.fire_cooldown_ticks += 1;
-        numeric.heist.safe_maximum_health = 2_500;
+        numeric.vault_break.safe_maximum_health = 2_500;
         numeric.ultimate_charge.dealt_damage_multiplier += 1;
         let UltimateParameters::Dash { damage, .. } = &mut numeric.ultimates[0].parameters else {
             panic!("first tunable ultimate is Dash");
@@ -1346,9 +1352,11 @@ mod tests {
         };
         *range = 438.0;
         validate_snapshot(&numeric, &baseline, &builds, &weapons, &maps).unwrap();
-        let mut invalid_heist = baseline.clone();
-        invalid_heist.heist.safe_maximum_health = 99;
-        assert!(validate_snapshot(&invalid_heist, &baseline, &builds, &weapons, &maps,).is_err());
+        let mut invalid_vault_break = baseline.clone();
+        invalid_vault_break.vault_break.safe_maximum_health = 99;
+        assert!(
+            validate_snapshot(&invalid_vault_break, &baseline, &builds, &weapons, &maps,).is_err()
+        );
         let mut expanded_brush = baseline.clone();
         expanded_brush.weapons[2].recipe.world_effects =
             vec![WorldEffectDefinition::DestroyMap { radius: 128.0 }];
@@ -1385,7 +1393,7 @@ mod tests {
         );
         assert!(json.contains("\"ultimates\""));
         assert!(json.contains("\"displayName\""));
-        assert!(json.contains("\"heist\""));
+        assert!(json.contains("\"vaultBreak\""));
         assert!(json.contains("\"effectTiles\""));
         assert!(json.contains("\"key\":\"lightweight-movement\""));
         assert!(json.contains("\"value\":1250"));
@@ -1418,7 +1426,7 @@ mod tests {
         );
         let resolved = revised_maps
             .resolve_preset(
-                crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+                crate::map::FEATURE_YARD_TAKEDOWN_PRESET,
                 crate::map::MapInstanceId(1),
             )
             .unwrap();
@@ -1454,43 +1462,45 @@ mod tests {
     }
 
     #[test]
-    fn persisted_heist_tuning_installs_and_only_new_cross_mode_changes_are_rejected() {
+    fn persisted_vault_break_tuning_installs_and_only_new_cross_mode_changes_are_rejected() {
         let builds = BuildCatalog::embedded().unwrap();
         let weapons = WeaponCatalog::embedded().unwrap();
         let maps = crate::map::MapContentCatalog::embedded().unwrap();
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let mut persisted = baseline.clone();
-        persisted.heist.safe_maximum_health = 2_750;
+        persisted.vault_break.safe_maximum_health = 2_750;
 
-        let mut rules = crate::matchplay::HeistRules::default();
-        install_heist_tuning(&mut rules, &persisted);
+        let mut rules = crate::matchplay::VaultBreakRules::default();
+        install_vault_break_tuning(&mut rules, &persisted);
         assert_eq!(rules.safe_maximum_health, 2_750);
 
         assert!(
             validate_mode_specific_tuning(
                 &persisted,
                 &persisted,
-                crate::map::WIPEOUT_MODE_DEFINITION,
+                crate::map::TAKEDOWN_MODE_DEFINITION,
                 false,
             )
             .is_ok()
         );
         let mut changed = persisted.clone();
-        changed.heist.safe_maximum_health += 1;
+        changed.vault_break.safe_maximum_health += 1;
         assert_eq!(
             validate_mode_specific_tuning(
                 &changed,
                 &persisted,
-                crate::map::WIPEOUT_MODE_DEFINITION,
+                crate::map::TAKEDOWN_MODE_DEFINITION,
                 false,
             ),
-            Err("field /heist/safeMaximumHealth: Heist tuning requires a Heist Practice match")
+            Err(
+                "field /vaultBreak/safeMaximumHealth: Vault Break tuning requires a Vault Break Practice match"
+            )
         );
         assert!(
             validate_mode_specific_tuning(
                 &baseline,
                 &persisted,
-                crate::map::WIPEOUT_MODE_DEFINITION,
+                crate::map::TAKEDOWN_MODE_DEFINITION,
                 true,
             )
             .is_ok()
@@ -1544,7 +1554,7 @@ mod tests {
         let maps = crate::map::MapContentCatalog::embedded().unwrap();
         let resolved_map = maps
             .resolve_preset(
-                crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+                crate::map::FEATURE_YARD_TAKEDOWN_PRESET,
                 crate::map::MapInstanceId(1),
             )
             .unwrap();
@@ -1553,7 +1563,7 @@ mod tests {
         let manifest = practice_manifest(&human_snapshot, &bot_snapshot);
         let baseline = BalanceLabSnapshotV3::from_catalogs(&builds, &weapons, &maps);
         let mut applied = baseline.clone();
-        applied.heist.safe_maximum_health = 2_750;
+        applied.vault_break.safe_maximum_health = 2_750;
         let mut candidate = applied.clone();
         candidate.condition_rules.freeze_duration_ticks = 45;
         candidate.condition_rules.cold_decay_per_tick = 12;
@@ -1643,7 +1653,7 @@ mod tests {
             MatchRoot,
             MatchState {
                 match_id: crate::matchplay::MatchId(40),
-                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: crate::map::TAKEDOWN_MODE_DEFINITION,
                 phase: crate::matchplay::MatchPhase::Active { ends_at_tick: 500 },
                 rules_revision: 1,
             },

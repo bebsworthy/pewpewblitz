@@ -261,7 +261,8 @@ pub(crate) fn install_configured_server_mode(
 mod tests {
     use super::*;
     use crate::modes::{
-        BuiltInModeRegistrationsPlugin, ModeTopologyPolicy, heist, hot_zone, wipeout, zombie,
+        BuiltInModeRegistrationsPlugin, ModeTopologyPolicy, takedown, turf_hold, vault_break,
+        zombie,
     };
 
     #[test]
@@ -274,9 +275,9 @@ mod tests {
         reversed.add_plugins((
             ModeRegistryPlugin,
             zombie::ZombieModeRegistrationPlugin,
-            heist::HeistModeRegistrationPlugin,
-            hot_zone::HotZoneModeRegistrationPlugin,
-            wipeout::WipeoutModeRegistrationPlugin,
+            vault_break::VaultBreakModeRegistrationPlugin,
+            turf_hold::TurfHoldModeRegistrationPlugin,
+            takedown::TakedownModeRegistrationPlugin,
         ));
         reversed.finish();
 
@@ -346,46 +347,46 @@ mod tests {
     #[test]
     fn builder_rejects_duplicates_capacity_and_missing_builtins() {
         let mut duplicate = ModeRegistryBuilder::default();
-        duplicate.register(wipeout::REGISTRATION).unwrap();
+        duplicate.register(takedown::REGISTRATION).unwrap();
         assert!(matches!(
-            duplicate.register(wipeout::REGISTRATION),
+            duplicate.register(takedown::REGISTRATION),
             Err(ModeRegistryError::DuplicateDefinition(_))
         ));
 
         let mut duplicate_key = ModeRegistryBuilder::default();
-        duplicate_key.register(wipeout::REGISTRATION).unwrap();
-        let mut duplicate_key_registration = hot_zone::REGISTRATION;
-        duplicate_key_registration.key = wipeout::REGISTRATION.key;
+        duplicate_key.register(takedown::REGISTRATION).unwrap();
+        let mut duplicate_key_registration = turf_hold::REGISTRATION;
+        duplicate_key_registration.key = takedown::REGISTRATION.key;
         assert_eq!(
             duplicate_key.register(duplicate_key_registration),
-            Err(ModeRegistryError::DuplicateKey("wipeout"))
+            Err(ModeRegistryError::DuplicateKey("takedown"))
         );
 
         let mut duplicate_mode = ModeRegistryBuilder::default();
-        duplicate_mode.register(wipeout::REGISTRATION).unwrap();
-        let mut duplicate_mode_registration = hot_zone::REGISTRATION;
-        duplicate_mode_registration.configured_mode = Some(GameMode::Wipeout);
+        duplicate_mode.register(takedown::REGISTRATION).unwrap();
+        let mut duplicate_mode_registration = turf_hold::REGISTRATION;
+        duplicate_mode_registration.configured_mode = Some(GameMode::Takedown);
         assert_eq!(
             duplicate_mode.register(duplicate_mode_registration),
             Err(ModeRegistryError::DuplicateConfiguredMode(
-                GameMode::Wipeout
+                GameMode::Takedown
             ))
         );
 
         #[cfg(feature = "server")]
         {
             let mut duplicate_routing = ModeRegistryBuilder::default();
-            duplicate_routing.register(wipeout::REGISTRATION).unwrap();
-            let mut duplicate_routing_registration = hot_zone::REGISTRATION;
+            duplicate_routing.register(takedown::REGISTRATION).unwrap();
+            let mut duplicate_routing_registration = turf_hold::REGISTRATION;
             duplicate_routing_registration
                 .server
                 .as_mut()
                 .unwrap()
-                .routing_mode = brawler_routing::GameMode::Wipeout;
+                .routing_mode = brawler_routing::GameMode::Takedown;
             assert_eq!(
                 duplicate_routing.register(duplicate_routing_registration),
                 Err(ModeRegistryError::DuplicateRoutingMode(
-                    brawler_routing::GameMode::Wipeout
+                    brawler_routing::GameMode::Takedown
                 ))
             );
         }
@@ -411,10 +412,10 @@ mod tests {
         );
 
         let mut missing = ModeRegistryBuilder::default();
-        missing.register(wipeout::REGISTRATION).unwrap();
+        missing.register(takedown::REGISTRATION).unwrap();
         assert!(matches!(
             missing.seal(),
-            Err(ModeRegistryError::MissingBuiltInMode(GameMode::HotZone))
+            Err(ModeRegistryError::MissingBuiltInMode(GameMode::TurfHold))
         ));
     }
 
@@ -422,15 +423,15 @@ mod tests {
     #[test]
     fn sealing_rejects_a_configured_mode_without_server_projection() {
         let mut builder = ModeRegistryBuilder::default();
-        let mut wipeout = wipeout::REGISTRATION;
-        wipeout.server = None;
-        for registration in [wipeout, hot_zone::REGISTRATION, heist::REGISTRATION] {
+        let mut takedown = takedown::REGISTRATION;
+        takedown.server = None;
+        for registration in [takedown, turf_hold::REGISTRATION, vault_break::REGISTRATION] {
             builder.register(registration).unwrap();
         }
         assert!(matches!(
             builder.seal(),
             Err(ModeRegistryError::MissingServerProjection(
-                GameMode::Wipeout
+                GameMode::Takedown
             ))
         ));
     }
@@ -439,15 +440,15 @@ mod tests {
     #[test]
     fn sealing_rejects_a_configured_mode_without_client_projection() {
         let mut builder = ModeRegistryBuilder::default();
-        let mut wipeout = wipeout::REGISTRATION;
-        wipeout.presentation = None;
-        for registration in [wipeout, hot_zone::REGISTRATION, heist::REGISTRATION] {
+        let mut takedown = takedown::REGISTRATION;
+        takedown.presentation = None;
+        for registration in [takedown, turf_hold::REGISTRATION, vault_break::REGISTRATION] {
             builder.register(registration).unwrap();
         }
         assert!(matches!(
             builder.seal(),
             Err(ModeRegistryError::MissingClientProjection(
-                GameMode::Wipeout
+                GameMode::Takedown
             ))
         ));
     }
@@ -459,18 +460,19 @@ mod tests {
             config::MatchRulesProfile,
             map::ServerMapSelection,
             matchplay::{
-                HeistModePlugin, HeistRules, HotZoneModePlugin, HotZoneRules, MatchLifecycleRules,
-                MatchModeSetup, WipeoutModePlugin, WipeoutRules, ZombieModePlugin, ZombieRules,
+                MatchLifecycleRules, MatchModeSetup, TakedownModePlugin, TakedownRules,
+                TurfHoldModePlugin, TurfHoldRules, VaultBreakModePlugin, VaultBreakRules,
+                ZombieModePlugin, ZombieRules,
             },
         };
 
         let cases = [
-            (GameMode::Wipeout, 10, Some(300), None),
-            (GameMode::HotZone, 1_800, None, None),
-            (GameMode::Heist, 2_000, None, Some(25)),
+            (GameMode::Takedown, 10, Some(300), None),
+            (GameMode::TurfHold, 1_800, None, None),
+            (GameMode::VaultBreak, 2_000, None, Some(25)),
             (GameMode::Zombie, 4, None, None),
         ];
-        for (mode, objective_target, wipeout_credit, heist_critical) in cases {
+        for (mode, objective_target, takedown_credit, vault_break_critical) in cases {
             let mut app = App::new();
             app.insert_resource(MatchLifecycleRules::default())
                 .add_plugins((ModeRegistryPlugin, BuiltInModeRegistrationsPlugin));
@@ -480,8 +482,8 @@ mod tests {
                 super::super::ModeInstallInput {
                     profile: MatchRulesProfile::Production,
                     objective_target: Some(objective_target),
-                    wipeout_recent_hostile_damage_credit_ticks: wipeout_credit,
-                    heist_critical_health_percent: heist_critical,
+                    takedown_recent_hostile_damage_credit_ticks: takedown_credit,
+                    vault_break_critical_health_percent: vault_break_critical,
                 },
             );
 
@@ -496,38 +498,40 @@ mod tests {
                 Some(registration.server().default_map_preset)
             );
             assert_eq!(
-                app.is_plugin_added::<WipeoutModePlugin>(),
-                mode == GameMode::Wipeout
+                app.is_plugin_added::<TakedownModePlugin>(),
+                mode == GameMode::Takedown
             );
             assert_eq!(
-                app.is_plugin_added::<HotZoneModePlugin>(),
-                mode == GameMode::HotZone
+                app.is_plugin_added::<TurfHoldModePlugin>(),
+                mode == GameMode::TurfHold
             );
             assert_eq!(
-                app.is_plugin_added::<HeistModePlugin>(),
-                mode == GameMode::Heist
+                app.is_plugin_added::<VaultBreakModePlugin>(),
+                mode == GameMode::VaultBreak
             );
             assert_eq!(
                 app.is_plugin_added::<ZombieModePlugin>(),
                 mode == GameMode::Zombie
             );
             match mode {
-                GameMode::Wipeout => assert_eq!(
-                    *app.world().resource::<WipeoutRules>(),
-                    WipeoutRules {
+                GameMode::Takedown => assert_eq!(
+                    *app.world().resource::<TakedownRules>(),
+                    TakedownRules {
                         target_score: objective_target,
-                        recent_hostile_damage_credit_ticks: wipeout_credit.unwrap(),
+                        recent_hostile_damage_credit_ticks: takedown_credit.unwrap(),
                     }
                 ),
-                GameMode::HotZone => assert_eq!(
-                    app.world().resource::<HotZoneRules>().target_progress_ticks,
+                GameMode::TurfHold => assert_eq!(
+                    app.world()
+                        .resource::<TurfHoldRules>()
+                        .target_progress_ticks,
                     objective_target
                 ),
-                GameMode::Heist => assert_eq!(
-                    *app.world().resource::<HeistRules>(),
-                    HeistRules {
+                GameMode::VaultBreak => assert_eq!(
+                    *app.world().resource::<VaultBreakRules>(),
+                    VaultBreakRules {
                         safe_maximum_health: objective_target,
-                        critical_health_percent: heist_critical.unwrap(),
+                        critical_health_percent: vault_break_critical.unwrap(),
                     }
                 ),
                 GameMode::Zombie => assert_eq!(

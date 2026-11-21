@@ -13,7 +13,7 @@ use brawler::lobby::{
     PublishedMapState, PublishedMapSummary, PublishedMapsRejection,
 };
 
-const COMMUNITY_GAME: &str = "wipeout-1v1";
+const COMMUNITY_GAME: &str = "takedown-1v1";
 
 fn advertised_game(
     harness: &Harness,
@@ -147,14 +147,14 @@ fn publishing_validates_with_the_authoritative_rules_and_stores_a_pending_map() 
     let mut harness = Harness::new_product_lobby(1);
     wait_for_product_lobby(&mut harness);
 
-    // A Hot Zone recipe cannot become a Wipeout community map.
-    let wrong_mode = preset_recipe(brawler::map::FEATURE_YARD_HOT_ZONE_PRESET);
+    // A Turf Hold recipe cannot become a Takedown community map.
+    let wrong_mode = preset_recipe(brawler::map::FEATURE_YARD_TURF_HOLD_PRESET);
     assert_eq!(
         publish(&mut harness, 0, COMMUNITY_GAME, "Wrong Mode", wrong_mode),
         MapPublishDecision::Rejected(MapPublishRejection::InvalidMapRecipe)
     );
     // A recipe outside the Map Maker authoring limits is refused before storage.
-    let mut oversized = preset_recipe(brawler::map::FEATURE_YARD_WIPEOUT_PRESET);
+    let mut oversized = preset_recipe(brawler::map::FEATURE_YARD_TAKEDOWN_PRESET);
     oversized.dimensions.width = brawler::map::AUTHORING_LIMITS.maximum_axis_cells + 1;
     assert_eq!(
         publish(&mut harness, 0, COMMUNITY_GAME, "Oversized", oversized),
@@ -165,9 +165,9 @@ fn publishing_validates_with_the_authoritative_rules_and_stores_a_pending_map() 
         publish(
             &mut harness,
             0,
-            "wipeout-2v2",
+            "takedown-2v2",
             "Closed Pool",
-            preset_recipe(brawler::map::FEATURE_YARD_WIPEOUT_PRESET),
+            preset_recipe(brawler::map::FEATURE_YARD_TAKEDOWN_PRESET),
         ),
         MapPublishDecision::Rejected(MapPublishRejection::CommunityMapsDisabled)
     );
@@ -180,7 +180,7 @@ fn publishing_validates_with_the_authoritative_rules_and_stores_a_pending_map() 
         0,
         COMMUNITY_GAME,
         "Yard Remix",
-        preset_recipe(brawler::map::FEATURE_YARD_WIPEOUT_PRESET),
+        preset_recipe(brawler::map::FEATURE_YARD_TAKEDOWN_PRESET),
     )
     else {
         panic!("a valid recipe is accepted");
@@ -197,7 +197,7 @@ fn publishing_validates_with_the_authoritative_rules_and_stores_a_pending_map() 
             0,
             COMMUNITY_GAME,
             "Yard Remix Two",
-            preset_recipe(brawler::map::FEATURE_YARD_WIPEOUT_PRESET),
+            preset_recipe(brawler::map::FEATURE_YARD_TAKEDOWN_PRESET),
         ),
         MapPublishDecision::Rejected(MapPublishRejection::CoolingDown { .. })
     ));
@@ -237,7 +237,7 @@ fn publish_and_approve(harness: &mut Harness) -> PublishedMapId {
         0,
         COMMUNITY_GAME,
         "Yard Remix",
-        preset_recipe(brawler::map::FEATURE_YARD_WIPEOUT_PRESET),
+        preset_recipe(brawler::map::FEATURE_YARD_TAKEDOWN_PRESET),
     )
     else {
         panic!("a valid recipe is accepted");
@@ -445,7 +445,7 @@ fn an_approved_map_follows_the_built_in_rotation_and_every_client_loads_it() {
 fn authors_list_and_withdraw_only_their_own_published_maps() {
     let mut harness = Harness::new_product_lobby(2);
     wait_for_product_lobby(&mut harness);
-    let yard = || preset_recipe(brawler::map::FEATURE_YARD_WIPEOUT_PRESET);
+    let yard = || preset_recipe(brawler::map::FEATURE_YARD_TAKEDOWN_PRESET);
     let own = accepted_id(publish(
         &mut harness,
         0,

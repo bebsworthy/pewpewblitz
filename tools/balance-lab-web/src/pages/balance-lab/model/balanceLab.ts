@@ -81,7 +81,7 @@ export interface BarrelTuning extends JsonObject {
   explosionProfile: JsonObject;
 }
 
-export interface HeistTuning extends JsonObject {
+export interface VaultBreakTuning extends JsonObject {
   safeMaximumHealth: number;
 }
 
@@ -131,7 +131,7 @@ export interface BalanceLabSnapshot extends JsonObject {
   barrel: BarrelTuning;
   chest: ChestTuning;
   effectTiles: EffectTileTuning;
-  heist: HeistTuning;
+  vaultBreak: VaultBreakTuning;
 }
 
 export interface TransactionView {

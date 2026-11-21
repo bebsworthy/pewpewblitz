@@ -3,7 +3,7 @@
 BRL-0114, 2026-09-07. Original project UI artwork derived from the user-approved Dashboard rev10 composition.
 
 - `assets/brawler/ui/shell/logo.png`: isolated AI-generated refinement, OpenAI image generation, original retained at `/Users/boyd/.codex/generated_images/01a07a6d-94f7-7f21-a36f-405709f6b7cd/exec-23b41955-8aa8-4d74-a70d-71dcd7076f66.png`. Prompt: isolate the approved stacked PEWPEW BLITZ cream/orange/navy logo, teal/cream blaster and lightning, transparent background, no grunge or other UI. Original production branding files are preserved. Clean refinement replaces the earlier mottled export; generated original retained.
-- Mode pennant badges: since BRL-1wms generated with the icon set (`icons/build_icons.py`, `mode-*`); the earlier `wipeout.svg`/`hot-zone.svg`/`heist.svg`/`zombie.svg`, `game-badge-*.svg` and `export-badges.cjs` were retired.
+- Mode pennant badges: since BRL-1wms generated with the icon set (`icons/build_icons.py`, `mode-*`); the earlier `takedown.svg`/`turf-hold.svg`/`vault-break.svg`/`zombie.svg`, `game-badge-*.svg` and `export-badges.cjs` were retired.
 - Background: native WGSL geometric planes, no raster texture.
 - Typography and models: existing shipped Lilita One and actual client models, with their existing manifest provenance.
 

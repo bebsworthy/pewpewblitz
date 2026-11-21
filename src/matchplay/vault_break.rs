@@ -1,4 +1,4 @@
-//! Server-authoritative mirrored Heist objective rules and replicated state.
+//! Server-authoritative mirrored Vault Break objective rules and replicated state.
 
 use crate::{
     combat::TeamId,
@@ -7,18 +7,18 @@ use crate::{
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-pub const HEIST_RULES_REVISION: u16 = 2;
-pub const HEIST_SAFE_COUNT: usize = 2;
-pub const HEIST_SAFE_HALF_EXTENTS: Vec2 = Vec2::new(48.0, 32.0);
-pub const MAX_HEIST_OBJECTIVE_CUES: usize = 256;
+pub const VAULT_BREAK_RULES_REVISION: u16 = 2;
+pub const VAULT_BREAK_SAFE_COUNT: usize = 2;
+pub const VAULT_BREAK_SAFE_HALF_EXTENTS: Vec2 = Vec2::new(48.0, 32.0);
+pub const MAX_VAULT_BREAK_OBJECTIVE_CUES: usize = 256;
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HeistRules {
+pub struct VaultBreakRules {
     pub safe_maximum_health: u16,
     pub critical_health_percent: u8,
 }
 
-impl Default for HeistRules {
+impl Default for VaultBreakRules {
     fn default() -> Self {
         Self {
             safe_maximum_health: 2_000,
@@ -29,49 +29,53 @@ impl Default for HeistRules {
     }
 }
 
-impl HeistRules {
+impl VaultBreakRules {
     pub fn validate(self) -> Result<Self, &'static str> {
         if self.safe_maximum_health == 0 {
-            return Err("Heist safe maximum health must be nonzero");
+            return Err("Vault Break safe maximum health must be nonzero");
         }
         if !(1..=99).contains(&self.critical_health_percent) {
-            return Err("Heist critical-health percentage must be within 1..=99");
+            return Err("Vault Break critical-health percentage must be within 1..=99");
         }
         Ok(self)
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HeistCompletion {
-    SafeDestroyed { destroyed_teams: [bool; 2] },
-    Timeout { comparison: HeistHealthComparison },
+pub enum VaultBreakCompletion {
+    SafeDestroyed {
+        destroyed_teams: [bool; 2],
+    },
+    Timeout {
+        comparison: VaultBreakHealthComparison,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HeistHealthComparison {
+pub enum VaultBreakHealthComparison {
     Team0Greater,
     Team1Greater,
     Equal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HeistSafeIdentity {
+pub struct VaultBreakSafeIdentity {
     pub anchor_id: ModeAnchorId,
     pub defending_team: TeamId,
 }
 
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HeistState {
+pub struct VaultBreakState {
     pub match_id: super::MatchId,
     pub rules_revision: u16,
     pub generation: MapDynamicGeneration,
     pub critical_health_percent: u8,
-    pub safes: [HeistSafeIdentity; HEIST_SAFE_COUNT],
-    pub completion: Option<HeistCompletion>,
+    pub safes: [VaultBreakSafeIdentity; VAULT_BREAK_SAFE_COUNT],
+    pub completion: Option<VaultBreakCompletion>,
 }
 
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HeistSafe {
+pub struct VaultBreakSafe {
     pub match_id: super::MatchId,
     pub anchor_id: ModeAnchorId,
     pub defending_team: TeamId,
@@ -94,10 +98,10 @@ pub struct PendingModeObjectiveDamage {
 pub struct PendingModeObjectiveDamages(pub Vec<PendingModeObjectiveDamage>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HeistSummary {
+pub struct VaultBreakSummary {
     pub final_health: [u16; 2],
     pub maximum_health: [u16; 2],
-    pub completion: Option<HeistCompletion>,
+    pub completion: Option<VaultBreakCompletion>,
     pub accepted_hits: u64,
     pub applied_damage: u64,
     pub first_damage_tick: [Option<u64>; 2],
@@ -105,14 +109,14 @@ pub struct HeistSummary {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HeistObjectiveCueKind {
+pub enum VaultBreakObjectiveCueKind {
     Damaged,
     Critical,
     Destroyed,
 }
 
 #[derive(Message, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-pub struct HeistObjectiveCue {
+pub struct VaultBreakObjectiveCue {
     pub event_id: crate::combat::CombatEventId,
     pub tick: u64,
     pub attack_id: crate::combat::AttackId,
@@ -122,7 +126,7 @@ pub struct HeistObjectiveCue {
     pub amount: u16,
     pub health_after: u16,
     pub maximum_health: u16,
-    pub kind: HeistObjectiveCueKind,
+    pub kind: VaultBreakObjectiveCueKind,
 }
 
 #[must_use]
@@ -131,28 +135,28 @@ pub fn objective_cue_kind(
     health_after: u16,
     maximum_health: u16,
     critical_health_percent: u8,
-) -> HeistObjectiveCueKind {
+) -> VaultBreakObjectiveCueKind {
     if health_after == 0 {
-        return HeistObjectiveCueKind::Destroyed;
+        return VaultBreakObjectiveCueKind::Destroyed;
     }
     let crossed_critical = u32::from(health_before) * 100
         > u32::from(maximum_health) * u32::from(critical_health_percent)
         && u32::from(health_after) * 100
             <= u32::from(maximum_health) * u32::from(critical_health_percent);
     if crossed_critical {
-        HeistObjectiveCueKind::Critical
+        VaultBreakObjectiveCueKind::Critical
     } else {
-        HeistObjectiveCueKind::Damaged
+        VaultBreakObjectiveCueKind::Damaged
     }
 }
 
 #[cfg(feature = "server")]
 #[derive(Resource, Default)]
-pub struct HeistObjectiveOutbox(pub Vec<HeistObjectiveCue>);
+pub struct VaultBreakObjectiveOutbox(pub Vec<VaultBreakObjectiveCue>);
 
 #[cfg(feature = "server")]
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct HeistTelemetry {
+pub struct VaultBreakTelemetry {
     pub accepted_hits: u64,
     pub applied_damage: u64,
     pub invalid_rejections: u64,
@@ -162,7 +166,7 @@ pub struct HeistTelemetry {
 }
 
 #[cfg(feature = "server")]
-impl HeistTelemetry {
+impl VaultBreakTelemetry {
     fn reject_invalid(&mut self) {
         self.reject_invalid_count(1);
     }
@@ -182,7 +186,7 @@ impl HeistTelemetry {
 
 #[cfg(feature = "client")]
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
-pub struct ReceivedHeistObjectiveCue(pub HeistObjectiveCue);
+pub struct ReceivedVaultBreakObjectiveCue(pub VaultBreakObjectiveCue);
 
 #[must_use]
 pub fn destroyed_safe_result(health: [u16; 2]) -> Option<super::MatchResult> {
@@ -213,19 +217,20 @@ pub fn timeout_result(health: [u16; 2], maximum: [u16; 2]) -> super::MatchResult
 #[cfg(feature = "server")]
 mod authority {
     use super::{
-        HEIST_RULES_REVISION, HEIST_SAFE_COUNT, HeistCompletion, HeistHealthComparison,
-        HeistObjectiveCue, HeistObjectiveCueKind, HeistObjectiveOutbox, HeistRules, HeistSafe,
-        HeistSafeIdentity, HeistState, HeistTelemetry, IntoScheduleConfigs,
-        MAX_HEIST_OBJECTIVE_CUES, MapDynamicGeneration, ModeAnchorId, PendingModeObjectiveDamage,
-        PendingModeObjectiveDamages, TeamId, destroyed_safe_result, objective_cue_kind,
+        IntoScheduleConfigs, MAX_VAULT_BREAK_OBJECTIVE_CUES, MapDynamicGeneration, ModeAnchorId,
+        PendingModeObjectiveDamage, PendingModeObjectiveDamages, TeamId,
+        VAULT_BREAK_RULES_REVISION, VAULT_BREAK_SAFE_COUNT, VaultBreakCompletion,
+        VaultBreakHealthComparison, VaultBreakObjectiveCue, VaultBreakObjectiveCueKind,
+        VaultBreakObjectiveOutbox, VaultBreakRules, VaultBreakSafe, VaultBreakSafeIdentity,
+        VaultBreakState, VaultBreakTelemetry, destroyed_safe_result, objective_cue_kind,
         remaining_health_comparison, timeout_result,
     };
     use crate::{
         combat::{CombatDamageSet, CurrentHealth},
         map::{
             DamageableLifeState, DamageableMaximumHealth, DamageableTargetClass,
-            DamageableTargetIdentity, HEIST_MODE_DEFINITION, MapDynamicState, MapInstanceMember,
-            MapRoot, ResolvedMap,
+            DamageableTargetIdentity, MapDynamicState, MapInstanceMember, MapRoot, ResolvedMap,
+            VAULT_BREAK_MODE_DEFINITION,
         },
         matchplay::{
             MatchPhase, MatchRestartSet, MatchRoot, MatchSet, MatchState, ModeOutcomeCause,
@@ -237,9 +242,9 @@ mod authority {
     use bevy::prelude::*;
     use lightyear::prelude::{NetworkTarget, Replicate};
 
-    pub struct HeistModePlugin;
+    pub struct VaultBreakModePlugin;
 
-    impl Plugin for HeistModePlugin {
+    impl Plugin for VaultBreakModePlugin {
         fn build(&self, app: &mut App) {
             let setup = app
                 .world()
@@ -247,25 +252,25 @@ mod authority {
                 .copied()
                 .unwrap_or_default();
             assert_eq!(
-                setup.mode_definition_id, HEIST_MODE_DEFINITION,
-                "HeistModePlugin requires a Heist match mode setup"
+                setup.mode_definition_id, VAULT_BREAK_MODE_DEFINITION,
+                "VaultBreakModePlugin requires a Vault Break match mode setup"
             );
             app.init_resource::<PendingModeObjectiveDamages>()
-                .init_resource::<HeistObjectiveOutbox>()
-                .init_resource::<HeistTelemetry>()
+                .init_resource::<VaultBreakObjectiveOutbox>()
+                .init_resource::<VaultBreakTelemetry>()
                 .add_systems(
                     Startup,
-                    install_heist_safes
+                    install_vault_break_safes
                         .after(crate::matchplay::server::initialize_match_root)
                         .after(crate::map::MapStartupSet::Instantiate),
                 )
                 .add_systems(
                     FixedUpdate,
-                    resolve_heist_deadline.in_set(MatchSet::DeadlineRules),
+                    resolve_vault_break_deadline.in_set(MatchSet::DeadlineRules),
                 )
                 .add_systems(
                     FixedUpdate,
-                    reset_heist_safes.in_set(MatchRestartSet::ModeReset),
+                    reset_vault_break_safes.in_set(MatchRestartSet::ModeReset),
                 )
                 .add_systems(
                     FixedPostUpdate,
@@ -279,7 +284,7 @@ mod authority {
                 )
                 .add_systems(
                     FixedPostUpdate,
-                    send_heist_objective_cues
+                    send_vault_break_objective_cues
                         .in_set(crate::combat::CombatSet::TelemetryAndCues)
                         .after(crate::concealment::ConcealmentSet::DecideObservers),
                 );
@@ -290,44 +295,44 @@ mod authority {
         clippy::needless_pass_by_value,
         reason = "Bevy system parameters are injected by value"
     )]
-    fn install_heist_safes(
+    fn install_vault_break_safes(
         mut commands: Commands,
-        rules: Res<HeistRules>,
+        rules: Res<VaultBreakRules>,
         map: Res<ResolvedMap>,
         map_roots: Query<&MapDynamicState, With<MapRoot>>,
         roots: Query<(Entity, &MatchState), With<MatchRoot>>,
     ) {
         let (root, match_state) = roots
             .single()
-            .expect("Heist startup requires exactly one match root");
+            .expect("Vault Break startup requires exactly one match root");
         let dynamic = map_roots
             .single()
-            .expect("Heist startup requires exactly one map root");
+            .expect("Vault Break startup requires exactly one map root");
         let rules = (*rules)
             .validate()
-            .expect("Heist startup requires validated rules");
-        assert_eq!(match_state.mode_definition_id, HEIST_MODE_DEFINITION);
-        assert_eq!(map.heist_safes.len(), HEIST_SAFE_COUNT);
+            .expect("Vault Break startup requires validated rules");
+        assert_eq!(match_state.mode_definition_id, VAULT_BREAK_MODE_DEFINITION);
+        assert_eq!(map.vault_break_safes.len(), VAULT_BREAK_SAFE_COUNT);
         let generation = dynamic.generation_id();
-        let mut identities = [HeistSafeIdentity {
+        let mut identities = [VaultBreakSafeIdentity {
             anchor_id: ModeAnchorId(0),
             defending_team: TeamId(u8::MAX),
-        }; HEIST_SAFE_COUNT];
-        for safe in &map.heist_safes {
+        }; VAULT_BREAK_SAFE_COUNT];
+        for safe in &map.vault_break_safes {
             let team = usize::from(safe.defending_team.0);
-            identities[team] = HeistSafeIdentity {
+            identities[team] = VaultBreakSafeIdentity {
                 anchor_id: safe.anchor_id,
                 defending_team: safe.defending_team,
             };
             let safe_entity = commands
                 .spawn((
-                    HeistSafe {
+                    VaultBreakSafe {
                         match_id: match_state.match_id,
                         anchor_id: safe.anchor_id,
                         defending_team: safe.defending_team,
                         generation,
                     },
-                    DamageableTargetIdentity::HeistSafe {
+                    DamageableTargetIdentity::VaultBreakSafe {
                         match_id: match_state.match_id,
                         anchor_id: safe.anchor_id,
                         defending_team: safe.defending_team,
@@ -357,9 +362,9 @@ mod authority {
                 });
         }
         commands.entity(root).insert((
-            HeistState {
+            VaultBreakState {
                 match_id: match_state.match_id,
-                rules_revision: HEIST_RULES_REVISION,
+                rules_revision: VAULT_BREAK_RULES_REVISION,
                 generation,
                 critical_health_percent: rules.critical_health_percent,
                 safes: identities,
@@ -382,11 +387,11 @@ mod authority {
     }
 
     fn cue_kind_for_rules(
-        rules: HeistRules,
+        rules: VaultBreakRules,
         health_before: u16,
         health_after: u16,
         maximum_health: u16,
-    ) -> HeistObjectiveCueKind {
+    ) -> VaultBreakObjectiveCueKind {
         objective_cue_kind(
             health_before,
             health_after,
@@ -405,14 +410,14 @@ mod authority {
         tick: Res<SimulationTick>,
         mut ids: ResMut<crate::combat::NextCombatIds>,
         mut facts: ResMut<crate::map::WorldTargetDamageFacts>,
-        rules: Res<HeistRules>,
-        mut outbox: ResMut<HeistObjectiveOutbox>,
-        mut telemetry: ResMut<HeistTelemetry>,
+        rules: Res<VaultBreakRules>,
+        mut outbox: ResMut<VaultBreakObjectiveOutbox>,
+        mut telemetry: ResMut<VaultBreakTelemetry>,
         roots: Query<&MatchState, With<MatchRoot>>,
         mut pending: ResMut<PendingModeObjectiveDamages>,
         mut safes: Query<(
             Entity,
-            &HeistSafe,
+            &VaultBreakSafe,
             &DamageableTargetIdentity,
             &Position,
             &DamageableMaximumHealth,
@@ -477,7 +482,7 @@ mod authority {
                 continue;
             };
             if facts.0.len() >= crate::map::MAX_WORLD_TARGET_FACTS
-                || outbox.0.len() >= MAX_HEIST_OBJECTIVE_CUES
+                || outbox.0.len() >= MAX_VAULT_BREAK_OBJECTIVE_CUES
             {
                 telemetry.reject_capacity(1);
                 continue;
@@ -510,7 +515,7 @@ mod authority {
                 terminal: (health.0 == 0)
                     .then_some(crate::map::WorldTargetTerminalFact::ModeObjectiveDestroyed),
             });
-            outbox.0.push(HeistObjectiveCue {
+            outbox.0.push(VaultBreakObjectiveCue {
                 event_id,
                 tick: tick.0,
                 attack_id: request.source.attack_id,
@@ -530,8 +535,8 @@ mod authority {
     }
 
     #[allow(clippy::needless_pass_by_value)]
-    fn send_heist_objective_cues(
-        mut outbox: ResMut<HeistObjectiveOutbox>,
+    fn send_vault_break_objective_cues(
+        mut outbox: ResMut<VaultBreakObjectiveOutbox>,
         links: Query<
             (
                 Entity,
@@ -541,7 +546,7 @@ mod authority {
             With<lightyear::prelude::LinkOf>,
         >,
         mut senders: Query<
-            &mut lightyear::prelude::MessageSender<HeistObjectiveCue>,
+            &mut lightyear::prelude::MessageSender<VaultBreakObjectiveCue>,
             With<lightyear::prelude::LinkOf>,
         >,
         visibility: Res<crate::concealment::ObserverVisibilityCache>,
@@ -588,7 +593,7 @@ mod authority {
 
     fn safe_health(
         state: &MatchState,
-        safes: &Query<(&HeistSafe, &CurrentHealth, &DamageableMaximumHealth)>,
+        safes: &Query<(&VaultBreakSafe, &CurrentHealth, &DamageableMaximumHealth)>,
     ) -> Option<([u16; 2], [u16; 2])> {
         let mut health = [0; 2];
         let mut maximum = [0; 2];
@@ -616,15 +621,15 @@ mod authority {
     )]
     fn evaluate_destroyed_safes(
         tick: Res<SimulationTick>,
-        mut roots: Query<(&MatchState, &mut HeistState), With<MatchRoot>>,
-        safes: Query<(&HeistSafe, &CurrentHealth, &DamageableMaximumHealth)>,
+        mut roots: Query<(&MatchState, &mut VaultBreakState), With<MatchRoot>>,
+        safes: Query<(&VaultBreakSafe, &CurrentHealth, &DamageableMaximumHealth)>,
         mut outcomes: ResMut<ModeRuleOutcome>,
         mut diagnostics: ResMut<crate::matchplay::MatchOutcomeDiagnostics>,
     ) {
-        let Ok((state, mut heist)) = roots.single_mut() else {
+        let Ok((state, mut vault_break)) = roots.single_mut() else {
             return;
         };
-        if !matches!(state.phase, MatchPhase::Active { .. }) || heist.completion.is_some() {
+        if !matches!(state.phase, MatchPhase::Active { .. }) || vault_break.completion.is_some() {
             return;
         }
         let Some((health, _)) = safe_health(state, &safes) else {
@@ -633,7 +638,7 @@ mod authority {
         let Some(result) = destroyed_safe_result(health) else {
             return;
         };
-        heist.completion = Some(HeistCompletion::SafeDestroyed {
+        vault_break.completion = Some(VaultBreakCompletion::SafeDestroyed {
             destroyed_teams: [health[0] == 0, health[1] == 0],
         });
         crate::matchplay::offer_mode_rule_outcome(
@@ -652,31 +657,31 @@ mod authority {
         clippy::needless_pass_by_value,
         reason = "Bevy system parameters are injected by value"
     )]
-    fn resolve_heist_deadline(
+    fn resolve_vault_break_deadline(
         tick: Res<SimulationTick>,
-        mut roots: Query<(&MatchState, &mut HeistState), With<MatchRoot>>,
-        safes: Query<(&HeistSafe, &CurrentHealth, &DamageableMaximumHealth)>,
+        mut roots: Query<(&MatchState, &mut VaultBreakState), With<MatchRoot>>,
+        safes: Query<(&VaultBreakSafe, &CurrentHealth, &DamageableMaximumHealth)>,
         mut outcomes: ResMut<ModeRuleOutcome>,
         mut diagnostics: ResMut<crate::matchplay::MatchOutcomeDiagnostics>,
     ) {
-        let Ok((state, mut heist)) = roots.single_mut() else {
+        let Ok((state, mut vault_break)) = roots.single_mut() else {
             return;
         };
         let MatchPhase::Active { ends_at_tick } = state.phase else {
             return;
         };
-        if tick.0 < ends_at_tick || heist.completion.is_some() {
+        if tick.0 < ends_at_tick || vault_break.completion.is_some() {
             return;
         }
         let Some((health, maximum)) = safe_health(state, &safes) else {
             return;
         };
         let ordering = remaining_health_comparison(health, maximum);
-        heist.completion = Some(HeistCompletion::Timeout {
+        vault_break.completion = Some(VaultBreakCompletion::Timeout {
             comparison: match ordering {
-                std::cmp::Ordering::Greater => HeistHealthComparison::Team0Greater,
-                std::cmp::Ordering::Less => HeistHealthComparison::Team1Greater,
-                std::cmp::Ordering::Equal => HeistHealthComparison::Equal,
+                std::cmp::Ordering::Greater => VaultBreakHealthComparison::Team0Greater,
+                std::cmp::Ordering::Less => VaultBreakHealthComparison::Team1Greater,
+                std::cmp::Ordering::Equal => VaultBreakHealthComparison::Equal,
             },
         });
         crate::matchplay::offer_mode_rule_outcome(
@@ -696,18 +701,18 @@ mod authority {
         clippy::too_many_arguments,
         reason = "the restart transaction reconciles the root, both safes, map generation, and bounded mode buffers atomically"
     )]
-    fn reset_heist_safes(
+    fn reset_vault_break_safes(
         mut commands: Commands,
-        rules: Res<HeistRules>,
+        rules: Res<VaultBreakRules>,
         restart: Option<Res<crate::matchplay::PendingMatchRestart>>,
-        mut roots: Query<&mut HeistState, With<MatchRoot>>,
+        mut roots: Query<&mut VaultBreakState, With<MatchRoot>>,
         mut pending: ResMut<PendingModeObjectiveDamages>,
-        mut outbox: ResMut<HeistObjectiveOutbox>,
-        mut telemetry: ResMut<HeistTelemetry>,
+        mut outbox: ResMut<VaultBreakObjectiveOutbox>,
+        mut telemetry: ResMut<VaultBreakTelemetry>,
         maps: Query<&MapDynamicState, With<MapRoot>>,
         mut safes: Query<(
             Entity,
-            &mut HeistSafe,
+            &mut VaultBreakSafe,
             &mut DamageableTargetIdentity,
             &mut DamageableMaximumHealth,
             &mut CurrentHealth,
@@ -717,7 +722,7 @@ mod authority {
         let Some(slot) = restart.as_ref().and_then(|restart| restart.slot()) else {
             return;
         };
-        let Ok(mut heist) = roots.single_mut() else {
+        let Ok(mut vault_break) = roots.single_mut() else {
             return;
         };
         let Ok(map) = maps.single() else {
@@ -727,17 +732,17 @@ mod authority {
             map_instance_id: map.map_instance_id,
             generation: map.generation.saturating_add(1),
         };
-        heist.match_id = slot.next_id;
-        heist.generation = next_generation;
-        heist.critical_health_percent = rules.critical_health_percent;
-        heist.completion = None;
+        vault_break.match_id = slot.next_id;
+        vault_break.generation = next_generation;
+        vault_break.critical_health_percent = rules.critical_health_percent;
+        vault_break.completion = None;
         pending.0.clear();
         outbox.0.clear();
-        *telemetry = HeistTelemetry::default();
+        *telemetry = VaultBreakTelemetry::default();
         for (entity, mut safe, mut identity, mut maximum, mut health, mut life) in &mut safes {
             safe.match_id = slot.next_id;
             safe.generation = next_generation;
-            *identity = DamageableTargetIdentity::HeistSafe {
+            *identity = DamageableTargetIdentity::VaultBreakSafe {
                 match_id: slot.next_id,
                 anchor_id: safe.anchor_id,
                 defending_team: safe.defending_team,
@@ -753,7 +758,7 @@ mod authority {
 }
 
 #[cfg(feature = "server")]
-pub use authority::HeistModePlugin;
+pub use authority::VaultBreakModePlugin;
 
 #[cfg(test)]
 mod tests {
@@ -761,27 +766,27 @@ mod tests {
 
     #[test]
     fn rules_reject_zero_health_and_invalid_critical_thresholds() {
-        assert!(HeistRules::default().validate().is_ok());
+        assert!(VaultBreakRules::default().validate().is_ok());
         assert!(
-            HeistRules {
+            VaultBreakRules {
                 safe_maximum_health: 0,
-                ..HeistRules::default()
+                ..VaultBreakRules::default()
             }
             .validate()
             .is_err()
         );
         assert!(
-            HeistRules {
+            VaultBreakRules {
                 critical_health_percent: 0,
-                ..HeistRules::default()
+                ..VaultBreakRules::default()
             }
             .validate()
             .is_err()
         );
         assert!(
-            HeistRules {
+            VaultBreakRules {
                 critical_health_percent: 100,
-                ..HeistRules::default()
+                ..VaultBreakRules::default()
             }
             .validate()
             .is_err()
@@ -792,20 +797,20 @@ mod tests {
     fn objective_cues_distinguish_damage_critical_crossing_and_destruction() {
         assert_eq!(
             objective_cue_kind(2_000, 1_990, 2_000, 25),
-            HeistObjectiveCueKind::Damaged
+            VaultBreakObjectiveCueKind::Damaged
         );
         assert_eq!(
             objective_cue_kind(501, 500, 2_000, 25),
-            HeistObjectiveCueKind::Critical
+            VaultBreakObjectiveCueKind::Critical
         );
         assert_eq!(
             objective_cue_kind(500, 490, 2_000, 25),
-            HeistObjectiveCueKind::Damaged,
+            VaultBreakObjectiveCueKind::Damaged,
             "remaining below the threshold must not replay the critical transition"
         );
         assert_eq!(
             objective_cue_kind(1, 0, 2_000, 25),
-            HeistObjectiveCueKind::Destroyed
+            VaultBreakObjectiveCueKind::Destroyed
         );
     }
 

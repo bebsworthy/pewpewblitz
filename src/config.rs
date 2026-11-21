@@ -107,21 +107,26 @@ pub enum NetworkTransport {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum GameMode {
     #[default]
-    Wipeout,
-    HotZone,
-    Heist,
+    Takedown,
+    TurfHold,
+    VaultBreak,
     Zombie,
 }
 
 impl GameMode {
-    pub const ALL: [Self; 4] = [Self::Wipeout, Self::HotZone, Self::Heist, Self::Zombie];
+    pub const ALL: [Self; 4] = [
+        Self::Takedown,
+        Self::TurfHold,
+        Self::VaultBreak,
+        Self::Zombie,
+    ];
 
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "wipeout" | "default" => Some(Self::Wipeout),
-            "hot-zone" | "hot_zone" | "hotzone" => Some(Self::HotZone),
-            "heist" => Some(Self::Heist),
+            "takedown" | "default" => Some(Self::Takedown),
+            "turf-hold" | "turf_hold" | "turfhold" => Some(Self::TurfHold),
+            "vault-break" => Some(Self::VaultBreak),
             "zombie" => Some(Self::Zombie),
             _ => None,
         }
@@ -130,9 +135,9 @@ impl GameMode {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Wipeout => "wipeout",
-            Self::HotZone => "hot-zone",
-            Self::Heist => "heist",
+            Self::Takedown => "takedown",
+            Self::TurfHold => "turf-hold",
+            Self::VaultBreak => "vault-break",
             Self::Zombie => "zombie",
         }
     }
@@ -186,8 +191,8 @@ pub struct ServerNetworkConfig {
     pub match_respawn_ticks: Option<u64>,
     pub match_spawn_protection_ticks: Option<u64>,
     pub match_completed_input_lock_ticks: Option<u64>,
-    pub wipeout_recent_hostile_damage_credit_ticks: Option<u64>,
-    pub heist_critical_health_percent: Option<u8>,
+    pub takedown_recent_hostile_damage_credit_ticks: Option<u64>,
+    pub vault_break_critical_health_percent: Option<u8>,
 }
 
 impl Default for ServerNetworkConfig {
@@ -202,7 +207,7 @@ impl Default for ServerNetworkConfig {
             handshake_timeout: Duration::from_secs(3),
             client_timeout: Duration::from_secs(3),
             impairment_profile: NetworkImpairmentProfile::from_env(),
-            game_mode: GameMode::Wipeout,
+            game_mode: GameMode::Takedown,
             match_rules_profile: MatchRulesProfile::Production,
             match_objective_target: None,
             match_duration_ticks: None,
@@ -210,8 +215,8 @@ impl Default for ServerNetworkConfig {
             match_respawn_ticks: None,
             match_spawn_protection_ticks: None,
             match_completed_input_lock_ticks: None,
-            wipeout_recent_hostile_damage_credit_ticks: None,
-            heist_critical_health_percent: None,
+            takedown_recent_hostile_damage_credit_ticks: None,
+            vault_break_critical_health_percent: None,
         }
     }
 }
@@ -235,8 +240,8 @@ impl ServerNetworkConfig {
             self.match_respawn_ticks.is_some(),
             self.match_spawn_protection_ticks.is_some(),
             self.match_completed_input_lock_ticks.is_some(),
-            self.wipeout_recent_hostile_damage_credit_ticks.is_some(),
-            self.heist_critical_health_percent.is_some(),
+            self.takedown_recent_hostile_damage_credit_ticks.is_some(),
+            self.vault_break_critical_health_percent.is_some(),
         ];
         if match_overrides.iter().any(|present| *present)
             && !match_overrides.iter().all(|present| *present)
@@ -249,16 +254,16 @@ impl ServerNetworkConfig {
             || self.match_respawn_ticks == Some(0)
             || self.match_spawn_protection_ticks == Some(0)
             || self.match_completed_input_lock_ticks == Some(0)
-            || self.wipeout_recent_hostile_damage_credit_ticks == Some(0)
+            || self.takedown_recent_hostile_damage_credit_ticks == Some(0)
         {
             return Err("resolved match rule values must be greater than zero".to_string());
         }
         if self
-            .heist_critical_health_percent
+            .vault_break_critical_health_percent
             .is_some_and(|percent| !(1..=99).contains(&percent))
         {
             return Err(
-                "resolved Heist critical-health percentage must be within 1..=99".to_string(),
+                "resolved Vault Break critical-health percentage must be within 1..=99".to_string(),
             );
         }
         Ok(())
@@ -403,15 +408,15 @@ mod tests {
     }
 
     #[test]
-    fn game_modes_parse_explicit_names_and_default_to_wipeout() {
-        assert_eq!(ServerNetworkConfig::default().game_mode, GameMode::Wipeout);
-        assert_eq!(GameMode::parse("wipeout"), Some(GameMode::Wipeout));
-        assert_eq!(GameMode::parse("hot-zone"), Some(GameMode::HotZone));
-        assert_eq!(GameMode::parse("Hot_Zone"), Some(GameMode::HotZone));
-        assert_eq!(GameMode::parse("heist"), Some(GameMode::Heist));
+    fn game_modes_parse_explicit_names_and_default_to_takedown() {
+        assert_eq!(ServerNetworkConfig::default().game_mode, GameMode::Takedown);
+        assert_eq!(GameMode::parse("takedown"), Some(GameMode::Takedown));
+        assert_eq!(GameMode::parse("turf-hold"), Some(GameMode::TurfHold));
+        assert_eq!(GameMode::parse("Turf_Hold"), Some(GameMode::TurfHold));
+        assert_eq!(GameMode::parse("vault-break"), Some(GameMode::VaultBreak));
         assert_eq!(GameMode::parse("koth"), None);
-        assert_eq!(GameMode::HotZone.name(), "hot-zone");
-        assert_eq!(GameMode::Heist.name(), "heist");
+        assert_eq!(GameMode::TurfHold.name(), "turf-hold");
+        assert_eq!(GameMode::VaultBreak.name(), "vault-break");
     }
 
     #[test]
@@ -446,13 +451,13 @@ mod tests {
             match_respawn_ticks: Some(180),
             match_spawn_protection_ticks: Some(90),
             match_completed_input_lock_ticks: Some(60),
-            wipeout_recent_hostile_damage_credit_ticks: Some(300),
-            heist_critical_health_percent: Some(25),
+            takedown_recent_hostile_damage_credit_ticks: Some(300),
+            vault_break_critical_health_percent: Some(25),
             ..ServerNetworkConfig::default()
         };
         assert!(config.validate().is_ok());
 
-        config.heist_critical_health_percent = Some(100);
+        config.vault_break_critical_health_percent = Some(100);
         assert!(
             config
                 .validate()

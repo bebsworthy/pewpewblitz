@@ -6,13 +6,13 @@ fn server_match(harness: &mut Harness) -> MatchState {
     *query.single(world).expect("one server match")
 }
 
-fn server_wipeout(harness: &mut Harness) -> brawler::matchplay::WipeoutState {
+fn server_takedown(harness: &mut Harness) -> brawler::matchplay::TakedownState {
     let world = harness.server.world_mut();
     let mut query =
-        world.query_filtered::<&brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
+        world.query_filtered::<&brawler::matchplay::TakedownState, With<MatchRootMarker>>();
     query
         .single(world)
-        .expect("one server wipeout state")
+        .expect("one server takedown state")
         .clone()
 }
 
@@ -50,7 +50,7 @@ fn activate_two_player_match(harness: &mut Harness, request_id: u64) {
     harness.step_until(|harness| matches!(server_match(harness).phase, MatchPhase::Active { .. }));
 }
 
-fn complete_wipeout_match(harness: &mut Harness, event_id: u64) {
+fn complete_takedown_match(harness: &mut Harness, event_id: u64) {
     let players = {
         let world = harness.server.world_mut();
         let mut query =
@@ -74,7 +74,7 @@ fn complete_wipeout_match(harness: &mut Harness, event_id: u64) {
     {
         let world = harness.server.world_mut();
         let mut roots =
-            world.query_filtered::<&mut brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
+            world.query_filtered::<&mut brawler::matchplay::TakedownState, With<MatchRootMarker>>();
         roots.single_mut(world).unwrap().target_score = 1;
     }
     let tick = harness.server_simulation_tick();
@@ -164,7 +164,7 @@ fn nondefault_completed_input_lock_controls_restart_command_acceptance() {
     );
     activate_two_player_match(&mut harness, 7_200);
 
-    complete_wipeout_match(&mut harness, 70_200);
+    complete_takedown_match(&mut harness, 70_200);
     harness
         .step_until(|harness| matches!(server_match(harness).phase, MatchPhase::Completed { .. }));
     let completed = server_match(&mut harness);
@@ -292,13 +292,13 @@ fn ready_commands_are_link_scoped_idempotent_and_match_scoped() {
     {
         let world = harness.clients[0].world_mut();
         let mut query =
-            world.query_filtered::<&mut brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
+            world.query_filtered::<&mut brawler::matchplay::TakedownState, With<MatchRootMarker>>();
         query.single_mut(world).unwrap().team_scores = [u16::MAX, u16::MAX];
     }
     for _ in 0..6 {
         harness.step();
     }
-    assert_eq!(server_wipeout(&mut harness).team_scores, [0, 0]);
+    assert_eq!(server_takedown(&mut harness).team_scores, [0, 0]);
 }
 
 #[test]
@@ -579,7 +579,7 @@ fn four_clients_converge_saved_brawler_loadouts_and_restart_three_authoritative_
     {
         let world = harness.server.world_mut();
         let mut query =
-            world.query_filtered::<&mut brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
+            world.query_filtered::<&mut brawler::matchplay::TakedownState, With<MatchRootMarker>>();
         query.single_mut(world).unwrap().target_score = 1;
     }
     let tick = harness.server.world().resource::<SimulationTick>().0;
@@ -630,7 +630,7 @@ fn four_clients_converge_saved_brawler_loadouts_and_restart_three_authoritative_
     harness
         .step_until(|harness| matches!(server_match(harness).phase, MatchPhase::Completed { .. }));
     let completed = server_match(&mut harness);
-    assert_eq!(server_wipeout(&mut harness).team_scores, [1, 0]);
+    assert_eq!(server_takedown(&mut harness).team_scores, [1, 0]);
     {
         let world = harness.server.world_mut();
         let mut stale_lifecycle = world.query_filtered::<(), (
@@ -681,7 +681,7 @@ fn four_clients_converge_saved_brawler_loadouts_and_restart_three_authoritative_
     harness.step_until(|harness| server_match(harness).match_id.0 > active.match_id.0);
     let restarted = server_match(&mut harness);
     assert!(matches!(restarted.phase, MatchPhase::Waiting));
-    assert_eq!(server_wipeout(&mut harness).team_scores, [0, 0]);
+    assert_eq!(server_takedown(&mut harness).team_scores, [0, 0]);
     let world = harness.server.world_mut();
     let mut stale_projectiles = world.query_filtered::<&MatchMember, With<Projectile>>();
     assert!(
@@ -757,7 +757,7 @@ fn four_clients_converge_saved_brawler_loadouts_and_restart_three_authoritative_
     {
         let world = harness.server.world_mut();
         let mut query =
-            world.query_filtered::<&mut brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
+            world.query_filtered::<&mut brawler::matchplay::TakedownState, With<MatchRootMarker>>();
         query.single_mut(world).unwrap().target_score = 1;
     }
     let second_tick = harness.server.world().resource::<SimulationTick>().0;
@@ -831,7 +831,7 @@ fn four_clients_converge_saved_brawler_loadouts_and_restart_three_authoritative_
     {
         let world = harness.server.world_mut();
         let mut query =
-            world.query_filtered::<&mut brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
+            world.query_filtered::<&mut brawler::matchplay::TakedownState, With<MatchRootMarker>>();
         query.single_mut(world).unwrap().target_score = 1;
     }
     let third_tick = harness.server.world().resource::<SimulationTick>().0;
@@ -1177,7 +1177,7 @@ fn fighter_intent_is_gated_in_waiting_countdown_and_completed() {
     {
         let world = harness.server.world_mut();
         let mut roots =
-            world.query_filtered::<&mut brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
+            world.query_filtered::<&mut brawler::matchplay::TakedownState, With<MatchRootMarker>>();
         roots.single_mut(world).unwrap().target_score = 1;
     }
     let tick = harness.server.world().resource::<SimulationTick>().0;
@@ -1471,7 +1471,7 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
         .unwrap();
     assert!(triggered_passive.adrenaline_until_tick.is_some());
     assert!(triggered_passive.adrenaline_rearm_at_tick.is_some());
-    assert_eq!(server_wipeout(&mut harness).team_scores, [1, 0]);
+    assert_eq!(server_takedown(&mut harness).team_scores, [1, 0]);
     let deadline = *harness
         .server
         .world()
@@ -1488,7 +1488,7 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
             ..fact
         });
     harness.step();
-    assert_eq!(server_wipeout(&mut harness).team_scores, [1, 0]);
+    assert_eq!(server_takedown(&mut harness).team_scores, [1, 0]);
     assert_eq!(
         harness
             .server
@@ -1608,12 +1608,12 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
     assert_eq!(diagnostics.stale_tick, 1);
     assert_eq!(diagnostics.unknown_or_wrong_match_target, 1);
     assert_eq!(diagnostics.friendly_invalid_defeat, 1);
-    assert_eq!(server_wipeout(&mut harness).team_scores, [1, 0]);
+    assert_eq!(server_takedown(&mut harness).team_scores, [1, 0]);
 
     {
         let world = harness.server.world_mut();
         let mut roots =
-            world.query_filtered::<&mut brawler::matchplay::WipeoutState, With<MatchRootMarker>>();
+            world.query_filtered::<&mut brawler::matchplay::TakedownState, With<MatchRootMarker>>();
         roots.single_mut(world).unwrap().target_score = 2;
     }
     let completion_tick = harness.server.world().resource::<SimulationTick>().0;
@@ -1636,7 +1636,7 @@ fn defeat_schedules_one_exact_respawn_and_duplicate_event_is_harmless() {
 }
 
 #[test]
-fn wipeout_final_player_statistics_replicate_atomically_and_reset_on_restart() {
+fn takedown_final_player_statistics_replicate_atomically_and_reset_on_restart() {
     let mut harness = Harness::new_match_with_lifecycle_rules(
         2,
         brawler::matchplay::MatchLifecycleRules {
@@ -1645,9 +1645,9 @@ fn wipeout_final_player_statistics_replicate_atomically_and_reset_on_restart() {
         },
     );
     activate_two_player_match(&mut harness, 88_100);
-    complete_wipeout_match(&mut harness, 88_101);
-    harness.step_until(|h| server_wipeout(h).completed_result.is_some());
-    let final_scores = server_wipeout(&mut harness);
+    complete_takedown_match(&mut harness, 88_101);
+    harness.step_until(|h| server_takedown(h).completed_result.is_some());
+    let final_scores = server_takedown(&mut harness);
     assert_eq!(final_scores.team_scores, [1, 0]);
     assert_eq!(
         final_scores
@@ -1671,7 +1671,7 @@ fn wipeout_final_player_statistics_replicate_atomically_and_reset_on_restart() {
     harness.step_until(|h| {
         (0..2).all(|i| {
             let world = h.clients[i].world_mut();
-            let mut q = world.query::<&brawler::matchplay::WipeoutState>();
+            let mut q = world.query::<&brawler::matchplay::TakedownState>();
             q.iter(world).any(|scores| scores == &final_scores)
         })
     });
@@ -1687,7 +1687,7 @@ fn wipeout_final_player_statistics_replicate_atomically_and_reset_on_restart() {
         );
     }
     harness.step_until(|h| server_match(h).match_id != completed.match_id);
-    let reset = server_wipeout(&mut harness);
+    let reset = server_takedown(&mut harness);
     assert_eq!(reset.completed_result, None);
     assert_eq!(reset.team_scores, [0, 0]);
     assert!(

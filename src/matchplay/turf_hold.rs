@@ -1,26 +1,26 @@
-//! Server-authoritative Hot Zone objective rules, state, and mode plugin.
+//! Server-authoritative Turf Hold objective rules, state, and mode plugin.
 
 use super::MatchId;
 use crate::combat::TeamId;
 use crate::map::ModeAnchorId;
 #[cfg(feature = "server")]
-use crate::map::{HOT_ZONE_MODE_DEFINITION, NormalizedArea};
+use crate::map::{NormalizedArea, TURF_HOLD_MODE_DEFINITION};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Composed revision of the validated common lifecycle plus Hot Zone rules.
-pub const HOT_ZONE_RULES_REVISION: u16 = 2;
+/// Composed revision of the validated common lifecycle plus Turf Hold rules.
+pub const TURF_HOLD_RULES_REVISION: u16 = 2;
 
 /// World-unit outward expansion defining near-zone combat for telemetry.
-pub const HOT_ZONE_NEAR_COMBAT_EXPANSION: f32 = 240.0;
+pub const TURF_HOLD_NEAR_COMBAT_EXPANSION: f32 = 240.0;
 
-/// Hot Zone-specific objective rules layered on the common `MatchLifecycleRules`.
+/// Turf Hold-specific objective rules layered on the common `MatchLifecycleRules`.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HotZoneRules {
+pub struct TurfHoldRules {
     pub target_progress_ticks: u16,
 }
 
-impl Default for HotZoneRules {
+impl Default for TurfHoldRules {
     fn default() -> Self {
         // 1,800 ticks at the fixed 60 Hz rate is exactly 30 seconds of uncontested control.
         Self {
@@ -30,7 +30,7 @@ impl Default for HotZoneRules {
 }
 
 #[cfg(feature = "server")]
-impl HotZoneRules {
+impl TurfHoldRules {
     pub fn validate_with(
         self,
         lifecycle: &super::MatchLifecycleRules,
@@ -39,7 +39,7 @@ impl HotZoneRules {
         if u64::from(self.target_progress_ticks) < 2
             || u64::from(self.target_progress_ticks) > ceiling
         {
-            return Err("Hot Zone target progress must be between 2 and the active limit ceiling");
+            return Err("Turf Hold target progress must be between 2 and the active limit ceiling");
         }
         Ok(self)
     }
@@ -47,7 +47,7 @@ impl HotZoneRules {
 
 /// Current occupancy status of the zone, derived once per evaluated tick.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum HotZoneStatus {
+pub enum TurfHoldStatus {
     #[default]
     Empty,
     Controlled {
@@ -56,19 +56,19 @@ pub enum HotZoneStatus {
     Contested,
 }
 
-/// Durable replicated Hot Zone objective state, present on the match root only for Hot Zone.
+/// Durable replicated Turf Hold objective state, present on the match root only for Turf Hold.
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HotZoneState {
+pub struct TurfHoldState {
     pub match_id: MatchId,
     pub zone_anchor_id: ModeAnchorId,
     pub occupants: [u8; 2],
-    pub status: HotZoneStatus,
+    pub status: TurfHoldStatus,
     pub progress_ticks: [u16; 2],
     pub target_progress_ticks: u16,
     pub next_evaluation_tick: u64,
 }
 
-impl HotZoneState {
+impl TurfHoldState {
     /// A zero evaluation tick marks an uninitialized activation; the first eligible active
     /// tick initializes it before evaluating.
     pub const UNINITIALIZED_EVALUATION_TICK: u64 = 0;
@@ -87,7 +87,7 @@ pub(crate) struct ResolvedObjectiveZone {
 /// is appended per fault; sampled evidence uses the common bounded match record deque.
 #[cfg(feature = "server")]
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct HotZoneDiagnostics {
+pub(crate) struct TurfHoldDiagnostics {
     pub(crate) duplicate_evaluations: u64,
     pub(crate) skipped_evaluation_ticks: u64,
     pub(crate) skipped_evaluation_distance: u64,
@@ -95,9 +95,9 @@ pub(crate) struct HotZoneDiagnostics {
     pub(crate) occupant_count_saturations: u64,
 }
 
-/// Terminal Hot Zone telemetry snapshot attached to one common match summary.
+/// Terminal Turf Hold telemetry snapshot attached to one common match summary.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct HotZoneSummary {
+pub struct TurfHoldSummary {
     pub final_progress_ticks: [u16; 2],
     pub target_progress_ticks: u16,
     pub first_entry_tick_by_team: [Option<u64>; 2],
@@ -112,10 +112,10 @@ pub struct HotZoneSummary {
     pub near_zone_defeats_suffered_by_team: [u32; 2],
 }
 
-/// Live Hot Zone telemetry accumulator, reset by the mode restart reset.
+/// Live Turf Hold telemetry accumulator, reset by the mode restart reset.
 #[cfg(feature = "server")]
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct HotZoneTelemetry {
+pub(crate) struct TurfHoldTelemetry {
     pub(crate) match_id: Option<MatchId>,
     first_entry_tick_by_team: [Option<u64>; 2],
     first_progress_tick_by_team: [Option<u64>; 2],
@@ -126,13 +126,13 @@ pub(crate) struct HotZoneTelemetry {
     control_gained_transitions_by_team: [u32; 2],
     longest_consecutive_control_ticks_by_team: [u64; 2],
     current_consecutive_control_ticks: [u64; 2],
-    previous_status: HotZoneStatus,
+    previous_status: TurfHoldStatus,
     near_zone_damage_suffered_by_team: [u64; 2],
     near_zone_defeats_suffered_by_team: [u32; 2],
 }
 
 #[cfg(feature = "server")]
-impl HotZoneTelemetry {
+impl TurfHoldTelemetry {
     pub(crate) fn reset_for(&mut self, match_id: MatchId) {
         *self = Self {
             match_id: Some(match_id),
@@ -151,7 +151,7 @@ impl HotZoneTelemetry {
         &mut self,
         tick: u64,
         occupants: [u8; 2],
-        status: HotZoneStatus,
+        status: TurfHoldStatus,
     ) {
         for team in [0_usize, 1] {
             if occupants[team] > 0 {
@@ -177,11 +177,11 @@ impl HotZoneTelemetry {
             }
         }
         match status {
-            HotZoneStatus::Empty => self.empty_ticks = self.empty_ticks.saturating_add(1),
-            HotZoneStatus::Contested => {
+            TurfHoldStatus::Empty => self.empty_ticks = self.empty_ticks.saturating_add(1),
+            TurfHoldStatus::Contested => {
                 self.contested_ticks = self.contested_ticks.saturating_add(1);
             }
-            HotZoneStatus::Controlled { .. } => {}
+            TurfHoldStatus::Controlled { .. } => {}
         }
         self.previous_status = status;
     }
@@ -212,8 +212,8 @@ impl HotZoneTelemetry {
         }
     }
 
-    pub(crate) fn summary(&self, state: &HotZoneState) -> HotZoneSummary {
-        HotZoneSummary {
+    pub(crate) fn summary(&self, state: &TurfHoldState) -> TurfHoldSummary {
+        TurfHoldSummary {
             final_progress_ticks: state.progress_ticks,
             target_progress_ticks: state.target_progress_ticks,
             first_entry_tick_by_team: self.first_entry_tick_by_team,
@@ -232,19 +232,19 @@ impl HotZoneTelemetry {
 }
 
 #[cfg(feature = "server")]
-fn controlled_by(status: HotZoneStatus, team: usize) -> bool {
-    matches!(status, HotZoneStatus::Controlled { team: held } if usize::from(held.0) == team)
+fn controlled_by(status: TurfHoldStatus, team: usize) -> bool {
+    matches!(status, TurfHoldStatus::Controlled { team: held } if usize::from(held.0) == team)
 }
 
 #[cfg(feature = "server")]
 mod rules {
     use super::{
-        HOT_ZONE_NEAR_COMBAT_EXPANSION, HotZoneDiagnostics, HotZoneRules, HotZoneState,
-        HotZoneStatus, HotZoneTelemetry, IntoScheduleConfigs, NormalizedArea,
-        ResolvedObjectiveZone, TeamId,
+        IntoScheduleConfigs, NormalizedArea, ResolvedObjectiveZone,
+        TURF_HOLD_NEAR_COMBAT_EXPANSION, TeamId, TurfHoldDiagnostics, TurfHoldRules, TurfHoldState,
+        TurfHoldStatus, TurfHoldTelemetry,
     };
     use crate::combat::CurrentHealth;
-    use crate::map::HOT_ZONE_MODE_DEFINITION;
+    use crate::map::TURF_HOLD_MODE_DEFINITION;
     use crate::matchplay::{
         ActiveCombatant, ConnectedMatchRoster, MatchOutcomeDiagnostics, MatchParticipant,
         MatchPhase, MatchRestartSet, MatchRoot, MatchSet, MatchState, ModeOutcomeCause,
@@ -256,9 +256,9 @@ mod rules {
     use avian2d::prelude::Position;
     use bevy::prelude::*;
 
-    pub struct HotZoneModePlugin;
+    pub struct TurfHoldModePlugin;
 
-    impl Plugin for HotZoneModePlugin {
+    impl Plugin for TurfHoldModePlugin {
         fn build(&self, app: &mut App) {
             let setup = app
                 .world()
@@ -266,32 +266,32 @@ mod rules {
                 .copied()
                 .unwrap_or_default();
             assert_eq!(
-                setup.mode_definition_id, HOT_ZONE_MODE_DEFINITION,
-                "HotZoneModePlugin requires a Hot Zone match mode setup"
+                setup.mode_definition_id, TURF_HOLD_MODE_DEFINITION,
+                "TurfHoldModePlugin requires a Turf Hold match mode setup"
             );
-            app.init_resource::<HotZoneTelemetry>()
-                .init_resource::<HotZoneDiagnostics>()
+            app.init_resource::<TurfHoldTelemetry>()
+                .init_resource::<TurfHoldDiagnostics>()
                 .add_systems(
                     Startup,
-                    initialize_hot_zone_state.after(super::super::server::initialize_match_root),
+                    initialize_turf_hold_state.after(super::super::server::initialize_match_root),
                 )
                 .add_systems(
                     FixedUpdate,
-                    resolve_hot_zone_deadline.in_set(MatchSet::DeadlineRules),
+                    resolve_turf_hold_deadline.in_set(MatchSet::DeadlineRules),
                 )
                 .add_systems(
                     FixedUpdate,
-                    reset_hot_zone_state_on_restart.in_set(MatchRestartSet::ModeReset),
+                    reset_turf_hold_state_on_restart.in_set(MatchRestartSet::ModeReset),
                 )
                 .add_systems(
                     FixedPostUpdate,
-                    evaluate_hot_zone_objective
+                    evaluate_turf_hold_objective
                         .in_set(MatchSet::ModeRules)
                         .after(prepare_mode_rule_facts),
                 )
                 .add_systems(
                     FixedPostUpdate,
-                    record_hot_zone_near_combat
+                    record_turf_hold_near_combat
                         .in_set(MatchSet::Outcomes)
                         .after(record_match_telemetry)
                         .before(clear_combat_facts),
@@ -303,9 +303,9 @@ mod rules {
     /// mode state on the match root. Startup fails on absent, duplicate, wrong-shaped, or
     /// mode-mismatched anchors.
     #[allow(clippy::needless_pass_by_value)]
-    fn initialize_hot_zone_state(
+    fn initialize_turf_hold_state(
         mut commands: Commands,
-        rules: Res<HotZoneRules>,
+        rules: Res<TurfHoldRules>,
         zone: Res<ResolvedObjectiveZone>,
         roots: Query<(Entity, &MatchState), With<MatchRoot>>,
     ) {
@@ -313,22 +313,22 @@ mod rules {
             return;
         };
         assert_eq!(
-            state.mode_definition_id, HOT_ZONE_MODE_DEFINITION,
-            "Hot Zone mode requires a Hot Zone map"
+            state.mode_definition_id, TURF_HOLD_MODE_DEFINITION,
+            "Turf Hold mode requires a Turf Hold map"
         );
         let zone = *zone;
         let crate::map::MapShape::Circle { radius } = zone.area.shape else {
-            panic!("validated Hot Zone objective must be circular");
+            panic!("validated Turf Hold objective must be circular");
         };
         commands.entity(root).insert((
-            HotZoneState {
+            TurfHoldState {
                 match_id: state.match_id,
                 zone_anchor_id: zone.anchor_id,
                 occupants: [0, 0],
-                status: HotZoneStatus::Empty,
+                status: TurfHoldStatus::Empty,
                 progress_ticks: [0, 0],
                 target_progress_ticks: rules.target_progress_ticks,
-                next_evaluation_tick: HotZoneState::UNINITIALIZED_EVALUATION_TICK,
+                next_evaluation_tick: TurfHoldState::UNINITIALIZED_EVALUATION_TICK,
             },
             crate::matchplay::BotObjectiveView::ControlArea {
                 center: zone.area.center,
@@ -344,13 +344,13 @@ mod rules {
     /// Deadline rule: at or after `ends_at_tick`, recognize an already-present threshold
     /// state (recovered or injected) and otherwise resolve the timeout comparison.
     #[allow(clippy::needless_pass_by_value)]
-    fn resolve_hot_zone_deadline(
+    fn resolve_turf_hold_deadline(
         tick: Res<SimulationTick>,
-        roots: Query<(&MatchState, &HotZoneState), With<MatchRoot>>,
+        roots: Query<(&MatchState, &TurfHoldState), With<MatchRoot>>,
         mut outcomes: ResMut<ModeRuleOutcome>,
         mut diagnostics: ResMut<MatchOutcomeDiagnostics>,
     ) {
-        let Ok((state, hot_zone)) = roots.single() else {
+        let Ok((state, turf_hold)) = roots.single() else {
             return;
         };
         let MatchPhase::Active { ends_at_tick } = state.phase else {
@@ -360,11 +360,11 @@ mod rules {
             return;
         }
         let (cause, result) =
-            match threshold_result(hot_zone.progress_ticks, hot_zone.target_progress_ticks) {
+            match threshold_result(turf_hold.progress_ticks, turf_hold.target_progress_ticks) {
                 Some(result) => (ModeOutcomeCause::Threshold, result),
                 None => (
                     ModeOutcomeCause::Timeout,
-                    progress_comparison(hot_zone.progress_ticks),
+                    progress_comparison(turf_hold.progress_ticks),
                 ),
             };
         offer_mode_rule_outcome(
@@ -380,22 +380,22 @@ mod rules {
     }
 
     #[allow(clippy::needless_pass_by_value)]
-    fn reset_hot_zone_state_on_restart(
+    fn reset_turf_hold_state_on_restart(
         restart: Option<Res<crate::matchplay::server::PendingMatchRestart>>,
-        mut roots: Query<&mut HotZoneState, With<MatchRoot>>,
-        mut telemetry: ResMut<HotZoneTelemetry>,
+        mut roots: Query<&mut TurfHoldState, With<MatchRoot>>,
+        mut telemetry: ResMut<TurfHoldTelemetry>,
     ) {
         let Some(slot) = restart.as_ref().and_then(|restart| restart.slot()) else {
             return;
         };
-        let Ok(mut hot_zone) = roots.single_mut() else {
+        let Ok(mut turf_hold) = roots.single_mut() else {
             return;
         };
-        hot_zone.match_id = slot.next_id;
-        hot_zone.occupants = [0, 0];
-        hot_zone.status = HotZoneStatus::Empty;
-        hot_zone.progress_ticks = [0, 0];
-        hot_zone.next_evaluation_tick = HotZoneState::UNINITIALIZED_EVALUATION_TICK;
+        turf_hold.match_id = slot.next_id;
+        turf_hold.occupants = [0, 0];
+        turf_hold.status = TurfHoldStatus::Empty;
+        turf_hold.progress_ticks = [0, 0];
+        turf_hold.next_evaluation_tick = TurfHoldState::UNINITIALIZED_EVALUATION_TICK;
         telemetry.reset_for(slot.next_id);
     }
 
@@ -406,13 +406,13 @@ mod rules {
         clippy::too_many_arguments,
         clippy::type_complexity
     )]
-    fn evaluate_hot_zone_objective(
+    fn evaluate_turf_hold_objective(
         tick: Res<SimulationTick>,
         zone: Option<Res<ResolvedObjectiveZone>>,
         roster: Res<ConnectedMatchRoster>,
-        mut roots: Query<(&MatchState, &mut HotZoneState), With<MatchRoot>>,
-        mut telemetry: ResMut<HotZoneTelemetry>,
-        mut diagnostics: ResMut<HotZoneDiagnostics>,
+        mut roots: Query<(&MatchState, &mut TurfHoldState), With<MatchRoot>>,
+        mut telemetry: ResMut<TurfHoldTelemetry>,
+        mut diagnostics: ResMut<TurfHoldDiagnostics>,
         mut outcomes: ResMut<ModeRuleOutcome>,
         mut outcome_diagnostics: ResMut<MatchOutcomeDiagnostics>,
         fighters: Query<
@@ -431,26 +431,26 @@ mod rules {
         >,
     ) {
         let Some(zone) = zone else { return };
-        let Ok((state, mut hot_zone)) = roots.single_mut() else {
+        let Ok((state, mut turf_hold)) = roots.single_mut() else {
             return;
         };
-        if !matches!(state.phase, MatchPhase::Active { .. }) || state.match_id != hot_zone.match_id
+        if !matches!(state.phase, MatchPhase::Active { .. }) || state.match_id != turf_hold.match_id
         {
             return;
         }
-        if hot_zone.next_evaluation_tick == HotZoneState::UNINITIALIZED_EVALUATION_TICK {
-            hot_zone.next_evaluation_tick = tick.0;
+        if turf_hold.next_evaluation_tick == TurfHoldState::UNINITIALIZED_EVALUATION_TICK {
+            turf_hold.next_evaluation_tick = tick.0;
         }
-        if tick.0 < hot_zone.next_evaluation_tick {
+        if tick.0 < turf_hold.next_evaluation_tick {
             diagnostics.duplicate_evaluations = diagnostics.duplicate_evaluations.saturating_add(1);
             return;
         }
-        if tick.0 > hot_zone.next_evaluation_tick {
+        if tick.0 > turf_hold.next_evaluation_tick {
             diagnostics.skipped_evaluation_ticks =
                 diagnostics.skipped_evaluation_ticks.saturating_add(1);
             diagnostics.skipped_evaluation_distance = diagnostics
                 .skipped_evaluation_distance
-                .saturating_add(tick.0 - hot_zone.next_evaluation_tick);
+                .saturating_add(tick.0 - turf_hold.next_evaluation_tick);
         }
         if roster.match_id != Some(state.match_id) {
             return;
@@ -479,19 +479,19 @@ mod rules {
             }
         }
         let status = zone_status(occupants);
-        if let HotZoneStatus::Controlled { team } = status {
+        if let TurfHoldStatus::Controlled { team } = status {
             let index = usize::from(team.0);
-            hot_zone.progress_ticks[index] = hot_zone.progress_ticks[index]
+            turf_hold.progress_ticks[index] = turf_hold.progress_ticks[index]
                 .saturating_add(1)
-                .min(hot_zone.target_progress_ticks);
+                .min(turf_hold.target_progress_ticks);
         }
-        hot_zone.occupants = occupants;
-        hot_zone.status = status;
-        hot_zone.next_evaluation_tick = tick.0.saturating_add(1);
+        turf_hold.occupants = occupants;
+        turf_hold.status = status;
+        turf_hold.next_evaluation_tick = tick.0.saturating_add(1);
         telemetry.record_evaluation(tick.0, occupants, status);
 
         if let Some(result) =
-            threshold_result(hot_zone.progress_ticks, hot_zone.target_progress_ticks)
+            threshold_result(turf_hold.progress_ticks, turf_hold.target_progress_ticks)
         {
             offer_mode_rule_outcome(
                 &mut outcomes,
@@ -509,11 +509,11 @@ mod rules {
     /// Near-zone combat telemetry: applied hostile damage/defeat facts whose fighter target
     /// stands inside the objective shape expanded outward, attributed to the suffering team.
     #[allow(clippy::needless_pass_by_value, clippy::type_complexity)]
-    fn record_hot_zone_near_combat(
+    fn record_turf_hold_near_combat(
         tick: Res<SimulationTick>,
         zone: Option<Res<ResolvedObjectiveZone>>,
-        roots: Query<(&MatchState, &HotZoneState), With<MatchRoot>>,
-        mut telemetry: ResMut<HotZoneTelemetry>,
+        roots: Query<(&MatchState, &TurfHoldState), With<MatchRoot>>,
+        mut telemetry: ResMut<TurfHoldTelemetry>,
         facts: Res<crate::combat::CombatOutcomeFacts>,
         fighters: Query<(&NetworkEntityId, &MatchParticipant, &TeamId, &Position), With<Fighter>>,
     ) {
@@ -525,7 +525,7 @@ mod rules {
             return;
         }
         telemetry.begin_match(state.match_id);
-        let near_area = expand_area(zone.area, HOT_ZONE_NEAR_COMBAT_EXPANSION);
+        let near_area = expand_area(zone.area, TURF_HOLD_NEAR_COMBAT_EXPANSION);
         for fact in &facts.0 {
             if fact.tick != tick.0 {
                 continue;
@@ -578,12 +578,12 @@ mod rules {
     }
 
     #[must_use]
-    pub(crate) fn zone_status(occupants: [u8; 2]) -> HotZoneStatus {
+    pub(crate) fn zone_status(occupants: [u8; 2]) -> TurfHoldStatus {
         match (occupants[0] > 0, occupants[1] > 0) {
-            (false, false) => HotZoneStatus::Empty,
-            (true, false) => HotZoneStatus::Controlled { team: TeamId(0) },
-            (false, true) => HotZoneStatus::Controlled { team: TeamId(1) },
-            (true, true) => HotZoneStatus::Contested,
+            (false, false) => TurfHoldStatus::Empty,
+            (true, false) => TurfHoldStatus::Controlled { team: TeamId(0) },
+            (false, true) => TurfHoldStatus::Controlled { team: TeamId(1) },
+            (true, true) => TurfHoldStatus::Contested,
         }
     }
 
@@ -613,25 +613,25 @@ mod rules {
 }
 
 #[cfg(feature = "server")]
-pub use rules::HotZoneModePlugin;
+pub use rules::TurfHoldModePlugin;
 
 /// Match mode setup for the dedicated-server composition table.
 #[must_use]
 #[cfg(feature = "server")]
-pub fn hot_zone_setup_for_composition() -> super::MatchModeSetup {
+pub fn turf_hold_setup_for_composition() -> super::MatchModeSetup {
     super::MatchModeSetup {
-        mode_definition_id: HOT_ZONE_MODE_DEFINITION,
-        rules_revision: HOT_ZONE_RULES_REVISION,
+        mode_definition_id: TURF_HOLD_MODE_DEFINITION,
+        rules_revision: TURF_HOLD_RULES_REVISION,
     }
 }
 
-/// Hot Zone rules for one rules profile. Verification shortens deadlines and uses a 30-tick
+/// Turf Hold rules for one rules profile. Verification shortens deadlines and uses a 30-tick
 /// progress target without changing semantics.
 #[must_use]
-pub fn hot_zone_rules_for_profile(profile: crate::config::MatchRulesProfile) -> HotZoneRules {
+pub fn turf_hold_rules_for_profile(profile: crate::config::MatchRulesProfile) -> TurfHoldRules {
     match profile {
-        crate::config::MatchRulesProfile::Production => HotZoneRules::default(),
-        crate::config::MatchRulesProfile::ProcessVerification => HotZoneRules {
+        crate::config::MatchRulesProfile::Production => TurfHoldRules::default(),
+        crate::config::MatchRulesProfile::ProcessVerification => TurfHoldRules {
             target_progress_ticks: 30,
         },
     }
@@ -691,16 +691,16 @@ mod tests {
 
     #[test]
     fn zone_status_covers_empty_controlled_and_contested() {
-        assert_eq!(zone_status([0, 0]), HotZoneStatus::Empty);
+        assert_eq!(zone_status([0, 0]), TurfHoldStatus::Empty);
         assert_eq!(
             zone_status([2, 0]),
-            HotZoneStatus::Controlled { team: TeamId(0) }
+            TurfHoldStatus::Controlled { team: TeamId(0) }
         );
         assert_eq!(
             zone_status([0, 1]),
-            HotZoneStatus::Controlled { team: TeamId(1) }
+            TurfHoldStatus::Controlled { team: TeamId(1) }
         );
-        assert_eq!(zone_status([1, 3]), HotZoneStatus::Contested);
+        assert_eq!(zone_status([1, 3]), TurfHoldStatus::Contested);
     }
 
     #[test]
@@ -730,22 +730,22 @@ mod tests {
 
     #[test]
     fn telemetry_counts_ticks_transitions_and_near_zone_combat() {
-        let mut telemetry = HotZoneTelemetry::default();
+        let mut telemetry = TurfHoldTelemetry::default();
         telemetry.begin_match(MatchId(1));
-        telemetry.record_evaluation(10, [1, 0], HotZoneStatus::Controlled { team: TeamId(0) });
-        telemetry.record_evaluation(11, [2, 0], HotZoneStatus::Controlled { team: TeamId(0) });
-        telemetry.record_evaluation(12, [2, 2], HotZoneStatus::Contested);
-        telemetry.record_evaluation(13, [0, 0], HotZoneStatus::Empty);
-        telemetry.record_evaluation(14, [0, 1], HotZoneStatus::Controlled { team: TeamId(1) });
+        telemetry.record_evaluation(10, [1, 0], TurfHoldStatus::Controlled { team: TeamId(0) });
+        telemetry.record_evaluation(11, [2, 0], TurfHoldStatus::Controlled { team: TeamId(0) });
+        telemetry.record_evaluation(12, [2, 2], TurfHoldStatus::Contested);
+        telemetry.record_evaluation(13, [0, 0], TurfHoldStatus::Empty);
+        telemetry.record_evaluation(14, [0, 1], TurfHoldStatus::Controlled { team: TeamId(1) });
         telemetry.record_near_zone_combat(TeamId(0), Some(25), true);
         telemetry.record_near_zone_combat(TeamId(0), None, true);
         telemetry.record_near_zone_combat(TeamId(0), Some(25), false);
         telemetry.record_near_zone_combat(TeamId(2), Some(25), true);
-        let state = HotZoneState {
+        let state = TurfHoldState {
             match_id: MatchId(1),
             zone_anchor_id: ModeAnchorId(1),
             occupants: [0, 1],
-            status: HotZoneStatus::Controlled { team: TeamId(1) },
+            status: TurfHoldStatus::Controlled { team: TeamId(1) },
             progress_ticks: [2, 1],
             target_progress_ticks: 30,
             next_evaluation_tick: 15,

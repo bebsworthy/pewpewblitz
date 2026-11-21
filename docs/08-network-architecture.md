@@ -444,7 +444,7 @@ cells were affected.
 Damageable barrels and chests retain stable generation/placement identity plus replicated current
 health and life state. Their terminal transaction commits the map placement outcome and collider
 change exactly once. A chest additionally creates one generation-derived public restoration pickup
-with replicated position, definition, availability, and expiry. Heist objectives use stable
+with replicated position, definition, availability, and expiry. Vault Break objectives use stable
 match/map/anchor/team identity and replicated public health but remain mode-owned rather than map
 placements. Clients never submit contact, damage, health, terminal, pickup, or objective outcomes.
 
@@ -469,7 +469,7 @@ responsible for collision and gameplay truth; client reconstruction is presentat
 prediction support only.
 
 Damageable-object readiness joins the resolved map generation with the complete expected live
-object set; Heist readiness additionally requires the matching mode objective set. Live pickups are
+object set; Vault Break readiness additionally requires the matching mode objective set. Live pickups are
 ordinary durable replicated entities and therefore converge for late join/reconnect without cue
 replay. A missing or generation-mismatched set keeps presentation in its explicit syncing state
 rather than showing stale health, collision, or loot availability.
@@ -516,7 +516,7 @@ state, score updates, and telemetry can otherwise reveal a hidden subject even w
 culled. Owner control remains intact; permitted owners/allies receive the spatial fighter while
 opponents do not.
 
-V10 barrels, chests, restoration pickups, Heist objectives, and their health/availability facts are
+V10 barrels, chests, restoration pickups, Vault Break objectives, and their health/availability facts are
 public and never become concealment subjects. A cue that carries an initiating fighter or other
 fighter-derived source still keeps that subject identity and passes through the observer-specific
 filter after the accepted attack/reveal transition; public object state cannot be used to copy a
@@ -580,7 +580,7 @@ Networking is validated incrementally rather than treated as one oversized miles
 2. **v1 Milestone 03 — movement:** the server validates input frames and owns movement and facing; clients interpolate remote state; owner movement prediction was later adopted by BRL-0141 after latency measurement.
 3. **v1 Milestone 04 — combat:** the server owns firing, projectiles, hits, damage, defeats, and sandbox reset under packet delay, loss, duplication, and jitter tests.
 4. **v1 Milestone 07 — match:** the server owns teams, respawns, scores, timers, victory, restart, and disconnect behavior throughout the match lifecycle.
-5. **v1 Milestone 09 — objectives:** Hot Zone proves that continuous objective state remains authoritative while reusing the same gameplay and match-lifecycle components/plugins.
+5. **v1 Milestone 09 — objectives:** Turf Hold proves that continuous objective state remains authoritative while reusing the same gameplay and match-lifecycle components/plugins.
 6. **V8 map dynamics:** connected and late/reconnecting clients converge on authoritative
    whole-placement removal/replacement state and exact map generations.
 7. **V9 concealment and reveal:** server-owned terrain/ability sources feed per-client visibility,
@@ -597,14 +597,14 @@ Prediction, lag compensation, advanced interpolation tuning, anti-cheat hardenin
 
 Protocol 44 adds the bounded `practice_map_preset_ids` list to each advertised game type and an optional map ID to `PracticeStartRequest`. The list is derived from server-approved pools for that mode and filtered by spawn capacity. The catalog fingerprint includes it. The lobby rejects IDs outside that list before allocation; an omitted ID preserves the existing automation default (first multiplayer-pool map). This uses the global compatibility handshake, with no per-message compatibility decoder.
 
-Protocol 45 extends Wipeout's replicated scoring component with a match-tagged, fixed-capacity
+Protocol 45 extends Takedown's replicated scoring component with a match-tagged, fixed-capacity
 player breakdown (stable player/network identities, accepted display names, kills and deaths).
 Team scores and player counters are published together. A completion marker is committed after
 the authoritative outcome phase in that same component; routed clients wait for the matching
 completed snapshot before retaining results and returning to the lobby. Names and departed player
 rows remain available for final results. This does not change the in-game HUD or input protocol.
 
-Protocol 46 adds the bounded `ObjectiveResult` component for Hot Zone and Heist. After the
+Protocol 46 adds the bounded `ObjectiveResult` component for Turf Hold and Vault Break. After the
 server commits a terminal outcome, it publishes that outcome and the final capture progress or
 idol current/maximum health together. Clients wait for a matching match/result snapshot before
 returning to the lobby, then retain it for Results independently of live objective entities.
@@ -714,3 +714,18 @@ drops the `weapon_costs` table and every ultimate and passive `point_cost`, whic
 gameplay content fingerprint. The recipe fingerprint, match character snapshot schema 8,
 match-manifest v5, control IPC v7, the route envelope, and the Balance Lab snapshot and persistence
 schemas are unchanged. Every role must be rebuilt.
+
+Protocol 56 renames the game modes (BRL-wg28): Wipeout becomes Takedown, Hot Zone becomes Turf Hold,
+and Heist becomes Vault Break, everywhere including internal identifiers. The `GameMode` variants
+(`Takedown`, `TurfHold`, `VaultBreak`) keep their wire indices, but the replicated and registered
+types that carried the old names (for example `TakedownState`, `TurfHoldState`, `VaultBreakState`,
+`VaultBreakSafe`) have new paths, so the protocol-registry fingerprint changes. Mode keys
+(`takedown`, `turf-hold`, `vault-break`), game-type IDs (`takedown-*`, `turf-hold-*`,
+`vault-break-*`), built-in map keys (`feature-yard-takedown`, `feature-yard-turf-hold`,
+`feature-yard-vault-break`), the `mode_policies.vault_break` config key, and VFX keys change,
+which changes the gameplay content fingerprint. This is a one-time cutover with no aliases: the
+profile database moves to schema 5, whose migration rewrites stored published-map game-type IDs to
+the new names, and the Balance Lab moves to snapshot schema 23, persistence envelope 17, and editor
+manifest 16, whose load migration moves persisted `heist` tuning to `vaultBreak`. Match-manifest v5,
+control IPC v7, and the route envelope keep their shapes, but carry the new game-type IDs. Every role
+must be rebuilt.

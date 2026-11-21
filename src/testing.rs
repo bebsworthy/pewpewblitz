@@ -81,13 +81,13 @@ fn default_brawler_snapshot() -> crate::profiles::MatchCharacterSnapshot {
     .expect("default character snapshot")
 }
 
-/// Build one validated two-team Wipeout match manifest whose participants all use the embedded
+/// Build one validated two-team Takedown match manifest whose participants all use the embedded
 /// default saved brawler, for separate-App routed match-worker tests (BRL-yyeg).
 ///
 /// # Panics
 /// Panics when the embedded catalogs cannot produce the default build snapshot.
 #[must_use]
-pub fn routed_wipeout_manifest(
+pub fn routed_takedown_manifest(
     config: &ServerNetworkConfig,
     participants: &[TestRoutedParticipant],
 ) -> brawler_routing::MatchManifestV1 {
@@ -100,8 +100,8 @@ pub fn routed_wipeout_manifest(
     let map = maps
         .presets
         .iter()
-        .find(|preset| preset.id == crate::map::FEATURE_YARD_WIPEOUT_PRESET)
-        .expect("Feature Yard Wipeout preset")
+        .find(|preset| preset.id == crate::map::FEATURE_YARD_TAKEDOWN_PRESET)
+        .expect("Feature Yard Takedown preset")
         .clone();
     let map_recipe_fingerprint = maps
         .resolve_preset(map.id, crate::map::MapInstanceId(1))
@@ -151,7 +151,7 @@ pub fn routed_wipeout_manifest(
         request_id: brawler_routing::RequestId::new(3).expect("nonzero"),
         match_id: MatchId::new(4).expect("nonzero"),
         allocation_id: AllocationId::new(5).expect("nonzero"),
-        mode: brawler_routing::GameMode::Wipeout,
+        mode: brawler_routing::GameMode::Takedown,
         map_preset: map.id.0,
         map_revision: u32::from(map.admission_revision),
         map_recipe_fingerprint,
@@ -163,8 +163,8 @@ pub fn routed_wipeout_manifest(
         respawn_ticks: 180,
         spawn_protection_ticks: 90,
         completed_input_lock_ticks: 60,
-        wipeout_recent_hostile_damage_credit_ticks: 300,
-        heist_critical_health_percent: 25,
+        takedown_recent_hostile_damage_credit_ticks: 300,
+        vault_break_critical_health_percent: 25,
         reserved: 0,
         seed: 1,
         participants: manifest_participants,

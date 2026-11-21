@@ -178,7 +178,7 @@ The established weapon foundation supports:
 - no falloff and linear damage falloff;
 - explicit owner, ally, hostile, and bounded combined recipient policies;
 - one bounded terrain-destruction world effect;
-- explicit positive-damage eligibility for live environment objects and hostile Heist objectives;
+- explicit positive-damage eligibility for live environment objects and hostile Vault Break objectives;
 - authoritative fire cooldown, one-at-a-time ammunition recovery, lifetime, collision, and outcome attribution;
 - stable presentation cues resolved independently by the client.
 
@@ -280,10 +280,10 @@ and matching aim trace are implemented together.
 
 Eligible V10 world targets reuse these accepted deliveries without becoming fighters. Straight,
 lobbed, and melee contact may apply positive damage to a live barrel or chest; hostile straight,
-lobbed, and melee contact may damage a Heist objective according to its mode-owned policy. Status,
+lobbed, and melee contact may damage a Vault Break objective according to its mode-owned policy. Status,
 knockback, fighter passives, charge, and defeat semantics do not transfer merely because a target
 has health. The complete policy is owned by
-[Damageable world objects and Heist](./18-damageable-world-objects-and-heist.md).
+[Damageable world objects and Vault Break](./18-damageable-world-objects-and-vault-break.md).
 
 Zombie hostile NPCs are a distinct combat-target family rather than enemy fighters. Player-owned
 straight, lobbed, spray, splash, sticky, melee, sentry, field, and condition deliveries may target

@@ -1,7 +1,7 @@
 # Crossroads Facility environment kit
 
 The environment kit for map presentation theme 1 (Crossroads Facility; BRL-0153). Every built-in
-theme-1 map (Crossroads Facility, Barrel Yard, Feature Yard Wipeout/Hot Zone/Heist, Zombie Yard)
+theme-1 map (Crossroads Facility, Barrel Yard, Feature Yard Takedown/Turf Hold/Vault Break, Zombie Yard)
 draws its imported environment pieces only from this kit. The kit is original project work built
 entirely by the checked-in procedural Blender script; no third-party, commissioned, generated, or
 hand-edited model data is involved.
@@ -59,7 +59,7 @@ update the matching `theme_kits` entry in `assets/catalogs/map_asset_visuals.ron
 | `barrel.glb` | 37 (oil barrel) | red drum with hazard band | Contained 0.73 |
 | `barrel-debris.glb` | 38 (barrel debris) | flat staves and lid | Contained 0.77, flat |
 | `chest.glb` | 40 (treasure chest) | wood chest with gold straps | Contained 0.84 |
-| `vault.glb` | 39 (Heist safe) | steel vault with gold dial | Contained 0.96 |
+| `vault.glb` | 39 (Vault Break safe) | steel vault with gold dial | Contained 0.96 |
 | `pickup.glb` | 42 (restoration pickup) | green canister with white cross | Contained 0.55 |
 | `weapon-rack.glb` | 11 | wooden rack with three blasters | Contained 0.88 |
 | `target.glb` | 12 | red and white target on a stand | Contained 0.72 |

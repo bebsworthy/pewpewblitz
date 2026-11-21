@@ -2,7 +2,7 @@
 
 use super::{
     BalanceLabCommand, BalanceLabRevision, BalanceLabRuntime, BalanceLabSnapshotV3,
-    RevisedCatalogs, SNAPSHOT_SCHEMA_VERSION, TransactionStatus, install_heist_tuning,
+    RevisedCatalogs, SNAPSHOT_SCHEMA_VERSION, TransactionStatus, install_vault_break_tuning,
     manifest_selections, persistence, publish_result, reject, roster,
     validate_mode_specific_tuning, validate_snapshot,
 };
@@ -233,7 +233,7 @@ fn commit_transaction(
     catalogs: &mut TunedCatalogResources,
     resolved_map: &mut ResolvedMap,
     condition_rules: &mut crate::combat::CombatConditionRulesResource,
-    heist_rules: Option<&mut crate::matchplay::HeistRules>,
+    vault_break_rules: Option<&mut crate::matchplay::VaultBreakRules>,
     restart: &mut PendingMatchRestart,
     restart_policy: &mut RestartBuildPolicy,
     next_match_id: &mut NextMatchId,
@@ -256,8 +256,8 @@ fn commit_transaction(
     catalogs.characters.0 = prepared.next.characters;
     *resolved_map = prepared.next_resolved_map;
     condition_rules.0 = prepared.candidate.condition_rules;
-    if let Some(rules) = heist_rules {
-        install_heist_tuning(rules, &prepared.candidate);
+    if let Some(rules) = vault_break_rules {
+        install_vault_break_tuning(rules, &prepared.candidate);
     }
     for (entity, loadout) in prepared.resolved_roster {
         let mut fighter = fighters
@@ -301,7 +301,7 @@ pub(super) fn apply_balance_lab_transaction(
     mut catalogs: TunedCatalogResources,
     mut resolved_map: ResMut<ResolvedMap>,
     mut condition_rules: ResMut<crate::combat::CombatConditionRulesResource>,
-    mut heist_rules: Option<ResMut<crate::matchplay::HeistRules>>,
+    mut vault_break_rules: Option<ResMut<crate::matchplay::VaultBreakRules>>,
     mut restart: ResMut<PendingMatchRestart>,
     mut restart_policy: ResMut<RestartBuildPolicy>,
     mut next_match_id: ResMut<NextMatchId>,
@@ -360,7 +360,7 @@ pub(super) fn apply_balance_lab_transaction(
         &mut catalogs,
         &mut resolved_map,
         &mut condition_rules,
-        heist_rules.as_deref_mut(),
+        vault_break_rules.as_deref_mut(),
         &mut restart,
         &mut restart_policy,
         &mut next_match_id,
@@ -479,7 +479,7 @@ mod tests {
             MatchRoot,
             MatchState {
                 match_id: crate::matchplay::MatchId(40),
-                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: crate::map::TAKEDOWN_MODE_DEFINITION,
                 phase: MatchPhase::Active { ends_at_tick: 500 },
                 rules_revision: 1,
             },
@@ -524,7 +524,7 @@ mod tests {
             let resolved_map = revised
                 .maps
                 .resolve_preset(
-                    crate::map::FEATURE_YARD_WIPEOUT_PRESET,
+                    crate::map::FEATURE_YARD_TAKEDOWN_PRESET,
                     crate::map::MapInstanceId(1),
                 )
                 .unwrap();
@@ -557,8 +557,8 @@ mod tests {
             .insert_resource(crate::combat::CombatConditionRulesResource(
                 applied.condition_rules,
             ))
-            .insert_resource(crate::matchplay::HeistRules {
-                safe_maximum_health: applied.heist.safe_maximum_health,
+            .insert_resource(crate::matchplay::VaultBreakRules {
+                safe_maximum_health: applied.vault_break.safe_maximum_health,
                 ..default()
             })
             .init_resource::<PendingMatchRestart>()
@@ -669,7 +669,7 @@ mod tests {
         maps: MapContentCatalog,
         resolved_map: ResolvedMap,
         condition_rules: crate::combat::CombatConditionRules,
-        heist_rules: crate::matchplay::HeistRules,
+        vault_break_rules: crate::matchplay::VaultBreakRules,
         human: FighterSnapshot,
         bot: FighterSnapshot,
         restart: Option<PendingMatchRestartSlot>,
@@ -692,7 +692,7 @@ mod tests {
             condition_rules: world
                 .resource::<crate::combat::CombatConditionRulesResource>()
                 .0,
-            heist_rules: *world.resource::<crate::matchplay::HeistRules>(),
+            vault_break_rules: *world.resource::<crate::matchplay::VaultBreakRules>(),
             human: fighter_snapshot(world, fixture.human),
             bot: fighter_snapshot(world, fixture.bot),
             restart: world.resource::<PendingMatchRestart>().slot(),
@@ -711,7 +711,7 @@ mod tests {
         assert_eq!(after.maps, before.maps);
         assert_eq!(after.resolved_map, before.resolved_map);
         assert_eq!(after.condition_rules, before.condition_rules);
-        assert_eq!(after.heist_rules, before.heist_rules);
+        assert_eq!(after.vault_break_rules, before.vault_break_rules);
         assert_eq!(after.human, before.human);
         assert_eq!(after.bot, before.bot);
         assert_eq!(after.restart, before.restart);

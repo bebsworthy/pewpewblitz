@@ -41,9 +41,9 @@ pub enum SeedPolicy {
 /// M01 constructor below is the only convenience default and remains Bevy-free.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AllocationPolicy {
-    pub wipeout: ModeAllocationPolicy,
-    pub hot_zone: ModeAllocationPolicy,
-    pub heist: ModeAllocationPolicy,
+    pub takedown: ModeAllocationPolicy,
+    pub turf_hold: ModeAllocationPolicy,
+    pub vault_break: ModeAllocationPolicy,
     pub zombie: ModeAllocationPolicy,
     pub heartbeat_ms: u32,
     pub seed_policy: SeedPolicy,
@@ -74,17 +74,17 @@ impl AllocationPolicy {
 
     #[must_use]
     pub const fn new(
-        wipeout: ModeAllocationPolicy,
-        hot_zone: ModeAllocationPolicy,
-        heist: ModeAllocationPolicy,
+        takedown: ModeAllocationPolicy,
+        turf_hold: ModeAllocationPolicy,
+        vault_break: ModeAllocationPolicy,
         zombie: ModeAllocationPolicy,
         heartbeat_ms: u32,
         seed_policy: SeedPolicy,
     ) -> Self {
         Self {
-            wipeout,
-            hot_zone,
-            heist,
+            takedown,
+            turf_hold,
+            vault_break,
             zombie,
             heartbeat_ms,
             seed_policy,
@@ -92,9 +92,9 @@ impl AllocationPolicy {
     }
 
     pub fn validate(self) -> Result<(), CodecError> {
-        self.wipeout.validate()?;
-        self.hot_zone.validate()?;
-        self.heist.validate()?;
+        self.takedown.validate()?;
+        self.turf_hold.validate()?;
+        self.vault_break.validate()?;
         self.zombie.validate()?;
         if self.heartbeat_ms == 0 {
             return Err(CodecError::InvalidValue);
@@ -105,9 +105,9 @@ impl AllocationPolicy {
     #[must_use]
     pub const fn for_mode(self, mode: GameMode) -> ModeAllocationPolicy {
         match mode {
-            GameMode::Wipeout => self.wipeout,
-            GameMode::HotZone => self.hot_zone,
-            GameMode::Heist => self.heist,
+            GameMode::Takedown => self.takedown,
+            GameMode::TurfHold => self.turf_hold,
+            GameMode::VaultBreak => self.vault_break,
             GameMode::Zombie => self.zombie,
         }
     }
@@ -180,8 +180,8 @@ mod tests {
 
     #[test]
     fn policy_selects_explicit_mode_values() {
-        assert_eq!(POLICY.for_mode(GameMode::Wipeout).map_preset, 11);
-        assert_eq!(POLICY.for_mode(GameMode::HotZone).rules_profile, 2);
+        assert_eq!(POLICY.for_mode(GameMode::Takedown).map_preset, 11);
+        assert_eq!(POLICY.for_mode(GameMode::TurfHold).rules_profile, 2);
         assert!(POLICY.validate().is_ok());
     }
 
@@ -189,8 +189,8 @@ mod tests {
     fn policy_rejects_zero_gameplay_values() {
         let invalid = AllocationPolicy::new(
             ModeAllocationPolicy::new(0, 12, 1),
-            POLICY.hot_zone,
-            POLICY.heist,
+            POLICY.turf_hold,
+            POLICY.vault_break,
             POLICY.zombie,
             POLICY.heartbeat_ms,
             POLICY.seed_policy,
@@ -213,7 +213,7 @@ mod tests {
         let request = AllocateRequestBody {
             request_id: crate::RequestId::new(5).unwrap(),
             lobby_session_id: participant.lobby_session_id,
-            mode: GameMode::Wipeout,
+            mode: GameMode::Takedown,
             map_preset: 1,
             map_revision: 1,
             map_recipe_fingerprint: 1,
@@ -225,8 +225,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             team_count: 2,
             players_per_team: 2,
             participants: vec![participant, participant],
@@ -253,7 +253,7 @@ mod tests {
         let request = AllocateRequestBody {
             request_id: crate::RequestId::new(1).unwrap(),
             lobby_session_id: crate::LobbySessionId::new(1).unwrap(),
-            mode: GameMode::Wipeout,
+            mode: GameMode::Takedown,
             map_preset: 1,
             map_revision: 1,
             map_recipe_fingerprint: 1,
@@ -265,8 +265,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             team_count: 2,
             players_per_team: 1,
             participants: vec![participant(1, 0), participant(2, 1)],
@@ -299,7 +299,7 @@ mod tests {
         let request = AllocateRequestBody {
             request_id: crate::RequestId::new(1).unwrap(),
             lobby_session_id: human.lobby_session_id,
-            mode: GameMode::HotZone,
+            mode: GameMode::TurfHold,
             map_preset: 1,
             map_revision: 1,
             map_recipe_fingerprint: 1,
@@ -311,8 +311,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             team_count: 2,
             players_per_team: 2,
             participants: vec![human],
@@ -357,8 +357,8 @@ mod tests {
             respawn_ticks: 900,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             team_count: 1,
             players_per_team: 3,
             participants: vec![human],

@@ -137,15 +137,15 @@ pub struct CatalogRevision(pub [u8; CATALOG_REVISION_BYTES]);
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdvertisedRulesSummary {
-    Wipeout {
+    Takedown {
         target_score: u16,
         active_limit_ticks: u64,
     },
-    HotZone {
+    TurfHold {
         target_progress_ticks: u16,
         active_limit_ticks: u64,
     },
-    Heist {
+    VaultBreak {
         safe_maximum_health: u16,
         active_limit_ticks: u64,
     },
@@ -356,9 +356,9 @@ impl AdvertisedGameType {
         }
         let supports_authoring = matches!(
             self.mode_definition_id,
-            crate::map::WIPEOUT_MODE_DEFINITION
-                | crate::map::HOT_ZONE_MODE_DEFINITION
-                | crate::map::HEIST_MODE_DEFINITION
+            crate::map::TAKEDOWN_MODE_DEFINITION
+                | crate::map::TURF_HOLD_MODE_DEFINITION
+                | crate::map::VAULT_BREAK_MODE_DEFINITION
         );
         if self.map_authoring_limits != supports_authoring.then_some(crate::map::AUTHORING_LIMITS)
             || (self.community_maps && !supports_authoring)
@@ -375,15 +375,15 @@ impl AdvertisedGameType {
             return Err(LobbyModelError::InvalidTopology);
         }
         match self.rules_summary {
-            AdvertisedRulesSummary::Wipeout {
+            AdvertisedRulesSummary::Takedown {
                 target_score,
                 active_limit_ticks,
             } if target_score > 0 && active_limit_ticks > 0 => {}
-            AdvertisedRulesSummary::HotZone {
+            AdvertisedRulesSummary::TurfHold {
                 target_progress_ticks,
                 active_limit_ticks,
             } if target_progress_ticks > 0 && active_limit_ticks > 0 => {}
-            AdvertisedRulesSummary::Heist {
+            AdvertisedRulesSummary::VaultBreak {
                 safe_maximum_health,
                 active_limit_ticks,
             } if safe_maximum_health > 0 && active_limit_ticks > 0 => {}
@@ -632,7 +632,7 @@ pub fn canonical_catalog_bytes(
         bytes.push(game_type.team_count);
         bytes.push(game_type.players_per_team);
         match game_type.rules_summary {
-            AdvertisedRulesSummary::Wipeout {
+            AdvertisedRulesSummary::Takedown {
                 target_score,
                 active_limit_ticks,
             } => {
@@ -640,7 +640,7 @@ pub fn canonical_catalog_bytes(
                 bytes.extend_from_slice(&target_score.to_be_bytes());
                 bytes.extend_from_slice(&active_limit_ticks.to_be_bytes());
             }
-            AdvertisedRulesSummary::HotZone {
+            AdvertisedRulesSummary::TurfHold {
                 target_progress_ticks,
                 active_limit_ticks,
             } => {
@@ -648,7 +648,7 @@ pub fn canonical_catalog_bytes(
                 bytes.extend_from_slice(&target_progress_ticks.to_be_bytes());
                 bytes.extend_from_slice(&active_limit_ticks.to_be_bytes());
             }
-            AdvertisedRulesSummary::Heist {
+            AdvertisedRulesSummary::VaultBreak {
                 safe_maximum_health,
                 active_limit_ticks,
             } => {
@@ -689,9 +689,9 @@ mod tests {
     fn golden_catalog() -> Vec<AdvertisedGameType> {
         vec![
             AdvertisedGameType {
-                id: GameTypeId::new("wipeout-2v2").unwrap(),
+                id: GameTypeId::new("takedown-2v2").unwrap(),
                 configuration_revision: 1,
-                display_name: "Wipeout 2v2".to_string(),
+                display_name: "Takedown 2v2".to_string(),
                 mode_definition_id: ModeDefinitionId(2),
                 map_preset_ids: vec![MapPresetId(1)],
                 practice_map_preset_ids: vec![MapPresetId(1)],
@@ -699,15 +699,15 @@ mod tests {
                 community_maps: false,
                 team_count: 2,
                 players_per_team: 2,
-                rules_summary: AdvertisedRulesSummary::Wipeout {
+                rules_summary: AdvertisedRulesSummary::Takedown {
                     target_score: 10,
                     active_limit_ticks: 10_800,
                 },
             },
             AdvertisedGameType {
-                id: GameTypeId::new("hot-zone-2v2").unwrap(),
+                id: GameTypeId::new("turf-hold-2v2").unwrap(),
                 configuration_revision: 1,
-                display_name: "Hot Zone 2v2".to_string(),
+                display_name: "Turf Hold 2v2".to_string(),
                 mode_definition_id: ModeDefinitionId(3),
                 map_preset_ids: vec![MapPresetId(2)],
                 practice_map_preset_ids: vec![MapPresetId(2)],
@@ -715,7 +715,7 @@ mod tests {
                 community_maps: false,
                 team_count: 2,
                 players_per_team: 2,
-                rules_summary: AdvertisedRulesSummary::HotZone {
+                rules_summary: AdvertisedRulesSummary::TurfHold {
                     target_progress_ticks: 1_800,
                     active_limit_ticks: 10_800,
                 },
@@ -727,13 +727,13 @@ mod tests {
     fn canonical_catalog_matches_committed_golden_vector() {
         let catalog = golden_catalog();
         let bytes = canonical_catalog_bytes(&catalog).unwrap();
-        assert_eq!(bytes.len(), 163);
+        assert_eq!(bytes.len(), 167);
         assert_eq!(
             catalog_revision(&catalog).unwrap().0,
             [
-                0xf4, 0xd8, 0x99, 0x3b, 0xfd, 0xb2, 0xf8, 0x27, 0xdf, 0x6f, 0x6e, 0x92, 0x0c, 0x72,
-                0xde, 0x56, 0x94, 0xcd, 0x5c, 0x0a, 0x40, 0x26, 0xc8, 0xa6, 0x05, 0xa1, 0xc9, 0x27,
-                0xd3, 0xd1, 0xd9, 0x8d,
+                0xe5, 0x43, 0x96, 0xcf, 0x51, 0xf6, 0xe4, 0x57, 0xe3, 0xaa, 0xf1, 0x8e, 0x58, 0x36,
+                0x6e, 0x5b, 0x3a, 0x24, 0x08, 0x04, 0xb2, 0xef, 0x0d, 0xe9, 0x75, 0xb8, 0x7b, 0xc4,
+                0x21, 0xf4, 0x80, 0x85,
             ]
         );
     }
@@ -868,7 +868,7 @@ mod tests {
         changed[0].practice_map_preset_ids.push(MapPresetId(3));
         mutations.push(changed);
         let mut changed = original.clone();
-        changed[0].rules_summary = AdvertisedRulesSummary::Wipeout {
+        changed[0].rules_summary = AdvertisedRulesSummary::Takedown {
             target_score: 11,
             active_limit_ticks: 10_800,
         };

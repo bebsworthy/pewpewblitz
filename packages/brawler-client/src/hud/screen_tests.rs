@@ -53,7 +53,7 @@ pub(crate) fn hud_app(width: u16, height: u16, mode: brawler::map::ModeDefinitio
             match_id: MATCH,
             completed_tick: 60,
         },
-        brawler::matchplay::WipeoutState {
+        brawler::matchplay::TakedownState {
             team_scores: [12, 9],
             target_score: 15,
             ..default()
@@ -276,7 +276,7 @@ fn assert_layout(app: &mut App, width: u16, height: u16, expect_strip: bool) {
 #[test]
 fn match_hud_fits_desktop_and_phone_viewports_without_collisions() {
     for (width, height) in VIEWPORTS {
-        let mut app = hud_app(width, height, brawler::map::WIPEOUT_MODE_DEFINITION);
+        let mut app = hud_app(width, height, brawler::map::TAKEDOWN_MODE_DEFINITION);
         assert_layout(&mut app, width, height, false);
     }
 }
@@ -307,7 +307,7 @@ fn latched_scoreboard_app(width: u16, height: u16, touch: bool) -> App {
         env!("CARGO_MANIFEST_DIR"),
         "/../../assets/brawler/ui/fonts/lilita-one-regular.ttf"
     ));
-    let mut app = hud_app(width, height, brawler::map::WIPEOUT_MODE_DEFINITION);
+    let mut app = hud_app(width, height, brawler::map::TAKEDOWN_MODE_DEFINITION);
     app.insert_resource(ui::touch_target::TouchTargetPolicy { enabled: touch });
     let world = app.world_mut();
     let statuses = [

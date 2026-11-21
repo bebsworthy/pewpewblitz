@@ -468,7 +468,7 @@ mod tests {
             match_id: MatchId::new(u128::from(request) + 200).unwrap(),
             route_id: RouteId::new(1).unwrap(),
             peer_id: PeerId::new(2).unwrap(),
-            game_mode: crate::config::GameMode::Wipeout,
+            game_mode: crate::config::GameMode::Takedown,
             capability: RouteCapability::from_bytes([1; 32]).unwrap(),
             activation_expiry_unix_ms: 1,
             route_expiry_unix_ms: 2,

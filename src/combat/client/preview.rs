@@ -47,7 +47,7 @@ pub enum AimTraceBlockerClass {
     Fighter,
     Sentry,
     HostileNpc,
-    HeistSafe,
+    VaultBreakSafe,
 }
 
 /// One currently replicated dynamic body eligible to stop the local player's next straight shot.
@@ -624,7 +624,7 @@ struct StraightShot {
 }
 
 /// Traces every delivery of a straight or sticky weapon from the fighter: first the muzzle
-/// offset against Heist safes, then the authored range against all blockers.
+/// offset against Vault Break safes, then the authored range against all blockers.
 fn trace_straight_shots(
     origin: Vec2,
     facing: f32,
@@ -658,7 +658,7 @@ fn trace_straight_shots(
     let muzzle_blockers: Vec<_> = dynamic
         .iter()
         .copied()
-        .filter(|blocker| blocker.class == AimTraceBlockerClass::HeistSafe)
+        .filter(|blocker| blocker.class == AimTraceBlockerClass::VaultBreakSafe)
         .collect();
     angles
         .into_iter()
@@ -907,7 +907,7 @@ pub fn cone_spray_primitives(
     )
 }
 
-/// Traced cone-spray rays from the clockwise edge to the counter-clockwise edge. Only Heist safes
+/// Traced cone-spray rays from the clockwise edge to the counter-clockwise edge. Only Vault Break safes
 /// join map geometry as occluders, matching the authoritative spray.
 #[expect(
     clippy::cast_precision_loss,
@@ -926,7 +926,7 @@ fn cone_spray_rays(
     let geometry_blockers = dynamic
         .iter()
         .copied()
-        .filter(|blocker| blocker.class == AimTraceBlockerClass::HeistSafe)
+        .filter(|blocker| blocker.class == AimTraceBlockerClass::VaultBreakSafe)
         .collect::<Vec<_>>();
     (0..CONE_SPRAY_RAYS)
         .map(|ray| {
@@ -1368,7 +1368,7 @@ mod geometry_tests {
             ..Default::default()
         };
         let blocker = AimTraceDynamicBlocker {
-            class: AimTraceBlockerClass::HeistSafe,
+            class: AimTraceBlockerClass::VaultBreakSafe,
             stable_id: 1,
             position: Vec2::new(45.0, 0.0),
             rotation: 0.0,

@@ -1385,9 +1385,10 @@ fn config_from_manifest(
             config.match_respawn_ticks = Some(manifest.respawn_ticks);
             config.match_spawn_protection_ticks = Some(manifest.spawn_protection_ticks);
             config.match_completed_input_lock_ticks = Some(manifest.completed_input_lock_ticks);
-            config.wipeout_recent_hostile_damage_credit_ticks =
-                Some(manifest.wipeout_recent_hostile_damage_credit_ticks);
-            config.heist_critical_health_percent = Some(manifest.heist_critical_health_percent);
+            config.takedown_recent_hostile_damage_credit_ticks =
+                Some(manifest.takedown_recent_hostile_damage_credit_ticks);
+            config.vault_break_critical_health_percent =
+                Some(manifest.vault_break_critical_health_percent);
             // The manifest whitelist controls who may join this isolated match. Keep the
             // production endpoint capacity because match composition validates it against the
             // selected rules profile's maximum active-fighter capacity, not only this roster's
@@ -1640,7 +1641,7 @@ mod tests {
         AllocateRequestBody {
             request_id: brawler_routing::RequestId::new(request_id).unwrap(),
             lobby_session_id,
-            mode: brawler_routing::GameMode::Wipeout,
+            mode: brawler_routing::GameMode::Takedown,
             map_preset: 1,
             map_revision: 1,
             map_recipe_fingerprint: 1,
@@ -1652,8 +1653,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             team_count: 2,
             players_per_team: 2,
             participants: vec![
@@ -1823,8 +1824,8 @@ mod tests {
     #[test]
     fn automatic_transition_mode_uses_the_complete_registered_mode_set() {
         assert_eq!(
-            automatic_transition_game_mode("heist").unwrap(),
-            GameMode::Heist
+            automatic_transition_game_mode("vault-break").unwrap(),
+            GameMode::VaultBreak
         );
         assert!(automatic_transition_game_mode("unknown").is_err());
     }
@@ -1849,7 +1850,7 @@ mod tests {
     fn canonical_completed_result_is_versioned_and_stable() {
         let state = MatchState {
             match_id: crate::matchplay::MatchId(9),
-            mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: crate::map::TAKEDOWN_MODE_DEFINITION,
             phase: MatchPhase::Completed {
                 completed_at_tick: 12,
                 restart_unlocked_at_tick: 72,
@@ -2119,7 +2120,7 @@ mod tests {
             request_id: brawler_routing::RequestId::new(3).unwrap(),
             match_id: brawler_routing::MatchId::new(4).unwrap(),
             allocation_id: brawler_routing::AllocationId::new(5).unwrap(),
-            mode: brawler_routing::GameMode::Wipeout,
+            mode: brawler_routing::GameMode::Takedown,
             map_preset: 1,
             map_revision: 1,
             map_recipe_fingerprint: 1,
@@ -2131,8 +2132,8 @@ mod tests {
             respawn_ticks: 180,
             spawn_protection_ticks: 90,
             completed_input_lock_ticks: 60,
-            wipeout_recent_hostile_damage_credit_ticks: 300,
-            heist_critical_health_percent: 25,
+            takedown_recent_hostile_damage_credit_ticks: 300,
+            vault_break_critical_health_percent: 25,
             reserved: 0,
             seed: 1,
             participants: vec![participant(1), participant(2)],
@@ -2163,7 +2164,7 @@ mod tests {
             MatchRoot,
             MatchState {
                 match_id: crate::matchplay::MatchId(1),
-                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: crate::map::TAKEDOWN_MODE_DEFINITION,
                 phase: MatchPhase::Waiting,
                 rules_revision: 1,
             },
@@ -2378,7 +2379,7 @@ mod tests {
             MatchRoot,
             MatchState {
                 match_id: crate::matchplay::MatchId(9),
-                mode_definition_id: crate::map::WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: crate::map::TAKEDOWN_MODE_DEFINITION,
                 phase: MatchPhase::Completed {
                     completed_at_tick: 12,
                     restart_unlocked_at_tick: 72,

@@ -290,17 +290,17 @@ fn lobby_membership() -> ClientLobbyMembership {
         server_name: "Test Lobby".to_string(),
         catalog_revision: brawler::lobby::CatalogRevision([1; 32]),
         game_types: vec![brawler::lobby::AdvertisedGameType {
-            id: brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
+            id: brawler::lobby::GameTypeId::new("takedown-2v2").unwrap(),
             configuration_revision: 1,
-            display_name: "Wipeout 2v2".to_string(),
-            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            display_name: "Takedown 2v2".to_string(),
+            mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
             map_preset_ids: vec![brawler::map::MapPresetId(1)],
             practice_map_preset_ids: vec![brawler::map::MapPresetId(1)],
             map_authoring_limits: Some(brawler::map::AUTHORING_LIMITS),
             community_maps: false,
             team_count: 2,
             players_per_team: 2,
-            rules_summary: brawler::lobby::AdvertisedRulesSummary::Wipeout {
+            rules_summary: brawler::lobby::AdvertisedRulesSummary::Takedown {
                 target_score: 10,
                 active_limit_ticks: 3_600,
             },
@@ -405,7 +405,7 @@ fn match_result_context(
         game_type_id: Some(game_type_id),
         game_name: None,
         final_score: None,
-        wipeout: None,
+        takedown: None,
         objective: None,
         local_player: None,
         published_map: None,
@@ -498,7 +498,7 @@ fn a_queue_handoff_reaches_the_match_even_after_a_late_reservation_removal() {
                 reservation_id,
                 ticket_id: Some(joined.ticket_id),
                 game_type_id: joined.game_type_id.clone(),
-                mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
                 map_preset_id: Some(brawler::map::MapPresetId(1)),
                 map_recipe_id: brawler::map::MapRecipeId(1),
                 map_recipe_revision: 1,
@@ -520,7 +520,7 @@ fn a_queue_handoff_reaches_the_match_even_after_a_late_reservation_removal() {
         match_id: brawler_routing::MatchId::new(3).unwrap(),
         route_id: brawler_routing::RouteId::new(4).unwrap(),
         peer_id: brawler_routing::PeerId::new(5).unwrap(),
-        game_mode: brawler::config::GameMode::Wipeout,
+        game_mode: brawler::config::GameMode::Takedown,
         capability: brawler::protocol::RouteCapability::from_bytes([7; 32]).unwrap(),
         activation_expiry_unix_ms: 10,
         route_expiry_unix_ms: 20,
@@ -564,7 +564,7 @@ fn a_queue_handoff_reaches_the_match_even_after_a_late_reservation_removal() {
         brawler::matchplay::MatchRoot,
         brawler::matchplay::MatchState {
             match_id: brawler::matchplay::MatchId(3),
-            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
             phase: brawler::matchplay::MatchPhase::Countdown { starts_at_tick: 60 },
             rules_revision: 1,
         },
@@ -750,7 +750,7 @@ fn match_failure_and_fresh_lobby_return_preserve_result_and_one_shot_error_paths
             .unwrap()
             .game_name
             .as_deref(),
-        Some("Wipeout 2v2")
+        Some("Takedown 2v2")
     );
     assert_eq!(
         completed
@@ -1009,8 +1009,8 @@ fn dashboard_menu_omits_favorite_without_a_real_server_target() {
 fn dashboard_mode_card_summary_contains_only_mode_and_team_size() {
     let game = lobby_membership().game_types.remove(0);
     let summary = dashboard_game_summary(&game);
-    assert!(game.display_name.contains("Wipeout"));
-    assert!(summary.contains("WIPEOUT"));
+    assert!(game.display_name.contains("Takedown"));
+    assert!(summary.contains("TAKEDOWN"));
     assert!(!summary.contains("Map pool:"));
     assert!(!summary.contains("Selected map"));
 }
@@ -1107,7 +1107,7 @@ fn completed_match_stays_covered_until_the_fresh_lobby_is_ready() {
             brawler::matchplay::MatchRoot,
             brawler::matchplay::MatchState {
                 match_id: brawler::matchplay::MatchId(9),
-                mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+                mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
                 phase: brawler::matchplay::MatchPhase::Completed {
                     completed_at_tick: 12,
                     restart_unlocked_at_tick: 72,
@@ -1211,7 +1211,7 @@ fn results_replay_uses_the_exact_fresh_lobby_game() {
             game_type_id: Some(game_type_id.clone()),
             game_name: None,
             final_score: None,
-            wipeout: None,
+            takedown: None,
             objective: None,
             local_player: None,
             published_map: None,
@@ -1264,11 +1264,11 @@ fn returning_to_game_select_preserves_a_still_advertised_game() {
     let mut app = flow_test_app();
     let mut lobby = lobby_membership();
     let mut second = lobby.game_types[0].clone();
-    second.id = brawler::lobby::GameTypeId::new("hot-zone-2v2").unwrap();
+    second.id = brawler::lobby::GameTypeId::new("turf-hold-2v2").unwrap();
     second.configuration_revision = 2;
-    second.display_name = "Hot Zone 2v2".to_string();
-    second.mode_definition_id = brawler::map::HOT_ZONE_MODE_DEFINITION;
-    second.rules_summary = brawler::lobby::AdvertisedRulesSummary::HotZone {
+    second.display_name = "Turf Hold 2v2".to_string();
+    second.mode_definition_id = brawler::map::TURF_HOLD_MODE_DEFINITION;
+    second.rules_summary = brawler::lobby::AdvertisedRulesSummary::TurfHold {
         target_progress_ticks: 1800,
         active_limit_ticks: 10800,
     };
@@ -1354,10 +1354,10 @@ fn game_type_child_drafts_then_discards_or_confirms() {
     let mut lobby = lobby_membership();
     let first = lobby.game_types[0].clone();
     let mut second = first.clone();
-    second.id = brawler::lobby::GameTypeId::new("hot-zone-2v2").unwrap();
+    second.id = brawler::lobby::GameTypeId::new("turf-hold-2v2").unwrap();
     second.configuration_revision = 2;
-    second.display_name = "Hot Zone 2v2".to_string();
-    second.mode_definition_id = brawler::map::HOT_ZONE_MODE_DEFINITION;
+    second.display_name = "Turf Hold 2v2".to_string();
+    second.mode_definition_id = brawler::map::TURF_HOLD_MODE_DEFINITION;
     lobby.game_types.push(second.clone());
     let mut selection = SelectedGameType {
         catalog_revision: Some(lobby.catalog_revision),
@@ -1410,7 +1410,7 @@ fn results_disable_replay_when_the_exact_game_disappears() {
         game_type_id: Some(brawler::lobby::GameTypeId::new("retired-mode").unwrap()),
         game_name: Some("Retired Mode".to_string()),
         final_score: None,
-        wipeout: None,
+        takedown: None,
         objective: None,
         local_player: None,
         published_map: None,
@@ -1460,7 +1460,7 @@ fn queue_copy_uses_advertised_game_and_the_accepted_character_pick() {
     let membership = brawler::lobby::QueueMembership {
         ticket_id: brawler::lobby::QueueTicketId::new(1).unwrap(),
         catalog_revision: brawler::lobby::CatalogRevision([1; 32]),
-        game_type_id: brawler::lobby::GameTypeId::new("wipeout-2v2").unwrap(),
+        game_type_id: brawler::lobby::GameTypeId::new("takedown-2v2").unwrap(),
         game_type_configuration_revision: 1,
         profile_revision: brawler::profiles::ProfileRevision::INITIAL,
         accepted_build: brawler::builds::AcceptedBuildSummary {
@@ -1478,8 +1478,8 @@ fn queue_copy_uses_advertised_game_and_the_accepted_character_pick() {
         Some(&lobby_membership()),
         &builds,
     );
-    assert_eq!(copy.mode, "WIPEOUT");
-    assert_eq!(copy.game, "Wipeout 2v2");
+    assert_eq!(copy.mode, "TAKEDOWN");
+    assert_eq!(copy.game, "Takedown 2v2");
     assert_eq!(copy.brawler, "Bumper");
     assert_eq!(copy.population, "Updating queue");
     assert_eq!(copy.build, "Restoration Field · Adrenal Response");
@@ -1499,7 +1499,7 @@ fn queue_copy_uses_advertised_game_and_the_accepted_character_pick() {
             reservation_id: brawler::lobby::MatchReservationId::new(1).unwrap(),
             ticket_id: Some(membership.ticket_id),
             game_type_id: membership.game_type_id.clone(),
-            mode_definition_id: brawler::map::WIPEOUT_MODE_DEFINITION,
+            mode_definition_id: brawler::map::TAKEDOWN_MODE_DEFINITION,
             map_preset_id: Some(brawler::map::MapPresetId(1)),
             map_recipe_id: brawler::map::MapRecipeId(1),
             map_recipe_revision: 1,
@@ -2114,8 +2114,8 @@ fn game_selection_groups_modes_preserves_variants_and_has_one_back_button() {
     let mut app = flow_test_app();
     let mut lobby = lobby_membership();
     let mut second = lobby.game_types[0].clone();
-    second.id = brawler::lobby::GameTypeId::new("alternate-wipeout").unwrap();
-    second.display_name = "Alternate Wipeout".into();
+    second.id = brawler::lobby::GameTypeId::new("alternate-takedown").unwrap();
+    second.display_name = "Alternate Takedown".into();
     lobby.game_types.push(second);
     app.world_mut().spawn((
         Client,
@@ -2181,7 +2181,7 @@ fn game_selection_groups_modes_preserves_variants_and_has_one_back_button() {
             .as_ref()
             .unwrap()
             .as_str(),
-        "alternate-wipeout"
+        "alternate-takedown"
     );
 }
 
@@ -2875,9 +2875,9 @@ fn assert_map_maker_phone_touch_targets(app: &mut App, at: &dyn Fn(&str) -> Stri
 /// `count` saved drafts in every Map Maker mode, for library layout checks.
 fn sample_map_drafts(count: u64) -> super::super::MapDraftLibrary {
     let modes = [
-        brawler::map::WIPEOUT_MODE_DEFINITION,
-        brawler::map::HOT_ZONE_MODE_DEFINITION,
-        brawler::map::HEIST_MODE_DEFINITION,
+        brawler::map::TAKEDOWN_MODE_DEFINITION,
+        brawler::map::TURF_HOLD_MODE_DEFINITION,
+        brawler::map::VAULT_BREAK_MODE_DEFINITION,
     ];
     let mut library = super::super::MapDraftLibrary::default();
     for id in 1..=count {
@@ -3105,7 +3105,7 @@ fn map_editor_chrome_focus_walks_the_controls_and_returns_to_the_map_cursor() {
     assert!(flat_focus_rings(&mut app).is_empty());
 }
 
-/// Wipeout 3v3, Hot Zone and Heist victories for the local team 1, as Results presents them.
+/// Takedown 3v3, Turf Hold and Vault Break victories for the local team 1, as Results presents them.
 fn results_layout_contexts(
     game_type_id: &brawler::lobby::GameTypeId,
 ) -> [(&'static str, super::super::ClientMatchResultContext); 3] {
@@ -3113,14 +3113,14 @@ fn results_layout_contexts(
     let result = MatchResult::TeamVictory {
         team: brawler::combat::TeamId(0),
     };
-    let mut wipeout = brawler::matchplay::WipeoutState {
+    let mut takedown = brawler::matchplay::TakedownState {
         team_scores: [10, 7],
         target_score: 10,
         ..Default::default()
     };
-    for (index, slot) in wipeout.players.iter_mut().take(6).enumerate() {
+    for (index, slot) in takedown.players.iter_mut().take(6).enumerate() {
         let id = u64::try_from(index).unwrap() + 1;
-        *slot = Some(brawler::matchplay::WipeoutPlayerStats {
+        *slot = Some(brawler::matchplay::TakedownPlayerStats {
             player_id: brawler::protocol::PlayerId(id),
             network_id: brawler::protocol::NetworkEntityId(id),
             team: brawler::combat::TeamId(u8::try_from(index % 2).unwrap()),
@@ -3150,16 +3150,16 @@ fn results_layout_contexts(
     };
     [
         (
-            "Wipeout",
+            "Takedown",
             super::super::ClientMatchResultContext {
-                wipeout: Some(wipeout),
+                takedown: Some(takedown),
                 ..base.clone()
             },
         ),
         (
-            "Hot Zone",
+            "Turf Hold",
             super::super::ClientMatchResultContext {
-                objective: objective(ObjectiveTotals::HotZone {
+                objective: objective(ObjectiveTotals::TurfHold {
                     progress: [1800, 927],
                     target: 1800,
                 }),
@@ -3167,9 +3167,9 @@ fn results_layout_contexts(
             },
         ),
         (
-            "Heist",
+            "Vault Break",
             super::super::ClientMatchResultContext {
-                objective: objective(ObjectiveTotals::Heist {
+                objective: objective(ObjectiveTotals::VaultBreak {
                     health: [1800, 0],
                     maximum: [2000, 2000],
                 }),
@@ -4640,7 +4640,7 @@ fn published_summary(
     brawler::lobby::PublishedMapSummary {
         published_map_id: brawler::lobby::PublishedMapId::new(id).unwrap(),
         name: name.to_string(),
-        game_type_id: brawler::lobby::GameTypeId::new("wipeout-1v1").unwrap(),
+        game_type_id: brawler::lobby::GameTypeId::new("takedown-1v1").unwrap(),
         listing,
     }
 }
@@ -4812,7 +4812,7 @@ fn practice_queue_again_uses_fresh_generation_game_and_profile_revision() {
     let game_type_id = membership.game_types[0].id.clone();
     let mut app = configured_lobby_flow_app(membership);
     let mut fresh_membership = lobby_membership();
-    fresh_membership.game_types[0].id = brawler::lobby::GameTypeId::new("stale-wipeout").unwrap();
+    fresh_membership.game_types[0].id = brawler::lobby::GameTypeId::new("stale-takedown").unwrap();
     fresh_membership.profile.revision = brawler::profiles::ProfileRevision::new(9).unwrap();
     app.world_mut().spawn((
         Client,

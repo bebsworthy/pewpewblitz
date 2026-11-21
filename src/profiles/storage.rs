@@ -22,7 +22,7 @@ pub use published_maps::{
 
 const APPLICATION_ID: i32 = 0x4252_574c;
 /// Schema 4 (BRL-egn6): character picks replace saved brawlers and the part inventory.
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 /// The first schema with published maps; older test databases fail closed.
 const OLDEST_RETIRABLE_SCHEMA_VERSION: i32 = 3;
 const EXECUTOR_BOUND: usize = 64;
@@ -187,11 +187,24 @@ fn migrate(connection: &mut Connection) -> Result<(), ProfileStorageError> {
              ALTER TABLE profiles ADD COLUMN selected_character_id INTEGER CHECK(selected_character_id IS NULL OR selected_character_id>0);",
         )?;
         transaction.execute_batch(CREATE_CHARACTER_TABLES)?;
+        transaction.pragma_update(None, "user_version", 4)?;
+        transaction.commit()?;
+    }
+    let version: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version == 4 {
+        // BRL-wg28: one-time cutover of published maps to the renamed game-type IDs.
+        let transaction = connection.transaction()?;
+        transaction.execute_batch(RENAME_GAME_TYPE_IDS)?;
         transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         transaction.commit()?;
     }
     Ok(())
 }
+
+/// Schema 5 (BRL-wg28) renames the stored game-type IDs of published maps in place.
+const RENAME_GAME_TYPE_IDS: &str = "UPDATE published_maps SET game_type_id='takedown-'||substr(game_type_id,9) WHERE game_type_id LIKE 'wipeout-%';
+UPDATE published_maps SET game_type_id='turf-hold-'||substr(game_type_id,10) WHERE game_type_id LIKE 'hot-zone-%';
+UPDATE published_maps SET game_type_id='vault-break-'||substr(game_type_id,7) WHERE game_type_id LIKE 'heist-%';";
 
 fn validate_database(connection: &Connection) -> Result<(), ProfileStorageError> {
     let application_id: i32 =

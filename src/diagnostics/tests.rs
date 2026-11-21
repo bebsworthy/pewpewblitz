@@ -5,7 +5,7 @@ use super::*;
 fn valid_manifest() -> RunManifestV1 {
     RunManifestV1 {
         schema_version: CLOSEOUT_SCHEMA_VERSION,
-        scenario_id: "wipeout-2v2-baseline".to_string(),
+        scenario_id: "takedown-2v2-baseline".to_string(),
         scenario_revision: 3,
         run_id: "run-42".to_string(),
         build_version: "0.1.0".to_string(),
@@ -14,7 +14,7 @@ fn valid_manifest() -> RunManifestV1 {
         protocol_version: 11,
         registry_fingerprint: 7,
         content_fingerprint: 9,
-        mode: "wipeout".to_string(),
+        mode: "takedown".to_string(),
         rules_profile: "production".to_string(),
         network_profile: "local".to_string(),
         render_profile: "native".to_string(),
@@ -77,7 +77,7 @@ fn manifest_report_lines_are_deterministic_and_parseable() {
     let first = manifest.to_report_lines();
     let second = manifest.to_report_lines();
     assert_eq!(first, second);
-    assert!(first.contains(&"scenario_id=wipeout-2v2-baseline".to_string()));
+    assert!(first.contains(&"scenario_id=takedown-2v2-baseline".to_string()));
     let joined = first.join("\n");
     let pairs = split_report_lines(&joined).expect("manifest lines split");
     assert_eq!(parse_report_field(&pairs, "seed"), Some("99"));
@@ -232,10 +232,10 @@ fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
     let mut weapon = ghost_match;
     weapon.gameplay.matches_completed = 1;
     weapon.gameplay.match_result = Some("draw".to_string());
-    weapon.gameplay.mode_definition_id = Some(crate::map::WIPEOUT_MODE_DEFINITION.0);
-    weapon.gameplay.wipeout_final_scores = Some([6, 6]);
-    weapon.gameplay.wipeout_target_score = Some(10);
-    weapon.gameplay.wipeout_score_margin = Some(0);
+    weapon.gameplay.mode_definition_id = Some(crate::map::TAKEDOWN_MODE_DEFINITION.0);
+    weapon.gameplay.takedown_final_scores = Some([6, 6]);
+    weapon.gameplay.takedown_target_score = Some(10);
+    weapon.gameplay.takedown_score_margin = Some(0);
     weapon.gameplay.attacks_with_hostile_contact = 5;
     weapon.gameplay.accepted_attacks = 4;
     let weapon_contents = weapon.to_report_lines().join("\n");
@@ -275,9 +275,9 @@ fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
 
     // A completed match must carry exactly one complete, consistent mode summary.
     let mut mode = deferred;
-    mode.gameplay.wipeout_final_scores = None;
-    mode.gameplay.wipeout_target_score = None;
-    mode.gameplay.wipeout_score_margin = None;
+    mode.gameplay.takedown_final_scores = None;
+    mode.gameplay.takedown_target_score = None;
+    mode.gameplay.takedown_score_margin = None;
     mode.gameplay.mode_definition_id = Some(999);
     let contents = mode.to_report_lines().join("\n");
     let pairs = split_report_lines(&contents).expect("lines split");
@@ -285,17 +285,17 @@ fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
         error.contains("mode_definition_id is not a supported match mode")
     }));
 
-    mode.gameplay.mode_definition_id = Some(crate::map::WIPEOUT_MODE_DEFINITION.0);
+    mode.gameplay.mode_definition_id = Some(crate::map::TAKEDOWN_MODE_DEFINITION.0);
     let contents = mode.to_report_lines().join("\n");
     let pairs = split_report_lines(&contents).expect("lines split");
     assert!(
         parse_closeout_report(&pairs)
-            .is_err_and(|error| error.contains("wipeout mode aggregates are incomplete"))
+            .is_err_and(|error| error.contains("takedown mode aggregates are incomplete"))
     );
 
-    mode.gameplay.wipeout_final_scores = Some([10, 2]);
-    mode.gameplay.wipeout_target_score = Some(10);
-    mode.gameplay.wipeout_score_margin = Some(3);
+    mode.gameplay.takedown_final_scores = Some([10, 2]);
+    mode.gameplay.takedown_target_score = Some(10);
+    mode.gameplay.takedown_score_margin = Some(3);
     let contents = mode.to_report_lines().join("\n");
     let pairs = split_report_lines(&contents).expect("lines split");
     assert!(
@@ -303,38 +303,38 @@ fn report_reader_rejects_semantically_invalid_reconstructed_reports() {
             .is_err_and(|error| error.contains("score margin does not match the final scores"))
     );
 
-    mode.gameplay.wipeout_score_margin = Some(8);
+    mode.gameplay.takedown_score_margin = Some(8);
     let contents = mode.to_report_lines().join("\n");
     let pairs = split_report_lines(&contents).expect("lines split");
     assert!(parse_closeout_report(&pairs).is_ok());
 
-    mode.gameplay.mode_definition_id = Some(crate::map::HOT_ZONE_MODE_DEFINITION.0);
-    mode.gameplay.hot_zone_final_progress = Some([30, 12]);
-    mode.gameplay.hot_zone_target_progress_ticks = Some(30);
-    mode.gameplay.hot_zone_controlled_ticks = Some([120, 45]);
-    mode.gameplay.hot_zone_contested_ticks = Some(35);
-    mode.gameplay.hot_zone_control_gained_transitions = Some([4, 2]);
-    mode.gameplay.hot_zone_longest_control_ticks = Some([80, 30]);
+    mode.gameplay.mode_definition_id = Some(crate::map::TURF_HOLD_MODE_DEFINITION.0);
+    mode.gameplay.turf_hold_final_progress = Some([30, 12]);
+    mode.gameplay.turf_hold_target_progress_ticks = Some(30);
+    mode.gameplay.turf_hold_controlled_ticks = Some([120, 45]);
+    mode.gameplay.turf_hold_contested_ticks = Some(35);
+    mode.gameplay.turf_hold_control_gained_transitions = Some([4, 2]);
+    mode.gameplay.turf_hold_longest_control_ticks = Some([80, 30]);
     let contents = mode.to_report_lines().join("\n");
     let pairs = split_report_lines(&contents).expect("lines split");
     assert!(
         parse_closeout_report(&pairs)
-            .is_err_and(|error| error.contains("hot-zone mode aggregates carry wipeout fields"))
+            .is_err_and(|error| error.contains("turf-hold mode aggregates carry takedown fields"))
     );
 
-    mode.gameplay.wipeout_final_scores = None;
-    mode.gameplay.wipeout_target_score = None;
-    mode.gameplay.wipeout_score_margin = None;
+    mode.gameplay.takedown_final_scores = None;
+    mode.gameplay.takedown_target_score = None;
+    mode.gameplay.takedown_score_margin = None;
     let contents = mode.to_report_lines().join("\n");
     let pairs = split_report_lines(&contents).expect("lines split");
     assert!(parse_closeout_report(&pairs).is_ok());
 
-    mode.gameplay.hot_zone_final_progress = Some([31, 2]);
+    mode.gameplay.turf_hold_final_progress = Some([31, 2]);
     let contents = mode.to_report_lines().join("\n");
     let pairs = split_report_lines(&contents).expect("lines split");
     assert!(
         parse_closeout_report(&pairs)
-            .is_err_and(|error| error.contains("hot-zone final progress exceeds the target"))
+            .is_err_and(|error| error.contains("turf-hold final progress exceeds the target"))
     );
 }
 
@@ -1115,24 +1115,24 @@ fn manifest_participants_are_cached_while_fighters_live_and_survive_shutdown() {
     assert_eq!(rows(&app).len(), 2);
 }
 
-/// Hot Zone closeouts carry the mode identity plus the terminal objective state the
+/// Turf Hold closeouts carry the mode identity plus the terminal objective state the
 /// match telemetry owns, so objective behavior stays evidenced without a full
 /// mode summary dump.
 #[cfg(feature = "server")]
 #[test]
-fn gameplay_aggregates_consolidate_hot_zone_terminal_state() {
+fn gameplay_aggregates_consolidate_turf_hold_terminal_state() {
     use super::process::ProcessDiagnosticsState;
     use crate::abilities::AbilityTelemetry;
     use crate::combat::{TeamId, WeaponTelemetry};
-    use crate::map::HOT_ZONE_MODE_DEFINITION;
-    use crate::matchplay::{HotZoneSummary, MatchId, MatchResult, MatchTelemetry, ModeSummary};
+    use crate::map::TURF_HOLD_MODE_DEFINITION;
+    use crate::matchplay::{MatchId, MatchResult, MatchTelemetry, ModeSummary, TurfHoldSummary};
 
     let mut matches = MatchTelemetry::default();
     matches.begin(MatchId(3), 40);
     matches.complete_with_mode(
         400,
-        HOT_ZONE_MODE_DEFINITION,
-        ModeSummary::HotZone(HotZoneSummary {
+        TURF_HOLD_MODE_DEFINITION,
+        ModeSummary::TurfHold(TurfHoldSummary {
             final_progress_ticks: [30, 12],
             target_progress_ticks: 30,
             first_entry_tick_by_team: [Some(60), Some(90)],
@@ -1165,15 +1165,15 @@ fn gameplay_aggregates_consolidate_hot_zone_terminal_state() {
         .clone();
     assert_eq!(
         gameplay.mode_definition_id,
-        Some(HOT_ZONE_MODE_DEFINITION.0)
+        Some(TURF_HOLD_MODE_DEFINITION.0)
     );
-    assert_eq!(gameplay.hot_zone_final_progress, Some([30, 12]));
-    assert_eq!(gameplay.hot_zone_target_progress_ticks, Some(30));
-    assert_eq!(gameplay.hot_zone_controlled_ticks, Some([120, 45]));
-    assert_eq!(gameplay.hot_zone_contested_ticks, Some(35));
-    assert_eq!(gameplay.hot_zone_control_gained_transitions, Some([4, 2]));
-    assert_eq!(gameplay.hot_zone_longest_control_ticks, Some([80, 30]));
-    assert_eq!(gameplay.wipeout_final_scores, None);
+    assert_eq!(gameplay.turf_hold_final_progress, Some([30, 12]));
+    assert_eq!(gameplay.turf_hold_target_progress_ticks, Some(30));
+    assert_eq!(gameplay.turf_hold_controlled_ticks, Some([120, 45]));
+    assert_eq!(gameplay.turf_hold_contested_ticks, Some(35));
+    assert_eq!(gameplay.turf_hold_control_gained_transitions, Some([4, 2]));
+    assert_eq!(gameplay.turf_hold_longest_control_ticks, Some([80, 30]));
+    assert_eq!(gameplay.takedown_final_scores, None);
     // The consolidated block round-trips and validates as one report.
     let report = CloseoutReportV1 {
         manifest: valid_manifest(),

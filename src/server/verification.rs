@@ -197,20 +197,20 @@ pub(super) fn verify_process_match(
         .collect::<Vec<_>>()
         .join(",");
     let (mode_definition_id, final_score_team_1, final_score_team_2) = match &summary.mode_summary {
-        crate::matchplay::ModeSummary::Wipeout(wipeout) => (
+        crate::matchplay::ModeSummary::Takedown(takedown) => (
             summary.mode_definition_id.0,
-            wipeout.final_scores[0],
-            wipeout.final_scores[1],
+            takedown.final_scores[0],
+            takedown.final_scores[1],
         ),
-        crate::matchplay::ModeSummary::HotZone(hot_zone) => (
+        crate::matchplay::ModeSummary::TurfHold(turf_hold) => (
             summary.mode_definition_id.0,
-            hot_zone.final_progress_ticks[0],
-            hot_zone.final_progress_ticks[1],
+            turf_hold.final_progress_ticks[0],
+            turf_hold.final_progress_ticks[1],
         ),
-        crate::matchplay::ModeSummary::Heist(heist) => (
+        crate::matchplay::ModeSummary::VaultBreak(vault_break) => (
             summary.mode_definition_id.0,
-            heist.final_health[0],
-            heist.final_health[1],
+            vault_break.final_health[0],
+            vault_break.final_health[1],
         ),
         crate::matchplay::ModeSummary::Zombie(zombie) => (
             summary.mode_definition_id.0,
@@ -339,7 +339,7 @@ pub(super) fn verify_process_match(
         check.completed = true;
         return;
     }
-    info!(%report, "authoritative Wipeout process verification complete");
+    info!(%report, "authoritative Takedown process verification complete");
     check.completed = true;
     app_exit.write(AppExit::Success);
 }

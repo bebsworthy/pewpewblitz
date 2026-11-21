@@ -356,14 +356,14 @@ impl MapEditorSession {
             .filter(|anchor| placement_ids.contains(&anchor.placement_id))
         {
             match &mut anchor.kind {
-                brawler::map::MapModeAnchorKind::HotZoneCircle {
+                brawler::map::MapModeAnchorKind::TurfHoldCircle {
                     center_half_cell, ..
                 }
                 | brawler::map::MapModeAnchorKind::ZombieIngress { center_half_cell } => {
                     center_half_cell.x = shift_u16(center_half_cell.x, delta_x * 2)?;
                     center_half_cell.y = shift_u16(center_half_cell.y, delta_y * 2)?;
                 }
-                brawler::map::MapModeAnchorKind::HeistSafe { origin_cell, .. } => {
+                brawler::map::MapModeAnchorKind::VaultBreakSafe { origin_cell, .. } => {
                     origin_cell.x = shift_u16(origin_cell.x, delta_x)?;
                     origin_cell.y = shift_u16(origin_cell.y, delta_y)?;
                 }
@@ -644,9 +644,9 @@ impl MapEditorSession {
         Ok(())
     }
 
-    pub fn place_hot_zone(&mut self, cell: MapCell) -> Result<(), String> {
-        if self.document.recipe.mode_definition_id != brawler::map::HOT_ZONE_MODE_DEFINITION {
-            return Err("capture circles are only available for Hot Zone".to_string());
+    pub fn place_turf_hold(&mut self, cell: MapCell) -> Result<(), String> {
+        if self.document.recipe.mode_definition_id != brawler::map::TURF_HOLD_MODE_DEFINITION {
+            return Err("capture circles are only available for Turf Hold".to_string());
         }
         let before = self.document.recipe.clone();
         let mut candidate = before.clone();
@@ -656,7 +656,7 @@ impl MapEditorSession {
             .push(brawler::map::MapModeAnchorPlacement {
                 placement_id: MapPlacementId(next_placement_id(&candidate)?.0),
                 anchor_id: brawler::map::ModeAnchorId(1),
-                kind: brawler::map::MapModeAnchorKind::HotZoneCircle {
+                kind: brawler::map::MapModeAnchorKind::TurfHoldCircle {
                     center_half_cell: brawler::map::MapHalfCellPoint {
                         x: cell.x.saturating_mul(2).saturating_add(1),
                         y: cell.y.saturating_mul(2).saturating_add(1),
@@ -669,11 +669,11 @@ impl MapEditorSession {
         Ok(())
     }
 
-    pub fn place_heist_safe(&mut self, cell: MapCell, team_slot: u8) -> Result<(), String> {
-        if self.document.recipe.mode_definition_id != brawler::map::HEIST_MODE_DEFINITION
+    pub fn place_vault_break_safe(&mut self, cell: MapCell, team_slot: u8) -> Result<(), String> {
+        if self.document.recipe.mode_definition_id != brawler::map::VAULT_BREAK_MODE_DEFINITION
             || team_slot > 1
         {
-            return Err("team safes are only available for Heist".to_string());
+            return Err("team safes are only available for Vault Break".to_string());
         }
         if cell.x.saturating_add(3) > self.document.recipe.dimensions.width
             || cell.y.saturating_add(2) > self.document.recipe.dimensions.height
@@ -682,20 +682,20 @@ impl MapEditorSession {
         }
         let before = self.document.recipe.clone();
         let mut candidate = before.clone();
-        candidate.mode_anchors.retain(|anchor| !matches!(anchor.kind, brawler::map::MapModeAnchorKind::HeistSafe { team_slot: team, .. } if team == team_slot));
+        candidate.mode_anchors.retain(|anchor| !matches!(anchor.kind, brawler::map::MapModeAnchorKind::VaultBreakSafe { team_slot: team, .. } if team == team_slot));
         let next = next_placement_id(&candidate)?;
         candidate
             .mode_anchors
             .push(brawler::map::MapModeAnchorPlacement {
                 placement_id: next,
                 anchor_id: brawler::map::ModeAnchorId(u32::from(team_slot) + 1),
-                kind: brawler::map::MapModeAnchorKind::HeistSafe {
+                kind: brawler::map::MapModeAnchorKind::VaultBreakSafe {
                     team_slot,
                     origin_cell: cell,
                     width_cells: 3,
                     height_cells: 2,
                     quarter_turns: 0,
-                    objective_visual_profile_id: brawler::map::HEIST_SAFE_VISUAL_PROFILE,
+                    objective_visual_profile_id: brawler::map::VAULT_BREAK_SAFE_VISUAL_PROFILE,
                 },
             });
         bump_revision(&mut candidate)?;
@@ -874,10 +874,10 @@ fn replace_slot_at_cell(
 
 fn anchor_contains_cell(anchor: &brawler::map::MapModeAnchorPlacement, cell: MapCell) -> bool {
     match anchor.kind {
-        brawler::map::MapModeAnchorKind::HotZoneCircle {
+        brawler::map::MapModeAnchorKind::TurfHoldCircle {
             center_half_cell, ..
         } => center_half_cell.x / 2 == cell.x && center_half_cell.y / 2 == cell.y,
-        brawler::map::MapModeAnchorKind::HeistSafe {
+        brawler::map::MapModeAnchorKind::VaultBreakSafe {
             origin_cell,
             width_cells,
             height_cells,
@@ -896,7 +896,7 @@ fn anchor_contains_cell(anchor: &brawler::map::MapModeAnchorPlacement, cell: Map
 
 fn anchor_fits(dimensions: MapDimensions, anchor: &brawler::map::MapModeAnchorPlacement) -> bool {
     match anchor.kind {
-        brawler::map::MapModeAnchorKind::HotZoneCircle {
+        brawler::map::MapModeAnchorKind::TurfHoldCircle {
             center_half_cell,
             radius_half_cells,
         } => {
@@ -907,7 +907,7 @@ fn anchor_fits(dimensions: MapDimensions, anchor: &brawler::map::MapModeAnchorPl
                 && center_half_cell.y.saturating_add(radius_half_cells)
                     <= dimensions.height.saturating_mul(2)
         }
-        brawler::map::MapModeAnchorKind::HeistSafe {
+        brawler::map::MapModeAnchorKind::VaultBreakSafe {
             origin_cell,
             width_cells,
             height_cells,
@@ -963,7 +963,7 @@ mod tests {
         let document = MapDraftDocument::blank(
             MapDraftId(8),
             "Arena",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             MapDimensions {
                 width: 32,
                 height: 24,
@@ -984,7 +984,7 @@ mod tests {
         let document = MapDraftDocument::blank(
             MapDraftId(8),
             "Arena",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             MapDimensions {
                 width: 32,
                 height: 24,
@@ -1014,7 +1014,7 @@ mod tests {
         let document = MapDraftDocument::blank(
             MapDraftId(10),
             "Stroke Arena",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             MapDimensions {
                 width: 32,
                 height: 24,
@@ -1044,7 +1044,7 @@ mod tests {
         let document = MapDraftDocument::blank(
             MapDraftId(12),
             "Erase Arena",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             MapDimensions {
                 width: 32,
                 height: 24,
@@ -1082,7 +1082,7 @@ mod tests {
         let document = MapDraftDocument::blank(
             MapDraftId(18),
             "Move Arena",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             MapDimensions {
                 width: 32,
                 height: 24,
@@ -1132,7 +1132,7 @@ mod tests {
         let document = MapDraftDocument::blank(
             MapDraftId(19),
             "Duplicate Arena",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             MapDimensions {
                 width: 32,
                 height: 24,
@@ -1173,7 +1173,7 @@ mod tests {
         let document = MapDraftDocument::blank(
             MapDraftId(11),
             "Resize Arena",
-            brawler::map::WIPEOUT_MODE_DEFINITION,
+            brawler::map::TAKEDOWN_MODE_DEFINITION,
             MapDimensions {
                 width: 32,
                 height: 24,

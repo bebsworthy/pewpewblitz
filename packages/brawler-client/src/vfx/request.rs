@@ -10,7 +10,7 @@ const MAX_VFX_DIAGNOSTIC_LABEL_LENGTH: usize = 96;
 pub(crate) const COMBAT_VFX_PRODUCER_RANK: u16 = 100;
 pub(crate) const WORLD_OBJECT_VFX_PRODUCER_RANK: u16 = 200;
 pub(crate) const PICKUP_VFX_PRODUCER_RANK: u16 = 300;
-pub(crate) const HEIST_VFX_PRODUCER_RANK: u16 = 400;
+pub(crate) const VAULT_BREAK_VFX_PRODUCER_RANK: u16 = 400;
 
 pub(crate) const COMBAT_MUZZLE_VFX: VfxRequestKey = VfxRequestKey::new("combat.muzzle");
 pub(crate) const COMBAT_IMPACT_VFX: VfxRequestKey = VfxRequestKey::new("combat.impact");
@@ -29,9 +29,11 @@ pub(crate) const WORLD_OBJECT_EXPLOSION_VFX: VfxRequestKey =
 pub(crate) const PICKUP_SPAWNED_VFX: VfxRequestKey = VfxRequestKey::new("pickup.spawned");
 pub(crate) const PICKUP_COLLECTED_VFX: VfxRequestKey = VfxRequestKey::new("pickup.collected");
 pub(crate) const PICKUP_EXPIRED_VFX: VfxRequestKey = VfxRequestKey::new("pickup.expired");
-pub(crate) const HEIST_DAMAGED_VFX: VfxRequestKey = VfxRequestKey::new("heist.damaged");
-pub(crate) const HEIST_CRITICAL_VFX: VfxRequestKey = VfxRequestKey::new("heist.critical");
-pub(crate) const HEIST_DESTROYED_VFX: VfxRequestKey = VfxRequestKey::new("heist.destroyed");
+pub(crate) const VAULT_BREAK_DAMAGED_VFX: VfxRequestKey = VfxRequestKey::new("vault-break.damaged");
+pub(crate) const VAULT_BREAK_CRITICAL_VFX: VfxRequestKey =
+    VfxRequestKey::new("vault-break.critical");
+pub(crate) const VAULT_BREAK_DESTROYED_VFX: VfxRequestKey =
+    VfxRequestKey::new("vault-break.destroyed");
 
 /// A process-local semantic presentation identity registered by one feature plugin.
 ///

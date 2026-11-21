@@ -45,7 +45,7 @@ run `ticket list` and `ticket task <ID>` rather than inferring active work from 
 - [Concealment and reveal specification](./17-concealment.md) — V9's observer-specific terrain,
   self-cloak, allied-area, proximity, attack/damage reveal, reveal-scan, privacy, and verification
   contract.
-- [Damageable world objects and Heist specification](./18-damageable-world-objects-and-heist.md) —
+- [Damageable world objects and Vault Break specification](./18-damageable-world-objects-and-vault-break.md) —
   completed V10 contract for health-bearing targets, oil barrels, mirrored team idols, treasure
   chests, restoration pickups, authority, recovery, and verification.
 - [Bots](./10-bots.md) — server-hosted practice-controller decision, bounded policy contract,
@@ -101,7 +101,7 @@ and closeout learning.
 | V7 | Persistent server-owned player profiles, saved brawlers, weapon bases, and four-slot weapon-part equipment | [V7 roadmap](./implementation/v7/roadmap.md) |
 | V8 | Sparse-grid maps, unified map-asset/gameplay/visual catalogs, full built-in conversion, and retirement of the old production map system | [V8 roadmap](./implementation/v8/roadmap.md) |
 | V9 | Authoritative observer-specific concealment, terrain/proximity proof, cloak/reveal/field ultimates, server-advertised brawler metadata, and the full-screen saved-brawler flow | [V9 roadmap](./implementation/v9/roadmap.md) |
-| V10 | Damageable world objects, oil barrels, mirrored Heist, the consolidated Feature Yard family, treasure chests, restoration pickups, and cross-feature closeout | [V10 roadmap](./implementation/v10/roadmap.md) |
+| V10 | Damageable world objects, oil barrels, mirrored Vault Break, the consolidated Feature Yard family, treasure chests, restoration pickups, and cross-feature closeout | [V10 roadmap](./implementation/v10/roadmap.md) |
 | V11 | Playable deterministic server-hosted Practice bots with fair perception, map-aware navigation, objective play, Pulse/Dash behavior, and input-only authority | [V11 roadmap](./implementation/v11/roadmap.md) |
 | V12 | Completed 3v3 maps and dynamic framing, Balance Lab correctness/presentation, server-authoritative sustain and ammunition recovery, instant evidence capture, projectile geometry/readability, and feedback-driven balance | [V12 roadmap](./implementation/v12/roadmap.md) |
 | V13 | Draft specification context only: original Blender-authored environment kit and reproducible Bevy-ready asset pipeline; not active scope | [V13 roadmap](./implementation/v13/roadmap.md) |

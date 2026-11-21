@@ -19,7 +19,7 @@ use crate::{
 use bevy::{prelude::*, ui::InteractionDisabled, window::PrimaryWindow};
 use brawler::{
     combat::TeamId,
-    matchplay::{MatchResult, WipeoutState},
+    matchplay::{MatchResult, TakedownState},
 };
 use lightyear::prelude::client::Client;
 
@@ -198,7 +198,7 @@ impl ResultsPainter<'_> {
                 })
                 .with_children(|body| {
                     self.header(body);
-                    if let Some(scores) = &self.context.wipeout {
+                    if let Some(scores) = &self.context.takedown {
                         self.teams(body, scores);
                     } else if let Some(objective) = self.context.objective {
                         self.objective(body, objective.totals);
@@ -310,15 +310,17 @@ impl ResultsPainter<'_> {
             .entity(headline)
             .insert(ResultsLayoutRole::Headline);
         self.burst(p, headline);
-        let title = self.context.wipeout.as_ref().map_or_else(
+        let title = self.context.takedown.as_ref().map_or_else(
             || {
                 self.context.objective.map_or_else(
                     || self.context.game_name.clone().unwrap_or_default(),
                     |o| match o.totals {
-                        brawler::matchplay::ObjectiveTotals::HotZone { .. } => {
-                            "HOT ZONE".to_owned()
+                        brawler::matchplay::ObjectiveTotals::TurfHold { .. } => {
+                            "TURF HOLD".to_owned()
                         }
-                        brawler::matchplay::ObjectiveTotals::Heist { .. } => "HEIST".to_owned(),
+                        brawler::matchplay::ObjectiveTotals::VaultBreak { .. } => {
+                            "VAULT BREAK".to_owned()
+                        }
                     },
                 )
             },
@@ -331,7 +333,7 @@ impl ResultsPainter<'_> {
                         .filter(|p| p.team.0 == t)
                         .count()
                 });
-                format!("WIPEOUT · {}v{}", counts[0], counts[1])
+                format!("TAKEDOWN · {}v{}", counts[0], counts[1])
             },
         );
         if !title.is_empty() {
@@ -349,7 +351,7 @@ impl ResultsPainter<'_> {
                 .insert(ResultsLayoutRole::MapCredit);
         }
     }
-    fn teams(&self, p: &mut ChildSpawnerCommands, scores: &WipeoutState) {
+    fn teams(&self, p: &mut ChildSpawnerCommands, scores: &TakedownState) {
         p.spawn(Node {
             width: percent(100),
             max_width: px(1360),
@@ -371,7 +373,7 @@ impl ResultsPainter<'_> {
             }
         });
     }
-    fn team(&self, p: &mut ChildSpawnerCommands, scores: &WipeoutState, team: TeamId) {
+    fn team(&self, p: &mut ChildSpawnerCommands, scores: &TakedownState, team: TeamId) {
         p.spawn((
             ResultsLayoutRole::TeamCard,
             Node {

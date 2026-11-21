@@ -1,4 +1,4 @@
-//! Deterministic Heist authority, replication, outcome, and restart scenarios.
+//! Deterministic Vault Break authority, replication, outcome, and restart scenarios.
 
 use super::*;
 
@@ -20,7 +20,7 @@ fn step_until_budget(
             return;
         }
     }
-    panic!("Heist harness condition did not become true within {budget} steps");
+    panic!("Vault Break harness condition did not become true within {budget} steps");
 }
 
 fn select_ready_and_activate(harness: &mut Harness, request_base: u64) {
@@ -60,7 +60,7 @@ fn safe_health(harness: &mut Harness, client: Option<usize>) -> [u16; 2] {
         harness.server.world_mut()
     };
     let mut query = world.query::<(
-        &brawler::matchplay::HeistSafe,
+        &brawler::matchplay::VaultBreakSafe,
         &CurrentHealth,
         &brawler::map::DamageableMaximumHealth,
     )>();
@@ -74,25 +74,25 @@ fn safe_health(harness: &mut Harness, client: Option<usize>) -> [u16; 2] {
     health
 }
 
-fn heist_critical_health_percent(harness: &mut Harness, client: Option<usize>) -> u8 {
+fn vault_break_critical_health_percent(harness: &mut Harness, client: Option<usize>) -> u8 {
     let world = if let Some(index) = client {
         harness.clients[index].world_mut()
     } else {
         harness.server.world_mut()
     };
     let mut query =
-        world.query_filtered::<&brawler::matchplay::HeistState, With<MatchRootMarker>>();
+        world.query_filtered::<&brawler::matchplay::VaultBreakState, With<MatchRootMarker>>();
     query
         .single(world)
-        .expect("one replicated Heist state")
+        .expect("one replicated Vault Break state")
         .critical_health_percent
 }
 
-fn drain_heist_cues(
+fn drain_vault_break_cues(
     harness: &mut Harness,
     client: usize,
-) -> Vec<brawler::matchplay::HeistObjectiveCue> {
-    std::mem::take(&mut harness.client_heist_cues[client])
+) -> Vec<brawler::matchplay::VaultBreakObjectiveCue> {
+    std::mem::take(&mut harness.client_vault_break_cues[client])
 }
 
 fn source_and_target(
@@ -128,7 +128,7 @@ fn source_and_target(
         .find(|identity| {
             matches!(
                 identity,
-                DamageableTargetIdentity::HeistSafe {
+                DamageableTargetIdentity::VaultBreakSafe {
                     match_id: target_match,
                     defending_team,
                     ..
@@ -183,22 +183,24 @@ fn restart_after_completion(harness: &mut Harness, request_base: u64) {
 }
 
 #[test]
-fn nondefault_heist_threshold_replicates_and_drives_the_critical_crossing() {
+fn nondefault_vault_break_threshold_replicates_and_drives_the_critical_crossing() {
     const CRITICAL_PERCENT: u8 = 26;
-    let mut harness = Harness::new_heist_match(2);
+    let mut harness = Harness::new_vault_break_match(2);
     harness
         .server
-        .insert_resource(brawler::matchplay::HeistRules {
+        .insert_resource(brawler::matchplay::VaultBreakRules {
             safe_maximum_health: 2_000,
             critical_health_percent: CRITICAL_PERCENT,
         });
     select_ready_and_activate(&mut harness, 5);
 
     step_until_budget(&mut harness, 60, |harness| {
-        (0..2).all(|index| heist_critical_health_percent(harness, Some(index)) == CRITICAL_PERCENT)
+        (0..2).all(|index| {
+            vault_break_critical_health_percent(harness, Some(index)) == CRITICAL_PERCENT
+        })
     });
     assert_eq!(
-        heist_critical_health_percent(&mut harness, None),
+        vault_break_critical_health_percent(&mut harness, None),
         CRITICAL_PERCENT
     );
 
@@ -208,15 +210,15 @@ fn nondefault_heist_threshold_replicates_and_drives_the_critical_crossing() {
     });
     assert_eq!(safe_health(&mut harness, None), [2_000, 521]);
     for index in 0..2 {
-        let cues = drain_heist_cues(&mut harness, index);
+        let cues = drain_vault_break_cues(&mut harness, index);
         assert!(cues.iter().any(|cue| {
-            cue.kind == brawler::matchplay::HeistObjectiveCueKind::Damaged
+            cue.kind == brawler::matchplay::VaultBreakObjectiveCueKind::Damaged
                 && cue.health_after == 521
         }));
         assert!(
-            !cues
-                .iter()
-                .any(|cue| { cue.kind == brawler::matchplay::HeistObjectiveCueKind::Critical })
+            !cues.iter().any(|cue| {
+                cue.kind == brawler::matchplay::VaultBreakObjectiveCueKind::Critical
+            })
         );
     }
 
@@ -226,10 +228,14 @@ fn nondefault_heist_threshold_replicates_and_drives_the_critical_crossing() {
     });
     assert_eq!(safe_health(&mut harness, None), [2_000, 520]);
     for index in 0..2 {
-        assert!(drain_heist_cues(&mut harness, index).iter().any(|cue| {
-            cue.kind == brawler::matchplay::HeistObjectiveCueKind::Critical
-                && cue.health_after == 520
-        }));
+        assert!(
+            drain_vault_break_cues(&mut harness, index)
+                .iter()
+                .any(|cue| {
+                    cue.kind == brawler::matchplay::VaultBreakObjectiveCueKind::Critical
+                        && cue.health_after == 520
+                })
+        );
     }
 }
 
@@ -238,14 +244,14 @@ fn nondefault_heist_threshold_replicates_and_drives_the_critical_crossing() {
     clippy::too_many_lines,
     reason = "the scenario keeps threshold cues, invalid damage, completion, and restart convergence in one authority proof"
 )]
-fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
-    let mut harness = Harness::new_heist_match(2);
+fn vault_break_safe_damage_threshold_cues_converge_and_restart_cleanly() {
+    let mut harness = Harness::new_vault_break_match(2);
     select_ready_and_activate(&mut harness, 10);
     assert_eq!(safe_health(&mut harness, None), [2_000, 2_000]);
     step_until_budget(&mut harness, 60, |harness| {
-        (0..2).all(|index| heist_critical_health_percent(harness, Some(index)) == 25)
+        (0..2).all(|index| vault_break_critical_health_percent(harness, Some(index)) == 25)
     });
-    assert_eq!(heist_critical_health_percent(&mut harness, None), 25);
+    assert_eq!(vault_break_critical_health_percent(&mut harness, None), 25);
 
     let (rejected_source, enemy_target) = source_and_target(&mut harness, TeamId(0), 698);
     let friendly_target = {
@@ -256,7 +262,7 @@ fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
             .find(|identity| {
                 matches!(
                     identity,
-                    DamageableTargetIdentity::HeistSafe {
+                    DamageableTargetIdentity::VaultBreakSafe {
                         defending_team: TeamId(0),
                         ..
                     }
@@ -290,7 +296,7 @@ fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
         harness
             .server
             .world()
-            .resource::<brawler::matchplay::HeistTelemetry>()
+            .resource::<brawler::matchplay::VaultBreakTelemetry>()
             .invalid_rejections,
         2
     );
@@ -303,7 +309,7 @@ fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
             let mut barrels =
                 world.query_filtered::<&DamageableTargetIdentity, With<DamageableWorldObject>>();
             let barrel = *barrels.iter(world).next().expect("Twin Vaults barrel");
-            let mut safes = world.query::<(&brawler::matchplay::HeistSafe, &Position)>();
+            let mut safes = world.query::<(&brawler::matchplay::VaultBreakSafe, &Position)>();
             let safe_position = safes
                 .iter(world)
                 .find(|(safe, _)| safe.defending_team == TeamId(1))
@@ -337,10 +343,14 @@ fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
         (0..2).all(|index| safe_health(harness, Some(index)) == [2_000, 500])
     });
     for index in 0..2 {
-        assert!(drain_heist_cues(&mut harness, index).iter().any(|cue| {
-            cue.kind == brawler::matchplay::HeistObjectiveCueKind::Critical
-                && cue.health_after == 500
-        }));
+        assert!(
+            drain_vault_break_cues(&mut harness, index)
+                .iter()
+                .any(|cue| {
+                    cue.kind == brawler::matchplay::VaultBreakObjectiveCueKind::Critical
+                        && cue.health_after == 500
+                })
+        );
     }
     queue_safe_damage(&mut harness, TeamId(0), 701, 500);
     step_until_budget(&mut harness, 30, |harness| {
@@ -357,7 +367,7 @@ fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
     let telemetry = *harness
         .server
         .world()
-        .resource::<brawler::matchplay::HeistTelemetry>();
+        .resource::<brawler::matchplay::VaultBreakTelemetry>();
     assert_eq!(telemetry.accepted_hits, 2);
     assert_eq!(telemetry.applied_damage, 2_000);
     assert!(telemetry.destroyed_at_tick[1].is_some());
@@ -366,10 +376,14 @@ fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
         (0..2).all(|index| safe_health(harness, Some(index)) == [2_000, 0])
     });
     for index in 0..2 {
-        assert!(drain_heist_cues(&mut harness, index).iter().any(|cue| {
-            cue.kind == brawler::matchplay::HeistObjectiveCueKind::Destroyed
-                && cue.health_after == 0
-        }));
+        assert!(
+            drain_vault_break_cues(&mut harness, index)
+                .iter()
+                .any(|cue| {
+                    cue.kind == brawler::matchplay::VaultBreakObjectiveCueKind::Destroyed
+                        && cue.health_after == 0
+                })
+        );
     }
 
     let previous = server_match(&mut harness).match_id;
@@ -382,7 +396,7 @@ fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
         let mut maps = world.query_filtered::<&MapDynamicState, With<MapRoot>>();
         maps.single(world).unwrap().generation_id()
     };
-    let mut safes = world.query::<&brawler::matchplay::HeistSafe>();
+    let mut safes = world.query::<&brawler::matchplay::VaultBreakSafe>();
     assert!(
         safes.iter(world).all(|safe| {
             safe.match_id == restarted.match_id && safe.generation == map_generation
@@ -391,8 +405,8 @@ fn heist_safe_damage_threshold_cues_converge_and_restart_cleanly() {
 }
 
 #[test]
-fn heist_same_tick_double_destruction_draws_and_timeout_uses_fraction() {
-    let mut draw = Harness::new_heist_match(2);
+fn vault_break_same_tick_double_destruction_draws_and_timeout_uses_fraction() {
+    let mut draw = Harness::new_vault_break_match(2);
     select_ready_and_activate(&mut draw, 30);
     queue_safe_damage(&mut draw, TeamId(0), 710, 2_000);
     queue_safe_damage(&mut draw, TeamId(1), 711, 2_000);
@@ -408,12 +422,12 @@ fn heist_same_tick_double_destruction_draws_and_timeout_uses_fraction() {
         }
     ));
 
-    let mut timeout = Harness::new_heist_match(2);
+    let mut timeout = Harness::new_vault_break_match(2);
     select_ready_and_activate(&mut timeout, 40);
     let tick = timeout.server_simulation_tick();
     {
         let world = timeout.server.world_mut();
-        let mut safes = world.query::<(&brawler::matchplay::HeistSafe, &mut CurrentHealth)>();
+        let mut safes = world.query::<(&brawler::matchplay::VaultBreakSafe, &mut CurrentHealth)>();
         for (safe, mut health) in safes.iter_mut(world) {
             health.0 = if safe.defending_team == TeamId(0) {
                 1_000
@@ -440,8 +454,8 @@ fn heist_same_tick_double_destruction_draws_and_timeout_uses_fraction() {
 }
 
 #[test]
-fn heist_objective_buffer_deduplicates_and_caps_authoritative_requests() {
-    let mut harness = Harness::new_heist_match(2);
+fn vault_break_objective_buffer_deduplicates_and_caps_authoritative_requests() {
+    let mut harness = Harness::new_vault_break_match(2);
     select_ready_and_activate(&mut harness, 60);
     let (source, target) = source_and_target(&mut harness, TeamId(0), 800);
     let request = brawler::matchplay::PendingModeObjectiveDamage {
@@ -464,7 +478,7 @@ fn heist_objective_buffer_deduplicates_and_caps_authoritative_requests() {
     let telemetry = *harness
         .server
         .world()
-        .resource::<brawler::matchplay::HeistTelemetry>();
+        .resource::<brawler::matchplay::VaultBreakTelemetry>();
     assert_eq!(telemetry.accepted_hits, 1);
     assert_eq!(telemetry.invalid_rejections, 1);
 
@@ -476,7 +490,7 @@ fn heist_objective_buffer_deduplicates_and_caps_authoritative_requests() {
             .find(|identity| {
                 matches!(
                     identity,
-                    DamageableTargetIdentity::HeistSafe {
+                    DamageableTargetIdentity::VaultBreakSafe {
                         defending_team: TeamId(0),
                         ..
                     }
@@ -510,20 +524,20 @@ fn heist_objective_buffer_deduplicates_and_caps_authoritative_requests() {
     let telemetry = *harness
         .server
         .world()
-        .resource::<brawler::matchplay::HeistTelemetry>();
+        .resource::<brawler::matchplay::VaultBreakTelemetry>();
     assert_eq!(telemetry.capacity_rejections, 1);
     assert_eq!(telemetry.invalid_rejections, 65);
 }
 
 #[test]
-fn heist_sentry_uses_enemy_safe_only_when_no_hostile_fighter_qualifies() {
-    let mut harness = Harness::new_heist_match(2);
+fn vault_break_sentry_uses_enemy_safe_only_when_no_hostile_fighter_qualifies() {
+    let mut harness = Harness::new_vault_break_match(2);
     select_ready_and_activate_with_loadouts(&mut harness, 90, [(3, 2, 5), (1, 1, 3)]);
     let owner_player = harness.controlled_player_id(0);
     let (enemy_safe, enemy_safe_position) = {
         let world = harness.server.world_mut();
         let mut safes = world.query::<(
-            &brawler::matchplay::HeistSafe,
+            &brawler::matchplay::VaultBreakSafe,
             &DamageableTargetIdentity,
             &Position,
         )>();

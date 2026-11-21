@@ -27,8 +27,8 @@ const LOGICAL_SERVER_ID: u128 = 0x4d01;
 const SUPERVISOR_GENERATION: u64 = 0x51;
 const LOBBY_WORKER_ID: u128 = 0x100;
 const LOBBY_PROCESS_ID: u128 = 0x1000;
-/// A Wipeout preset both allocations play.
-const WIPEOUT_MAP_PRESET: u16 = 1;
+/// A Takedown preset both allocations play.
+const TAKEDOWN_MAP_PRESET: u16 = 1;
 
 #[path = "support/profile_database_file.rs"]
 mod profile_database_file;
@@ -161,11 +161,11 @@ fn allocation_request(
     // fingerprint, so read both from the embedded catalog rather than pinning literals.
     let catalog = brawler::map::MapContentCatalog::embedded().expect("embedded map catalog loads");
     let preset = catalog
-        .preset(brawler::map::MapPresetId(WIPEOUT_MAP_PRESET))
-        .expect("the Wipeout test preset exists");
+        .preset(brawler::map::MapPresetId(TAKEDOWN_MAP_PRESET))
+        .expect("the Takedown test preset exists");
     let map_recipe_fingerprint = catalog
         .resolve_preset(preset.id, brawler::map::MapInstanceId(1))
-        .expect("the Wipeout test preset resolves")
+        .expect("the Takedown test preset resolves")
         .snapshot
         .identity
         .recipe_fingerprint
@@ -173,8 +173,8 @@ fn allocation_request(
     AllocateRequestBody {
         request_id: RequestId::new(request_id).unwrap(),
         lobby_session_id,
-        mode: GameMode::Wipeout,
-        map_preset: WIPEOUT_MAP_PRESET,
+        mode: GameMode::Takedown,
+        map_preset: TAKEDOWN_MAP_PRESET,
         map_revision: u32::from(preset.admission_revision),
         map_recipe_fingerprint,
         map_recipe: Vec::new(),
@@ -185,8 +185,8 @@ fn allocation_request(
         respawn_ticks: 180,
         spawn_protection_ticks: 90,
         completed_input_lock_ticks: 60,
-        wipeout_recent_hostile_damage_credit_ticks: 300,
-        heist_critical_health_percent: 25,
+        takedown_recent_hostile_damage_credit_ticks: 300,
+        vault_break_critical_health_percent: 25,
         team_count: 2,
         players_per_team: 1,
         participants: participants.to_vec(),
