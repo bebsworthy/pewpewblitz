@@ -1,0 +1,4 @@
+{"v":1,"eid":"07d7e0c85c6a8975","at":"2026-11-20T19:42:50Z","n":0,"op":"asset.add","id":"a-m542x7m","by":null,"file":"brawlers-picked.png","sha256":"9c554678d8586758ebfb17dd63f9cbaf21323be8e15ed60f55fddda0053fb71c","size":504681,"caption":null}
+{"v":1,"eid":"80cb76eaa06f5275","at":"2026-11-20T19:42:50Z","n":1,"op":"asset.caption","id":"a-m542x7m","by":null,"caption":"After: Bumper's whole blade at 1280x720"}
+{"v":1,"eid":"a20833dc415b5fd4","at":"2026-11-20T19:42:50Z","n":2,"op":"asset.add","id":"a-03jbwj0","by":null,"file":"brawlers-picked-2.png","sha256":"09d36895a4f835cd2637b675ef109731c1c52b02e7ad02d540a448a23b85bd9a","size":582193,"caption":null}
+{"v":1,"eid":"6e3df8aab33432b7","at":"2026-11-20T19:42:50Z","n":3,"op":"asset.caption","id":"a-03jbwj0","by":null,"caption":"Before: blade clipped at 1280x720"}

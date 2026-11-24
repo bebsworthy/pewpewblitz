@@ -1,0 +1,5 @@
+# >>> ticket
+*
+!.gitignore
+!config.toml
+# <<< ticket

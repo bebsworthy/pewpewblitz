@@ -1,0 +1,4 @@
+{"v":1,"eid":"a227888574d3e856","at":"2026-11-21T19:19:40Z","n":0,"op":"asset.add","id":"a-tm305fj","by":null,"file":"last-stand-mid-match.png","sha256":"ea792ed1bffeb732cf43422ae5077cd33b6704b1114cc3562101810bac008afb","size":3386810,"caption":null}
+{"v":1,"eid":"3b37103efdf71400","at":"2026-11-21T19:19:40Z","n":1,"op":"asset.caption","id":"a-tm305fj","by":null,"caption":"Last Stand mid-match: tick 1426, 3/6 alive, ZONE CLOSING 2, coral current ring + white next ring, chests"}
+{"v":1,"eid":"bc29c8c5a39d1954","at":"2026-11-21T19:19:40Z","n":2,"op":"asset.add","id":"a-8afgxds","by":null,"file":"last-stand-late-boundary.png","sha256":"7fcec9a5198a739d33da7c0043b8f706eb2081f6d2e2696fad569d544b56f723","size":3354352,"caption":null}
+{"v":1,"eid":"8ac3e656ed88afd6","at":"2026-11-21T19:19:40Z","n":3,"op":"asset.caption","id":"a-8afgxds","by":null,"caption":"Last Stand late boundary: tick 2226, 2/6 alive, 0:12 left, ring edge closing"}

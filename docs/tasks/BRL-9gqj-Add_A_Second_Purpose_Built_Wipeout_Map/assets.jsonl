@@ -1,0 +1,4 @@
+{"v":1,"eid":"44fc1080c6490edb","at":"2026-11-21T09:52:18Z","n":0,"op":"asset.add","id":"a-84nbn5f","by":null,"file":"sluicegate-works-overview.png","sha256":"3deda118c516034b7b25910d71ce35e8112d6bd9b48edf5cd261d58c43417ef6","size":12066,"caption":null}
+{"v":1,"eid":"00eebfdf8f849a5d","at":"2026-11-21T09:52:18Z","n":1,"op":"asset.caption","id":"a-84nbn5f","by":null,"caption":"Sluicegate Works top-down overview (Practice map art, generated from the recipe)"}
+{"v":1,"eid":"d8e6223191bbc7e0","at":"2026-11-21T09:52:18Z","n":2,"op":"asset.add","id":"a-xtpmykw","by":null,"file":"brawler-000480.png","sha256":"b9a7cd08cb8fa83e7b0184fd02d0356c123903e8fd2aac98b3039c0bcfff24fb","size":3394799,"caption":null}
+{"v":1,"eid":"c702ca5603669c2c","at":"2026-11-21T09:52:18Z","n":3,"op":"asset.caption","id":"a-xtpmykw","by":null,"caption":"Sluicegate Works live 3v3 Practice match (v3-render-evidence, native offscreen)"}

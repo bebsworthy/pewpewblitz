@@ -1,0 +1,6 @@
+{"v":1,"eid":"e1a587e223bc48ac","at":"2026-11-21T11:09:48Z","n":0,"op":"asset.add","id":"a-ahhybjp","by":null,"file":"game-select.png","sha256":"342bf6e8a1888c20aecf61993d877baecab9d762bfe1838a9d0247176f764222","size":418696,"caption":null}
+{"v":1,"eid":"f001dc178126f537","at":"2026-11-21T11:09:48Z","n":1,"op":"asset.caption","id":"a-ahhybjp","by":null,"caption":"Mode picker with Takedown / Turf Hold / Vault Break (1280x720 shell capture, 2026-11-21)"}
+{"v":1,"eid":"cd473cdccaf998de","at":"2026-11-21T11:09:48Z","n":2,"op":"asset.add","id":"a-gz3hxne","by":null,"file":"results.png","sha256":"3a0ec5b0f5a6fd8b9b7e779b5879c7f255dd808195641b4867be891e9ec6a648","size":271739,"caption":null}
+{"v":1,"eid":"58bbd10306c30b75","at":"2026-11-21T11:09:48Z","n":3,"op":"asset.caption","id":"a-gz3hxne","by":null,"caption":"Vault Break 3v3 Practice Results (1280x720 shell capture, 2026-11-21)"}
+{"v":1,"eid":"aad5a88506c96225","at":"2026-11-21T11:09:48Z","n":4,"op":"asset.add","id":"a-s32a58a","by":null,"file":"dashboard.png","sha256":"307fb2d5f960869e6d93da97ce8a5463f4abf1db802906ec754b4b760c1638e4","size":741745,"caption":null}
+{"v":1,"eid":"ca92c87fdadcdabc","at":"2026-11-21T11:09:48Z","n":5,"op":"asset.caption","id":"a-s32a58a","by":null,"caption":"Dashboard mode card showing TAKEDOWN (1280x720 shell capture, 2026-11-21)"}

@@ -1,0 +1,4 @@
+{"v":1,"eid":"5ab65299be311e9a","at":"2026-11-21T14:46:21Z","n":0,"op":"asset.add","id":"a-t12rwh9","by":null,"file":"shard-rush-practice-hud.png","sha256":"c9f343170aac5cae7229b1820b263bd25585b9239277ee2e8209b3e919ad57d7","size":3519258,"caption":null}
+{"v":1,"eid":"19e6c1ec54b0ba0b","at":"2026-11-21T14:46:21Z","n":1,"op":"asset.caption","id":"a-t12rwh9","by":null,"caption":"Shard Rush 3v3 Practice on Prism Quarry (render evidence capture, tick 660): plate shows 0/8 SHARDS and HOLD 8 TO WIN"}
+{"v":1,"eid":"e0080599cb1154bb","at":"2026-11-21T14:46:21Z","n":2,"op":"asset.add","id":"a-dmqjmxn","by":null,"file":"prism-quarry-overview.png","sha256":"588c27d5be9e32cdbd92abd2271eb9377850f2e9c6fd912a4f1413594c84ef59","size":11966,"caption":null}
+{"v":1,"eid":"7459e514928cb4d2","at":"2026-11-21T14:46:21Z","n":3,"op":"asset.caption","id":"a-dmqjmxn","by":null,"caption":"Prism Quarry Practice overview (generated from the recipe)"}
